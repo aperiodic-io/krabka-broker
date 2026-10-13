@@ -10,7 +10,7 @@ use {
     crate::{
         error::RemoteStorageError,
         metadata::{CustomMetadata, RemoteLogSegmentMetadata},
-        storage_manager::{ArtifactBody, LogSegmentData},
+        storage_manager::{ArtifactBody, LogSegmentData, SegmentArtifact},
         worm::{MANIFEST_SUFFIX, ObjectEntry, Sha256Digest, WormError},
     },
     krabka_object_store::{ObjectOps, PutMode, PutOutcome, PutRequest},
@@ -87,7 +87,7 @@ impl S3RemoteStorage {
         // Only the WORM path reads this list. An empty `Vec` allocates
         // nothing, so the default path pays nothing to declare it.
         let mut objects = Vec::new();
-        for (suffix, body) in data.artifacts() {
+        for SegmentArtifact { suffix, body } in data.artifacts() {
             let key = self.segment_key(metadata, suffix);
             let outcome = match body {
                 ArtifactBody::File(path) => Self::block_os(self.ops.put_from_path(

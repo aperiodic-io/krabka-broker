@@ -32,7 +32,13 @@ impl ControllerApiVersions for NoApiVersions {
     }
 }
 
-fn signed_token() -> (OAuthBearerValidator, String) {
+/// A signed-JWS validator and a token it admits.
+struct SignedToken {
+    validator: OAuthBearerValidator,
+    token: String,
+}
+
+fn signed_token() -> SignedToken {
     let rng = SystemRandom::new();
     let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
     let key =
@@ -49,17 +55,17 @@ fn signed_token() -> (OAuthBearerValidator, String) {
         B64.encode(serde_json::json!({"sub": "controller-peer", "exp": expiry}).to_string());
     let input = format!("{header}.{payload}");
     let signature = key.sign(&rng, input.as_bytes()).unwrap();
-    (
-        OAuthBearerValidator::Signed(validator),
-        format!("{input}.{}", B64.encode(signature.as_ref())),
-    )
+    SignedToken {
+        validator: OAuthBearerValidator::Signed(validator),
+        token: format!("{input}.{}", B64.encode(signature.as_ref())),
+    }
 }
 
 #[tokio::test]
 async fn signed_validation_rechecks_the_publication_after_crypto_success() {
     use std::sync::atomic::{AtomicI64, AtomicU64};
 
-    let (validator, token) = signed_token();
+    let SignedToken { validator, token } = signed_token();
     for (finished_generation, admitted) in [(2, true), (3, false), (4, false)] {
         let generation = AtomicU64::new(2);
         let fetched = AtomicI64::new(1000);
@@ -110,7 +116,7 @@ async fn signed_validation_rechecks_the_publication_after_crypto_success() {
 
 #[tokio::test]
 async fn controller_signed_oauth_requires_a_fresh_published_cache() {
-    let (validator, token) = signed_token();
+    let SignedToken { validator, token } = signed_token();
     // Positive crypto control: rejection below cannot be attributed to a bad token.
     let expected_expiry = validator
         .validate(&token, now_ms())

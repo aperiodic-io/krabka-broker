@@ -153,43 +153,61 @@ mod tests {
     /// negotiation can satisfy.
     #[test]
     fn controller_feature_ranges_must_be_named_and_not_inverted() {
-        // (what it is, features, accepted?)
-        let cases: Vec<(&str, Vec<controller_registration_request::Feature>, bool)> = vec![
-            ("no features at all", vec![], true),
-            (
-                "one ordinary range",
-                vec![feature("kraft.version", 0, 1)],
-                true,
-            ),
-            (
-                "a range that is a single point",
-                vec![feature("metadata.version", 7, 7)],
-                true,
-            ),
-            (
-                "several ordinary ranges",
-                vec![
+        // The features the controller registers with, and whether they are accepted.
+        struct Case {
+            what: &'static str,
+            features: Vec<controller_registration_request::Feature>,
+            accepted: bool,
+        }
+        let cases = vec![
+            Case {
+                what: "no features at all",
+                features: vec![],
+                accepted: true,
+            },
+            Case {
+                what: "one ordinary range",
+                features: vec![feature("kraft.version", 0, 1)],
+                accepted: true,
+            },
+            Case {
+                what: "a range that is a single point",
+                features: vec![feature("metadata.version", 7, 7)],
+                accepted: true,
+            },
+            Case {
+                what: "several ordinary ranges",
+                features: vec![
                     feature("kraft.version", 0, 1),
                     feature("group.version", 0, 1),
                 ],
-                true,
-            ),
-            ("a nameless feature", vec![feature("", 0, 1)], false),
-            (
-                "an inverted range",
-                vec![feature("kraft.version", 2, 1)],
-                false,
-            ),
-            (
-                "one good range and one inverted",
-                vec![
+                accepted: true,
+            },
+            Case {
+                what: "a nameless feature",
+                features: vec![feature("", 0, 1)],
+                accepted: false,
+            },
+            Case {
+                what: "an inverted range",
+                features: vec![feature("kraft.version", 2, 1)],
+                accepted: false,
+            },
+            Case {
+                what: "one good range and one inverted",
+                features: vec![
                     feature("kraft.version", 0, 1),
                     feature("group.version", 5, 4),
                 ],
-                false,
-            ),
+                accepted: false,
+            },
         ];
-        for (what, features, accepted) in cases {
+        for Case {
+            what,
+            features,
+            accepted,
+        } in cases
+        {
             let request = request_with(features);
             let got = decode_controller_features(&request);
             check!(got.is_ok() == accepted, "{what}: {got:?}");

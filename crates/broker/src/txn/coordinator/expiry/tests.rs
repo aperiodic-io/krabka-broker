@@ -141,11 +141,17 @@ fn image_with_leader(leader: NodeId, leader_epoch: krabka_metadata::LeaderEpoch)
         .call()
 }
 
+/// A coordinator and the tempdir that must outlive it.
+struct SeededCoordinator {
+    coordinator: Arc<TxnCoordinator>,
+    _dir: TempDir,
+}
+
 /// A coordinator that persisted `entry` as the leader of the single
 /// `__transaction_state` partition. When `leader` is another broker, that
 /// broker is elected afterwards at leader epoch 1. The tempdir must outlive the
 /// coordinator, so it comes back with it.
-async fn seeded_coordinator(entry: TxnEntry, leader: NodeId) -> (Arc<TxnCoordinator>, TempDir) {
+async fn seeded_coordinator(entry: TxnEntry, leader: NodeId) -> SeededCoordinator {
     let dir = tempdir().expect("tempdir");
     let partitions = Arc::new(PartitionRegistry::new());
     partitions.insert(
@@ -185,12 +191,22 @@ async fn seeded_coordinator(entry: TxnEntry, leader: NodeId) -> (Arc<TxnCoordina
                 .await,
         );
     }
-    (coordinator, dir)
+    SeededCoordinator {
+        coordinator,
+        _dir: dir,
+    }
 }
 
-/// The `(key, value)` pairs of every record in `__transaction_state-0`, with
-/// each key decoded to its transactional id.
-fn transaction_state_records(coordinator: &TxnCoordinator) -> Vec<(String, Option<Vec<u8>>)> {
+/// One record of `__transaction_state-0`: its key decoded to the transactional
+/// id, and its value, which is `None` for a tombstone.
+#[derive(Debug, PartialEq, Eq)]
+struct StateRecord {
+    transactional_id: String,
+    value: Option<Vec<u8>>,
+}
+
+/// Every record in `__transaction_state-0`.
+fn transaction_state_records(coordinator: &TxnCoordinator) -> Vec<StateRecord> {
     let part = coordinator
         .partitions
         .get(bootstrap::TOPIC, PartitionIndex(0))
@@ -206,7 +222,10 @@ fn transaction_state_records(coordinator: &TxnCoordinator) -> Vec<(String, Optio
             for record in &batch.records {
                 let key = decode_key(record.key.as_ref().expect("record carries a key"))
                     .expect("record carries a TransactionLogKey");
-                out.push((key, record.value.as_ref().map(|v| v.to_vec())));
+                out.push(StateRecord {
+                    transactional_id: key,
+                    value: record.value.as_ref().map(|v| v.to_vec()),
+                });
             }
             offset = Offset(batch.base_offset + i64::from(batch.last_offset_delta) + 1);
         }
@@ -224,7 +243,8 @@ async fn describe_transactions_row(coordinator: &TxnCoordinator) -> TransactionS
 
 #[tokio::test]
 async fn an_expired_completed_transaction_is_tombstoned_and_dropped() {
-    let (coordinator, _dir) = seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
+    let SeededCoordinator { coordinator, _dir } =
+        seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
     let before = transaction_state_records(&coordinator);
     assert!(before.len() == 1, "{before:?}");
     // Before the sweep, `DescribeTransactions` answers with the full entry.
@@ -264,12 +284,19 @@ async fn an_expired_completed_transaction_is_tombstoned_and_dropped() {
     // byte-exact `TransactionLogKey`.
     let after = transaction_state_records(&coordinator);
     check!(after.len() == 2, "{after:?}");
-    check!(after[1] == (TID.to_string(), None));
+    check!(
+        after[1]
+            == StateRecord {
+                transactional_id: TID.to_string(),
+                value: None,
+            }
+    );
 }
 
 #[tokio::test]
 async fn a_transaction_inside_the_expiry_window_survives() {
-    let (coordinator, _dir) = seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
+    let SeededCoordinator { coordinator, _dir } =
+        seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
 
     let expired = coordinator
         .expire_transactional_ids(EXPIRY_MS - 1, EXPIRY_MS)
@@ -284,7 +311,8 @@ async fn a_transaction_inside_the_expiry_window_survives() {
 /// to resolve. The sweep leaves it alone however long it waits.
 #[tokio::test]
 async fn a_prepared_two_pc_transaction_survives_indefinitely() {
-    let (coordinator, _dir) = seeded_coordinator(prepared_two_pc_entry(0), NodeId(1)).await;
+    let SeededCoordinator { coordinator, _dir } =
+        seeded_coordinator(prepared_two_pc_entry(0), NodeId(1)).await;
 
     for now_ms in [EXPIRY_MS + 1, EXPIRY_MS * 1_000, i64::MAX] {
         let expired = coordinator
@@ -312,7 +340,7 @@ async fn a_prepared_two_pc_transaction_survives_indefinitely() {
     // No tombstone was ever appended: only the seeded value record is there.
     let records = transaction_state_records(&coordinator);
     check!(records.len() == 1, "{records:?}");
-    check!(records[0].1.is_some());
+    check!(records[0].value.is_some());
 }
 
 /// The sweep takes its decision against the *live* entry under the tid's own
@@ -324,7 +352,8 @@ async fn a_prepared_two_pc_transaction_survives_indefinitely() {
 /// whatever the scheduler does, and the outcome is the same every run.
 #[tokio::test]
 async fn a_transaction_that_begins_while_the_sweep_waits_is_not_expired() {
-    let (coordinator, _dir) = seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
+    let SeededCoordinator { coordinator, _dir } =
+        seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
     let coordinator = Arc::new(coordinator);
     let handle = coordinator.get(TID).expect("the seeded entry");
     let mut entry = handle.lock().await;
@@ -358,7 +387,8 @@ async fn a_transaction_that_begins_while_the_sweep_waits_is_not_expired() {
 /// historical id count, which is the leak the sweep exists to close.
 #[tokio::test]
 async fn replaying_a_tombstone_reclaims_the_producer_id_index() {
-    let (coordinator, _dir) = seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
+    let SeededCoordinator { coordinator, _dir } =
+        seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
     let expired = coordinator
         .expire_transactional_ids(EXPIRY_MS + 1, EXPIRY_MS)
         .await;
@@ -383,7 +413,8 @@ async fn replaying_a_tombstone_reclaims_the_producer_id_index() {
 /// to that id, so replaying the first id's tombstone must leave it alone.
 #[tokio::test]
 async fn replaying_a_tombstone_keeps_a_pid_that_now_names_another_id() {
-    let (coordinator, _dir) = seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
+    let SeededCoordinator { coordinator, _dir } =
+        seeded_coordinator(complete_commit_entry(0), NodeId(1)).await;
     coordinator
         .expire_transactional_ids(EXPIRY_MS + 1, EXPIRY_MS)
         .await;
@@ -412,7 +443,8 @@ async fn replaying_a_tombstone_keeps_a_pid_that_now_names_another_id() {
 /// `TransactionCoordinator.onResignation` does.
 #[tokio::test]
 async fn a_partition_this_broker_no_longer_leads_is_skipped() {
-    let (coordinator, _dir) = seeded_coordinator(complete_commit_entry(0), NodeId(2)).await;
+    let SeededCoordinator { coordinator, _dir } =
+        seeded_coordinator(complete_commit_entry(0), NodeId(2)).await;
 
     let expired = coordinator
         .expire_transactional_ids(EXPIRY_MS + 1, EXPIRY_MS)
@@ -437,7 +469,8 @@ async fn a_partition_this_broker_no_longer_leads_is_skipped() {
 /// restarted.
 #[tokio::test]
 async fn a_sweep_tick_refreshes_leadership_before_expiring() {
-    let (coordinator, _dir) = seeded_coordinator(complete_commit_entry(0), NodeId(2)).await;
+    let SeededCoordinator { coordinator, _dir } =
+        seeded_coordinator(complete_commit_entry(0), NodeId(2)).await;
     // Nothing expires while the stale view says this broker does not lead it,
     // however far the clock is pushed.
     check!(
@@ -474,7 +507,13 @@ async fn a_sweep_tick_refreshes_leadership_before_expiring() {
     );
     let records = transaction_state_records(&coordinator);
     check!(records.len() == 2, "{records:?}");
-    check!(records[1] == (TID.to_string(), None));
+    check!(
+        records[1]
+            == StateRecord {
+                transactional_id: TID.to_string(),
+                value: None,
+            }
+    );
     // The tick reads the live image once, to refresh leadership, and writes
     // no metadata of its own: the tombstone goes to `__transaction_state`.
     check!(source.current_image_calls() == 1);

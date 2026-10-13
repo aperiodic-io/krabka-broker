@@ -23,6 +23,13 @@ use {
     std::sync::Arc,
 };
 
+/// A partition of one incarnation of a topic, named by the topic's id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TopicIncarnationPartition {
+    topic_id: uuid::Uuid,
+    partition: PartitionIndex,
+}
+
 /// Concurrent registry of locally-hosted partitions, keyed by
 /// (topic, partition).
 ///
@@ -33,7 +40,7 @@ use {
 #[derive(Debug, Default)]
 pub(crate) struct PartitionRegistry {
     inner: DashMap<Arc<str>, DashMap<PartitionIndex, Arc<Partition>>>,
-    preferred_log_dirs: DashMap<(uuid::Uuid, PartitionIndex), std::path::PathBuf>,
+    preferred_log_dirs: DashMap<TopicIncarnationPartition, std::path::PathBuf>,
     /// KIP-1066: the log directories this broker holds cordoned, which new
     /// partition directories avoid. It lives beside the preferred directories
     /// because both decide where a partition this broker opens goes.
@@ -195,8 +202,13 @@ impl PartitionRegistry {
         partition: PartitionIndex,
         log_dir: std::path::PathBuf,
     ) {
-        self.preferred_log_dirs
-            .insert((topic_id, partition), log_dir);
+        self.preferred_log_dirs.insert(
+            TopicIncarnationPartition {
+                topic_id,
+                partition,
+            },
+            log_dir,
+        );
     }
 
     #[must_use]
@@ -206,12 +218,18 @@ impl PartitionRegistry {
         partition: PartitionIndex,
     ) -> Option<std::path::PathBuf> {
         self.preferred_log_dirs
-            .get(&(topic_id, partition))
+            .get(&TopicIncarnationPartition {
+                topic_id,
+                partition,
+            })
             .map(|entry| entry.value().clone())
     }
 
     pub(crate) fn clear_preferred_log_dir(&self, topic_id: uuid::Uuid, partition: PartitionIndex) {
-        self.preferred_log_dirs.remove(&(topic_id, partition));
+        self.preferred_log_dirs.remove(&TopicIncarnationPartition {
+            topic_id,
+            partition,
+        });
     }
 
     /// The partition indices currently hosted for `topic`. It is empty when

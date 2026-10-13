@@ -291,63 +291,76 @@ mod tests {
     /// authorizer, since an invalid name never reaches either.
     #[tokio::test]
     async fn handle_validates_topic_name_before_authorizing() {
-        type Case<'a> = (&'a str, Arc<dyn Authorizer>, i16, Option<String>);
+        /// A topic name, the authorizer, and the error code and message the
+        /// partition row must carry.
+        struct NameCase<'a> {
+            name: &'a str,
+            authorizer: Arc<dyn Authorizer>,
+            expected_code: i16,
+            expected_message: Option<String>,
+        }
 
         let too_long = "a".repeat(krabka_log::topic_name::MAX_TOPIC_NAME_LENGTH + 1);
-        let cases: Vec<Case<'_>> = vec![
-            (
-                "",
-                Arc::new(AllowAllAuthorizer),
-                codes::INVALID_TOPIC_EXCEPTION,
-                Some(krabka_log::topic_name::InvalidTopicName::Empty.to_string()),
-            ),
-            (
-                "",
-                Arc::new(DenyAll),
-                codes::INVALID_TOPIC_EXCEPTION,
-                Some(krabka_log::topic_name::InvalidTopicName::Empty.to_string()),
-            ),
-            (
-                "a/b",
-                Arc::new(AllowAllAuthorizer),
-                codes::INVALID_TOPIC_EXCEPTION,
-                Some(
+        let cases: Vec<NameCase<'_>> = vec![
+            NameCase {
+                name: "",
+                authorizer: Arc::new(AllowAllAuthorizer),
+                expected_code: codes::INVALID_TOPIC_EXCEPTION,
+                expected_message: Some(krabka_log::topic_name::InvalidTopicName::Empty.to_string()),
+            },
+            NameCase {
+                name: "",
+                authorizer: Arc::new(DenyAll),
+                expected_code: codes::INVALID_TOPIC_EXCEPTION,
+                expected_message: Some(krabka_log::topic_name::InvalidTopicName::Empty.to_string()),
+            },
+            NameCase {
+                name: "a/b",
+                authorizer: Arc::new(AllowAllAuthorizer),
+                expected_code: codes::INVALID_TOPIC_EXCEPTION,
+                expected_message: Some(
                     krabka_log::topic_name::InvalidTopicName::IllegalCharacter("a/b".into())
                         .to_string(),
                 ),
-            ),
-            (
-                "a/b",
-                Arc::new(DenyAll),
-                codes::INVALID_TOPIC_EXCEPTION,
-                Some(
+            },
+            NameCase {
+                name: "a/b",
+                authorizer: Arc::new(DenyAll),
+                expected_code: codes::INVALID_TOPIC_EXCEPTION,
+                expected_message: Some(
                     krabka_log::topic_name::InvalidTopicName::IllegalCharacter("a/b".into())
                         .to_string(),
                 ),
-            ),
-            (
-                too_long.as_str(),
-                Arc::new(AllowAllAuthorizer),
-                codes::INVALID_TOPIC_EXCEPTION,
-                Some(
+            },
+            NameCase {
+                name: too_long.as_str(),
+                authorizer: Arc::new(AllowAllAuthorizer),
+                expected_code: codes::INVALID_TOPIC_EXCEPTION,
+                expected_message: Some(
                     krabka_log::topic_name::InvalidTopicName::TooLong(too_long.clone()).to_string(),
                 ),
-            ),
-            (
-                "missing-but-valid",
-                Arc::new(AllowAllAuthorizer),
-                codes::UNKNOWN_TOPIC_OR_PARTITION,
-                Some("This server does not host this topic-partition.".into()),
-            ),
-            (
-                "missing-but-valid",
-                Arc::new(DenyAll),
-                codes::TOPIC_AUTHORIZATION_FAILED,
-                Some("Topic authorization failed.".into()),
-            ),
+            },
+            NameCase {
+                name: "missing-but-valid",
+                authorizer: Arc::new(AllowAllAuthorizer),
+                expected_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                expected_message: Some("This server does not host this topic-partition.".into()),
+            },
+            NameCase {
+                name: "missing-but-valid",
+                authorizer: Arc::new(DenyAll),
+                expected_code: codes::TOPIC_AUTHORIZATION_FAILED,
+                expected_message: Some("Topic authorization failed.".into()),
+            },
         ];
 
-        for (name, authorizer, expected_code, expected_message) in cases {
+        for NameCase {
+            name,
+            authorizer,
+            expected_code,
+            expected_message,
+        } in cases
+        {
             broker_fixture!((broker_handle, _dir, broker), start_broker(authorizer));
             request_identity!((p, peer), principal("alice"));
             let req = request(name, &[0]);

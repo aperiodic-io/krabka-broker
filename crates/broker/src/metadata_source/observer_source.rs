@@ -144,7 +144,7 @@ mod tests {
         super::*,
         crate::{
             metadata_observer::{ObserverConfig, test_support::observer_config},
-            metadata_source::test_support::{start_controller, topic_record},
+            metadata_source::test_support::{StartedController, start_controller, topic_record},
         },
         std::sync::Mutex,
         tempfile::TempDir,
@@ -224,7 +224,10 @@ mod tests {
 
     #[tokio::test]
     async fn observer_source_reports_the_replicated_metadata_offset() {
-        let (_dir, ctrl) = start_controller().await;
+        let StartedController {
+            dir: _dir,
+            controller: ctrl,
+        } = start_controller().await;
         ctrl.submit_change(vec![topic_record("observed-through-source")])
             .await
             .expect("submit metadata");

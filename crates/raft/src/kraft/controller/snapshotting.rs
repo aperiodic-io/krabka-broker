@@ -18,6 +18,7 @@ use {
     },
     crate::{
         error::RaftError,
+        kraft::snapshot_fetch::SnapshotId,
         snapshot::{SnapshotReader, SnapshotWriter},
     },
     krabka_ids::Offset,
@@ -218,7 +219,7 @@ impl Engine {
 
     /// The latest local snapshot id `(end_offset, epoch)`, if any (leader's
     /// `FetchSnapshot` hint).
-    pub fn latest_snapshot_id(&self) -> Option<(i64, i32)> { latest_checkpoint_id(&self.data_dir) }
+    pub fn latest_snapshot_id(&self) -> Option<SnapshotId> { latest_checkpoint_id(&self.data_dir) }
 
     /// Serialize the current image into a KIP-630 checkpoint under the data dir.
     #[tracing::instrument(

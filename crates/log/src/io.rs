@@ -418,23 +418,41 @@ mod tests {
         }
     }
 
-    fn scratch_file() -> (tempfile::TempDir, File) {
-        let dir = tempfile::tempdir().unwrap();
-        let file = File::create(dir.path().join("scratch")).unwrap();
-        (dir, file)
+    /// A file in a temporary directory.
+    struct ScratchFile {
+        dir: tempfile::TempDir,
+        file: File,
     }
 
-    fn existing_state(contents: &[u8]) -> (tempfile::TempDir, PathBuf, PathBuf) {
+    fn scratch_file() -> ScratchFile {
+        let dir = tempfile::tempdir().unwrap();
+        let file = File::create(dir.path().join("scratch")).unwrap();
+        ScratchFile { dir, file }
+    }
+
+    /// A state file with contents, and the staging path beside it, in a
+    /// temporary directory.
+    struct ExistingState {
+        dir: tempfile::TempDir,
+        path: PathBuf,
+        tmp: PathBuf,
+    }
+
+    fn existing_state(contents: &[u8]) -> ExistingState {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state");
         let tmp = dir.path().join("state.tmp");
         std::fs::write(&path, contents).unwrap();
-        (dir, path, tmp)
+        ExistingState { dir, path, tmp }
     }
 
     #[test]
     fn write_atomic_replaces_the_target_and_consumes_the_staging_file() {
-        let (_dir, path, tmp) = existing_state(b"old contents");
+        let ExistingState {
+            dir: _dir,
+            path,
+            tmp,
+        } = existing_state(b"old contents");
 
         for contents in [b"new".as_slice(), b"newer"] {
             write_file_atomic(&tmp, &path, contents).unwrap();
@@ -445,7 +463,11 @@ mod tests {
 
     #[test]
     fn write_atomic_leaves_the_target_alone_when_the_staged_write_fails() {
-        let (_dir, path, tmp) = existing_state(b"old");
+        let ExistingState {
+            dir: _dir,
+            path,
+            tmp,
+        } = existing_state(b"old");
 
         let io = Scripted::new(vec![Err(std::io::Error::from(
             std::io::ErrorKind::StorageFull,
@@ -457,7 +479,7 @@ mod tests {
 
     #[test]
     fn write_all_resumes_short_writes_retries_interruptions_and_stops_on_no_progress() {
-        let (_dir, file) = scratch_file();
+        let ScratchFile { dir: _dir, file } = scratch_file();
 
         for (script, expected) in [
             // Three short writes finish a six-byte buffer, each offered only what

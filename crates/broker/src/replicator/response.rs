@@ -400,9 +400,36 @@ pub(super) struct RoundEntry {
     pub(super) request_leader_epoch: i32,
 }
 
+/// A partition addressed by its topic id.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct IdPartition {
+    topic_id: WireUuid,
+    partition: i32,
+}
+
+/// A partition addressed by its topic name.
+#[derive(PartialEq, Eq, Hash)]
+struct NamedPartition {
+    topic: String,
+    partition: i32,
+}
+
+/// Where a partition's row sits in one response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RowLocation {
+    topic_index: usize,
+    partition_index: usize,
+}
+
+/// A followed partition's key and what its response row asked for.
+pub(super) struct KeyedAction {
+    pub(super) key: FollowedKey,
+    pub(super) action: RowAction,
+}
+
 /// Stable lookup built only when a fetcher's metadata membership changes.
 pub(super) struct FollowedIndex {
-    by_id: std::collections::HashMap<(WireUuid, i32), Arc<Config>>,
+    by_id: std::collections::HashMap<IdPartition, Arc<Config>>,
     by_name: std::collections::HashMap<Arc<str>, std::collections::HashMap<i32, Arc<Config>>>,
 }
 
@@ -413,8 +440,13 @@ impl FollowedIndex {
             by_name: std::collections::HashMap::with_capacity(followed.len()),
         };
         for cfg in followed.values() {
-            out.by_id
-                .insert((cfg.topic_id, cfg.partition.get()), Arc::clone(cfg));
+            out.by_id.insert(
+                IdPartition {
+                    topic_id: cfg.topic_id,
+                    partition: cfg.partition.get(),
+                },
+                Arc::clone(cfg),
+            );
             out.by_name
                 .entry(Arc::clone(&cfg.topic))
                 .or_default()
@@ -425,7 +457,12 @@ impl FollowedIndex {
 
     fn config(&self, topic: &FetchableTopicResponse, partition: i32) -> Option<Arc<Config>> {
         let by_id = (topic.topic_id != WireUuid::ZERO)
-            .then(|| self.by_id.get(&(topic.topic_id, partition)))
+            .then(|| {
+                self.by_id.get(&IdPartition {
+                    topic_id: topic.topic_id,
+                    partition,
+                })
+            })
             .flatten();
         let by_name = if topic.topic.is_empty() {
             None
@@ -449,7 +486,7 @@ pub(super) async fn apply_response_indexed(
     response: &mut FetchResponse,
     followed: &FollowedIndex,
     request_epochs: &std::collections::HashMap<FollowedKey, i32>,
-) -> Vec<(FollowedKey, RowAction)> {
+) -> Vec<KeyedAction> {
     let response_index = ResponseIndex::of(response);
     let mut rows = Vec::new();
     for topic_index in 0..response.responses.len() {
@@ -459,10 +496,18 @@ pub(super) async fn apply_response_indexed(
             let Some(cfg) = followed.config(topic, partition) else {
                 continue;
             };
-            if response_index.locate(response, &cfg) != Some((topic_index, partition_index)) {
+            if response_index.locate(response, &cfg)
+                != Some(RowLocation {
+                    topic_index,
+                    partition_index,
+                })
+            {
                 continue;
             }
-            let key = (Arc::clone(&cfg.topic), PartitionIndex(partition));
+            let key = FollowedKey {
+                topic: Arc::clone(&cfg.topic),
+                partition: PartitionIndex(partition),
+            };
             let request_epoch = request_epochs
                 .get(&key)
                 .copied()
@@ -473,7 +518,7 @@ pub(super) async fn apply_response_indexed(
                 request_epoch,
             )
             .await;
-            rows.push((key, action));
+            rows.push(KeyedAction { key, action });
         }
     }
     rows
@@ -485,8 +530,8 @@ pub(super) async fn apply_response_indexed(
 /// untouched.
 #[derive(Default)]
 struct ResponseIndex {
-    by_id: std::collections::HashMap<(WireUuid, i32), Option<(usize, usize)>>,
-    by_name: std::collections::HashMap<(String, i32), Option<(usize, usize)>>,
+    by_id: std::collections::HashMap<IdPartition, Option<RowLocation>>,
+    by_name: std::collections::HashMap<NamedPartition, Option<RowLocation>>,
 }
 
 impl ResponseIndex {
@@ -494,18 +539,27 @@ impl ResponseIndex {
         let mut index = Self::default();
         for (topic_index, topic) in response.responses.iter().enumerate() {
             for (partition_index, partition) in topic.partitions.iter().enumerate() {
-                let at = (topic_index, partition_index);
+                let at = RowLocation {
+                    topic_index,
+                    partition_index,
+                };
                 if topic.topic_id != WireUuid::ZERO {
                     index
                         .by_id
-                        .entry((topic.topic_id, partition.partition_index))
+                        .entry(IdPartition {
+                            topic_id: topic.topic_id,
+                            partition: partition.partition_index,
+                        })
                         .and_modify(|slot| *slot = None)
                         .or_insert(Some(at));
                 }
                 if !topic.topic.is_empty() {
                     index
                         .by_name
-                        .entry((topic.topic.clone(), partition.partition_index))
+                        .entry(NamedPartition {
+                            topic: topic.topic.clone(),
+                            partition: partition.partition_index,
+                        })
                         .and_modify(|slot| *slot = None)
                         .or_insert(Some(at));
                 }
@@ -516,13 +570,19 @@ impl ResponseIndex {
 
     /// The row that answers `cfg`, if exactly one does and its identity
     /// matches on every field the negotiated version populated.
-    fn locate(&self, response: &FetchResponse, cfg: &Config) -> Option<(usize, usize)> {
+    fn locate(&self, response: &FetchResponse, cfg: &Config) -> Option<RowLocation> {
         let by_id = (cfg.topic_id != WireUuid::ZERO)
-            .then(|| self.by_id.get(&(cfg.topic_id, cfg.partition.get())))
+            .then(|| {
+                self.by_id.get(&IdPartition {
+                    topic_id: cfg.topic_id,
+                    partition: cfg.partition.get(),
+                })
+            })
             .flatten();
-        let by_name = self
-            .by_name
-            .get(&(cfg.topic.to_string(), cfg.partition.get()));
+        let by_name = self.by_name.get(&NamedPartition {
+            topic: cfg.topic.to_string(),
+            partition: cfg.partition.get(),
+        });
         // A key claimed twice under either identity is ambiguous under both:
         // the row it would resolve to is one of a contradictory pair.
         let at = match (by_id, by_name) {
@@ -533,7 +593,7 @@ impl ResponseIndex {
             // one unambiguous row, and none of them may mutate anything.
             _ => return None,
         };
-        let topic = response.responses.get(at.0)?;
+        let topic = response.responses.get(at.topic_index)?;
         fetch_topic_identity_matches(topic, cfg).then_some(at)
     }
 }
@@ -557,11 +617,15 @@ pub(super) async fn handle_response(
     request_leader_epoch: i32,
 ) -> RowAction {
     let index = ResponseIndex::of(&resp);
-    let Some((topic, partition)) = index.locate(&resp, cfg) else {
+    let Some(RowLocation {
+        topic_index,
+        partition_index,
+    }) = index.locate(&resp, cfg)
+    else {
         return RowAction::Continue;
     };
     handle_partition_response(
-        &mut resp.responses[topic].partitions[partition],
+        &mut resp.responses[topic_index].partitions[partition_index],
         cfg,
         request_leader_epoch,
     )
@@ -594,11 +658,22 @@ mod tests {
         std::time::Duration,
     };
 
-    fn local_partition_fixture() -> (Config, tempfile::TempDir, Arc<Partition>) {
+    /// A config, its log directory and the local partition opened for it.
+    struct LocalPartitionFixture {
+        cfg: Config,
+        dir: tempfile::TempDir,
+        part: Arc<Partition>,
+    }
+
+    fn local_partition_fixture() -> LocalPartitionFixture {
         let (cfg, log_dir) = test_config(image_with_leader(LEADER_ID));
         ensure_local_partition(&cfg).unwrap();
         let part = cfg.partitions.get(&cfg.topic, cfg.partition).unwrap();
-        (cfg, log_dir, part)
+        LocalPartitionFixture {
+            cfg,
+            dir: log_dir,
+            part,
+        }
     }
 
     fn one_record_batch(base_offset: i64) -> RecordBatch {
@@ -738,7 +813,11 @@ mod tests {
 
     #[tokio::test]
     async fn stale_request_epoch_cannot_truncate_the_follower_log() {
-        let (cfg, _log_dir, part) = local_partition_fixture();
+        let LocalPartitionFixture {
+            cfg,
+            dir: _dir,
+            part,
+        } = local_partition_fixture();
         part.replicate_batch(one_record_batch(0)).await.unwrap();
         assert!(part.log_end_offset() == Offset(1));
 
@@ -764,12 +843,22 @@ mod tests {
     /// answered its Fetch with.
     #[tokio::test]
     async fn diverging_epoch_truncates_to_the_intersection_with_the_local_epochs() {
+        /// A leader epoch and the number of records written under it.
+        struct Run {
+            leader_epoch: i32,
+            count: usize,
+        }
+        /// The leader's diverging epoch and its end offset.
+        struct Diverging {
+            epoch: i32,
+            end_offset: i64,
+        }
         struct Case {
             name: &'static str,
-            /// The follower log as runs of `(leader epoch, record count)`.
-            runs: &'static [(i32, usize)],
+            /// The follower log as runs of a leader epoch and a record count.
+            runs: &'static [Run],
             /// The leader's diverging epoch and its end offset.
-            diverging: (i32, i64),
+            diverging: Diverging,
             /// The log end offset after the truncation.
             expected_end: i64,
             /// The `(epoch, start offset)` entries left in the epoch history.
@@ -788,8 +877,20 @@ mod tests {
                 // it does not know epoch 5, so it keeps only what epoch 4
                 // ended with, not the leader's end for epoch 5.
                 "two elections: the follower does not know the leader's epoch",
-                &[(4, 10), (6, 5)],
-                (5, 12),
+                &[
+                    Run {
+                        leader_epoch: 4,
+                        count: 10,
+                    },
+                    Run {
+                        leader_epoch: 6,
+                        count: 5,
+                    },
+                ],
+                Diverging {
+                    epoch: 5,
+                    end_offset: 12,
+                },
                 10,
                 &[(4, 0)],
             ),
@@ -798,36 +899,78 @@ mod tests {
                 // leader's end offset cannot be a truncation point, or the
                 // same row would come back on every Fetch.
                 "the leader's end offset is past the log end",
-                &[(4, 10), (6, 2)],
-                (5, 20),
+                &[
+                    Run {
+                        leader_epoch: 4,
+                        count: 10,
+                    },
+                    Run {
+                        leader_epoch: 6,
+                        count: 2,
+                    },
+                ],
+                Diverging {
+                    epoch: 5,
+                    end_offset: 20,
+                },
                 10,
                 &[(4, 0)],
             ),
             case(
                 "a known epoch that the leader ended earlier than the follower",
-                &[(4, 13)],
-                (4, 8),
+                &[Run {
+                    leader_epoch: 4,
+                    count: 13,
+                }],
+                Diverging {
+                    epoch: 4,
+                    end_offset: 8,
+                },
                 8,
                 &[(4, 0)],
             ),
             case(
                 "a known epoch that the leader ended later than the follower",
-                &[(4, 10), (6, 5)],
-                (4, 12),
+                &[
+                    Run {
+                        leader_epoch: 4,
+                        count: 10,
+                    },
+                    Run {
+                        leader_epoch: 6,
+                        count: 5,
+                    },
+                ],
+                Diverging {
+                    epoch: 4,
+                    end_offset: 12,
+                },
                 10,
                 &[(4, 0)],
             ),
             case(
                 "the leader's epoch is below every epoch the follower recorded",
-                &[(6, 5)],
-                (5, 3),
+                &[Run {
+                    leader_epoch: 6,
+                    count: 5,
+                }],
+                Diverging {
+                    epoch: 5,
+                    end_offset: 3,
+                },
                 0,
                 &[],
             ),
             case(
                 "no leader end offset leaves the log alone",
-                &[(4, 5)],
-                (4, -1),
+                &[Run {
+                    leader_epoch: 4,
+                    count: 5,
+                }],
+                Diverging {
+                    epoch: 4,
+                    end_offset: -1,
+                },
                 5,
                 &[(4, 0)],
             ),
@@ -835,13 +978,21 @@ mod tests {
         for Case {
             name,
             runs,
-            diverging: (epoch, end_offset),
+            diverging: Diverging { epoch, end_offset },
             expected_end,
             expected_epochs,
         } in cases
         {
-            let (cfg, _log_dir, part) = local_partition_fixture();
-            for &(leader_epoch, count) in runs {
+            let LocalPartitionFixture {
+                cfg,
+                dir: _dir,
+                part,
+            } = local_partition_fixture();
+            for &Run {
+                leader_epoch,
+                count,
+            } in runs
+            {
                 for _ in 0..count {
                     let mut batch = RecordBatch {
                         partition_leader_epoch: leader_epoch,
@@ -873,7 +1024,11 @@ mod tests {
 
     #[tokio::test]
     async fn failed_append_leaves_log_retryable() {
-        let (cfg, _log_dir, part) = local_partition_fixture();
+        let LocalPartitionFixture {
+            cfg,
+            dir: _dir,
+            part,
+        } = local_partition_fixture();
         let respond = |base_offset| {
             fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
                 partition_index: PARTITION,
@@ -942,7 +1097,11 @@ mod tests {
         let mut actual = Vec::new();
         let mut expected = Vec::new();
         for raw in [false, true] {
-            let (cfg, log_dir, part) = local_partition_fixture();
+            let LocalPartitionFixture {
+                cfg,
+                dir: log_dir,
+                part,
+            } = local_partition_fixture();
             part.log
                 .lock()
                 .unwrap()
@@ -975,7 +1134,11 @@ mod tests {
     #[tokio::test]
     async fn a_batch_past_the_log_end_offset_is_replicated_across_the_hole() {
         for raw in [false, true] {
-            let (cfg, _log_dir, part) = local_partition_fixture();
+            let LocalPartitionFixture {
+                cfg,
+                dir: _dir,
+                part,
+            } = local_partition_fixture();
 
             // Offsets 1 to 4 were compacted away on the leader.
             for base_offset in [0, 5] {
@@ -992,7 +1155,11 @@ mod tests {
 
     #[tokio::test]
     async fn raw_compressed_replication_stays_byte_exact() {
-        let (cfg, _log_dir, part) = local_partition_fixture();
+        let LocalPartitionFixture {
+            cfg,
+            dir: _dir,
+            part,
+        } = local_partition_fixture();
         let mut batch = one_record_batch(0);
         batch.partition_leader_epoch = cfg.leader_epoch.0;
         batch.attributes = batch.attributes.with_compression(CompressionType::Lz4);

@@ -157,7 +157,10 @@ impl SharePersister {
         // the lifecycle hook is the first thing to touch the topic when no
         // client has issued FindCoordinator(SHARE) yet. Mirrors how the txn
         // handlers refresh before dispatching.
-        let (state_partition, local) = self.route(group, topic_id, partition).await?;
+        let RoutedPartition {
+            state_partition,
+            local,
+        } = self.route(group, topic_id, partition).await?;
         if local {
             return self
                 .share_coordinator
@@ -202,7 +205,10 @@ impl SharePersister {
         topic_id: uuid::Uuid,
         partition: i32,
     ) -> Result<(), BrokerError> {
-        let (state_partition, local) = self.route(group, topic_id, partition).await?;
+        let RoutedPartition {
+            state_partition,
+            local,
+        } = self.route(group, topic_id, partition).await?;
         let result = if local {
             self.share_coordinator
                 .delete(&self.controller.current_image(), group, topic_id, partition)
@@ -248,13 +254,16 @@ impl SharePersister {
         group: &str,
         topic_id: uuid::Uuid,
         partition: i32,
-    ) -> Result<(PartitionIndex, bool), BrokerError> {
+    ) -> Result<RoutedPartition, BrokerError> {
         let state_partition = self
             .share_coordinator
             .state_partition_for(group, &topic_id, partition);
         self.ensure_topic_and_refresh(state_partition).await?;
         let local = self.share_coordinator.is_leader(state_partition).await;
-        Ok((state_partition, local))
+        Ok(RoutedPartition {
+            state_partition,
+            local,
+        })
     }
 
     /// Ask for `__share_group_state` if it does not exist, and refresh this
@@ -353,7 +362,10 @@ impl SharePersister {
         partition: i32,
         leader_epoch: i32,
     ) -> Result<SharePartitionState, BrokerError> {
-        let (state_partition, local) = self.route(group, topic_id, partition).await?;
+        let RoutedPartition {
+            state_partition,
+            local,
+        } = self.route(group, topic_id, partition).await?;
         if local {
             return self
                 .share_coordinator
@@ -384,7 +396,11 @@ impl SharePersister {
             resp.results.into_iter().flat_map(|topic| topic.partitions),
             "ReadShareGroupState",
             partition,
-            |row| (row.partition, row.error_code, row.error_message.as_deref()),
+            |row| PartitionStatus {
+                partition: row.partition,
+                code: row.error_code,
+                message: row.error_message.as_deref(),
+            },
         )?;
 
         // The read response carries no leader epoch and no delivery complete
@@ -415,7 +431,10 @@ impl SharePersister {
         topic_id: uuid::Uuid,
         partition: i32,
     ) -> Result<Option<ShareStateSummary>, BrokerError> {
-        let (state_partition, local) = self.route(group, topic_id, partition).await?;
+        let RoutedPartition {
+            state_partition,
+            local,
+        } = self.route(group, topic_id, partition).await?;
         if local {
             return self
                 .share_coordinator
@@ -439,7 +458,11 @@ impl SharePersister {
             resp.results.into_iter().flat_map(|topic| topic.partitions),
             "ReadShareGroupStateSummary",
             partition,
-            |row| (row.partition, row.error_code, row.error_message.as_deref()),
+            |row| PartitionStatus {
+                partition: row.partition,
+                code: row.error_code,
+                message: row.error_message.as_deref(),
+            },
         )?;
 
         // The summary of a key with no state is the default row: epochs 0 and
@@ -479,7 +502,10 @@ impl SharePersister {
     ) -> Result<(), BrokerError> {
         let (state_epoch, leader_epoch) = epochs;
         let (start_offset, delivery_complete_count) = progress;
-        let (state_partition, local) = self.route(group, topic_id, partition).await?;
+        let RoutedPartition {
+            state_partition,
+            local,
+        } = self.route(group, topic_id, partition).await?;
         if local {
             let request = ShareWrite {
                 state_epoch,
@@ -614,6 +640,20 @@ impl SharePersister {
     }
 }
 
+/// The state partition that serves a share partition, and whether this broker
+/// leads it.
+struct RoutedPartition {
+    state_partition: PartitionIndex,
+    local: bool,
+}
+
+/// The verdict of a leader on one partition of a share-state write.
+struct PartitionRow {
+    partition: i32,
+    error_code: i16,
+    error_message: Option<String>,
+}
+
 /// The three share-state write RPCs — `InitializeShareGroupState`,
 /// `WriteShareGroupState` and `DeleteShareGroupState` — answer with the same
 /// shape: one result per topic, each holding one `PartitionResult` per
@@ -621,19 +661,22 @@ impl SharePersister {
 /// needs from all three, so the remote path can read the leader's verdict
 /// without a copy of the send per RPC.
 trait PartitionResults {
-    /// `(partition, error_code, error_message)` for every partition the leader
-    /// answered for.
-    fn partition_results(self) -> Vec<(i32, i16, Option<String>)>;
+    /// The verdict for every partition the leader answered for.
+    fn partition_results(self) -> Vec<PartitionRow>;
 }
 
 macro_rules! impl_partition_results {
     ($($response:ty),+ $(,)?) => {
         $(impl PartitionResults for $response {
-            fn partition_results(self) -> Vec<(i32, i16, Option<String>)> {
+            fn partition_results(self) -> Vec<PartitionRow> {
                 self.results
                     .into_iter()
                     .flat_map(|topic| topic.partitions)
-                    .map(|p| (p.partition, p.error_code, p.error_message))
+                    .map(|p| PartitionRow {
+                        partition: p.partition,
+                        error_code: p.error_code,
+                        error_message: p.error_message,
+                    })
                     .collect()
             }
         })+
@@ -656,7 +699,12 @@ fn refused(what: &str, partition: i32, error_code: i16, message: &str) -> Broker
     }
 }
 
-type PartitionStatus<'a> = (i32, i16, Option<&'a str>);
+/// A partition's verdict, borrowed from its row.
+struct PartitionStatus<'a> {
+    partition: i32,
+    code: i16,
+    message: Option<&'a str>,
+}
 
 /// Finds the requested row and checks the leader's verdict without changing its payload.
 fn checked_partition<T>(
@@ -667,13 +715,13 @@ fn checked_partition<T>(
 ) -> Result<T, BrokerError> {
     let row = rows
         .into_iter()
-        .find(|row| status(row).0 == partition)
+        .find(|row| status(row).partition == partition)
         .ok_or_else(|| {
             BrokerError::Share(format!(
                 "{what} for partition {partition}: leader answered for no such partition"
             ))
         })?;
-    let (_, code, message) = status(&row);
+    let PartitionStatus { code, message, .. } = status(&row);
     if code != 0 {
         return Err(refused(
             what,
@@ -698,7 +746,11 @@ fn check_partition_result<R: PartitionResults>(
     partition: i32,
 ) -> Result<(), BrokerError> {
     checked_partition(resp.partition_results(), what, partition, |row| {
-        (row.0, row.1, row.2.as_deref())
+        PartitionStatus {
+            partition: row.partition,
+            code: row.error_code,
+            message: row.error_message.as_deref(),
+        }
     })
     .map(|_| ())
 }
@@ -718,18 +770,36 @@ mod tests {
         },
     };
 
-    fn response(partitions: &[(i32, i16)]) -> InitializeShareGroupStateResponse {
+    /// A partition and the error code the leader answers for it.
+    struct PartitionCode {
+        partition: i32,
+        error_code: i16,
+    }
+
+    fn code(partition: i32, error_code: i16) -> PartitionCode {
+        PartitionCode {
+            partition,
+            error_code,
+        }
+    }
+
+    fn response(partitions: &[PartitionCode]) -> InitializeShareGroupStateResponse {
         InitializeShareGroupStateResponse {
             results: vec![InitializeStateResult {
                 topic_id: ProtoUuid([7; 16]),
                 partitions: partitions
                     .iter()
-                    .map(|&(partition, error_code)| PartitionResult {
-                        partition,
-                        error_code,
-                        error_message: None,
-                        ..Default::default()
-                    })
+                    .map(
+                        |&PartitionCode {
+                             partition,
+                             error_code,
+                         }| PartitionResult {
+                            partition,
+                            error_code,
+                            error_message: None,
+                            ..Default::default()
+                        },
+                    )
                     .collect(),
                 ..Default::default()
             }],
@@ -739,7 +809,7 @@ mod tests {
 
     #[test]
     fn leader_accepting_the_partition_is_success() {
-        assert2::assert!(check_partition_result(response(&[(0, 0)]), "Initialize", 0).is_ok());
+        assert2::assert!(check_partition_result(response(&[code(0, 0)]), "Initialize", 0).is_ok());
     }
 
     /// The bug this guards: the group-coordinator lifecycle hook records a
@@ -751,7 +821,7 @@ mod tests {
         // 16 is NOT_COORDINATOR: the state-partition leader has not caught up
         // with its own leadership yet. It is transient, and the caller only
         // retries if it hears about it.
-        let error = check_partition_result(response(&[(0, 16)]), "Initialize", 0)
+        let error = check_partition_result(response(&[code(0, 16)]), "Initialize", 0)
             .expect_err("a refused partition must not read as success");
         assert2::assert!(error.to_string().contains("16"));
     }
@@ -788,7 +858,7 @@ mod tests {
 
     #[test]
     fn a_leader_silent_about_the_partition_is_an_error() {
-        assert2::assert!(check_partition_result(response(&[(1, 0)]), "Initialize", 0).is_err());
+        assert2::assert!(check_partition_result(response(&[code(1, 0)]), "Initialize", 0).is_err());
         assert2::assert!(check_partition_result(response(&[]), "Initialize", 0).is_err());
     }
 }

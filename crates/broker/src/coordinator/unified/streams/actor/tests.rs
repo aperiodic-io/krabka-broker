@@ -39,14 +39,15 @@ fn epoch_five_member() -> StreamsMemberState {
     member
 }
 
-fn input_topic_source(partitions: u32) -> Arc<FakeMetadataSource> {
+/// A metadata source whose image holds only the topic `in`.
+fn input_topic_source(partitions: i32) -> Arc<FakeMetadataSource> {
     Arc::new(
         FakeMetadataSource::builder()
-            .image(image_of(None, &[(
-                "in",
-                1,
-                i32::try_from(partitions).expect("partition count fits i32"),
-            )]))
+            .image(image_of(None, &[ImageTopic {
+                name: "in",
+                id: 1,
+                partitions,
+            }]))
             .build(),
     )
 }
@@ -491,12 +492,34 @@ async fn heartbeat_applies_member_metadata() {
     }
 }
 
+/// A topic of a test metadata image: its name, the byte that fills its topic
+/// id, and its partition count.
+#[derive(Clone, Copy)]
+struct ImageTopic {
+    name: &'static str,
+    id: u8,
+    partitions: i32,
+}
+
+/// A member as the group describes it: its id, epoch and active partitions of
+/// subtopology `0`.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct DescribedMember {
+    member_id: String,
+    member_epoch: i32,
+    active: Vec<i32>,
+}
+
+/// A status entry of a heartbeat response: its code and detail.
+#[derive(Debug, PartialEq, Eq)]
+struct StatusEntry {
+    code: i8,
+    detail: String,
+}
+
 /// Builds the metadata image of one broker, `broker_rack` its rack, that
-/// holds each `(name, id byte, partitions)` topic.
-fn image_of(
-    broker_rack: Option<&str>,
-    topics: &[(&str, u8, i32)],
-) -> krabka_metadata::MetadataImage {
+/// holds each of `topics`.
+fn image_of(broker_rack: Option<&str>, topics: &[ImageTopic]) -> krabka_metadata::MetadataImage {
     use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord, TopicRecord};
 
     let broker = krabka_audit::NodeId(1);
@@ -506,7 +529,12 @@ fn image_of(
             ..crate::test_support::broker_registration(broker)
         },
     )];
-    for &(name, id, partitions) in topics {
+    for topic in topics {
+        let ImageTopic {
+            name,
+            id,
+            partitions,
+        } = *topic;
         records.push(MetadataRecord::V1Topic(TopicRecord {
             name: name.into(),
             topic_id: uuid::Uuid::from_bytes([id; 16]),
@@ -567,62 +595,69 @@ fn one_subtopology(
     }
 }
 
-/// Kafka refreshes the topic metadata of a streams group on the next
-/// heartbeat after a change (`onMetadataUpdate`, `hasMetadataExpired`,
-/// `computeMetadataHash`) and bumps the group epoch when the hash or the
-/// member metadata changed (`hasStreamsMemberMetadataChanged`). Each row joins
-/// one member, applies one change, sends one heartbeat at the member epoch, and
-/// compares the whole response.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() {
+enum HeartbeatChange {
+    Image(Box<krabka_metadata::MetadataImage>),
+    Rack(&'static str),
+    Process(&'static str),
+}
+
+struct HeartbeatRow {
+    name: &'static str,
+    initial: krabka_metadata::MetadataImage,
+    storage: TopologyStorage,
+    change: HeartbeatChange,
+    /// The owned active tasks of the heartbeat, when it reports them.
+    owned_active: Option<Vec<i32>>,
+    epoch: i32,
+    /// The active tasks, when the response sends the task lists.
+    active: Option<Vec<i32>>,
+    status: Option<
+        Vec<krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status>,
+    >,
+}
+
+/// An image that holds only the topic `in`.
+fn in_image(partitions: i32) -> krabka_metadata::MetadataImage {
+    image_of(None, &[ImageTopic {
+        name: "in",
+        id: 1,
+        partitions,
+    }])
+}
+
+/// Rows for [`a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment`].
+fn heartbeat_change_rows() -> Vec<HeartbeatRow> {
     use {
         crate::coordinator::unified::streams::topology::status,
         krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status,
     };
 
-    enum Change {
-        Image(Box<krabka_metadata::MetadataImage>),
-        Rack(&'static str),
-        Process(&'static str),
-    }
-    struct Row {
-        name: &'static str,
-        initial: krabka_metadata::MetadataImage,
-        storage: TopologyStorage,
-        change: Change,
-        /// The owned active tasks of the heartbeat, when it reports them.
-        owned_active: Option<Vec<i32>>,
-        epoch: i32,
-        /// The active tasks, when the response sends the task lists.
-        active: Option<Vec<i32>>,
-        status: Option<Vec<Status>>,
-    }
-    let rows = [
-        Row {
+    vec![
+        HeartbeatRow {
             name: "the missing source topic is created",
             initial: image_of(None, &[]),
             storage: TopologyStorage::Stateless,
-            change: Change::Image(Box::new(image_of(None, &[("in", 1, 2)]))),
+            change: HeartbeatChange::Image(Box::new(in_image(2))),
             owned_active: None,
             epoch: 3,
             active: Some(vec![0, 1]),
             status: Some(vec![]),
         },
-        Row {
+        HeartbeatRow {
             name: "partitions are added to the source topic",
-            initial: image_of(None, &[("in", 1, 1)]),
+            initial: in_image(1),
             storage: TopologyStorage::Stateless,
-            change: Change::Image(Box::new(image_of(None, &[("in", 1, 2)]))),
+            change: HeartbeatChange::Image(Box::new(in_image(2))),
             owned_active: Some(vec![0]),
             epoch: 3,
             active: Some(vec![0, 1]),
             status: Some(vec![]),
         },
-        Row {
+        HeartbeatRow {
             name: "the source topic is deleted",
-            initial: image_of(None, &[("in", 1, 2)]),
+            initial: in_image(2),
             storage: TopologyStorage::Stateless,
-            change: Change::Image(Box::new(image_of(None, &[]))),
+            change: HeartbeatChange::Image(Box::new(image_of(None, &[]))),
             owned_active: Some(vec![]),
             epoch: 3,
             active: Some(vec![]),
@@ -632,40 +667,59 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
                 ..Default::default()
             }]),
         },
-        Row {
+        HeartbeatRow {
             name: "the member sends a new rack id",
-            initial: image_of(None, &[("in", 1, 1)]),
+            initial: in_image(1),
             storage: TopologyStorage::Stateless,
-            change: Change::Rack("rack-b"),
+            change: HeartbeatChange::Rack("rack-b"),
             owned_active: Some(vec![0]),
             epoch: 3,
             active: None,
             status: Some(vec![]),
         },
-        Row {
+        HeartbeatRow {
             name: "the member sends a new process id",
-            initial: image_of(None, &[("in", 1, 1)]),
+            initial: in_image(1),
             storage: TopologyStorage::Stateless,
-            change: Change::Process("process-b"),
+            change: HeartbeatChange::Process("process-b"),
             owned_active: Some(vec![0]),
             epoch: 3,
             active: None,
             status: Some(vec![]),
         },
-        Row {
+        HeartbeatRow {
             name: "the internal topic is created",
-            initial: image_of(None, &[("in", 1, 1)]),
+            initial: in_image(1),
             storage: TopologyStorage::StoreChangelog,
-            change: Change::Image(Box::new(image_of(None, &[
-                ("in", 1, 1),
-                ("store-changelog", 2, 1),
+            change: HeartbeatChange::Image(Box::new(image_of(None, &[
+                ImageTopic {
+                    name: "in",
+                    id: 1,
+                    partitions: 1,
+                },
+                ImageTopic {
+                    name: "store-changelog",
+                    id: 2,
+                    partitions: 1,
+                },
             ]))),
             owned_active: Some(vec![]),
             epoch: 3,
             active: Some(vec![0]),
             status: Some(vec![]),
         },
-    ];
+    ]
+}
+
+/// Kafka refreshes the topic metadata of a streams group on the next
+/// heartbeat after a change (`onMetadataUpdate`, `hasMetadataExpired`,
+/// `computeMetadataHash`) and bumps the group epoch when the hash or the
+/// member metadata changed (`hasStreamsMemberMetadataChanged`). Each row joins
+/// one member, applies one change, sends one heartbeat at the member epoch, and
+/// compares the whole response.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() {
+    let rows = heartbeat_change_rows();
 
     for row in rows {
         let source = Arc::new(FakeMetadataSource::builder().image(row.initial).build());
@@ -689,12 +743,12 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         check!(joined.member_epoch == 2, "{}", row.name);
 
         let (rack, process) = match row.change {
-            Change::Image(image) => {
+            HeartbeatChange::Image(image) => {
                 source.set_image(*image);
                 ("rack-a", "process-a")
             }
-            Change::Rack(rack) => (rack, "process-a"),
-            Change::Process(process) => ("rack-a", process),
+            HeartbeatChange::Rack(rack) => (rack, "process-a"),
+            HeartbeatChange::Process(process) => ("rack-a", process),
         };
         let owned = row.owned_active.map(|partitions| {
             vec![
@@ -752,7 +806,7 @@ async fn a_new_target_persists_the_target_of_every_member() {
     let m2 = heartbeat(&handle, request("m2", 0)).await;
     check!((m1.member_epoch, m2.member_epoch) == (2, 3));
 
-    source.set_image(image_of(None, &[("in", 1, 4)]));
+    source.set_image(in_image(4));
     let resp = heartbeat(&handle, request("m1", 2)).await;
     check!(resp.member_epoch == 4);
 
@@ -782,14 +836,11 @@ async fn a_new_target_persists_the_target_of_every_member() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_seeded_group_asks_for_its_missing_internal_topics_again() {
     use {
-        crate::{
-            coordinator::unified::streams::topology::{InternalTopicSpec, status},
-            test_support::FakeMetadataSource,
-        },
+        crate::coordinator::unified::streams::topology::{InternalTopicSpec, status},
         krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status,
     };
 
-    let image = || image_of(None, &[("in", 1, 1)]);
+    let image = || in_image(1);
     let (before, _log) = make_coordinator();
     before.set_metadata_source(Arc::new(
         FakeMetadataSource::builder().image(image()).build(),
@@ -867,13 +918,7 @@ async fn a_group_loaded_before_the_metadata_source_connects_assigns_its_tasks() 
         active: Option<Vec<i32>>,
     }
 
-    let source = || {
-        Arc::new(
-            FakeMetadataSource::builder()
-                .image(image_of(None, &[("in", 1, 2)]))
-                .build(),
-        )
-    };
+    let source = || input_topic_source(2);
     let request = |member_id: &str, member_epoch, owned: Vec<i32>| StreamsGroupHeartbeatRequest {
         group_id: "g".into(),
         member_id: member_id.into(),
@@ -973,10 +1018,7 @@ async fn a_group_loaded_before_the_metadata_source_connects_assigns_its_tasks() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_join_sizes_the_internal_topics_as_kafka_does() {
     use {
-        crate::{
-            coordinator::unified::streams::topology::{InternalTopicSpec, status},
-            test_support::FakeMetadataSource,
-        },
+        crate::coordinator::unified::streams::topology::{InternalTopicSpec, status},
         krabka_protocol::owned::{
             common::{
                 streams_group_heartbeat_request::topic_info::TopicInfo,
@@ -986,10 +1028,14 @@ async fn a_join_sizes_the_internal_topics_as_kafka_does() {
         },
     };
 
+    struct PartitionCounts {
+        orders: i32,
+        customers: i32,
+    }
     struct Row {
         name: &'static str,
         /// The partition counts of `orders` and `customers`.
-        partitions: (i32, i32),
+        partitions: PartitionCounts,
         copartitioned: bool,
         /// The expected partition counts of `rp` and `store-changelog`.
         rp: i32,
@@ -998,14 +1044,20 @@ async fn a_join_sizes_the_internal_topics_as_kafka_does() {
     let rows = [
         Row {
             name: "copartition coerces rp to the customers topic",
-            partitions: (6, 3),
+            partitions: PartitionCounts {
+                orders: 6,
+                customers: 3,
+            },
             copartitioned: true,
             rp: 3,
             changelog: 3,
         },
         Row {
             name: "rp takes the partition count of its writer",
-            partitions: (4, 8),
+            partitions: PartitionCounts {
+                orders: 4,
+                customers: 8,
+            },
             copartitioned: false,
             rp: 4,
             changelog: 8,
@@ -1016,8 +1068,16 @@ async fn a_join_sizes_the_internal_topics_as_kafka_does() {
         let source = Arc::new(
             FakeMetadataSource::builder()
                 .image(image_of(None, &[
-                    ("orders", 1, row.partitions.0),
-                    ("customers", 2, row.partitions.1),
+                    ImageTopic {
+                        name: "orders",
+                        id: 1,
+                        partitions: row.partitions.orders,
+                    },
+                    ImageTopic {
+                        name: "customers",
+                        id: 2,
+                        partitions: row.partitions.customers,
+                    },
                 ]))
                 .build(),
         );
@@ -1116,6 +1176,10 @@ async fn the_heartbeat_status_list_follows_kafka() {
         /// A leave, with `shutdown_application`.
         Leave(&'static str, bool),
     }
+    struct ExpectedStatus {
+        code: i8,
+        detail: &'static str,
+    }
     struct Row {
         name: &'static str,
         sources: &'static [&'static str],
@@ -1124,7 +1188,7 @@ async fn the_heartbeat_status_list_follows_kafka() {
         epoch: i32,
         /// The active tasks, when the response sends the task lists.
         active: Option<Vec<i32>>,
-        status: Vec<(i8, &'static str)>,
+        status: Vec<ExpectedStatus>,
     }
     let rows = [
         Row {
@@ -1143,10 +1207,10 @@ async fn the_heartbeat_status_list_follows_kafka() {
             member: "m1",
             epoch: 2,
             active: Some(vec![]),
-            status: vec![(
-                status::MISSING_SOURCE_TOPICS,
-                "Source topics a, b are missing.",
-            )],
+            status: vec![ExpectedStatus {
+                code: status::MISSING_SOURCE_TOPICS,
+                detail: "Source topics a, b are missing.",
+            }],
         },
         Row {
             name: "a heartbeat requests the shutdown",
@@ -1155,11 +1219,11 @@ async fn the_heartbeat_status_list_follows_kafka() {
             member: "m1",
             epoch: 2,
             active: None,
-            status: vec![(
-                status::SHUTDOWN_APPLICATION,
-                "Streams group member m1 encountered a fatal error and requested a shutdown for \
+            status: vec![ExpectedStatus {
+                code: status::SHUTDOWN_APPLICATION,
+                detail: "Streams group member m1 encountered a fatal error and requested a shutdown for \
                  the entire application.",
-            )],
+            }],
         },
         Row {
             name: "a leave requests the shutdown",
@@ -1173,11 +1237,11 @@ async fn the_heartbeat_status_list_follows_kafka() {
             member: "m1",
             epoch: 4,
             active: None,
-            status: vec![(
-                status::SHUTDOWN_APPLICATION,
-                "Streams group member m2 encountered a fatal error and requested a shutdown for \
+            status: vec![ExpectedStatus {
+                code: status::SHUTDOWN_APPLICATION,
+                detail: "Streams group member m2 encountered a fatal error and requested a shutdown for \
                  the entire application.",
-            )],
+            }],
         },
         Row {
             name: "the shutdown request ends when the group becomes empty",
@@ -1200,10 +1264,10 @@ async fn the_heartbeat_status_list_follows_kafka() {
             member: "m2",
             epoch: 3,
             active: Some(vec![]),
-            status: vec![(
-                status::STALE_TOPOLOGY,
-                "The member's topology epoch 1 is behind the group's topology epoch 2.",
-            )],
+            status: vec![ExpectedStatus {
+                code: status::STALE_TOPOLOGY,
+                detail: "The member's topology epoch 1 is behind the group's topology epoch 2.",
+            }],
         },
         Row {
             name: "a member at the group topology does not get STALE_TOPOLOGY",
@@ -1261,9 +1325,9 @@ async fn the_heartbeat_status_list_follows_kafka() {
             .maybe_status(Some(
                 row.status
                     .iter()
-                    .map(|(status_code, detail)| Status {
-                        status_code: *status_code,
-                        status_detail: (*detail).into(),
+                    .map(|status| Status {
+                        status_code: status.code,
+                        status_detail: status.detail.into(),
                         ..Default::default()
                     })
                     .collect(),
@@ -1288,7 +1352,6 @@ async fn the_heartbeat_status_list_follows_kafka() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_heartbeat_response_carries_what_kafka_sends() {
     use {
-        crate::test_support::FakeMetadataSource,
         krabka_protocol::owned::{
             common::{
                 streams_group_heartbeat_request::endpoint::Endpoint as RequestEndpoint,
@@ -1420,7 +1483,11 @@ async fn the_heartbeat_response_carries_what_kafka_sends() {
     for (name, max_size, partitions, beats, expected) in rows {
         let source = Arc::new(
             FakeMetadataSource::builder()
-                .image(image_of(None, &[("in", 1, partitions)]))
+                .image(image_of(None, &[ImageTopic {
+                    name: "in",
+                    id: 1,
+                    partitions,
+                }]))
                 .build(),
         );
         let coord = coordinator_with_source(source, Some(max_size));
@@ -1560,10 +1627,7 @@ async fn a_member_keeps_its_epoch_until_it_revokes_and_is_fenced_after_its_timeo
 /// afterwards.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_topology_update_or_an_invalid_owned_task_is_refused() {
-    use {
-        crate::test_support::FakeMetadataSource,
-        krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds,
-    };
+    use krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds;
 
     let join = |member_id: &str, epoch, source: &str| {
         let mut topology = one_subtopology().call();
@@ -1613,7 +1677,18 @@ async fn a_topology_update_or_an_invalid_owned_task_is_refused() {
     for (name, request, message) in rows {
         let source = Arc::new(
             FakeMetadataSource::builder()
-                .image(image_of(None, &[("in", 1, 1), ("other", 2, 1)]))
+                .image(image_of(None, &[
+                    ImageTopic {
+                        name: "in",
+                        id: 1,
+                        partitions: 1,
+                    },
+                    ImageTopic {
+                        name: "other",
+                        id: 2,
+                        partitions: 1,
+                    },
+                ]))
                 .build(),
         );
         let (coord, _log) = make_coordinator();
@@ -1697,13 +1772,21 @@ async fn a_static_member_follows_kafka_static_membership() {
                 status: Some(vec![]),
                 ..Default::default()
             },
-            vec![("m1".to_string(), -2, vec![0])],
+            vec![DescribedMember {
+                member_id: "m1".to_string(),
+                member_epoch: -2,
+                active: vec![0],
+            }],
         ),
         (
             "a new member replaces the released static member",
             vec![beat("m1", -2, "i1"), join("m2", "i1")],
             assigned("m2", 2),
-            vec![("m2".to_string(), 2, vec![0])],
+            vec![DescribedMember {
+                member_id: "m2".to_string(),
+                member_epoch: 2,
+                active: vec![0],
+            }],
         ),
         (
             "a join with an instance id that a member still holds",
@@ -1716,7 +1799,11 @@ async fn a_static_member_follows_kafka_static_membership() {
                         .into(),
                 ),
             ),
-            vec![("m1".to_string(), 2, vec![0])],
+            vec![DescribedMember {
+                member_id: "m1".to_string(),
+                member_epoch: 2,
+                active: vec![0],
+            }],
         ),
         (
             "a heartbeat with the instance id of another member",
@@ -1725,7 +1812,11 @@ async fn a_static_member_follows_kafka_static_membership() {
                 codes::FENCED_INSTANCE_ID,
                 Some("Static member m2 with instance id i1 was fenced by member m1.".into()),
             ),
-            vec![("m1".to_string(), 2, vec![0])],
+            vec![DescribedMember {
+                member_id: "m1".to_string(),
+                member_epoch: 2,
+                active: vec![0],
+            }],
         ),
         (
             "a heartbeat with an unknown instance id",
@@ -1734,22 +1825,38 @@ async fn a_static_member_follows_kafka_static_membership() {
                 codes::UNKNOWN_MEMBER_ID,
                 Some("Instance id i9 is unknown.".into()),
             ),
-            vec![("m1".to_string(), 2, vec![0])],
+            vec![DescribedMember {
+                member_id: "m1".to_string(),
+                member_epoch: 2,
+                active: vec![0],
+            }],
         ),
         (
             "a released static member does not count against a full group",
             vec![join("m3", "i3"), beat("m1", -2, "i1"), join("m2", "i1")],
             assigned("m2", 3),
             vec![
-                ("m2".to_string(), 3, vec![0]),
-                ("m3".to_string(), 3, vec![]),
+                DescribedMember {
+                    member_id: "m2".to_string(),
+                    member_epoch: 3,
+                    active: vec![0],
+                },
+                DescribedMember {
+                    member_id: "m3".to_string(),
+                    member_epoch: 3,
+                    active: vec![],
+                },
             ],
         ),
         (
             "a replacement takes over a member id that another member holds",
             vec![join("m2", "i2"), beat("m1", -2, "i1"), join("m2", "i1")],
             assigned("m2", 4),
-            vec![("m2".to_string(), 4, vec![0])],
+            vec![DescribedMember {
+                member_id: "m2".to_string(),
+                member_epoch: 4,
+                active: vec![0],
+            }],
         ),
         (
             "a static member leaves for good",
@@ -1780,13 +1887,17 @@ async fn a_static_member_follows_kafka_static_membership() {
         }
 
         check!(last == Some(expected), "{name}");
-        let mut described: Vec<(String, i32, Vec<i32>)> = describe(&handle)
+        let mut described: Vec<DescribedMember> = describe(&handle)
             .await
             .members
             .into_iter()
             .map(|member| {
                 let active = member.active.get("0").cloned().unwrap_or_default();
-                (member.member_id, member.member_epoch, active)
+                DescribedMember {
+                    member_id: member.member_id,
+                    member_epoch: member.member_epoch,
+                    active,
+                }
             })
             .collect();
         described.sort();
@@ -1901,11 +2012,18 @@ fn validate_offset_commit_follows_kafka_streams_group() {
 fn older_epoch_commit_checks_each_tasks_assignment_epoch() {
     use crate::coordinator::unified::streams::persistence::{StoredSubtopology, StoredTopicInfo};
 
-    type Row = (
-        &'static str,
-        &'static [(&'static str, i32)],
-        Result<(), i16>,
-    );
+    /// A partition that the commit writes.
+    struct CommittedPartition {
+        topic: &'static str,
+        partition: i32,
+    }
+
+    /// A row: its label, the partitions the commit writes, and the answer.
+    struct CommitRow {
+        row: &'static str,
+        committed: &'static [CommittedPartition],
+        expected: Result<(), i16>,
+    }
 
     let subtopology = |id: &str, source: &str, repartition: &[&str]| StoredSubtopology {
         subtopology_id: id.into(),
@@ -1943,46 +2061,100 @@ fn older_epoch_commit_checks_each_tasks_assignment_epoch() {
     group.members.insert("m1".into(), member);
 
     // (row, committed (topic, partition)s, expected)
-    let rows: [Row; 10] = [
-        ("no partitions", &[], Ok(())),
-        ("assigned before the epoch", &[("in", 0)], Ok(())),
-        (
-            "assigned after the epoch",
-            &[("in", 1)],
-            Err(codes::STALE_MEMBER_EPOCH),
-        ),
-        ("pending revocation at the epoch", &[("in", 2)], Ok(())),
-        (
-            "no recorded epoch reads the member epoch",
-            &[("in", 3)],
-            Err(codes::STALE_MEMBER_EPOCH),
-        ),
-        ("a repartition source topic", &[("rep", 0)], Ok(())),
-        (
-            "one refused partition refuses the commit",
-            &[("in", 0), ("in", 1)],
-            Err(codes::STALE_MEMBER_EPOCH),
-        ),
-        (
-            "a task the member does not hold",
-            &[("in", 4)],
-            Err(codes::STALE_MEMBER_EPOCH),
-        ),
-        (
-            "another subtopology's task",
-            &[("other", 0)],
-            Err(codes::STALE_MEMBER_EPOCH),
-        ),
-        (
-            "a topic outside the topology",
-            &[("unknown", 0)],
-            Err(codes::STALE_MEMBER_EPOCH),
-        ),
+    let rows: [CommitRow; 10] = [
+        CommitRow {
+            row: "no partitions",
+            committed: &[],
+            expected: Ok(()),
+        },
+        CommitRow {
+            row: "assigned before the epoch",
+            committed: &[CommittedPartition {
+                topic: "in",
+                partition: 0,
+            }],
+            expected: Ok(()),
+        },
+        CommitRow {
+            row: "assigned after the epoch",
+            committed: &[CommittedPartition {
+                topic: "in",
+                partition: 1,
+            }],
+            expected: Err(codes::STALE_MEMBER_EPOCH),
+        },
+        CommitRow {
+            row: "pending revocation at the epoch",
+            committed: &[CommittedPartition {
+                topic: "in",
+                partition: 2,
+            }],
+            expected: Ok(()),
+        },
+        CommitRow {
+            row: "no recorded epoch reads the member epoch",
+            committed: &[CommittedPartition {
+                topic: "in",
+                partition: 3,
+            }],
+            expected: Err(codes::STALE_MEMBER_EPOCH),
+        },
+        CommitRow {
+            row: "a repartition source topic",
+            committed: &[CommittedPartition {
+                topic: "rep",
+                partition: 0,
+            }],
+            expected: Ok(()),
+        },
+        CommitRow {
+            row: "one refused partition refuses the commit",
+            committed: &[
+                CommittedPartition {
+                    topic: "in",
+                    partition: 0,
+                },
+                CommittedPartition {
+                    topic: "in",
+                    partition: 1,
+                },
+            ],
+            expected: Err(codes::STALE_MEMBER_EPOCH),
+        },
+        CommitRow {
+            row: "a task the member does not hold",
+            committed: &[CommittedPartition {
+                topic: "in",
+                partition: 4,
+            }],
+            expected: Err(codes::STALE_MEMBER_EPOCH),
+        },
+        CommitRow {
+            row: "another subtopology's task",
+            committed: &[CommittedPartition {
+                topic: "other",
+                partition: 0,
+            }],
+            expected: Err(codes::STALE_MEMBER_EPOCH),
+        },
+        CommitRow {
+            row: "a topic outside the topology",
+            committed: &[CommittedPartition {
+                topic: "unknown",
+                partition: 0,
+            }],
+            expected: Err(codes::STALE_MEMBER_EPOCH),
+        },
     ];
-    for (row, committed, expected) in rows {
-        let partitions: Vec<(String, i32)> = committed
+    for CommitRow {
+        row,
+        committed,
+        expected,
+    } in rows
+    {
+        let partitions: Vec<_> = committed
             .iter()
-            .map(|(topic, partition)| ((*topic).to_string(), *partition))
+            .map(|committed| (committed.topic.to_string(), committed.partition))
             .collect();
         for fence in [
             CommitFence::Offset { api_version: 9 },
@@ -2238,7 +2410,7 @@ fn endpoint_partitions_follow_the_endpoint_to_partitions_manager_of_each_release
     };
 
     // The topic `in` has two partitions.
-    let image = image_of(None, &[("in", 1, 2)]);
+    let image = in_image(2);
     let subtopologies = BTreeMap::from([("0".to_string(), ConfiguredSubtopology {
         number_of_tasks: 4,
         source_topics: BTreeSet::from(["in".to_string()]),
@@ -2346,42 +2518,129 @@ async fn assignment_waits_for_the_initial_delay_and_the_interval() {
         std::time::Duration,
     };
 
-    // (member id, member epoch sent, clock advance before the heartbeat,
-    // expected member epoch, expected ASSIGNMENT_DELAYED detail)
-    type Step = (&'static str, i32, u64, i32, Option<&'static str>);
-    let rows: [(&str, u64, u64, Vec<Step>); 3] = [
-        (
-            // Three members join within one second: one assignment, after
-            // the delay, for the group epoch of the third join.
-            "initial delay coalesces the joins",
-            3_000,
-            0,
-            vec![
-                ("m1", 0, 0, 1, Some(INITIAL_DELAY_DETAIL)),
-                ("m2", 0, 500, 1, Some(INITIAL_DELAY_DETAIL)),
-                ("m3", 0, 500, 1, Some(INITIAL_DELAY_DETAIL)),
-                ("m1", 1, 2_100, 4, None),
-                ("m2", 1, 0, 4, None),
+    /// A heartbeat: the member id, the member epoch sent, the clock advance
+    /// before it, the expected member epoch and the expected
+    /// `ASSIGNMENT_DELAYED` detail.
+    struct DelayStep {
+        member_id: &'static str,
+        member_epoch: i32,
+        advance_ms: u64,
+        want_epoch: i32,
+        want_delay: Option<&'static str>,
+    }
+
+    /// A delay and interval, and the heartbeats that run under them.
+    struct DelayRow {
+        name: &'static str,
+        delay_ms: u64,
+        interval_ms: u64,
+        steps: Vec<DelayStep>,
+    }
+
+    let rows: [DelayRow; 3] = [
+        // Three members join within one second: one assignment, after
+        // the delay, for the group epoch of the third join.
+        DelayRow {
+            name: "initial delay coalesces the joins",
+            delay_ms: 3_000,
+            interval_ms: 0,
+            steps: vec![
+                DelayStep {
+                    member_id: "m1",
+                    member_epoch: 0,
+                    advance_ms: 0,
+                    want_epoch: 1,
+                    want_delay: Some(INITIAL_DELAY_DETAIL),
+                },
+                DelayStep {
+                    member_id: "m2",
+                    member_epoch: 0,
+                    advance_ms: 500,
+                    want_epoch: 1,
+                    want_delay: Some(INITIAL_DELAY_DETAIL),
+                },
+                DelayStep {
+                    member_id: "m3",
+                    member_epoch: 0,
+                    advance_ms: 500,
+                    want_epoch: 1,
+                    want_delay: Some(INITIAL_DELAY_DETAIL),
+                },
+                DelayStep {
+                    member_id: "m1",
+                    member_epoch: 1,
+                    advance_ms: 2_100,
+                    want_epoch: 4,
+                    want_delay: None,
+                },
+                DelayStep {
+                    member_id: "m2",
+                    member_epoch: 1,
+                    advance_ms: 0,
+                    want_epoch: 4,
+                    want_delay: None,
+                },
             ],
-        ),
-        (
-            // A change 200 ms after an assignment waits for the interval.
-            "assignment interval defers a change",
-            0,
-            1_000,
-            vec![
-                ("m1", 0, 0, 2, None),
-                ("m2", 0, 200, 2, Some(ASSIGNMENT_INTERVAL_DETAIL)),
-                ("m2", 2, 900, 3, None),
+        },
+        // A change 200 ms after an assignment waits for the interval.
+        DelayRow {
+            name: "assignment interval defers a change",
+            delay_ms: 0,
+            interval_ms: 1_000,
+            steps: vec![
+                DelayStep {
+                    member_id: "m1",
+                    member_epoch: 0,
+                    advance_ms: 0,
+                    want_epoch: 2,
+                    want_delay: None,
+                },
+                DelayStep {
+                    member_id: "m2",
+                    member_epoch: 0,
+                    advance_ms: 200,
+                    want_epoch: 2,
+                    want_delay: Some(ASSIGNMENT_INTERVAL_DETAIL),
+                },
+                DelayStep {
+                    member_id: "m2",
+                    member_epoch: 2,
+                    advance_ms: 900,
+                    want_epoch: 3,
+                    want_delay: None,
+                },
             ],
-        ),
-        ("no delay assigns at once", 0, 0, vec![
-            ("m1", 0, 0, 2, None),
-            ("m2", 0, 200, 3, None),
-        ]),
+        },
+        DelayRow {
+            name: "no delay assigns at once",
+            delay_ms: 0,
+            interval_ms: 0,
+            steps: vec![
+                DelayStep {
+                    member_id: "m1",
+                    member_epoch: 0,
+                    advance_ms: 0,
+                    want_epoch: 2,
+                    want_delay: None,
+                },
+                DelayStep {
+                    member_id: "m2",
+                    member_epoch: 0,
+                    advance_ms: 200,
+                    want_epoch: 3,
+                    want_delay: None,
+                },
+            ],
+        },
     ];
 
-    for (name, delay_ms, interval_ms, steps) in rows {
+    for DelayRow {
+        name,
+        delay_ms,
+        interval_ms,
+        steps,
+    } in rows
+    {
         let coord = coordinator_with_log(
             StreamsGroupConfig {
                 initial_rebalance_delay: Duration::from_millis(delay_ms),
@@ -2391,7 +2650,14 @@ async fn assignment_waits_for_the_initial_delay_and_the_interval() {
             Arc::new(InMemoryOffsetsLog::default()),
         );
         let handle = coord.get_or_create_streams("g");
-        for (member_id, member_epoch, advance_ms, want_epoch, want_delay) in steps {
+        for DelayStep {
+            member_id,
+            member_epoch,
+            advance_ms,
+            want_epoch,
+            want_delay,
+        } in steps
+        {
             tokio::time::sleep(Duration::from_millis(advance_ms)).await;
             let resp = heartbeat(&handle, StreamsGroupHeartbeatRequest {
                 group_id: "g".into(),
@@ -2401,15 +2667,21 @@ async fn assignment_waits_for_the_initial_delay_and_the_interval() {
                 ..Default::default()
             })
             .await;
-            let delayed: Vec<(i8, String)> = resp
+            let delayed: Vec<StatusEntry> = resp
                 .status
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|status| status.status_code == ASSIGNMENT_DELAYED)
-                .map(|status| (status.status_code, status.status_detail))
+                .map(|status| StatusEntry {
+                    code: status.status_code,
+                    detail: status.status_detail,
+                })
                 .collect();
-            let want: Vec<(i8, String)> = want_delay
-                .map(|detail| (ASSIGNMENT_DELAYED, detail.to_owned()))
+            let want: Vec<StatusEntry> = want_delay
+                .map(|detail| StatusEntry {
+                    code: ASSIGNMENT_DELAYED,
+                    detail: detail.to_owned(),
+                })
                 .into_iter()
                 .collect();
             // Only a join gets the task lists, since every target is empty.
@@ -2620,11 +2892,17 @@ async fn a_changed_validation_or_assignment_config_bumps_the_epoch() {
 /// `newStreamsGroupMetadataRecord` writes them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bump_records_the_validated_topology_epoch() {
-    use crate::test_support::FakeMetadataSource;
-
     // (case, the topics in the image, the recorded validated topology epoch)
     let rows = [
-        ("the source topic exists", vec![("in", 1, 2)], 1),
+        (
+            "the source topic exists",
+            vec![ImageTopic {
+                name: "in",
+                id: 1,
+                partitions: 2,
+            }],
+            1,
+        ),
         ("the source topic is missing", vec![], -1),
     ];
     for (case, topics, validated) in rows {

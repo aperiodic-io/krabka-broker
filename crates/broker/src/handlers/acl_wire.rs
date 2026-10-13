@@ -10,15 +10,40 @@ use krabka_metadata::{AclOperation, PatternType, PermissionType, ResourceType};
 
 pub mod binding_filter;
 
+/// One seeded topic ACL: its resource name and pattern type.
+#[cfg(test)]
+pub(crate) struct SeededPattern {
+    pub(crate) name: &'static str,
+    pub(crate) pattern_type: PatternType,
+}
+
 /// Topic patterns shared by the filter and handler matching fixtures.
 #[cfg(test)]
-pub(crate) const PATTERN_MATCHING_FIXTURE: [(&str, PatternType); 6] = [
-    ("foo", PatternType::Literal),
-    ("*", PatternType::Literal),
-    ("f", PatternType::Prefixed),
-    ("fo", PatternType::Prefixed),
-    ("bar", PatternType::Prefixed),
-    ("food", PatternType::Literal),
+pub(crate) const PATTERN_MATCHING_FIXTURE: [SeededPattern; 6] = [
+    SeededPattern {
+        name: "foo",
+        pattern_type: PatternType::Literal,
+    },
+    SeededPattern {
+        name: "*",
+        pattern_type: PatternType::Literal,
+    },
+    SeededPattern {
+        name: "f",
+        pattern_type: PatternType::Prefixed,
+    },
+    SeededPattern {
+        name: "fo",
+        pattern_type: PatternType::Prefixed,
+    },
+    SeededPattern {
+        name: "bar",
+        pattern_type: PatternType::Prefixed,
+    },
+    SeededPattern {
+        name: "food",
+        pattern_type: PatternType::Literal,
+    },
 ];
 
 /// Kafka's singleton cluster resource name (`Resource.CLUSTER_NAME`).

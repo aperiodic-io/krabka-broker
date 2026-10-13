@@ -48,6 +48,28 @@ pub(crate) fn sorted_epoch_pairs(
     pairs
 }
 
+/// A configuration key and its value.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ConfigEntry<'a> {
+    pub key: &'a str,
+    pub value: &'a str,
+}
+
+/// The configuration entry `key` set to `value`.
+pub(crate) fn entry<'a>(key: &'a str, value: &'a str) -> ConfigEntry<'a> {
+    ConfigEntry { key, value }
+}
+
+/// Owned configuration entries by key.
+pub(crate) fn config_map(
+    entries: &[ConfigEntry<'_>],
+) -> std::collections::BTreeMap<String, String> {
+    entries
+        .iter()
+        .map(|entry| (entry.key.to_owned(), entry.value.to_owned()))
+        .collect()
+}
+
 /// A topic-delta fixture using cluster id one and applying records in order.
 pub(crate) fn metadata_delta_image(
     records: &[krabka_metadata::MetadataRecord],
@@ -113,16 +135,22 @@ pub(crate) fn replay_offset_batch(producer_id: Option<i64>, records: Vec<Record>
     }
 }
 
+/// A record of the offsets topic: its parsed key, and its value or `None` for
+/// a tombstone.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OffsetsRecord {
+    pub key: NextGenKey,
+    pub value: Option<Bytes>,
+}
+
 /// Read the keys and values actually persisted in the test log, in record order.
-pub(crate) fn parsed_offset_records(batches: &[RecordBatch]) -> Vec<(NextGenKey, Option<Bytes>)> {
+pub(crate) fn parsed_offset_records(batches: &[RecordBatch]) -> Vec<OffsetsRecord> {
     batches
         .iter()
         .flat_map(|batch| &batch.records)
-        .map(|record| {
-            (
-                parse_key(record.key.as_ref().unwrap()).unwrap(),
-                record.value.clone(),
-            )
+        .map(|record| OffsetsRecord {
+            key: parse_key(record.key.as_ref().unwrap()).unwrap(),
+            value: record.value.clone(),
         })
         .collect()
 }
@@ -142,10 +170,15 @@ pub(crate) fn read_batch_epochs(log: &krabka_log::Log, end: Offset) -> Vec<i32> 
 }
 
 /// A default log and the directory that must outlive it.
-pub(crate) fn temp_log() -> (tempfile::TempDir, krabka_log::Log) {
+pub(crate) struct TempLog {
+    pub dir: tempfile::TempDir,
+    pub log: krabka_log::Log,
+}
+
+pub(crate) fn temp_log() -> TempLog {
     let dir = tempfile::tempdir().unwrap();
     let log = krabka_log::Log::open(dir.path(), krabka_log::LogConfig::default()).unwrap();
-    (dir, log)
+    TempLog { dir, log }
 }
 
 /// Coordinator fixtures with the broker's unchanged default membership settings.
@@ -197,21 +230,28 @@ pub(crate) enum DeletionTarget {
     Group,
 }
 
+/// A partition of a topic that is named by the topic's name.
+#[derive(Clone, Copy)]
+pub(crate) struct NamedPartition<'a> {
+    pub topic: &'a str,
+    pub partition: krabka_ids::PartitionIndex,
+}
+
 /// An ordered deletion batch, optionally ending with the group's tombstone.
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub(crate) struct DeletionTombstonesSetup<'a> {
     #[default("g")]
     pub group: &'a str,
-    pub offsets: &'a [(&'a str, krabka_ids::PartitionIndex)],
+    pub offsets: &'a [NamedPartition<'a>],
     pub target: DeletionTarget,
 }
 
 #[bon::builder]
 pub(crate) fn deletion_tombstones(
     #[builder(default = "g")] group: &'_ str,
-    #[builder(default)] offsets: &'_ [(&'_ str, krabka_ids::PartitionIndex)],
+    #[builder(default)] offsets: &'_ [NamedPartition<'_>],
     #[builder(default)] target: DeletionTarget,
-) -> Vec<(Key, Option<bytes::Bytes>)> {
+) -> Vec<OffsetsRecord> {
     let setup = DeletionTombstonesSetup {
         group,
         offsets,
@@ -220,24 +260,22 @@ pub(crate) fn deletion_tombstones(
     let mut records: Vec<_> = setup
         .offsets
         .iter()
-        .map(|(topic, partition)| {
-            (
-                Key::OffsetCommit {
-                    group_id: setup.group.into(),
-                    topic: (*topic).into(),
-                    partition: partition.0,
-                },
-                None,
-            )
+        .map(|&NamedPartition { topic, partition }| OffsetsRecord {
+            key: Key::OffsetCommit {
+                group_id: setup.group.into(),
+                topic: topic.into(),
+                partition: partition.0,
+            },
+            value: None,
         })
         .collect();
     if matches!(setup.target, DeletionTarget::Group) {
-        records.push((
-            Key::GroupMetadata {
+        records.push(OffsetsRecord {
+            key: Key::GroupMetadata {
                 group_id: setup.group.into(),
             },
-            None,
-        ));
+            value: None,
+        });
     }
     records
 }
@@ -259,7 +297,7 @@ pub(crate) fn topic_deletion_tombstones(
     #[builder(default = "orders")] topic: &'_ str,
     #[builder(default)] partitions: &'_ [krabka_ids::PartitionIndex],
     #[builder(default)] target: DeletionTarget,
-) -> Vec<(Key, Option<bytes::Bytes>)> {
+) -> Vec<OffsetsRecord> {
     let setup = TopicDeletionTombstonesSetup {
         group,
         topic,
@@ -269,7 +307,10 @@ pub(crate) fn topic_deletion_tombstones(
     let offsets: Vec<_> = setup
         .partitions
         .iter()
-        .map(|partition| (setup.topic, *partition))
+        .map(|&partition| NamedPartition {
+            topic: setup.topic,
+            partition,
+        })
         .collect();
     deletion_tombstones()
         .group(setup.group)
@@ -364,7 +405,9 @@ macro_rules! schedule_commit_changes {
         ::tokio::spawn(async move {
             // The wait must start before the changes land.
             ::tokio::time::sleep(::std::time::Duration::from_millis(20)).await;
-            if let Some(($leader, $epoch)) = moves_to {
+            if let Some(moved) = moves_to {
+                let $leader = moved.leader;
+                let $epoch = moved.epoch;
                 $($leader_action)*
             }
             if let Some(hw) = hw_later {
@@ -376,10 +419,17 @@ macro_rules! schedule_commit_changes {
 }
 pub(crate) use schedule_commit_changes;
 
+/// The partition's new leader and leader epoch after it moved.
+#[derive(Clone, Copy)]
+pub(crate) struct LeaderMove {
+    pub leader: u64,
+    pub epoch: i32,
+}
+
 pub(crate) struct CommitWaitCase {
     pub what: &'static str,
     pub hw_now: i64,
-    pub moves_to: Option<(u64, i32)>,
+    pub moves_to: Option<LeaderMove>,
     pub hw_later: Option<i64>,
     pub timeout: std::time::Duration,
     pub expected: CommitWaitOutcome,
@@ -429,7 +479,10 @@ pub(crate) fn commit_wait_cases() -> [CommitWaitCase; 6] {
         CommitWaitCase {
             what: "another broker takes the partition first",
             hw_now: 0,
-            moves_to: Some((2, 1)),
+            moves_to: Some(LeaderMove {
+                leader: 2,
+                epoch: 1,
+            }),
             hw_later: None,
             timeout: long,
             expected: NotLeader,
@@ -437,7 +490,10 @@ pub(crate) fn commit_wait_cases() -> [CommitWaitCase; 6] {
         CommitWaitCase {
             what: "this broker leads again, at a newer epoch",
             hw_now: 0,
-            moves_to: Some((1, 1)),
+            moves_to: Some(LeaderMove {
+                leader: 1,
+                epoch: 1,
+            }),
             hw_later: None,
             timeout: long,
             expected: NotLeader,
@@ -445,7 +501,10 @@ pub(crate) fn commit_wait_cases() -> [CommitWaitCase; 6] {
         CommitWaitCase {
             what: "the high watermark passes the records after the partition moved",
             hw_now: 0,
-            moves_to: Some((2, 1)),
+            moves_to: Some(LeaderMove {
+                leader: 2,
+                epoch: 1,
+            }),
             hw_later: Some(2),
             timeout: long,
             expected: NotLeader,

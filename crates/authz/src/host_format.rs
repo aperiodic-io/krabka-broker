@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn matches_jdk_text_form() {
-        let cases: &[(IpAddr, &str)] = &[
+        let cases = [
             (IpAddr::V4(Ipv4Addr::LOCALHOST), "127.0.0.1"),
             (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), "10.0.0.5"),
             (IpAddr::V6(Ipv6Addr::LOCALHOST), "0:0:0:0:0:0:0:1"),
@@ -69,7 +69,7 @@ mod tests {
             ),
         ];
         for (ip, expected) in cases {
-            assert2::assert!(jdk_host_address(*ip) == *expected);
+            assert2::assert!(jdk_host_address(ip) == expected);
         }
     }
 }

@@ -20,11 +20,23 @@ const LEAVE_GROUP_STATIC_MEMBER_EPOCH: i32 = -2;
 /// Kafka 4.3.1 refuses static membership, task offsets and warmup tasks, and
 /// Kafka trunk drops those three checks, so they hold only while
 /// `unstable.api.versions.enable` is off. Both refuse source topic regexes.
+/// The error code and message that a refused request is answered with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RequestError {
+    pub(super) code: i16,
+    pub(super) message: String,
+}
+
 pub(super) fn request_error(
     req: &StreamsGroupHeartbeatRequest,
     unstable: UnstableApiVersions,
-) -> Option<(i16, String)> {
-    let invalid = |message: &str| Some((codes::INVALID_REQUEST, message.to_string()));
+) -> Option<RequestError> {
+    let invalid = |message: &str| {
+        Some(RequestError {
+            code: codes::INVALID_REQUEST,
+            message: message.to_string(),
+        })
+    };
 
     if unstable == UnstableApiVersions::Disabled {
         if req.instance_id.is_some() {
@@ -90,14 +102,14 @@ pub(super) fn request_error(
             .flat_map(|subtopology| subtopology.state_changelog_topics.iter())
             .find(|topic| topic.partitions != 0)
         {
-            return Some((
-                codes::STREAMS_INVALID_TOPOLOGY,
-                format!(
+            return Some(RequestError {
+                code: codes::STREAMS_INVALID_TOPOLOGY,
+                message: format!(
                     "Changelog topic {} must have an undefined partition count, but it is set to \
                      {}.",
                     topic.name, topic.partitions
                 ),
-            ));
+            });
         }
     } else if req.member_epoch == LEAVE_GROUP_STATIC_MEMBER_EPOCH {
         if req.instance_id.is_none() {
@@ -174,110 +186,125 @@ mod tests {
         }]
     }
 
-    type Row = (
-        &'static str,
-        StreamsGroupHeartbeatRequest,
-        Option<(i16, String)>,
-    );
+    /// A request, the error that Kafka gives it (or `None` for a valid
+    /// request), and the name a failure reports.
+    struct Row {
+        name: &'static str,
+        request: StreamsGroupHeartbeatRequest,
+        expected: Option<RequestError>,
+    }
 
-    fn invalid(message: &str) -> (i16, String) { (codes::INVALID_REQUEST, message.to_string()) }
+    fn invalid(message: &str) -> RequestError {
+        RequestError {
+            code: codes::INVALID_REQUEST,
+            message: message.to_string(),
+        }
+    }
 
     /// The rows of the checks on every request and on a join.
     fn join_rows() -> Vec<Row> {
         vec![
-            ("a valid join", join(), None),
-            ("a valid heartbeat", heartbeat(3), None),
-            (
-                "an empty member id",
-                StreamsGroupHeartbeatRequest {
+            Row {
+                name: "a valid join",
+                request: join(),
+                expected: None,
+            },
+            Row {
+                name: "a valid heartbeat",
+                request: heartbeat(3),
+                expected: None,
+            },
+            Row {
+                name: "an empty member id",
+                request: StreamsGroupHeartbeatRequest {
                     member_id: String::new(),
                     ..join()
                 },
-                Some(invalid("MemberId can't be empty.")),
-            ),
-            (
-                "a blank group id",
-                StreamsGroupHeartbeatRequest {
+                expected: Some(invalid("MemberId can't be empty.")),
+            },
+            Row {
+                name: "a blank group id",
+                request: StreamsGroupHeartbeatRequest {
                     group_id: " \t".into(),
                     ..join()
                 },
-                Some(invalid("GroupId can't be empty.")),
-            ),
-            (
-                "an empty instance id",
-                StreamsGroupHeartbeatRequest {
+                expected: Some(invalid("GroupId can't be empty.")),
+            },
+            Row {
+                name: "an empty instance id",
+                request: StreamsGroupHeartbeatRequest {
                     instance_id: Some(String::new()),
                     ..join()
                 },
-                Some(invalid("InstanceId can't be empty.")),
-            ),
-            (
-                "an empty rack id",
-                StreamsGroupHeartbeatRequest {
+                expected: Some(invalid("InstanceId can't be empty.")),
+            },
+            Row {
+                name: "an empty rack id",
+                request: StreamsGroupHeartbeatRequest {
                     rack_id: Some(String::new()),
                     ..join()
                 },
-                Some(invalid("RackId can't be empty.")),
-            ),
-            (
-                "a join without a rebalance timeout",
-                StreamsGroupHeartbeatRequest {
+                expected: Some(invalid("RackId can't be empty.")),
+            },
+            Row {
+                name: "a join without a rebalance timeout",
+                request: StreamsGroupHeartbeatRequest {
                     rebalance_timeout_ms: -1,
                     ..join()
                 },
-                Some(invalid(
+                expected: Some(invalid(
                     "RebalanceTimeoutMs must be provided in first request.",
                 )),
-            ),
-            (
-                "a join with active tasks",
-                StreamsGroupHeartbeatRequest {
+            },
+            Row {
+                name: "a join with active tasks",
+                request: StreamsGroupHeartbeatRequest {
                     active_tasks: Some(task()),
                     ..join()
                 },
-                Some(invalid("ActiveTasks must be empty when (re-)joining.")),
-            ),
-            (
-                "a join with a null active task list",
-                StreamsGroupHeartbeatRequest {
+                expected: Some(invalid("ActiveTasks must be empty when (re-)joining.")),
+            },
+            Row {
+                name: "a join with a null active task list",
+                request: StreamsGroupHeartbeatRequest {
                     active_tasks: None,
                     ..join()
                 },
-                Some(invalid("ActiveTasks must be empty when (re-)joining.")),
-            ),
-            (
-                "a join with standby tasks",
-                StreamsGroupHeartbeatRequest {
+                expected: Some(invalid("ActiveTasks must be empty when (re-)joining.")),
+            },
+            Row {
+                name: "a join with standby tasks",
+                request: StreamsGroupHeartbeatRequest {
                     standby_tasks: Some(task()),
                     ..join()
                 },
-                Some(invalid("StandbyTasks must be empty when (re-)joining.")),
-            ),
-            (
-                "a join with warmup tasks",
-                StreamsGroupHeartbeatRequest {
+                expected: Some(invalid("StandbyTasks must be empty when (re-)joining.")),
+            },
+            Row {
+                name: "a join with warmup tasks",
+                request: StreamsGroupHeartbeatRequest {
                     warmup_tasks: Some(task()),
                     ..join()
                 },
-                Some(invalid("WarmupTasks must be empty when (re-)joining.")),
-            ),
-            (
-                "a join without a topology",
-                StreamsGroupHeartbeatRequest {
+                expected: Some(invalid("WarmupTasks must be empty when (re-)joining.")),
+            },
+            Row {
+                name: "a join without a topology",
+                request: StreamsGroupHeartbeatRequest {
                     topology: None,
                     ..join()
                 },
-                Some(invalid("Topology must be non-null when (re-)joining.")),
-            ),
+                expected: Some(invalid("Topology must be non-null when (re-)joining.")),
+            },
         ]
     }
 
     /// The rows of the topology checks and of the checks on a heartbeat.
     fn topology_and_heartbeat_rows() -> Vec<Row> {
         vec![
-            (
-                "a changelog topic with a partition count",
-                StreamsGroupHeartbeatRequest {
+            Row {
+                name: "a changelog topic with a partition count",
+                request: StreamsGroupHeartbeatRequest {
                     topology: Some(Topology {
                         subtopologies: vec![Subtopology {
                             state_changelog_topics: vec![TopicInfo {
@@ -291,16 +318,16 @@ mod tests {
                     }),
                     ..join()
                 },
-                Some((
-                    codes::STREAMS_INVALID_TOPOLOGY,
-                    "Changelog topic store-changelog must have an undefined partition count, but \
-                     it is set to 2."
+                expected: Some(RequestError {
+                    code: codes::STREAMS_INVALID_TOPOLOGY,
+                    message: "Changelog topic store-changelog must have an undefined partition \
+                              count, but it is set to 2."
                         .into(),
-                )),
-            ),
-            (
-                "a source topic regex",
-                StreamsGroupHeartbeatRequest {
+                }),
+            },
+            Row {
+                name: "a source topic regex",
+                request: StreamsGroupHeartbeatRequest {
                     member_id: String::new(),
                     topology: Some(Topology {
                         subtopologies: vec![Subtopology {
@@ -311,40 +338,40 @@ mod tests {
                     }),
                     ..join()
                 },
-                Some(invalid(
+                expected: Some(invalid(
                     "Regular expressions for source topics are not supported yet.",
                 )),
-            ),
-            (
-                "epoch -3",
-                heartbeat(-3),
-                Some(invalid(
+            },
+            Row {
+                name: "epoch -3",
+                request: heartbeat(-3),
+                expected: Some(invalid(
                     "MemberEpoch is -3, but must be greater than or equal to -2.",
                 )),
-            ),
-            (
-                "epoch -2 without an instance id",
-                heartbeat(-2),
-                Some(invalid("InstanceId can't be null.")),
-            ),
-            (
-                "one task list without the others",
-                StreamsGroupHeartbeatRequest {
+            },
+            Row {
+                name: "epoch -2 without an instance id",
+                request: heartbeat(-2),
+                expected: Some(invalid("InstanceId can't be null.")),
+            },
+            Row {
+                name: "one task list without the others",
+                request: StreamsGroupHeartbeatRequest {
                     active_tasks: Some(vec![]),
                     ..heartbeat(3)
                 },
-                Some(invalid(
+                expected: Some(invalid(
                     "If one task-type is non-null, all must be non-null.",
                 )),
-            ),
-            (
-                "a topology on a heartbeat",
-                StreamsGroupHeartbeatRequest {
+            },
+            Row {
+                name: "a topology on a heartbeat",
+                request: StreamsGroupHeartbeatRequest {
                     topology: Some(topology()),
                     ..heartbeat(3)
                 },
-                Some(invalid("Topology can only be provided when (re-)joining.")),
-            ),
+                expected: Some(invalid("Topology can only be provided when (re-)joining.")),
+            },
         ]
     }
 
@@ -354,8 +381,11 @@ mod tests {
     /// run with `unstable.api.versions.enable` on.
     #[test]
     fn request_checks_follow_kafka() {
-        for (name, request, expected) in
-            join_rows().into_iter().chain(topology_and_heartbeat_rows())
+        for Row {
+            name,
+            request,
+            expected,
+        } in join_rows().into_iter().chain(topology_and_heartbeat_rows())
         {
             check!(
                 request_error(&request, UnstableApiVersions::Enabled) == expected,

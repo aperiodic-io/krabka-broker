@@ -121,12 +121,18 @@ impl Fixture {
     }
 }
 
+/// A broker config and the directory that backs its log.
+struct IdleWindowConfig {
+    cfg: BrokerConfig,
+    log_dir: TempDir,
+}
+
 /// A test broker whose PLAINTEXT listener is held to `idle`.
-fn config_with_idle_window(idle: Time) -> (BrokerConfig, TempDir) {
+fn config_with_idle_window(idle: Time) -> IdleWindowConfig {
     let log_dir = tempfile::tempdir().expect("tempdir");
     let mut cfg = BrokerConfig::for_tests(log_dir.path().to_path_buf());
     cfg.connections_max_idle = Some(idle);
-    (cfg, log_dir)
+    IdleWindowConfig { cfg, log_dir }
 }
 
 /// Sends one `ApiVersions` v0 request and reads its response. Returning the
@@ -190,12 +196,12 @@ async fn silent_plaintext_connection_closes_past_its_idle_window(
     window_secs: u32,
     per_listener: bool,
 ) {
-    let (mut cfg, log_dir) = if per_listener {
+    let IdleWindowConfig { mut cfg, log_dir } = if per_listener {
         let log_dir = tempfile::tempdir().expect("tempdir");
-        (
-            BrokerConfig::for_tests(log_dir.path().to_path_buf()),
+        IdleWindowConfig {
+            cfg: BrokerConfig::for_tests(log_dir.path().to_path_buf()),
             log_dir,
-        )
+        }
     } else {
         config_with_idle_window(krabka_units::secs(window_secs))
     };
@@ -208,7 +214,7 @@ async fn silent_plaintext_connection_closes_past_its_idle_window(
     } else {
         "PLAINTEXT"
     };
-    let fixture = Fixture::start(cfg, log_dir, listener).await;
+    let fixture = Box::pin(Fixture::start(cfg, log_dir, listener)).await;
 
     let mut stream = fixture.connect().await;
     assert2::assert!(fixture.idle_closes() == 0);
@@ -226,8 +232,8 @@ async fn silent_plaintext_connection_closes_past_its_idle_window(
 /// deadline that did not reset on each frame read would have fired.
 #[tokio::test(flavor = "current_thread")]
 async fn a_connection_speaking_each_half_window_is_never_closed() {
-    let (cfg, log_dir) = config_with_idle_window(krabka_units::secs(60));
-    let fixture = Fixture::start(cfg, log_dir, "PLAINTEXT").await;
+    let IdleWindowConfig { cfg, log_dir } = config_with_idle_window(krabka_units::secs(60));
+    let fixture = Box::pin(Fixture::start(cfg, log_dir, "PLAINTEXT")).await;
 
     let mut stream = fixture.connect().await;
     for corr_id in 0..4 {

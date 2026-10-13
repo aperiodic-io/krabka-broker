@@ -26,11 +26,17 @@ pub(crate) async fn accept_http_request(listener: TcpListener) -> TcpStream {
     socket
 }
 
+/// A bound local HTTP test endpoint and the URL that reaches it.
+pub(crate) struct HttpListener {
+    pub listener: TcpListener,
+    pub endpoint: String,
+}
+
 /// Bind a local HTTP test endpoint without starting its response task.
-pub(crate) async fn http_listener() -> (TcpListener, String) {
+pub(crate) async fn http_listener() -> HttpListener {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
-    (listener, endpoint)
+    HttpListener { listener, endpoint }
 }
 
 pub(crate) async fn respond(socket: &mut TcpStream, status: &str, body: &str) {
@@ -58,14 +64,44 @@ pub(crate) fn s3_config(bucket: &str, endpoint: String) -> S3Config {
     }
 }
 
+/// One canned HTTP response and the request prefix that must reach it.
+pub(crate) struct HttpPage {
+    pub expected_request: String,
+    pub status: &'static str,
+    pub body: &'static str,
+}
+
+impl HttpPage {
+    pub(crate) fn new(
+        expected_request: impl Into<String>,
+        status: &'static str,
+        body: &'static str,
+    ) -> Self {
+        Self {
+            expected_request: expected_request.into(),
+            status,
+            body,
+        }
+    }
+}
+
+/// A running canned-page server: the endpoint to reach it and the task to
+/// join once every page has been served.
+pub(crate) struct HttpServer {
+    pub endpoint: String,
+    pub server: tokio::task::JoinHandle<()>,
+}
+
 /// Serve canned HTTP pages, preserving request and optional `SigV4` checks.
-pub(crate) async fn serve_http_pages(
-    pages: Vec<(String, &'static str, &'static str)>,
-    signed: bool,
-) -> (String, tokio::task::JoinHandle<()>) {
-    let (listener, endpoint) = http_listener().await;
+pub(crate) async fn serve_http_pages(pages: Vec<HttpPage>, signed: bool) -> HttpServer {
+    let HttpListener { listener, endpoint } = http_listener().await;
     let server = tokio::spawn(async move {
-        for (expected_request, status, body) in pages {
+        for HttpPage {
+            expected_request,
+            status,
+            body,
+        } in pages
+        {
             let (mut socket, _) = listener.accept().await.unwrap();
             let request = read_request(&mut socket).await;
             assert2::check!(request.starts_with(&expected_request));
@@ -79,7 +115,7 @@ pub(crate) async fn serve_http_pages(
             respond(&mut socket, status, body).await;
         }
     });
-    (endpoint, server)
+    HttpServer { endpoint, server }
 }
 
 pub(crate) async fn round_trip(

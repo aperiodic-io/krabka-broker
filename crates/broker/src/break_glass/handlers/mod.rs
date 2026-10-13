@@ -93,13 +93,13 @@ pub(crate) fn from_wire_uuid(id: WireUuid) -> Uuid { Uuid::from_bytes(id.0) }
 /// The wire form of a `uuid` id.
 pub(crate) fn to_wire_uuid(id: Uuid) -> WireUuid { WireUuid(*id.as_bytes()) }
 
-/// The error code and the text that a failed `submit_change` answers with.
+/// The [`Refusal`] that a failed `submit_change` answers with.
 ///
 /// A raft submit fails for two reasons that a caller acts on differently. This
 /// broker is not the controller leader, which the caller retries somewhere
 /// else, or the quorum did not take the record, which the caller retries later.
-pub(crate) fn submit_error(error: &RaftError) -> (i16, String) {
-    match error {
+pub(crate) fn submit_error(error: &RaftError) -> Refusal {
+    let (code, message) = match error {
         RaftError::NotLeader { .. } | RaftError::LeaderUnknown => (
             codes::NOT_CONTROLLER,
             "this broker is not the active controller".to_owned(),
@@ -112,7 +112,8 @@ pub(crate) fn submit_error(error: &RaftError) -> (i16, String) {
             codes::COORDINATOR_NOT_AVAILABLE,
             format!("the metadata quorum did not take the record: {other}"),
         ),
-    }
+    };
+    Refusal::new(code, message)
 }
 
 /// The fields of one [`AuditEvent::PrivilegedAction`] event.
@@ -337,9 +338,9 @@ pub(crate) mod tests {
             ),
         ];
         for (label, error, expected) in cases {
-            let (code, text) = submit_error(&error);
-            check!(code == expected, "case {label}");
-            check!(!text.is_empty(), "case {label}");
+            let refusal = submit_error(&error);
+            check!(refusal.code == expected, "case {label}");
+            check!(!refusal.message.is_empty(), "case {label}");
         }
     }
 

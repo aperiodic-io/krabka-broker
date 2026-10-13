@@ -241,8 +241,8 @@ impl Log {
 
         let to_drop: Vec<Offset> = self
             .sealed_segments_with_next_base()
-            .take_while(|(_, next_base)| *next_base <= target)
-            .map(|(segment, _)| segment.base_offset())
+            .take_while(|sealed| sealed.next_base <= target)
+            .map(|sealed| sealed.segment.base_offset())
             .collect();
         self.remove_sealed_segments(&to_drop)?;
 

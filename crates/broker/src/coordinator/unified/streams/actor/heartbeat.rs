@@ -112,7 +112,7 @@ pub(super) async fn handle_heartbeat(
     // joining member.
     let mut static_recorder = None;
     if let Some(instance_id) = &req.instance_id {
-        let (existing, error) = checked_static_member(actor, req, instance_id);
+        let StaticMemberCheck { existing, error } = checked_static_member(actor, req, instance_id);
         if let Some(response) = error {
             return Ok(response);
         }
@@ -634,7 +634,7 @@ async fn handle_leave(
         actor.state.request_shutdown(&req.member_id);
     }
     if let Some(instance_id) = &req.instance_id {
-        let (_, error) = checked_static_member(actor, req, instance_id);
+        let StaticMemberCheck { error, .. } = checked_static_member(actor, req, instance_id);
         if let Some(response) = error {
             return Ok(response);
         }
@@ -677,15 +677,22 @@ fn static_member_id(actor: &ActorState, instance_id: &str) -> Option<String> {
         .map(|member| member.member_id.clone())
 }
 
+/// The member that holds an instance id, and the error that the instance id
+/// earns, if any.
+struct StaticMemberCheck {
+    existing: Option<String>,
+    error: Option<StreamsGroupHeartbeatResponse>,
+}
+
 /// Resolves the instance before checking its ownership, for joins and leaves alike.
 fn checked_static_member(
     actor: &ActorState,
     req: &StreamsGroupHeartbeatRequest,
     instance_id: &str,
-) -> (Option<String>, Option<StreamsGroupHeartbeatResponse>) {
+) -> StaticMemberCheck {
     let existing = static_member_id(actor, instance_id);
     let error = static_member_error(req, instance_id, existing.as_deref(), actor);
-    (existing, error)
+    StaticMemberCheck { existing, error }
 }
 
 /// Kafka's static member checks: a join may not take an instance id that a

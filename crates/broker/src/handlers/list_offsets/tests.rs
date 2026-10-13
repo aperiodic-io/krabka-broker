@@ -245,6 +245,13 @@ async fn denied_topic_rows_are_appended_after_authorized_rows_regardless_of_requ
     }
 }
 
+/// The partitions a request names, and the rows it is answered with.
+struct DuplicateCase<'a> {
+    name: &'a str,
+    partition_indexes: Vec<i32>,
+    expected: Vec<ListOffsetsPartitionResponse>,
+}
+
 #[tokio::test]
 async fn duplicate_partitions_get_invalid_request_on_every_row() {
     use super::test_support::client_for;
@@ -306,23 +313,30 @@ async fn duplicate_partitions_get_invalid_request_on_every_row() {
         ..Default::default()
     };
 
-    let cases: Vec<(&str, Vec<i32>, Vec<ListOffsetsPartitionResponse>)> = vec![
-        ("no duplicates", vec![0, 1], vec![
-            resolved0.clone(),
-            resolved1.clone(),
-        ]),
-        ("one partition duplicated", vec![0, 0], vec![
-            invalid(0),
-            invalid(0),
-        ]),
-        (
-            "mixed: one partition duplicated, one resolved normally",
-            vec![0, 0, 1],
-            vec![invalid(0), invalid(0), resolved1.clone()],
-        ),
+    let cases: Vec<DuplicateCase<'_>> = vec![
+        DuplicateCase {
+            name: "no duplicates",
+            partition_indexes: vec![0, 1],
+            expected: vec![resolved0.clone(), resolved1.clone()],
+        },
+        DuplicateCase {
+            name: "one partition duplicated",
+            partition_indexes: vec![0, 0],
+            expected: vec![invalid(0), invalid(0)],
+        },
+        DuplicateCase {
+            name: "mixed: one partition duplicated, one resolved normally",
+            partition_indexes: vec![0, 0, 1],
+            expected: vec![invalid(0), invalid(0), resolved1.clone()],
+        },
     ];
 
-    for (name, partition_indexes, expected) in cases {
+    for DuplicateCase {
+        name,
+        partition_indexes,
+        expected,
+    } in cases
+    {
         let response = client
             .send(request(&partition_indexes))
             .await

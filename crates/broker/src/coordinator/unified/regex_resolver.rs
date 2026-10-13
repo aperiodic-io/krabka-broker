@@ -76,17 +76,23 @@ impl ImageTopicRegexResolver {
     }
 }
 
+/// A subscribed pattern and its compiled whole-name matcher.
+struct CompiledPattern<'a> {
+    pattern: &'a String,
+    regex: regex::Regex,
+}
+
 impl TopicRegexResolver for ImageTopicRegexResolver {
     fn resolve(&self, regexes: &BTreeSet<String>) -> HashMap<String, ResolvedRegularExpression> {
         let timestamp_ms = now_ms();
-        let compiled: Vec<(&String, regex::Regex)> = regexes
+        let compiled: Vec<CompiledPattern<'_>> = regexes
             .iter()
             .filter_map(|pattern| {
                 // Kafka's `TopicRegexResolver` selects a topic with
                 // `Matcher.matches()`, so the pattern must match the whole
                 // name.
                 match compile_full_match(pattern) {
-                    Ok(regex) => Some((pattern, regex)),
+                    Ok(regex) => Some(CompiledPattern { pattern, regex }),
                     Err(error) => {
                         tracing::error!(%pattern, %error,
                             "ignoring a subscribed topic regex that does not compile");
@@ -100,10 +106,10 @@ impl TopicRegexResolver for ImageTopicRegexResolver {
             .map(|pattern| (pattern, BTreeSet::new()))
             .collect();
         for topic in self.image.topics() {
-            for (pattern, regex) in &compiled {
-                if regex.is_match(&topic.name) {
+            for compiled in &compiled {
+                if compiled.regex.is_match(&topic.name) {
                     matched
-                        .entry(pattern)
+                        .entry(compiled.pattern)
                         .or_default()
                         .insert(topic.name.clone());
                 }
@@ -291,24 +297,47 @@ mod tests {
     /// that does not compile resolves to no topic.
     #[test]
     fn a_pattern_selects_only_topics_whose_whole_name_matches() {
+        struct Row {
+            pattern: &'static str,
+            /// The topics the pattern selects.
+            topics: &'static [&'static str],
+        }
+
         let image = image_with_topics(&["orders", "orders-eu", "my-orders", "audit"]);
         let resolver = resolver(image, Arc::new(AllowAllAuthorizer));
-        // (pattern, the topics it selects)
-        let rows: [(&str, &[&str]); 6] = [
-            ("orders", &["orders"]),
-            ("orders.*", &["orders", "orders-eu"]),
-            (".*orders", &["my-orders", "orders"]),
-            ("rders", &[]),
-            ("a|orders", &["orders"]),
-            ("*invalid", &[]),
+        let rows: [Row; 6] = [
+            Row {
+                pattern: "orders",
+                topics: &["orders"],
+            },
+            Row {
+                pattern: "orders.*",
+                topics: &["orders", "orders-eu"],
+            },
+            Row {
+                pattern: ".*orders",
+                topics: &["my-orders", "orders"],
+            },
+            Row {
+                pattern: "rders",
+                topics: &[],
+            },
+            Row {
+                pattern: "a|orders",
+                topics: &["orders"],
+            },
+            Row {
+                pattern: "*invalid",
+                topics: &[],
+            },
         ];
-        let patterns: Vec<&str> = rows.iter().map(|(pattern, _)| *pattern).collect();
+        let patterns: Vec<&str> = rows.iter().map(|row| row.pattern).collect();
         let expected: HashMap<String, Vec<String>> = rows
             .iter()
-            .map(|(pattern, topics)| {
+            .map(|row| {
                 (
-                    (*pattern).to_owned(),
-                    topics.iter().map(|topic| (*topic).to_owned()).collect(),
+                    row.pattern.to_owned(),
+                    row.topics.iter().map(|topic| (*topic).to_owned()).collect(),
                 )
             })
             .collect();

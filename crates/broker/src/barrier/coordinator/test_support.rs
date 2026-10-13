@@ -85,13 +85,30 @@ pub(crate) struct Fixture {
     config: BarrierConfig,
 }
 
+/// A data topic of the fixture and the number of its partitions that are open.
+pub(super) struct DataTopic<'a> {
+    pub(super) name: &'a str,
+    pub(super) partitions: i32,
+}
+
 impl Fixture {
     // Every partition of the cluster is open here, and this broker leads
     // all of them.
-    pub(crate) fn new() -> Self { Self::with_data_partitions(&[("orders", 2), ("payments", 1)]) }
+    pub(crate) fn new() -> Self {
+        Self::with_data_partitions(&[
+            DataTopic {
+                name: "orders",
+                partitions: 2,
+            },
+            DataTopic {
+                name: "payments",
+                partitions: 1,
+            },
+        ])
+    }
 
     // Open the state partitions, and only the named data partitions.
-    pub(super) fn with_data_partitions(data: &[(&str, i32)]) -> Self {
+    pub(super) fn with_data_partitions(data: &[DataTopic<'_>]) -> Self {
         let dir = tempdir().expect("tempdir");
         let registry = Arc::new(PartitionRegistry::new());
         for p in 0..4 {
@@ -101,10 +118,10 @@ impl Fixture {
                 ..Default::default()
             });
         }
-        for (topic, count) in data {
-            for p in 0..*count {
+        for DataTopic { name, partitions } in data {
+            for p in 0..*partitions {
                 open_partition(&registry, dir.path(), StandalonePartitionSetup {
-                    topic,
+                    topic: name,
                     partition: krabka_ids::PartitionIndex(p),
                     ..Default::default()
                 });

@@ -146,7 +146,7 @@ async fn run_verify(args: VerifyArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (store, s3) = match open_store(&args) {
+    let OpenedStore { store, s3 } = match open_store(&args) {
         Ok(store) => store,
         Err(message) => {
             eprintln!("error: {message}");
@@ -208,10 +208,15 @@ fn trusted_keys(args: &VerifyArgs) -> Result<TrustedManifestKeys, String> {
     Ok(TrustedManifestKeys::from_pairs(pairs))
 }
 
+/// The opened archive and, for a bucket, the config to list its uploads with.
+#[derive(Debug)]
+struct OpenedStore {
+    store: Arc<dyn object_store::ObjectStore>,
+    s3: Option<S3Config>,
+}
+
 /// Opens the archive named by `--local-dir` or by `--bucket`.
-fn open_store(
-    args: &VerifyArgs,
-) -> Result<(Arc<dyn object_store::ObjectStore>, Option<S3Config>), String> {
+fn open_store(args: &VerifyArgs) -> Result<OpenedStore, String> {
     let config = match (args.local_dir.as_ref(), args.bucket.as_ref()) {
         (Some(root), _) => ObjectStoreConfig::Local { root: root.clone() },
         (None, Some(bucket)) => ObjectStoreConfig::S3(S3Config {
@@ -229,7 +234,7 @@ fn open_store(
         _ => None,
     };
     build_object_store(&config)
-        .map(|store| (store, s3))
+        .map(|store| OpenedStore { store, s3 })
         .map_err(|e| e.to_string())
 }
 
@@ -725,7 +730,7 @@ mod tests {
         let mut local = args(None);
         local.local_dir = Some(dir.path().to_path_buf());
         local.bucket = Some("ignored".into());
-        let (_, s3) = open_store(&local).expect("a local directory opens");
+        let OpenedStore { s3, .. } = open_store(&local).expect("a local directory opens");
         assert!(s3.is_none(), "a local run has no bucket to list uploads in");
 
         let mut bucket = args(None);
@@ -734,7 +739,7 @@ mod tests {
         bucket.region = "eu-west-1".into();
         bucket.endpoint = Some("http://minio:9000".into());
         bucket.allow_http = true;
-        let (_, s3) = open_store(&bucket).expect("an S3 bucket opens");
+        let OpenedStore { s3, .. } = open_store(&bucket).expect("an S3 bucket opens");
         let s3 = s3.expect("the S3 config is carried through for the upload listing");
         assert!(s3.bucket == "archive-bucket");
         assert!(s3.region == "eu-west-1");

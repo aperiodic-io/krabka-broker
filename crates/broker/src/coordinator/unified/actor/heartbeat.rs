@@ -313,8 +313,10 @@ pub(crate) fn step_heartbeat(
             regexes,
         );
         state.track_rebalance_timeout(&member_id, now);
-        let (pending, resolutions) =
-            member_update_records(recorder, state, update, &member_id, None);
+        let MemberUpdateRecords {
+            pending,
+            resolutions,
+        } = member_update_records(recorder, state, update, &member_id, None);
         let response = build_assignment_resp(state, &member_id, config, true);
         return HeartbeatStep {
             response,
@@ -363,8 +365,10 @@ pub(crate) fn step_heartbeat(
         Err(message) => return HeartbeatStep::answer(invalid_regex_resp(message)),
     };
     state.track_rebalance_timeout(&member_id, now);
-    let (pending, resolutions) =
-        member_update_records(recorder, state, update, &member_id, replacement);
+    let MemberUpdateRecords {
+        pending,
+        resolutions,
+    } = member_update_records(recorder, state, update, &member_id, replacement);
     // Kafka sends the assignment only on a join (epoch 0), on a full request,
     // or when the member's assigned partitions changed.
     let assignment_changed = assigned_before.as_ref()
@@ -414,6 +418,13 @@ pub(super) fn replace_static_member(
     pending
 }
 
+/// What [`member_update_records`] gives back: the records of the update, and
+/// the regex resolutions to apply in a batch of their own afterwards.
+pub(super) struct MemberUpdateRecords {
+    pub(super) pending: PendingRecords,
+    pub(super) resolutions: Option<Resolutions>,
+}
+
 /// The records of a heartbeat or classic join that ran the member update
 /// `update` for `member_id`, recorded by `recorder`, and the regex
 /// resolutions the group applies in a batch of their own afterwards.
@@ -428,7 +439,7 @@ pub(super) fn member_update_records(
     update: MemberUpdate,
     member_id: &str,
     replacement: Option<PendingRecords>,
-) -> (PendingRecords, Option<Resolutions>) {
+) -> MemberUpdateRecords {
     let mut target = update.target;
     if let (Some(changed), Some(_)) = (target.as_mut(), replacement.as_ref())
         && !changed.iter().any(|changed| changed == member_id)
@@ -445,7 +456,10 @@ pub(super) fn member_update_records(
     if let Some(replacement) = replacement {
         pending = replacement.followed_by(pending);
     }
-    (pending, update.resolutions)
+    MemberUpdateRecords {
+        pending,
+        resolutions: update.resolutions,
+    }
 }
 
 /// Pure form of the leave path (`member_epoch` -1 or -2), after Kafka's

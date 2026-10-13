@@ -79,12 +79,15 @@ async fn acknowledge(handle: &GroupActorHandle, joined: &ConsumerGroupHeartbeatR
     }
 }
 
+/// The partitions of a topic that is named by the byte its topic id repeats.
+struct TopicByte {
+    byte: u8,
+    partitions: Vec<i32>,
+}
+
 /// The answer to `m1` at `member_epoch`. `assignment` names each topic by the
 /// byte that its topic id repeats.
-fn answer(
-    member_epoch: i32,
-    assignment: Option<Vec<(u8, Vec<i32>)>>,
-) -> ConsumerGroupHeartbeatResponse {
+fn answer(member_epoch: i32, assignment: Option<Vec<TopicByte>>) -> ConsumerGroupHeartbeatResponse {
     ConsumerGroupHeartbeatResponse {
         member_id: Some("m1".into()),
         member_epoch,
@@ -92,8 +95,8 @@ fn answer(
         assignment: assignment.map(|topics| Assignment {
             topic_partitions: topics
                 .into_iter()
-                .map(|(topic_id, partitions)| AssignedTopic {
-                    topic_id: proto_uuid(topic_id),
+                .map(|TopicByte { byte, partitions }| AssignedTopic {
+                    topic_id: proto_uuid(byte),
                     partitions,
                     ..Default::default()
                 })
@@ -122,7 +125,13 @@ fn grows_to_three(name: &'static str, before: ReconcileInput) -> Row {
         before,
         after: snapshot_of(&[("orders", 1, 3)]),
         update: &["orders"],
-        expected: answer(3, Some(vec![(1, vec![0, 1, 2])])),
+        expected: answer(
+            3,
+            Some(vec![TopicByte {
+                byte: 1,
+                partitions: vec![0, 1, 2],
+            }]),
+        ),
     }
 }
 
@@ -211,13 +220,25 @@ async fn a_loaded_group_refreshes_its_metadata_at_the_first_heartbeat() {
             "the topic grew while no coordinator held the group",
             snapshot_of(&[("orders", 1, 3)]),
             None,
-            answer(3, Some(vec![(1, vec![0, 1, 2])])),
+            answer(
+                3,
+                Some(vec![TopicByte {
+                    byte: 1,
+                    partitions: vec![0, 1, 2],
+                }]),
+            ),
         ),
         (
             "the topic grew after the load",
             snapshot_of(&[("orders", 1, 2)]),
             Some(snapshot_of(&[("orders", 1, 3)])),
-            answer(3, Some(vec![(1, vec![0, 1, 2])])),
+            answer(
+                3,
+                Some(vec![TopicByte {
+                    byte: 1,
+                    partitions: vec![0, 1, 2],
+                }]),
+            ),
         ),
     ];
 

@@ -185,59 +185,84 @@ fn fault_for(value: &[u8], offset: i64) -> Option<MetadataReplayError> {
         .map(|error| MetadataReplayError::UndecodableRecord { offset, error })
 }
 
+/// An elected single-voter engine, its data directory and the epoch it leads.
+struct ElectedReplayEngine {
+    engine: Engine,
+    dir: tempfile::TempDir,
+    epoch: i32,
+}
+
+fn elected_replay_engine() -> ElectedReplayEngine {
+    let (engine, dir) = super::test_support::single_voter_leader_engine();
+    let epoch = i32::try_from(engine.core.quorum_state().leader_epoch).expect("epoch");
+    ElectedReplayEngine { engine, dir, epoch }
+}
+
 /// One row per failure kind. A controller stops on bytes that do not decode,
 /// in live apply and in restart recovery, and names the record's offset and
 /// the decoder's error. It skips a record that decodes but that the image
 /// cannot take. Each row first commits a topic, so a row can name a topic
 /// the image holds.
-fn elected_replay_engine() -> (Engine, tempfile::TempDir, i32) {
-    let (engine, dir) = super::test_support::single_voter_leader_engine();
-    let epoch = i32::try_from(engine.core.quorum_state().leader_epoch).expect("epoch");
-    (engine, dir, epoch)
-}
 
 #[test]
 fn a_controller_stops_on_a_committed_record_it_cannot_decode() {
-    let cases: [(&str, Vec<u8>, Want); 8] = [
-        ("unknown apiKey", patched_topic_value(1, 99), Want::Stop),
-        (
-            "value version above the highest supported",
-            patched_topic_value(2, 99),
-            Want::Stop,
-        ),
+    struct Scenario {
+        case: &'static str,
+        value: Vec<u8>,
+        want: Want,
+    }
+    let cases = [
+        Scenario {
+            case: "unknown apiKey",
+            value: patched_topic_value(1, 99),
+            want: Want::Stop,
+        },
+        Scenario {
+            case: "value version above the highest supported",
+            value: patched_topic_value(2, 99),
+            want: Want::Stop,
+        },
         // `krabka-metadata` checks the KIP-631 frame version from the
         // revision that versions the private records on. Before it, the
         // decoder reads the bytes and replay applies them.
-        (
-            "frame version other than 1",
-            patched_topic_value(0, 2),
-            Want::AsTheDecoderSays,
-        ),
-        (
-            "undecodable krabka-private record",
-            undecodable_private_value(),
-            Want::Stop,
-        ),
-        (
-            "unknown topic id",
-            unknown_topic_removal_value(),
-            Want::Skip,
-        ),
-        ("validate failure", unknown_topic_config_value(), Want::Skip),
-        (
-            "invalid reference: unknown partition of a known topic",
-            unknown_partition_change_value(),
-            Want::Skip,
-        ),
-        (
-            "invalid value: unknown fenced value",
-            unknown_fenced_change_value(),
-            Want::StopWith(unknown_fenced_error()),
-        ),
+        Scenario {
+            case: "frame version other than 1",
+            value: patched_topic_value(0, 2),
+            want: Want::AsTheDecoderSays,
+        },
+        Scenario {
+            case: "undecodable krabka-private record",
+            value: undecodable_private_value(),
+            want: Want::Stop,
+        },
+        Scenario {
+            case: "unknown topic id",
+            value: unknown_topic_removal_value(),
+            want: Want::Skip,
+        },
+        Scenario {
+            case: "validate failure",
+            value: unknown_topic_config_value(),
+            want: Want::Skip,
+        },
+        Scenario {
+            case: "invalid reference: unknown partition of a known topic",
+            value: unknown_partition_change_value(),
+            want: Want::Skip,
+        },
+        Scenario {
+            case: "invalid value: unknown fenced value",
+            value: unknown_fenced_change_value(),
+            want: Want::StopWith(unknown_fenced_error()),
+        },
     ];
 
-    for (case, value, want) in cases {
-        let (mut engine, _dir, epoch) = elected_replay_engine();
+    for Scenario { case, value, want } in cases {
+        let ElectedReplayEngine {
+            mut engine,
+            dir: _dir,
+            epoch,
+        } = elected_replay_engine();
         let known = engine.log.log_end_offset().0;
         engine
             .log
@@ -299,7 +324,11 @@ fn a_controller_stops_on_a_committed_record_it_cannot_decode() {
 /// A controller that has stopped on a record applies nothing after it.
 #[test]
 fn a_stopped_controller_applies_no_later_record() {
-    let (mut engine, _dir, epoch) = elected_replay_engine();
+    let ElectedReplayEngine {
+        mut engine,
+        dir: _dir,
+        epoch,
+    } = elected_replay_engine();
     let bad_offset = engine.log.log_end_offset().0;
     engine
         .log

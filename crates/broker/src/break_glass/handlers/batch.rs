@@ -48,6 +48,13 @@ pub(crate) struct GatedBatch {
     pub(crate) applied: Vec<(String, Option<Uuid>)>,
 }
 
+/// The phase and reason of the event that records an append's outcome.
+#[derive(Debug, PartialEq)]
+struct AppendOutcome<'a> {
+    phase: PrivilegedPhase,
+    reason: &'a str,
+}
+
 impl GatedBatch {
     /// An empty batch for `action`, whose `Applied` events carry
     /// `admitted_reason` before the append and `committed_reason` after it.
@@ -107,10 +114,16 @@ impl GatedBatch {
     /// The phase and reason of the event that records the append's outcome:
     /// the committed reason when `failure` is `None`, and a refusal carrying
     /// the submit error otherwise.
-    fn outcome<'a>(&self, failure: Option<&'a str>) -> (PrivilegedPhase, &'a str) {
+    fn outcome<'a>(&self, failure: Option<&'a str>) -> AppendOutcome<'a> {
         match failure {
-            None => (PrivilegedPhase::Applied, self.committed_reason),
-            Some(error) => (PrivilegedPhase::Refused, error),
+            None => AppendOutcome {
+                phase: PrivilegedPhase::Applied,
+                reason: self.committed_reason,
+            },
+            Some(error) => AppendOutcome {
+                phase: PrivilegedPhase::Refused,
+                reason: error,
+            },
         }
     }
 
@@ -125,7 +138,7 @@ impl GatedBatch {
         ctx: &RequestContext<'_>,
         failure: Option<&str>,
     ) {
-        let (phase, reason) = self.outcome(failure);
+        let AppendOutcome { phase, reason } = self.outcome(failure);
         for (target, proposal_id) in &self.applied {
             audit_transition(
                 &broker.audit_log,
@@ -156,14 +169,14 @@ mod tests {
         );
 
         for (failure, expected) in [
-            (None, (PrivilegedPhase::Applied, "committed in the append")),
-            (
-                Some("submit failed: not the controller"),
-                (
-                    PrivilegedPhase::Refused,
-                    "submit failed: not the controller",
-                ),
-            ),
+            (None, AppendOutcome {
+                phase: PrivilegedPhase::Applied,
+                reason: "committed in the append",
+            }),
+            (Some("submit failed: not the controller"), AppendOutcome {
+                phase: PrivilegedPhase::Refused,
+                reason: "submit failed: not the controller",
+            }),
         ] {
             assert!(batch.outcome(failure) == expected, "{failure:?}");
         }

@@ -3,7 +3,7 @@ use {
     crate::{
         config::{NodeRole, StretchProfile},
         file_config::FileConfig,
-        host_port::local_host_name,
+        host_port::{HostPort, local_host_name},
     },
     assert2::assert,
     tempfile::tempdir,
@@ -409,7 +409,7 @@ fn a_dynamic_controller_registers_its_listener_with_the_host_name_for_a_wildcard
         ("0.0.0.0:9592", host_name.clone()),
         ("[::]:9592", host_name),
     ];
-    let registered: Vec<(String, u16)> = cases
+    let registered: Vec<HostPort> = cases
         .iter()
         .map(|(bound, _)| {
             let config = BrokerConfig {
@@ -422,10 +422,16 @@ fn a_dynamic_controller_registers_its_listener_with_the_host_name_for_a_wildcard
                 .into_iter()
                 .next()
                 .expect("one controller endpoint");
-            (endpoint.host, endpoint.port)
+            HostPort {
+                host: endpoint.host,
+                port: endpoint.port,
+            }
         })
         .collect();
-    let expected: Vec<(String, u16)> = cases.into_iter().map(|(_, host)| (host, 9592)).collect();
+    let expected: Vec<HostPort> = cases
+        .into_iter()
+        .map(|(_, host)| HostPort { host, port: 9592 })
+        .collect();
     assert!(registered == expected);
 }
 
@@ -526,14 +532,19 @@ mod unclean_restart {
             .expect("self-registration");
     }
 
+    /// Node 2 as `cluster_with_node_two_eligible` leaves it.
+    struct EligibleNode {
+        config: BrokerConfig,
+        dir: tempfile::TempDir,
+        epoch: i64,
+    }
+
     /// Stand the fixture up: node 1 leading an RF=3 partition, node 2 booted
     /// once and then dropped out of the ISR, so it holds ELR membership.
     ///
     /// Returns node 2's config, its log dir, and the broker epoch the cluster
     /// now holds for it -- the epoch a graceful stop would leave behind.
-    async fn cluster_with_node_two_eligible(
-        broker: &Arc<Broker>,
-    ) -> (BrokerConfig, tempfile::TempDir, i64) {
+    async fn cluster_with_node_two_eligible(broker: &Arc<Broker>) -> EligibleNode {
         wait_for_controller_leader(broker).await;
         broker
             .controller
@@ -565,7 +576,7 @@ mod unclean_restart {
             .current_image()
             .broker_epoch(RESTARTING)
             .expect("node 2 is registered");
-        (config, dir, epoch)
+        EligibleNode { config, dir, epoch }
     }
 
     /// The defect this closes: a broker that crashed -- no clean-shutdown
@@ -576,7 +587,11 @@ mod unclean_restart {
     async fn a_crashed_broker_loses_its_elr_membership_on_restart() {
         let (handle, _dir) = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
         let broker = handle.broker_arc_for_test();
-        let (mut config, _victim_dir, _epoch) = cluster_with_node_two_eligible(&broker).await;
+        let EligibleNode {
+            mut config,
+            dir: _victim_dir,
+            epoch: _epoch,
+        } = cluster_with_node_two_eligible(&broker).await;
 
         // A crash writes nothing, so the restart can prove nothing.
         boot(&broker, &mut config).await;
@@ -621,7 +636,11 @@ mod unclean_restart {
     async fn a_gracefully_stopped_broker_keeps_its_elr_membership_on_restart() {
         let (handle, _dir) = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
         let broker = handle.broker_arc_for_test();
-        let (mut config, victim_dir, epoch) = cluster_with_node_two_eligible(&broker).await;
+        let EligibleNode {
+            mut config,
+            dir: victim_dir,
+            epoch,
+        } = cluster_with_node_two_eligible(&broker).await;
 
         // The graceful stop leaves its proof; the restart spends it.
         write(victim_dir.path(), epoch);

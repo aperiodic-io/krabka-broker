@@ -51,13 +51,23 @@ fn record_batch_with_values(values: &[&str]) -> RecordBatch {
     batch
 }
 
-/// One record per `(value, timestamp)` pair. `base_timestamp` is the
+/// A record value and the absolute timestamp it carries.
+struct TimestampedValue<'a> {
+    value: &'a str,
+    timestamp: i64,
+}
+
+/// One record per value and timestamp. `base_timestamp` is the
 /// first timestamp. Each record's `timestamp_delta` reconstructs the
 /// requested absolute timestamp. `max_timestamp` is the largest
 /// timestamp.
-fn timestamped_batch(entries: &[(&str, i64)]) -> RecordBatch {
-    let base_ts = entries.first().map_or(0, |(_, ts)| *ts);
-    let max_ts = entries.iter().map(|(_, ts)| *ts).max().unwrap_or(0);
+fn timestamped_batch(entries: &[TimestampedValue<'_>]) -> RecordBatch {
+    let base_ts = entries.first().map_or(0, |entry| entry.timestamp);
+    let max_ts = entries
+        .iter()
+        .map(|entry| entry.timestamp)
+        .max()
+        .unwrap_or(0);
     let len_i32 = i32::try_from(entries.len()).expect("small");
     let mut batch = RecordBatch {
         base_timestamp: base_ts,
@@ -65,12 +75,12 @@ fn timestamped_batch(entries: &[(&str, i64)]) -> RecordBatch {
         last_offset_delta: (len_i32 - 1).max(0),
         ..RecordBatch::default()
     };
-    for (i, (v, ts)) in entries.iter().enumerate() {
+    for (i, entry) in entries.iter().enumerate() {
         batch.records.push(Record {
-            timestamp_delta: ts - base_ts,
+            timestamp_delta: entry.timestamp - base_ts,
             ..value_record(
                 i32::try_from(i).expect("small"),
-                Some(Bytes::from((*v).to_string())),
+                Some(Bytes::from(entry.value.to_string())),
             )
         });
     }
@@ -92,7 +102,20 @@ async fn list_offsets_by_timestamp_local() {
     // Offsets 0..=2 with timestamps 100, 200, 300.
     p.client
         .send(batch_request(
-            timestamped_batch(&[("a", 100), ("b", 200), ("c", 300)]),
+            timestamped_batch(&[
+                TimestampedValue {
+                    value: "a",
+                    timestamp: 100,
+                },
+                TimestampedValue {
+                    value: "b",
+                    timestamp: 200,
+                },
+                TimestampedValue {
+                    value: "c",
+                    timestamp: 300,
+                },
+            ]),
             SinglePartitionProduceSetup {
                 topic: ("by_ts").into(),
                 topic_id,

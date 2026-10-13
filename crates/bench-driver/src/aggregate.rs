@@ -249,21 +249,45 @@ pub struct TsSeries {
 type SampleExtract = fn(&Sample) -> f64;
 type BrokerExtract = fn(&BrokerSample) -> f64;
 
-fn client_ts_metrics() -> Vec<(&'static str, SampleExtract)> {
+/// A time-series metric key paired with the function that reads its value out
+/// of one sample.
+#[derive(Debug, Clone, Copy)]
+struct TsMetricSource<Extract> {
+    metric: &'static str,
+    extract: Extract,
+}
+
+fn client_ts_metrics() -> Vec<TsMetricSource<SampleExtract>> {
     vec![
-        ("producer_msgs_per_sec", |s| s.producer_rate.per_sec_f64()),
-        ("consumer_msgs_per_sec", |s| s.consumer_rate.per_sec_f64()),
-        ("producer_p99_ms", |s| millis_f64(s.producer_p99)),
-        ("consumer_e2e_p99_ms", |s| millis_f64(s.consumer_e2e_p99)),
+        TsMetricSource {
+            metric: "producer_msgs_per_sec",
+            extract: |s| s.producer_rate.per_sec_f64(),
+        },
+        TsMetricSource {
+            metric: "consumer_msgs_per_sec",
+            extract: |s| s.consumer_rate.per_sec_f64(),
+        },
+        TsMetricSource {
+            metric: "producer_p99_ms",
+            extract: |s| millis_f64(s.producer_p99),
+        },
+        TsMetricSource {
+            metric: "consumer_e2e_p99_ms",
+            extract: |s| millis_f64(s.consumer_e2e_p99),
+        },
     ]
 }
 
-fn broker_ts_metrics() -> Vec<(&'static str, BrokerExtract)> {
+fn broker_ts_metrics() -> Vec<TsMetricSource<BrokerExtract>> {
     vec![
-        ("broker_cpu_cores", |b| b.cpu_cores),
-        ("broker_mem_working_set_mb", |b| {
-            mebibytes_f64(b.mem_working_set)
-        }),
+        TsMetricSource {
+            metric: "broker_cpu_cores",
+            extract: |b| b.cpu_cores,
+        },
+        TsMetricSource {
+            metric: "broker_mem_working_set_mb",
+            extract: |b| mebibytes_f64(b.mem_working_set),
+        },
     ]
 }
 
@@ -293,7 +317,7 @@ pub fn averaged_timeseries(runs: &[RunOutput]) -> Vec<TsSeries> {
                 continue;
             }
 
-            for &(metric, extract) in &client_metrics {
+            for &TsMetricSource { metric, extract } in &client_metrics {
                 let mut buckets: BTreeMap<TimeOffsetMs, Vec<f64>> = BTreeMap::new();
                 for r in &stack_runs {
                     for s in &r.samples {
@@ -305,7 +329,7 @@ pub fn averaged_timeseries(runs: &[RunOutput]) -> Vec<TsSeries> {
                 }
             }
 
-            for &(metric, extract) in &broker_metrics {
+            for &TsMetricSource { metric, extract } in &broker_metrics {
                 let mut buckets: BTreeMap<TimeOffsetMs, Vec<f64>> = BTreeMap::new();
                 for r in &stack_runs {
                     for b in &r.broker_samples {

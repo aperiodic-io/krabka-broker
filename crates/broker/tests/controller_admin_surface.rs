@@ -126,20 +126,26 @@ const KAFKA_CONTROLLER_LISTENER_KEYS: [i16; 41] = [
 /// KIP-1312).
 const KAFKA_TRUNK_CONTROLLER_LISTENER_KEYS: [i16; 1] = [94];
 
+/// A running node and the directory that backs it.
+struct ControllerNode {
+    broker: BrokerHandle,
+    dir: tempfile::TempDir,
+}
+
 /// Start a one-node broker whose controller listener is reachable on its own
 /// port, and return the handle. Both listeners are bound before the broker
 /// starts so the test knows the ports without racing the bind.
-async fn start_broker() -> (BrokerHandle, tempfile::TempDir) {
+async fn start_broker() -> ControllerNode {
     start_node(&[NodeRole::Controller, NodeRole::Broker], |_| {}).await
 }
 
 /// [`start_broker`], serving what krabka implements from Kafka trunk:
 /// `unstable.api.versions.enable` and `unstable.feature.versions.enable` on.
-async fn start_trunk_broker() -> (BrokerHandle, tempfile::TempDir) {
+async fn start_trunk_broker() -> ControllerNode {
     start_node(&[NodeRole::Controller, NodeRole::Broker], enable_trunk).await
 }
 
-async fn start_surface(trunk: bool) -> (BrokerHandle, tempfile::TempDir) {
+async fn start_surface(trunk: bool) -> ControllerNode {
     if trunk {
         start_trunk_broker().await
     } else {
@@ -165,15 +171,13 @@ fn enable_trunk(config: &mut BrokerConfig) {
 
 /// The same node, with the `process.roles` the case needs and `configure`
 /// applied last.
-async fn start_node(
-    roles: &[NodeRole],
-    configure: fn(&mut BrokerConfig),
-) -> (BrokerHandle, tempfile::TempDir) {
-    start_with_bound_listeners(|config| {
+async fn start_node(roles: &[NodeRole], configure: fn(&mut BrokerConfig)) -> ControllerNode {
+    let (broker, dir) = start_with_bound_listeners(|config| {
         config.roles = roles.to_vec();
         configure(config);
     })
-    .await
+    .await;
+    ControllerNode { broker, dir }
 }
 
 /// An `ApiVersions` request that passes Kafka's `ApiVersionsRequest.isValid`:
@@ -192,6 +196,13 @@ async fn dial_controller(broker: &BrokerHandle) -> Connection {
     .expect("dial the controller listener")
 }
 
+/// The versions of one api key that a listener advertises, inclusive.
+#[derive(Debug, PartialEq, Eq)]
+struct VersionRange {
+    min: i16,
+    max: i16,
+}
+
 /// The Admin api keys a Kafka 4.x controller listener accepts, paired with the
 /// version range krabka speaks for each.
 ///
@@ -205,15 +216,15 @@ async fn dial_controller(broker: &BrokerHandle) -> Connection {
 /// Every one of them is at the version range Kafka 4.3.1 serves, which is the
 /// vendored range, so the default and the trunk tables agree on them; trunk
 /// adds `UnregisterController`.
-fn expected_admin_versions(trunk: bool) -> std::collections::BTreeMap<i16, (i16, i16)> {
+fn expected_admin_versions(trunk: bool) -> std::collections::BTreeMap<i16, VersionRange> {
     macro_rules! range {
         ($($request:ident),+ $(,)?) => {
             std::collections::BTreeMap::from([$((
                 krabka_protocol::owned::$request::API_KEY,
-                (
-                    krabka_protocol::owned::$request::MIN_VERSION,
-                    krabka_protocol::owned::$request::MAX_VERSION,
-                ),
+                VersionRange {
+                    min: krabka_protocol::owned::$request::MIN_VERSION,
+                    max: krabka_protocol::owned::$request::MAX_VERSION,
+                },
             ),)+])
         };
     }
@@ -254,15 +265,20 @@ fn expected_admin_versions(trunk: bool) -> std::collections::BTreeMap<i16, (i16,
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_api_versions_advertises_the_kafka_controller_admin_surface() {
     for trunk in [false, true] {
-        let (broker, _dir) = start_surface(trunk).await;
+        let ControllerNode { broker, dir: _dir } = start_surface(trunk).await;
         let response = advertised_controller_versions(&broker).await;
 
         let expected = expected_admin_versions(true);
-        let advertised: std::collections::BTreeMap<i16, (i16, i16)> = response
+        let advertised: std::collections::BTreeMap<i16, VersionRange> = response
             .api_keys
             .iter()
             .filter(|api| expected.contains_key(&api.api_key))
-            .map(|api| (api.api_key, (api.min_version, api.max_version)))
+            .map(|api| {
+                (api.api_key, VersionRange {
+                    min: api.min_version,
+                    max: api.max_version,
+                })
+            })
             .collect();
 
         check!(
@@ -290,7 +306,7 @@ async fn controller_api_versions_advertises_the_kafka_controller_admin_surface()
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_listener_advertises_no_key_kafka_does_not() {
     for trunk in [false, true] {
-        let (broker, _dir) = start_surface(trunk).await;
+        let ControllerNode { broker, dir: _dir } = start_surface(trunk).await;
         let response = advertised_controller_versions(&broker).await;
 
         let advertised: std::collections::BTreeSet<i16> =
@@ -315,7 +331,7 @@ async fn controller_listener_advertises_no_key_kafka_does_not() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_listener_serves_the_topic_lifecycle() {
-    let (broker, _dir) = start_broker().await;
+    let ControllerNode { broker, dir: _dir } = start_broker().await;
     let connection = dial_controller(&broker).await;
 
     let created = connection
@@ -422,7 +438,7 @@ async fn controller_listener_serves_the_topic_lifecycle() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_listener_serves_the_writing_delegation_token_apis() {
-    let (broker, _dir) = start_broker().await;
+    let ControllerNode { broker, dir: _dir } = start_broker().await;
     let connection = dial_controller(&broker).await;
 
     // The controller listener in `for_tests` is PLAINTEXT and the requests are
@@ -491,7 +507,7 @@ async fn controller_listener_serves_the_writing_delegation_token_apis() {
 /// listener and the matching read on the same connection sees it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_listener_serves_the_scram_write_path() {
-    let (broker, _dir) = start_broker().await;
+    let ControllerNode { broker, dir: _dir } = start_broker().await;
     let connection = dial_controller(&broker).await;
 
     let altered = connection
@@ -567,7 +583,7 @@ fn alice_scram_credentials() -> DescribeUserScramCredentialsResponse {
 async fn controller_listener_serves_assign_replicas_to_dirs() {
     const LOG_DIR_ID: WireUuid = WireUuid([7; 16]);
 
-    let (broker, _dir) = start_broker().await;
+    let ControllerNode { broker, dir: _dir } = start_broker().await;
     let connection = dial_controller(&broker).await;
     let broker_epoch = broker
         .controller_image_for_test()
@@ -639,7 +655,7 @@ async fn controller_listener_serves_assign_replicas_to_dirs() {
 /// `unstable.*.enable` settings on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_listener_serves_unregister_controller() {
-    let (broker, _dir) = start_trunk_broker().await;
+    let ControllerNode { broker, dir: _dir } = start_trunk_broker().await;
     broker
         .submit_metadata_record_for_test(controller_registration(NodeId(7)))
         .await
@@ -700,7 +716,7 @@ async fn controller_listener_serves_unregister_controller() {
 /// metadata nothing can ever serve.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_only_node_places_no_replica_on_itself() {
-    let (broker, _dir) = start_node(&[NodeRole::Controller], |_| {}).await;
+    let ControllerNode { broker, dir: _dir } = start_node(&[NodeRole::Controller], |_| {}).await;
     let connection = dial_controller(&broker).await;
 
     let created = connection
@@ -826,6 +842,13 @@ enum EpochAnswer {
     Kept,
 }
 
+/// The port and fence the image holds for a registered broker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RegisteredBroker {
+    port: u16,
+    fenced: bool,
+}
+
 /// What one registration step came to: the error code, the epoch, and the
 /// port and fence the image then holds for the broker the step registered,
 /// if the step was accepted.
@@ -833,7 +856,7 @@ enum EpochAnswer {
 struct Outcome {
     error_code: i16,
     epoch: EpochAnswer,
-    registered: Option<(u16, bool)>,
+    registered: Option<RegisteredBroker>,
 }
 
 const fn refused(error_code: i16) -> Outcome {
@@ -848,8 +871,19 @@ const fn accepted(epoch: EpochAnswer, port: u16, fenced: bool) -> Outcome {
     Outcome {
         error_code: 0,
         epoch,
-        registered: Some((port, fenced)),
+        registered: Some(RegisteredBroker { port, fenced }),
     }
+}
+
+/// One registration step of
+/// [`controller_listener_registers_a_restarted_broker_as_kafka_does`]: what it
+/// does, the registration it sends, how long to wait first, and the outcome
+/// Kafka gives it.
+struct Step {
+    what: &'static str,
+    registration: Registration,
+    wait: Option<Duration>,
+    expected: Outcome,
 }
 
 /// krabka-io/krabka-broker#822: a Kafka broker that restarts rejoins over the
@@ -865,69 +899,74 @@ const fn accepted(epoch: EpochAnswer, port: u16, fenced: bool) -> Outcome {
 /// the log directories. Each step runs against the image the steps before it left.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_listener_registers_a_restarted_broker_as_kafka_does() {
-    type Step = (&'static str, Registration, Option<Duration>, Outcome);
-    let steps: Vec<Step> = vec![
-        (
-            "a first registration",
-            Registration::broker_7(0xa, 19_092),
-            None,
-            accepted(EpochAnswer::New, 19_092, true),
-        ),
-        (
-            "the same incarnation again, on a new port, after it unfenced",
-            Registration::broker_7(0xa, 19_093),
-            None,
-            accepted(EpochAnswer::Kept, 19_093, false),
-        ),
-        (
-            "a new incarnation while the previous one heartbeats",
-            Registration::broker_7(0xb, 19_094),
-            None,
-            refused(DUPLICATE_BROKER_REGISTRATION),
-        ),
-        (
-            "the new incarnation once the session expired",
-            Registration::broker_7(0xb, 19_094),
+    let steps = vec![
+        Step {
+            what: "a first registration",
+            registration: Registration::broker_7(0xa, 19_092),
+            wait: None,
+            expected: accepted(EpochAnswer::New, 19_092, true),
+        },
+        Step {
+            what: "the same incarnation again, on a new port, after it unfenced",
+            registration: Registration::broker_7(0xa, 19_093),
+            wait: None,
+            expected: accepted(EpochAnswer::Kept, 19_093, false),
+        },
+        Step {
+            what: "a new incarnation while the previous one heartbeats",
+            registration: Registration::broker_7(0xb, 19_094),
+            wait: None,
+            expected: refused(DUPLICATE_BROKER_REGISTRATION),
+        },
+        Step {
+            what: "the new incarnation once the session expired",
+            registration: Registration::broker_7(0xb, 19_094),
             // Longer than the two-second `heartbeat_timeout` of the test
             // configuration.
-            Some(Duration::from_millis(2_500)),
-            accepted(EpochAnswer::New, 19_094, true),
-        ),
-        (
-            "no metadata.version feature",
-            Registration {
+            wait: Some(Duration::from_millis(2_500)),
+            expected: accepted(EpochAnswer::New, 19_094, true),
+        },
+        Step {
+            what: "no metadata.version feature",
+            registration: Registration {
                 with_metadata_version: false,
                 ..Registration::broker_8()
             },
-            None,
-            refused(INVALID_REGISTRATION),
-        ),
-        (
-            "no log directory",
-            Registration {
+            wait: None,
+            expected: refused(INVALID_REGISTRATION),
+        },
+        Step {
+            what: "no log directory",
+            registration: Registration {
                 log_dirs: &[],
                 ..Registration::broker_8()
             },
-            None,
-            refused(INVALID_REGISTRATION),
-        ),
-        (
-            "a log directory broker 7 registered",
-            Registration {
+            wait: None,
+            expected: refused(INVALID_REGISTRATION),
+        },
+        Step {
+            what: "a log directory broker 7 registered",
+            registration: Registration {
                 log_dirs: &[8000, 7000],
                 ..Registration::broker_8()
             },
-            None,
-            refused(INVALID_REGISTRATION),
-        ),
+            wait: None,
+            expected: refused(INVALID_REGISTRATION),
+        },
     ];
 
-    let (broker, _dir) = start_broker().await;
+    let ControllerNode { broker, dir: _dir } = start_broker().await;
     let connection = dial_controller(&broker).await;
     let mut epoch_of_7 = -1;
     let mut expected = Vec::new();
     let mut outcomes = Vec::new();
-    for (what, registration, wait, outcome) in steps {
+    for Step {
+        what,
+        registration,
+        wait,
+        expected: outcome,
+    } in steps
+    {
         expected.push((what, outcome));
         if let Some(wait) = wait {
             tokio::time::sleep(wait).await;
@@ -954,7 +993,10 @@ async fn controller_listener_registers_a_restarted_broker_as_kafka_does() {
             broker
                 .controller_image_for_test()
                 .broker(node)
-                .map(|registered| (registered.port, registered.fenced))
+                .map(|registered| RegisteredBroker {
+                    port: registered.port,
+                    fenced: registered.fenced,
+                })
         } else {
             None
         };
@@ -1008,7 +1050,7 @@ const ILLEGAL_SASL_STATE: i16 = 34;
 /// `SaslAuthenticate` v2.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_listener_serves_the_inter_broker_and_sasl_apis() {
-    let (broker, _dir) = start_broker().await;
+    let ControllerNode { broker, dir: _dir } = start_broker().await;
     let connection = dial_controller(&broker).await;
     let unknown_topic = WireUuid([7; 16]);
     // The controller checks the sender's broker epoch before any row, as

@@ -479,6 +479,16 @@ async fn ready_group_describes_the_configured_topology_and_every_member_field() 
 /// Kafka's `maybeUpdateGroupState`: a group with no members is `Empty`, also
 /// when its topology never became ready; and a group id of another type is
 /// `GROUP_ID_NOT_FOUND` with Kafka's `castToStreamsGroup` message.
+/// A described group as the tests compare it.
+#[derive(Debug, PartialEq, Eq)]
+struct GroupSummary {
+    group_id: String,
+    error_code: i16,
+    error_message: Option<String>,
+    group_state: String,
+    member_count: usize,
+}
+
 #[tokio::test]
 async fn empty_group_is_empty_and_another_group_type_is_not_found() {
     use {
@@ -511,30 +521,34 @@ async fn empty_group_is_empty_and_another_group_type_is_not_found() {
 
     let resp = describe(&broker, &["left", "share"]).await;
 
-    let groups: Vec<(String, i16, Option<String>, String, usize)> = resp
+    let groups: Vec<GroupSummary> = resp
         .groups
         .into_iter()
-        .map(|g| {
-            (
-                g.group_id,
-                g.error_code,
-                g.error_message,
-                g.group_state,
-                g.members.len(),
-            )
+        .map(|g| GroupSummary {
+            group_id: g.group_id,
+            error_code: g.error_code,
+            error_message: g.error_message,
+            group_state: g.group_state,
+            member_count: g.members.len(),
         })
         .collect();
     assert!(
         groups
             == vec![
-                ("left".into(), codes::NONE, None, "Empty".into(), 0),
-                (
-                    "share".into(),
-                    codes::GROUP_ID_NOT_FOUND,
-                    Some("Group share is not a streams group.".into()),
-                    String::new(),
-                    0,
-                ),
+                GroupSummary {
+                    group_id: "left".into(),
+                    error_code: codes::NONE,
+                    error_message: None,
+                    group_state: "Empty".into(),
+                    member_count: 0,
+                },
+                GroupSummary {
+                    group_id: "share".into(),
+                    error_code: codes::GROUP_ID_NOT_FOUND,
+                    error_message: Some("Group share is not a streams group.".into()),
+                    group_state: String::new(),
+                    member_count: 0,
+                },
             ]
     );
     broker_handle.shutdown().await;

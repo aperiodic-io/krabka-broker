@@ -3,27 +3,31 @@
 
 use {
     super::{EpochEntry, LeaderEpochCheckpoint},
+    crate::test_support::TempPath,
     krabka_ids::{LeaderEpoch, Offset},
-    std::path::PathBuf,
     tempfile::TempDir,
 };
 
-pub(super) fn fresh() -> (TempDir, PathBuf) {
-    let dir = TempDir::new().unwrap();
-    let path = dir.path().join("leader-epoch-checkpoint");
-    (dir, path)
+/// A checkpoint and the temporary directory that holds its file.
+pub(super) struct TempCheckpoint {
+    pub(super) dir: TempDir,
+    pub(super) checkpoint: LeaderEpochCheckpoint,
 }
 
-/// An on-disk checkpoint containing the explicit epoch/start pairs of a test.
-pub(super) fn checkpoint(entries: &[(i32, i64)]) -> (TempDir, LeaderEpochCheckpoint) {
-    let (dir, path) = fresh();
+pub(super) fn fresh() -> TempPath {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("leader-epoch-checkpoint");
+    TempPath { dir, path }
+}
+
+/// An on-disk checkpoint containing the explicit epoch/start entries of a test.
+pub(super) fn checkpoint(entries: &[EpochEntry]) -> TempCheckpoint {
+    let TempPath { dir, path } = fresh();
     let mut checkpoint = LeaderEpochCheckpoint::open(path).unwrap();
-    for &(epoch, start) in entries {
-        checkpoint
-            .append(LeaderEpoch(epoch), Offset(start))
-            .unwrap();
+    for entry in entries {
+        checkpoint.append(entry.epoch, entry.start_offset).unwrap();
     }
-    (dir, checkpoint)
+    TempCheckpoint { dir, checkpoint }
 }
 
 pub(super) fn entry(epoch: i32, start: i64) -> EpochEntry {
@@ -41,12 +45,4 @@ pub(super) fn check_persisted(
     assert2::check!(checkpoint.entries() == expected, "{name}");
     let reopened = LeaderEpochCheckpoint::open(checkpoint.path.clone()).unwrap();
     assert2::check!(reopened.entries() == expected, "{name} (reopened)");
-}
-
-pub(super) fn checkpoint_entries(entries: &[EpochEntry]) -> (TempDir, LeaderEpochCheckpoint) {
-    let (dir, mut checkpoint) = checkpoint(&[]);
-    for entry in entries {
-        checkpoint.append(entry.epoch, entry.start_offset).unwrap();
-    }
-    (dir, checkpoint)
 }

@@ -161,19 +161,61 @@ mod tests {
 
     #[test]
     fn a_selection_applies_the_epoch_floor_and_the_cap() {
-        let cases: &[(i64, i32, Vec<BarrierCut>)] = &[
+        struct Case {
+            from_epoch: i64,
+            max_results: i32,
+            expected: Vec<BarrierCut>,
+        }
+        let cases = &[
             // -1 is the request default, and asks for every retained cut.
-            (0, -1, vec![wire(4, 40), wire(5, 50), wire(6, 60)]),
-            (5, -1, vec![wire(5, 50), wire(6, 60)]),
-            (7, -1, Vec::new()),
+            Case {
+                from_epoch: 0,
+                max_results: -1,
+                expected: vec![wire(4, 40), wire(5, 50), wire(6, 60)],
+            },
+            Case {
+                from_epoch: 5,
+                max_results: -1,
+                expected: vec![wire(5, 50), wire(6, 60)],
+            },
+            Case {
+                from_epoch: 7,
+                max_results: -1,
+                expected: Vec::new(),
+            },
             // 0 asks for none, rather than for everything.
-            (0, 0, Vec::new()),
-            (5, 0, Vec::new()),
-            (5, 1, vec![wire(5, 50)]),
-            (0, 2, vec![wire(4, 40), wire(5, 50)]),
-            (0, 99, vec![wire(4, 40), wire(5, 50), wire(6, 60)]),
+            Case {
+                from_epoch: 0,
+                max_results: 0,
+                expected: Vec::new(),
+            },
+            Case {
+                from_epoch: 5,
+                max_results: 0,
+                expected: Vec::new(),
+            },
+            Case {
+                from_epoch: 5,
+                max_results: 1,
+                expected: vec![wire(5, 50)],
+            },
+            Case {
+                from_epoch: 0,
+                max_results: 2,
+                expected: vec![wire(4, 40), wire(5, 50)],
+            },
+            Case {
+                from_epoch: 0,
+                max_results: 99,
+                expected: vec![wire(4, 40), wire(5, 50), wire(6, 60)],
+            },
         ];
-        for (from_epoch, max_results, expected) in cases {
+        for Case {
+            from_epoch,
+            max_results,
+            expected,
+        } in cases
+        {
             check!(
                 select(&three_cuts(), *from_epoch, *max_results) == *expected,
                 "from_epoch {from_epoch} max_results {max_results}"

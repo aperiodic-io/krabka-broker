@@ -49,7 +49,7 @@ pub(super) async fn list_archive(
 pub(super) fn orphans(listing: &DirListing, decoded: &[KeyedManifest]) -> Vec<String> {
     let referenced: BTreeSet<&str> = decoded
         .iter()
-        .flat_map(|(_, manifest)| {
+        .flat_map(|KeyedManifest { manifest, .. }| {
             manifest
                 .body
                 .objects

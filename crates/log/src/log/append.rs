@@ -15,6 +15,7 @@ use {
         error::LogError,
         producer_snapshot, retention,
         segment::Segment,
+        stamp_index::OffsetRange,
         txn_index::TxnIndex,
     },
     krabka_ids::{LeaderEpoch, Offset, ProducerId},
@@ -22,6 +23,12 @@ use {
     krabka_units::prelude::{ByteSize, ByteSizeExt as _, Time, TimeExt as _},
     tracing::instrument,
 };
+
+/// The write settings an append retains after it rolls the active segment.
+pub(super) struct AppendRoll {
+    pub(super) index_interval: ByteSize,
+    pub(super) flush_on_append: bool,
+}
 
 impl Log {
     pub(super) fn complete_append_state(
@@ -42,7 +49,7 @@ impl Log {
         &mut self,
         incoming_size: impl FnOnce() -> ByteSize,
         max_timestamp: i64,
-    ) -> Result<(ByteSize, bool), LogError> {
+    ) -> Result<AppendRoll, LogError> {
         let (
             segment_size,
             segment_roll_interval,
@@ -88,7 +95,10 @@ impl Log {
                 SegmentAllocation::OnWrite => active.write_buffered()?,
             }
         }
-        Ok((index_interval, flush_on_append))
+        Ok(AppendRoll {
+            index_interval,
+            flush_on_append,
+        })
     }
 
     /// Append a `RecordBatch` and return the assigned `base_offset` together
@@ -402,7 +412,10 @@ impl Log {
         let stored_bytes = verbatim
             .or(encoded.as_deref())
             .expect("owned batches were encoded above");
-        let (index_interval, flush_on_append) = self.roll_for_append(
+        let AppendRoll {
+            index_interval,
+            flush_on_append,
+        } = self.roll_for_append(
             || ByteSize::from_bytes(u64::try_from(stored_bytes.len()).unwrap_or(u64::MAX)),
             batch.max_timestamp,
         )?;
@@ -461,7 +474,10 @@ impl Log {
                     self.pending_stamp_ranges
                         .entry(pid)
                         .or_default()
-                        .push((base_offset, last_offset));
+                        .push(OffsetRange {
+                            first: base_offset,
+                            last: last_offset,
+                        });
                     self.refresh_lso()?;
                     false
                 }

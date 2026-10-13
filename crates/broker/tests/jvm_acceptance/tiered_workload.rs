@@ -196,10 +196,15 @@ const SEGMENT_ARTIFACTS: [&str; 5] = [
 /// whitespace-separated field of the line, after the date, size and class.
 fn listed_key(line: &str) -> Option<&str> { line.split_whitespace().last() }
 
-/// Group `listing`'s keys by segment and report `(complete, seen)`: how many
-/// segments hold every entry of [`SEGMENT_ARTIFACTS`], and how many segments
-/// the listing mentions at all.
-fn segment_completeness(listing: &str) -> (usize, usize) {
+/// How many segments of a listing hold every entry of [`SEGMENT_ARTIFACTS`],
+/// and how many segments the listing mentions at all.
+struct SegmentCompleteness {
+    complete: usize,
+    seen: usize,
+}
+
+/// Group `listing`'s keys by segment and report how complete they are.
+fn segment_completeness(listing: &str) -> SegmentCompleteness {
     let mut segments: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
         std::collections::BTreeMap::new();
     for key in listing.lines().filter_map(listed_key) {
@@ -218,7 +223,10 @@ fn segment_completeness(listing: &str) -> (usize, usize) {
         .values()
         .filter(|found| found.len() == SEGMENT_ARTIFACTS.len())
         .count();
-    (complete, segments.len())
+    SegmentCompleteness {
+        complete,
+        seen: segments.len(),
+    }
 }
 
 /// Poll `mc ls --recursive local/<bucket>` until the archive holds at least
@@ -261,7 +269,7 @@ pub(crate) async fn wait_for_settled_minio_segments(bucket: &str, min_segments: 
         // no krabka metric reflects object arrival in the bucket.
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         listing = minio_list_objects(bucket);
-        (complete, seen) = segment_completeness(&listing);
+        SegmentCompleteness { complete, seen } = segment_completeness(&listing);
         stable = if listing == previous { stable + 1 } else { 0 };
         if complete >= min_segments && complete == seen && stable >= STABLE_POLLS {
             return listing;

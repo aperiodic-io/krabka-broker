@@ -4,7 +4,7 @@
 //! advertised `host.docker.internal` name, which is the same address the JVM
 //! containers use, so one metadata response serves both.
 
-use crate::support::manifest_dir;
+use crate::{jvm_acceptance::three_broker_cluster::StartedCluster, support::manifest_dir};
 
 /// Host port assignments for the two-broker JVM inter-broker test. The
 /// `SASL_PLAINTEXT` listener of broker 0 binds an allocated port (advertised as
@@ -23,14 +23,17 @@ async fn start_configured(
     password: &str,
     adjust: impl Fn(&mut krabka_broker::BrokerConfig),
 ) -> TwoSaslBrokers {
-    let ([first, second], _, [first_dir, second_dir]) =
-        super::three_broker_cluster::start_sasl_cluster()
-            .listeners(super::ports::cluster_listeners())
-            .admin(admin)
-            .admin_pass(password)
-            .adjust(adjust)
-            .call()
-            .await;
+    let StartedCluster {
+        brokers: [first, second],
+        dirs: [first_dir, second_dir],
+        ..
+    } = super::three_broker_cluster::start_sasl_cluster()
+        .listeners(super::ports::cluster_listeners())
+        .admin(admin)
+        .admin_pass(password)
+        .adjust(adjust)
+        .call()
+        .await;
     (first, second, first_dir, second_dir)
 }
 

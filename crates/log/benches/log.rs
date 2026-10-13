@@ -56,34 +56,53 @@ fn make_verbatim_from_batch(batch: &RecordBatch) -> VerbatimBatch {
 // Append benchmarks
 // ---------------------------------------------------------------------------
 
-fn open_log(config: LogConfig) -> (tempfile::TempDir, Log) {
+/// An open log together with the temporary directory that holds it.
+struct TempLog {
+    dir: tempfile::TempDir,
+    log: Log,
+}
+
+fn open_log(config: LogConfig) -> TempLog {
     let scratch = tempdir().expect("tempdir");
     let target_path = scratch.path();
     let log = Log::open(target_path, config).expect("open log");
-    (scratch, log)
+    TempLog { dir: scratch, log }
 }
 
-fn populated_log(
-    config: LogConfig,
-    appends: usize,
-    records: i32,
-    payload: usize,
-) -> (tempfile::TempDir, Log) {
-    let (dir, mut log) = open_log(config);
+fn populated_log(config: LogConfig, appends: usize, records: i32, payload: usize) -> TempLog {
+    let TempLog { dir, mut log } = open_log(config);
     for _ in 0..appends {
         log.append(&mut make_batch(records, payload)).unwrap();
     }
-    (dir, log)
+    TempLog { dir, log }
 }
 
-fn verbatim_fixture(payload: usize) -> (tempfile::TempDir, Arc<Mutex<Log>>, VerbatimBatch) {
-    let (dir, log) = open_log(LogConfig::default());
+/// A shared log in a temporary directory, with a verbatim batch to append to it.
+struct VerbatimFixture {
+    dir: tempfile::TempDir,
+    log: Arc<Mutex<Log>>,
+    batch: VerbatimBatch,
+}
+
+fn verbatim_fixture(payload: usize) -> VerbatimFixture {
+    let TempLog { dir, log } = open_log(LogConfig::default());
     let batch = make_verbatim_batch(1, payload);
-    (dir, Arc::new(Mutex::new(log)), batch)
+    VerbatimFixture {
+        dir,
+        log: Arc::new(Mutex::new(log)),
+        batch,
+    }
+}
+
+/// An empty file in a temporary directory.
+#[cfg(unix)]
+struct FileFixture {
+    dir: tempfile::TempDir,
+    file: std::fs::File,
 }
 
 #[cfg(unix)]
-fn file_fixture() -> (tempfile::TempDir, std::fs::File) {
+fn file_fixture() -> FileFixture {
     let dir = tempdir().unwrap();
     let file = OpenOptions::new()
         .read(true)
@@ -91,18 +110,26 @@ fn file_fixture() -> (tempfile::TempDir, std::fs::File) {
         .create_new(true)
         .open(dir.path().join("bench.log"))
         .unwrap();
-    (dir, file)
+    FileFixture { dir, file }
 }
 
-fn async_verbatim_fixture() -> (
-    tempfile::TempDir,
-    Arc<Mutex<Log>>,
-    VerbatimBatch,
-    tokio::runtime::Runtime,
-) {
-    let (dir, log, batch) = verbatim_fixture(100 * 1024);
+/// A [`VerbatimFixture`] with the tokio runtime that drives it.
+struct AsyncVerbatimFixture {
+    dir: tempfile::TempDir,
+    log: Arc<Mutex<Log>>,
+    batch: VerbatimBatch,
+    runtime: tokio::runtime::Runtime,
+}
+
+fn async_verbatim_fixture() -> AsyncVerbatimFixture {
+    let VerbatimFixture { dir, log, batch } = verbatim_fixture(100 * 1024);
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    (dir, log, batch, runtime)
+    AsyncVerbatimFixture {
+        dir,
+        log,
+        batch,
+        runtime,
+    }
 }
 
 fn bench_append_record_sizes(c: &mut Criterion) {
@@ -115,7 +142,7 @@ fn bench_append_record_sizes(c: &mut Criterion) {
         (100, 1024),
         (500, 256),
     ] {
-        let (_dir, mut log) = open_log(LogConfig::default());
+        let TempLog { dir: _dir, mut log } = open_log(LogConfig::default());
         group.bench_function(format!("{records}rec_{payload}B"), |b| {
             b.iter(|| {
                 let mut batch = make_batch(records, payload);
@@ -131,7 +158,7 @@ fn bench_append_large_message_paths(c: &mut Criterion) {
     let mut group = c.benchmark_group("log/append_large_message");
 
     group.bench_function("owned_1rec_100KiB", |b| {
-        let (_dir, mut log) = open_log(LogConfig::default());
+        let TempLog { dir: _dir, mut log } = open_log(LogConfig::default());
         b.iter(|| {
             let mut batch = make_batch(1, 100 * 1024);
             log.append(&mut batch).unwrap();
@@ -143,7 +170,7 @@ fn bench_append_large_message_paths(c: &mut Criterion) {
         ("verbatim_1rec_512KiB", 512 * 1024),
     ] {
         group.bench_function(label, |b| {
-            let (_dir, mut log) = open_log(LogConfig::default());
+            let TempLog { dir: _dir, mut log } = open_log(LogConfig::default());
             let batch = make_verbatim_batch(1, payload);
             b.iter(|| {
                 log.append_verbatim(&batch).unwrap();
@@ -196,7 +223,11 @@ fn bench_append_handoff(c: &mut Criterion) {
     let mut group = c.benchmark_group("log/append_handoff");
 
     group.bench_function("direct_mutex_verbatim_1rec_100KiB", |b| {
-        let (_dir, log, batch) = verbatim_fixture(100 * 1024);
+        let VerbatimFixture {
+            dir: _dir,
+            log,
+            batch,
+        } = verbatim_fixture(100 * 1024);
         b.iter_custom(|iters| {
             let start = Instant::now();
             for _ in 0..iters {
@@ -207,7 +238,12 @@ fn bench_append_handoff(c: &mut Criterion) {
     });
 
     group.bench_function("spawn_blocking_mutex_verbatim_1rec_100KiB", |b| {
-        let (_dir, log, batch, rt) = async_verbatim_fixture();
+        let AsyncVerbatimFixture {
+            dir: _dir,
+            log,
+            batch,
+            runtime: rt,
+        } = async_verbatim_fixture();
         b.iter_custom(|iters| {
             rt.block_on(async {
                 let t0 = Instant::now();
@@ -226,7 +262,12 @@ fn bench_append_handoff(c: &mut Criterion) {
     });
 
     group.bench_function("block_in_place_mutex_verbatim_1rec_100KiB", |b| {
-        let (_dir, log, batch, rt) = async_verbatim_fixture();
+        let AsyncVerbatimFixture {
+            dir: _dir,
+            log,
+            batch,
+            runtime: rt,
+        } = async_verbatim_fixture();
         b.iter_custom(|iters| {
             rt.block_on(async {
                 let start = Instant::now();
@@ -250,7 +291,7 @@ fn bench_file_write_shapes(c: &mut Criterion) {
     let body = vec![0xCDu8; (100 * 1024) - header.len()];
 
     group.bench_function("seek_end_writev_100KiB", |b| {
-        let (_dir, file) = file_fixture();
+        let FileFixture { dir: _dir, file } = file_fixture();
         b.iter(|| {
             (&file).seek(SeekFrom::End(0)).unwrap();
             write_file_payload_vectored(&file, &header, &body);
@@ -258,14 +299,14 @@ fn bench_file_write_shapes(c: &mut Criterion) {
     });
 
     group.bench_function("writev_at_current_cursor_100KiB", |b| {
-        let (_dir, file) = file_fixture();
+        let FileFixture { dir: _dir, file } = file_fixture();
         b.iter(|| {
             write_file_payload_vectored(&file, &header, &body);
         });
     });
 
     group.bench_function("write_all_at_twice_100KiB", |b| {
-        let (_dir, file) = file_fixture();
+        let FileFixture { dir: _dir, file } = file_fixture();
         let mut position = 0u64;
         b.iter(|| {
             file.write_all_at(&header, position).unwrap();
@@ -294,7 +335,7 @@ fn bench_file_write_shapes(_c: &mut Criterion) {}
 // ---------------------------------------------------------------------------
 
 fn bench_read(c: &mut Criterion) {
-    let (_dir, log) = populated_log(LogConfig::default(), 200, 100, 256);
+    let TempLog { dir: _dir, log } = populated_log(LogConfig::default(), 200, 100, 256);
     let end = log.log_end_offset();
 
     let mut group = c.benchmark_group("log/read");
@@ -328,7 +369,10 @@ fn bench_read(c: &mut Criterion) {
         target_os = "dragonfly",
     ))]
     let (_descriptor_dir, descriptor_log, descriptor_end) = {
-        let (dir, mut descriptor_log) = open_log(LogConfig::default());
+        let TempLog {
+            dir,
+            log: mut descriptor_log,
+        } = open_log(LogConfig::default());
         for _ in 0..1024 {
             let mut batch = make_batch(1, 64);
             descriptor_log.append(&mut batch).unwrap();
@@ -365,7 +409,10 @@ fn bench_read(c: &mut Criterion) {
         target_os = "dragonfly",
     ))]
     let (_large_batch_dir, large_batch_log, large_batch_end) = {
-        let (dir, mut large_batch_log) = open_log(LogConfig::default());
+        let TempLog {
+            dir,
+            log: mut large_batch_log,
+        } = open_log(LogConfig::default());
         let mut batch = make_batch(1, 1024 * 1024);
         large_batch_log.append(&mut batch).unwrap();
         let end = large_batch_log.log_end_offset();
@@ -401,7 +448,7 @@ fn bench_open(c: &mut Criterion) {
     let mut group = c.benchmark_group("log/open");
 
     for &num_appends in &[50usize, 200, 500] {
-        let (dir, log) = populated_log(
+        let TempLog { dir, log } = populated_log(
             LogConfig {
                 segment_size: kibibytes(1),
                 ..LogConfig::default()
@@ -442,7 +489,7 @@ fn bench_truncate(c: &mut Criterion) {
     group.bench_function("truncate_recent_offset", |b| {
         b.iter_with_setup(
             || {
-                let (dir, log) = populated_log(LogConfig::default(), 50, 10, 64);
+                let TempLog { dir, log } = populated_log(LogConfig::default(), 50, 10, 64);
                 let end = log.log_end_offset();
                 (dir, log, end)
             },
@@ -461,7 +508,7 @@ fn bench_truncate(c: &mut Criterion) {
 // ---------------------------------------------------------------------------
 
 fn bench_accessors(c: &mut Criterion) {
-    let (_dir, log) = populated_log(LogConfig::default(), 100, 10, 64);
+    let TempLog { dir: _dir, log } = populated_log(LogConfig::default(), 100, 10, 64);
 
     let mut group = c.benchmark_group("log/accessors");
     group.bench_function("log_end_offset", |b| {

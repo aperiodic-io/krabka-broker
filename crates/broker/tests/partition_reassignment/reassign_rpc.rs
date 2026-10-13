@@ -1,14 +1,22 @@
 //! Unauthenticated wire drivers for `AlterPartitionReassignments` (`api_key`
 //! 45) and `ListPartitionReassignments` (`api_key` 46).
 //!
-//! Each driver opens a fresh PLAINTEXT connection, encodes the request, and
-//! flattens the decoded response into plain tuples that a test can compare
-//! directly.
+//! Each driver opens a fresh PLAINTEXT connection and encodes the request. The
+//! alter driver flattens the decoded response into plain tuples that a test can
+//! compare directly; the list driver hands back the decoded rows.
 
 use {
     crate::{
         kafka_wire, plaintext_wire::CLIENT_ID,
         support::wire::HeaderEncoding as RequestHeaderEncoding,
+    },
+    krabka_protocol::owned::{
+        list_partition_reassignments_request::{
+            ListPartitionReassignmentsRequest, ListPartitionReassignmentsTopics,
+        },
+        list_partition_reassignments_response::{
+            ListPartitionReassignmentsResponse, OngoingTopicReassignment,
+        },
     },
     std::net::SocketAddr,
     tokio::net::TcpStream,
@@ -25,34 +33,14 @@ pub async fn drive_alter_reassignments(
 }
 
 /// Drives `ListPartitionReassignments` over a fresh PLAINTEXT connection. It
-/// returns
-/// `(topic_name, [(partition_index, replicas, adding_replicas, removing_replicas)])`
-/// rows.
+/// returns the decoded topic rows.
 pub async fn drive_list_reassignments(
     addr: SocketAddr,
-    filter: Option<Vec<(&str, Vec<i32>)>>,
-) -> Vec<(String, Vec<(i32, Vec<i32>, Vec<i32>, Vec<i32>)>)> {
-    use krabka_protocol::owned::{
-        list_partition_reassignments_request::{
-            ListPartitionReassignmentsRequest, ListPartitionReassignmentsTopics,
-        },
-        list_partition_reassignments_response::ListPartitionReassignmentsResponse,
-    };
-
-    let topics_arg = filter.map(|list| {
-        list.into_iter()
-            .map(
-                |(name, partition_indexes)| ListPartitionReassignmentsTopics {
-                    name: name.to_string(),
-                    partition_indexes,
-                    ..Default::default()
-                },
-            )
-            .collect()
-    });
+    filter: Option<Vec<ListPartitionReassignmentsTopics>>,
+) -> Vec<OngoingTopicReassignment> {
     let req = ListPartitionReassignmentsRequest {
         timeout_ms: 30_000,
-        topics: topics_arg,
+        topics: filter,
         ..Default::default()
     };
     let mut stream = TcpStream::connect(addr).await.expect("connect");
@@ -67,24 +55,6 @@ pub async fn drive_list_reassignments(
         .expect("ListPartitionReassignments round-trip");
 
     resp.topics
-        .into_iter()
-        .map(|t| {
-            (
-                t.name,
-                t.partitions
-                    .into_iter()
-                    .map(|p| {
-                        (
-                            p.partition_index,
-                            p.replicas,
-                            p.adding_replicas,
-                            p.removing_replicas,
-                        )
-                    })
-                    .collect(),
-            )
-        })
-        .collect()
 }
 
 pub async fn alter_reassignments_on(

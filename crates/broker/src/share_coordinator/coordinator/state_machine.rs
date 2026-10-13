@@ -76,6 +76,13 @@ macro_rules! state_operation {
     };
 }
 
+/// The key of one share-partition state.
+struct StateKeyRef<'a> {
+    group: &'a str,
+    topic_id: uuid::Uuid,
+    partition: i32,
+}
+
 impl ShareCoordinator {
     state_operation! {
         /// Serves an `InitializeShareGroupState` partition, as Kafka's
@@ -105,7 +112,11 @@ impl ShareCoordinator {
             .initialize_in_term(
                 active.term,
                 image,
-                (group, topic_id, partition),
+                StateKeyRef {
+                    group,
+                    topic_id,
+                    partition,
+                },
                 state_epoch,
                 start_offset,
             )
@@ -211,7 +222,11 @@ impl ShareCoordinator {
         &self,
         term: Term,
         image: &MetadataImage,
-        (group, topic_id, partition): (&str, uuid::Uuid, i32),
+        StateKeyRef {
+            group,
+            topic_id,
+            partition,
+        }: StateKeyRef<'_>,
         state_epoch: StateEpoch,
         start_offset: Offset,
     ) -> Result<(), ShareStateError> {

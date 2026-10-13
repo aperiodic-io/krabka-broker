@@ -393,7 +393,7 @@ async fn a_rebuild_retains_the_replayed_tail_for_duplicates() {
 
     for (initial_sequence, widths) in [(0, [1; 6]), (i32::MAX - 1, [1, 3, 2, 1, 4, 2])] {
         let dir = tempfile::tempdir().unwrap();
-        let (mut log, config) = snapshot_rolling_log(dir.path());
+        let RollingLog { mut log, config } = snapshot_rolling_log(dir.path());
         let mut sequence = initial_sequence;
         let mut expected = Vec::new();
         for (index, width) in widths.into_iter().enumerate() {
@@ -485,7 +485,7 @@ async fn replay_chooses_first_retained_alias_after_sequence_wrap() {
     use krabka_protocol::records::{Record, RecordBatch};
 
     let dir = tempfile::tempdir().unwrap();
-    let (mut log, config) = snapshot_rolling_log(dir.path());
+    let RollingLog { mut log, config } = snapshot_rolling_log(dir.path());
     for (index, (sequence, delta)) in [(0, 0), (1, i32::MAX - 1), (0, 0)].into_iter().enumerate() {
         let timestamp = 100 + i64::try_from(index).unwrap();
         log.append(&mut RecordBatch {
@@ -611,12 +611,18 @@ async fn snapshot_reload_preserves_retry_frontiers_and_epoch_fencing() {
     }
 }
 
+/// A log that rolls on every append, and the config that reopens it.
+struct RollingLog {
+    log: krabka_log::Log,
+    config: krabka_log::LogConfig,
+}
+
 /// Every append rolls, exposing the snapshot plus uncovered replay tail.
-fn snapshot_rolling_log(path: &std::path::Path) -> (krabka_log::Log, krabka_log::LogConfig) {
+fn snapshot_rolling_log(path: &std::path::Path) -> RollingLog {
     let config = krabka_log::LogConfig {
         segment_size: krabka_units::prelude::bytes(1),
         ..Default::default()
     };
     let log = krabka_log::Log::open(path, config.clone()).unwrap();
-    (log, config)
+    RollingLog { log, config }
 }

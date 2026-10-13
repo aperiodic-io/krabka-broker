@@ -7,9 +7,11 @@ use {
     crate::{
         config::LogConfig,
         log::test_support::{
-            append_samples, check_contiguous_exports, check_stamps, rolled_log, sample_batch,
-            sample_batch_with_epoch, sample_log, stamped_rolling_log, test_log,
+            TempLog, append_samples, check_contiguous_exports, check_front_evicted_stamps,
+            rolled_log, sample_batch, sample_batch_with_epoch, sample_log, stamped_rolling_log,
+            test_log,
         },
+        stamp_index::OffsetRange,
         test_support::{log_file_count, segmented_log},
     },
     assert2::check,
@@ -59,20 +61,20 @@ fn an_epoch_ending_where_the_range_begins_does_not_overlap_it() {
 
 #[test]
 fn tiered_local_delete_removes_only_deleted_segment_stamp_indexes() {
-    let (_dir, mut log) = stamped_rolling_log(10, 1, 3);
+    let TempLog { dir: _dir, mut log } = stamped_rolling_log(10, 1, 3);
 
     check!(log.sealed_txn_indexes.contains_key(&Offset(0)));
     check!(log.delete_local_segments_through(Offset(1)).unwrap() == 1);
     check!(!log.sealed_txn_indexes.contains_key(&Offset(0)));
     check!(log.sealed_txn_indexes.contains_key(&Offset(1)));
 
-    check_stamps(&log, &[(0, None), (1, Some(11)), (2, Some(12))]);
+    check_front_evicted_stamps(&log);
 }
 
 #[test]
 fn tierable_segments_excludes_active_and_reports_paths() {
     // small so we roll fast
-    let (dir, mut log) = sample_log(
+    let TempLog { dir, mut log } = sample_log(
         LogConfig {
             segment_size: bytes(200),
             ..LogConfig::default()
@@ -102,7 +104,7 @@ fn tierable_segments_excludes_active_and_reports_paths() {
 
 #[test]
 fn tierable_segments_empty_for_single_active_segment() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let mut b = sample_batch(3);
     log.append(&mut b).unwrap();
     // No roll happened: the only segment is active and never tierable.
@@ -111,7 +113,7 @@ fn tierable_segments_empty_for_single_active_segment() {
 
 #[test]
 fn tierable_segments_last_offset_matches_next_base() {
-    let (_dir, mut log) = sample_log(
+    let TempLog { dir: _dir, mut log } = sample_log(
         LogConfig {
             segment_size: bytes(200),
             ..LogConfig::default()
@@ -202,7 +204,7 @@ fn epochs_for_range_clamps_and_filters() {
 
 #[test]
 fn local_log_start_offset_matches_log_start_offset() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     append_samples(&mut log, 3, 2);
     assert2::assert!(log.local_log_start_offset() == log.log_start_offset());
 }
@@ -262,7 +264,7 @@ fn delete_local_segments_through_removes_the_evicted_bases_snapshots() {
         producer_snapshot::list(dir)
             .unwrap()
             .into_iter()
-            .map(|(offset, _)| offset)
+            .map(|snapshot| snapshot.offset)
             .collect()
     };
     let before = snapshots(dir.path());
@@ -390,7 +392,7 @@ fn delete_local_segments_through_is_noop_at_or_below_current_start() {
 
 #[test]
 fn delete_local_segments_through_rejects_negative_target() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let err = log.delete_local_segments_through(Offset(-1)).unwrap_err();
     assert2::assert!(matches!(err, LogError::InvalidArgument(_)));
 }
@@ -472,9 +474,16 @@ fn a_delete_records_floor_under_the_local_segments_survives_a_reopen() {
 #[derive(Debug, PartialEq)]
 struct AfterRoll {
     rolled: bool,
-    sealed: Vec<(Offset, Offset)>,
-    active: Option<(Offset, ByteSize)>,
+    sealed: Vec<OffsetRange>,
+    active: Option<ActiveBase>,
     log_end: Offset,
+}
+
+/// The base offset and size of the active segment.
+#[derive(Debug, PartialEq)]
+struct ActiveBase {
+    base_offset: Offset,
+    size: ByteSize,
 }
 
 fn roll_and_describe(log: &mut Log) -> AfterRoll {
@@ -487,12 +496,33 @@ fn roll_and_describe(log: &mut Log) -> AfterRoll {
         sealed: log
             .tierable_segments()
             .iter()
-            .map(|export| (export.base_offset, export.last_offset))
+            .map(|export| OffsetRange {
+                first: export.base_offset,
+                last: export.last_offset,
+            })
             .collect(),
-        active: log
-            .active_segment_export()
-            .map(|active| (active.base_offset, active.size)),
+        active: log.active_segment_export().map(|active| ActiveBase {
+            base_offset: active.base_offset,
+            size: active.size,
+        }),
         log_end: log.log_end_offset(),
+    }
+}
+
+/// The state after three records sit in one sealed segment and an empty
+/// active segment opens at offset 3.
+fn after_rolling_three_records(rolled: bool) -> AfterRoll {
+    AfterRoll {
+        rolled,
+        sealed: vec![OffsetRange {
+            first: Offset(0),
+            last: Offset(2),
+        }],
+        active: Some(ActiveBase {
+            base_offset: Offset(3),
+            size: ByteSize::ZERO,
+        }),
+        log_end: Offset(3),
     }
 }
 
@@ -502,14 +532,17 @@ fn roll_and_describe(log: &mut Log) -> AfterRoll {
 // is nothing in it to copy and the new segment would open at the same base.
 #[test]
 fn roll_seals_the_active_records_and_never_rolls_an_empty_segment() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
 
     check!(
         roll_and_describe(&mut log)
             == AfterRoll {
                 rolled: false,
                 sealed: vec![],
-                active: Some((Offset(0), ByteSize::ZERO)),
+                active: Some(ActiveBase {
+                    base_offset: Offset(0),
+                    size: ByteSize::ZERO,
+                }),
                 log_end: Offset(0),
             },
         "an empty log has nothing to roll"
@@ -517,24 +550,12 @@ fn roll_seals_the_active_records_and_never_rolls_an_empty_segment() {
 
     log.append(&mut sample_batch(3)).unwrap();
     check!(
-        roll_and_describe(&mut log)
-            == AfterRoll {
-                rolled: true,
-                sealed: vec![(Offset(0), Offset(2))],
-                active: Some((Offset(3), ByteSize::ZERO)),
-                log_end: Offset(3),
-            },
+        roll_and_describe(&mut log) == after_rolling_three_records(true),
         "the three records move into a sealed segment"
     );
 
     check!(
-        roll_and_describe(&mut log)
-            == AfterRoll {
-                rolled: false,
-                sealed: vec![(Offset(0), Offset(2))],
-                active: Some((Offset(3), ByteSize::ZERO)),
-                log_end: Offset(3),
-            },
+        roll_and_describe(&mut log) == after_rolling_three_records(false),
         "the fresh segment is empty, so a second roll does nothing"
     );
 }
@@ -548,7 +569,7 @@ fn active_segment_export_ages_the_segment_the_way_retention_does() {
         ("a stamped record", 5_000, false),
         ("no record timestamp", -1, true),
     ] {
-        let (dir, mut log) = test_log();
+        let TempLog { dir, mut log } = test_log();
         let mut batch = sample_batch(2);
         batch.max_timestamp = max_timestamp;
         log.append(&mut batch).unwrap();

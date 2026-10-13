@@ -12,8 +12,8 @@ use {
             fencing::{RegistrationChange, registration_change},
         },
         leader_election::test_support::{
-            expected_clean_election, fencing_updates, img_with_partition, one_partition_change,
-            partition_batches, recovery_handle_for_tests, register_brokers,
+            FencingUpdate, expected_clean_election, fencing_updates, img_with_partition,
+            one_partition_change, partition_batches, recovery_handle_for_tests, register_brokers,
         },
         metadata_source::MetadataSource,
         metrics::BrokerMetrics,
@@ -95,7 +95,13 @@ async fn tick_discovers_registered_broker_that_never_heartbeated_and_fails_it_ov
     assert!(partition_batches(&batches).is_empty());
     // Broker 1 is fenced until it proves catch-up, and the tick publishes
     // that so a follower-served response can see it.
-    assert!(fencing_updates(&batches) == vec![(1, krabka_metadata::FencingChange::Fence)]);
+    assert!(
+        fencing_updates(&batches)
+            == vec![FencingUpdate {
+                node_id: 1,
+                change: krabka_metadata::FencingChange::Fence,
+            }]
+    );
 
     // One full window later brokers 2 and 3 heartbeated again. Broker 1
     // did not. The tick expires it and fails t-0 over to broker 2.
@@ -175,7 +181,13 @@ async fn first_tick_of_a_new_term_seeds_before_it_sweeps() {
     assert!(partition_batches(&batches).len() == 1);
     // The death is published in the same tick that detects it, so a
     // follower-served `Metadata` sees broker 1's replicas offline.
-    assert!(fencing_updates(&batches) == vec![(1, krabka_metadata::FencingChange::Fence)]);
+    assert!(
+        fencing_updates(&batches)
+            == vec![FencingUpdate {
+                node_id: 1,
+                change: krabka_metadata::FencingChange::Fence,
+            }]
+    );
 }
 
 #[tokio::test]

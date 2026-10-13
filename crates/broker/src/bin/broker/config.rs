@@ -203,37 +203,52 @@ mod tests {
 
     #[test]
     fn the_controller_listener_defaults_to_port_9093_and_yields_to_its_flag() {
+        struct Case {
+            name: &'static str,
+            flags: &'static [&'static str],
+            expected: &'static str,
+        }
+
         let _guard = env_guard();
-        let cases: [(&str, &[&str], &str); 5] = [
-            ("default", &[], "127.0.0.1:9093"),
-            (
-                "the client host with the controller port",
-                &["--listen-addr=10.1.2.3:19092"],
-                "10.1.2.3:9093",
-            ),
-            (
-                "a config file binds every interface",
-                &["--config-file=broker.toml"],
-                "0.0.0.0:9093",
-            ),
-            (
-                "the flag wins over the client host",
-                &[
+        let cases: [Case; 5] = [
+            Case {
+                name: "default",
+                flags: &[],
+                expected: "127.0.0.1:9093",
+            },
+            Case {
+                name: "the client host with the controller port",
+                flags: &["--listen-addr=10.1.2.3:19092"],
+                expected: "10.1.2.3:9093",
+            },
+            Case {
+                name: "a config file binds every interface",
+                flags: &["--config-file=broker.toml"],
+                expected: "0.0.0.0:9093",
+            },
+            Case {
+                name: "the flag wins over the client host",
+                flags: &[
                     "--listen-addr=10.1.2.3:19092",
                     "--controller-listen-addr=127.0.0.1:19093",
                 ],
-                "127.0.0.1:19093",
-            ),
-            (
-                "the flag wins over the config file",
-                &[
+                expected: "127.0.0.1:19093",
+            },
+            Case {
+                name: "the flag wins over the config file",
+                flags: &[
                     "--config-file=broker.toml",
                     "--controller-listen-addr=10.0.0.5:29093",
                 ],
-                "10.0.0.5:29093",
-            ),
+                expected: "10.0.0.5:29093",
+            },
         ];
-        for (name, flags, expected) in cases {
+        for Case {
+            name,
+            flags,
+            expected,
+        } in cases
+        {
             let args =
                 Args::try_parse_from(std::iter::once("krabka-broker").chain(flags.iter().copied()))
                     .unwrap_or_else(|error| panic!("{name}: {error}"));

@@ -14,7 +14,8 @@ use {
         elr,
         hwm::{consistent_leo, real_hwm, real_wal_hwm},
         state::{
-            Act, DpState, ELR_BEAT_LONGER_LOG, ELR_DROPPED_COMMITTED, ELR_ELECTED, isr_eligible,
+            Act, AssignedRange, DpState, ELR_BEAT_LONGER_LOG, ELR_DROPPED_COMMITTED, ELR_ELECTED,
+            isr_eligible,
         },
         truncation::real_truncation_offset,
     },
@@ -43,6 +44,13 @@ pub(super) struct DpModel {
     /// ELR configuration carries more per-state than the others, so it buys
     /// its ELR bookkeeping back out of its log length.
     max_len: usize,
+}
+
+/// The base offset a reservation hands out, and the next offset the image holds
+/// afterwards.
+struct Reservation {
+    base: i64,
+    next: i64,
 }
 
 impl DpModel {
@@ -104,7 +112,7 @@ impl DpModel {
     /// advance adds to the same counter, so a single advance of
     /// `committed_next` replays to the same image as the history that reached
     /// it.
-    fn reserve(&self, committed_next: i64, count: i64) -> (i64, i64) {
+    fn reserve(&self, committed_next: i64, count: i64) -> Reservation {
         let advance = |count| {
             MetadataRecord::V1PartitionOffsetAdvance(PartitionOffsetAdvanceRecord {
                 topic: elr::TOPIC.to_string(),
@@ -125,7 +133,7 @@ impl DpModel {
         let next = image
             .partition_next_offset(elr::TOPIC, elr::PARTITION)
             .expect("the advance just applied");
-        (base, next)
+        Reservation { base, next }
     }
 }
 
@@ -139,8 +147,11 @@ impl Model for DpModel {
                     s.log[usize::from(s.leader)].push(s.leader_epoch);
                 }
                 Act::Assign(count) => {
-                    let (base, next) = self.reserve(s.seq_next, i64::from(count));
-                    s.assigned.push((base, base + i64::from(count)));
+                    let Reservation { base, next } = self.reserve(s.seq_next, i64::from(count));
+                    s.assigned.push(AssignedRange {
+                        start: base,
+                        end: base + i64::from(count),
+                    });
                     s.seq_next = next;
                 }
                 Act::Replicate(b) => {
@@ -367,7 +378,7 @@ impl Model for DpModel {
                 }),
                 Property::always("offsets_contiguous_and_unique", |_, s: &DpState| {
                     let mut next = 0;
-                    for &(start, end) in &s.assigned {
+                    for &AssignedRange { start, end } in &s.assigned {
                         if start != next || end <= start {
                             return false;
                         }

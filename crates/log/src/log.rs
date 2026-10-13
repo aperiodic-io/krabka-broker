@@ -15,7 +15,7 @@ use {
         leader_epoch_checkpoint::LeaderEpochCheckpoint,
         producer_snapshot::{ProducerBatchMetadata, ProducerSnapshotEntry},
         segment::Segment,
-        stamp_index::StampIndex,
+        stamp_index::{OffsetRange, StampIndex},
         stamp_source::StampSource,
         txn_index::TxnIndex,
     },
@@ -69,6 +69,22 @@ crate::sendfile_cfg! {
     pub use self::read::RawReadDesc;
 }
 
+/// The jitter sample that shortens the roll interval of one active segment.
+#[derive(Debug, Clone, Copy)]
+struct RollJitter {
+    /// The base offset of the active segment the sample was drawn for.
+    segment_base: Offset,
+    sample: u64,
+}
+
+/// Segment files that retention renamed away and has yet to delete.
+#[derive(Debug, Clone)]
+struct PendingDelete {
+    /// The instant from which the files may be deleted.
+    deadline: std::time::SystemTime,
+    paths: Vec<PathBuf>,
+}
+
 /// A Kafka-format log: a sorted collection of [`Segment`]s plus a single
 /// active segment that accepts appends.
 ///
@@ -86,8 +102,8 @@ pub struct Log {
     rollover_flusher: rollover_flush::Flusher,
     unflushed_messages: u64,
     last_flush: std::time::Instant,
-    roll_jitter: Option<(Offset, u64)>,
-    pending_deletes: Vec<(std::time::SystemTime, Vec<PathBuf>)>,
+    roll_jitter: Option<RollJitter>,
+    pending_deletes: Vec<PendingDelete>,
     /// The global log start (Kafka's `logStartOffset`): the first offset any
     /// reader may ask for, wherever the records for it live.
     ///
@@ -170,7 +186,7 @@ pub struct Log {
     /// Exact data-batch ranges for each in-flight transaction. A commit
     /// marker stamps only these ranges, so interleaved transactions and
     /// ordinary records never inherit another transaction's commit stamp.
-    pending_stamp_ranges: HashMap<ProducerId, Vec<(Offset, Offset)>>,
+    pending_stamp_ranges: HashMap<ProducerId, Vec<OffsetRange>>,
 
     /// Last transaction-coordinator epoch observed in a durable commit or
     /// abort marker for each producer. The marker value carries this field,

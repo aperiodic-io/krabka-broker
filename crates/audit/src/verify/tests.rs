@@ -5,12 +5,12 @@ use {
     super::*,
     crate::{
         FileEd25519Signer,
-        chain::{ChainState, GENESIS_HEAD},
+        chain::{ChainLink, ChainState, GENESIS_HEAD},
         checkpoint::Checkpoint,
         event::AuditEventClass,
         ids::EpochMs,
         sink::AuditRecord,
-        test_support::shared_signer as signer,
+        test_support::{TestSigner, shared_signer as signer},
     },
     assert2::check,
     bytes::Bytes,
@@ -74,10 +74,16 @@ fn lifecycle_record(value: Vec<u8>) -> AuditRecord {
     }
 }
 
-fn partition() -> (tempfile::TempDir, Log) {
-    let directory = tempfile::tempdir().unwrap();
-    let log = Log::open(directory.path(), LogConfig::default()).unwrap();
-    (directory, log)
+/// An empty partition log and the temporary directory that backs it.
+struct TempPartition {
+    dir: tempfile::TempDir,
+    log: Log,
+}
+
+fn partition() -> TempPartition {
+    let dir = tempfile::tempdir().unwrap();
+    let log = Log::open(dir.path(), LogConfig::default()).unwrap();
+    TempPartition { dir, log }
 }
 
 fn untrusted_report(directory: &std::path::Path) -> VerifyReport {
@@ -98,7 +104,10 @@ fn signed_head(chain: &ChainState, signer: &FileEd25519Signer, time: i64) -> Che
 }
 
 fn reserved_marker_report(count: u64, relabel: bool) -> VerifyReport {
-    let (directory, mut log) = partition();
+    let TempPartition {
+        dir: directory,
+        mut log,
+    } = partition();
     let mut marker = AuditRecord::records_lost(count, 1);
     if relabel {
         marker.headers[0].1 = b"application_lifecycle".to_vec();
@@ -108,14 +117,23 @@ fn reserved_marker_report(count: u64, relabel: bool) -> VerifyReport {
     untrusted_report(directory.path())
 }
 
-fn check_summary(report: &VerifyReport, expected: (bool, u64, u64, u64)) {
+/// The counts a verification report is expected to carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VerifySummary {
+    ok: bool,
+    checkpoints: u64,
+    records: u64,
+    unanchored_records: u64,
+}
+
+fn check_summary(report: &VerifyReport, expected: VerifySummary) {
     check!(
-        (
-            report.ok,
-            report.checkpoints.0,
-            report.records.0,
-            report.unanchored_records.0
-        ) == expected
+        VerifySummary {
+            ok: report.ok,
+            checkpoints: report.checkpoints.0,
+            records: report.records.0,
+            unanchored_records: report.unanchored_records.0,
+        } == expected
     );
 }
 
@@ -125,8 +143,8 @@ fn append_record(log: &mut Log, record: &AuditRecord, offset: i64) {
 }
 
 fn chain_record(chain: &mut ChainState, record: &mut AuditRecord) {
-    let (seq, previous) = chain.extend(&record.value);
-    record.push_chain_headers(seq, &previous);
+    let ChainLink { seq, prev_head } = chain.extend(&record.value);
+    record.push_chain_headers(seq, &prev_head);
 }
 
 fn check_break(report: &VerifyReport, missing: &str, reason: &str) {
@@ -154,18 +172,29 @@ fn append_lifecycle_chain(
     }
 }
 
-fn checkpointed_partition(
-    directory: &std::path::Path,
-    time: i64,
-) -> (Vec<u8>, Log, ChainState, i64) {
-    let (signer, public_key) = signer();
+/// A chained partition that ends in a signed checkpoint.
+struct CheckpointedPartition {
+    public_key: Vec<u8>,
+    log: Log,
+    chain: ChainState,
+    /// The offset of the checkpoint record.
+    offset: i64,
+}
+
+fn checkpointed_partition(directory: &std::path::Path, time: i64) -> CheckpointedPartition {
+    let TestSigner { signer, public_key } = signer();
     let mut log = Log::open(directory, LogConfig::default()).unwrap();
     let mut chain = ChainState::new();
     let mut offset = 0i64;
     append_lifecycle_chain(&mut log, &mut chain, &mut offset, 0..3);
     let checkpoint = signed_head(&chain, signer.as_ref(), time);
     append_record(&mut log, &checkpoint.to_record(), offset);
-    (public_key, log, chain, offset)
+    CheckpointedPartition {
+        public_key,
+        log,
+        chain,
+        offset,
+    }
 }
 
 fn append_and_verify(
@@ -181,8 +210,7 @@ fn append_and_verify(
 /// public key.
 fn build_partition(tmp: &std::path::Path) -> Vec<u8> {
     // checkpoint over the chain head
-    let (pubkey, _log, _chain, _offset) = checkpointed_partition(tmp, 123);
-    pubkey
+    checkpointed_partition(tmp, 123).public_key
 }
 
 #[test]
@@ -208,7 +236,7 @@ fn valid_partition_verifies_ok() {
 #[test]
 fn records_lost_marker_is_reported_without_breaking_the_chain() {
     let tmp = tempfile::tempdir().unwrap();
-    let (signer, public_key) = signer();
+    let TestSigner { signer, public_key } = signer();
     let mut log = Log::open(tmp.path(), LogConfig::default()).unwrap();
     let mut chain = ChainState::new();
     let mut marker = AuditRecord::records_lost(3, 1);
@@ -254,7 +282,7 @@ fn records_lost_body_cannot_be_hidden_by_changing_its_header() {
 
 #[test]
 fn records_lost_body_without_a_generation_is_rejected() {
-    let (tmp, mut log) = partition();
+    let TempPartition { dir: tmp, mut log } = partition();
     let mut chain = ChainState::new();
     let mut marker = AuditRecord::records_lost(4, 1);
     marker.value = br#"{"records_lost":4}"#.to_vec();
@@ -266,7 +294,7 @@ fn records_lost_body_without_a_generation_is_rejected() {
 
 #[test]
 fn persisted_loss_generation_must_advance() {
-    let (tmp, mut log) = partition();
+    let TempPartition { dir: tmp, mut log } = partition();
     let mut chain = ChainState::new();
     for (offset, generation) in [2_u64, 2].into_iter().enumerate() {
         let mut marker = AuditRecord::records_lost(4, generation);
@@ -294,7 +322,7 @@ fn malformed_reserved_loss_body_cannot_hide_behind_another_header() {
 
 #[test]
 fn records_lost_marker_does_not_excuse_a_sequence_gap() {
-    let (tmp, mut log) = partition();
+    let TempPartition { dir: tmp, mut log } = partition();
     let mut chain = ChainState::new();
     let _ = chain.extend(b"missing");
     let mut marker = AuditRecord::records_lost(1, 1);
@@ -317,7 +345,10 @@ fn records_lost_marker_requires_a_positive_count() {
 fn wrong_trusted_key_fails_at_checkpoint() {
     let tmp = tempfile::tempdir().unwrap();
     let _pubkey = build_partition(tmp.path());
-    let (_other, other_pub) = signer();
+    let TestSigner {
+        public_key: other_pub,
+        ..
+    } = signer();
     let trusted = TrustedKeys::single("k1".into(), other_pub);
     let report = verify_partition_dir(tmp.path(), &trusted).unwrap();
     check!(!report.ok);
@@ -328,7 +359,7 @@ fn wrong_trusted_key_fails_at_checkpoint() {
 #[test]
 fn signed_checkpoint_cannot_claim_an_empty_chain() {
     let tmp = tempfile::tempdir().unwrap();
-    let (signer, public_key) = signer();
+    let TestSigner { signer, public_key } = signer();
     let checkpoint = Checkpoint::signed(signer.as_ref(), Seq(0), &GENESIS_HEAD, EpochMs(123));
     let mut log = Log::open(tmp.path(), LogConfig::default()).unwrap();
     log.append(&mut audit_record_to_batch(&checkpoint.to_record(), 0))
@@ -346,7 +377,12 @@ fn signed_checkpoint_cannot_claim_an_empty_chain() {
 fn unanchored_tail_records_are_counted() {
     let tmp = tempfile::tempdir().unwrap();
     // 3 records + checkpoint (seq_high=2)
-    let (pubkey, mut log, mut chain, mut offset) = checkpointed_partition(tmp.path(), 100);
+    let CheckpointedPartition {
+        public_key: pubkey,
+        mut log,
+        mut chain,
+        mut offset,
+    } = checkpointed_partition(tmp.path(), 100);
     offset += 1;
 
     // 2 more records WITHOUT a trailing checkpoint
@@ -354,14 +390,19 @@ fn unanchored_tail_records_are_counted() {
 
     let trusted = TrustedKeys::single("k1".into(), pubkey);
     let report = verify_partition_dir(tmp.path(), &trusted).unwrap();
-    check_summary(&report, (true, 1, 5, 2));
+    check_summary(&report, VerifySummary {
+        ok: true,
+        checkpoints: 1,
+        records: 5,
+        unanchored_records: 2,
+    });
 }
 
 /// Chain-only partition with no signing key and no checkpoints. All records
 /// are unanchored.
 #[test]
 fn chain_only_partition_all_records_unanchored() {
-    let (tmp, mut log) = partition();
+    let TempPartition { dir: tmp, mut log } = partition();
     let mut chain = ChainState::new();
 
     for (offset, i) in (0..3u8).enumerate() {
@@ -373,7 +414,12 @@ fn chain_only_partition_all_records_unanchored() {
 
     // No trusted key needed — no checkpoints present
     let report = untrusted_report(tmp.path());
-    check_summary(&report, (true, 0, 3, 3));
+    check_summary(&report, VerifySummary {
+        ok: true,
+        checkpoints: 0,
+        records: 3,
+        unanchored_records: 3,
+    });
 }
 
 // ── Fix 2 tests: direct tamper-detection (chain-inconsistent fixtures) ────
@@ -381,7 +427,7 @@ fn chain_only_partition_all_records_unanchored() {
 /// Dropped record creates a seq gap that the verifier detects as a break.
 #[test]
 fn dropped_record_detected_as_seq_gap() {
-    let (tmp, mut log) = partition();
+    let TempPartition { dir: tmp, mut log } = partition();
     let mut chain = ChainState::new();
 
     // Build 3 records into memory first, then write only [0] and [2] (skip [1]).
@@ -409,20 +455,20 @@ fn dropped_record_detected_as_seq_gap() {
 /// The verifier detects a record with the wrong `prev_hash` as a chain break.
 #[test]
 fn wrong_prev_hash_detected() {
-    let (tmp, mut log) = partition();
+    let TempPartition { dir: tmp, mut log } = partition();
     let mut chain = ChainState::new();
 
     // Record 0: correct chain
     let mut rec0 = lifecycle_record(b"{\"i\":0}".to_vec());
-    let (seq0, prev0) = chain.extend(&rec0.value);
-    rec0.push_chain_headers(seq0, &prev0);
+    let ChainLink { seq, prev_head } = chain.extend(&rec0.value);
+    rec0.push_chain_headers(seq, &prev_head);
     append_record(&mut log, &rec0, 0);
 
     // Record 1: stamped with GENESIS_HEAD as prev (wrong — should be head after rec0)
     let mut rec1 = lifecycle_record(b"{\"i\":1}".to_vec());
     // Advance chain to get the correct seq, but use GENESIS_HEAD as wrong prev
-    let (seq1, _correct_prev) = chain.extend(&rec1.value);
-    rec1.push_chain_headers(seq1, &GENESIS_HEAD); // wrong prev
+    let ChainLink { seq, .. } = chain.extend(&rec1.value);
+    rec1.push_chain_headers(seq, &GENESIS_HEAD); // wrong prev
     append_record(&mut log, &rec1, 1);
 
     let report = untrusted_report(tmp.path());
@@ -443,13 +489,13 @@ fn wrong_prev_hash_detected() {
 /// and 1 and 0 are what the other arithmetic would give.
 #[test]
 fn break_offset_within_a_batch_is_base_plus_delta() {
-    let (tmp, mut log) = partition();
+    let TempPartition { dir: tmp, mut log } = partition();
     let mut chain = ChainState::new();
 
     let record = |value: &str, chain: &mut ChainState, tamper: bool| {
         let mut rec = lifecycle_record(value.as_bytes().to_vec());
-        let (seq, prev) = chain.extend(&rec.value);
-        rec.push_chain_headers(seq, if tamper { &GENESIS_HEAD } else { &prev });
+        let ChainLink { seq, prev_head } = chain.extend(&rec.value);
+        rec.push_chain_headers(seq, if tamper { &GENESIS_HEAD } else { &prev_head });
         rec
     };
 
@@ -483,7 +529,10 @@ fn stale_checkpoint_chain_head_mismatch_detected() {
     let tmp_orig = tempfile::tempdir().unwrap();
     let tmp_tampered = tempfile::tempdir().unwrap();
 
-    let (s, pubkey) = signer();
+    let TestSigner {
+        signer: s,
+        public_key: pubkey,
+    } = signer();
 
     // Build original partition: 2 records + checkpoint
     let mut orig_chain = ChainState::new();

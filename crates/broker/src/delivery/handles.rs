@@ -167,7 +167,13 @@ mod tests {
         tempfile::tempdir,
     };
 
-    fn log_of(policy: DeliveryPolicy, activations: &[i64]) -> (tempfile::TempDir, Mutex<Log>) {
+    /// A log, and the directory that holds it.
+    struct LogInDir {
+        dir: tempfile::TempDir,
+        log: Mutex<Log>,
+    }
+
+    fn log_of(policy: DeliveryPolicy, activations: &[i64]) -> LogInDir {
         let dir = tempdir().expect("log root");
         let config = LogConfig {
             delivery_policy: policy,
@@ -178,7 +184,10 @@ mod tests {
             log.append(&mut batch_at(*activation_ms))
                 .expect("append a batch");
         }
-        (dir, Mutex::new(log))
+        LogInDir {
+            dir,
+            log: Mutex::new(log),
+        }
     }
 
     /// Handles pinned at `now_ms`, for a test that only reads the clock.
@@ -189,15 +198,21 @@ mod tests {
     /// Handles on a manual timeline that starts at `now_ms`, for the one test
     /// that has to carry the clock across an activation boundary. The clock it
     /// returns moves the wall reading it handed the handles.
-    fn advancing_handles_at(now_ms: i64) -> (Arc<ManualMonotonicClock>, DeliveryHandles) {
+    fn advancing_handles_at(now_ms: i64) -> AdvancingHandles {
         let clock = ManualMonotonicClock::new_shared();
         let handles = DeliveryHandles::with_clock(clock.new_wall_clock(wall_at(now_ms)));
-        (clock, handles)
+        AdvancingHandles { clock, handles }
+    }
+
+    /// Handles, and the manual clock that moves them.
+    struct AdvancingHandles {
+        clock: Arc<ManualMonotonicClock>,
+        handles: DeliveryHandles,
     }
 
     #[test]
     fn an_immediate_topic_reports_no_schedule_but_still_mirrors_the_log_end() {
-        let (_dir, log) = log_of(DeliveryPolicy::Immediate, &[NOW_MS + 3_600_000]);
+        let LogInDir { dir: _dir, log } = log_of(DeliveryPolicy::Immediate, &[NOW_MS + 3_600_000]);
         let handles = handles_at(NOW_MS);
 
         check!(handles.publish_now(&log).is_none());
@@ -206,7 +221,7 @@ mod tests {
 
     #[test]
     fn a_scheduled_topic_reports_the_pending_count_and_the_next_deadline() {
-        let (_dir, log) = log_of(DeliveryPolicy::Scheduled, &[
+        let LogInDir { dir: _dir, log } = log_of(DeliveryPolicy::Scheduled, &[
             NOW_MS - 60_000,
             NOW_MS + 10_000,
         ]);
@@ -225,8 +240,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_publish_that_moves_the_watermark_wakes_a_parked_reader() {
-        let (_dir, log) = log_of(DeliveryPolicy::Scheduled, &[NOW_MS + 10_000]);
-        let (clock, handles) = advancing_handles_at(NOW_MS);
+        let LogInDir { dir: _dir, log } = log_of(DeliveryPolicy::Scheduled, &[NOW_MS + 10_000]);
+        let AdvancingHandles { clock, handles } = advancing_handles_at(NOW_MS);
         handles.publish_now(&log);
         check!(handles.watermark() == Offset(0));
 

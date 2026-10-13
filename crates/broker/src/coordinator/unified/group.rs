@@ -437,13 +437,13 @@ mod tests {
     /// `ConsumerGroup.validateOffsetFetch`.
     #[test]
     fn validate_offset_fetch_follows_the_group_kind_and_member_protocol() {
-        type Row<'a> = (
-            &'a str,
-            &'a CoordinatorGroup,
-            Option<&'a str>,
-            i32,
-            Result<(), i16>,
-        );
+        struct Row<'a> {
+            name: &'a str,
+            group: &'a CoordinatorGroup,
+            member_id: Option<&'a str>,
+            epoch: i32,
+            expected: Result<(), i16>,
+        }
 
         use {
             crate::{
@@ -469,58 +469,71 @@ mod tests {
         let classic = CoordinatorGroup::new_classic("g");
 
         let rows: [Row<'_>; 8] = [
-            (
-                "classic group, any member",
-                &classic,
-                Some("ghost"),
-                3,
-                Ok(()),
-            ),
-            ("admin fetch", &consumer, None, -1, Ok(())),
-            (
-                "native member, its epoch",
-                &consumer,
-                Some("native"),
-                7,
-                Ok(()),
-            ),
-            (
-                "native member, other epoch",
-                &consumer,
-                Some("native"),
-                6,
-                Err(codes::STALE_MEMBER_EPOCH),
-            ),
-            (
-                "classic member, its generation",
-                &consumer,
-                Some("classic"),
-                7,
-                Ok(()),
-            ),
-            (
-                "classic member, other generation",
-                &consumer,
-                Some("classic"),
-                8,
-                Err(codes::ILLEGAL_GENERATION),
-            ),
-            (
-                "unknown member",
-                &consumer,
-                Some("ghost"),
-                7,
-                Err(codes::UNKNOWN_MEMBER_ID),
-            ),
-            (
-                "no member id with an epoch",
-                &consumer,
-                None,
-                0,
-                Err(codes::UNKNOWN_MEMBER_ID),
-            ),
+            Row {
+                name: "classic group, any member",
+                group: &classic,
+                member_id: Some("ghost"),
+                epoch: 3,
+                expected: Ok(()),
+            },
+            Row {
+                name: "admin fetch",
+                group: &consumer,
+                member_id: None,
+                epoch: -1,
+                expected: Ok(()),
+            },
+            Row {
+                name: "native member, its epoch",
+                group: &consumer,
+                member_id: Some("native"),
+                epoch: 7,
+                expected: Ok(()),
+            },
+            Row {
+                name: "native member, other epoch",
+                group: &consumer,
+                member_id: Some("native"),
+                epoch: 6,
+                expected: Err(codes::STALE_MEMBER_EPOCH),
+            },
+            Row {
+                name: "classic member, its generation",
+                group: &consumer,
+                member_id: Some("classic"),
+                epoch: 7,
+                expected: Ok(()),
+            },
+            Row {
+                name: "classic member, other generation",
+                group: &consumer,
+                member_id: Some("classic"),
+                epoch: 8,
+                expected: Err(codes::ILLEGAL_GENERATION),
+            },
+            Row {
+                name: "unknown member",
+                group: &consumer,
+                member_id: Some("ghost"),
+                epoch: 7,
+                expected: Err(codes::UNKNOWN_MEMBER_ID),
+            },
+            Row {
+                name: "no member id with an epoch",
+                group: &consumer,
+                member_id: None,
+                epoch: 0,
+                expected: Err(codes::UNKNOWN_MEMBER_ID),
+            },
         ];
-        for (name, group, member_id, epoch, expected) in rows {
+        for Row {
+            name,
+            group,
+            member_id,
+            epoch,
+            expected,
+        } in rows
+        {
             check!(
                 group.validate_offset_fetch(member_id, epoch) == expected,
                 "{name}"

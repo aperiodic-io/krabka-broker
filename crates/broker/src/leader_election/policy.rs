@@ -580,17 +580,38 @@ mod tests {
 
     #[test]
     fn only_witnesses_alive_is_unavailable_whatever_the_unclean_flag_says() {
+        struct Case {
+            strategy: RecoveryStrategy,
+            unclean_enabled: bool,
+        }
+
         // Leader 1 and data replica 3 are dead. Only witness 2 is alive, and
         // it holds every committed record. Electing 3 would discard them, so
         // the answer is Unavailable: never Recover, never an unclean Elect.
         let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
-        let cases: [(RecoveryStrategy, bool); 4] = [
-            (RecoveryStrategy::None, false),
-            (RecoveryStrategy::None, true),
-            (RecoveryStrategy::Balanced, false),
-            (RecoveryStrategy::Aggressive, true),
+        let cases = [
+            Case {
+                strategy: RecoveryStrategy::None,
+                unclean_enabled: false,
+            },
+            Case {
+                strategy: RecoveryStrategy::None,
+                unclean_enabled: true,
+            },
+            Case {
+                strategy: RecoveryStrategy::Balanced,
+                unclean_enabled: false,
+            },
+            Case {
+                strategy: RecoveryStrategy::Aggressive,
+                unclean_enabled: true,
+            },
         ];
-        for (strategy, unclean_enabled) in cases {
+        for Case {
+            strategy,
+            unclean_enabled,
+        } in cases
+        {
             let decision = decide(
                 &pr,
                 /*dead*/ 1,
@@ -765,12 +786,31 @@ mod tests {
     /// election of the one replica that is left.
     #[test]
     fn an_elr_member_that_cannot_lead_falls_through_to_the_unclean_election() {
+        struct Case {
+            label: &'static str,
+            alive: &'static [u64],
+            witness_ids: &'static [u64],
+        }
+
         let pr = partition_record(1, &[1, 2, 3], &[1]);
-        let cases: [(&str, &[u64], &[u64]); 2] = [
-            ("the only ELR member is dead", &[3], &[]),
-            ("the only ELR member is a witness", &[2, 3], &[2]),
+        let cases = [
+            Case {
+                label: "the only ELR member is dead",
+                alive: &[3],
+                witness_ids: &[],
+            },
+            Case {
+                label: "the only ELR member is a witness",
+                alive: &[2, 3],
+                witness_ids: &[2],
+            },
         ];
-        for (label, alive, witness_ids) in cases {
+        for Case {
+            label,
+            alive,
+            witness_ids,
+        } in cases
+        {
             let decision = decide_with_elr(
                 &pr,
                 /*dead*/ 1,

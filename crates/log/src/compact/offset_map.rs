@@ -80,9 +80,12 @@ pub fn build_offset_map(
 mod tests {
     use {
         super::*,
-        crate::compact::test_support::{
-            control_batch, make_record, superseded_records, transactional_record,
-            write_sealed_batches, write_sealed_segment,
+        crate::{
+            compact::test_support::{
+                control_batch, make_record, superseded_records, transactional_record,
+                write_sealed_batches, write_sealed_segment,
+            },
+            test_support::KeyValue,
         },
         bytes::Bytes,
         krabka_ids::Offset,
@@ -167,18 +170,27 @@ mod tests {
         let seg = write_sealed_batches(dir.path(), &[
             transactional_record()
                 .offset(5)
-                .payload((b"k", b"committed"))
+                .payload(KeyValue {
+                    key: b"k",
+                    value: b"committed",
+                })
                 .call(),
             control_batch(6, 1000, 1 /* COMMIT */),
             transactional_record()
                 .offset(10)
                 .producer(2000)
-                .payload((b"k", b"aborted"))
+                .payload(KeyValue {
+                    key: b"k",
+                    value: b"aborted",
+                })
                 .call(),
             transactional_record()
                 .offset(11)
                 .producer(2000)
-                .payload((b"only-aborted", b"v"))
+                .payload(KeyValue {
+                    key: b"only-aborted",
+                    value: b"v",
+                })
                 .call(),
             control_batch(12, 2000, 0 /* ABORT */),
         ]);

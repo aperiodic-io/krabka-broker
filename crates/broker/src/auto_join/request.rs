@@ -8,7 +8,7 @@
 //! host name that a controller bound to a wildcard address advertises.
 
 use {
-    crate::host_port::{advertised_host, local_host_name, parse_host_port},
+    crate::host_port::{HostPort, advertised_host, local_host_name, parse_host_port},
     krabka_protocol::owned::add_raft_voter_request::{AddRaftVoterRequest, Listener},
 };
 
@@ -44,9 +44,9 @@ pub(super) fn advertised_controller_listener(
     if !bound.ip().is_unspecified() {
         return controller_listener(bound);
     }
-    let Some((host, port)) = advertised
+    let Some(HostPort { host, port }) = advertised
         .and_then(parse_host_port)
-        .filter(|(host, _)| !host.is_empty())
+        .filter(|endpoint| !endpoint.host.is_empty())
     else {
         return controller_listener(bound);
     };
@@ -62,6 +62,14 @@ pub(super) fn select_bootstrap_server(bootstrap_servers: &[String], attempt: usi
     &bootstrap_servers[attempt % bootstrap_servers.len()]
 }
 
+/// Where a join request goes, and where that server came from.
+pub(super) struct JoinTarget {
+    /// The `<host>:<port>` to dial.
+    pub(super) server: String,
+    /// Whether `server` is a bootstrap server rather than the current leader.
+    pub(super) from_bootstrap: bool,
+}
+
 /// The controller endpoint that a join request goes to: the current leader's
 /// `CONTROLLER` endpoint, or a bootstrap server while no leader is known.
 ///
@@ -71,13 +79,14 @@ pub(super) fn select_bootstrap_server(bootstrap_servers: &[String], attempt: usi
 /// away from it, a bootstrap server answers `NOT_LEADER_OR_FOLLOWER` to every
 /// join, so a join that always dialed it would never finish.
 ///
-/// `attempt` rotates across the bootstrap servers, and the second value says
-/// whether the target is a bootstrap server.
+/// `attempt` rotates across the bootstrap servers, and
+/// [`JoinTarget::from_bootstrap`] says whether the target is a bootstrap
+/// server.
 pub(super) fn join_target(
     quorum: &krabka_raft::QuorumState,
     bootstrap_servers: &[String],
     attempt: usize,
-) -> (String, bool) {
+) -> JoinTarget {
     let leader_endpoint = quorum
         .current_leader
         .and_then(|leader| quorum.voter_nodes.get(&leader))
@@ -89,11 +98,14 @@ pub(super) fn join_target(
                 .or_else(|| leader.endpoints.first())
         });
     match leader_endpoint {
-        Some(endpoint) => (format!("{}:{}", endpoint.host, endpoint.port), false),
-        None => (
-            select_bootstrap_server(bootstrap_servers, attempt).to_owned(),
-            true,
-        ),
+        Some(endpoint) => JoinTarget {
+            server: format!("{}:{}", endpoint.host, endpoint.port),
+            from_bootstrap: false,
+        },
+        None => JoinTarget {
+            server: select_bootstrap_server(bootstrap_servers, attempt).to_owned(),
+            from_bootstrap: true,
+        },
     }
 }
 
@@ -210,25 +222,31 @@ mod tests {
 
     #[test]
     fn a_join_goes_to_the_known_leader_and_to_a_bootstrap_server_otherwise() {
-        fn quorum(
-            leader: Option<u64>,
-            voters: &[(u64, &[(&str, u16)])],
-        ) -> krabka_raft::QuorumState {
+        struct Endpoint<'a> {
+            name: &'a str,
+            port: u16,
+        }
+        struct Voter<'a> {
+            id: u64,
+            endpoints: &'a [Endpoint<'a>],
+        }
+
+        fn quorum(leader: Option<u64>, voters: &[Voter<'_>]) -> krabka_raft::QuorumState {
             krabka_raft::QuorumState {
                 current_term: 3,
                 current_leader: leader.map(krabka_raft::NodeId),
                 voters: voters
                     .iter()
-                    .map(|(id, _)| krabka_raft::NodeId(*id))
+                    .map(|voter| krabka_raft::NodeId(voter.id))
                     .collect(),
                 voter_nodes: voters
                     .iter()
-                    .map(|(id, endpoints)| {
+                    .map(|Voter { id, endpoints }| {
                         (krabka_raft::NodeId(*id), krabka_raft::Node {
                             directory_id: uuid::Uuid::from_u128(u128::from(*id)),
                             endpoints: endpoints
                                 .iter()
-                                .map(|(name, port)| krabka_metadata::VoterEndpoint {
+                                .map(|Endpoint { name, port }| krabka_metadata::VoterEndpoint {
                                     name: (*name).to_owned(),
                                     host: "127.0.0.1".to_owned(),
                                     port: *port,
@@ -246,9 +264,27 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect();
-        let leader_two_voters: &[(u64, &[(&str, u16)])] = &[
-            (1, &[("CONTROLLER", 9001)]),
-            (2, &[("REPLICATION", 9102), ("CONTROLLER", 9002)]),
+        let leader_two_voters = &[
+            Voter {
+                id: 1,
+                endpoints: &[Endpoint {
+                    name: "CONTROLLER",
+                    port: 9001,
+                }],
+            },
+            Voter {
+                id: 2,
+                endpoints: &[
+                    Endpoint {
+                        name: "REPLICATION",
+                        port: 9102,
+                    },
+                    Endpoint {
+                        name: "CONTROLLER",
+                        port: 9002,
+                    },
+                ],
+            },
         ];
         for (case, quorum, attempt, expected) in [
             (
@@ -259,7 +295,13 @@ mod tests {
             ),
             (
                 "the leader has no CONTROLLER endpoint",
-                quorum(Some(1), &[(1, &[("REPLICATION", 9101)])]),
+                quorum(Some(1), &[Voter {
+                    id: 1,
+                    endpoints: &[Endpoint {
+                        name: "REPLICATION",
+                        port: 9101,
+                    }],
+                }]),
                 0,
                 ("127.0.0.1:9101", false),
             ),
@@ -276,8 +318,11 @@ mod tests {
                 ("127.0.0.1:9001", true),
             ),
         ] {
-            let (target, from_bootstrap) = join_target(&quorum, &bootstrap, attempt);
-            assert!((target.as_str(), from_bootstrap) == expected, "{case}");
+            let target = join_target(&quorum, &bootstrap, attempt);
+            assert!(
+                (target.server.as_str(), target.from_bootstrap) == expected,
+                "{case}"
+            );
         }
     }
 

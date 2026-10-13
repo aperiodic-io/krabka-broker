@@ -13,8 +13,8 @@
 //! arrived.
 
 use {
-    super::Log,
-    crate::error::LogError,
+    super::{Log, append::AppendRoll, open::DataProducerAppend},
+    crate::{error::LogError, stamp_index::OffsetRange},
     bytes::{Bytes, BytesMut},
     krabka_ids::{LeaderEpoch, Offset, ProducerId},
     krabka_protocol::records::{
@@ -263,7 +263,10 @@ impl Log {
         )?;
         // The follower uses the same append-time policy and roll check as the
         // owned path, against this replicated batch's bytes and timestamp.
-        let (index_interval, flush_on_append) = self.roll_for_append(
+        let AppendRoll {
+            index_interval,
+            flush_on_append,
+        } = self.roll_for_append(
             || ByteSize::from_bytes(u64::try_from(batch.bytes.len()).unwrap_or(u64::MAX)),
             batch.max_timestamp,
         )?;
@@ -298,15 +301,22 @@ impl Log {
                 self.pending_stamp_ranges
                     .entry(pid)
                     .or_default()
-                    .push((base_offset, last_offset));
+                    .push(OffsetRange {
+                        first: base_offset,
+                        last: last_offset,
+                    });
             }
             self.refresh_lso()?;
 
-            self.update_data_producer_entry(
-                (batch.producer_id, batch.producer_epoch),
-                (batch.base_sequence, batch.last_offset_delta),
-                (base_offset, batch.max_timestamp, is_transactional),
-            )?;
+            self.update_data_producer_entry(DataProducerAppend {
+                producer_id: batch.producer_id,
+                producer_epoch: batch.producer_epoch,
+                base_sequence: batch.base_sequence,
+                last_offset_delta: batch.last_offset_delta,
+                base_offset,
+                timestamp: batch.max_timestamp,
+                is_transactional,
+            })?;
             if is_transactional {
                 self.clear_verification_after_append(pid, batch.producer_epoch, false);
             }

@@ -41,17 +41,43 @@ fn request_body(version: i16, name: &str) -> Vec<u8> {
     body.to_vec()
 }
 
-type ApiVersionCase = (i16, Vec<u8>, i16, i16, bool);
+/// One request on the connection and the answer it must get.
+struct ApiVersionCase {
+    /// The request version.
+    version: i16,
+    body: Vec<u8>,
+    /// The version the answer body is encoded at.
+    body_version: i16,
+    error_code: i16,
+    /// Whether the answer lists the full table.
+    full: bool,
+}
+
+fn api_version_case(
+    version: i16,
+    body: Vec<u8>,
+    body_version: i16,
+    error_code: i16,
+    full: bool,
+) -> ApiVersionCase {
+    ApiVersionCase {
+        version,
+        body,
+        body_version,
+        error_code,
+        full,
+    }
+}
 
 fn api_version_cases(version_five: ApiVersionCase) -> [ApiVersionCase; 7] {
     [
-        (6, vec![0xff], 0, 35, false),
-        (i16::MAX, vec![], 0, 35, false),
-        (3, request_body(3, ""), 3, 42, false),
-        (4, request_body(4, "a b"), 4, 42, false),
+        api_version_case(6, vec![0xff], 0, 35, false),
+        api_version_case(i16::MAX, vec![], 0, 35, false),
+        api_version_case(3, request_body(3, ""), 3, 42, false),
+        api_version_case(4, request_body(4, "a b"), 4, 42, false),
         version_five,
-        (4, request_body(4, "krabka"), 4, 0, true),
-        (0, vec![], 0, 0, true),
+        api_version_case(4, request_body(4, "krabka"), 4, 0, true),
+        api_version_case(0, vec![], 0, 0, true),
     ]
 }
 
@@ -61,12 +87,11 @@ fn api_version_cases(version_five: ApiVersionCase) -> [ApiVersionCase; 7] {
 #[tokio::test]
 async fn controller_listener_answers_api_versions_refusals_and_keeps_the_connection() {
     use crate::UnstableApiVersions::{Disabled, Enabled};
-    // (version, request body, body version of the answer, error code, whether
-    // the answer lists the full table). With unstable api versions disabled
-    // the listener serves Kafka 4.3.1's v0-v4, so v5 is answered the way that
-    // release answers it.
-    let strict_rows = api_version_cases((5, request_body(5, "krabka"), 0, 35, false));
-    let trunk_rows = api_version_cases((5, request_body(5, "krabka"), 5, 0, true));
+    // With unstable api versions disabled the listener serves Kafka 4.3.1's
+    // v0-v4, so v5 is answered the way that release answers it.
+    let strict_rows =
+        api_version_cases(api_version_case(5, request_body(5, "krabka"), 0, 35, false));
+    let trunk_rows = api_version_cases(api_version_case(5, request_body(5, "krabka"), 5, 0, true));
     for (api_versions, served_max, rows) in [(Disabled, 4, strict_rows), (Enabled, 5, trunk_rows)] {
         let unstable = super::Unstable { api_versions };
         let (engine, _dir) = single_voter_engine();
@@ -95,7 +120,17 @@ async fn controller_listener_answers_api_versions_refusals_and_keeps_the_connect
             KraftController::wall_clock_ms,
         ));
 
-        for (correlation_id, (version, body, body_version, error_code, full)) in (1..).zip(rows) {
+        for (
+            correlation_id,
+            ApiVersionCase {
+                version,
+                body,
+                body_version,
+                error_code,
+                full,
+            },
+        ) in (1..).zip(rows)
+        {
             let label = format!("{api_versions:?} v{version}");
             client
                 .write_all(&api_versions_frame(version, correlation_id, &body))

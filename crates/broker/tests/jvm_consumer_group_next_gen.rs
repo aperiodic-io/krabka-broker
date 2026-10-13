@@ -23,9 +23,7 @@ const KAFKA_IMAGE_NEXT_GEN: &str = "mirror.gcr.io/apache/kafka:4.0.0";
 /// heartbeat's `SubscribedTopicRegex` instead of being compiled client-side.
 const KAFKA_IMAGE_CLASSIC: &str = "mirror.gcr.io/confluentinc/cp-kafka:7.4.0";
 
-async fn start_host_broker() -> (krabka_broker::BrokerHandle, tempfile::TempDir) {
-    support::start_jvm_single("krabka_broker=info,info", |_| {}).await
-}
+use support::{StartedBroker, start_host_broker};
 /// Pre-create a topic with the classic admin tooling. Krabka's broker does
 /// not auto-create topics on the produce path, so tests must create them
 /// explicitly. This matches the existing `jvm_acceptance.rs` convention.
@@ -100,7 +98,10 @@ fn parse_partitions(stdout: &str) -> std::collections::BTreeSet<i32> {
 #[ignore = "requires Docker"]
 async fn jvm_kip848_single_consumer_round_trip() {
     let bootstrap = bootstrap_addr();
-    let (_broker, _dir) = start_host_broker().await;
+    let StartedBroker {
+        broker: _broker,
+        dir: _dir,
+    } = start_host_broker().await;
     create_topic("kip848-rt", 1);
     let produced = docker_run(KAFKA_IMAGE_CLASSIC, &[
         "bash",
@@ -129,7 +130,10 @@ async fn jvm_kip848_single_consumer_round_trip() {
 #[ignore = "requires Docker"]
 async fn jvm_kip848_describe_group() {
     let bootstrap = bootstrap_addr();
-    let (_broker, _dir) = start_host_broker().await;
+    let StartedBroker {
+        broker: _broker,
+        dir: _dir,
+    } = start_host_broker().await;
     create_topic("kip848-d", 1);
     docker_run(KAFKA_IMAGE_CLASSIC, &[
         "bash",
@@ -163,7 +167,10 @@ async fn jvm_kip848_describe_group() {
 #[ignore = "requires Docker"]
 async fn jvm_kip848_delete_group() {
     let bootstrap = bootstrap_addr();
-    let (_broker, _dir) = start_host_broker().await;
+    let StartedBroker {
+        broker: _broker,
+        dir: _dir,
+    } = start_host_broker().await;
     create_topic("kip848-del", 1);
     docker_run(KAFKA_IMAGE_CLASSIC, &[
         "bash",
@@ -193,7 +200,10 @@ async fn jvm_kip848_delete_group() {
 #[ignore = "requires Docker"]
 async fn jvm_kip848_coexists_with_classic() {
     let bootstrap = bootstrap_addr();
-    let (_broker, _dir) = start_host_broker().await;
+    let StartedBroker {
+        broker: _broker,
+        dir: _dir,
+    } = start_host_broker().await;
     create_topic("kip848-coex", 1);
     docker_run(KAFKA_IMAGE_CLASSIC, &[
         "bash",
@@ -247,7 +257,7 @@ async fn jvm_kip848_coexists_with_classic() {
 #[ignore = "requires Docker"]
 async fn jvm_kip848_classic_and_consumer_in_one_group_migrate() {
     let bootstrap = bootstrap_addr();
-    let (broker, _dir) = start_host_broker().await;
+    let StartedBroker { broker, dir: _dir } = start_host_broker().await;
     create_topic("mig", 4);
     let group = "g-migrate";
     let all: std::collections::BTreeSet<i32> = (0..4).collect();

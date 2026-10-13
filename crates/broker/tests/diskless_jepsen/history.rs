@@ -154,11 +154,21 @@ pub(crate) fn durable_end(ledger: &[AckedRecord]) -> i64 {
     i64::try_from(ledger.len()).expect("ledger length fits i64")
 }
 
-/// The `(offset, value)` pairs the readback must reproduce.
-pub(crate) fn ledger_values(ledger: &[AckedRecord]) -> Vec<(i64, Vec<u8>)> {
+/// The offset and value of one record, as the readback must reproduce it.
+#[derive(Debug, PartialEq)]
+pub(crate) struct LedgerEntry {
+    pub(crate) offset: i64,
+    pub(crate) value: Vec<u8>,
+}
+
+/// The entries the readback must reproduce.
+pub(crate) fn ledger_values(ledger: &[AckedRecord]) -> Vec<LedgerEntry> {
     ledger
         .iter()
-        .map(|record| (record.offset, record.value.clone()))
+        .map(|record| LedgerEntry {
+            offset: record.offset,
+            value: record.value.clone(),
+        })
         .collect()
 }
 

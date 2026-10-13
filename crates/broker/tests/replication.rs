@@ -44,10 +44,16 @@ mod idempotent_failover;
 
 type Cluster = Vec<(BrokerHandle, BrokerConfig, TempDir)>;
 
+/// A created topic: where its leader listens and the id `CreateTopics` gave it.
+struct ReplicatedPartition {
+    leader_addr: String,
+    topic_id: krabka_protocol::primitives::uuid::Uuid,
+}
+
 async fn create_replicated_partition(
     cluster: &Cluster,
     topic: CreatableTopic,
-) -> (String, krabka_protocol::primitives::uuid::Uuid) {
+) -> ReplicatedPartition {
     let leader_addr = cluster[0].1.listen_addr.to_string();
     let admin = connect_client(leader_addr.clone(), None).await;
     let name = topic.name.clone();
@@ -58,10 +64,19 @@ async fn create_replicated_partition(
     for (handle, _, _) in cluster {
         handle.wait_until_partition_present(&name, 0).await;
     }
-    (leader_addr, topic_id)
+    ReplicatedPartition {
+        leader_addr,
+        topic_id,
+    }
 }
 
-async fn metrics_cluster(topic: &str) -> (Cluster, std::net::SocketAddr) {
+/// A cluster and the metrics address of its first broker.
+struct MetricsCluster {
+    cluster: Cluster,
+    metrics_addr: std::net::SocketAddr,
+}
+
+async fn metrics_cluster(topic: &str) -> MetricsCluster {
     let cluster = support::start_n_node_with(3, |_, config| {
         config.metrics_listen_addr = Some("127.0.0.1:0".parse().unwrap());
     })
@@ -85,15 +100,20 @@ async fn metrics_cluster(topic: &str) -> (Cluster, std::net::SocketAddr) {
         .0
         .metrics_addr()
         .expect("metrics server should be bound");
-    (cluster, metrics_addr)
+    MetricsCluster {
+        cluster,
+        metrics_addr,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn replication_factor_three_propagates_to_all_followers() {
     let _g = cluster_lock().lock().await;
     let cluster = registered_cluster(3).await;
-    let (leader_addr, topic_id) =
-        create_replicated_partition(&cluster, support::topic_on("repl", &[&[1, 2, 3]])).await;
+    let ReplicatedPartition {
+        leader_addr,
+        topic_id,
+    } = create_replicated_partition(&cluster, support::topic_on("repl", &[&[1, 2, 3]])).await;
 
     let producer = connect_client(leader_addr, None).await;
     let batch = support::client::value_batch().records(20).call();
@@ -111,8 +131,10 @@ async fn replication_factor_three_propagates_to_all_followers() {
 async fn out_of_range_truncates_and_recovers() {
     let _g = cluster_lock().lock().await;
     let cluster = registered_cluster(3).await;
-    let (leader_addr, topic_id) =
-        create_replicated_partition(&cluster, support::topic_on("oor", &[&[1, 2, 3]])).await;
+    let ReplicatedPartition {
+        leader_addr,
+        topic_id,
+    } = create_replicated_partition(&cluster, support::topic_on("oor", &[&[1, 2, 3]])).await;
 
     // Produce 50 records in 50 separate single-record batches so the
     // leader's log holds them as discrete batches. A single 50-record
@@ -184,7 +206,10 @@ async fn a_follower_that_catches_up_across_segments_copies_every_batch() {
         handle.wait_until_brokers_registered(3).await;
     }
 
-    let (leader_addr, topic_id) = create_replicated_partition(&cluster, CreatableTopic {
+    let ReplicatedPartition {
+        leader_addr,
+        topic_id,
+    } = create_replicated_partition(&cluster, CreatableTopic {
         configs: vec![CreatableTopicConfig {
             name: "segment.bytes".into(),
             value: Some("1048576".into()),
@@ -305,7 +330,10 @@ async fn delete_records_moves_every_replica_log_start_before_it_answers() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_follower_batches_every_partition_of_one_leader_into_one_session() {
     let _g = cluster_lock().lock().await;
-    let (cluster, metrics_addr) = metrics_cluster("batched").await;
+    let MetricsCluster {
+        cluster,
+        metrics_addr,
+    } = metrics_cluster("batched").await;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let mut sessions = -1_i64;
     while std::time::Instant::now() < deadline {
@@ -337,7 +365,10 @@ async fn a_follower_batches_every_partition_of_one_leader_into_one_session() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_caught_up_follower_fetches_a_few_times_a_second_whatever_it_follows() {
     let _g = cluster_lock().lock().await;
-    let (cluster, metrics_addr) = metrics_cluster("idle-rate").await;
+    let MetricsCluster {
+        cluster,
+        metrics_addr,
+    } = metrics_cluster("idle-rate").await;
     // Let the followers settle into their steady state before sampling.
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     let before = scrape_counter(metrics_addr, "krabka_broker_api_requests_total", "Fetch").await;

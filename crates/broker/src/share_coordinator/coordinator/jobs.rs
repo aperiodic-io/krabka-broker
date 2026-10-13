@@ -230,8 +230,14 @@ pub(crate) fn periodic_jobs_enabled(image: &MetadataImage) -> bool { share_group
 fn deleted_topic_ids(previous: &MetadataImage, next: &MetadataImage) -> HashSet<uuid::Uuid> {
     deleted_topics(previous, next)
         .into_iter()
-        .map(|(_, topic_id)| topic_id)
+        .map(|topic| topic.topic_id)
         .collect()
+}
+
+/// A baseline image and the channel of the later ones.
+struct ImageWatch {
+    baseline: Arc<MetadataImage>,
+    images: watch::Receiver<Arc<MetadataImage>>,
 }
 
 /// Spawns the loop of [`run`].
@@ -244,10 +250,10 @@ pub(crate) fn spawn(
     shutdown: CancellationToken,
 ) {
     let baseline = images.borrow_and_update().clone();
-    tokio::spawn(run(coordinator, (baseline, images), shutdown));
+    tokio::spawn(run(coordinator, ImageWatch { baseline, images }, shutdown));
 }
 
-/// Watches `images`, a baseline image and the channel of the later ones, and
+/// Watches `image_watch`, a baseline image and the channel of the later ones, and
 /// drives the background work until `shutdown` is cancelled or the channel
 /// closes.
 ///
@@ -257,10 +263,13 @@ pub(crate) fn spawn(
 /// `TimerTask`s do. They stop when share groups become disabled.
 async fn run(
     coordinator: Arc<ShareCoordinator>,
-    images: (Arc<MetadataImage>, watch::Receiver<Arc<MetadataImage>>),
+    image_watch: ImageWatch,
     shutdown: CancellationToken,
 ) {
-    let (mut previous, mut images) = images;
+    let ImageWatch {
+        baseline: mut previous,
+        mut images,
+    } = image_watch;
     let prune_interval = coordinator.config.state_topic_prune_interval;
     let cold_interval = coordinator.config.cold_partition_snapshot_interval;
     let mut enabled = periodic_jobs_enabled(&previous);

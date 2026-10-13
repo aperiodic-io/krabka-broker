@@ -397,11 +397,11 @@ fn build_topic_rows(
         requested.names.iter().map(String::as_str),
         !requested.all,
     );
-    let (mut described, denied_describe): (Vec<&str>, Vec<&str>) = requested
+    let (mut described, denied_describe) = requested
         .names
         .iter()
         .map(String::as_str)
-        .partition(|name| allowed(&describe, name));
+        .partition::<Vec<&str>, _>(|name| allowed(&describe, name));
 
     let auto_create = broker.config.auto_create_topics_enable
         && inputs.request.allow_auto_topic_creation

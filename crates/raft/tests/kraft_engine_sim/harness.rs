@@ -248,15 +248,26 @@ where
     }
 }
 
-/// The set of `(node, leader_id, leader_epoch)` that each live engine currently
-/// believes, read through the non-mutating `quorum_state` handle op.
-async fn leaders(net: &SimNet, ids: &[NodeId]) -> Vec<(NodeId, Option<NodeId>, u32)> {
+/// The leader and epoch that one engine currently believes.
+struct LeaderView {
+    node: NodeId,
+    leader: Option<NodeId>,
+    epoch: u32,
+}
+
+/// The leader view of each live engine, read through the non-mutating
+/// `quorum_state` handle op.
+async fn leaders(net: &SimNet, ids: &[NodeId]) -> Vec<LeaderView> {
     let mut out = Vec::new();
     for &id in ids {
         if let Some(ctrl) = net.get(id)
             && let Ok(qs) = ctrl.quorum_state().await
         {
-            out.push((id, qs.leader_id, qs.leader_epoch));
+            out.push(LeaderView {
+                node: id,
+                leader: qs.leader_id,
+                epoch: qs.leader_epoch,
+            });
         }
     }
     out
@@ -277,12 +288,12 @@ pub(crate) async fn await_single_leader(
         // All live nodes must report the same Some(leader) and same epoch, and
         // that leader must be one of the live nodes.
         if !snap.is_empty() {
-            let first_leader = snap[0].1;
-            let first_epoch = snap[0].2;
+            let first_leader = snap[0].leader;
+            let first_epoch = snap[0].epoch;
             if let Some(leader) = first_leader {
                 let agree = snap
                     .iter()
-                    .all(|(_, l, e)| *l == Some(leader) && *e == first_epoch);
+                    .all(|view| view.leader == Some(leader) && view.epoch == first_epoch);
                 let live = ids.contains(&leader);
                 if agree && live {
                     return (leader, first_epoch);
@@ -291,7 +302,10 @@ pub(crate) async fn await_single_leader(
         }
         assert2::assert!(
             tokio::time::Instant::now() < deadline,
-            "no single leader before timeout; states={snap:?}"
+            "no single leader before timeout; states={:?}",
+            snap.iter()
+                .map(|view| format!("{:?} sees {:?} at {}", view.node, view.leader, view.epoch))
+                .collect::<Vec<_>>()
         );
         tokio::task::yield_now().await;
     }

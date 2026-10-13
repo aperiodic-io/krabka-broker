@@ -3,7 +3,8 @@ use {
     crate::{
         TransactionalBatch,
         log::test_support::{
-            AppendPath as Path, append_path as append, control_key, control_value, test_log,
+            AppendPath as Path, TempLog, append_path as append, control_key, control_value,
+            test_log,
         },
         test_support::open_log,
     },
@@ -225,6 +226,20 @@ fn active(
     }
 }
 
+/// A case name, the batches appended, and the active producers expected.
+struct ActiveProducersCase {
+    name: &'static str,
+    batches: Vec<RecordBatch>,
+    want: Vec<ActiveProducer>,
+}
+
+/// A case name, the batches appended, and the last records expected.
+struct LastRecordsCase {
+    name: &'static str,
+    batches: Vec<RecordBatch>,
+    want: HashMap<ProducerId, ProducerLastRecord>,
+}
+
 /// Compare a projection after each append path, replay and producer snapshot load.
 fn check_append_paths<T: std::fmt::Debug + PartialEq>(
     name: &str,
@@ -233,7 +248,7 @@ fn check_append_paths<T: std::fmt::Debug + PartialEq>(
     read: impl Fn(&Log) -> T,
 ) {
     for path in [Path::Leader, Path::Follower, Path::Verbatim] {
-        let (dir, mut log) = test_log();
+        let TempLog { dir, mut log } = test_log();
         for batch in batches.iter().cloned() {
             append(&mut log, path, batch);
         }
@@ -261,26 +276,26 @@ fn check_append_paths<T: std::fmt::Debug + PartialEq>(
 /// the producer-state snapshot.
 #[test]
 fn active_producers_report_the_producer_state_of_every_append_path() {
-    let cases: Vec<(&str, Vec<RecordBatch>, Vec<ActiveProducer>)> = vec![
-        (
-            "a batch without a producer id",
-            producer_history(ProducerHistory::MissingId),
-            vec![],
-        ),
-        (
-            "idempotent batches",
-            producer_history(ProducerHistory::Idempotent),
-            vec![
+    let cases = vec![
+        ActiveProducersCase {
+            name: "a batch without a producer id",
+            batches: producer_history(ProducerHistory::MissingId),
+            want: vec![],
+        },
+        ActiveProducersCase {
+            name: "idempotent batches",
+            batches: producer_history(ProducerHistory::Idempotent),
+            want: vec![
                 active()
                     .producer_epoch(2)
                     .last_sequence(4)
                     .last_timestamp(2_000)
                     .call(),
             ],
-        ),
-        (
-            "an open transaction",
-            vec![
+        },
+        ActiveProducersCase {
+            name: "an open transaction",
+            batches: vec![
                 data()
                     .producer(BatchProducer::from_wire((8, 0)))
                     .records(2)
@@ -293,7 +308,7 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
                     .transaction(BatchTransactionMode::Transactional)
                     .call(),
             ],
-            vec![
+            want: vec![
                 active()
                     .producer_id(8)
                     .last_sequence(2)
@@ -301,11 +316,11 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
                     .maybe_current_txn_start_offset(Some(0))
                     .call(),
             ],
-        ),
-        (
-            "a commit at the same epoch (transaction version 1)",
-            producer_history(ProducerHistory::Committed),
-            vec![
+        },
+        ActiveProducersCase {
+            name: "a commit at the same epoch (transaction version 1)",
+            batches: producer_history(ProducerHistory::Committed),
+            want: vec![
                 active()
                     .producer_id(9)
                     .producer_epoch(1)
@@ -314,11 +329,11 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
                     .coordinator_epoch(5)
                     .call(),
             ],
-        ),
-        (
-            "an abort at a bumped epoch (transaction version 2)",
-            producer_history(ProducerHistory::Aborted),
-            vec![
+        },
+        ActiveProducersCase {
+            name: "an abort at a bumped epoch (transaction version 2)",
+            batches: producer_history(ProducerHistory::Aborted),
+            want: vec![
                 active()
                     .producer_id(10)
                     .producer_epoch(2)
@@ -327,11 +342,11 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
                     .coordinator_epoch(6)
                     .call(),
             ],
-        ),
-        (
-            "a marker without a data batch",
-            producer_history(ProducerHistory::MarkerOnly),
-            vec![
+        },
+        ActiveProducersCase {
+            name: "a marker without a data batch",
+            batches: producer_history(ProducerHistory::MarkerOnly),
+            want: vec![
                 active()
                     .producer_id(11)
                     .producer_epoch(3)
@@ -340,10 +355,10 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
                     .coordinator_epoch(7)
                     .call(),
             ],
-        ),
-        (
-            "a transaction after a commit",
-            vec![
+        },
+        ActiveProducersCase {
+            name: "a transaction after a commit",
+            batches: vec![
                 data()
                     .producer(BatchProducer::from_wire((12, 0)))
                     .transaction(BatchTransactionMode::Transactional)
@@ -360,7 +375,7 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
                     .transaction(BatchTransactionMode::Transactional)
                     .call(),
             ],
-            vec![
+            want: vec![
                 active()
                     .producer_id(12)
                     .last_sequence(1)
@@ -369,11 +384,11 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
                     .maybe_current_txn_start_offset(Some(2))
                     .call(),
             ],
-        ),
-        (
-            "several producers, in producer id order",
-            producer_history(ProducerHistory::SeveralProducers),
-            vec![
+        },
+        ActiveProducersCase {
+            name: "several producers, in producer id order",
+            batches: producer_history(ProducerHistory::SeveralProducers),
+            want: vec![
                 active().producer_id(20).last_timestamp(2_000).call(),
                 active()
                     .producer_id(25)
@@ -383,9 +398,14 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
                     .call(),
                 active().producer_id(30).call(),
             ],
-        ),
+        },
     ];
-    for (name, batches, want) in cases {
+    for ActiveProducersCase {
+        name,
+        batches,
+        want,
+    } in cases
+    {
         check_append_paths(name, &batches, &want, Log::active_producers);
     }
 }
@@ -403,47 +423,48 @@ fn last_records_of_active_producers_follow_every_append_path() {
             producer_epoch,
         })
     };
-    let cases: Vec<(
-        &str,
-        Vec<RecordBatch>,
-        HashMap<ProducerId, ProducerLastRecord>,
-    )> = vec![
-        (
-            "a batch without a producer id",
-            producer_history(ProducerHistory::MissingId),
-            HashMap::new(),
-        ),
-        (
-            "idempotent batches",
-            producer_history(ProducerHistory::Idempotent),
-            HashMap::from([last(7, Some(4), 2)]),
-        ),
-        (
-            "a commit at the same epoch (transaction version 1)",
-            producer_history(ProducerHistory::Committed),
-            HashMap::from([last(9, Some(1), 1)]),
-        ),
-        (
-            "an abort at a bumped epoch (transaction version 2)",
-            producer_history(ProducerHistory::Aborted),
-            HashMap::from([last(10, None, 2)]),
-        ),
-        (
-            "a marker without a data batch",
-            producer_history(ProducerHistory::MarkerOnly),
-            HashMap::from([last(11, None, 3)]),
-        ),
-        (
-            "several producers",
-            producer_history(ProducerHistory::SeveralProducers),
-            HashMap::from([
+    let cases = vec![
+        LastRecordsCase {
+            name: "a batch without a producer id",
+            batches: producer_history(ProducerHistory::MissingId),
+            want: HashMap::new(),
+        },
+        LastRecordsCase {
+            name: "idempotent batches",
+            batches: producer_history(ProducerHistory::Idempotent),
+            want: HashMap::from([last(7, Some(4), 2)]),
+        },
+        LastRecordsCase {
+            name: "a commit at the same epoch (transaction version 1)",
+            batches: producer_history(ProducerHistory::Committed),
+            want: HashMap::from([last(9, Some(1), 1)]),
+        },
+        LastRecordsCase {
+            name: "an abort at a bumped epoch (transaction version 2)",
+            batches: producer_history(ProducerHistory::Aborted),
+            want: HashMap::from([last(10, None, 2)]),
+        },
+        LastRecordsCase {
+            name: "a marker without a data batch",
+            batches: producer_history(ProducerHistory::MarkerOnly),
+            want: HashMap::from([last(11, None, 3)]),
+        },
+        LastRecordsCase {
+            name: "several producers",
+            batches: producer_history(ProducerHistory::SeveralProducers),
+            want: HashMap::from([
                 last(20, Some(1), 0),
                 last(25, Some(2), 4),
                 last(30, Some(0), 0),
             ]),
-        ),
+        },
     ];
-    for (name, batches, want) in cases {
+    for LastRecordsCase {
+        name,
+        batches,
+        want,
+    } in cases
+    {
         check_append_paths(name, &batches, &want, Log::last_records_of_active_producers);
     }
 }
@@ -465,7 +486,7 @@ fn remove_expired_producers_keeps_open_transactions_and_recent_producers() {
         ("long after every write", i64::MAX, vec![3]),
     ];
     for (name, now_ms, staying) in cases {
-        let (_dir, mut log) = test_log();
+        let TempLog { dir: _dir, mut log } = test_log();
         log.append(&mut data().producer(BatchProducer::from_wire((1, 0))).call())
             .unwrap();
         log.append(
@@ -517,7 +538,7 @@ fn remove_expired_producers_keeps_open_transactions_and_recent_producers() {
 /// gone too, so the next batch at the same epoch is its only batch.
 #[test]
 fn an_expired_producer_starts_again_without_its_retained_batches() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     log.append(&mut data().producer(BatchProducer::from_wire((5, 0))).call())
         .unwrap();
     log.append(
@@ -571,7 +592,7 @@ fn remove_expired_producers_drops_old_verification_state() {
         ("a verification at the expiration", 2_000, false),
     ];
     for (name, now_ms, verifies) in cases {
-        let (_dir, mut log) = test_log();
+        let TempLog { dir: _dir, mut log } = test_log();
         let guard = log
             .maybe_start_transaction_verification(batch, false, (1_000, 86_400_000))
             .unwrap();

@@ -370,52 +370,127 @@ mod tests {
     /// has finalized `metadata.version` 25 and `group.version` 1.
     #[test]
     fn features_are_checked_as_kafka_checks_them() {
-        type Case<'a> = (&'a str, &'a [(&'a str, i16, i16)], Result<(), i16>);
-        let cases: &[Case<'_>] = &[
-            (
-                "both finalized features in range",
-                &[("metadata.version", 7, 25), ("group.version", 0, 1)],
-                Ok(()),
-            ),
-            (
-                "metadata.version below the finalized level",
-                &[("metadata.version", 7, 24), ("group.version", 0, 1)],
-                Err(codes::UNSUPPORTED_VERSION),
-            ),
-            (
-                "a feature the cluster left at level 0 that the broker cannot run at 0",
-                &[
-                    ("metadata.version", 7, 25),
-                    ("group.version", 0, 1),
-                    ("share.version", 1, 1),
+        /// A supported version range the registering broker reports for a feature.
+        struct FeatureRange {
+            name: &'static str,
+            min: i16,
+            max: i16,
+        }
+
+        /// A case label, the features the broker reports, and the registration outcome.
+        struct FeatureCase {
+            what: &'static str,
+            features: &'static [FeatureRange],
+            expected: Result<(), i16>,
+        }
+
+        let cases: &[FeatureCase] = &[
+            FeatureCase {
+                what: "both finalized features in range",
+                features: &[
+                    FeatureRange {
+                        name: "metadata.version",
+                        min: 7,
+                        max: 25,
+                    },
+                    FeatureRange {
+                        name: "group.version",
+                        min: 0,
+                        max: 1,
+                    },
                 ],
-                Err(codes::UNSUPPORTED_VERSION),
-            ),
-            (
-                "an unfinalized feature that includes level 0",
-                &[
-                    ("metadata.version", 7, 25),
-                    ("group.version", 0, 1),
-                    ("share.version", 0, 1),
+                expected: Ok(()),
+            },
+            FeatureCase {
+                what: "metadata.version below the finalized level",
+                features: &[
+                    FeatureRange {
+                        name: "metadata.version",
+                        min: 7,
+                        max: 24,
+                    },
+                    FeatureRange {
+                        name: "group.version",
+                        min: 0,
+                        max: 1,
+                    },
                 ],
-                Ok(()),
-            ),
-            (
-                "no metadata.version",
-                &[("group.version", 0, 1)],
-                Err(codes::INVALID_REGISTRATION),
-            ),
-            ("no features at all", &[], Err(codes::INVALID_REGISTRATION)),
-            (
-                "a finalized feature the broker does not name",
-                &[("metadata.version", 7, 25)],
-                Err(codes::UNSUPPORTED_VERSION),
-            ),
-            (
-                "an unsupported feature wins over a missing metadata.version",
-                &[("group.version", 2, 3)],
-                Err(codes::UNSUPPORTED_VERSION),
-            ),
+                expected: Err(codes::UNSUPPORTED_VERSION),
+            },
+            FeatureCase {
+                what: "a feature the cluster left at level 0 that the broker cannot run at 0",
+                features: &[
+                    FeatureRange {
+                        name: "metadata.version",
+                        min: 7,
+                        max: 25,
+                    },
+                    FeatureRange {
+                        name: "group.version",
+                        min: 0,
+                        max: 1,
+                    },
+                    FeatureRange {
+                        name: "share.version",
+                        min: 1,
+                        max: 1,
+                    },
+                ],
+                expected: Err(codes::UNSUPPORTED_VERSION),
+            },
+            FeatureCase {
+                what: "an unfinalized feature that includes level 0",
+                features: &[
+                    FeatureRange {
+                        name: "metadata.version",
+                        min: 7,
+                        max: 25,
+                    },
+                    FeatureRange {
+                        name: "group.version",
+                        min: 0,
+                        max: 1,
+                    },
+                    FeatureRange {
+                        name: "share.version",
+                        min: 0,
+                        max: 1,
+                    },
+                ],
+                expected: Ok(()),
+            },
+            FeatureCase {
+                what: "no metadata.version",
+                features: &[FeatureRange {
+                    name: "group.version",
+                    min: 0,
+                    max: 1,
+                }],
+                expected: Err(codes::INVALID_REGISTRATION),
+            },
+            FeatureCase {
+                what: "no features at all",
+                features: &[],
+                expected: Err(codes::INVALID_REGISTRATION),
+            },
+            FeatureCase {
+                what: "a finalized feature the broker does not name",
+                features: &[FeatureRange {
+                    name: "metadata.version",
+                    min: 7,
+                    max: 25,
+                }],
+                expected: Err(codes::UNSUPPORTED_VERSION),
+            },
+            FeatureCase {
+                what: "an unsupported feature wins over a missing metadata.version",
+                features: &[FeatureRange {
+                    name: "group.version",
+                    min: 2,
+                    max: 3,
+                }],
+                expected: Err(codes::UNSUPPORTED_VERSION),
+            },
         ];
         let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
         for (name, level) in [("metadata.version", 25), ("group.version", 1)] {
@@ -426,11 +501,16 @@ mod tests {
                 },
             ));
         }
-        for (what, features, expected) in cases {
+        for FeatureCase {
+            what,
+            features,
+            expected,
+        } in cases
+        {
             let req = BrokerRegistrationRequest {
                 features: features
                     .iter()
-                    .map(|&(name, min, max)| Feature {
+                    .map(|&FeatureRange { name, min, max }| Feature {
                         name: name.into(),
                         min_supported_version: min,
                         max_supported_version: max,
@@ -448,28 +528,59 @@ mod tests {
     /// directory 500, and broker 2 is registering.
     #[test]
     fn log_dirs_are_checked_as_kafka_checks_them() {
-        let cases: &[(&str, &[u128], Result<(), i16>)] = &[
-            ("one fresh directory", &[1000], Ok(())),
-            ("two fresh directories", &[1000, 1001], Ok(())),
-            ("no directory", &[], Err(codes::INVALID_REGISTRATION)),
-            ("MIGRATING", &[0], Err(codes::INVALID_REGISTRATION)),
-            (
-                "the last reserved id",
-                &[99],
-                Err(codes::INVALID_REGISTRATION),
-            ),
-            ("the first id past the reserved range", &[100], Ok(())),
-            (
-                "one id twice",
-                &[1000, 1000],
-                Err(codes::INVALID_REGISTRATION),
-            ),
-            (
-                "a directory another broker registered",
-                &[1000, 500],
-                Err(codes::INVALID_REGISTRATION),
-            ),
-            ("a directory it registered itself", &[600], Ok(())),
+        /// A case label, the directories the broker reports, and the registration outcome.
+        struct DirCase {
+            what: &'static str,
+            directories: &'static [u128],
+            expected: Result<(), i16>,
+        }
+
+        let cases: &[DirCase] = &[
+            DirCase {
+                what: "one fresh directory",
+                directories: &[1000],
+                expected: Ok(()),
+            },
+            DirCase {
+                what: "two fresh directories",
+                directories: &[1000, 1001],
+                expected: Ok(()),
+            },
+            DirCase {
+                what: "no directory",
+                directories: &[],
+                expected: Err(codes::INVALID_REGISTRATION),
+            },
+            DirCase {
+                what: "MIGRATING",
+                directories: &[0],
+                expected: Err(codes::INVALID_REGISTRATION),
+            },
+            DirCase {
+                what: "the last reserved id",
+                directories: &[99],
+                expected: Err(codes::INVALID_REGISTRATION),
+            },
+            DirCase {
+                what: "the first id past the reserved range",
+                directories: &[100],
+                expected: Ok(()),
+            },
+            DirCase {
+                what: "one id twice",
+                directories: &[1000, 1000],
+                expected: Err(codes::INVALID_REGISTRATION),
+            },
+            DirCase {
+                what: "a directory another broker registered",
+                directories: &[1000, 500],
+                expected: Err(codes::INVALID_REGISTRATION),
+            },
+            DirCase {
+                what: "a directory it registered itself",
+                directories: &[600],
+                expected: Ok(()),
+            },
         ];
         let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
         for (node, directory) in [(1, 500), (2, 600)] {
@@ -483,7 +594,12 @@ mod tests {
                 },
             ));
         }
-        for (what, directories, expected) in cases {
+        for DirCase {
+            what,
+            directories,
+            expected,
+        } in cases
+        {
             let req = BrokerRegistrationRequest {
                 broker_id: 2,
                 log_dirs: directories

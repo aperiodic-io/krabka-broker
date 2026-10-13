@@ -49,25 +49,32 @@ const KAFKA_IMAGE: &str = "mirror.gcr.io/apache/kafka:4.3.1";
 /// store rather than the cluster-Alter gate in front of it.
 const CONTROLLER_PRINCIPAL: &str = "ANONYMOUS";
 
-/// Ports for this test process, allocated once rather than fixed, so this
-/// suite can run beside the other container suites.
-fn ports() -> &'static (String, String, String) {
-    static PORTS: std::sync::OnceLock<(String, String, String)> = std::sync::OnceLock::new();
+/// The advertised, listen and controller listen addresses of this test
+/// process, allocated once rather than fixed, so this suite can run beside the
+/// other container suites.
+struct Ports {
+    advertised: String,
+    listen: String,
+    controller: String,
+}
+
+fn ports() -> &'static Ports {
+    static PORTS: std::sync::OnceLock<Ports> = std::sync::OnceLock::new();
     PORTS.get_or_init(|| {
         let (client, controller) = (support::free_port(), support::free_port());
-        (
-            format!("host.docker.internal:{client}"),
-            format!("0.0.0.0:{client}"),
-            format!("0.0.0.0:{controller}"),
-        )
+        Ports {
+            advertised: format!("host.docker.internal:{client}"),
+            listen: format!("0.0.0.0:{client}"),
+            controller: format!("0.0.0.0:{controller}"),
+        }
     })
 }
 
-fn advertised_addr() -> &'static str { &ports().0 }
+fn advertised_addr() -> &'static str { &ports().advertised }
 
-fn listen_addr() -> &'static str { &ports().1 }
+fn listen_addr() -> &'static str { &ports().listen }
 
-fn controller_listen() -> &'static str { &ports().2 }
+fn controller_listen() -> &'static str { &ports().controller }
 
 /// The controller listener as the CLI containers address it. The voter set
 /// carries the same name, because `DescribeCluster` projects the voter
@@ -77,11 +84,15 @@ fn controller_bootstrap() -> &'static str {
     ADDR.get_or_init(|| controller_listen().replace("0.0.0.0", "host.docker.internal"))
 }
 
+/// A running broker and the directory that backs it.
+struct StartedBroker {
+    broker: BrokerHandle,
+    dir: tempfile::TempDir,
+}
+
 /// Boot an in-process broker whose controller listener the CLI containers
 /// reach at [`controller_bootstrap`], letting the caller adjust the config.
-async fn start_host_broker_with(
-    adjust: impl FnOnce(&mut BrokerConfig),
-) -> (BrokerHandle, tempfile::TempDir) {
+async fn start_host_broker_with(adjust: impl FnOnce(&mut BrokerConfig)) -> StartedBroker {
     init_jvm_tracing("krabka_broker=info,warn");
     let dir = tempfile::tempdir().expect("tempdir");
     let mut config = BrokerConfig {
@@ -101,8 +112,8 @@ async fn start_host_broker_with(
             .call()
     };
     adjust(&mut config);
-    let handle = Broker::start(config).await.expect("start broker");
-    (handle, dir)
+    let broker = Broker::start(config).await.expect("start broker");
+    StartedBroker { broker, dir }
 }
 
 /// Run one Kafka admin tool with `--bootstrap-controller <controller>` from
@@ -152,7 +163,7 @@ fn kafka_tool(tool: &str, args: &[&str]) -> String {
 async fn kafka_configs_bootstrap_controller_round_trips_a_dynamic_broker_config() {
     const THROTTLE: &str = "leader.replication.throttled.rate=1048576";
 
-    let (broker, _dir) = start_host_broker_with(|_| {}).await;
+    let StartedBroker { broker, dir: _dir } = start_host_broker_with(|_| {}).await;
 
     kafka_tool("kafka-configs", &[
         "--entity-type",
@@ -188,7 +199,7 @@ async fn kafka_configs_bootstrap_controller_round_trips_a_dynamic_broker_config(
 async fn kafka_acls_bootstrap_controller_add_list_remove() {
     const TOPIC: &str = "controller-acl-topic";
 
-    let (broker, _dir) = start_host_broker_with(|config| {
+    let StartedBroker { broker, dir: _dir } = start_host_broker_with(|config| {
         // The PLAINTEXT controller listener carries `ANONYMOUS`, so that
         // principal is the super user, as Kafka's docs set it up.
         config.authorizer =
@@ -238,7 +249,7 @@ async fn kafka_acls_bootstrap_controller_add_list_remove() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn kafka_reassign_partitions_bootstrap_controller_lists() {
-    let (broker, _dir) = start_host_broker_with(|_| {}).await;
+    let StartedBroker { broker, dir: _dir } = start_host_broker_with(|_| {}).await;
 
     let listed = kafka_tool("kafka-reassign-partitions", &["--list"]);
 
@@ -294,7 +305,7 @@ async fn kafka_topics_has_no_bootstrap_controller_option() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn kafka_features_bootstrap_controller_describes_and_downgrades() {
-    let (broker, _dir) = start_host_broker_with(|_| {}).await;
+    let StartedBroker { broker, dir: _dir } = start_host_broker_with(|_| {}).await;
 
     let described = kafka_tool("kafka-features", &["describe"]);
     let before = support::jvm_finalized_level(&described, "transaction.version");

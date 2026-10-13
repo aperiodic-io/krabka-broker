@@ -75,6 +75,13 @@ mod support;
 
 const USER: &str = "broker";
 const PASS: &str = "secret";
+
+/// A `SASL/PLAIN` user name and password.
+#[derive(Clone, Copy)]
+struct PlainLogin<'a> {
+    username: &'a str,
+    password: &'a str,
+}
 const IB_LISTENER: &str = "SASL_PLAINTEXT";
 const TID: &str = "remote-fanout-tid";
 const TOPIC: &str = "t";
@@ -111,7 +118,7 @@ fn apply_sasl(cfg: &mut BrokerConfig, addr: SocketAddr) {
 
 /// Client-side `SASL/PLAIN` so the test's low-level clients authenticate
 /// against the brokers' `SASL_PLAINTEXT` listener.
-fn client_security((username, password): (&str, &str)) -> ClientSecurity {
+fn client_security(PlainLogin { username, password }: PlainLogin<'_>) -> ClientSecurity {
     ClientSecurity {
         protocol: ListenerProtocol::SaslPlaintext,
         tls: None,
@@ -124,7 +131,7 @@ fn client_security((username, password): (&str, &str)) -> ClientSecurity {
 }
 
 /// Open a client to `addr` that authenticates as `credentials`.
-async fn sasl_client_as(addr: &str, credentials: (&str, &str)) -> Client {
+async fn sasl_client_as(addr: &str, credentials: PlainLogin<'_>) -> Client {
     Client::builder()
         .bootstrap(addr.to_string())
         .client_id("krabka-txn-fanout-test")
@@ -135,7 +142,13 @@ async fn sasl_client_as(addr: &str, credentials: (&str, &str)) -> Client {
 }
 
 /// Open a client to `addr` that authenticates as the broker user.
-async fn sasl_client(addr: &str) -> Client { sasl_client_as(addr, (USER, PASS)).await }
+async fn sasl_client(addr: &str) -> Client {
+    sasl_client_as(addr, PlainLogin {
+        username: USER,
+        password: PASS,
+    })
+    .await
+}
 
 /// Boot a two-broker KIP-853 auto-join cluster on a `SASL_PLAINTEXT` listener.
 ///
@@ -155,7 +168,7 @@ async fn start_two_sasl(
     // with the same static 2-voter set (concrete controller ports) and elect
     // among themselves over the SASL controller wire — no KIP-853 dynamic voter
     // reconfiguration or auto-join.
-    let voters: Vec<(u64, SocketAddr)> = vec![(1, controller_addrs[0]), (2, controller_addrs[1])];
+    let voters = vec![(1, controller_addrs[0]), (2, controller_addrs[1])];
 
     let dir0 = TempDir::new().unwrap();
     let mut cfg0 = BrokerConfig::for_tests(dir0.path().to_path_buf());
@@ -269,7 +282,18 @@ async fn wait_all_hold_topic<'a>(handles: impl Iterator<Item = &'a BrokerHandle>
     }
 }
 
-async fn partition_leaders(client: &Client, handle: &BrokerHandle, topic: &str) -> Vec<(i32, i32)> {
+/// The node that leads one partition of a topic.
+#[derive(Clone, Copy, Debug)]
+struct PartitionLeader {
+    partition_index: i32,
+    leader_id: i32,
+}
+
+async fn partition_leaders(
+    client: &Client,
+    handle: &BrokerHandle,
+    topic: &str,
+) -> Vec<PartitionLeader> {
     // A non-zero `leader` in the image is exactly the wire condition the old
     // loop polled for (`leader_id >= 0`); await both partitions' elections
     // event-driven via the image watch channel, then take one Metadata snapshot.
@@ -290,8 +314,18 @@ async fn partition_leaders(client: &Client, handle: &BrokerHandle, topic: &str) 
     topic
         .partitions
         .iter()
-        .map(|p| (p.partition_index, p.leader_id))
+        .map(|p| PartitionLeader {
+            partition_index: p.partition_index,
+            leader_id: p.leader_id,
+        })
         .collect()
+}
+
+/// A coordinator's node id and the address it listens on.
+struct CoordinatorEndpoint {
+    node_id: i32,
+    host: String,
+    port: i32,
 }
 
 /// Find the transaction coordinator for `transactional_id`: its node id, host
@@ -302,7 +336,7 @@ async fn partition_leaders(client: &Client, handle: &BrokerHandle, topic: &str) 
 /// `FindCoordinator` can race ahead of that election and briefly return
 /// `COORDINATOR_NOT_AVAILABLE`. The function retries until a deadline, so a
 /// coordinator that never becomes available still fails the test.
-async fn find_coordinator(client: &Client, transactional_id: &str) -> (i32, String, i32) {
+async fn find_coordinator(client: &Client, transactional_id: &str) -> CoordinatorEndpoint {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let fc = client
@@ -314,12 +348,20 @@ async fn find_coordinator(client: &Client, transactional_id: &str) -> (i32, Stri
             })
             .await
             .expect("find coordinator");
-        let (node, host, port) = fc.coordinators.first().map_or_else(
-            || (fc.node_id, fc.host.clone(), fc.port),
-            |c| (c.node_id, c.host.clone(), c.port),
+        let endpoint = fc.coordinators.first().map_or_else(
+            || CoordinatorEndpoint {
+                node_id: fc.node_id,
+                host: fc.host.clone(),
+                port: fc.port,
+            },
+            |c| CoordinatorEndpoint {
+                node_id: c.node_id,
+                host: c.host.clone(),
+                port: c.port,
+            },
         );
-        if node >= 0 {
-            return (node, host, port);
+        if endpoint.node_id >= 0 {
+            return endpoint;
         }
         assert!(
             Instant::now() <= deadline,
@@ -352,24 +394,25 @@ async fn end_txn_marker_fanout_to_remote_leader_over_sasl() {
     );
 
     let leaders = partition_leaders(&admin, &cluster[0].0, TOPIC).await;
-    let distinct: std::collections::BTreeSet<i32> = leaders.iter().map(|&(_, l)| l).collect();
+    let distinct: std::collections::BTreeSet<i32> =
+        leaders.iter().map(|leader| leader.leader_id).collect();
     assert!(
         distinct.len() == 2,
         "expected partition leadership split across both brokers, got {leaders:?}"
     );
 
-    let (coord_node, coord_host, coord_port) = find_coordinator(&admin, TID).await;
+    let coordinator = find_coordinator(&admin, TID).await;
 
     // Pick the partition led by the broker that is NOT the coordinator, so
     // EndTxn must fan a marker to a *remote* leader over the SASL listener.
     let remote_partition = leaders
         .iter()
-        .find(|&&(_, leader)| leader != coord_node)
-        .map(|&(p, _)| p)
+        .find(|led| led.leader_id != coordinator.node_id)
+        .map(|led| led.partition_index)
         .expect("a partition led by a non-coordinator broker");
 
     // Connect to the coordinator and run the transaction control plane.
-    let coord = sasl_client(&format!("{coord_host}:{coord_port}")).await;
+    let coord = sasl_client(&format!("{}:{}", coordinator.host, coordinator.port)).await;
 
     let init = coord
         .send(
@@ -441,6 +484,10 @@ const ADMIN_USER: &str = "admin";
 const ADMIN_PASS: &str = "admin-secret";
 const CLIENT_USER: &str = "client";
 const CLIENT_PASS: &str = "client-secret";
+const CLIENT_LOGIN: PlainLogin<'static> = PlainLogin {
+    username: CLIENT_USER,
+    password: CLIENT_PASS,
+};
 
 /// Run the brokers with an ACL authorizer. `admin` and `ANONYMOUS` are the
 /// super users. The broker user and the client user get their ACLs from the
@@ -549,16 +596,13 @@ async fn a_remote_coordinator_verifies_a_produce_for_a_broker_with_only_cluster_
             .await;
     }
 
-    let admin = sasl_client_as(
-        &cluster[0].1.listen_addr.to_string(),
-        (ADMIN_USER, ADMIN_PASS),
-    )
+    let admin = sasl_client_as(&cluster[0].1.listen_addr.to_string(), PlainLogin {
+        username: ADMIN_USER,
+        password: ADMIN_PASS,
+    })
     .await;
-    let client_bootstrap = sasl_client_as(
-        &cluster[0].1.listen_addr.to_string(),
-        (CLIENT_USER, CLIENT_PASS),
-    )
-    .await;
+    let client_bootstrap =
+        sasl_client_as(&cluster[0].1.listen_addr.to_string(), CLIENT_LOGIN).await;
 
     let cases = [
         VerificationCase {
@@ -590,20 +634,22 @@ async fn a_remote_coordinator_verifies_a_produce_for_a_broker_with_only_cluster_
         let leaders = partition_leaders(&admin, &cluster[0].0, case.name).await;
         wait_all_hold_topic(cluster.iter().map(|(handle, _, _)| handle), case.name).await;
 
-        let (coordinator, coordinator_host, coordinator_port) =
-            find_coordinator(&client_bootstrap, case.name).await;
-        let (partition, leader) = leaders
+        let coordinator = find_coordinator(&client_bootstrap, case.name).await;
+        let PartitionLeader {
+            partition_index: partition,
+            leader_id: leader,
+        } = leaders
             .iter()
             .copied()
-            .find(|&(_, leader)| leader != coordinator)
+            .find(|led| led.leader_id != coordinator.node_id)
             .expect("a partition led by a broker that is not the coordinator");
         let leader_addr = ready_leader_addr(&cluster, case.name, partition, leader).await;
         let to_coordinator = sasl_client_as(
-            &format!("{coordinator_host}:{coordinator_port}"),
-            (CLIENT_USER, CLIENT_PASS),
+            &format!("{}:{}", coordinator.host, coordinator.port),
+            CLIENT_LOGIN,
         )
         .await;
-        let to_leader = sasl_client_as(&leader_addr, (CLIENT_USER, CLIENT_PASS)).await;
+        let to_leader = sasl_client_as(&leader_addr, CLIENT_LOGIN).await;
 
         let init = init_producer(&to_coordinator, case.name).await;
         let topic = AddPartitionsToTxnTopic {

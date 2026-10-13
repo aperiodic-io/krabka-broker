@@ -95,7 +95,12 @@ async fn mtls_principal_is_cert_dn_and_super_user_bypass_works() {
     // super-users + no ACLs the compat shim would allow everything
     // regardless of principal, which would mask the principal-derivation
     // path under test.
-    let (_log_dir, _pem_dir, handle, addr) = mtls_super_user(ClientAuthMode::Required).await;
+    let MtlsBroker {
+        log_dir: _log_dir,
+        pem_dir: _pem_dir,
+        handle,
+        addr,
+    } = mtls_super_user(ClientAuthMode::Required).await;
 
     // Build the test TLS client: pin the broker's self-issued cert,
     // present the fixture client cert + key.
@@ -143,7 +148,11 @@ async fn mtls_principal_is_cert_dn_and_super_user_bypass_works() {
 async fn an_unmappable_certificate_dn_closes_the_connection() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let (_log_dir, _pem_dir, mut cfg) = mtls_fixture(ClientAuthMode::Required);
+    let MtlsFixture {
+        log_dir: _log_dir,
+        pem_dir: _pem_dir,
+        config: mut cfg,
+    } = mtls_fixture(ClientAuthMode::Required);
     // Matches only OU=ServiceUsers; the fixture DN has no matching rule.
     cfg.listeners[0].principal_mapper =
         krabka_broker::SslPrincipalMapper::parse(&["RULE:^CN=(.*?),OU=ServiceUsers.*$/$1/"])
@@ -191,7 +200,12 @@ async fn an_unmappable_certificate_dn_closes_the_connection() {
 async fn a_connection_with_no_certificate_is_served_rather_than_closed() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let (_log_dir, _pem_dir, handle, addr) = mtls_super_user(ClientAuthMode::Optional).await;
+    let MtlsBroker {
+        log_dir: _log_dir,
+        pem_dir: _pem_dir,
+        handle,
+        addr,
+    } = mtls_super_user(ClientAuthMode::Optional).await;
 
     let server_cert_der = server_certificate();
     let client_cfg = ClientConfig::builder()
@@ -256,9 +270,14 @@ fn check_create_topics_success(bytes: &[u8], context: &str) {
     );
 }
 
-fn mtls_fixture(
-    client_auth: ClientAuthMode,
-) -> (tempfile::TempDir, tempfile::TempDir, BrokerConfig) {
+/// A broker configuration with the temporary directories it reads and writes.
+struct MtlsFixture {
+    log_dir: tempfile::TempDir,
+    pem_dir: tempfile::TempDir,
+    config: BrokerConfig,
+}
+
+fn mtls_fixture(client_auth: ClientAuthMode) -> MtlsFixture {
     let log_dir = tempfile::tempdir().unwrap();
     let pem_dir = tempfile::tempdir().unwrap();
     let server_cert_path = write_fixture(pem_dir.path(), "server.pem", DEV_CERT);
@@ -272,7 +291,19 @@ fn mtls_fixture(
         client_ca_path: Some(client_ca_path),
         client_auth,
     });
-    (log_dir, pem_dir, cfg)
+    MtlsFixture {
+        log_dir,
+        pem_dir,
+        config: cfg,
+    }
+}
+
+/// A running super-user broker with the temporary directories that back it.
+struct MtlsBroker {
+    log_dir: tempfile::TempDir,
+    pem_dir: tempfile::TempDir,
+    handle: BrokerHandle,
+    addr: std::net::SocketAddr,
 }
 
 fn server_certificate() -> CertificateDer<'static> {
@@ -300,17 +331,19 @@ async fn mtls_connect(
     connector.connect(server_name, tcp).await.expect(context)
 }
 
-async fn mtls_super_user(
-    client_auth: ClientAuthMode,
-) -> (
-    tempfile::TempDir,
-    tempfile::TempDir,
-    BrokerHandle,
-    std::net::SocketAddr,
-) {
-    let (log_dir, pem_dir, mut config) = mtls_fixture(client_auth);
+async fn mtls_super_user(client_auth: ClientAuthMode) -> MtlsBroker {
+    let MtlsFixture {
+        log_dir,
+        pem_dir,
+        mut config,
+    } = mtls_fixture(client_auth);
     config.super_users = maplit::hashset! {CLIENT_PRINCIPAL.to_string()};
     let handle = Broker::start(config).await.expect("broker must start");
     let addr = handle.listen_addr();
-    (log_dir, pem_dir, handle, addr)
+    MtlsBroker {
+        log_dir,
+        pem_dir,
+        handle,
+        addr,
+    }
 }

@@ -31,13 +31,6 @@ impl TxnCommitProducer {
             ..Default::default()
         }
     }
-
-    pub(super) fn from_wire((id, epoch): (i64, i16)) -> Self {
-        Self {
-            id: ProducerId(id),
-            epoch: ProducerEpoch(epoch),
-        }
-    }
 }
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -125,16 +118,26 @@ pub(super) fn request() -> TxnOffsetCommitRequest {
     }
 }
 
+/// A topic name and a partition index: the key of one offset row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct RowKey<'a> {
+    pub(super) topic: &'a str,
+    pub(super) partition: i32,
+}
+
 /// Visits every requested key, including refused rows, against the supplied append oracle.
 pub(super) fn check_appended_keys(
     topics: &[TxnOffsetCommitRequestTopic],
-    appended: &[(&str, i32)],
-    mut check: impl FnMut((&str, i32), bool),
+    appended: &[RowKey<'_>],
+    mut check: impl FnMut(RowKey<'_>, bool),
 ) {
-    let appended: HashSet<(&str, i32)> = appended.iter().copied().collect();
+    let appended: HashSet<RowKey<'_>> = appended.iter().copied().collect();
     for topic in topics {
         for partition in &topic.partitions {
-            let key = (topic.name.as_str(), partition.partition_index);
+            let key = RowKey {
+                topic: topic.name.as_str(),
+                partition: partition.partition_index,
+            };
             check(key, appended.contains(&key));
         }
     }

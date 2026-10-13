@@ -96,9 +96,19 @@ struct Case {
     name: &'static str,
     /// The request identity, as an offset from the live one the coordinator
     /// just handed out; `None` supplies no identity at all.
-    offset: Option<(i64, i16)>,
+    offset: Option<IdentityOffset>,
     expected_error_code: i16,
 }
+
+/// How far a request identity sits from the live one: in producer ids and in
+/// epochs.
+#[derive(Clone, Copy)]
+struct IdentityOffset {
+    id: i64,
+    epoch: i16,
+}
+
+fn shift(id: i64, epoch: i16) -> IdentityOffset { IdentityOffset { id, epoch } }
 
 /// KIP-360: `InitProducerId` answers a caller that names a producer identity
 /// the coordinator does not hold with `PRODUCER_FENCED` (90), before it
@@ -118,13 +128,13 @@ async fn init_producer_id_fences_a_stale_producer_identity() {
 
     let cases = [
         case("no identity supplied", None, 0),
-        case("the live identity", Some((0, 0)), 0),
+        case("the live identity", Some(shift(0, 0)), 0),
         // Kafka refuses half an identity with INVALID_REQUEST, whatever the
         // entry holds (`KafkaApis.handleInitProducerIdRequest`).
-        case("no epoch", Some((0, -1)), 42),
-        case("an unreached epoch", Some((0, 1)), 90),
-        case("another producer id", Some((1, 0)), 90),
-        case("another producer id and no epoch", Some((1, -1)), 42),
+        case("no epoch", Some(shift(0, -1)), 42),
+        case("an unreached epoch", Some(shift(0, 1)), 90),
+        case("another producer id", Some(shift(1, 0)), 90),
+        case("another producer id and no epoch", Some(shift(1, -1)), 42),
     ];
 
     for (index, case) in cases.into_iter().enumerate() {
@@ -136,7 +146,7 @@ async fn init_producer_id_fences_a_stale_producer_identity() {
         // One transactional id per case: an admitted request bumps the epoch,
         // which would move the identity the next case starts from.
         let tid = format!("kip360-tid-{index}");
-        let (producer_id, producer_epoch) = init_transaction(&client, &tid).await;
+        let producer = init_transaction(&client, &tid).await;
 
         if name == "a stale epoch" {
             // A fresh entry's `last_producer_epoch` starts at -1, KIP-360's
@@ -151,7 +161,7 @@ async fn init_producer_id_fences_a_stale_producer_identity() {
                 .send(
                     init_producer_request()
                         .maybe_transactional_id(Some(tid.clone()))
-                        .producer(ProducerIdentity::from_wire((producer_id, producer_epoch)))
+                        .producer(producer)
                         .call(),
                 )
                 .await
@@ -161,9 +171,10 @@ async fn init_producer_id_fences_a_stale_producer_identity() {
 
         let (request_id, request_epoch) = match offset {
             None => (-1, -1),
-            Some((id_offset, epoch_offset)) => {
-                (producer_id + id_offset, producer_epoch + epoch_offset)
-            }
+            Some(IdentityOffset {
+                id: id_offset,
+                epoch: epoch_offset,
+            }) => (producer.id.0 + id_offset, producer.epoch.0 + epoch_offset),
         };
 
         let response = client
@@ -179,7 +190,9 @@ async fn init_producer_id_fences_a_stale_producer_identity() {
         assert!(
             response.error_code == expected,
             "InitProducerId with {name} ({request_id}, {request_epoch}) against \
-             ({producer_id}, {producer_epoch}): {response:?}"
+             ({}, {}): {response:?}",
+            producer.id.0,
+            producer.epoch.0
         );
         if expected != 0 {
             assert!(
@@ -224,15 +237,15 @@ async fn txn_offset_commit_fences_classic_generation_and_member() {
     );
 
     let client = connect_client(bootstrap.clone(), None).await;
-    let (producer_id, producer_epoch) = init_transaction(&client, "fence-tid").await;
+    let producer = init_transaction(&client, "fence-tid").await;
     // The client negotiates v6 (KIP-1319), which names the topic by id only.
     let topic_id = support::topic_id_for(&client, "fence-in").await;
 
     let mk = |generation_id: i32, member_id: &str| TxnOffsetCommitRequest {
         transactional_id: "fence-tid".into(),
         group_id: "fence-g".into(),
-        producer_id,
-        producer_epoch,
+        producer_id: producer.id.0,
+        producer_epoch: producer.epoch.0,
         generation_id_or_member_epoch: generation_id,
         member_id: member_id.into(),
         topics: vec![txn_offset_topic("fence-in", topic_id, vec![
@@ -289,7 +302,7 @@ async fn txn_offset_commit_fences_next_gen_member_epoch() {
     create_topic(&bootstrap, "ng-in").await;
 
     let client = connect_client(bootstrap.clone(), None).await;
-    let (producer_id, producer_epoch) = init_transaction(&client, "ng-tid").await;
+    let producer = init_transaction(&client, "ng-tid").await;
     let topic_id = support::topic_id_for(&client, "ng-in").await;
 
     // Establish a next-gen group member; after the first heartbeat the member
@@ -308,8 +321,8 @@ async fn txn_offset_commit_fences_next_gen_member_epoch() {
     let mk = |epoch_val: i32| TxnOffsetCommitRequest {
         transactional_id: "ng-tid".into(),
         group_id: "ng-g".into(),
-        producer_id,
-        producer_epoch,
+        producer_id: producer.id.0,
+        producer_epoch: producer.epoch.0,
         generation_id_or_member_epoch: epoch_val, // carries the member epoch for next-gen groups
         member_id: member_id.clone(),
         topics: vec![txn_offset_topic("ng-in", topic_id, vec![

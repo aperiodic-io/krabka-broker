@@ -140,7 +140,11 @@ async fn seeded_records_follow_the_features_and_lead_the_acl_entries() {
 /// carries the seeded records as well.
 #[tokio::test]
 async fn the_manifest_mirrors_the_seeded_binary_stream() {
-    let (_parent, log_dir, extra) = formatted_restored_topic(&[]).await;
+    let FormattedRestoredTopic {
+        parent: _parent,
+        log_dir,
+        extra,
+    } = formatted_restored_topic(&[]).await;
 
     let records = bootstrap_records(&log_dir);
     let manifest: serde_json::Value = serde_json::from_slice(
@@ -169,7 +173,11 @@ async fn the_manifest_mirrors_the_seeded_binary_stream() {
 /// would boot a different cluster.
 #[tokio::test]
 async fn a_dynamic_format_seeds_the_offset_zero_checkpoint() {
-    let (_parent, log_dir, extra) = formatted_restored_topic(&["--no-initial-controllers"]).await;
+    let FormattedRestoredTopic {
+        parent: _parent,
+        log_dir,
+        extra,
+    } = formatted_restored_topic(&["--no-initial-controllers"]).await;
 
     let stream = bootstrap_records(&log_dir);
     check!(stream.ends_with(&extra));
@@ -241,12 +249,21 @@ async fn run_writes_what_run_with_records_writes_for_no_extras() {
     check!(run_checkpoint == seam_checkpoint);
 }
 
-async fn formatted_restored_topic(
-    extra_args: &[&str],
-) -> (tempfile::TempDir, std::path::PathBuf, Vec<MetadataRecord>) {
+/// A formatted directory, its parent, and the records it was seeded with.
+struct FormattedRestoredTopic {
+    parent: tempfile::TempDir,
+    log_dir: std::path::PathBuf,
+    extra: Vec<MetadataRecord>,
+}
+
+async fn formatted_restored_topic(extra_args: &[&str]) -> FormattedRestoredTopic {
     let parent = tempfile::tempdir().unwrap();
     let log_dir = empty_log_dir(&parent, "seeded");
     let extra = restored_topic("restored-orders", 1, 2);
     format(&log_dir, extra_args, extra.clone()).await;
-    (parent, log_dir, extra)
+    FormattedRestoredTopic {
+        parent,
+        log_dir,
+        extra,
+    }
 }

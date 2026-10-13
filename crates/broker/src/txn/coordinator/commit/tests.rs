@@ -87,6 +87,12 @@ fn state_image(leader: u64, epoch: i32, isr: &[u64]) -> MetadataImage {
     image
 }
 
+/// A coordinator and the state partition whose log it writes.
+struct StateCoordinator {
+    coordinator: Arc<TxnCoordinator>,
+    partition: Arc<Partition>,
+}
+
 /// A coordinator that leads the state partition at [`EPOCH`], whose log
 /// sits on a real partition with a follower that never fetches, so the high
 /// watermark stays where the test puts it. With `with_metadata`, the
@@ -95,7 +101,7 @@ async fn coordinator(
     dir: &std::path::Path,
     metadata: &Arc<FakeMetadataSource>,
     with_metadata: bool,
-) -> (Arc<TxnCoordinator>, Arc<Partition>) {
+) -> StateCoordinator {
     let part_dir = partition_dir(dir, bootstrap::TOPIC, 0);
     std::fs::create_dir_all(&part_dir).expect("create the partition dir");
     let partition = spawn_partition(
@@ -129,7 +135,10 @@ async fn coordinator(
         .await
         .finished()
         .await;
-    (coordinator, partition)
+    StateCoordinator {
+        coordinator,
+        partition,
+    }
 }
 
 /// What happens once the record is in the leader's log.
@@ -267,7 +276,10 @@ async fn a_transition_is_published_only_once_it_commits_in_its_term() {
                 .image(state_image(1, EPOCH, case.isr))
                 .build(),
         );
-        let (coordinator, partition) = coordinator(dir.path(), &metadata, case.with_metadata).await;
+        let StateCoordinator {
+            coordinator,
+            partition,
+        } = coordinator(dir.path(), &metadata, case.with_metadata).await;
         let entry = TxnEntry::new_empty(TID.into(), ProducerId(7), 0, case.txn_timeout_ms, 0);
 
         let changes = {
@@ -342,7 +354,10 @@ async fn a_tombstone_removes_the_id_only_once_it_commits() {
                 .image(state_image(1, EPOCH, &[1, 2]))
                 .build(),
         );
-        let (coordinator, partition) = coordinator(dir.path(), &metadata, true).await;
+        let StateCoordinator {
+            coordinator,
+            partition,
+        } = coordinator(dir.path(), &metadata, true).await;
         let entry = TxnEntry::new_empty(TID.into(), ProducerId(7), 0, 60_000, 0);
         let changes = {
             let partition = Arc::clone(&partition);

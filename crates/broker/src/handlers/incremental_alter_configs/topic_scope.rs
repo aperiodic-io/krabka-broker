@@ -162,12 +162,11 @@ mod tests {
         crate::{
             handlers::{
                 incremental_alter_configs::test_support::{
-                    AlterableConfig, assert, check, image_with_topic_config, make_del_cfg,
-                    make_set_cfg, make_topic_resource,
+                    AlterableConfig, StoredOverride, assert, check, image_with_topic_config,
+                    make_del_cfg, make_set_cfg, make_topic_resource, overrides_map,
                 },
                 test_support::check_config_result,
             },
-            test_support::string_pairs,
             throttle::LEADER_THROTTLED_REPLICAS_KEY,
         },
     };
@@ -194,7 +193,10 @@ mod tests {
 
     #[test]
     fn controller_managed_topic_configs_are_rejected_whatever_the_operation() {
-        let img = image_with_topic_config("orders", &[(config_keys::RETENTION_MS, "60000")]);
+        let img = image_with_topic_config("orders", &[StoredOverride::new(
+            config_keys::RETENTION_MS,
+            "60000",
+        )]);
 
         for key in config_keys::CONTROLLER_MANAGED_TOPIC_CONFIGS {
             for (label, config) in [
@@ -231,7 +233,10 @@ mod tests {
 
     #[test]
     fn an_ordinary_topic_config_still_merges_onto_the_existing_map() {
-        let img = image_with_topic_config("orders", &[(config_keys::RETENTION_MS, "60000")]);
+        let img = image_with_topic_config("orders", &[StoredOverride::new(
+            config_keys::RETENTION_MS,
+            "60000",
+        )]);
 
         let record = topic_config_record(
             &make_topic_resource("orders", vec![make_set_cfg(
@@ -255,7 +260,10 @@ mod tests {
     fn compaction_op_conflicts_with_scheduled_delivery_already_on_the_topic() {
         // The ops alone are legal. Only the merge with the topic's existing
         // config shows the conflict.
-        let img = image_with_topic_config("orders", &[(config_keys::DELIVERY_MODE, "scheduled")]);
+        let img = image_with_topic_config("orders", &[StoredOverride::new(
+            config_keys::DELIVERY_MODE,
+            "scheduled",
+        )]);
 
         let (code, message) = topic_config_record(
             &make_topic_resource("orders", vec![make_set_cfg(
@@ -279,7 +287,10 @@ mod tests {
 
     #[test]
     fn scheduled_delivery_op_conflicts_with_compaction_already_on_the_topic() {
-        let img = image_with_topic_config("orders", &[(config_keys::CLEANUP_POLICY, "compact")]);
+        let img = image_with_topic_config("orders", &[StoredOverride::new(
+            config_keys::CLEANUP_POLICY,
+            "compact",
+        )]);
 
         let (code, _) = topic_config_record(
             &make_topic_resource("orders", vec![make_set_cfg(
@@ -295,7 +306,10 @@ mod tests {
 
     #[test]
     fn deleting_the_delivery_mode_clears_the_conflict_in_the_same_request() {
-        let img = image_with_topic_config("orders", &[(config_keys::DELIVERY_MODE, "scheduled")]);
+        let img = image_with_topic_config("orders", &[StoredOverride::new(
+            config_keys::DELIVERY_MODE,
+            "scheduled",
+        )]);
 
         let record = topic_config_record(
             &make_topic_resource("orders", vec![
@@ -317,47 +331,53 @@ mod tests {
     fn no_operation_can_move_a_topic_between_data_paths() {
         /// The topic's stored overrides, the ops the request carries, and
         /// whether the merged map is accepted.
-        type DisklessOps<'a> = (
-            &'a str,
-            &'a [(&'a str, &'a str)],
-            Vec<AlterableConfig>,
-            bool,
-        );
+        struct DisklessOps<'a> {
+            label: &'a str,
+            stored: &'a [StoredOverride<'a>],
+            ops: Vec<AlterableConfig>,
+            want_ok: bool,
+        }
 
         let cases: [DisklessOps<'_>; 5] = [
-            (
-                "a SET that restates the value the topic already has",
-                &[(config_keys::DISKLESS, "true")],
-                vec![make_set_cfg(config_keys::DISKLESS, "true")],
-                true,
-            ),
-            (
-                "an ordinary SET alongside the untouched flag",
-                &[(config_keys::DISKLESS, "true")],
-                vec![make_set_cfg(config_keys::RETENTION_MS, "60000")],
-                true,
-            ),
-            (
-                "a SET that turns the flag off",
-                &[(config_keys::DISKLESS, "true")],
-                vec![make_set_cfg(config_keys::DISKLESS, "false")],
-                false,
-            ),
-            (
-                "a DELETE of the flag",
-                &[(config_keys::DISKLESS, "true")],
-                vec![make_del_cfg(config_keys::DISKLESS)],
-                false,
-            ),
-            (
-                "a SET that turns the flag on for a local-log topic",
-                &[(config_keys::RETENTION_MS, "60000")],
-                vec![make_set_cfg(config_keys::DISKLESS, "true")],
-                false,
-            ),
+            DisklessOps {
+                label: "a SET that restates the value the topic already has",
+                stored: &[StoredOverride::new(config_keys::DISKLESS, "true")],
+                ops: vec![make_set_cfg(config_keys::DISKLESS, "true")],
+                want_ok: true,
+            },
+            DisklessOps {
+                label: "an ordinary SET alongside the untouched flag",
+                stored: &[StoredOverride::new(config_keys::DISKLESS, "true")],
+                ops: vec![make_set_cfg(config_keys::RETENTION_MS, "60000")],
+                want_ok: true,
+            },
+            DisklessOps {
+                label: "a SET that turns the flag off",
+                stored: &[StoredOverride::new(config_keys::DISKLESS, "true")],
+                ops: vec![make_set_cfg(config_keys::DISKLESS, "false")],
+                want_ok: false,
+            },
+            DisklessOps {
+                label: "a DELETE of the flag",
+                stored: &[StoredOverride::new(config_keys::DISKLESS, "true")],
+                ops: vec![make_del_cfg(config_keys::DISKLESS)],
+                want_ok: false,
+            },
+            DisklessOps {
+                label: "a SET that turns the flag on for a local-log topic",
+                stored: &[StoredOverride::new(config_keys::RETENTION_MS, "60000")],
+                ops: vec![make_set_cfg(config_keys::DISKLESS, "true")],
+                want_ok: false,
+            },
         ];
 
-        for (label, stored, ops, want_ok) in cases {
+        for DisklessOps {
+            label,
+            stored,
+            ops,
+            want_ok,
+        } in cases
+        {
             let img = image_with_topic_config("orders", stored);
 
             let result = topic_config_record(&make_topic_resource("orders", ops), &img);
@@ -368,7 +388,10 @@ mod tests {
 
     #[test]
     fn tiered_storage_cannot_be_turned_on_for_a_diskless_topic() {
-        let img = image_with_topic_config("orders", &[(config_keys::DISKLESS, "true")]);
+        let img = image_with_topic_config("orders", &[StoredOverride::new(
+            config_keys::DISKLESS,
+            "true",
+        )]);
 
         let (code, message) = topic_config_record(
             &make_topic_resource("orders", vec![make_set_cfg(
@@ -386,7 +409,10 @@ mod tests {
 
     #[test]
     fn scheduled_delivery_keys_merge_onto_an_existing_topic_config() {
-        let img = image_with_topic_config("retries", &[(config_keys::RETENTION_MS, "60000")]);
+        let img = image_with_topic_config("retries", &[StoredOverride::new(
+            config_keys::RETENTION_MS,
+            "60000",
+        )]);
 
         let record = topic_config_record(
             &make_topic_resource("retries", vec![
@@ -411,7 +437,10 @@ mod tests {
 
     #[test]
     fn a_merged_map_that_breaks_the_policy_is_a_policy_violation() {
-        let img = image_with_topic_config("orders", &[(config_keys::MIN_INSYNC_REPLICAS, "2")]);
+        let img = image_with_topic_config("orders", &[StoredOverride::new(
+            config_keys::MIN_INSYNC_REPLICAS,
+            "2",
+        )]);
         let policy = TopicPolicy {
             min_insync_replicas: Some(2),
             ..TopicPolicy::default()
@@ -438,7 +467,10 @@ mod tests {
 
     #[test]
     fn a_merged_map_that_satisfies_the_policy_still_commits() {
-        let img = image_with_topic_config("orders", &[(config_keys::MIN_INSYNC_REPLICAS, "1")]);
+        let img = image_with_topic_config("orders", &[StoredOverride::new(
+            config_keys::MIN_INSYNC_REPLICAS,
+            "1",
+        )]);
         let policy = TopicPolicy {
             min_insync_replicas: Some(2),
             ..TopicPolicy::default()
@@ -476,10 +508,10 @@ mod tests {
             ..Default::default()
         };
         let leader = LEADER_THROTTLED_REPLICAS_KEY;
-        let record = |pairs: &[(&str, &str)]| {
+        let record = |pairs: &[StoredOverride<'_>]| {
             Ok(MetadataRecord::V1TopicConfig(TopicConfigRecord {
                 topic: "orders".into(),
-                overrides: string_pairs(pairs),
+                overrides: overrides_map(pairs),
             }))
         };
         let cases = [
@@ -493,25 +525,31 @@ mod tests {
                 "orders",
                 vec![],
                 vec![op(config_keys::CLEANUP_POLICY, OP_APPEND, "compact")],
-                record(&[(config_keys::CLEANUP_POLICY, "delete,compact")]),
+                record(&[StoredOverride::new(
+                    config_keys::CLEANUP_POLICY,
+                    "delete,compact",
+                )]),
             ),
             (
                 "orders",
-                vec![(config_keys::CLEANUP_POLICY, "compact,delete")],
+                vec![StoredOverride::new(
+                    config_keys::CLEANUP_POLICY,
+                    "compact,delete",
+                )],
                 vec![op(config_keys::CLEANUP_POLICY, 3, "delete")],
-                record(&[(config_keys::CLEANUP_POLICY, "compact")]),
+                record(&[StoredOverride::new(config_keys::CLEANUP_POLICY, "compact")]),
             ),
             (
                 "orders",
-                vec![(leader, "0:1")],
+                vec![StoredOverride::new(leader, "0:1")],
                 vec![op(leader, OP_APPEND, "1:2")],
-                record(&[(leader, "0:1,1:2")]),
+                record(&[StoredOverride::new(leader, "0:1,1:2")]),
             ),
             (
                 "orders",
-                vec![(leader, "0:1")],
+                vec![StoredOverride::new(leader, "0:1")],
                 vec![op(leader, OP_APPEND, "0:1")],
-                record(&[(leader, "0:1")]),
+                record(&[StoredOverride::new(leader, "0:1")]),
             ),
             (
                 "orders",

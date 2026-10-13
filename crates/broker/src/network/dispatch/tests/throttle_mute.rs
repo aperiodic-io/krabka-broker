@@ -58,6 +58,15 @@ const ONE_WINDOW_CEILING: Duration = Duration::from_millis(1900);
 /// needs an outer bound that is generous next to the window itself.
 const MUTE_LIFT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// A quota config key and the value it is seeded with.
+struct AnonymousQuota<'a> {
+    key: &'a str,
+    value: f64,
+}
+
+/// An [`AnonymousQuota`] of `key` set to `value`.
+const fn quota(key: &str, value: f64) -> AnonymousQuota<'_> { AnonymousQuota { key, value } }
+
 /// Starts a broker whose quota throttle caps at `throttle_max`, and seeds
 /// `quotas` against the ANONYMOUS user.
 ///
@@ -67,7 +76,7 @@ const MUTE_LIFT_TIMEOUT: Duration = Duration::from_secs(10);
 /// request driven afterwards is guaranteed to see them.
 async fn broker_with_anonymous_quotas(
     throttle_max: Time,
-    quotas: &[(&str, f64)],
+    quotas: &[AnonymousQuota<'_>],
 ) -> (BrokerHandle, tempfile::TempDir) {
     let (handle, dir) = broker_with_throttle(throttle_max).await;
     seed_anonymous_quotas(&handle, quotas).await;
@@ -87,10 +96,10 @@ async fn broker_with_anonymous_quotas(
 /// connection for `throttle_max` on the very next quota-charged request, so a
 /// topic created through the wire protocol afterwards would eat the mute
 /// window this function's caller is trying to test around.
-async fn seed_anonymous_quotas(handle: &BrokerHandle, quotas: &[(&str, f64)]) {
+async fn seed_anonymous_quotas(handle: &BrokerHandle, quotas: &[AnonymousQuota<'_>]) {
     let records: Vec<MetadataRecord> = quotas
         .iter()
-        .map(|(key, value)| {
+        .map(|AnonymousQuota { key, value }| {
             MetadataRecord::V1ClientQuota(ClientQuotaRecord {
                 entity: vec![QuotaEntity {
                     entity_type: "user".into(),
@@ -115,7 +124,7 @@ async fn seed_anonymous_quotas(handle: &BrokerHandle, quotas: &[(&str, f64)]) {
             };
             quotas
                 .iter()
-                .all(|(name, value)| configs.get(*name) == Some(value))
+                .all(|AnonymousQuota { key, value }| configs.get(*key) == Some(value))
         })
         .await;
 }
@@ -228,6 +237,12 @@ fn decode_response_body<T: Decode<'static>>(frame: &BytesMut, version: i16) -> T
     T::decode(&mut cursor, version).expect("decode response body")
 }
 
+/// The response a mute held back, and how long the mute lasted.
+struct MutedRead {
+    frame: BytesMut,
+    muted_for: Duration,
+}
+
 /// Reads the response the mute is holding back, and returns how long after
 /// `muted_at` it arrived.
 ///
@@ -236,7 +251,7 @@ fn decode_response_body<T: Decode<'static>>(frame: &BytesMut, version: i16) -> T
 async fn read_after_mute(
     framed: &mut Framed<TcpStream, KafkaCodec>,
     muted_at: Instant,
-) -> (BytesMut, Duration) {
+) -> MutedRead {
     check!(
         tokio::time::timeout(CLIENT_TIMEOUT, framed.next())
             .await
@@ -249,7 +264,10 @@ async fn read_after_mute(
         "the mute must lift once the window closes",
     )
     .await;
-    (frame, muted_at.elapsed())
+    MutedRead {
+        frame,
+        muted_for: muted_at.elapsed(),
+    }
 }
 
 /// KIP-219: a throttled request is answered at once, and the quota is enforced
@@ -265,13 +283,18 @@ async fn read_after_mute(
 #[tokio::test]
 async fn throttled_connection_answers_first_and_mutes_afterwards() {
     let mute_window = millis(1000);
-    let (handle, _dir, server, mut framed) = request_quota_connection(mute_window).await;
+    let QuotaConnection {
+        handle,
+        dir: _dir,
+        server,
+        mut framed,
+    } = request_quota_connection(mute_window).await;
 
     // The first request trips the quota. Its response must still arrive well
     // inside a client timeout that the throttle window would blow through.
     let sent_at = Instant::now();
     send_api_versions(&mut framed, 1).await;
-    let (_first, answered_at) = response_before_mute(
+    let ResponseBeforeMute { answered_at, .. } = response_before_mute(
         &mut framed,
         sent_at,
         mute_window,
@@ -294,7 +317,12 @@ async fn throttled_connection_answers_first_and_mutes_afterwards() {
 #[tokio::test]
 async fn a_throttled_fetch_writes_its_plan_before_the_mute() {
     let mute_window = millis(1000);
-    let (handle, _dir, server, mut framed) = request_quota_connection(mute_window).await;
+    let QuotaConnection {
+        handle,
+        dir: _dir,
+        server,
+        mut framed,
+    } = request_quota_connection(mute_window).await;
 
     let sent_at = Instant::now();
     send_request(
@@ -305,7 +333,10 @@ async fn a_throttled_fetch_writes_its_plan_before_the_mute() {
         &fetch_body("no-such-topic"),
     )
     .await;
-    let (first, answered_at) = response_before_mute(
+    let ResponseBeforeMute {
+        frame: first,
+        answered_at,
+    } = response_before_mute(
         &mut framed,
         sent_at,
         mute_window,
@@ -342,7 +373,7 @@ async fn acks_zero_produce_writes_no_response_and_still_mutes() {
     // 8 KiB produce, after the one-second burst, is about two seconds of debt,
     // longer than `mute_window` and well inside `MUTE_LIFT_TIMEOUT`.
     let (handle, _dir) =
-        broker_with_anonymous_quotas(mute_window, &[("producer_byte_rate", 2800.0)]).await;
+        broker_with_anonymous_quotas(mute_window, &[quota("producer_byte_rate", 2800.0)]).await;
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
     create_topic(&mut framed, "acks-zero-mute").await;
@@ -361,7 +392,7 @@ async fn acks_zero_produce_writes_no_response_and_still_mutes() {
     // Nothing at all for the window: no produce response, because `acks=0`
     // asks for none, and no `ApiVersions` response, because the produce muted
     // the connection.
-    let (frame, muted_for) = read_after_mute(&mut framed, produced_at).await;
+    let MutedRead { frame, muted_for } = read_after_mute(&mut framed, produced_at).await;
     check!(
         response_correlation_id(&frame) == 3,
         "the only response must be the ApiVersions one; acks=0 writes no produce response"
@@ -386,8 +417,8 @@ async fn acks_zero_produce_writes_no_response_and_still_mutes() {
 async fn a_request_tripping_two_quotas_is_muted_once_for_the_longest_window() {
     let mute_window = millis(1000);
     let (handle, _dir) = broker_with_anonymous_quotas(mute_window, &[
-        ("producer_byte_rate", 4800.0),
-        ("request_percentage", 0.0001),
+        quota("producer_byte_rate", 4800.0),
+        quota("request_percentage", 0.0001),
     ])
     .await;
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
@@ -431,7 +462,7 @@ async fn a_request_tripping_two_quotas_is_muted_once_for_the_longest_window() {
 #[tokio::test]
 async fn produce_charges_the_whole_request_frame_once() {
     let (handle, _dir) =
-        broker_with_anonymous_quotas(millis(1000), &[("producer_byte_rate", 1000.0)]).await;
+        broker_with_anonymous_quotas(millis(1000), &[quota("producer_byte_rate", 1000.0)]).await;
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
     let body = produce_body("frame-charge", 1, 256, 8);
@@ -515,7 +546,7 @@ async fn every_charged_api_reports_its_delay_and_mutes() {
     // that creates it runs the creation on this runtime, and that work would
     // delay the read the mute window is measured from.
     handle.wait_until_group_coordinator_ready().await;
-    seed_anonymous_quotas(&handle, &[("request_percentage", 0.0001)]).await;
+    seed_anonymous_quotas(&handle, &[quota("request_percentage", 0.0001)]).await;
 
     let cases = [
         QuotaCase {
@@ -647,7 +678,10 @@ async fn every_charged_api_reports_its_delay_and_mutes() {
                 case.name
             );
         } else {
-            let (next, muted_for) = read_after_mute(&mut framed, answered_at).await;
+            let MutedRead {
+                frame: next,
+                muted_for,
+            } = read_after_mute(&mut framed, answered_at).await;
             check!(response_correlation_id(&next) == 2, "{}", case.name);
             check!(
                 muted_for >= mute_window.to_std().saturating_sub(SLACK),
@@ -681,7 +715,7 @@ async fn acks_zero_produce_is_exempt_from_the_request_quota() {
 
     // Seeded only now: the topic exists before the connection has any
     // request-quota debt to charge against it.
-    seed_anonymous_quotas(&handle, &[("request_percentage", 0.0001)]).await;
+    seed_anonymous_quotas(&handle, &[quota("request_percentage", 0.0001)]).await;
 
     send_request(
         &mut framed,
@@ -713,8 +747,8 @@ async fn acks_zero_produce_is_exempt_from_the_request_quota() {
 async fn a_controller_mutation_and_the_request_quota_resolve_in_one_observation() {
     const VERSION: i16 = 7;
     let (handle, _dir) = broker_with_anonymous_quotas(millis(1000), &[
-        ("controller_mutation_rate", 1.0),
-        ("request_percentage", 0.0001),
+        quota("controller_mutation_rate", 1.0),
+        quota("request_percentage", 0.0001),
     ])
     .await;
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
@@ -789,18 +823,31 @@ async fn finish_muted_connection(
     handle.shutdown().await;
 }
 
-async fn request_quota_connection(
-    window: Time,
-) -> (
-    BrokerHandle,
-    tempfile::TempDir,
-    tokio::task::JoinHandle<()>,
-    Framed<TcpStream, KafkaCodec>,
-) {
+/// A broker with a request quota that mutes after one request, and one
+/// connection to its serve loop.
+struct QuotaConnection {
+    handle: BrokerHandle,
+    dir: tempfile::TempDir,
+    server: tokio::task::JoinHandle<()>,
+    framed: Framed<TcpStream, KafkaCodec>,
+}
+
+async fn request_quota_connection(window: Time) -> QuotaConnection {
     let (handle, dir) =
-        broker_with_anonymous_quotas(window, &[("request_percentage", 0.0001)]).await;
+        broker_with_anonymous_quotas(window, &[quota("request_percentage", 0.0001)]).await;
     let (server, framed) = connect_to_serve_loop(&handle).await;
-    (handle, dir, server, framed)
+    QuotaConnection {
+        handle,
+        dir,
+        server,
+        framed,
+    }
+}
+
+/// A response read before a mute, and when it was read.
+struct ResponseBeforeMute {
+    frame: BytesMut,
+    answered_at: Instant,
 }
 
 async fn response_before_mute(
@@ -808,12 +855,15 @@ async fn response_before_mute(
     sent_at: Instant,
     window: Time,
     context: &str,
-) -> (BytesMut, Instant) {
+) -> ResponseBeforeMute {
     let first = response_frame(framed, CLIENT_TIMEOUT, context).await;
     let answered_at = Instant::now();
     check!(response_correlation_id(&first) == 1);
     check!(sent_at.elapsed() < window.to_std());
-    (first, answered_at)
+    ResponseBeforeMute {
+        frame: first,
+        answered_at,
+    }
 }
 
 async fn next_response_after_mute(
@@ -822,7 +872,10 @@ async fn next_response_after_mute(
     window: Time,
 ) -> Duration {
     send_api_versions(framed, 2).await;
-    let (second, muted_for) = read_after_mute(framed, answered_at).await;
+    let MutedRead {
+        frame: second,
+        muted_for,
+    } = read_after_mute(framed, answered_at).await;
     check!(response_correlation_id(&second) == 2);
     // The mute began when the first response was written, marginally before the client's read.
     check!(muted_for >= window.to_std().saturating_sub(SLACK));

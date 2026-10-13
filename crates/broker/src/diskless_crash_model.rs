@@ -85,9 +85,16 @@ struct CrashState {
     trimmed: i64,
     /// The log end the last fsync acknowledged to the producer.
     producer_committed: i64,
-    reservations: Vec<(i64, i64)>,
+    reservations: Vec<Reservation>,
     appenders_seen: u8,
     witnesses: u8,
+}
+
+/// A half-open range of offsets the controller reserved for one append.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct Reservation {
+    base: i64,
+    end: i64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -113,9 +120,9 @@ impl Model for CrashModel {
     krabka_macros::model_transition!(last, action, s; {
             match action {
                 Act::ReserveVia(node) => {
-                    let (base, next) = reserve_via_controller(&s);
+                    let Reservation { base, end: next } = reserve_via_controller(&s);
                     s.kraft_next = next;
-                    s.reservations.push((base, next));
+                    s.reservations.push(Reservation { base, end: next });
                     s.appenders_seen |= 1 << node;
                     if s.appenders_seen.count_ones() >= 2 {
                         s.witnesses |= WITNESS_STATELESS_APPEND;
@@ -246,7 +253,7 @@ impl Model for CrashModel {
             }),
             Property::always("reservations_gap_free_and_unique", |_, s: &CrashState| {
                 let mut next = 0;
-                for &(base, end) in &s.reservations {
+                for &Reservation { base, end } in &s.reservations {
                     if base != next || end <= base {
                         return false;
                     }
@@ -313,16 +320,17 @@ fn quorum_frontier(s: &CrashState) -> i64 {
 /// pending chain folded from the image frontier with
 /// `wal_reservation_frontier`, then `reserve_offsets` from its end. Either
 /// kernel refusing is a failure of the run, not a pruned step.
-fn reserve_via_controller(s: &CrashState) -> (i64, i64) {
+fn reserve_via_controller(s: &CrashState) -> Reservation {
     let pending_frontier = s
         .reservations
         .iter()
-        .try_fold(0, |frontier, &(base, end)| {
+        .try_fold(0, |frontier, &Reservation { base, end }| {
             krabka_verified::offset_allocator::wal_reservation_frontier(frontier, base, end - base)
         })
         .expect("the controller's pending reservation chain stays exact");
-    krabka_verified::offset_allocator::reserve_offsets(pending_frontier, 1)
-        .expect("a bounded reservation is representable")
+    let (base, end) = krabka_verified::offset_allocator::reserve_offsets(pending_frontier, 1)
+        .expect("a bounded reservation is representable");
+    Reservation { base, end }
 }
 
 fn surviving_wal_frontier(s: &CrashState) -> i64 {

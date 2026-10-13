@@ -6,7 +6,7 @@
 use {
     super::{
         response::{fail_authenticate_with, sasl_ok},
-        state::{ConnectionAuth, SaslExchange, session_expiry},
+        state::{ConnectionAuth, SaslExchange, SessionExpiry, session_expiry},
     },
     crate::{codes::ILLEGAL_SASL_STATE, time_util::now_ms},
     krabka_protocol::owned::{
@@ -95,7 +95,10 @@ pub fn handle_authenticate_plain<S: BuildHasher>(
                     .to_owned(),
             );
         }
-        let (expires_at_ms, session_lifetime_ms) = session_expiry(now_ms(), None, max_reauth);
+        let SessionExpiry {
+            expires_at_ms,
+            session_lifetime_ms,
+        } = session_expiry(now_ms(), None, max_reauth);
         *auth = ConnectionAuth::Authenticated {
             principal: p,
             mechanism: SaslMechanism::Plain,
@@ -232,52 +235,71 @@ mod tests {
     #[test]
     fn every_plain_refusal_answers_kafkas_message() {
         const INVALID: &str = "Authentication failed: Invalid username or password";
-        let cases: [(&str, Vec<u8>, &str); 10] = [
-            (
-                "empty payload",
-                Vec::new(),
-                "Invalid SASL/PLAIN response: expected 3 tokens, got 1",
-            ),
-            (
-                "two fields",
-                b"\0alice".to_vec(),
-                "Invalid SASL/PLAIN response: expected 3 tokens, got 2",
-            ),
-            (
-                "four fields",
-                b"\0alice\0wonderland\0extra".to_vec(),
-                "Invalid SASL/PLAIN response: expected 3 tokens, got 4",
-            ),
-            (
-                "five fields report four",
-                b"\0alice\0wonderland\0a\0b".to_vec(),
-                "Invalid SASL/PLAIN response: expected 3 tokens, got 4",
-            ),
-            (
-                "empty username",
-                b"\0\0wonderland".to_vec(),
-                "Authentication failed: username not specified",
-            ),
-            (
-                "empty password",
-                b"\0alice\0".to_vec(),
-                "Authentication failed: password not specified",
-            ),
-            (
-                "non-utf8 username",
-                vec![0, 0xff, 0xfe, 0, b'w', b'o'],
-                INVALID,
-            ),
-            ("unknown user", b"\0carol\0wonderland".to_vec(), INVALID),
-            ("wrong password", b"\0alice\0hunter2".to_vec(), INVALID),
-            (
-                "authzid names another user",
-                b"bob\0alice\0wonderland".to_vec(),
-                "Authentication failed: Client requested an authorization id that is different \
+        /// One refused PLAIN payload and the message it must be answered with.
+        struct Refusal<'a> {
+            case: &'a str,
+            bytes: Vec<u8>,
+            message: &'a str,
+        }
+        let cases: [Refusal<'_>; 10] = [
+            Refusal {
+                case: "empty payload",
+                bytes: Vec::new(),
+                message: "Invalid SASL/PLAIN response: expected 3 tokens, got 1",
+            },
+            Refusal {
+                case: "two fields",
+                bytes: b"\0alice".to_vec(),
+                message: "Invalid SASL/PLAIN response: expected 3 tokens, got 2",
+            },
+            Refusal {
+                case: "four fields",
+                bytes: b"\0alice\0wonderland\0extra".to_vec(),
+                message: "Invalid SASL/PLAIN response: expected 3 tokens, got 4",
+            },
+            Refusal {
+                case: "five fields report four",
+                bytes: b"\0alice\0wonderland\0a\0b".to_vec(),
+                message: "Invalid SASL/PLAIN response: expected 3 tokens, got 4",
+            },
+            Refusal {
+                case: "empty username",
+                bytes: b"\0\0wonderland".to_vec(),
+                message: "Authentication failed: username not specified",
+            },
+            Refusal {
+                case: "empty password",
+                bytes: b"\0alice\0".to_vec(),
+                message: "Authentication failed: password not specified",
+            },
+            Refusal {
+                case: "non-utf8 username",
+                bytes: vec![0, 0xff, 0xfe, 0, b'w', b'o'],
+                message: INVALID,
+            },
+            Refusal {
+                case: "unknown user",
+                bytes: b"\0carol\0wonderland".to_vec(),
+                message: INVALID,
+            },
+            Refusal {
+                case: "wrong password",
+                bytes: b"\0alice\0hunter2".to_vec(),
+                message: INVALID,
+            },
+            Refusal {
+                case: "authzid names another user",
+                bytes: b"bob\0alice\0wonderland".to_vec(),
+                message: "Authentication failed: Client requested an authorization id that is different \
                  from username",
-            ),
+            },
         ];
-        for (case, bytes, message) in cases {
+        for Refusal {
+            case,
+            bytes,
+            message,
+        } in cases
+        {
             let req = SaslAuthenticateRequest {
                 auth_bytes: bytes::Bytes::from(bytes),
                 ..Default::default()

@@ -10,8 +10,8 @@
 
 use {
     super::{
-        FetcherKey, FetcherTask, ReplicatorSupervisor, TopicPartition, desired_follower_set,
-        resolve_leader_endpoint,
+        FetcherKey, FetcherTask, LeaderEndpoint, ReplicatorSupervisor, TopicPartition,
+        desired_follower_set, resolve_leader_endpoint,
     },
     crate::replicator::{self, FollowedKey},
     krabka_ids::PartitionIndex,
@@ -22,7 +22,7 @@ use {
 
 /// One leader's worth of desired follower state.
 struct DesiredFetcher {
-    endpoint: (String, u16),
+    endpoint: LeaderEndpoint,
     partitions: BTreeMap<FollowedKey, Arc<replicator::Config>>,
 }
 
@@ -67,9 +67,9 @@ impl ReplicatorSupervisor {
             let followed = Arc::new(replicator::FollowedPartitionsState::new(wanted.partitions));
             let handle = tokio::spawn(replicator::run_fetcher(replicator::FetcherConfig {
                 node_id: self.node_id,
-                leader_node_id: key.0,
-                leader_host: wanted.endpoint.0.clone(),
-                leader_port: wanted.endpoint.1,
+                leader_node_id: key.leader,
+                leader_host: wanted.endpoint.host.clone(),
+                leader_port: wanted.endpoint.port,
                 client_id: self.client_id.clone(),
                 shutdown: token.clone(),
                 connection: self.connection_config(),
@@ -123,14 +123,14 @@ impl ReplicatorSupervisor {
                 continue;
             };
             let endpoint = resolve_leader_endpoint(broker, &self.inter_broker_listener_name);
-            let fetcher_key = (
+            let fetcher_key = FetcherKey {
                 leader,
-                replicator::fetcher_id_for(&key.0, key.1, self.replication.fetchers),
-            );
-            let followed_key = (
-                self.partitions.shared_topic_name(&key.0),
-                PartitionIndex(key.1),
-            );
+                fetcher_id: replicator::fetcher_id_for(&key.0, key.1, self.replication.fetchers),
+            };
+            let followed_key = FollowedKey {
+                topic: self.partitions.shared_topic_name(&key.0),
+                partition: PartitionIndex(key.1),
+            };
             // Reuse the configuration the fetcher already holds when nothing
             // about the partition's target moved. A reconcile runs on every
             // metadata image change, and building a `Config` clones the log
@@ -172,7 +172,7 @@ impl ReplicatorSupervisor {
         followed_key: &FollowedKey,
         topic: &krabka_metadata::TopicRecord,
         partition: &krabka_metadata::PartitionRecord,
-        endpoint: &(String, u16),
+        endpoint: &LeaderEndpoint,
     ) -> Option<Arc<replicator::Config>> {
         let task = self.tasks.get(&fetcher_key)?;
         if task.endpoint != *endpoint {
@@ -198,7 +198,10 @@ impl ReplicatorSupervisor {
         key: &TopicPartition,
         topic: &krabka_metadata::TopicRecord,
         partition: &krabka_metadata::PartitionRecord,
-        (leader_host, leader_port): (String, u16),
+        LeaderEndpoint {
+            host: leader_host,
+            port: leader_port,
+        }: LeaderEndpoint,
     ) -> replicator::Config {
         replicator::Config {
             node_id: self.node_id,
@@ -244,7 +247,7 @@ mod tests {
     };
 
     /// The `(topic, partition)` keys one fetcher follows, in key order.
-    fn followed_keys(supervisor: &ReplicatorSupervisor, key: FetcherKey) -> Vec<(String, i32)> {
+    fn followed_keys(supervisor: &ReplicatorSupervisor, key: FetcherKey) -> Vec<TopicPartition> {
         supervisor
             .tasks
             .get(&key)
@@ -253,13 +256,13 @@ mod tests {
             .lock()
             .expect("followed-partitions mutex poisoned")
             .keys()
-            .map(|(topic, partition)| (topic.to_string(), partition.get()))
+            .map(|key| (key.topic.to_string(), key.partition.get()))
             .collect()
     }
 
     /// A fetcher whose task parks until its token is cancelled, so a test can
     /// observe whether reconcile retired it.
-    fn running_fetcher(shutdown: CancellationToken, endpoint: (String, u16)) -> FetcherTask {
+    fn running_fetcher(shutdown: CancellationToken, endpoint: LeaderEndpoint) -> FetcherTask {
         let child_shutdown = shutdown.clone();
         FetcherTask {
             shutdown,
@@ -269,7 +272,7 @@ mod tests {
         }
     }
 
-    fn leader_endpoint(image: &MetadataImage, leader: NodeId) -> (String, u16) {
+    fn leader_endpoint(image: &MetadataImage, leader: NodeId) -> LeaderEndpoint {
         resolve_leader_endpoint(image.broker(leader).expect("leader broker"), "INTERNAL")
     }
 
@@ -286,7 +289,10 @@ mod tests {
             &("t".into(), 0),
             topic,
             image.partition("t", 0).expect("partition"),
-            ("leader.internal".into(), 9094),
+            LeaderEndpoint {
+                host: "leader.internal".into(),
+                port: 9094,
+            },
         );
 
         check!(config.connection.replication.fetch_max == bytes(2_345_678));
@@ -320,12 +326,14 @@ mod tests {
 
         check!(supervisor.tasks.len() == 1);
         check!(
-            followed_keys(&supervisor, (NodeId(1), 0))
-                == vec![
-                    ("t".to_string(), 0),
-                    ("t".to_string(), 1),
-                    ("t".to_string(), 2)
-                ]
+            followed_keys(&supervisor, FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0
+            }) == vec![
+                ("t".to_string(), 0),
+                ("t".to_string(), 1),
+                ("t".to_string(), 2)
+            ]
         );
         for task in &supervisor.tasks {
             task.shutdown.cancel();
@@ -339,7 +347,10 @@ mod tests {
     async fn a_replica_on_an_offline_log_directory_is_not_followed() {
         let img = followed_image(1, &[0], 8);
         let (supervisor, _partitions, _reporter, dir) = reconciled_supervisor(&img).await;
-        let followed_while_online = followed_keys(&supervisor, (NodeId(1), 0));
+        let followed_while_online = followed_keys(&supervisor, FetcherKey {
+            leader: NodeId(1),
+            fetcher_id: 0,
+        });
 
         supervisor
             .log_dir_status
@@ -373,8 +384,18 @@ mod tests {
         let (supervisor, _partitions, _reporter, _dir) = reconciled_supervisor(&img).await;
 
         check!(supervisor.tasks.len() == 2);
-        check!(followed_keys(&supervisor, (NodeId(1), 0)) == vec![("t".to_string(), 0)]);
-        check!(followed_keys(&supervisor, (NodeId(3), 0)) == vec![("t".to_string(), 1)]);
+        check!(
+            followed_keys(&supervisor, FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0
+            }) == vec![("t".to_string(), 0)]
+        );
+        check!(
+            followed_keys(&supervisor, FetcherKey {
+                leader: NodeId(3),
+                fetcher_id: 0
+            }) == vec![("t".to_string(), 1)]
+        );
         for task in &supervisor.tasks {
             task.shutdown.cancel();
         }
@@ -414,7 +435,7 @@ mod tests {
                     .lock()
                     .expect("followed-partitions mutex poisoned")
                     .keys()
-                    .map(|(_, partition)| partition.get())
+                    .map(|key| key.partition.get())
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -434,7 +455,10 @@ mod tests {
         let (supervisor, _partitions, _reporter, _dir) = reconciled_supervisor(&two).await;
         let token = supervisor
             .tasks
-            .get(&(NodeId(1), 0))
+            .get(&FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0,
+            })
             .expect("fetcher")
             .shutdown
             .clone();
@@ -442,7 +466,12 @@ mod tests {
         let one = followed_image(2, &[0], 8);
         supervisor.reconcile(&one).await;
 
-        check!(followed_keys(&supervisor, (NodeId(1), 0)) == vec![("t".to_string(), 0)]);
+        check!(
+            followed_keys(&supervisor, FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0
+            }) == vec![("t".to_string(), 0)]
+        );
         check!(!token.is_cancelled());
         token.cancel();
     }
@@ -453,8 +482,14 @@ mod tests {
         let (supervisor, _partitions, _reporter, _dir) = supervisor_fixture(img.clone());
         let token = CancellationToken::new();
         supervisor.tasks.insert(
-            (NodeId(1), 0),
-            running_fetcher(token.clone(), ("127.0.0.1".into(), 9092)),
+            FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0,
+            },
+            running_fetcher(token.clone(), LeaderEndpoint {
+                host: "127.0.0.1".into(),
+                port: 9092,
+            }),
         );
 
         supervisor.reconcile(&img).await;
@@ -471,14 +506,26 @@ mod tests {
         let (supervisor, _partitions, _reporter, _dir) = supervisor_fixture(img.clone());
         let stale = CancellationToken::new();
         supervisor.tasks.insert(
-            (NodeId(1), 0),
-            running_fetcher(stale.clone(), ("moved.example".into(), 1234)),
+            FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0,
+            },
+            running_fetcher(stale.clone(), LeaderEndpoint {
+                host: "moved.example".into(),
+                port: 1234,
+            }),
         );
 
         supervisor.reconcile(&img).await;
 
         assert!(stale.is_cancelled());
-        let replacement = supervisor.tasks.get(&(NodeId(1), 0)).expect("respawned");
+        let replacement = supervisor
+            .tasks
+            .get(&FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0,
+            })
+            .expect("respawned");
         check!(replacement.endpoint == leader_endpoint(&img, NodeId(1)));
         check!(!replacement.handle.is_finished());
         replacement.shutdown.cancel();
@@ -489,16 +536,25 @@ mod tests {
         let img = followed_image(1, &[0], 8);
         let (supervisor, _partitions, _reporter, _dir) = supervisor_fixture(img.clone());
         let stale_shutdown = CancellationToken::new();
-        supervisor.tasks.insert((NodeId(1), 0), FetcherTask {
-            shutdown: stale_shutdown.clone(),
-            handle: tokio::spawn(async {}),
-            followed: Arc::new(replicator::FollowedPartitionsState::default()),
-            endpoint: leader_endpoint(&img, NodeId(1)),
-        });
+        supervisor.tasks.insert(
+            FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0,
+            },
+            FetcherTask {
+                shutdown: stale_shutdown.clone(),
+                handle: tokio::spawn(async {}),
+                followed: Arc::new(replicator::FollowedPartitionsState::default()),
+                endpoint: leader_endpoint(&img, NodeId(1)),
+            },
+        );
         await_until("old fetcher exits", || {
             supervisor
                 .tasks
-                .get(&(NodeId(1), 0))
+                .get(&FetcherKey {
+                    leader: NodeId(1),
+                    fetcher_id: 0,
+                })
                 .is_some_and(|task| task.handle.is_finished())
         })
         .await;
@@ -506,7 +562,13 @@ mod tests {
         supervisor.reconcile(&img).await;
 
         assert!(stale_shutdown.is_cancelled());
-        let replacement = supervisor.tasks.get(&(NodeId(1), 0)).expect("respawned");
+        let replacement = supervisor
+            .tasks
+            .get(&FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0,
+            })
+            .expect("respawned");
         assert!(!replacement.handle.is_finished());
         replacement.shutdown.cancel();
     }
@@ -549,16 +611,22 @@ mod tests {
         ]);
         supervisor.reconcile(&after).await;
 
-        let task = supervisor.tasks.get(&(NodeId(1), 0)).expect("fetcher");
+        let task = supervisor
+            .tasks
+            .get(&FetcherKey {
+                leader: NodeId(1),
+                fetcher_id: 0,
+            })
+            .expect("fetcher");
         let followed = task
             .followed
             .lock()
             .expect("followed-partitions mutex poisoned");
         let config = followed
-            .get(&(
-                supervisor.partitions.shared_topic_name("t"),
-                PartitionIndex(0),
-            ))
+            .get(&FollowedKey {
+                topic: supervisor.partitions.shared_topic_name("t"),
+                partition: PartitionIndex(0),
+            })
             .expect("the recreated partition");
         check!(config.topic_id.0 == recreated_id.into_bytes());
         check!(config.leader_epoch == krabka_metadata::LeaderEpoch(9));

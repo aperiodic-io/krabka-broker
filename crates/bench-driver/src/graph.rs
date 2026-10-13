@@ -79,6 +79,15 @@ pub fn render_html(runs: &[RunOutput], title: &str) -> String {
     wrap_page(title, &body)
 }
 
+/// One run together with the `runNN` tag parsed from its result filename.
+#[derive(Debug, Clone)]
+pub struct TaggedRun {
+    /// The `runNN` tag from the result filename.
+    pub tag: String,
+    /// The run the file held.
+    pub run: RunOutput,
+}
+
 /// Renders an HTML *fragment* with no `<html>` wrapper, for the Zola website to
 /// embed. The fragment holds the averaged scalar summary, and then throughput,
 /// CPU, and memory over the run window for each scenario. Every individual run
@@ -86,8 +95,8 @@ pub fn render_html(runs: &[RunOutput], title: &str) -> String {
 /// run with the `runNN` tag parsed from the result filename, so every per-run
 /// trace carries a name.
 #[must_use]
-pub fn render_web_fragment(tagged: &[(String, RunOutput)]) -> String {
-    let runs: Vec<RunOutput> = tagged.iter().map(|(_, r)| r.clone()).collect();
+pub fn render_web_fragment(tagged: &[TaggedRun]) -> String {
+    let runs: Vec<RunOutput> = tagged.iter().map(|t| t.run.clone()).collect();
     let cells = aggregate_cells(&runs);
     if cells.is_empty() {
         return "<p>No benchmark runs available yet.</p>\n".to_string();
@@ -114,12 +123,9 @@ pub fn render_web_fragment(tagged: &[(String, RunOutput)]) -> String {
         "<h2 id=\"per-run\">Per run &amp; averaged — throughput, CPU and memory over the run</h2>\n",
     );
     // Group runs into cells, preserving each run's tag for the faint per-run lines.
-    let mut by_cell: BTreeMap<CellKey, Vec<(&str, &RunOutput)>> = BTreeMap::new();
-    for (tag, r) in tagged {
-        by_cell
-            .entry(CellKey::of(r))
-            .or_default()
-            .push((tag.as_str(), r));
+    let mut by_cell: BTreeMap<CellKey, Vec<&TaggedRun>> = BTreeMap::new();
+    for t in tagged {
+        by_cell.entry(CellKey::of(&t.run)).or_default().push(t);
     }
     for (key, cell_runs) in &by_cell {
         push_fmt(
@@ -137,13 +143,20 @@ pub fn render_web_fragment(tagged: &[(String, RunOutput)]) -> String {
     out
 }
 
+/// One point of a run's own time series.
+#[derive(Debug, Clone, Copy)]
+struct RunPoint {
+    t_offset_ms: TimeOffsetMs,
+    value: f64,
+}
+
 /// A website time-series metric. It holds the matching [`averaged_timeseries`]
 /// key for the bold mean line, a label, and a way to pull a run's
-/// `(t_offset_ms, value)` points for the faint per-run lines.
+/// [`RunPoint`]s for the faint per-run lines.
 struct WebMetric {
     avg_key: &'static str,
     label: &'static str,
-    per_run: fn(&RunOutput) -> Vec<(TimeOffsetMs, f64)>,
+    per_run: fn(&RunOutput) -> Vec<RunPoint>,
 }
 
 fn web_metrics() -> Vec<WebMetric> {
@@ -154,7 +167,10 @@ fn web_metrics() -> Vec<WebMetric> {
             per_run: |r| {
                 r.samples
                     .iter()
-                    .map(|s| (s.t_offset_ms, s.producer_rate.per_sec_f64()))
+                    .map(|s| RunPoint {
+                        t_offset_ms: s.t_offset_ms,
+                        value: s.producer_rate.per_sec_f64(),
+                    })
                     .collect()
             },
         },
@@ -164,7 +180,10 @@ fn web_metrics() -> Vec<WebMetric> {
             per_run: |r| {
                 r.broker_samples
                     .iter()
-                    .map(|b| (b.t_offset_ms, b.cpu_cores))
+                    .map(|b| RunPoint {
+                        t_offset_ms: b.t_offset_ms,
+                        value: b.cpu_cores,
+                    })
                     .collect()
             },
         },
@@ -174,40 +193,55 @@ fn web_metrics() -> Vec<WebMetric> {
             per_run: |r| {
                 r.broker_samples
                     .iter()
-                    .map(|b| (b.t_offset_ms, mebibytes_f64(b.mem_working_set)))
+                    .map(|b| RunPoint {
+                        t_offset_ms: b.t_offset_ms,
+                        value: mebibytes_f64(b.mem_working_set),
+                    })
                     .collect()
             },
         },
     ]
 }
 
-/// `(bold mean line colour, faint per-run line colour)` per stack.
-fn stack_colors(s: Stack) -> (&'static str, &'static str) {
+/// The bold mean line colour and the faint per-run line colour of one stack.
+struct StackColors {
+    mean: &'static str,
+    faint: &'static str,
+}
+
+fn stack_colors(s: Stack) -> StackColors {
     match s {
-        Stack::Krabka => ("rgb(234,88,12)", "rgba(234,88,12,0.20)"),
-        Stack::Kafka => ("rgb(37,99,235)", "rgba(37,99,235,0.20)"),
+        Stack::Krabka => StackColors {
+            mean: "rgb(234,88,12)",
+            faint: "rgba(234,88,12,0.20)",
+        },
+        Stack::Kafka => StackColors {
+            mean: "rgb(37,99,235)",
+            faint: "rgba(37,99,235,0.20)",
+        },
     }
 }
 
 /// One chart for `wm` in one cell. Every run is a faint line that the legend
 /// hides, and each stack also gets a bold across-run mean line.
-fn per_run_chart(
-    key: &CellKey,
-    cell_runs: &[(&str, &RunOutput)],
-    wm: &WebMetric,
-    ts: &[TsSeries],
-) -> Plot {
+fn per_run_chart(key: &CellKey, cell_runs: &[&TaggedRun], wm: &WebMetric, ts: &[TsSeries]) -> Plot {
     let mut plot = Plot::new();
     for stack in [Stack::Krabka, Stack::Kafka] {
-        let (mean_color, faint_color) = stack_colors(stack);
+        let StackColors {
+            mean: mean_color,
+            faint: faint_color,
+        } = stack_colors(stack);
 
-        for (tag, run) in cell_runs.iter().filter(|(_, r)| r.stack == stack) {
+        for TaggedRun { tag, run } in cell_runs.iter().copied().filter(|t| t.run.stack == stack) {
             let pts = (wm.per_run)(run);
             if pts.is_empty() {
                 continue;
             }
-            let x: Vec<f64> = pts.iter().map(|(t, _)| t.as_time().secs_f64()).collect();
-            let y: Vec<f64> = pts.iter().map(|(_, v)| *v).collect();
+            let x: Vec<f64> = pts
+                .iter()
+                .map(|p| p.t_offset_ms.as_time().secs_f64())
+                .collect();
+            let y: Vec<f64> = pts.iter().map(|p| p.value).collect();
             plot.add_trace(
                 Scatter::new(x, y)
                     .mode(Mode::Lines)
@@ -288,16 +322,29 @@ fn bar_chart(cells: &[CellAgg], m: &ScalarMetric) -> Plot {
     plot
 }
 
+/// The `(cell, metric)` that one time-series chart plots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SeriesGroup<'a> {
+    key: &'a CellKey,
+    metric: &'static str,
+}
+
 /// One line chart per `(scenario, metric)`. Each chart holds a krabka line and a
 /// kafka line of the across-run-averaged value over the run.
 fn timeseries_charts(ts: &[TsSeries]) -> String {
-    let mut groups: BTreeMap<(&CellKey, &'static str), Vec<&TsSeries>> = BTreeMap::new();
+    let mut groups: BTreeMap<SeriesGroup<'_>, Vec<&TsSeries>> = BTreeMap::new();
     for s in ts {
-        groups.entry((&s.key, s.metric)).or_default().push(s);
+        groups
+            .entry(SeriesGroup {
+                key: &s.key,
+                metric: s.metric,
+            })
+            .or_default()
+            .push(s);
     }
 
     let mut out = String::new();
-    for (&(key, metric), series) in &groups {
+    for (&SeriesGroup { key, metric }, series) in &groups {
         let label = ts_metric_label(metric);
         let mut plot = Plot::new();
         for s in series {
@@ -477,22 +524,22 @@ mod tests {
             r
         };
         let tagged = vec![
-            (
-                "run01".to_string(),
-                mk(Stack::Krabka, per_sec(1000), 2.0, mebibytes(300)),
-            ),
-            (
-                "run02".to_string(),
-                mk(Stack::Krabka, per_sec(1200), 2.2, mebibytes(320)),
-            ),
-            (
-                "run01".to_string(),
-                mk(Stack::Kafka, per_sec(800), 3.5, mebibytes(2000)),
-            ),
-            (
-                "run02".to_string(),
-                mk(Stack::Kafka, per_sec(820), 3.6, mebibytes(2100)),
-            ),
+            TaggedRun {
+                tag: "run01".to_string(),
+                run: mk(Stack::Krabka, per_sec(1000), 2.0, mebibytes(300)),
+            },
+            TaggedRun {
+                tag: "run02".to_string(),
+                run: mk(Stack::Krabka, per_sec(1200), 2.2, mebibytes(320)),
+            },
+            TaggedRun {
+                tag: "run01".to_string(),
+                run: mk(Stack::Kafka, per_sec(800), 3.5, mebibytes(2000)),
+            },
+            TaggedRun {
+                tag: "run02".to_string(),
+                run: mk(Stack::Kafka, per_sec(820), 3.6, mebibytes(2100)),
+            },
         ];
         let html = render_web_fragment(&tagged);
         // The fragment is inlined into a page the site serves online, so it

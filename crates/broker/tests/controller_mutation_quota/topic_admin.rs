@@ -27,15 +27,22 @@ use {
     std::net::SocketAddr,
 };
 
+/// The throttle time and the first topic result's error code of a topic
+/// mutation response.
+pub(crate) struct TopicMutationResult {
+    pub(crate) throttle_time_ms: i32,
+    pub(crate) error_code: i16,
+}
+
 /// Drive `CreateTopics` (`api_key=19`) over a SASL/PLAIN connection.
-/// Returns `(throttle_time_ms, per-topic error_code)` from the first result.
+/// Returns the throttle time and the first topic result's error code.
 pub(crate) async fn drive_create_topics_sasl(
     addr: SocketAddr,
     user: &str,
     pass: &str,
     topic: &str,
     partitions: i32,
-) -> (i32, i16) {
+) -> TopicMutationResult {
     const VERSION: i16 = 7; // MAX_VERSION; flexible (>= 5)
 
     let req = create_topic_request_with_setup()
@@ -72,17 +79,20 @@ pub(crate) async fn drive_create_topics_sasl(
         CreateTopicsResponse::decode(&mut cur, VERSION).expect("decode CreateTopicsResponse");
 
     let err_code = resp.topics.first().map_or(-1, |t| t.error_code);
-    (resp.throttle_time_ms, err_code)
+    TopicMutationResult {
+        throttle_time_ms: resp.throttle_time_ms,
+        error_code: err_code,
+    }
 }
 
 /// Drive `DeleteTopics` (`api_key=20`) over a SASL/PLAIN connection.
-/// Returns `(throttle_time_ms, per-topic error_code)` from the first result.
+/// Returns the throttle time and the first topic result's error code.
 pub(crate) async fn drive_delete_topics_sasl(
     addr: SocketAddr,
     user: &str,
     pass: &str,
     topic: &str,
-) -> (i32, i16) {
+) -> TopicMutationResult {
     // Use version 3 (flexible=4+, topic_names field for versions 0-5).
     // Flexible starts at version 4; use version 4 to get throttle_time_ms (v1+)
     // and flexible encoding, while using topic_names (not the v6+ topics field).
@@ -119,5 +129,8 @@ pub(crate) async fn drive_delete_topics_sasl(
         DeleteTopicsResponse::decode(&mut cur, VERSION).expect("decode DeleteTopicsResponse");
 
     let err_code = resp.responses.first().map_or(-1, |r| r.error_code);
-    (resp.throttle_time_ms, err_code)
+    TopicMutationResult {
+        throttle_time_ms: resp.throttle_time_ms,
+        error_code: err_code,
+    }
 }

@@ -9,9 +9,15 @@ use {
 krabka_macros::bound_start_fixture!(config, bound_config, ::krabka_broker);
 krabka_macros::bound_start_fixture!(start, start_bound, ::krabka_broker, unwrap, bound_config);
 
-async fn start_broker() -> (krabka_broker::BrokerHandle, tempfile::TempDir) {
+/// A running broker and the directory that backs it.
+struct StartedBroker {
+    broker: krabka_broker::BrokerHandle,
+    dir: tempfile::TempDir,
+}
+
+async fn start_broker() -> StartedBroker {
     let (broker, _controller_addr, dir) = start_bound(|_| {}).await;
-    (broker, dir)
+    StartedBroker { broker, dir }
 }
 
 async fn describe_topic(
@@ -29,7 +35,7 @@ async fn describe_topic(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_bootstrap_routes_supported_and_rejects_unsupported_admin_rpc() {
-    let (broker, _dir) = start_broker().await;
+    let StartedBroker { broker, dir: _dir } = start_broker().await;
     let broker_bootstrap = broker.listen_addr().to_string();
     let mut broker_admin = AdminClient::connect(std::slice::from_ref(&broker_bootstrap))
         .await
@@ -101,7 +107,7 @@ async fn controller_bootstrap_routes_supported_and_rejects_unsupported_admin_rpc
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn controller_bootstrap_rejects_broker_endpoint() {
-    let (broker, _dir) = start_broker().await;
+    let StartedBroker { broker, dir: _dir } = start_broker().await;
     let result = AdminClient::connect_controller(&[broker.listen_addr().to_string()]).await;
 
     check!(matches!(

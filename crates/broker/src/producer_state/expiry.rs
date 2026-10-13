@@ -15,6 +15,18 @@ use {
     tokio::sync::Mutex,
 };
 
+/// A topic and its partition map, copied out so no `DashMap` guard is held.
+struct TopicSlot {
+    topic: String,
+    partitions: Arc<PartitionMap>,
+}
+
+/// A partition and its producer-state handle, copied out of its map.
+struct PartitionSlot {
+    partition: PartitionIndex,
+    handle: Arc<Mutex<PartitionProducerState>>,
+}
+
 impl ProducerState {
     /// Evict idempotent-producer entries that are expired at `now_ms`.
     ///
@@ -36,17 +48,27 @@ impl ProducerState {
         let mut evicted = 0usize;
         // Snapshot the (topic -> partition-map) refs first so we don't
         // hold a DashMap shard guard across the per-partition `.await`.
-        let topics: Vec<(String, Arc<PartitionMap>)> = self
+        let topics: Vec<TopicSlot> = self
             .by_topic
             .iter()
-            .map(|e| (e.key().clone(), e.value().clone()))
+            .map(|e| TopicSlot {
+                topic: e.key().clone(),
+                partitions: e.value().clone(),
+            })
             .collect();
-        for (topic, parts) in topics {
-            let partition_refs: Vec<(PartitionIndex, Arc<Mutex<PartitionProducerState>>)> = parts
+        for TopicSlot {
+            topic,
+            partitions: parts,
+        } in topics
+        {
+            let partition_refs: Vec<PartitionSlot> = parts
                 .iter()
-                .map(|e| (*e.key(), e.value().clone()))
+                .map(|e| PartitionSlot {
+                    partition: *e.key(),
+                    handle: e.value().clone(),
+                })
                 .collect();
-            for (partition, handle) in partition_refs {
+            for PartitionSlot { partition, handle } in partition_refs {
                 let mut state = handle.lock().await;
                 let before = state.entries.len();
                 state

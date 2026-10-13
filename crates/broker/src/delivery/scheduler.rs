@@ -40,7 +40,18 @@ use {
 const TASK: &str = "delivery scheduler";
 
 /// How the scheduler names a partition in its own bookkeeping.
-type PartitionKey = (String, PartitionIndex);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct PartitionKey {
+    topic: String,
+    index: PartitionIndex,
+}
+
+/// A deadline in the heap, ordered by deadline and then by partition.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct HeapEntry {
+    deadline_ms: i64,
+    key: PartitionKey,
+}
 
 /// Min-heap of activation deadlines, keyed on the epoch-millisecond instant at
 /// which a partition's first waiting batch becomes visible.
@@ -52,7 +63,7 @@ type PartitionKey = (String, PartitionIndex);
 #[derive(Default)]
 struct DeadlineHeap {
     deadlines: HashMap<PartitionKey, i64>,
-    heap: BinaryHeap<Reverse<(i64, PartitionKey)>>,
+    heap: BinaryHeap<Reverse<HeapEntry>>,
 }
 
 impl DeadlineHeap {
@@ -62,7 +73,7 @@ impl DeadlineHeap {
     /// Record that `key`'s first waiting batch becomes visible at `deadline_ms`.
     fn set(&mut self, key: PartitionKey, deadline_ms: i64) {
         self.deadlines.insert(key.clone(), deadline_ms);
-        self.heap.push(Reverse((deadline_ms, key)));
+        self.heap.push(Reverse(HeapEntry { deadline_ms, key }));
         if self.heap.len() > self.deadlines.len() * 2 + 16 {
             self.rebuild();
         }
@@ -84,7 +95,7 @@ impl DeadlineHeap {
     /// The earliest deadline still recorded, or `None` when nothing waits.
     fn earliest(&mut self) -> Option<i64> {
         loop {
-            let Reverse((deadline_ms, key)) = self.heap.peek()?;
+            let Reverse(HeapEntry { deadline_ms, key }) = self.heap.peek()?;
             if self.deadlines.get(key) == Some(deadline_ms) {
                 return Some(*deadline_ms);
             }
@@ -96,7 +107,12 @@ impl DeadlineHeap {
         self.heap = self
             .deadlines
             .iter()
-            .map(|(key, deadline_ms)| Reverse((*deadline_ms, key.clone())))
+            .map(|(key, deadline_ms)| {
+                Reverse(HeapEntry {
+                    deadline_ms: *deadline_ms,
+                    key: key.clone(),
+                })
+            })
             .collect();
     }
 }
@@ -136,10 +152,19 @@ pub(crate) async fn run(
 
         metrics.scheduler_woke();
         sweep(
-            (&partitions, node_id),
-            (time_util::epoch_millis(config.clock.now()), advance_all),
+            SweepRegistry {
+                partitions: &partitions,
+                node_id,
+            },
+            SweepClock {
+                now_ms: time_util::epoch_millis(config.clock.now()),
+                advance_all,
+            },
             &mut heap,
-            (metrics.as_ref(), &waker),
+            SweepReporting {
+                metrics: metrics.as_ref(),
+                waker: &waker,
+            },
         );
         advance_all = false;
 
@@ -156,6 +181,27 @@ pub(crate) async fn run(
     }
 }
 
+/// The partitions a sweep walks, and the node whose leadership it follows.
+#[derive(Clone, Copy)]
+struct SweepRegistry<'a> {
+    partitions: &'a PartitionRegistry,
+    node_id: NodeId,
+}
+
+/// The instant a sweep runs at, and whether it recomputes every partition.
+#[derive(Clone, Copy)]
+struct SweepClock {
+    now_ms: i64,
+    advance_all: bool,
+}
+
+/// Where a sweep reports what it did.
+#[derive(Clone, Copy)]
+struct SweepReporting<'a> {
+    metrics: &'a dyn DeliveryMetrics,
+    waker: &'a Arc<DeliveryWaker>,
+}
+
 /// Advance the partitions that came due, and refresh the heap.
 ///
 /// `advance_all` forces every scheduled partition through a recompute, rather
@@ -163,18 +209,27 @@ pub(crate) async fn run(
 /// heap gets populated, and a produce that re-armed the task sets it because
 /// the task does not know which partition asked for the earlier deadline.
 fn sweep(
-    registry: (&PartitionRegistry, NodeId),
-    clock: (i64, bool),
+    registry: SweepRegistry<'_>,
+    clock: SweepClock,
     heap: &mut DeadlineHeap,
-    reporting: (&dyn DeliveryMetrics, &Arc<DeliveryWaker>),
+    reporting: SweepReporting<'_>,
 ) {
-    let (partitions, node_id) = registry;
-    let (now_ms, advance_all) = clock;
-    let (metrics, waker) = reporting;
+    let SweepRegistry {
+        partitions,
+        node_id,
+    } = registry;
+    let SweepClock {
+        now_ms,
+        advance_all,
+    } = clock;
+    let SweepReporting { metrics, waker } = reporting;
 
     let mut live: HashSet<PartitionKey> = HashSet::new();
     for partition in partitions.arcs() {
-        let key = (partition.topic.clone(), partition.index);
+        let key = PartitionKey {
+            topic: partition.topic.clone(),
+            index: partition.index,
+        };
         if partition.current_leader.load(Ordering::Relaxed) != node_id {
             heap.forget(&key);
             continue;

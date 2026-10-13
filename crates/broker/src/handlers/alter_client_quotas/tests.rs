@@ -6,7 +6,7 @@
 
 use {
     super::{
-        test_support::{entry, request},
+        test_support::{EntityPart, entry, op, part, request},
         *,
     },
     crate::{
@@ -29,7 +29,7 @@ use {
 crate::test_support::context_helper!(client_id = "admin-client");
 
 fn expected_entry(
-    entity: (&str, Option<&str>),
+    entity: EntityPart<'_>,
     error_code: i16,
     error_message: Option<String>,
 ) -> RespEntry {
@@ -37,8 +37,8 @@ fn expected_entry(
         error_code,
         error_message,
         entity: vec![tagged_wire!(RespEntity {
-            entity_type: entity.0.into(),
-            entity_name: entity.1.map(str::to_owned),
+            entity_type: entity.entity_type.into(),
+            entity_name: entity.entity_name.map(str::to_owned),
         })],
     })
 }
@@ -74,8 +74,8 @@ fn quota_value(handle: &BrokerHandle, user: &str, quota_key: &str) -> Option<f64
 fn whole_request_error_answers_every_entry() {
     let req = request(
         vec![
-            entry(vec![("user", Some("alice"))], vec![]),
-            entry(vec![("client-id", Some("app"))], vec![]),
+            entry(vec![part("user", Some("alice"))], vec![]),
+            entry(vec![part("client-id", Some("app"))], vec![]),
         ],
         false,
     );
@@ -84,12 +84,12 @@ fn whole_request_error_answers_every_entry() {
 
     let expected = expected_response(vec![
         expected_entry(
-            ("user", Some("alice")),
+            part("user", Some("alice")),
             CLUSTER_AUTHORIZATION_FAILED,
             Some("denied".into()),
         ),
         expected_entry(
-            ("client-id", Some("app")),
+            part("client-id", Some("app")),
             CLUSTER_AUTHORIZATION_FAILED,
             Some("denied".into()),
         ),
@@ -106,10 +106,9 @@ async fn handle_denies_cluster_alter_for_each_entry() {
         context(ctx, "alice")
     );
     let req = request(
-        vec![entry(vec![("user", Some("alice"))], vec![(
+        vec![entry(vec![part("user", Some("alice"))], vec![op(
             "producer_byte_rate",
             1024.0,
-            false,
         )])],
         false,
     );
@@ -120,7 +119,7 @@ async fn handle_denies_cluster_alter_for_each_entry() {
         .version(version)
         .context(&ctx)
         .expected(expected_response(vec![expected_entry(
-            ("user", Some("alice")),
+            part("user", Some("alice")),
             CLUSTER_AUTHORIZATION_FAILED,
             Some("Cluster authorization failed.".into()),
         )]))
@@ -162,10 +161,9 @@ async fn cluster_alter_configs_gates_the_quota_write() {
         let principal = principal(user);
         let ctx = test_context(&principal, &peer);
         let req = request(
-            vec![entry(vec![("user", Some(user))], vec![(
+            vec![entry(vec![part("user", Some(user))], vec![op(
                 "producer_byte_rate",
                 1024.0,
-                false,
             )])],
             false,
         );
@@ -184,7 +182,7 @@ async fn cluster_alter_configs_gates_the_quota_write() {
             .version(version)
             .context(&ctx)
             .expected(expected_response(vec![expected_entry(
-                ("user", Some(user)),
+                part("user", Some(user)),
                 error_code,
                 error_message,
             )]))
@@ -213,32 +211,29 @@ async fn handle_reports_entry_results_and_obeys_validate_only(validate_only: boo
     );
     let (entries, expected_entries, stored) = if validate_only {
         (
-            vec![entry(vec![("user", Some("carol"))], vec![(
+            vec![entry(vec![part("user", Some("carol"))], vec![op(
                 "producer_byte_rate",
                 2048.0,
-                false,
             )])],
-            vec![expected_entry(("user", Some("carol")), 0, None)],
+            vec![expected_entry(part("user", Some("carol")), 0, None)],
             vec![("carol", "producer_byte_rate", None)],
         )
     } else {
         (
             vec![
-                entry(vec![("user", Some("alice"))], vec![(
+                entry(vec![part("user", Some("alice"))], vec![op(
                     "producer_byte_rate",
                     1024.0,
-                    false,
                 )]),
-                entry(vec![("user", Some("bob"))], vec![(
+                entry(vec![part("user", Some("bob"))], vec![op(
                     "unknown_quota_key",
                     1.0,
-                    false,
                 )]),
             ],
             vec![
-                expected_entry(("user", Some("alice")), 0, None),
+                expected_entry(part("user", Some("alice")), 0, None),
                 expected_entry(
-                    ("user", Some("bob")),
+                    part("user", Some("bob")),
                     INVALID_REQUEST,
                     Some("Invalid configuration key unknown_quota_key".into()),
                 ),
@@ -270,7 +265,7 @@ async fn repeated_entity_answers_one_row_with_and_without_validate_only() {
     let version = 1;
     test_ctx!(ctx, "admin");
     let row = |name: &str, code: i16, message: Option<&str>| {
-        expected_entry(("user", Some(name)), code, message.map(Into::into))
+        expected_entry(part("user", Some(name)), code, message.map(Into::into))
     };
     let expected = expected_response(vec![
         row(
@@ -285,20 +280,17 @@ async fn repeated_entity_answers_one_row_with_and_without_validate_only() {
         broker_fixture!((broker_handle, _dir, broker), allow_all);
         let req = request(
             vec![
-                entry(vec![("user", Some("dave"))], vec![(
+                entry(vec![part("user", Some("dave"))], vec![op(
                     "producer_byte_rate",
                     1024.0,
-                    false,
                 )]),
-                entry(vec![("user", Some("erin"))], vec![(
+                entry(vec![part("user", Some("erin"))], vec![op(
                     "request_percentage",
                     4.0,
-                    false,
                 )]),
-                entry(vec![("user", Some("dave"))], vec![(
+                entry(vec![part("user", Some("dave"))], vec![op(
                     "consumer_byte_rate",
                     2048.0,
-                    false,
                 )]),
             ],
             validate_only,

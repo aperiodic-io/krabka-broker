@@ -43,11 +43,36 @@ const UNKNOWN_NAME: &str = "no-such-topic";
 /// The name of the topic that exists in these tests.
 const KNOWN_NAME: &str = "offsets-resolution";
 
-use crate::handlers::test_support::{DenyTopics, TopicRef, TopicResolutionCase as Case};
+use crate::handlers::test_support::{
+    CaseOutcomes, DenyTopics, TopicRef, TopicResolutionCase as Case, WireTopic,
+};
+
+/// A topic-partition that a group holds a committed offset for.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct CommittedKey {
+    topic: String,
+    partition: i32,
+}
+
+impl CommittedKey {
+    /// The key of partition 0 of `topic`.
+    fn partition_zero(topic: &str) -> Self {
+        Self {
+            topic: topic.to_owned(),
+            partition: 0,
+        }
+    }
+}
 
 /// The actual or the expected outcome of one [`Case`]: the response, and the
-/// `(topic, partition)` keys that the group holds committed offsets for.
-type Outcome = (i16, TopicRef, OffsetCommitResponse, Vec<(String, i32)>);
+/// keys that the group holds committed offsets for.
+#[derive(Debug, PartialEq)]
+struct Outcome {
+    version: i16,
+    topic: TopicRef,
+    response: OffsetCommitResponse,
+    keys: Vec<CommittedKey>,
+}
 
 async fn create_known_topic(broker: &BrokerHandle) -> WireUuid {
     created_topic_fixture!(
@@ -64,9 +89,9 @@ async fn create_known_topic(broker: &BrokerHandle) -> WireUuid {
     WireUuid(topic.topic_id.into_bytes())
 }
 
-/// The committed `(topic, partition)` keys of `group`, sorted. A group that
-/// has no actor holds none.
-async fn committed_keys(broker: &BrokerHandle, group: &str) -> Vec<(String, i32)> {
+/// The committed keys of `group`, sorted. A group that has no actor holds
+/// none.
+async fn committed_keys(broker: &BrokerHandle, group: &str) -> Vec<CommittedKey> {
     let shared = broker.broker_arc_for_test();
     let Some(actor) = shared.group_coordinator.find(group) else {
         return Vec::new();
@@ -82,6 +107,7 @@ async fn committed_keys(broker: &BrokerHandle, group: &str) -> Vec<(String, i32)
         .expect("FetchOffsets reply")
         .committed
         .into_keys()
+        .map(|(topic, partition)| CommittedKey { topic, partition })
         .collect();
     keys.sort();
     keys
@@ -119,10 +145,17 @@ async fn drive(
     known_id: WireUuid,
     row: usize,
     case: Case,
-) -> (Outcome, Outcome) {
-    let (name, topic_id) = case
-        .topic
-        .wire_reference((KNOWN_NAME, known_id), (UNKNOWN_NAME, UNKNOWN_ID));
+) -> CaseOutcomes<Outcome> {
+    let WireTopic { name, id: topic_id } = case.topic.wire_reference(
+        WireTopic {
+            name: KNOWN_NAME,
+            id: known_id,
+        },
+        WireTopic {
+            name: UNKNOWN_NAME,
+            id: UNKNOWN_ID,
+        },
+    );
     let group = format!("resolution-{row}");
     // An empty member id and generation -1 commit as a simple consumer, so
     // the membership check passes.
@@ -169,14 +202,24 @@ async fn drive(
         } else {
             name
         };
-        vec![(committed_name.to_string(), 0)]
+        vec![CommittedKey::partition_zero(committed_name)]
     } else {
         Vec::new()
     };
-    (
-        (case.version, case.topic, actual, actual_keys),
-        (case.version, case.topic, expected, expected_keys),
-    )
+    CaseOutcomes {
+        actual: Outcome {
+            version: case.version,
+            topic: case.topic,
+            response: actual,
+            keys: actual_keys,
+        },
+        expected: Outcome {
+            version: case.version,
+            topic: case.topic,
+            response: expected,
+            keys: expected_keys,
+        },
+    }
 }
 
 async fn run_table(authorizer: Arc<dyn Authorizer>, cases: &[Case]) {
@@ -194,7 +237,10 @@ async fn run_table(authorizer: Arc<dyn Authorizer>, cases: &[Case]) {
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
     for (row, case) in cases.iter().enumerate() {
-        let (got, want) = drive(&broker, known_id, row, *case).await;
+        let CaseOutcomes {
+            actual: got,
+            expected: want,
+        } = drive(&broker, known_id, row, *case).await;
         actual.push(got);
         expected.push(want);
     }
@@ -291,7 +337,7 @@ async fn refused_rows_precede_the_committed_row() {
     };
     assert!(
         (actual, committed_keys(&broker, GROUP).await)
-            == (expected, vec![(KNOWN_NAME.to_string(), 0)])
+            == (expected, vec![CommittedKey::partition_zero(KNOWN_NAME)])
     );
     broker.shutdown().await;
 }
@@ -366,7 +412,7 @@ async fn unknown_partition_answers_on_its_own_row() {
                 }],
                 ..Default::default()
             },
-            vec![(KNOWN_NAME.to_string(), 0)],
+            vec![CommittedKey::partition_zero(KNOWN_NAME)],
         ));
     }
     assert!(actual == expected);

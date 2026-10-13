@@ -67,8 +67,8 @@ impl AuditRecord {
             "event_class".to_string(),
             class.as_header().as_bytes().to_vec(),
         )];
-        if let Some((name, status)) = principal_and_status(event) {
-            headers.push(("principal".to_string(), name.into_bytes()));
+        if let Some(PrincipalStatus { principal, status }) = principal_and_status(event) {
+            headers.push(("principal".to_string(), principal.into_bytes()));
             headers.push(("status".to_string(), status.as_bytes().to_vec()));
         }
         AuditRecord {
@@ -79,7 +79,13 @@ impl AuditRecord {
     }
 }
 
-fn principal_and_status(event: &AuditEvent) -> Option<(String, &'static str)> {
+/// The principal name and outcome status an audit record carries as headers.
+struct PrincipalStatus {
+    principal: String,
+    status: &'static str,
+}
+
+fn principal_and_status(event: &AuditEvent) -> Option<PrincipalStatus> {
     match event {
         AuditEvent::Authentication {
             principal, outcome, ..
@@ -89,10 +95,14 @@ fn principal_and_status(event: &AuditEvent) -> Option<(String, &'static str)> {
         }
         | AuditEvent::PrivilegedAction {
             principal, outcome, ..
-        } => Some((principal.name.clone(), outcome.as_str())),
-        AuditEvent::AuthorizationDenied { principal, .. } => {
-            Some((principal.name.clone(), "denied"))
-        }
+        } => Some(PrincipalStatus {
+            principal: principal.name.clone(),
+            status: outcome.as_str(),
+        }),
+        AuditEvent::AuthorizationDenied { principal, .. } => Some(PrincipalStatus {
+            principal: principal.name.clone(),
+            status: "denied",
+        }),
         AuditEvent::Lifecycle { .. } => None,
     }
 }

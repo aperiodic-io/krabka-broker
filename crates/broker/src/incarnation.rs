@@ -97,17 +97,37 @@ mod tests {
     /// fresh id, and the fresh id is what the file holds afterwards.
     #[test]
     fn reads_a_valid_id_and_regenerates_an_unreadable_one() {
+        struct Case {
+            contents: &'static str,
+            /// The id `load_or_generate` must return, or `None` when it must
+            /// be a fresh one.
+            want: Option<Uuid>,
+        }
+
         let kept = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
-        // (file contents, the id `load_or_generate` must return, or `None`
-        // when it must be a fresh one)
-        let cases: &[(&str, Option<Uuid>)] = &[
-            ("01020304-0506-0708-090a-0b0c0d0e0f10", Some(kept)),
-            ("01020304-0506-0708-090a-0b0c0d0e0f10\n", Some(kept)),
-            ("", None),
-            ("not-a-uuid", None),
-            ("0\n01020304-0506-0708-090a-0b0c0d0e0f10", None),
+        let cases: &[Case] = &[
+            Case {
+                contents: "01020304-0506-0708-090a-0b0c0d0e0f10",
+                want: Some(kept),
+            },
+            Case {
+                contents: "01020304-0506-0708-090a-0b0c0d0e0f10\n",
+                want: Some(kept),
+            },
+            Case {
+                contents: "",
+                want: None,
+            },
+            Case {
+                contents: "not-a-uuid",
+                want: None,
+            },
+            Case {
+                contents: "0\n01020304-0506-0708-090a-0b0c0d0e0f10",
+                want: None,
+            },
         ];
-        for (contents, want) in cases {
+        for Case { contents, want } in cases {
             let dir = tempfile::tempdir().unwrap();
             std::fs::write(dir.path().join(FILE_NAME), contents).unwrap();
             let id = load_or_generate(dir.path());

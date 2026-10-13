@@ -42,17 +42,24 @@ async fn capture_projection_within<S: std::hash::BuildHasher>(
     captured_at_ms: u64,
     timeout: Duration,
 ) -> Result<DisklessWalCapture, String> {
-    let (projection, cutoffs) = tokio::time::timeout(timeout, project_committed_index(log))
+    let CommittedIndex {
+        projection,
+        cutoffs,
+    } = tokio::time::timeout(timeout, project_committed_index(log))
         .await
         .map_err(|_| "diskless WAL index capture timed out".to_owned())??;
     projection.capture(topics, cutoffs, captured_at_ms)
 }
 
+/// The projection of the committed index, with the high watermarks it was read up to.
+struct CommittedIndex {
+    projection: WalCaptureProjection,
+    cutoffs: Vec<i64>,
+}
+
 /// Read the watermarks, then project every partition from its low watermark
 /// up to its high watermark. Returns the projection and the high watermarks.
-async fn project_committed_index(
-    log: &dyn MetadataEventLog,
-) -> Result<(WalCaptureProjection, Vec<i64>), String> {
+async fn project_committed_index(log: &dyn MetadataEventLog) -> Result<CommittedIndex, String> {
     let cutoffs = log
         .high_water_marks()
         .await
@@ -105,7 +112,10 @@ async fn project_committed_index(
         }
         read.map_err(|error| error.to_string())?;
     }
-    Ok((projection, cutoffs))
+    Ok(CommittedIndex {
+        projection,
+        cutoffs,
+    })
 }
 
 #[cfg(test)]
@@ -141,13 +151,20 @@ mod tests {
         HighWatermarksPastTheEnd,
     }
 
+    /// The position of one record a range read handed over.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct VisitedRecord {
+        partition: i32,
+        offset: i64,
+    }
+
     /// An in-process index that records what each range read handed over,
     /// and can misbehave on its watermark lookups.
     struct ScriptedLog {
         inner: Arc<InProcessMetadataEventLog>,
         fault: Fault,
-        /// `(partition, offset)` of each visited record, in visit order.
-        visited: Mutex<Vec<(i32, i64)>>,
+        /// Each visited record, in visit order.
+        visited: Mutex<Vec<VisitedRecord>>,
     }
 
     impl ScriptedLog {
@@ -189,10 +206,10 @@ mod tests {
         ) -> Result<(), MetadataLogError> {
             self.inner
                 .visit_range(partition, start, end, &mut |record: MetadataEventRecord| {
-                    self.visited
-                        .lock()
-                        .unwrap()
-                        .push((record.partition, record.offset));
+                    self.visited.lock().unwrap().push(VisitedRecord {
+                        partition: record.partition,
+                        offset: record.offset,
+                    });
                     visit(record)
                 })
                 .await
@@ -223,7 +240,9 @@ mod tests {
 
     krabka_macros::wal_capture_topic_fixture!(orders, TOPIC_ID, "orders", 1);
 
-    fn visited_offsets(log: &ScriptedLog) -> Vec<(i32, i64)> { log.visited.lock().unwrap().clone() }
+    fn visited_offsets(log: &ScriptedLog) -> Vec<VisitedRecord> {
+        log.visited.lock().unwrap().clone()
+    }
 
     #[tokio::test]
     async fn capture_skips_replay_fences_and_projects_the_rest() {
@@ -262,7 +281,19 @@ mod tests {
                     authentication: None,
                 }
         );
-        assert!(visited_offsets(&log) == vec![(0, 0), (0, 1)]);
+        assert!(
+            visited_offsets(&log)
+                == vec![
+                    VisitedRecord {
+                        partition: 0,
+                        offset: 0
+                    },
+                    VisitedRecord {
+                        partition: 0,
+                        offset: 1
+                    }
+                ]
+        );
     }
 
     #[tokio::test]
@@ -289,7 +320,19 @@ mod tests {
                 == "diskless WAL index partition 0 offset 1: unknown diskless WAL index key version \
                     28271"
         );
-        check!(visited_offsets(&log) == vec![(0, 0), (0, 1)]);
+        check!(
+            visited_offsets(&log)
+                == vec![
+                    VisitedRecord {
+                        partition: 0,
+                        offset: 0
+                    },
+                    VisitedRecord {
+                        partition: 0,
+                        offset: 1
+                    }
+                ]
+        );
     }
 
     #[tokio::test]

@@ -42,6 +42,13 @@ use {
     std::{collections::BTreeMap, path::PathBuf},
 };
 
+/// A partition addressed by topic name and index, ordered by topic and then index.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct TopicPartitionKey {
+    topic: String,
+    partition: i32,
+}
+
 pub(crate) fn handle(
     broker: &Broker,
     version: i16,
@@ -70,19 +77,32 @@ pub(crate) fn handle(
         // collects them into a map that keeps the LAST destination, and
         // `ReplicaManager.alterReplicaLogDirs` handles each partition once, so
         // a superseded destination is neither validated nor started.
-        let mut destinations: BTreeMap<(String, i32), PathBuf> = BTreeMap::new();
+        let mut destinations: BTreeMap<TopicPartitionKey, PathBuf> = BTreeMap::new();
         for dir in req.dirs {
             let target_path = PathBuf::from(&dir.path);
             for topic in dir.topics {
                 for partition_index in topic.partitions {
-                    destinations.insert((topic.name.clone(), partition_index), target_path.clone());
+                    destinations.insert(
+                        TopicPartitionKey {
+                            topic: topic.name.clone(),
+                            partition: partition_index,
+                        },
+                        target_path.clone(),
+                    );
                 }
             }
         }
 
         // (topic, partition) → error code.
-        let mut per_partition: BTreeMap<(String, i32), i16> = BTreeMap::new();
-        for ((topic, partition_index), target_path) in destinations {
+        let mut per_partition: BTreeMap<TopicPartitionKey, i16> = BTreeMap::new();
+        for (
+            TopicPartitionKey {
+                topic,
+                partition: partition_index,
+            },
+            target_path,
+        ) in destinations
+        {
             let code = match future_log::start_move(
                 &partitions,
                 &future_logs,
@@ -112,14 +132,20 @@ pub(crate) fn handle(
                     codes::KAFKA_STORAGE_ERROR
                 }
             };
-            per_partition.insert((topic, partition_index), code);
+            per_partition.insert(
+                TopicPartitionKey {
+                    topic,
+                    partition: partition_index,
+                },
+                code,
+            );
         }
 
         // Group per-partition results back into the response's
         // per-topic shape.
         let mut by_topic: BTreeMap<String, Vec<AlterReplicaLogDirPartitionResult>> =
             BTreeMap::new();
-        for ((topic, partition), code) in per_partition {
+        for (TopicPartitionKey { topic, partition }, code) in per_partition {
             by_topic
                 .entry(topic)
                 .or_default()

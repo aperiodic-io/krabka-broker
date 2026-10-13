@@ -14,25 +14,46 @@ use {
     bytes::Bytes,
 };
 
+/// A value the registry check must refuse, and the name the case reports under.
+struct RejectedCase {
+    name: &'static str,
+    value: Bytes,
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn records_that_fail_validation_are_rejected_and_not_appended() {
     let (_registry, broker, client, _dir, id) = mock_topic_fixture("validated", VALIDATED).await;
 
-    let cases: Vec<(&str, Bytes)> = vec![
+    let cases = vec![
         // No Confluent frame at all: what a `StringSerializer` writes.
-        ("unframed", Bytes::from_static(b"plain text")),
+        RejectedCase {
+            name: "unframed",
+            value: Bytes::from_static(b"plain text"),
+        },
         // A frame whose magic byte is wrong.
-        ("bad magic", Bytes::from_static(&[0x01, 0, 0, 0, 42, b'x'])),
+        RejectedCase {
+            name: "bad magic",
+            value: Bytes::from_static(&[0x01, 0, 0, 0, 42, b'x']),
+        },
         // A frame truncated inside the schema id.
-        ("truncated id", Bytes::from_static(&[0x00, 0, 0])),
+        RejectedCase {
+            name: "truncated id",
+            value: Bytes::from_static(&[0x00, 0, 0]),
+        },
         // Well framed, but the registry does not know the id.
-        ("unknown id", framed(UNKNOWN_ID, b"anything")),
+        RejectedCase {
+            name: "unknown id",
+            value: framed(UNKNOWN_ID, b"anything"),
+        },
         // Well framed and registered, but under another subject: a producer
         // writing the right format to the wrong topic.
-        ("wrong subject", framed(OTHER_SUBJECT_ID, b"anything")),
+        RejectedCase {
+            name: "wrong subject",
+            value: framed(OTHER_SUBJECT_ID, b"anything"),
+        },
     ];
 
-    for (name, value) in cases {
+    for RejectedCase { name, value } in cases {
         let out = produce_value(&client, "validated", id, Some(value)).await;
         check!(out.error_code == INVALID_RECORD, "case {name}: {out:?}");
         check!(

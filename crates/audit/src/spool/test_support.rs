@@ -22,27 +22,34 @@ pub fn chained_record(seq: u64, prev: &[u8; 32], value: &[u8]) -> AuditRecord {
     r
 }
 
-pub fn seeded_spool(value: &[u8]) -> (tempfile::TempDir, AuditRecord, Spool) {
+/// A spool that holds one chained record, and the directory that backs it.
+pub struct SeededSpool {
+    pub dir: tempfile::TempDir,
+    pub record: AuditRecord,
+    pub spool: Spool,
+}
+
+pub fn seeded_spool(value: &[u8]) -> SeededSpool {
     let dir = tempfile::tempdir().unwrap();
     let record = chained_record(0, &GENESIS_HEAD, value);
     let mut spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
     spool.append(&record).unwrap();
-    (dir, record, spool)
+    SeededSpool { dir, record, spool }
 }
 
-pub(crate) fn spool_with_losses(
-    cap: ByteSize,
-    count: u64,
-) -> (
-    tempfile::TempDir,
-    Spool,
-    std::sync::Arc<super::PendingLosses>,
-) {
-    let directory = tempfile::tempdir().unwrap();
-    let spool = Spool::open(directory.path(), cap).unwrap();
+/// A spool with pending losses, and the directory that backs it.
+pub(crate) struct LossySpool {
+    pub dir: tempfile::TempDir,
+    pub spool: Spool,
+    pub losses: std::sync::Arc<super::PendingLosses>,
+}
+
+pub(crate) fn spool_with_losses(cap: ByteSize, count: u64) -> LossySpool {
+    let dir = tempfile::tempdir().unwrap();
+    let spool = Spool::open(dir.path(), cap).unwrap();
     let losses = spool.pending_losses();
     losses.add(count);
-    (directory, spool, losses)
+    LossySpool { dir, spool, losses }
 }
 
 pub(crate) fn reopen_after_losses(

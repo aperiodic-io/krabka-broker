@@ -85,7 +85,10 @@ fn format_version_problem(version: u32) -> Option<String> {
 }
 
 /// One manifest object and the key it was read from.
-pub(super) type KeyedManifest = (String, SegmentManifest);
+pub(super) struct KeyedManifest {
+    pub key: String,
+    pub manifest: SegmentManifest,
+}
 
 #[cfg(test)]
 mod tests {

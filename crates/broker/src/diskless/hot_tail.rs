@@ -1,7 +1,7 @@
 //! In-memory cache for quorum-committed diskless WAL tail batches.
 
 use {
-    crate::config::DEFAULT_DISKLESS_WAL_HOT_TAIL_MAX_SIZE,
+    crate::{config::DEFAULT_DISKLESS_WAL_HOT_TAIL_MAX_SIZE, wal::quorum::registry::ShardId},
     bytes::Bytes,
     krabka_ids::PartitionIndex,
     krabka_protocol::records::RecordBatch,
@@ -82,7 +82,10 @@ impl HotTailCache {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let map = state.entries.get(&(topic_id, partition.0))?;
+        let map = state.entries.get(&ShardId {
+            topic_id,
+            partition,
+        })?;
         let (_base, entry) = map.range(..=fetch_offset).next_back()?;
         if fetch_offset <= entry.last_offset
             && entry.last_offset < limit_offset
@@ -103,7 +106,10 @@ impl HotTailCache {
     ) {
         let base_offset = batch.base_offset;
         let last_offset = base_offset + i64::from(batch.last_offset_delta);
-        let key = (topic_id, partition.0);
+        let key = ShardId {
+            topic_id,
+            partition,
+        };
         let len = bytes.len();
         let bytes = if len <= self.max_bytes {
             Bytes::copy_from_slice(&bytes)
@@ -121,7 +127,13 @@ impl HotTailCache {
             .and_then(|batches| batches.remove(&base_offset))
         {
             state.total_bytes -= old.bytes.len();
-            state.order.retain(|cached| *cached != (key, base_offset));
+            state.order.retain(|cached| {
+                *cached
+                    != CachedBatch {
+                        shard: key,
+                        base_offset,
+                    }
+            });
         }
         if len > self.max_bytes {
             if state.entries.get(&key).is_some_and(BTreeMap::is_empty) {
@@ -135,10 +147,17 @@ impl HotTailCache {
             .entry(key)
             .or_default()
             .insert(base_offset, HotTailEntry { last_offset, bytes });
-        state.order.push_back((key, base_offset));
+        state.order.push_back(CachedBatch {
+            shard: key,
+            base_offset,
+        });
         state.total_bytes += len;
         while state.total_bytes > self.max_bytes {
-            let Some((old_key, old_offset)) = state.order.pop_front() else {
+            let Some(CachedBatch {
+                shard: old_key,
+                base_offset: old_offset,
+            }) = state.order.pop_front()
+            else {
                 break;
             };
             let removed = state
@@ -155,7 +174,10 @@ impl HotTailCache {
     }
 
     pub(crate) fn remove_partition(&self, topic_id: Uuid, partition: PartitionIndex) {
-        let key = (topic_id, partition.0);
+        let key = ShardId {
+            topic_id,
+            partition,
+        };
         let mut state = self
             .state
             .lock()
@@ -165,7 +187,7 @@ impl HotTailCache {
                 .into_values()
                 .map(|entry| entry.bytes.len())
                 .sum::<usize>();
-            state.order.retain(|(cached, _)| *cached != key);
+            state.order.retain(|cached| cached.shard != key);
         }
     }
 }
@@ -173,8 +195,15 @@ impl HotTailCache {
 #[derive(Debug, Default)]
 struct HotTailState {
     total_bytes: usize,
-    entries: HashMap<(Uuid, i32), BTreeMap<i64, HotTailEntry>>,
-    order: VecDeque<((Uuid, i32), i64)>,
+    entries: HashMap<ShardId, BTreeMap<i64, HotTailEntry>>,
+    order: VecDeque<CachedBatch>,
+}
+
+/// A cached batch, named by the partition it belongs to and its base offset.
+#[derive(Debug, PartialEq, Eq)]
+struct CachedBatch {
+    shard: ShardId,
+    base_offset: i64,
 }
 
 #[derive(Debug, Clone)]

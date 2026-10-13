@@ -30,8 +30,8 @@ use {
         metadata_source::MetadataSource,
         metrics::{BrokerMetrics, TopicLabel},
         remote_log_manager::test_support::{
-            self as fixtures, TEST_COPY_TIMEOUT, copy_exports, partition_snapshot,
-            rolled_tiered_partition_with_config,
+            self as fixtures, PartitionSnapshot, RetentionPolicy, TEST_COPY_TIMEOUT, copy_exports,
+            partition_snapshot, rolled_tiered_partition_with_config,
         },
     },
     assert2::{assert, check},
@@ -113,20 +113,29 @@ fn stalling_store() -> Arc<FaultInjectingStore> {
     faulty_store(FaultPolicy::none().with(StoreOp::Put, OpFault::stall(STALL)))
 }
 
+/// A tiered partition, its sealed exports and its log config.
+struct TieredPartition {
+    partition: Arc<Partition>,
+    exports: Vec<krabka_log::SegmentExport>,
+    config: LogConfig,
+}
+
 /// A tiered `orders-0` with segments already sealed on disk, plus its
 /// exports and log config.
-fn tiered_partition(
-    log_dir: &std::path::Path,
-) -> (Arc<Partition>, Vec<krabka_log::SegmentExport>, LogConfig) {
+fn tiered_partition(log_dir: &std::path::Path) -> TieredPartition {
     let partition = rolled_tiered_partition_with_config(log_dir, LogConfig {
         segment_size: bytes(256),
         remote_storage_enable: true,
         local_retention: Some(millis(1)),
         ..LogConfig::default()
     });
-    let (exports, config) = partition_snapshot(&partition);
+    let PartitionSnapshot { exports, config } = partition_snapshot(&partition);
     assert!(exports.len() >= 2, "the fixture needs sealed segments");
-    (partition, exports, config)
+    TieredPartition {
+        partition,
+        exports,
+        config,
+    }
 }
 
 fn orders_label() -> TopicLabel {
@@ -147,8 +156,15 @@ macro_rules! faulty_copy_fixture {
         $make:expr
     ) => {
         let $local = tempfile::tempdir().unwrap();
-        let ($partition, $exports, $config) = tiered_partition($local.path());
-        let ($store, $rsm) = store_backend($make);
+        let TieredPartition {
+            partition: $partition,
+            exports: $exports,
+            config: $config,
+        } = tiered_partition($local.path());
+        let StoreBackend {
+            store: $store,
+            rsm: $rsm,
+        } = store_backend($make);
     };
 }
 
@@ -158,7 +174,7 @@ macro_rules! faulty_copy_fixture {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_healthy_store_finishes_every_copy() {
     let log_dir = tempfile::tempdir().unwrap();
-    let (_partition, exports, _config) = tiered_partition(log_dir.path());
+    let TieredPartition { exports, .. } = tiered_partition(log_dir.path());
     let copy_context = CopyExportContext::new(backend(faulty_store(FaultPolicy::none())));
 
     let copied = copy_context
@@ -297,14 +313,14 @@ async fn a_stalled_copy_is_abandoned_at_its_deadline() {
 async fn a_stalled_partition_does_not_stop_the_sweep_reaching_the_next() {
     let log_dir = tempfile::tempdir().unwrap();
     let partitions = Arc::new(PartitionRegistry::new());
-    let first = tiered_partition(log_dir.path()).0;
+    let first = tiered_partition(log_dir.path()).partition;
     partitions.insert("orders".into(), PartitionIndex(0), first);
     let second_dir = tempfile::tempdir().unwrap();
-    let second = tiered_partition(second_dir.path()).0;
+    let second = tiered_partition(second_dir.path()).partition;
     second.current_leader.store(1, Ordering::Relaxed);
     partitions.insert("orders".into(), PartitionIndex(1), second);
 
-    let (store, rsm) = store_backend(stalling_store);
+    let StoreBackend { store, rsm } = store_backend(stalling_store);
     fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
     let controller: Arc<dyn MetadataSource> =
         Arc::new(fixed_source(image_with_orders_partitions(2)));
@@ -356,15 +372,36 @@ async fn a_stalled_partition_does_not_stop_the_sweep_reaching_the_next() {
 #[tokio::test(flavor = "multi_thread")]
 async fn local_retention_keeps_segments_whose_copy_never_finished() {
     /// One misbehaving store and the copy deadline it is driven under.
-    type Case = (&'static str, fn() -> Arc<FaultInjectingStore>, Time);
+    struct Case {
+        name: &'static str,
+        store: fn() -> Arc<FaultInjectingStore>,
+        copy_timeout: Time,
+    }
 
     let cases: [Case; 2] = [
-        ("throttled", throttling_store, TEST_COPY_TIMEOUT),
-        ("stalled", stalling_store, SHORT_COPY_DEADLINE),
+        Case {
+            name: "throttled",
+            store: throttling_store,
+            copy_timeout: TEST_COPY_TIMEOUT,
+        },
+        Case {
+            name: "stalled",
+            store: stalling_store,
+            copy_timeout: SHORT_COPY_DEADLINE,
+        },
     ];
-    for (case, store, copy_timeout) in cases {
+    for Case {
+        name,
+        store,
+        copy_timeout,
+    } in cases
+    {
         let log_dir = tempfile::tempdir().unwrap();
-        let (partition, exports, config) = tiered_partition(log_dir.path());
+        let TieredPartition {
+            partition,
+            exports,
+            config,
+        } = tiered_partition(log_dir.path());
         let copy_context = CopyExportContext::new(backend(store()));
 
         let copied = copy_context
@@ -375,7 +412,7 @@ async fn local_retention_keeps_segments_whose_copy_never_finished() {
                     .build(),
             )
             .await;
-        check!(copied == 0, "{case}");
+        check!(copied == 0, "{name}");
 
         // Far past every segment's `local.retention.ms`, so nothing but the
         // missing remote copy can be holding these bytes on disk.
@@ -384,24 +421,31 @@ async fn local_retention_keeps_segments_whose_copy_never_finished() {
             &exports,
             &config,
             &copy_context.rlmm,
-            (UnstableApiVersions::Disabled, now_ms() + 1_000_000),
+            RetentionPolicy {
+                unstable: UnstableApiVersions::Disabled,
+                now_ms: now_ms() + 1_000_000,
+            },
         )
         .await;
 
-        check!(removed == 0, "{case}");
+        check!(removed == 0, "{name}");
         let log = partition.log.lock().expect("partition log mutex poisoned");
         check!(
             log.local_log_start_offset() == exports[0].base_offset,
-            "{case}"
+            "{name}"
         );
-        check!(log.tierable_segments().len() == exports.len(), "{case}");
+        check!(log.tierable_segments().len() == exports.len(), "{name}");
     }
 }
 
-fn store_backend(
-    make_store: fn() -> Arc<FaultInjectingStore>,
-) -> (Arc<FaultInjectingStore>, Arc<dyn RemoteStorageManager>) {
+/// A fault-injecting store and the storage manager built over it.
+struct StoreBackend {
+    store: Arc<FaultInjectingStore>,
+    rsm: Arc<dyn RemoteStorageManager>,
+}
+
+fn store_backend(make_store: fn() -> Arc<FaultInjectingStore>) -> StoreBackend {
     let store = make_store();
     let rsm = backend(Arc::clone(&store));
-    (store, rsm)
+    StoreBackend { store, rsm }
 }

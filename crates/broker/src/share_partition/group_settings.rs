@@ -127,28 +127,34 @@ impl GroupShareSettings {
 mod tests {
     use {
         super::*,
-        crate::{features::SHARE_VERSION, test_support::string_pairs},
+        crate::{
+            coordinator::test_support::{ConfigEntry, config_map, entry},
+            features::SHARE_VERSION,
+        },
         assert2::assert,
         krabka_metadata::{GroupConfigRecord, MetadataRecord},
     };
 
-    fn image(configs: &[(&str, &str)]) -> MetadataImage {
+    /// The config overrides of a group, and the settings they resolve to.
+    struct SettingsRow {
+        configs: Vec<ConfigEntry<'static>>,
+        settings: GroupShareSettings,
+    }
+
+    fn image(configs: &[ConfigEntry<'_>]) -> MetadataImage {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&MetadataRecord::V1GroupConfig(GroupConfigRecord {
             group_id: "g".into(),
-            configs: string_pairs(configs),
+            configs: config_map(configs),
         }));
         image
     }
 
-    fn check_settings_rows(
-        defaults: &ShareGroupConfig,
-        rows: Vec<(&[(&str, &str)], GroupShareSettings)>,
-    ) {
+    fn check_settings_rows(defaults: &ShareGroupConfig, rows: Vec<SettingsRow>) {
         let mut actual = Vec::new();
         let mut expected = Vec::new();
-        for (configs, settings) in rows {
-            actual.push(GroupShareSettings::resolve(&image(configs), "g", defaults));
+        for SettingsRow { configs, settings } in rows {
+            actual.push(GroupShareSettings::resolve(&image(&configs), "g", defaults));
             expected.push(settings);
         }
         assert!(actual == expected);
@@ -165,41 +171,50 @@ mod tests {
             renew_acknowledge_enabled: true,
             dlq_enabled: false,
         };
-        let rows: Vec<(&[(&str, &str)], GroupShareSettings)> = vec![
-            (&[], broker),
-            (
-                &[(KEY_RECORD_LOCK_DURATION_MS, "60000")],
-                GroupShareSettings {
+        let rows: Vec<SettingsRow> = vec![
+            SettingsRow {
+                configs: vec![],
+                settings: broker,
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_RECORD_LOCK_DURATION_MS, "60000")],
+                settings: GroupShareSettings {
                     record_lock_duration: Duration::from_mins(1),
                     ..broker
                 },
-            ),
-            (&[(KEY_DELIVERY_COUNT_LIMIT, "2")], GroupShareSettings {
-                delivery_count_limit: 2,
-                ..broker
-            }),
-            (
-                &[(KEY_PARTITION_MAX_RECORD_LOCKS, "500")],
-                GroupShareSettings {
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_DELIVERY_COUNT_LIMIT, "2")],
+                settings: GroupShareSettings {
+                    delivery_count_limit: 2,
+                    ..broker
+                },
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_PARTITION_MAX_RECORD_LOCKS, "500")],
+                settings: GroupShareSettings {
                     max_record_locks: 500,
                     ..broker
                 },
-            ),
-            (
-                &[(KEY_ISOLATION_LEVEL, "read_committed")],
-                GroupShareSettings {
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_ISOLATION_LEVEL, "read_committed")],
+                settings: GroupShareSettings {
                     read_committed: true,
                     ..broker
                 },
-            ),
-            (
-                &[(KEY_RENEW_ACKNOWLEDGE_ENABLE, "FALSE")],
-                GroupShareSettings {
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_RENEW_ACKNOWLEDGE_ENABLE, "FALSE")],
+                settings: GroupShareSettings {
                     renew_acknowledge_enabled: false,
                     ..broker
                 },
-            ),
-            (&[(KEY_DELIVERY_COUNT_LIMIT, "many")], broker),
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_DELIVERY_COUNT_LIMIT, "many")],
+                settings: broker,
+            },
         ];
         check_settings_rows(&defaults, rows);
     }
@@ -212,47 +227,56 @@ mod tests {
     fn an_override_outside_the_broker_bounds_is_capped() {
         let defaults = ShareGroupConfig::default();
         let broker = GroupShareSettings::resolve(&image(&[]), "g", &defaults);
-        let rows: Vec<(&[(&str, &str)], GroupShareSettings)> = vec![
-            (&[(KEY_RECORD_LOCK_DURATION_MS, "1")], GroupShareSettings {
-                record_lock_duration: defaults.min_record_lock_duration,
-                ..broker
-            }),
-            (&[(KEY_RECORD_LOCK_DURATION_MS, "-7")], GroupShareSettings {
-                record_lock_duration: defaults.min_record_lock_duration,
-                ..broker
-            }),
-            (
-                &[(KEY_RECORD_LOCK_DURATION_MS, "3600000")],
-                GroupShareSettings {
+        let rows: Vec<SettingsRow> = vec![
+            SettingsRow {
+                configs: vec![entry(KEY_RECORD_LOCK_DURATION_MS, "1")],
+                settings: GroupShareSettings {
+                    record_lock_duration: defaults.min_record_lock_duration,
+                    ..broker
+                },
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_RECORD_LOCK_DURATION_MS, "-7")],
+                settings: GroupShareSettings {
+                    record_lock_duration: defaults.min_record_lock_duration,
+                    ..broker
+                },
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_RECORD_LOCK_DURATION_MS, "3600000")],
+                settings: GroupShareSettings {
                     record_lock_duration: defaults.max_record_lock_duration,
                     ..broker
                 },
-            ),
-            (&[(KEY_DELIVERY_COUNT_LIMIT, "1")], GroupShareSettings {
-                delivery_count_limit: defaults.min_delivery_count_limit,
-                ..broker
-            }),
-            (
-                &[(KEY_DELIVERY_COUNT_LIMIT, "100000")],
-                GroupShareSettings {
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_DELIVERY_COUNT_LIMIT, "1")],
+                settings: GroupShareSettings {
+                    delivery_count_limit: defaults.min_delivery_count_limit,
+                    ..broker
+                },
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_DELIVERY_COUNT_LIMIT, "100000")],
+                settings: GroupShareSettings {
                     delivery_count_limit: defaults.max_delivery_count_limit,
                     ..broker
                 },
-            ),
-            (
-                &[(KEY_PARTITION_MAX_RECORD_LOCKS, "10")],
-                GroupShareSettings {
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_PARTITION_MAX_RECORD_LOCKS, "10")],
+                settings: GroupShareSettings {
                     max_record_locks: defaults.min_partition_max_record_locks,
                     ..broker
                 },
-            ),
-            (
-                &[(KEY_PARTITION_MAX_RECORD_LOCKS, "1000000")],
-                GroupShareSettings {
+            },
+            SettingsRow {
+                configs: vec![entry(KEY_PARTITION_MAX_RECORD_LOCKS, "1000000")],
+                settings: GroupShareSettings {
                     max_record_locks: defaults.max_partition_max_record_locks,
                     ..broker
                 },
-            ),
+            },
         ];
         check_settings_rows(&defaults, rows);
     }
@@ -278,8 +302,8 @@ mod tests {
         let mut actual = Vec::new();
         let mut expected = Vec::new();
         for (level, topic, on) in cases {
-            let configs: Vec<(&str, &str)> = topic
-                .map(|name| (KEY_DLQ_TOPIC_NAME, name))
+            let configs: Vec<ConfigEntry<'_>> = topic
+                .map(|name| entry(KEY_DLQ_TOPIC_NAME, name))
                 .into_iter()
                 .collect();
             let mut image = image(&configs);

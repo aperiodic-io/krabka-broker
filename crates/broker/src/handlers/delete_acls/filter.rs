@@ -73,14 +73,31 @@ mod tests {
     /// `AclControlManager.validateFilter` refuses that one filter later.
     #[test]
     fn build_filter_refuses_only_the_unknown_byte() {
-        type CorruptFilter = fn(&mut DeleteAclsFilter, i8);
-        let cases: [(&str, CorruptFilter); 4] = [
-            ("resource_type_filter", |f, b| f.resource_type_filter = b),
-            ("pattern_type_filter", |f, b| f.pattern_type_filter = b),
-            ("operation", |f, b| f.operation = b),
-            ("permission_type", |f, b| f.permission_type = b),
+        /// A corruption of one axis of the filter, labelled by that axis.
+        struct CorruptFilterCase {
+            axis: &'static str,
+            corrupt: fn(&mut DeleteAclsFilter, i8),
+        }
+
+        let cases: [CorruptFilterCase; 4] = [
+            CorruptFilterCase {
+                axis: "resource_type_filter",
+                corrupt: |f, b| f.resource_type_filter = b,
+            },
+            CorruptFilterCase {
+                axis: "pattern_type_filter",
+                corrupt: |f, b| f.pattern_type_filter = b,
+            },
+            CorruptFilterCase {
+                axis: "operation",
+                corrupt: |f, b| f.operation = b,
+            },
+            CorruptFilterCase {
+                axis: "permission_type",
+                corrupt: |f, b| f.permission_type = b,
+            },
         ];
-        for (axis, corrupt) in cases {
+        for CorruptFilterCase { axis, corrupt } in cases {
             let mut unknown = filter(Some("orders"), Some("User:alice"));
             corrupt(&mut unknown, 0);
             check!(build_filter(&unknown) == Err(UnknownElement), "axis {axis}");

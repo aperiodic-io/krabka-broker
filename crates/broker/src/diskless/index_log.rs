@@ -519,13 +519,25 @@ mod tests {
 
     use super::test_support::{flush_record, second_object_flush_record};
 
+    /// An object and the offsets of the range it holds.
+    struct SeededRange<'a> {
+        object_key: &'a str,
+        first_offset: i64,
+        last_offset: i64,
+    }
+
     async fn seeded_index(
         event_log: Arc<dyn MetadataEventLog>,
         topic_id: Uuid,
-        ranges: &[(&str, i64, i64)],
+        ranges: &[SeededRange<'_>],
     ) -> DisklessIndexLog {
         let seed = DisklessIndexLog::start(event_log).await.unwrap();
-        for &(key, first, last) in ranges {
+        for &SeededRange {
+            object_key: key,
+            first_offset: first,
+            last_offset: last,
+        } in ranges
+        {
             seed.publish_flush(
                 &flush_record()
                     .topic_id(topic_id)
@@ -541,17 +553,35 @@ mod tests {
         seed
     }
 
-    async fn two_range_backlog(
-        partitions: i32,
-    ) -> (Arc<InProcessMetadataEventLog>, Uuid, DisklessIndexLog) {
+    /// An event log that holds a backlog, the topic it is for, and the index
+    /// that seeded it.
+    struct Backlog {
+        event_log: Arc<InProcessMetadataEventLog>,
+        topic_id: Uuid,
+        seed: DisklessIndexLog,
+    }
+
+    async fn two_range_backlog(partitions: i32) -> Backlog {
         let event_log = InProcessMetadataEventLog::new(partitions);
         let topic_id = Uuid::from_u128(7);
         let seed = seeded_index(event_log.clone(), topic_id, &[
-            ("object-a", 0, 3),
-            ("object-b", 4, 7),
+            SeededRange {
+                object_key: "object-a",
+                first_offset: 0,
+                last_offset: 3,
+            },
+            SeededRange {
+                object_key: "object-b",
+                first_offset: 4,
+                last_offset: 7,
+            },
         ])
         .await;
-        (event_log, topic_id, seed)
+        Backlog {
+            event_log,
+            topic_id,
+            seed,
+        }
     }
 
     async fn check_replayed_backlog(index: &DisklessIndexLog, topic_id: Uuid, context: &str) {
@@ -564,7 +594,11 @@ mod tests {
 
     #[tokio::test]
     async fn catch_up_resolves_only_once_the_topic_backlog_is_projected() {
-        let (event_log, topic_id, _seed) = two_range_backlog(2).await;
+        let Backlog {
+            event_log,
+            topic_id,
+            seed: _seed,
+        } = two_range_backlog(2).await;
 
         // A restart against the now-populated topic.
         let restarted = DisklessIndexLog::start(event_log).await.unwrap();
@@ -672,8 +706,12 @@ mod tests {
     #[tokio::test]
     async fn catch_up_gives_up_when_the_replay_stops_making_progress() {
         let event_log = InProcessMetadataEventLog::new(1);
-        let _seed =
-            seeded_index(event_log.clone(), Uuid::from_u128(7), &[("object-a", 0, 3)]).await;
+        let _seed = seeded_index(event_log.clone(), Uuid::from_u128(7), &[SeededRange {
+            object_key: "object-a",
+            first_offset: 0,
+            last_offset: 3,
+        }])
+        .await;
 
         // A silent-but-open stream is what a dead partition fetch loop leaves
         // behind. Waiting on it forever would never flush again.
@@ -689,7 +727,11 @@ mod tests {
 
     #[tokio::test]
     async fn catch_up_keeps_waiting_while_a_slow_replay_still_advances() {
-        let (event_log, topic_id, _seed) = two_range_backlog(1).await;
+        let Backlog {
+            event_log,
+            topic_id,
+            seed: _seed,
+        } = two_range_backlog(1).await;
 
         // Every record lands well inside the stall window, but the replay as a
         // whole outlasts it: progress, not elapsed time, is what the gate
@@ -708,7 +750,12 @@ mod tests {
     async fn catch_up_covers_a_record_appended_while_the_subscription_opens() {
         let event_log = InProcessMetadataEventLog::new(1);
         let topic_id = Uuid::from_u128(7);
-        let _seed = seeded_index(event_log.clone(), topic_id, &[("object-a", 0, 3)]).await;
+        let _seed = seeded_index(event_log.clone(), topic_id, &[SeededRange {
+            object_key: "object-a",
+            first_offset: 0,
+            last_offset: 3,
+        }])
+        .await;
 
         // The previous leader's in-flight flush lands while this projection is
         // subscribing. Pacing the replay keeps the assertion off the pump's
@@ -747,7 +794,12 @@ mod tests {
     async fn a_delete_floor_survives_a_rebuilt_projection() {
         let event_log = InProcessMetadataEventLog::new(1);
         let topic_id = Uuid::from_u128(7);
-        let seed = seeded_index(event_log.clone(), topic_id, &[("object-a", 0, 7)]).await;
+        let seed = seeded_index(event_log.clone(), topic_id, &[SeededRange {
+            object_key: "object-a",
+            first_offset: 0,
+            last_offset: 7,
+        }])
+        .await;
         seed.publish_delete_floor(topic_id, 0, 4, Duration::from_secs(5))
             .await
             .unwrap();
@@ -849,9 +901,15 @@ mod tests {
         assert!(error.to_string().contains("diskless index replay fence"));
     }
 
-    async fn projected_first_object(
-        transport: Arc<dyn MetadataEventLog>,
-    ) -> (DisklessIndexLog, Uuid, WalFlushRecord) {
+    /// An index with one projected object, the topic it is for, and the record
+    /// that was applied.
+    struct ProjectedObject {
+        index: DisklessIndexLog,
+        topic_id: Uuid,
+        record: WalFlushRecord,
+    }
+
+    async fn projected_first_object(transport: Arc<dyn MetadataEventLog>) -> ProjectedObject {
         let index = DisklessIndexLog::start(transport).await.unwrap();
         let topic_id = Uuid::from_u128(7);
         let record = flush_record().topic_id(topic_id).call();
@@ -861,14 +919,22 @@ mod tests {
                 .wait_until_applied(&record, Duration::from_secs(1))
                 .await
         );
-        (index, topic_id, record)
+        ProjectedObject {
+            index,
+            topic_id,
+            record,
+        }
     }
 
     #[tokio::test]
     async fn flush_and_tombstone_publish_failures_are_returned() {
         let transport =
             TogglePublishLog::new(InProcessMetadataEventLog::new(1), PublishOutcome::Succeed);
-        let (index, topic_id, _record) = projected_first_object(transport.clone()).await;
+        let ProjectedObject {
+            index,
+            topic_id,
+            record: _record,
+        } = projected_first_object(transport.clone()).await;
 
         transport.set_outcome(PublishOutcome::Fail);
 
@@ -889,7 +955,11 @@ mod tests {
     #[tokio::test]
     async fn consumed_tombstone_removes_the_projected_range() {
         let transport = InProcessMetadataEventLog::new(1);
-        let (index, topic_id, record) = projected_first_object(transport.clone()).await;
+        let ProjectedObject {
+            index,
+            topic_id,
+            record,
+        } = projected_first_object(transport.clone()).await;
         let key = WalIndexKey::from(&record.entries[0]);
 
         let bytes = key.to_bytes();

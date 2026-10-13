@@ -12,7 +12,7 @@
 //! even though its topic exists.
 
 use {
-    super::super::add_partitions_to_txn::test_support::seed_topic,
+    super::{super::add_partitions_to_txn::test_support::seed_topic, test_support::RowKey},
     crate::{
         api_catalog::UnstableApiVersions,
         broker::{Broker, BrokerHandle},
@@ -72,11 +72,17 @@ pub(super) async fn seed_topic_a(broker: &Broker) { seed_topic(broker, "a", 1).a
 
 /// Starts a broker that grants what the principal name says, waits until its
 /// group and transaction coordinators serve, and seeds topic `a`.
-async fn start_seeded_broker() -> (BrokerHandle, tempfile::TempDir) {
+async fn start_seeded_broker() -> SeededBroker {
     let (handle, dir) = start_transaction_grant_broker().await;
     wait_for_coordinators(&handle).await;
     seed_topic_a(&handle.broker_arc_for_test()).await;
-    (handle, dir)
+    SeededBroker { handle, dir }
+}
+
+/// A started broker and the data directory that must outlive it.
+struct SeededBroker {
+    handle: BrokerHandle,
+    dir: tempfile::TempDir,
 }
 
 /// Waits until the group coordinator serves `__consumer_offsets` and the
@@ -230,8 +236,24 @@ struct Case {
     name: &'static str,
     topics: Vec<TxnOffsetCommitRequestTopic>,
     grants: &'static str,
-    expected: Vec<(&'static str, i32, i16)>,
-    appended: Vec<(&'static str, i32)>,
+    expected: Vec<ExpectedRow>,
+    appended: Vec<RowKey<'static>>,
+}
+
+/// One response row a case expects: the topic and partition it answers, and
+/// its code.
+pub(super) struct ExpectedRow {
+    pub(super) topic: &'static str,
+    pub(super) partition: i32,
+    pub(super) code: i16,
+}
+
+pub(super) fn expected_row(topic: &'static str, partition: i32, code: i16) -> ExpectedRow {
+    ExpectedRow {
+        topic,
+        partition,
+        code,
+    }
 }
 
 /// The issue's table: one authorized existing partition, one authorized
@@ -240,7 +262,7 @@ struct Case {
 /// denied outright, and a mixed request with one row of each outcome.
 #[tokio::test]
 async fn txn_offset_commit_runs_the_existence_check_after_the_topic_read_gate() {
-    let (handle, _dir) = start_seeded_broker().await;
+    let SeededBroker { handle, dir: _dir } = start_seeded_broker().await;
     let broker = handle.broker_arc_for_test();
 
     let cases = [
@@ -248,28 +270,47 @@ async fn txn_offset_commit_runs_the_existence_check_after_the_topic_read_gate() 
             name: "authorized_existing_partition_commits",
             topics: vec![topic("a", &[0])],
             grants: READ_ON_STAR,
-            expected: vec![("a", 0, codes::NONE)],
-            appended: vec![("a", 0)],
+            expected: vec![ExpectedRow {
+                topic: "a",
+                partition: 0,
+                code: codes::NONE,
+            }],
+            appended: vec![RowKey {
+                topic: "a",
+                partition: 0,
+            }],
         },
         Case {
             name: "authorized_partition_out_of_the_topics_range_is_unknown",
             topics: vec![topic("a", &[5])],
             grants: READ_ON_STAR,
-            expected: vec![("a", 5, codes::UNKNOWN_TOPIC_OR_PARTITION)],
+            expected: vec![ExpectedRow {
+                topic: "a",
+                partition: 5,
+                code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+            }],
             appended: vec![],
         },
         Case {
             name: "authorized_topic_the_image_does_not_hold_is_unknown",
             topics: vec![topic("missing", &[0])],
             grants: READ_ON_STAR,
-            expected: vec![("missing", 0, codes::UNKNOWN_TOPIC_OR_PARTITION)],
+            expected: vec![ExpectedRow {
+                topic: "missing",
+                partition: 0,
+                code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+            }],
             appended: vec![],
         },
         Case {
             name: "denied_topic_is_topic_authorization_failed_not_unknown",
             topics: vec![topic("missing", &[0])],
             grants: NO_TOPIC_READ,
-            expected: vec![("missing", 0, codes::TOPIC_AUTHORIZATION_FAILED)],
+            expected: vec![ExpectedRow {
+                topic: "missing",
+                partition: 0,
+                code: codes::TOPIC_AUTHORIZATION_FAILED,
+            }],
             appended: vec![],
         },
         Case {
@@ -278,10 +319,21 @@ async fn txn_offset_commit_runs_the_existence_check_after_the_topic_read_gate() 
             grants: READ_ON_STAR,
             // Kafka's response builder holds the swept rows first.
             expected: vec![
-                ("missing", 0, codes::UNKNOWN_TOPIC_OR_PARTITION),
-                ("a", 0, codes::NONE),
+                ExpectedRow {
+                    topic: "missing",
+                    partition: 0,
+                    code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                },
+                ExpectedRow {
+                    topic: "a",
+                    partition: 0,
+                    code: codes::NONE,
+                },
             ],
-            appended: vec![("a", 0)],
+            appended: vec![RowKey {
+                topic: "a",
+                partition: 0,
+            }],
         },
     ];
 
@@ -305,15 +357,25 @@ async fn txn_offset_commit_runs_the_existence_check_after_the_topic_read_gate() 
         let response = commit_response(&broker, &request, version, &ctx).await;
 
         let got = response_rows(&response);
-        let expected: Vec<(String, i32, i16)> = case
+        let expected: Vec<ResponseRow> = case
             .expected
             .iter()
-            .map(|&(name, partition, code)| (name.to_string(), partition, code))
+            .map(
+                |&ExpectedRow {
+                     topic,
+                     partition,
+                     code,
+                 }| ResponseRow {
+                    topic: topic.to_string(),
+                    partition,
+                    code,
+                },
+            )
             .collect();
         check!(got == expected, "{}: response rows", case.name);
 
         super::test_support::check_appended_keys(&case.topics, &case.appended, |key, expected| {
-            let holds = log_holds_key(&broker, &group_id, key.0, key.1);
+            let holds = log_holds_key(&broker, &group_id, key.topic, key.partition);
             check!(
                 holds == expected,
                 "{}: log holds {:?} == {}",
@@ -335,7 +397,7 @@ async fn txn_offset_commit_runs_the_existence_check_after_the_topic_read_gate() 
 /// fencing error and skip the append.
 #[tokio::test]
 async fn unknown_rows_survive_a_group_fencing_failure() {
-    let (handle, _dir) = start_seeded_broker().await;
+    let SeededBroker { handle, dir: _dir } = start_seeded_broker().await;
     let broker = handle.broker_arc_for_test();
 
     let address = peer();
@@ -362,8 +424,16 @@ async fn unknown_rows_survive_a_group_fencing_failure() {
 
     let got = response_rows(&response);
     let expected = vec![
-        ("missing".to_string(), 0, codes::UNKNOWN_TOPIC_OR_PARTITION),
-        ("a".to_string(), 0, codes::ILLEGAL_GENERATION),
+        ResponseRow {
+            topic: "missing".to_string(),
+            partition: 0,
+            code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+        },
+        ResponseRow {
+            topic: "a".to_string(),
+            partition: 0,
+            code: codes::ILLEGAL_GENERATION,
+        },
     ];
     check!(got == expected, "fenced response preserves unknown rows");
 
@@ -415,16 +485,55 @@ enum TopicRef {
     Id(uuid::Uuid),
 }
 
+/// A request topic: how it is named, and the partitions it commits.
+struct RequestTopic {
+    topic: TopicRef,
+    partitions: &'static [i32],
+}
+
+/// A response row: the partition it answers, and its code.
+#[derive(Clone, Copy)]
+struct RowCode {
+    partition: i32,
+    code: i16,
+}
+
+/// A response topic: who it is, and its rows.
+struct ExpectedTopic {
+    topic: TopicRef,
+    rows: Vec<RowCode>,
+}
+
+fn req_topic(topic: TopicRef, partitions: &'static [i32]) -> RequestTopic {
+    RequestTopic { topic, partitions }
+}
+
+fn rc(partition: i32, code: i16) -> RowCode { RowCode { partition, code } }
+
+fn exp(topic: TopicRef, rows: Vec<RowCode>) -> ExpectedTopic { ExpectedTopic { topic, rows } }
+
+fn logged_key(topic: &'static str, partition: i32) -> RowKey<'static> {
+    RowKey { topic, partition }
+}
+
+/// A logged offset record: where it is, and the topic id it carries.
+#[derive(Debug, PartialEq, Eq)]
+struct LoggedValue<'a> {
+    topic: &'a str,
+    partition: i32,
+    topic_id: Option<uuid::Uuid>,
+}
+
 struct V6Case {
     name: &'static str,
     version: i16,
-    topics: Vec<(TopicRef, &'static [i32])>,
+    topics: Vec<RequestTopic>,
     /// The response topics in order: who the topic is and its rows.
-    expected: Vec<(TopicRef, Vec<(i32, i16)>)>,
+    expected: Vec<ExpectedTopic>,
     /// The `(topic, partition)` rows the log holds after the request, each
     /// with the topic id its offset records: the id the image holds at v6, and
     /// none below it, as Kafka 4.3.1 records.
-    logged: Vec<(&'static str, i32)>,
+    logged: Vec<RowKey<'static>>,
 }
 
 /// #867, KIP-1319, against Kafka trunk's `KafkaApis.handleTxnOffsetCommitRequest`
@@ -464,29 +573,32 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
         V6Case {
             name: "v5_names_the_topic_and_logs_no_id",
             version: 5,
-            topics: vec![(TopicRef::Name("a"), &[0])],
-            expected: vec![(TopicRef::Name("a"), vec![(0, codes::NONE)])],
-            logged: vec![("a", 0)],
+            topics: vec![req_topic(TopicRef::Name("a"), &[0])],
+            expected: vec![exp(TopicRef::Name("a"), vec![rc(0, codes::NONE)])],
+            logged: vec![logged_key("a", 0)],
         },
         V6Case {
             name: "v6_known_id_commits_under_the_topic_name",
             version: 6,
-            topics: vec![(TopicRef::IdOf("a"), &[0])],
-            expected: vec![(TopicRef::IdOf("a"), vec![(0, codes::NONE)])],
-            logged: vec![("a", 0)],
+            topics: vec![req_topic(TopicRef::IdOf("a"), &[0])],
+            expected: vec![exp(TopicRef::IdOf("a"), vec![rc(0, codes::NONE)])],
+            logged: vec![logged_key("a", 0)],
         },
         V6Case {
             name: "v6_unknown_id_is_unknown_topic_id",
             version: 6,
-            topics: vec![(TopicRef::Id(dead), &[0])],
-            expected: vec![(TopicRef::Id(dead), vec![(0, codes::UNKNOWN_TOPIC_ID)])],
+            topics: vec![req_topic(TopicRef::Id(dead), &[0])],
+            expected: vec![exp(TopicRef::Id(dead), vec![rc(
+                0,
+                codes::UNKNOWN_TOPIC_ID,
+            )])],
             logged: vec![],
         },
         V6Case {
             name: "v6_zero_id_is_unknown_topic_id",
             version: 6,
-            topics: vec![(TopicRef::Id(uuid::Uuid::nil()), &[0])],
-            expected: vec![(TopicRef::Id(uuid::Uuid::nil()), vec![(
+            topics: vec![req_topic(TopicRef::Id(uuid::Uuid::nil()), &[0])],
+            expected: vec![exp(TopicRef::Id(uuid::Uuid::nil()), vec![rc(
                 0,
                 codes::UNKNOWN_TOPIC_ID,
             )])],
@@ -495,8 +607,8 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
         V6Case {
             name: "v6_known_id_missing_partition_is_unknown_topic_or_partition",
             version: 6,
-            topics: vec![(TopicRef::IdOf("a"), &[5])],
-            expected: vec![(TopicRef::IdOf("a"), vec![(
+            topics: vec![req_topic(TopicRef::IdOf("a"), &[5])],
+            expected: vec![exp(TopicRef::IdOf("a"), vec![rc(
                 5,
                 codes::UNKNOWN_TOPIC_OR_PARTITION,
             )])],
@@ -505,8 +617,8 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
         V6Case {
             name: "v6_read_is_authorized_by_the_resolved_name",
             version: 6,
-            topics: vec![(TopicRef::IdOf("b"), &[0])],
-            expected: vec![(TopicRef::IdOf("b"), vec![(
+            topics: vec![req_topic(TopicRef::IdOf("b"), &[0])],
+            expected: vec![exp(TopicRef::IdOf("b"), vec![rc(
                 0,
                 codes::TOPIC_AUTHORIZATION_FAILED,
             )])],
@@ -516,22 +628,22 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
             name: "v6_swept_rows_lead_the_committed_ones",
             version: 6,
             topics: vec![
-                (TopicRef::IdOf("a"), &[0, 5]),
-                (TopicRef::IdOf("b"), &[0]),
-                (TopicRef::Id(dead), &[0]),
+                req_topic(TopicRef::IdOf("a"), &[0, 5]),
+                req_topic(TopicRef::IdOf("b"), &[0]),
+                req_topic(TopicRef::Id(dead), &[0]),
             ],
             expected: vec![
-                (TopicRef::IdOf("a"), vec![
-                    (5, codes::UNKNOWN_TOPIC_OR_PARTITION),
-                    (0, codes::NONE),
+                exp(TopicRef::IdOf("a"), vec![
+                    rc(5, codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    rc(0, codes::NONE),
                 ]),
-                (TopicRef::IdOf("b"), vec![(
+                exp(TopicRef::IdOf("b"), vec![rc(
                     0,
                     codes::TOPIC_AUTHORIZATION_FAILED,
                 )]),
-                (TopicRef::Id(dead), vec![(0, codes::UNKNOWN_TOPIC_ID)]),
+                exp(TopicRef::Id(dead), vec![rc(0, codes::UNKNOWN_TOPIC_ID)]),
             ],
-            logged: vec![("a", 0)],
+            logged: vec![logged_key("a", 0)],
         },
     ];
 
@@ -557,13 +669,18 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
                 topics: case
                     .topics
                     .iter()
-                    .map(|&(topic_ref, partitions)| {
-                        let (name, topic_id) = request_key(topic_ref);
-                        TxnOffsetCommitRequestTopic {
-                            topic_id,
-                            ..topic(&name, partitions)
-                        }
-                    })
+                    .map(
+                        |&RequestTopic {
+                             topic: topic_ref,
+                             partitions,
+                         }| {
+                            let (name, topic_id) = request_key(topic_ref);
+                            TxnOffsetCommitRequestTopic {
+                                topic_id,
+                                ..topic(&name, partitions)
+                            }
+                        },
+                    )
                     .collect(),
             })
             .await
@@ -575,41 +692,53 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
             topics: case
                 .expected
                 .iter()
-                .map(|(topic_ref, rows)| {
-                    let (name, topic_id) = request_key(*topic_ref);
-                    TxnOffsetCommitResponseTopic {
-                        name,
-                        topic_id,
-                        partitions: rows
-                            .iter()
-                            .map(|&(partition_index, error_code)| {
-                                TxnOffsetCommitResponsePartition {
-                                    partition_index,
-                                    error_code,
-                                    ..Default::default()
-                                }
-                            })
-                            .collect(),
-                        ..Default::default()
-                    }
-                })
+                .map(
+                    |ExpectedTopic {
+                         topic: topic_ref,
+                         rows,
+                     }| {
+                        let (name, topic_id) = request_key(*topic_ref);
+                        TxnOffsetCommitResponseTopic {
+                            name,
+                            topic_id,
+                            partitions: rows
+                                .iter()
+                                .map(|&RowCode { partition, code }| {
+                                    TxnOffsetCommitResponsePartition {
+                                        partition_index: partition,
+                                        error_code: code,
+                                        ..Default::default()
+                                    }
+                                })
+                                .collect(),
+                            ..Default::default()
+                        }
+                    },
+                )
                 .collect(),
             ..Default::default()
         };
         check!(response == expected, "{}", case.name);
 
-        let logged: Vec<(&str, i32, Option<uuid::Uuid>)> = ["a", "b"]
+        let logged: Vec<LoggedValue<'_>> = ["a", "b"]
             .into_iter()
             .flat_map(|name| [0, 5].map(|partition| (name, partition)))
             .filter_map(|(name, partition)| {
-                logged_value(&broker, &group_id, name, partition)
-                    .map(|value| (name, partition, value.topic_id))
+                logged_value(&broker, &group_id, name, partition).map(|value| LoggedValue {
+                    topic: name,
+                    partition,
+                    topic_id: value.topic_id,
+                })
             })
             .collect();
-        let want: Vec<(&str, i32, Option<uuid::Uuid>)> = case
+        let want: Vec<LoggedValue<'_>> = case
             .logged
             .iter()
-            .map(|&(name, partition)| (name, partition, (case.version >= 6).then(|| id_of(name))))
+            .map(|&RowKey { topic, partition }| LoggedValue {
+                topic,
+                partition,
+                topic_id: (case.version >= 6).then(|| id_of(topic)),
+            })
             .collect();
         check!(logged == want, "{}: logged offsets", case.name);
     }
@@ -624,7 +753,7 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
 /// `ILLEGAL_GENERATION`.
 #[tokio::test]
 async fn v6_answers_group_id_not_found_where_older_versions_answer_illegal_generation() {
-    let (handle, _dir) = start_seeded_broker().await;
+    let SeededBroker { handle, dir: _dir } = start_seeded_broker().await;
     let broker = handle.broker_arc_for_test();
     read_context!(address, user, ctx; "txn-offset-commit-missing-group");
     let a_id = broker
@@ -719,7 +848,7 @@ fn kip_1251_seed(topic_id: krabka_protocol::primitives::uuid::Uuid) -> GroupSeed
 /// below.
 #[tokio::test]
 async fn an_older_member_epoch_commits_a_partition_assigned_before_it() {
-    let (handle, _dir) = start_seeded_broker().await;
+    let SeededBroker { handle, dir: _dir } = start_seeded_broker().await;
     let broker = handle.broker_arc_for_test();
     read_context!(address, user, ctx; "txn-offset-commit-kip-1251");
     let a_id = krabka_protocol::primitives::uuid::Uuid(
@@ -774,7 +903,12 @@ async fn an_older_member_epoch_commits_a_partition_assigned_before_it() {
 
 /// The transaction the coordinator holds for one verification case: its state,
 /// its producer epoch, and whether it holds the group's offsets partition.
-type HeldTransaction = (TxnState, i16, bool);
+#[derive(Clone, Copy)]
+struct HeldTransaction {
+    state: TxnState,
+    epoch: i16,
+    holds_offsets: bool,
+}
 
 struct VerificationCase {
     name: &'static str,
@@ -796,7 +930,7 @@ struct VerificationCase {
 async fn txn_offset_commit_verifies_the_producer_with_the_transaction_coordinator() {
     use crate::txn::state::TxnState::{CompleteCommit, Empty, Ongoing, PrepareCommit};
 
-    let (handle, _dir) = start_seeded_broker().await;
+    let SeededBroker { handle, dir: _dir } = start_seeded_broker().await;
     let broker = handle.broker_arc_for_test();
     read_context!(address, user, ctx; "txn-offset-commit-verification");
 
@@ -811,56 +945,88 @@ async fn txn_offset_commit_verifies_the_producer_with_the_transaction_coordinato
         VerificationCase {
             name: "v3 from a fenced producer",
             version: 3,
-            held: Some((Ongoing, 6, true)),
+            held: Some(HeldTransaction {
+                state: Ongoing,
+                epoch: 6,
+                holds_offsets: true,
+            }),
             request_epoch: 5,
             expected: codes::INVALID_PRODUCER_EPOCH,
         },
         VerificationCase {
             name: "v3 when AddOffsetsToTxn never added the partition",
             version: 3,
-            held: Some((Ongoing, 5, false)),
+            held: Some(HeldTransaction {
+                state: Ongoing,
+                epoch: 5,
+                holds_offsets: false,
+            }),
             request_epoch: 5,
             expected: codes::INVALID_TXN_STATE,
         },
         VerificationCase {
             name: "v4 knows TRANSACTION_ABORTABLE",
             version: 4,
-            held: Some((Ongoing, 5, false)),
+            held: Some(HeldTransaction {
+                state: Ongoing,
+                epoch: 5,
+                holds_offsets: false,
+            }),
             request_epoch: 5,
             expected: codes::TRANSACTION_ABORTABLE,
         },
         VerificationCase {
             name: "v3 after the transaction completed",
             version: 3,
-            held: Some((CompleteCommit, 5, false)),
+            held: Some(HeldTransaction {
+                state: CompleteCommit,
+                epoch: 5,
+                holds_offsets: false,
+            }),
             request_epoch: 5,
             expected: codes::INVALID_TXN_STATE,
         },
         VerificationCase {
             name: "v3 while the transaction is ending",
             version: 3,
-            held: Some((PrepareCommit, 5, true)),
+            held: Some(HeldTransaction {
+                state: PrepareCommit,
+                epoch: 5,
+                holds_offsets: true,
+            }),
             request_epoch: 5,
             expected: codes::CONCURRENT_TRANSACTIONS,
         },
         VerificationCase {
             name: "v3 from the producer that added the partition",
             version: 3,
-            held: Some((Ongoing, 5, true)),
+            held: Some(HeldTransaction {
+                state: Ongoing,
+                epoch: 5,
+                holds_offsets: true,
+            }),
             request_epoch: 5,
             expected: codes::NONE,
         },
         VerificationCase {
             name: "v5 from a fenced producer",
             version: 5,
-            held: Some((Ongoing, 6, true)),
+            held: Some(HeldTransaction {
+                state: Ongoing,
+                epoch: 6,
+                holds_offsets: true,
+            }),
             request_epoch: 5,
             expected: codes::INVALID_PRODUCER_EPOCH,
         },
         VerificationCase {
             name: "v5 adds the partition to an empty transaction",
             version: 5,
-            held: Some((Empty, 5, false)),
+            held: Some(HeldTransaction {
+                state: Empty,
+                epoch: 5,
+                holds_offsets: false,
+            }),
             request_epoch: 5,
             expected: codes::NONE,
         },
@@ -870,7 +1036,12 @@ async fn txn_offset_commit_verifies_the_producer_with_the_transaction_coordinato
         let group_id = format!("group-verified-{row}");
         let transactional_id = format!("tid-verified-{row}");
         let producer_id = 900 + i64::try_from(row).expect("small");
-        if let Some((state, epoch, holds_offsets)) = case.held {
+        if let Some(HeldTransaction {
+            state,
+            epoch,
+            holds_offsets,
+        }) = case.held
+        {
             seed_transaction()
                 .broker(&broker)
                 .transactional_id(&transactional_id)
@@ -917,7 +1088,7 @@ async fn txn_offset_commit_verifies_the_producer_with_the_transaction_coordinato
 /// `ADD_PARTITION` above v4. The coordinator records `TV_2` for the add.
 #[tokio::test]
 async fn a_v5_commit_adds_the_offsets_partition_on_a_transaction_version_1_cluster() {
-    let (handle, _dir) = start_seeded_broker().await;
+    let SeededBroker { handle, dir: _dir } = start_seeded_broker().await;
     let broker = handle.broker_arc_for_test();
     broker
         .controller
@@ -941,8 +1112,17 @@ async fn a_v5_commit_adds_the_offsets_partition_on_a_transaction_version_1_clust
         })
         .call()
         .await;
-    let response =
-        commit_topic_a_without_membership(&broker, "tid-tv1", group_id, (700, 5), &ctx).await;
+    let response = commit_topic_a_without_membership(
+        &broker,
+        "tid-tv1",
+        group_id,
+        super::test_support::TxnCommitProducer {
+            id: krabka_ids::ProducerId(700),
+            epoch: super::test_support::ProducerEpoch(5),
+        },
+        &ctx,
+    )
+    .await;
     check!(response.topics[0].partitions[0].error_code == codes::NONE);
     check!(log_holds_key(&broker, group_id, "a", 0));
 
@@ -1001,9 +1181,17 @@ async fn a_v5_commit_records_the_topic_id_only_under_unstable_api_versions() {
             .maybe_group_id(Some(group_id))
             .call()
             .await;
-        let response =
-            commit_topic_a_without_membership(&broker, "tid-topic-id", group_id, (800, 0), &ctx)
-                .await;
+        let response = commit_topic_a_without_membership(
+            &broker,
+            "tid-topic-id",
+            group_id,
+            super::test_support::TxnCommitProducer {
+                id: krabka_ids::ProducerId(800),
+                epoch: super::test_support::ProducerEpoch(0),
+            },
+            &ctx,
+        )
+        .await;
         check!(
             response.topics[0].partitions[0].error_code == codes::NONE,
             "unstable={unstable}"
@@ -1029,7 +1217,7 @@ async fn commit_topic_a_without_membership(
     broker: &Broker,
     transactional_id: &str,
     group_id: &str,
-    producer: (i64, i16),
+    producer: super::test_support::TxnCommitProducer,
     context: &RequestContext<'_>,
 ) -> TxnOffsetCommitResponse {
     let request = TxnOffsetCommitRequest {
@@ -1037,7 +1225,7 @@ async fn commit_topic_a_without_membership(
         ..super::test_support::request_for()
             .transactional_id(transactional_id.to_owned())
             .group_id(group_id)
-            .producer(super::test_support::TxnCommitProducer::from_wire(producer))
+            .producer(producer)
             .topics(vec![topic("a", &[0])])
             .call()
     };
@@ -1061,17 +1249,23 @@ async fn commit_response(
     decode_response(&bytes, version)
 }
 
-fn response_rows(response: &TxnOffsetCommitResponse) -> Vec<(String, i32, i16)> {
+/// One response row: the topic and partition it answers, and its code.
+#[derive(Debug, PartialEq, Eq)]
+struct ResponseRow {
+    topic: String,
+    partition: i32,
+    code: i16,
+}
+
+fn response_rows(response: &TxnOffsetCommitResponse) -> Vec<ResponseRow> {
     response
         .topics
         .iter()
         .flat_map(|topic| {
-            topic.partitions.iter().map(|partition| {
-                (
-                    topic.name.clone(),
-                    partition.partition_index,
-                    partition.error_code,
-                )
+            topic.partitions.iter().map(|partition| ResponseRow {
+                topic: topic.name.clone(),
+                partition: partition.partition_index,
+                code: partition.error_code,
             })
         })
         .collect()

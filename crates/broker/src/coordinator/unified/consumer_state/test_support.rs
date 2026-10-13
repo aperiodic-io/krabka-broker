@@ -46,10 +46,17 @@ pub(crate) fn resolved_regex(
     }
 }
 
+/// A topic that [`Topics`] holds.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NamedTopic {
+    pub(crate) name: &'static str,
+    pub(crate) id: Uuid,
+}
+
 /// A metadata provider that holds the topics it was given, each with two
 /// partitions.
 #[derive(Debug)]
-pub(crate) struct Topics(pub(crate) Vec<(&'static str, Uuid)>);
+pub(crate) struct Topics(pub(crate) Vec<NamedTopic>);
 
 impl MetadataProvider for Topics {
     fn snapshot(&self) -> ReconcileInput {
@@ -57,9 +64,9 @@ impl MetadataProvider for Topics {
             topic_id_by_name: self
                 .0
                 .iter()
-                .map(|(name, id)| ((*name).to_owned(), *id))
+                .map(|topic| (topic.name.to_owned(), topic.id))
                 .collect(),
-            partitions_per_topic: self.0.iter().map(|(_, id)| (*id, 2)).collect(),
+            partitions_per_topic: self.0.iter().map(|topic| (topic.id, 2)).collect(),
             ..Default::default()
         }
     }

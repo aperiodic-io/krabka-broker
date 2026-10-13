@@ -5,6 +5,7 @@
 //! restored partition.
 
 use {
+    super::LeaderEpochStart,
     crate::error::RestoreError,
     krabka_ids::{LeaderEpoch, Offset},
     object_store::path::Path,
@@ -46,7 +47,7 @@ pub(super) fn parse_leader_epoch_checkpoint(
     bytes: &[u8],
     segment_base: Offset,
     segment_end: Offset,
-) -> Result<Vec<(LeaderEpoch, Offset)>, RestoreError> {
+) -> Result<Vec<LeaderEpochStart>, RestoreError> {
     let text = std::str::from_utf8(bytes).map_err(|_| checkpoint_error(key, 0, 0, 0))?;
     let mut lines = text.split('\n');
     let mut position: u64 = 0;
@@ -68,7 +69,6 @@ pub(super) fn parse_leader_epoch_checkpoint(
     position += u64::try_from(count_line.len().saturating_add(1)).unwrap_or(u64::MAX);
 
     let mut entries = Vec::new();
-    let mut previous: Option<(i32, i64)> = None;
     for _ in 0..count {
         let line = lines
             .next()
@@ -86,7 +86,9 @@ pub(super) fn parse_leader_epoch_checkpoint(
             return Err(checkpoint_error(key, position, declared, entries.len()));
         }
         if !krabka_verified::restore_leader_epoch_entry_valid(
-            previous,
+            entries
+                .last()
+                .map(|row: &LeaderEpochStart| (row.epoch.0, row.start_offset.0)),
             epoch,
             start_offset,
             segment_base.0,
@@ -94,8 +96,10 @@ pub(super) fn parse_leader_epoch_checkpoint(
         ) {
             return Err(checkpoint_error(key, position, declared, entries.len()));
         }
-        entries.push((LeaderEpoch(epoch), Offset(start_offset)));
-        previous = Some((epoch, start_offset));
+        entries.push(LeaderEpochStart {
+            epoch: LeaderEpoch(epoch),
+            start_offset: Offset(start_offset),
+        });
         position += u64::try_from(line.len().saturating_add(1)).unwrap_or(u64::MAX);
     }
 

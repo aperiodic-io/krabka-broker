@@ -15,7 +15,7 @@ use {
         },
         txnver_harness::{
             NONE, TRANSACTION_ABORTABLE, admin_client, boot_single, create_topic,
-            expected_partitions,
+            expected_partitions, partition_code,
         },
     },
     assert2::assert,
@@ -26,7 +26,7 @@ use {
 
 const VERIFY_TID: &str = "verify-tid";
 
-async fn await_transaction_coordinator(client: &Client) -> (i64, i16) {
+async fn await_transaction_coordinator(client: &Client) -> ProducerIdentity {
     let coordinator = client
         .send(coordinator_lookup_request(VERIFY_TID, 1, vec![
             VERIFY_TID.into(),
@@ -53,7 +53,7 @@ async fn await_transaction_coordinator(client: &Client) -> (i64, i16) {
             .await
             .expect("InitProducerId");
         if response.error_code == 0 {
-            return (response.producer_id, response.producer_epoch);
+            return ProducerIdentity::from_wire((response.producer_id, response.producer_epoch));
         }
         assert!(
             response.error_code == 15 || response.error_code == 16,
@@ -93,7 +93,7 @@ async fn tv2_verify_only_add_partitions_reports_per_partition_codes() {
     // `__transaction_state` partition's coordinator load can lag broker boot,
     // so `InitProducerId` may transiently return NOT_COORDINATOR (16) until it
     // settles — retry until the coordinator is ready.
-    let (pid, epoch) = await_transaction_coordinator(&client).await;
+    let producer = await_transaction_coordinator(&client).await;
 
     // Normal add of (t, 0): transitions the entry to Ongoing and registers the
     // partition. verify_only=false.
@@ -106,13 +106,13 @@ async fn tv2_verify_only_add_partitions_reports_per_partition_codes() {
         .send(
             partitions_request()
                 .transactional_id(VERIFY_TID)
-                .producer(ProducerIdentity::from_wire((pid, epoch)))
+                .producer(producer)
                 .topics(vec![added_topic])
                 .call(),
         )
         .await
         .expect("AddPartitionsToTxn add");
-    let expected_add = expected_partitions(VERIFY_TID, "t", &[(0, NONE)]);
+    let expected_add = expected_partitions(VERIFY_TID, "t", &[partition_code(0, NONE)]);
     assert!(
         add == expected_add,
         "adding (t,0) returned an unexpected response: {add:?}"
@@ -129,15 +129,17 @@ async fn tv2_verify_only_add_partitions_reports_per_partition_codes() {
         .send(
             partitions_request()
                 .transactional_id(VERIFY_TID)
-                .producer(ProducerIdentity::from_wire((pid, epoch)))
+                .producer(producer)
                 .registration(PartitionRegistration::VerifyOnly)
                 .topics(vec![verify_topic])
                 .call(),
         )
         .await
         .expect("AddPartitionsToTxn verify-only");
-    let expected_verify =
-        expected_partitions(VERIFY_TID, "t", &[(0, NONE), (1, TRANSACTION_ABORTABLE)]);
+    let expected_verify = expected_partitions(VERIFY_TID, "t", &[
+        partition_code(0, NONE),
+        partition_code(1, TRANSACTION_ABORTABLE),
+    ]);
     assert!(
         verify == expected_verify,
         "verify-only response did not match the partition result table: {verify:?}"

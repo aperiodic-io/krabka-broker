@@ -12,6 +12,7 @@ use {
         error::RaftError,
         kraft::{
             event::Event,
+            snapshot_fetch::SnapshotId,
             transport::PeerApi,
             types::{Epoch, NodeId, ReplicaKey},
         },
@@ -224,7 +225,7 @@ pub struct MetadataFetchSlice {
     /// The KIP-630 snapshot `(end_offset, epoch)` that replaces `records` when
     /// the observer asked for an offset this node has already pruned away.
     /// `records` is empty whenever this is set.
-    pub snapshot_id: Option<(i64, i32)>,
+    pub snapshot_id: Option<SnapshotId>,
     pub log_start_offset: i64,
     pub high_watermark: i64,
     /// Highest offset the quorum has committed, as this node last heard it.

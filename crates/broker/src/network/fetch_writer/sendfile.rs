@@ -140,7 +140,7 @@ crate::sendfile_cfg! {
             // `count_arg` shim normalizes our `usize remaining` to the right type. We
             // never pass `None` (which would mean "send to EOF" and could overshoot the
             // current batch into the next one in the same `.log` file).
-            let (result, sent) = bsd_sendfile(in_fd, out_fd, off, count);
+            let BsdSendfile { result, sent } = bsd_sendfile(in_fd, out_fd, off, count);
 
             let n = usize::try_from(sent).unwrap_or(0);
             match result {
@@ -169,7 +169,8 @@ crate::sendfile_cfg! {
 /// Platform shim over the per-OS BSD-family `nix::sys::sendfile::sendfile`
 /// signatures. macOS uses `Option<off_t>` for `count` and no flags. FreeBSD
 /// also takes `SfFlags` and a readahead hint. `DragonFly` takes neither, but
-/// uses `Option<usize>`. Returns `(nix::Result<()>, off_t bytes_sent)`.
+/// uses `Option<usize>`. Returns a [`BsdSendfile`]: the `nix::Result<()>` and the
+/// `off_t` bytes sent.
 ///
 /// Compile-reasoned only, because there is no macOS or BSD toolchain here. It
 /// needs CI verification.
@@ -186,7 +187,7 @@ fn bsd_sendfile(
     out_sock: std::os::fd::BorrowedFd<'_>,
     offset: nix::libc::off_t,
     count: usize,
-) -> (nix::Result<()>, nix::libc::off_t) {
+) -> BsdSendfile {
     #[cfg(any(
         target_os = "macos",
         target_os = "ios",
@@ -196,11 +197,13 @@ fn bsd_sendfile(
     {
         // Apple count is Option<off_t>, without flags or headers/trailers.
         let count = Some(nix::libc::off_t::try_from(count).unwrap_or(nix::libc::off_t::MAX));
-        nix::sys::sendfile::sendfile(in_fd, out_sock, offset, count, None, None)
+        let (result, sent) =
+            nix::sys::sendfile::sendfile(in_fd, out_sock, offset, count, None, None);
+        BsdSendfile { result, sent }
     }
     #[cfg(target_os = "freebsd")]
     {
-        nix::sys::sendfile::sendfile(
+        let (result, sent) = nix::sys::sendfile::sendfile(
             in_fd,
             out_sock,
             offset,
@@ -209,10 +212,28 @@ fn bsd_sendfile(
             None,
             nix::sys::sendfile::SfFlags::empty(),
             0,
-        )
+        );
+        BsdSendfile { result, sent }
     }
     #[cfg(target_os = "dragonfly")]
     {
-        nix::sys::sendfile::sendfile(in_fd, out_sock, offset, Some(count), None, None)
+        let (result, sent) =
+            nix::sys::sendfile::sendfile(in_fd, out_sock, offset, Some(count), None, None);
+        BsdSendfile { result, sent }
     }
+}
+
+/// What one BSD `sendfile(2)` call reports: its outcome and the bytes it sent,
+/// which can be non-zero beside an error.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+struct BsdSendfile {
+    result: nix::Result<()>,
+    sent: nix::libc::off_t,
 }

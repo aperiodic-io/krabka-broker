@@ -18,7 +18,7 @@ use {
             freeze_target,
             handlers::pattern_type_concrete,
             scope_covers_internal_topic,
-            signing::{FreezeSignatureCheck, verify_freeze_signature},
+            signing::{FreezeSignatureCheck, WireRefusal, verify_freeze_signature},
         },
         handlers::{RequestContext, cluster_alter_denied},
         time_util::now_ms,
@@ -162,7 +162,7 @@ pub(super) fn check_signature(
         replaces,
     };
     verify_freeze_signature(&check, record).map_err(|refusal| {
-        let (code, message) = refusal.wire();
+        let WireRefusal { code, message } = refusal.wire();
         Refusal::new(code, message)
     })?;
     Ok(true)

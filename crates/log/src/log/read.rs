@@ -54,6 +54,12 @@ fn emptied(segment: &Segment, next: Offset) -> bool { next > segment.last_offset
 /// waits for the next read.
 fn fits_after_first(len: ByteSize, remaining: ByteSize) -> bool { len <= remaining }
 
+/// The progress of a raw read and the chunks it collected.
+struct RawChunks<T> {
+    cursor: RawReadCursor,
+    chunks: Vec<T>,
+}
+
 /// Shared progress for verbatim bytes and file regions, including the first-batch exception.
 struct RawReadCursor {
     start: Offset,
@@ -210,7 +216,10 @@ impl Log {
             return Ok(RawReadDesc::empty(fetch_offset));
         }
 
-        let (cursor, regions) = self.raw_chunks(
+        let RawChunks {
+            cursor,
+            chunks: regions,
+        } = self.raw_chunks(
             fetch_offset,
             limit_offset,
             max_size,
@@ -326,7 +335,7 @@ impl Log {
         limit_offset: Offset,
         budget: ByteSize,
         mut read: impl FnMut(&Segment, Offset, ByteSize) -> Result<Option<RawChunk<T>>, LogError>,
-    ) -> Result<(RawReadCursor, Vec<T>), LogError> {
+    ) -> Result<RawChunks<T>, LogError> {
         let mut cursor = RawReadCursor::new(fetch_offset, budget);
         let mut chunks = Vec::new();
         for segment in self.segments.iter().chain(self.active.as_ref()) {
@@ -344,7 +353,7 @@ impl Log {
                 break;
             }
         }
-        Ok((cursor, chunks))
+        Ok(RawChunks { cursor, chunks })
     }
 
     /// Like [`Log::read`], but returns verbatim wire bytes with no decode.
@@ -379,7 +388,7 @@ impl Log {
             return Ok(RawRead::empty(fetch_offset));
         }
 
-        let (cursor, mut chunks) = self.raw_chunks(
+        let RawChunks { cursor, mut chunks } = self.raw_chunks(
             fetch_offset,
             limit_offset,
             max_size,

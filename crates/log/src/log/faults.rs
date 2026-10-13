@@ -160,13 +160,37 @@ fn is_storage_full(error: &LogError) -> bool {
 
 /// The two failure shapes every seam case is run against: an outright
 /// `StorageFull`, and a short write that lands `prefix` bytes first.
-const PREFIXES: [(&str, usize); 2] = [("outright StorageFull", 0), ("after a short write", 6)];
+const PREFIXES: [FailureShape; 2] = [
+    FailureShape {
+        label: "outright StorageFull",
+        prefix: 0,
+    },
+    FailureShape {
+        label: "after a short write",
+        prefix: 6,
+    },
+];
 
-fn durable_sample_log(config: &LogConfig) -> (tempfile::TempDir, Log, Offset) {
+/// One failure shape: its label, and the number of bytes that land first.
+#[derive(Debug, Clone, Copy)]
+struct FailureShape {
+    label: &'static str,
+    prefix: usize,
+}
+
+/// A log with one durable batch, the directory that holds it, and the log end
+/// offset that batch reached.
+struct DurableLog {
+    dir: tempfile::TempDir,
+    log: Log,
+    durable: Offset,
+}
+
+fn durable_sample_log(config: &LogConfig) -> DurableLog {
     let dir = tempdir().unwrap();
     let log = synced_sample_log(dir.path(), config.clone(), 1, 2);
     let durable = log.log_end_offset();
-    (dir, log, durable)
+    DurableLog { dir, log, durable }
 }
 
 /// A sparse-index write that fails is reported, and the batch it indexed is
@@ -174,13 +198,17 @@ fn durable_sample_log(config: &LogConfig) -> (tempfile::TempDir, Log, Offset) {
 #[test]
 fn a_disk_full_sparse_index_write_is_reported_and_rolled_back() {
     for target in [IoTarget::OffsetIndex, IoTarget::TimeIndex] {
-        for (label, prefix) in PREFIXES {
+        for FailureShape { label, prefix } in PREFIXES {
             // One index entry per batch, so the very next append writes one.
             let config = LogConfig {
                 index_interval: bytes(1),
                 ..LogConfig::default()
             };
-            let (dir, mut log, durable) = durable_sample_log(&config);
+            let DurableLog {
+                dir,
+                mut log,
+                durable,
+            } = durable_sample_log(&config);
 
             log.test_set_io(DiskFull::new(target, prefix));
             // A newer timestamp, because the time index only takes an entry
@@ -206,14 +234,18 @@ fn a_disk_full_sparse_index_write_is_reported_and_rolled_back() {
 /// it, and leaves nothing a reopen mistakes for a snapshot.
 #[test]
 fn a_disk_full_producer_snapshot_fails_the_roll_and_the_log_reopens_without_it() {
-    for (label, prefix) in PREFIXES {
+    for FailureShape { label, prefix } in PREFIXES {
         // Every append after the first rolls the active segment, and a roll is
         // what publishes the boundary snapshot.
         let config = LogConfig {
             flush_on_append: true,
             ..tiny_segments()
         };
-        let (dir, mut log, durable) = durable_sample_log(&config);
+        let DurableLog {
+            dir,
+            mut log,
+            durable,
+        } = durable_sample_log(&config);
 
         log.test_set_io(DiskFull::new(IoTarget::ProducerSnapshot, prefix));
         let error = log
@@ -242,7 +274,7 @@ fn a_disk_full_producer_snapshot_fails_the_roll_and_the_log_reopens_without_it()
 /// did reach disk.
 #[test]
 fn a_disk_full_leader_epoch_checkpoint_leaves_the_previous_checkpoint_standing() {
-    for (label, prefix) in PREFIXES {
+    for FailureShape { label, prefix } in PREFIXES {
         let dir = tempdir().unwrap();
         let config = LogConfig::default();
         let mut log = Log::open(dir.path(), config.clone()).unwrap();
@@ -267,12 +299,18 @@ fn a_disk_full_leader_epoch_checkpoint_leaves_the_previous_checkpoint_standing()
 
 /// Build a compactable log of twelve one-record segments under one key each,
 /// so a pass has real work and produces a real swap.
-fn compactable_log(dir: &Path) -> (LogConfig, Log) {
+fn compactable_log(dir: &Path) -> CompactableLog {
     let config = compacting_segments();
     let mut log = Log::open(dir, config.clone()).unwrap();
     append_keyed_samples(&mut log, 12, |i| format!("k{}", i % 3));
     log.sync().unwrap();
-    (config, log)
+    CompactableLog { config, log }
+}
+
+/// A compactable log and the configuration it was opened with.
+struct CompactableLog {
+    config: LogConfig,
+    log: Log,
 }
 
 /// A `.swap` file that cannot be written fails the pass, and `Log::open`
@@ -280,9 +318,9 @@ fn compactable_log(dir: &Path) -> (LogConfig, Log) {
 /// segments are still authoritative and every record is still there.
 #[test]
 fn a_disk_full_compaction_swap_leaves_the_pre_compaction_log_intact() {
-    for (label, prefix) in PREFIXES {
+    for FailureShape { label, prefix } in PREFIXES {
         let dir = tempdir().unwrap();
-        let (config, mut log) = compactable_log(dir.path());
+        let CompactableLog { config, mut log } = compactable_log(dir.path());
         let before = log.log_end_offset();
 
         log.test_set_io(DiskFull::new(IoTarget::CompactionSwap, prefix));
@@ -321,7 +359,7 @@ fn a_disk_full_compaction_swap_leaves_the_pre_compaction_log_intact() {
 #[test]
 fn a_failed_compaction_directory_fsync_is_reported_and_the_reopened_log_is_whole() {
     let dir = tempdir().unwrap();
-    let (config, mut log) = compactable_log(dir.path());
+    let CompactableLog { config, mut log } = compactable_log(dir.path());
     let before = log.log_end_offset();
 
     log.test_set_io(Arc::new(DirSyncFull));

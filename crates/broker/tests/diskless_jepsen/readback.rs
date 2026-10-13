@@ -15,7 +15,7 @@
 use {
     crate::{
         TOPIC,
-        history::{AckedRecord, ledger_values},
+        history::{AckedRecord, LedgerEntry, ledger_values},
         support::client::connect_owned,
     },
     assert2::assert,
@@ -46,7 +46,7 @@ pub(crate) async fn assert_rust_readback(bootstrap: &str, ledger: &[AckedRecord]
     );
 }
 
-async fn consume_ledger(bootstrap: &str, expected: usize) -> Vec<(i64, Vec<u8>)> {
+async fn consume_ledger(bootstrap: &str, expected: usize) -> Vec<LedgerEntry> {
     let client = connect_owned(bootstrap, "diskless-jepsen-consumer", "direct fetch client").await;
     let metadata = client.refresh_metadata().await.expect("fetch metadata");
     let topic = metadata
@@ -82,10 +82,10 @@ async fn consume_ledger(bootstrap: &str, expected: usize) -> Vec<(i64, Vec<u8>)>
             .expect("direct partition fetch");
         for record in records {
             offset = record.offset + 1;
-            observed.push((
-                record.offset,
-                record.value.map_or_else(Vec::new, |value| value.to_vec()),
-            ));
+            observed.push(LedgerEntry {
+                offset: record.offset,
+                value: record.value.map_or_else(Vec::new, |value| value.to_vec()),
+            });
         }
     }
     client.close();
@@ -98,7 +98,7 @@ pub(crate) async fn assert_jvm_differential(bootstrap: &str, ledger: &[AckedReco
     let observed = jvm_consume_exact(bootstrap, ledger.len()).await;
     let expected = ledger_values(ledger)
         .iter()
-        .flat_map(|(_, value)| value.iter().copied().chain(std::iter::once(b'\n')))
+        .flat_map(|entry| entry.value.iter().copied().chain(std::iter::once(b'\n')))
         .collect::<Vec<_>>();
     assert!(
         observed == expected,

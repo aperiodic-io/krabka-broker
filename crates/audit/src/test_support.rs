@@ -3,26 +3,43 @@
 use {
     crate::{
         AuditEndpoint, AuditEvent, AuditOutcome, AuditPrincipal, AuditResource, FileEd25519Signer,
-        PrivilegedPhase,
+        PrivilegedPhase, Spool,
     },
     ring::signature::{Ed25519KeyPair, KeyPair},
     std::sync::Arc,
 };
 
-pub(crate) fn signer() -> (FileEd25519Signer, Vec<u8>) {
+/// A spool and the temporary directory that backs it.
+pub(crate) struct TempSpool {
+    pub dir: tempfile::TempDir,
+    pub spool: Spool,
+}
+
+/// A generated signer and the public key that verifies its signatures.
+pub(crate) struct TestSigner<S> {
+    pub signer: S,
+    pub public_key: Vec<u8>,
+}
+
+pub(crate) fn signer_with_key_id(key_id: &str) -> TestSigner<FileEd25519Signer> {
     let rng = ring::rand::SystemRandom::new();
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
     let key_pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
     let public_key = key_pair.public_key().as_ref().to_vec();
-    (
-        FileEd25519Signer::from_pkcs8_bytes(pkcs8.as_ref(), "k1".into()).unwrap(),
+    TestSigner {
+        signer: FileEd25519Signer::from_pkcs8_bytes(pkcs8.as_ref(), key_id.into()).unwrap(),
         public_key,
-    )
+    }
 }
 
-pub(crate) fn shared_signer() -> (Arc<FileEd25519Signer>, Vec<u8>) {
-    let (signer, public_key) = signer();
-    (Arc::new(signer), public_key)
+pub(crate) fn signer() -> TestSigner<FileEd25519Signer> { signer_with_key_id("k1") }
+
+pub(crate) fn shared_signer() -> TestSigner<Arc<FileEd25519Signer>> {
+    let TestSigner { signer, public_key } = signer();
+    TestSigner {
+        signer: Arc::new(signer),
+        public_key,
+    }
 }
 
 pub(crate) fn authentication(port: u16, reason: Option<&str>, time_ms: i64) -> AuditEvent {

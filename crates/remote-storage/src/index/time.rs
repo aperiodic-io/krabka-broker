@@ -72,12 +72,26 @@ pub fn relative_offset_floor_for_timestamp(
 mod tests {
     use {super::*, assert2::assert};
 
-    fn time_entries(pairs: &[(i64, u32)]) -> Vec<TimeIndexEntry> {
-        pairs
+    /// A time index entry's decoded timestamp and relative offset.
+    #[derive(Debug, PartialEq, Eq)]
+    struct TimeSpec {
+        timestamp: i64,
+        relative_offset: u32,
+    }
+
+    const fn time_at(timestamp: i64, relative_offset: u32) -> TimeSpec {
+        TimeSpec {
+            timestamp,
+            relative_offset,
+        }
+    }
+
+    fn time_entries(specs: &[TimeSpec]) -> Vec<TimeIndexEntry> {
+        specs
             .iter()
-            .map(|&(ts, rel)| TimeIndexEntry {
-                timestamp: I64::new(ts),
-                relative_offset: U32::new(rel),
+            .map(|spec| TimeIndexEntry {
+                timestamp: I64::new(spec.timestamp),
+                relative_offset: U32::new(spec.relative_offset),
             })
             .collect()
     }
@@ -90,16 +104,21 @@ mod tests {
             buf.extend_from_slice(&rel.to_be_bytes());
         }
         let entries = parse_time_index(&buf).expect("valid time index");
-        let decoded: Vec<(i64, u32)> = entries
+        let decoded: Vec<TimeSpec> = entries
             .iter()
-            .map(|e| (e.timestamp.get(), e.relative_offset.get()))
+            .map(|e| time_at(e.timestamp.get(), e.relative_offset.get()))
             .collect();
-        assert!(decoded == vec![(1_000, 0), (2_000, 10), (3_000, 20)]);
+        assert!(decoded == vec![time_at(1_000, 0), time_at(2_000, 10), time_at(3_000, 20)]);
     }
 
     #[test]
     fn timestamp_floor_covers_strict_predecessor_boundaries() {
-        let entries = time_entries(&[(1_000, 0), (2_000, 10), (2_000, 20), (3_000, 30)]);
+        let entries = time_entries(&[
+            time_at(1_000, 0),
+            time_at(2_000, 10),
+            time_at(2_000, 20),
+            time_at(3_000, 30),
+        ]);
         for (ts, want) in [
             (500, 0),   // before first
             (1_000, 0), // exact first match scans from the segment start
@@ -195,7 +214,12 @@ mod tests {
 
     #[test]
     fn timestamp_floor_ignores_trailing_index_padding() {
-        let entries = time_entries(&[(1_000, 0), (2_000, 10), (0, 0), (0, 0)]);
+        let entries = time_entries(&[
+            time_at(1_000, 0),
+            time_at(2_000, 10),
+            time_at(0, 0),
+            time_at(0, 0),
+        ]);
         assert!(relative_offset_floor_for_timestamp(&entries, 3_000) == 10);
     }
 }

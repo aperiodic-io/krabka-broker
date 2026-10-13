@@ -14,7 +14,7 @@ use {
         config::{BrokerConfig, ListenerSpec},
         error::BrokerError,
         future_log::{FutureLogState, MovePolicy, resume_move},
-        log_dir,
+        log_dir::{self, DiscoveredPartition},
         partition_registry::PartitionRegistry,
         platform::{Sockets, bind_listener},
         throttle::ThrottleState,
@@ -26,8 +26,24 @@ use {
     tokio_util::sync::CancellationToken,
 };
 
+/// A data-plane listener spec with the socket that serves it.
+pub(super) struct BoundListener {
+    pub(super) spec: ListenerSpec,
+    pub(super) listener: TcpListener,
+    /// The address the broker records for the listener, which is not the
+    /// socket's own address for a preopened listener.
+    pub(super) address: SocketAddr,
+}
+
+/// What the accept loops of the data plane run under.
+pub(super) struct ListenerTasks {
+    /// Stops the accept loops.
+    pub(super) shutdown: CancellationToken,
+    pub(super) tasks: Vec<JoinHandle<()>>,
+}
+
 pub(super) struct ListenerStartup {
-    pub(super) bound: Vec<(ListenerSpec, TcpListener, SocketAddr)>,
+    pub(super) bound: Vec<BoundListener>,
     /// The bound address of the inter-broker listener, or of the first
     /// listener when none has that name. `None` on a node without the broker
     /// role, which binds no data-plane listener.
@@ -104,9 +120,9 @@ pub(super) async fn bind_listeners_and_recover_moves(
     .await?;
     let listen_addr = bound
         .iter()
-        .find(|(spec, _, _)| spec.name == config.inter_broker_listener_name)
+        .find(|bound| bound.spec.name == config.inter_broker_listener_name)
         .or_else(|| bound.first())
-        .map(|(_, _, address)| *address);
+        .map(|bound| bound.address);
     if let Some(listen_addr) = listen_addr
         && config.advertised_listener.ends_with(":0")
         && let Some((host, _)) = config.advertised_listener.rsplit_once(':')
@@ -115,7 +131,11 @@ pub(super) async fn bind_listeners_and_recover_moves(
     }
     let future_logs = Arc::new(DashMap::new());
     for log_dir in config.all_log_dirs() {
-        for (topic, partition_id) in log_dir::scan_future(&log_dir).unwrap_or_default() {
+        for DiscoveredPartition {
+            topic,
+            partition: partition_id,
+        } in log_dir::scan_future(&log_dir).unwrap_or_default()
+        {
             let partition = PartitionIndex(partition_id);
             if !partitions.contains(&topic, partition) {
                 let path = log_dir::future_partition_dir(&log_dir, &topic, partition_id);
@@ -160,7 +180,7 @@ async fn adopt_or_bind_listeners(
     sockets: Sockets,
     specs: Vec<ListenerSpec>,
     mut supplied: Vec<TcpListener>,
-) -> std::io::Result<Vec<(ListenerSpec, TcpListener, SocketAddr)>> {
+) -> std::io::Result<Vec<BoundListener>> {
     let mut bound = Vec::with_capacity(specs.len());
     for spec in specs {
         let serving = match sockets {
@@ -176,19 +196,23 @@ async fn adopt_or_bind_listeners(
             None => bind_listener(spec.bind_addr).await?,
         };
         let address = sockets.listener_address(&listener, spec.bind_addr)?;
-        bound.push((spec, listener, address));
+        bound.push(BoundListener {
+            spec,
+            listener,
+            address,
+        });
     }
     Ok(bound)
 }
 
 pub(super) fn spawn_listener_tasks(
     broker: &Arc<Broker>,
-    bound: Vec<(ListenerSpec, TcpListener, SocketAddr)>,
-) -> (CancellationToken, Vec<JoinHandle<()>>) {
+    bound: Vec<BoundListener>,
+) -> ListenerTasks {
     let shutdown = CancellationToken::new();
     let tasks = bound
         .into_iter()
-        .map(|(spec, listener, _)| {
+        .map(|BoundListener { spec, listener, .. }| {
             tokio::spawn(accept_loop(
                 Arc::clone(broker),
                 listener,
@@ -197,7 +221,7 @@ pub(super) fn spawn_listener_tasks(
             ))
         })
         .collect();
-    (shutdown, tasks)
+    ListenerTasks { shutdown, tasks }
 }
 
 #[cfg(test)]
@@ -227,31 +251,55 @@ mod tests {
         }
     }
 
-    /// `(spec name, address the broker records, address the socket is bound
-    /// to)` for each adopted listener.
-    fn adopted(
-        bound: &[(ListenerSpec, TcpListener, SocketAddr)],
-    ) -> Vec<(String, SocketAddr, SocketAddr)> {
+    /// An adopted listener as the test sees it.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Adopted {
+        /// The name of the spec the listener serves.
+        name: String,
+        /// The address the broker records.
+        recorded: SocketAddr,
+        /// The address the socket is bound to.
+        bound_to: SocketAddr,
+    }
+
+    fn adopted_listener(name: &str, recorded: SocketAddr, bound_to: SocketAddr) -> Adopted {
+        Adopted {
+            name: name.to_owned(),
+            recorded,
+            bound_to,
+        }
+    }
+
+    fn adopted(bound: &[BoundListener]) -> Vec<Adopted> {
         bound
             .iter()
-            .map(|(spec, listener, address)| {
-                (
-                    spec.name.clone(),
-                    *address,
-                    listener.local_addr().expect("local address"),
-                )
+            .map(|bound| Adopted {
+                name: bound.spec.name.clone(),
+                recorded: bound.address,
+                bound_to: bound.listener.local_addr().expect("local address"),
             })
             .collect()
     }
 
-    async fn two_listeners() -> (TcpListener, TcpListener, (SocketAddr, SocketAddr)) {
+    /// Two bound listeners, and the addresses they are bound to.
+    struct TwoListeners {
+        first: TcpListener,
+        second: TcpListener,
+        first_addr: SocketAddr,
+        second_addr: SocketAddr,
+    }
+
+    async fn two_listeners() -> TwoListeners {
         let first = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let second = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-        let locals = (
-            first.local_addr().expect("local address"),
-            second.local_addr().expect("local address"),
-        );
-        (first, second, locals)
+        let first_addr = first.local_addr().expect("local address");
+        let second_addr = second.local_addr().expect("local address");
+        TwoListeners {
+            first,
+            second,
+            first_addr,
+            second_addr,
+        }
     }
 
     /// A preopened listener cannot report its address, so the supplied
@@ -260,7 +308,12 @@ mod tests {
     /// either would fail: the adoption binds nothing.
     #[tokio::test]
     async fn preopened_listeners_serve_the_specs_in_order_without_a_bind() {
-        let (first, second, locals) = two_listeners().await;
+        let TwoListeners {
+            first,
+            second,
+            first_addr,
+            second_addr,
+        } = two_listeners().await;
         let data: SocketAddr = "10.255.0.1:9092".parse().expect("literal");
         let internal: SocketAddr = "10.255.0.1:9094".parse().expect("literal");
 
@@ -275,8 +328,8 @@ mod tests {
         assert!(
             adopted(&bound)
                 == vec![
-                    ("PLAINTEXT".to_owned(), data, locals.0),
-                    ("INTERNAL".to_owned(), internal, locals.1),
+                    adopted_listener("PLAINTEXT", data, first_addr),
+                    adopted_listener("INTERNAL", internal, second_addr),
                 ]
         );
     }
@@ -285,11 +338,16 @@ mod tests {
     /// whatever the order of the supplied listeners.
     #[tokio::test]
     async fn native_listeners_serve_the_spec_with_their_address() {
-        let (first, second, locals) = two_listeners().await;
+        let TwoListeners {
+            first,
+            second,
+            first_addr,
+            second_addr,
+        } = two_listeners().await;
 
         let bound = adopt_or_bind_listeners(
             Sockets::Native,
-            vec![spec("PLAINTEXT", locals.1), spec("INTERNAL", locals.0)],
+            vec![spec("PLAINTEXT", second_addr), spec("INTERNAL", first_addr)],
             vec![first, second],
         )
         .await
@@ -298,8 +356,8 @@ mod tests {
         assert!(
             adopted(&bound)
                 == vec![
-                    ("PLAINTEXT".to_owned(), locals.1, locals.1),
-                    ("INTERNAL".to_owned(), locals.0, locals.0),
+                    adopted_listener("PLAINTEXT", second_addr, second_addr),
+                    adopted_listener("INTERNAL", first_addr, first_addr),
                 ]
         );
     }
@@ -307,7 +365,12 @@ mod tests {
     /// What a node opens of its data plane, for each `process.roles`: the
     /// names of the bound listeners, the address `listen_addr` reports, and
     /// whether the port of the supplied listener still answers a connect.
-    type DataPlane = (Vec<String>, Option<SocketAddr>, bool);
+    #[derive(Debug, PartialEq, Eq)]
+    struct DataPlane {
+        listener_names: Vec<String>,
+        listen_addr: Option<SocketAddr>,
+        answers: bool,
+    }
 
     #[derive(Clone, Copy, Debug)]
     enum RoleCase {
@@ -347,19 +410,31 @@ mod tests {
         )
         .await
         .expect("bind the supplied data plane");
-        let names = startup
+        let listener_names = startup
             .bound
             .iter()
-            .map(|(spec, _, _)| spec.name.clone())
+            .map(|bound| bound.spec.name.clone())
             .collect();
         let answers = tokio::net::TcpStream::connect(address).await.is_ok();
-        let expected: DataPlane = if opens {
-            (vec!["PLAINTEXT".to_owned()], Some(address), true)
+        let expected = if opens {
+            DataPlane {
+                listener_names: vec!["PLAINTEXT".to_owned()],
+                listen_addr: Some(address),
+                answers: true,
+            }
         } else {
-            (Vec::new(), None, false)
+            DataPlane {
+                listener_names: Vec::new(),
+                listen_addr: None,
+                answers: false,
+            }
         };
         assert2::assert!(
-            (names, startup.listen_addr, answers) == expected,
+            DataPlane {
+                listener_names,
+                listen_addr: startup.listen_addr,
+                answers,
+            } == expected,
             "{roles:?}"
         );
         drop(startup);

@@ -220,103 +220,160 @@ mod tests {
     /// `SaslServerAuthenticator` and `KafkaChannel`.
     #[test]
     fn handshake_follows_kafkas_initial_and_reauthentication_rules() {
-        type Case = (
-            &'static str,
-            fn() -> ConnectionAuth,
-            Option<i64>,
-            &'static str,
-            (i16, bool, bool, After, Option<i64>),
-        );
+        /// What a handshake must answer and leave behind.
+        struct Expected {
+            code: i16,
+            lists_mechanisms: bool,
+            close_after: bool,
+            next: After,
+            last_after: Option<i64>,
+        }
+        struct Case {
+            name: &'static str,
+            start: fn() -> ConnectionAuth,
+            last_start: Option<i64>,
+            mechanism: &'static str,
+            expected: Expected,
+        }
         let enabled = [SaslMechanism::OAuthBearer, SaslMechanism::ScramSha512];
         let cases: [Case; 9] = [
-            (
-                "initial, enabled",
-                || ConnectionAuth::Anonymous,
-                None,
-                "OAUTHBEARER",
-                (
-                    0,
-                    true,
-                    false,
-                    After::Negotiating(SaslMechanism::OAuthBearer),
-                    None,
-                ),
-            ),
-            (
-                "initial, disabled mechanism closes",
-                || ConnectionAuth::Anonymous,
-                None,
-                "PLAIN",
-                (33, true, true, After::Anonymous, None),
-            ),
-            (
-                "initial, unknown mechanism closes",
-                || ConnectionAuth::Anonymous,
-                None,
-                "NOPE",
-                (33, true, true, After::Anonymous, None),
-            ),
-            (
-                "session without expiry cannot re-authenticate",
-                || authenticated(None),
-                None,
-                "OAUTHBEARER",
-                (34, false, false, After::Authenticated, None),
-            ),
-            (
-                "re-authentication less than a second after the last",
-                || authenticated(Some(NOW_MS + 5_000)),
-                Some(NOW_MS - 999),
-                "OAUTHBEARER",
-                (34, false, false, After::Authenticated, Some(NOW_MS - 999)),
-            ),
-            (
-                "re-authentication, same mechanism",
-                || authenticated(Some(NOW_MS + 5_000)),
-                Some(NOW_MS - 1_000),
-                "OAUTHBEARER",
-                (
-                    0,
-                    true,
-                    false,
-                    After::Reauthenticating(SaslMechanism::OAuthBearer),
-                    Some(NOW_MS),
-                ),
-            ),
-            (
-                "re-authentication switching to another enabled mechanism",
-                || authenticated(Some(NOW_MS + 5_000)),
-                None,
-                "SCRAM-SHA-512",
-                (0, true, false, After::ReauthBadMechanism, Some(NOW_MS)),
-            ),
-            (
-                "re-authentication with an unsupported mechanism closes",
-                || authenticated(Some(NOW_MS + 5_000)),
-                None,
-                "PLAIN",
-                (33, true, true, After::Authenticated, Some(NOW_MS)),
-            ),
-            (
-                "second handshake mid-exchange",
-                || ConnectionAuth::Negotiating {
+            Case {
+                name: "initial, enabled",
+                start: || ConnectionAuth::Anonymous,
+                last_start: None,
+                mechanism: "OAUTHBEARER",
+                expected: Expected {
+                    code: 0,
+                    lists_mechanisms: true,
+                    close_after: false,
+                    next: After::Negotiating(SaslMechanism::OAuthBearer),
+                    last_after: None,
+                },
+            },
+            Case {
+                name: "initial, disabled mechanism closes",
+                start: || ConnectionAuth::Anonymous,
+                last_start: None,
+                mechanism: "PLAIN",
+                expected: Expected {
+                    code: 33,
+                    lists_mechanisms: true,
+                    close_after: true,
+                    next: After::Anonymous,
+                    last_after: None,
+                },
+            },
+            Case {
+                name: "initial, unknown mechanism closes",
+                start: || ConnectionAuth::Anonymous,
+                last_start: None,
+                mechanism: "NOPE",
+                expected: Expected {
+                    code: 33,
+                    lists_mechanisms: true,
+                    close_after: true,
+                    next: After::Anonymous,
+                    last_after: None,
+                },
+            },
+            Case {
+                name: "session without expiry cannot re-authenticate",
+                start: || authenticated(None),
+                last_start: None,
+                mechanism: "OAUTHBEARER",
+                expected: Expected {
+                    code: 34,
+                    lists_mechanisms: false,
+                    close_after: false,
+                    next: After::Authenticated,
+                    last_after: None,
+                },
+            },
+            Case {
+                name: "re-authentication less than a second after the last",
+                start: || authenticated(Some(NOW_MS + 5_000)),
+                last_start: Some(NOW_MS - 999),
+                mechanism: "OAUTHBEARER",
+                expected: Expected {
+                    code: 34,
+                    lists_mechanisms: false,
+                    close_after: false,
+                    next: After::Authenticated,
+                    last_after: Some(NOW_MS - 999),
+                },
+            },
+            Case {
+                name: "re-authentication, same mechanism",
+                start: || authenticated(Some(NOW_MS + 5_000)),
+                last_start: Some(NOW_MS - 1_000),
+                mechanism: "OAUTHBEARER",
+                expected: Expected {
+                    code: 0,
+                    lists_mechanisms: true,
+                    close_after: false,
+                    next: After::Reauthenticating(SaslMechanism::OAuthBearer),
+                    last_after: Some(NOW_MS),
+                },
+            },
+            Case {
+                name: "re-authentication switching to another enabled mechanism",
+                start: || authenticated(Some(NOW_MS + 5_000)),
+                last_start: None,
+                mechanism: "SCRAM-SHA-512",
+                expected: Expected {
+                    code: 0,
+                    lists_mechanisms: true,
+                    close_after: false,
+                    next: After::ReauthBadMechanism,
+                    last_after: Some(NOW_MS),
+                },
+            },
+            Case {
+                name: "re-authentication with an unsupported mechanism closes",
+                start: || authenticated(Some(NOW_MS + 5_000)),
+                last_start: None,
+                mechanism: "PLAIN",
+                expected: Expected {
+                    code: 33,
+                    lists_mechanisms: true,
+                    close_after: true,
+                    next: After::Authenticated,
+                    last_after: Some(NOW_MS),
+                },
+            },
+            Case {
+                name: "second handshake mid-exchange",
+                start: || ConnectionAuth::Negotiating {
                     mechanism: SaslMechanism::OAuthBearer,
                     exchange: SaslExchange::OAuthBearer,
                     pending_token_expiry_ms: None,
                 },
-                None,
-                "OAUTHBEARER",
-                (
-                    34,
-                    false,
-                    true,
-                    After::Negotiating(SaslMechanism::OAuthBearer),
-                    None,
-                ),
-            ),
+                last_start: None,
+                mechanism: "OAUTHBEARER",
+                expected: Expected {
+                    code: 34,
+                    lists_mechanisms: false,
+                    close_after: true,
+                    next: After::Negotiating(SaslMechanism::OAuthBearer),
+                    last_after: None,
+                },
+            },
         ];
-        for (case, start, last_start, mechanism, expected) in cases {
-            let (code, lists_mechanisms, close_after, next, last_after) = expected;
+        for Case {
+            name,
+            start,
+            last_start,
+            mechanism,
+            expected:
+                Expected {
+                    code,
+                    lists_mechanisms,
+                    close_after,
+                    next,
+                    last_after,
+                },
+        } in cases
+        {
             let mut auth = start();
             let mut last_start_ms = last_start;
             let req = SaslHandshakeRequest {
@@ -339,11 +396,11 @@ mod tests {
                         mechanisms,
                         ..Default::default()
                     },
-                "{case}"
+                "{name}"
             );
-            assert!(outcome.close_after == close_after, "{case}");
-            assert!(after(&auth) == next, "{case}");
-            assert!(last_start_ms == last_after, "{case}");
+            assert!(outcome.close_after == close_after, "{name}");
+            assert!(after(&auth) == next, "{name}");
+            assert!(last_start_ms == last_after, "{name}");
         }
     }
 }

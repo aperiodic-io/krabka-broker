@@ -88,8 +88,8 @@ pub struct Predicates {
     /// `--exclude-producer-id` values.
     exclude_producer_id: HashSet<ProducerId>,
     /// `--exclude-offset` ranges, grouped per partition as half-open
-    /// `(start, end_exclusive)` pairs.
-    exclude_offset: HashMap<PartitionRef, Vec<(Offset, Offset)>>,
+    /// `[start, end_exclusive)` ranges.
+    exclude_offset: HashMap<PartitionRef, Vec<ExcludedOffsets>>,
 }
 
 impl Predicates {
@@ -161,7 +161,10 @@ impl Predicates {
         let mut saw_drop = false;
         for parsed in batch {
             let record = parsed?;
-            let (offset, timestamp_ms) = record_coordinates(header, &record)?;
+            let RecordCoordinates {
+                offset,
+                timestamp_ms,
+            } = record_coordinates(header, &record)?;
             match self.decide_record(partition, offset, timestamp_ms, producer_id, &record) {
                 RecordDecision::Keep => saw_keep = true,
                 RecordDecision::Drop => saw_drop = true,
@@ -224,7 +227,7 @@ impl Predicates {
             offset: self.exclude_offset.get(partition).is_some_and(|ranges| {
                 ranges
                     .iter()
-                    .any(|&(start, end_exclusive)| offset >= start && offset < end_exclusive)
+                    .any(|range| offset >= range.start && offset < range.end_exclusive)
             }),
             content: krabka_verified::RestoreContentExclusions {
                 key: record.key.is_some_and(|key| {
@@ -283,6 +286,21 @@ pub(crate) fn timestamp_type(attributes: Attributes) -> krabka_verified::Restore
     }
 }
 
+/// One decoded record's absolute offset and the timestamp Kafka reports for it.
+pub(crate) struct RecordCoordinates {
+    /// The record's absolute offset.
+    pub(crate) offset: Offset,
+    /// The record's timestamp, in milliseconds.
+    pub(crate) timestamp_ms: i64,
+}
+
+/// A half-open `--exclude-offset` range within one partition.
+#[derive(Debug, Clone, Copy)]
+struct ExcludedOffsets {
+    start: Offset,
+    end_exclusive: Offset,
+}
+
 /// Validate and adapt one decoded record's absolute offset and the timestamp
 /// Kafka reports for it at the verified boundary: `base_timestamp +
 /// timestamp_delta` under `CreateTime`, the batch `max_timestamp` under
@@ -290,13 +308,16 @@ pub(crate) fn timestamp_type(attributes: Attributes) -> krabka_verified::Restore
 pub(crate) fn record_coordinates(
     header: &RecordBatchHeader,
     record: &RecordBorrowed<'_>,
-) -> Result<(Offset, i64), RestoreError> {
+) -> Result<RecordCoordinates, RestoreError> {
     let frame = batch_frame(header);
     krabka_verified::restore_record_coordinates(frame, krabka_verified::RestoreRecordDeltas {
         offset_delta: record.offset_delta,
         timestamp_delta: record.timestamp_delta,
     })
-    .map(|(offset, timestamp)| (Offset(offset), timestamp))
+    .map(|(offset, timestamp_ms)| RecordCoordinates {
+        offset: Offset(offset),
+        timestamp_ms,
+    })
     .ok_or_else(|| {
         RecordsError::RecordParse(format!(
             "record coordinates are outside the batch: {frame:?}, record offset delta {}, \

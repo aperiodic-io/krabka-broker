@@ -484,54 +484,70 @@ mod tests {
     #[test]
     fn advance_past_log_start_archives_available_and_keeps_acquired_locked() {
         type Setup = fn(&mut AcquisitionState);
-        // (name, setup, materialize the window first, new log start,
-        // expected SPSO, expected SPEO, expected `Available` offsets).
-        type Case = (&'static str, Setup, bool, i64, i64, i64, Vec<i64>);
+        struct Case {
+            name: &'static str,
+            setup: Setup,
+            /// Materialize the window first.
+            materialize_window: bool,
+            log_start: i64,
+            exp_start: i64,
+            exp_end: i64,
+            /// The expected `Available` offsets.
+            exp_available: Vec<i64>,
+        }
         let no_window: Setup = |_s| {};
         let acquire_below: Setup = |s| {
             let _ = s.acquire("m1", 3, krabka_log::Offset(i64::MAX), t0(), LOCK, 5);
         };
         let cases: [Case; 4] = [
-            (
-                "nothing in flight, window never materialized",
-                no_window,
-                false,
-                3,
-                3,
-                3,
-                vec![],
-            ),
-            (
-                "available records below the new start are archived",
-                no_window,
-                true,
-                3,
-                3,
-                10,
-                vec![3, 4, 5, 6, 7, 8, 9],
-            ),
-            (
-                "acquired records below the new start stay locked",
-                acquire_below,
-                true,
-                3,
-                0,
-                10,
-                vec![3, 4, 5, 6, 7, 8, 9],
-            ),
-            (
-                "log start equal to the SPSO changes nothing",
-                no_window,
-                true,
-                0,
-                0,
-                10,
-                vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-            ),
+            Case {
+                name: "nothing in flight, window never materialized",
+                setup: no_window,
+                materialize_window: false,
+                log_start: 3,
+                exp_start: 3,
+                exp_end: 3,
+                exp_available: vec![],
+            },
+            Case {
+                name: "available records below the new start are archived",
+                setup: no_window,
+                materialize_window: true,
+                log_start: 3,
+                exp_start: 3,
+                exp_end: 10,
+                exp_available: vec![3, 4, 5, 6, 7, 8, 9],
+            },
+            Case {
+                name: "acquired records below the new start stay locked",
+                setup: acquire_below,
+                materialize_window: true,
+                log_start: 3,
+                exp_start: 0,
+                exp_end: 10,
+                exp_available: vec![3, 4, 5, 6, 7, 8, 9],
+            },
+            Case {
+                name: "log start equal to the SPSO changes nothing",
+                setup: no_window,
+                materialize_window: true,
+                log_start: 0,
+                exp_start: 0,
+                exp_end: 10,
+                exp_available: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            },
         ];
         let mut actual = Vec::new();
         let mut expected = Vec::new();
-        for (name, setup, materialize_window, log_start, exp_start, exp_end, exp_available) in cases
+        for Case {
+            name,
+            setup,
+            materialize_window,
+            log_start,
+            exp_start,
+            exp_end,
+            exp_available,
+        } in cases
         {
             let mut s = AcquisitionState::new(Offset(0));
             if materialize_window {
@@ -602,26 +618,82 @@ mod tests {
     /// Kafka's delivery throttle and acquire modes, over one ten-record run.
     #[test]
     fn acquire_follows_the_throttle_and_the_acquire_mode() {
-        // (delivery count of the run, max attempts, batch ends, max records,
-        // acquired ranges)
-        type Row = (i16, i16, Option<&'static [Offset]>, i32, Vec<(i64, i64)>);
+        /// The first and last offset of an acquired range.
+        #[derive(Debug, PartialEq, Eq)]
+        struct Bounds {
+            first: i64,
+            last: i64,
+        }
+        fn bounds(first: i64, last: i64) -> Bounds { Bounds { first, last } }
+        struct Row {
+            /// The delivery count of the run.
+            delivery_count: i16,
+            max_attempts: i16,
+            batch_ends: Option<&'static [Offset]>,
+            max_records: i32,
+            /// The acquired ranges.
+            want: Vec<Bounds>,
+        }
         let rows: Vec<Row> = vec![
             // record_limit cuts at the budget.
-            (0, 5, None, 3, vec![(0, 2)]),
+            Row {
+                delivery_count: 0,
+                max_attempts: 5,
+                batch_ends: None,
+                max_records: 3,
+                want: vec![bounds(0, 2)],
+            },
             // batch_optimized rounds the cut up to the end of its log batch.
-            (0, 5, Some(&[Offset(4), Offset(9)]), 3, vec![(0, 4)]),
+            Row {
+                delivery_count: 0,
+                max_attempts: 5,
+                batch_ends: Some(&[Offset(4), Offset(9)]),
+                max_records: 3,
+                want: vec![bounds(0, 4)],
+            },
             // Under the throttle limit of 3 the whole run goes out.
-            (2, 5, None, 10, vec![(0, 9)]),
+            Row {
+                delivery_count: 2,
+                max_attempts: 5,
+                batch_ends: None,
+                max_records: 10,
+                want: vec![bounds(0, 9)],
+            },
             // At the limit, half of the run.
-            (3, 5, None, 10, vec![(0, 4)]),
+            Row {
+                delivery_count: 3,
+                max_attempts: 5,
+                batch_ends: None,
+                max_records: 10,
+                want: vec![bounds(0, 4)],
+            },
             // On the last attempt, one record alone.
-            (4, 5, None, 10, vec![(0, 0)]),
+            Row {
+                delivery_count: 4,
+                max_attempts: 5,
+                batch_ends: None,
+                max_records: 10,
+                want: vec![bounds(0, 0)],
+            },
             // A limit of 2 throttles nothing before archiving.
-            (1, 2, None, 10, vec![(0, 9)]),
+            Row {
+                delivery_count: 1,
+                max_attempts: 2,
+                batch_ends: None,
+                max_records: 10,
+                want: vec![bounds(0, 9)],
+            },
         ];
         let mut actual = Vec::new();
         let mut expected = Vec::new();
-        for (delivery_count, max_attempts, batch_ends, max_records, want) in rows {
+        for Row {
+            delivery_count,
+            max_attempts,
+            batch_ends,
+            max_records,
+            want,
+        } in rows
+        {
             let mut s = AcquisitionState::new(Offset(0));
             s.materialize(Offset(10), 100);
             s.batches[0].delivery_count = delivery_count;
@@ -637,7 +709,7 @@ mod tests {
                     max_attempts,
                 )
                 .into_iter()
-                .map(|range| (range.first.0, range.last.0))
+                .map(|range| bounds(range.first.0, range.last.0))
                 .collect();
             actual.push((delivery_count, max_attempts, max_records, got));
             expected.push((delivery_count, max_attempts, max_records, want));

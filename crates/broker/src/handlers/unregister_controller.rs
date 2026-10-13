@@ -101,7 +101,10 @@ wire_handler! {
             );
         }
 
-        let (error_code, message) = match refusal(&image, req.controller_id) {
+        let Unregistration {
+            error_code,
+            message,
+        } = match refusal(&image, req.controller_id) {
             Some(refused) => refused,
             None => submit(broker, req.controller_id).await,
         };
@@ -120,30 +123,34 @@ wire_handler! {
     }
 }
 
+/// The error code and message that an `UnregisterController` answers with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Unregistration {
+    error_code: i16,
+    message: Option<String>,
+}
+
 /// The refusal trunk's `QuorumController.unregisterController` and
 /// `ClusterControlManager.unregisterController` answer for `controller_id`
 /// against `image`, in their order, or `None` when the record may be written.
-fn refusal(
-    image: &krabka_metadata::MetadataImage,
-    controller_id: i32,
-) -> Option<(i16, Option<String>)> {
+fn refusal(image: &krabka_metadata::MetadataImage, controller_id: i32) -> Option<Unregistration> {
     let node_id = u64::try_from(controller_id).ok().map(NodeId);
     if node_id.is_some_and(|id| image.voters().contains(id)) {
-        return Some((
-            codes::INVALID_REQUEST,
-            Some(format!(
+        return Some(Unregistration {
+            error_code: codes::INVALID_REQUEST,
+            message: Some(format!(
                 "Cannot unregister controller {controller_id} because it is part of the voter set."
             )),
-        ));
+        });
     }
     if image
         .finalized_metadata_version()
         .is_none_or(|level| level < CONTROLLER_UNREGISTRATION_MIN_LEVEL)
     {
-        return Some((
-            codes::UNSUPPORTED_VERSION,
-            Some(UNSUPPORTED_METADATA_VERSION_MESSAGE.to_owned()),
-        ));
+        return Some(Unregistration {
+            error_code: codes::UNSUPPORTED_VERSION,
+            message: Some(UNSUPPORTED_METADATA_VERSION_MESSAGE.to_owned()),
+        });
     }
     if node_id.is_none_or(|id| image.controller(id).is_none()) {
         return Some(not_registered(controller_id));
@@ -152,35 +159,42 @@ fn refusal(
 }
 
 /// Writes the `UnregisterControllerRecord` and reports how it went.
-async fn submit(broker: &Broker, controller_id: i32) -> (i16, Option<String>) {
+async fn submit(broker: &Broker, controller_id: i32) -> Unregistration {
     let Ok(node_id) = u64::try_from(controller_id).map(NodeId) else {
         return not_registered(controller_id);
     };
     let record = MetadataRecord::V1UnregisterController(UnregisterControllerRecord { node_id });
     match broker.controller.submit_change(vec![record]).await {
-        Ok(_) => (codes::NONE, Some(String::new())),
-        Err(RaftError::NotLeader { current_leader }) => (
-            codes::NOT_CONTROLLER,
-            Some(wrong_controller_message(current_leader)),
-        ),
-        Err(RaftError::LeaderUnknown | RaftError::UncommittedTail) => {
-            (codes::NOT_CONTROLLER, Some(wrong_controller_message(None)))
-        }
+        Ok(_) => Unregistration {
+            error_code: codes::NONE,
+            message: Some(String::new()),
+        },
+        Err(RaftError::NotLeader { current_leader }) => Unregistration {
+            error_code: codes::NOT_CONTROLLER,
+            message: Some(wrong_controller_message(current_leader)),
+        },
+        Err(RaftError::LeaderUnknown | RaftError::UncommittedTail) => Unregistration {
+            error_code: codes::NOT_CONTROLLER,
+            message: Some(wrong_controller_message(None)),
+        },
         // The image refuses the record only when the registration went away
         // between the check above and the append.
         Err(RaftError::Metadata(_)) => not_registered(controller_id),
-        Err(error) => (codes::UNKNOWN_SERVER_ERROR, Some(error.to_string())),
+        Err(error) => Unregistration {
+            error_code: codes::UNKNOWN_SERVER_ERROR,
+            message: Some(error.to_string()),
+        },
     }
 }
 
 /// Trunk's `ControllerIdNotRegisteredException` for `controller_id`.
-fn not_registered(controller_id: i32) -> (i16, Option<String>) {
-    (
-        codes::CONTROLLER_ID_NOT_REGISTERED,
-        Some(format!(
+fn not_registered(controller_id: i32) -> Unregistration {
+    Unregistration {
+        error_code: codes::CONTROLLER_ID_NOT_REGISTERED,
+        message: Some(format!(
             "Controller ID {controller_id} is not currently registered."
         )),
-    )
+    }
 }
 
 fn response(error_code: i16, error_message: Option<&str>) -> UnregisterControllerResponse {

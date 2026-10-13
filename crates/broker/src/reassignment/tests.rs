@@ -98,13 +98,14 @@ async fn wait_for_submission_count(controller: &MockReassignmentController, coun
     .expect("reassignment run loop did not submit expected records");
 }
 
-async fn start_watching_reassignment(
-    is_leader: bool,
-) -> (
-    Arc<MockReassignmentController>,
-    CancellationToken,
-    tokio::task::JoinHandle<()>,
-) {
+/// A running reassignment loop with its mock controller and shutdown handle.
+struct WatchingReassignment {
+    controller: Arc<MockReassignmentController>,
+    shutdown: CancellationToken,
+    task: tokio::task::JoinHandle<()>,
+}
+
+async fn start_watching_reassignment(is_leader: bool) -> WatchingReassignment {
     let initial = img()
         .replicas(vec![krabka_ids::NodeId(1)])
         .isr(vec![krabka_ids::NodeId(1)])
@@ -121,12 +122,20 @@ async fn start_watching_reassignment(
             .removing(vec![krabka_ids::NodeId(2)])
             .call(),
     );
-    (controller, shutdown, task)
+    WatchingReassignment {
+        controller,
+        shutdown,
+        task,
+    }
 }
 
 #[tokio::test]
 async fn run_submits_ready_reassignment_on_image_change() {
-    let (controller, shutdown, task) = start_watching_reassignment(true).await;
+    let WatchingReassignment {
+        controller,
+        shutdown,
+        task,
+    } = start_watching_reassignment(true).await;
     wait_for_submission_count(&controller, 1).await;
 
     shutdown.cancel();
@@ -141,7 +150,11 @@ async fn run_submits_ready_reassignment_on_image_change() {
 
 #[tokio::test]
 async fn run_skips_ready_reassignment_when_not_leader() {
-    let (controller, shutdown, task) = start_watching_reassignment(false).await;
+    let WatchingReassignment {
+        controller,
+        shutdown,
+        task,
+    } = start_watching_reassignment(false).await;
     let observed = tokio::time::timeout(
         Duration::from_millis(100),
         wait_for_submission_count(&controller, 1),

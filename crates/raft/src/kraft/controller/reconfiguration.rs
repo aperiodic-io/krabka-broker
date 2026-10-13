@@ -136,6 +136,16 @@ fn bootstrap_controls(
     ]
 }
 
+/// What a voter change names: its kind, the voter it targets, the facts the
+/// decision reads about that voter, and how far the voter's observer trails the
+/// leader.
+struct ReconfigurationTarget {
+    kind: VoterChangeKind,
+    voter_id: Option<NodeId>,
+    voter: TargetVoter,
+    observer_lag: u64,
+}
+
 impl Engine {
     /// Append the batch the leader starts `epoch` with: the `LeaderChange`
     /// control marker, and the bootstrap voter set that
@@ -171,7 +181,7 @@ impl Engine {
         current: &VoterSet,
         current_version: u16,
         check_only: bool,
-    ) -> (VoterChangeKind, Option<NodeId>, TargetVoter, u64) {
+    ) -> ReconfigurationTarget {
         use crate::reconfig::VoterChange;
 
         match change {
@@ -185,10 +195,10 @@ impl Engine {
                     directory_id: request.voter.directory_id,
                 });
                 let observer_end = progress.map_or(0, |progress| progress.fetch_offset);
-                (
-                    VoterChangeKind::Add,
-                    Some(request.voter.id),
-                    TargetVoter {
+                ReconfigurationTarget {
+                    kind: VoterChangeKind::Add,
+                    voter_id: Some(request.voter.id),
+                    voter: TargetVoter {
                         membership: target_membership(
                             current,
                             request.voter.id,
@@ -199,25 +209,26 @@ impl Engine {
                         caught_up: check_only
                             || progress.is_some_and(|progress| progress.is_caught_up(self.now())),
                     },
-                    u64::try_from(leader_end.saturating_sub(observer_end)).unwrap_or(u64::MAX),
-                )
+                    observer_lag: u64::try_from(leader_end.saturating_sub(observer_end))
+                        .unwrap_or(u64::MAX),
+                }
             }
-            VoterChange::Remove(request) => (
-                VoterChangeKind::Remove,
-                Some(request.id),
+            VoterChange::Remove(request) => ReconfigurationTarget {
+                kind: VoterChangeKind::Remove,
+                voter_id: Some(request.id),
                 // A removal reads only the voter key; the range and catch-up
                 // facts are not consulted.
-                TargetVoter {
+                voter: TargetVoter {
                     membership: target_membership(current, request.id, request.directory_id),
                     version_compatible: true,
                     caught_up: true,
                 },
-                0,
-            ),
-            VoterChange::Update(request) => (
-                VoterChangeKind::Update,
-                Some(request.voter.id),
-                TargetVoter {
+                observer_lag: 0,
+            },
+            VoterChange::Update(request) => ReconfigurationTarget {
+                kind: VoterChangeKind::Update,
+                voter_id: Some(request.voter.id),
+                voter: TargetVoter {
                     membership: target_membership(
                         current,
                         request.voter.id,
@@ -227,19 +238,21 @@ impl Engine {
                     // An update is not gated on catch-up.
                     caught_up: true,
                 },
-                0,
-            ),
+                observer_lag: 0,
+            },
             // A finalization names no voter; the kernel does not read these.
-            VoterChange::FinalizeKraftVersion(_) | VoterChange::ValidateKraftVersion(_) => (
-                VoterChangeKind::FinalizeKraftVersion,
-                None,
-                TargetVoter {
-                    membership: TargetMembership::Absent,
-                    version_compatible: true,
-                    caught_up: true,
-                },
-                0,
-            ),
+            VoterChange::FinalizeKraftVersion(_) | VoterChange::ValidateKraftVersion(_) => {
+                ReconfigurationTarget {
+                    kind: VoterChangeKind::FinalizeKraftVersion,
+                    voter_id: None,
+                    voter: TargetVoter {
+                        membership: TargetMembership::Absent,
+                        version_compatible: true,
+                        caught_up: true,
+                    },
+                    observer_lag: 0,
+                }
+            }
         }
     }
 
@@ -286,8 +299,12 @@ impl Engine {
                 .iter()
                 .all(|voter| voter_supports_version(voter, requested_version)),
         };
-        let (kind, target_id, target, lag) =
-            self.reconfiguration_target(&change, &current, current_version, check_only);
+        let ReconfigurationTarget {
+            kind,
+            voter_id: target_id,
+            voter: target,
+            observer_lag: lag,
+        } = self.reconfiguration_target(&change, &current, current_version, check_only);
 
         let decision = voter_reconfiguration_decision(
             leadership,

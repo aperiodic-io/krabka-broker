@@ -140,13 +140,13 @@ mod tests {
     /// One row of the `OffsetCommit` table: the group state, the request's
     /// member id, instance id and generation (`None` is the group's current
     /// generation), and the result.
-    type OffsetCase = (
-        GroupState,
-        &'static str,
-        Option<&'static str>,
-        Option<i32>,
-        Result<(), i16>,
-    );
+    struct OffsetCase {
+        state: GroupState,
+        member: &'static str,
+        instance: Option<&'static str>,
+        generation: Option<i32>,
+        want: Result<(), i16>,
+    }
 
     /// Kafka's `ClassicGroup.validateOffsetCommit` with
     /// `isTransactional = false`, row by row. The group holds `m1` and `m2`,
@@ -155,106 +155,143 @@ mod tests {
     fn offset_commit_follows_kafka_classic_group_rule() {
         let cases: [OffsetCase; 16] = [
             // The admin client on an empty group commits.
-            (GroupState::Empty, "", None, Some(-1), Ok(())),
+            OffsetCase {
+                state: GroupState::Empty,
+                member: "",
+                instance: None,
+                generation: Some(-1),
+                want: Ok(()),
+            },
             // A negative generation on an empty group commits, whatever it
             // names.
-            (GroupState::Empty, "ghost", None, Some(-1), Ok(())),
+            OffsetCase {
+                state: GroupState::Empty,
+                member: "ghost",
+                instance: None,
+                generation: Some(-1),
+                want: Ok(()),
+            },
             // The admin client on a group with members is refused.
-            (
-                GroupState::Stable,
-                "",
-                None,
-                Some(-1),
-                Err(codes::UNKNOWN_MEMBER_ID),
-            ),
-            (
-                GroupState::PreparingRebalance,
-                "",
-                None,
-                Some(-1),
-                Err(codes::UNKNOWN_MEMBER_ID),
-            ),
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "",
+                instance: None,
+                generation: Some(-1),
+                want: Err(codes::UNKNOWN_MEMBER_ID),
+            },
+            OffsetCase {
+                state: GroupState::PreparingRebalance,
+                member: "",
+                instance: None,
+                generation: Some(-1),
+                want: Err(codes::UNKNOWN_MEMBER_ID),
+            },
             // A generation at or above zero with no member id is validated.
-            (
-                GroupState::Stable,
-                "",
-                None,
-                None,
-                Err(codes::UNKNOWN_MEMBER_ID),
-            ),
-            (
-                GroupState::Empty,
-                "",
-                None,
-                Some(0),
-                Err(codes::UNKNOWN_MEMBER_ID),
-            ),
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "",
+                instance: None,
+                generation: None,
+                want: Err(codes::UNKNOWN_MEMBER_ID),
+            },
+            OffsetCase {
+                state: GroupState::Empty,
+                member: "",
+                instance: None,
+                generation: Some(0),
+                want: Err(codes::UNKNOWN_MEMBER_ID),
+            },
             // An unknown member is refused.
-            (
-                GroupState::Stable,
-                "ghost",
-                None,
-                None,
-                Err(codes::UNKNOWN_MEMBER_ID),
-            ),
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "ghost",
+                instance: None,
+                generation: None,
+                want: Err(codes::UNKNOWN_MEMBER_ID),
+            },
             // A known member with a negative generation is validated.
-            (
-                GroupState::Stable,
-                "m1",
-                None,
-                Some(-1),
-                Err(codes::ILLEGAL_GENERATION),
-            ),
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "m1",
+                instance: None,
+                generation: Some(-1),
+                want: Err(codes::ILLEGAL_GENERATION),
+            },
             // A known member on another generation is refused.
-            (
-                GroupState::Stable,
-                "m1",
-                None,
-                Some(99),
-                Err(codes::ILLEGAL_GENERATION),
-            ),
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "m1",
+                instance: None,
+                generation: Some(99),
+                want: Err(codes::ILLEGAL_GENERATION),
+            },
             // A known member on the current generation commits.
-            (GroupState::Stable, "m1", None, None, Ok(())),
-            (GroupState::PreparingRebalance, "m1", None, None, Ok(())),
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "m1",
+                instance: None,
+                generation: None,
+                want: Ok(()),
+            },
+            OffsetCase {
+                state: GroupState::PreparingRebalance,
+                member: "m1",
+                instance: None,
+                generation: None,
+                want: Ok(()),
+            },
             // ... but not while the group waits for the leader's SyncGroup.
-            (
-                GroupState::CompletingRebalance,
-                "m1",
-                None,
-                None,
-                Err(codes::REBALANCE_IN_PROGRESS),
-            ),
+            OffsetCase {
+                state: GroupState::CompletingRebalance,
+                member: "m1",
+                instance: None,
+                generation: None,
+                want: Err(codes::REBALANCE_IN_PROGRESS),
+            },
             // The instance pinned to another member id fences the request.
-            (
-                GroupState::Stable,
-                "",
-                Some("i1"),
-                None,
-                Err(codes::FENCED_INSTANCE_ID),
-            ),
-            (
-                GroupState::Stable,
-                "m2",
-                Some("i1"),
-                None,
-                Err(codes::FENCED_INSTANCE_ID),
-            ),
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "",
+                instance: Some("i1"),
+                generation: None,
+                want: Err(codes::FENCED_INSTANCE_ID),
+            },
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "m2",
+                instance: Some("i1"),
+                generation: None,
+                want: Err(codes::FENCED_INSTANCE_ID),
+            },
             // An instance no member holds is unknown.
-            (
-                GroupState::Stable,
-                "m1",
-                Some("i9"),
-                None,
-                Err(codes::UNKNOWN_MEMBER_ID),
-            ),
-            (GroupState::Stable, "m1", Some("i1"), None, Ok(())),
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "m1",
+                instance: Some("i9"),
+                generation: None,
+                want: Err(codes::UNKNOWN_MEMBER_ID),
+            },
+            OffsetCase {
+                state: GroupState::Stable,
+                member: "m1",
+                instance: Some("i1"),
+                generation: None,
+                want: Ok(()),
+            },
         ];
         let mut group = stable_two_member_group();
         group.static_members.insert("i1".into(), "m1".into());
         let current = group.generation_id;
         let mut actual = Vec::new();
         let mut expected = Vec::new();
-        for (state, member, instance, generation, want) in cases {
+        for OffsetCase {
+            state,
+            member,
+            instance,
+            generation,
+            want,
+        } in cases
+        {
             group.state = state;
             let generation = generation.unwrap_or(current);
             let got = validate_offset_commit(&group, member, instance, generation);

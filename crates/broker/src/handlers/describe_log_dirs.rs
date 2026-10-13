@@ -38,7 +38,10 @@ use {
         lag::{future_offset_lag, offset_lag_for},
     },
     crate::{
-        codes, disk_scanner::scan::sum_log_segments, handlers::cluster_describe_denied, log_dir,
+        codes,
+        disk_scanner::scan::sum_log_segments,
+        handlers::cluster_describe_denied,
+        log_dir::{self, DiscoveredPartition},
     },
 };
 
@@ -104,7 +107,7 @@ context_handler! {
                 } else {
                     log_dir::scan(dir)
                 };
-                for (topic, partition) in discovered.unwrap_or_default() {
+                for DiscoveredPartition { topic, partition } in discovered.unwrap_or_default() {
                     if !filter.allows(&topic, partition) {
                         continue;
                     }

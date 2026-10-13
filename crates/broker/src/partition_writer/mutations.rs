@@ -6,13 +6,15 @@
 //! blocking-pool wrapper they all call.
 
 use {
-    super::storage::{flag_storage_failure, lock_log, run_log_mutation},
+    super::{
+        WriterPartition,
+        storage::{StorageStatus, flag_storage_failure, lock_log, run_log_mutation},
+    },
     crate::{
         error::BrokerError, log_dir_status::LogDirRegistry, producer_state::ProducerState,
         replica_state::ReplicaState, wal::SharedWal,
     },
     arc_swap::ArcSwap,
-    krabka_ids::PartitionIndex,
     krabka_log::{Log, Offset},
     std::{
         path::PathBuf,
@@ -21,16 +23,26 @@ use {
     tokio::sync::Notify,
 };
 
+/// The producer tracker and replica watermark a replicated batch updates.
+#[derive(Clone, Copy)]
+pub(super) struct ReplicationState<'a> {
+    pub(super) producer_state: &'a ProducerState,
+    pub(super) replica_state: &'a tokio::sync::Mutex<ReplicaState>,
+}
+
 pub(super) async fn handle_replicate(
-    identity: (&str, PartitionIndex),
+    identity: WriterPartition<'_>,
     log: &Arc<Mutex<Log>>,
-    storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
-    state: (&ProducerState, &tokio::sync::Mutex<ReplicaState>),
+    storage_status: StorageStatus<'_>,
+    state: ReplicationState<'_>,
     mut batch: krabka_protocol::records::RecordBatch,
     ack: tokio::sync::oneshot::Sender<Result<(), BrokerError>>,
     append_notify: &Notify,
 ) {
-    let (producer_state, replica_state) = state;
+    let ReplicationState {
+        producer_state,
+        replica_state,
+    } = state;
     let offset = batch.base_offset;
     // Read before `batch` moves into the closure. A control batch is the only
     // shape `handle_replicate` ever receives that can change a producer's
@@ -88,7 +100,7 @@ pub(super) async fn handle_replicate(
             // takes a produce (`Partition::install_local_leadership`).
             if let Some(entry) = entry {
                 producer_state
-                    .mirror_log_entries(identity.0, identity.1, vec![entry])
+                    .mirror_log_entries(identity.topic, identity.partition, vec![entry])
                     .await;
             }
             append_notify.notify_waiters();
@@ -118,7 +130,10 @@ pub(super) async fn handle_replicate_verbatim(
                 .map_err(BrokerError::from)
         },
         "replicate verbatim task panicked",
-        (log_dir, log_dir_status),
+        StorageStatus {
+            log_dir,
+            registry: log_dir_status,
+        },
     )
     .await;
     let succeeded = result.is_ok();
@@ -137,7 +152,7 @@ pub(super) enum ResetMutation {
 /// Apply the selected reset and answer its acknowledgement after resetting the frontiers.
 pub(super) async fn handle_log_reset(
     log: &Arc<Mutex<Log>>,
-    storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
+    storage_status: StorageStatus<'_>,
     replica_state: &tokio::sync::Mutex<ReplicaState>,
     wal: Option<&SharedWal>,
     mutation: ResetMutation,
@@ -166,7 +181,7 @@ pub(super) async fn handle_log_reset(
 
 pub(super) async fn handle_trim(
     log: &Arc<Mutex<Log>>,
-    storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
+    storage_status: StorageStatus<'_>,
     wal: Option<&SharedWal>,
     new_start: Offset,
     ack: tokio::sync::oneshot::Sender<Result<Offset, BrokerError>>,
@@ -178,7 +193,7 @@ pub(super) async fn handle_trim(
         let wal_target = new_start.max(local_start);
         match wal.trim_to_offset(wal_target).await {
             Err(error) => {
-                flag_storage_failure(&error, storage_status.0, storage_status.1);
+                flag_storage_failure(&error, storage_status.log_dir, storage_status.registry);
                 Err(error)
             }
             Ok(wal_start) => {
@@ -203,7 +218,7 @@ pub(super) async fn handle_trim(
 
 async fn reconcile_trim_frontiers(
     log: &Arc<Mutex<Log>>,
-    storage_status: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
+    storage_status: StorageStatus<'_>,
     requested: Offset,
     wal_start: Offset,
 ) -> Result<Offset, BrokerError> {

@@ -364,10 +364,20 @@ fn static_boolean_keys_report_their_provenance() {
 /// default value.
 #[test]
 fn static_settings_name_the_metadata_log_dir_and_the_metadata_log_keys() {
+    /// A static setting beyond the base: its key and value.
+    struct ExtraSetting {
+        key: &'static str,
+        value: &'static str,
+    }
+
     let base = static_settings(&BrokerConfig::default());
-    let with = |extra: &[(&'static str, &str)]| {
+    let with = |extra: &[ExtraSetting]| {
         let mut settings = base.clone();
-        settings.extend(extra.iter().map(|(key, value)| (*key, (*value).to_owned())));
+        settings.extend(
+            extra
+                .iter()
+                .map(|setting| (setting.key, setting.value.to_owned())),
+        );
         settings
     };
     let cases = [
@@ -376,7 +386,10 @@ fn static_settings_name_the_metadata_log_dir_and_the_metadata_log_keys() {
             "a metadata log directory",
             Some("/var/lib/krabka/metadata"),
             "[runtime]\n",
-            with(&[("metadata.log.dir", "/var/lib/krabka/metadata")]),
+            with(&[ExtraSetting {
+                key: "metadata.log.dir",
+                value: "/var/lib/krabka/metadata",
+            }]),
         ),
         (
             "every metadata log key at Kafka's default",
@@ -388,11 +401,26 @@ fn static_settings_name_the_metadata_log_dir_and_the_metadata_log_keys() {
              metadata_max_retention = \"7d\"\n\
              metadata_max_idle_interval = \"500ms\"\n",
             with(&[
-                ("metadata.log.segment.bytes", "1073741824"),
-                ("metadata.log.segment.ms", "604800000"),
-                ("metadata.max.retention.bytes", "104857600"),
-                ("metadata.max.retention.ms", "604800000"),
-                ("metadata.max.idle.interval.ms", "500"),
+                ExtraSetting {
+                    key: "metadata.log.segment.bytes",
+                    value: "1073741824",
+                },
+                ExtraSetting {
+                    key: "metadata.log.segment.ms",
+                    value: "604800000",
+                },
+                ExtraSetting {
+                    key: "metadata.max.retention.bytes",
+                    value: "104857600",
+                },
+                ExtraSetting {
+                    key: "metadata.max.retention.ms",
+                    value: "604800000",
+                },
+                ExtraSetting {
+                    key: "metadata.max.idle.interval.ms",
+                    value: "500",
+                },
             ]),
         ),
         (
@@ -402,9 +430,18 @@ fn static_settings_name_the_metadata_log_dir_and_the_metadata_log_keys() {
              metadata_log_segment_bytes = \"8MiB\"\n\
              metadata_max_idle_interval = \"0ms\"\n",
             with(&[
-                ("metadata.log.dir", "/mnt/kafka/kafka-metadata-logs"),
-                ("metadata.log.segment.bytes", "8388608"),
-                ("metadata.max.idle.interval.ms", "0"),
+                ExtraSetting {
+                    key: "metadata.log.dir",
+                    value: "/mnt/kafka/kafka-metadata-logs",
+                },
+                ExtraSetting {
+                    key: "metadata.log.segment.bytes",
+                    value: "8388608",
+                },
+                ExtraSetting {
+                    key: "metadata.max.idle.interval.ms",
+                    value: "0",
+                },
             ]),
         ),
     ];

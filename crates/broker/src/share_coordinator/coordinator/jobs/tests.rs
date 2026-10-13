@@ -7,8 +7,8 @@ use {
         bootstrap,
         config::ShareCoordinatorConfig,
         coordinator::test_support::{
-            Logged, NOW_MS, configured_coordinator, image_with_topics, lead_all, logged_records,
-            set_clock,
+            ConfiguredCoordinator, Logged, LoggedRecord, NOW_MS, configured_coordinator,
+            image_with_topics, lead_all, logged_records, set_clock,
         },
         persistence::ShareSnapshotValue,
     },
@@ -22,13 +22,20 @@ use {
 const T1: uuid::Uuid = uuid::Uuid::from_bytes([61; 16]);
 const T2: uuid::Uuid = uuid::Uuid::from_bytes([62; 16]);
 
+/// A coordinator and the manual clock that drives it.
+struct TwoKeys {
+    coord: Arc<ShareCoordinator>,
+    clock: Arc<qubit_clock::ManualWallClock>,
+}
+
 /// A coordinator with key A (`ga`, T1, 0) and key B (`gb`, T2, 0), both
 /// initialized at [`NOW_MS`].
-async fn two_keys(
-    dir: &std::path::Path,
-    config: ShareCoordinatorConfig,
-) -> (Arc<ShareCoordinator>, Arc<qubit_clock::ManualWallClock>) {
-    let (coord, _reg, clock) = configured_coordinator(dir, config);
+async fn two_keys(dir: &std::path::Path, config: ShareCoordinatorConfig) -> TwoKeys {
+    let ConfiguredCoordinator {
+        coord,
+        registry: _reg,
+        clock,
+    } = configured_coordinator(dir, config);
     lead_all(&coord).await;
     let image = image_with_topics(&[(T1, 1), (T2, 1)]);
     coord
@@ -39,14 +46,13 @@ async fn two_keys(
         .initialize(&image, "gb", T2, 0, 1, Offset(0))
         .await
         .unwrap();
-    (Arc::new(coord), clock)
+    TwoKeys {
+        coord: Arc::new(coord),
+        clock,
+    }
 }
 
-fn records_of(
-    coord: &ShareCoordinator,
-    group: &str,
-    topic_id: uuid::Uuid,
-) -> Vec<(Offset, Logged)> {
+fn records_of(coord: &ShareCoordinator, group: &str, topic_id: uuid::Uuid) -> Vec<LoggedRecord> {
     logged_records(coord, coord.state_partition_for(group, &topic_id, 0))
 }
 
@@ -68,7 +74,10 @@ fn snapshot_of_b(snapshot_epoch: i32, write_timestamp: i64) -> Logged {
 #[tokio::test]
 async fn deleted_topic_keys_are_tombstoned() {
     let dir = tempdir().unwrap();
-    let (coord, _clock) = two_keys(dir.path(), ShareCoordinatorConfig::default()).await;
+    let TwoKeys {
+        coord,
+        clock: _clock,
+    } = two_keys(dir.path(), ShareCoordinatorConfig::default()).await;
     let b_before = records_of(&coord, "gb", T2);
 
     let written = coord.cleanup_deleted_topics(&HashSet::from([T1])).await;
@@ -76,7 +85,7 @@ async fn deleted_topic_keys_are_tombstoned() {
     check!(written == 1);
     let a_records: Vec<Logged> = records_of(&coord, "ga", T1)
         .into_iter()
-        .map(|(_, logged)| logged)
+        .map(|record| record.logged)
         .filter(|logged| *logged == Logged::Tombstone)
         .collect();
     check!(a_records == vec![Logged::Tombstone]);
@@ -92,7 +101,7 @@ async fn deleted_topic_keys_are_tombstoned() {
 #[tokio::test]
 async fn cold_snapshot_then_prune_frees_the_log_prefix() {
     let dir = tempdir().unwrap();
-    let (coord, clock) = two_keys(dir.path(), ShareCoordinatorConfig::default()).await;
+    let TwoKeys { coord, clock } = two_keys(dir.path(), ShareCoordinatorConfig::default()).await;
     coord.cleanup_deleted_topics(&HashSet::from([T1])).await;
     let interval_ms = 300_000;
 
@@ -113,7 +122,7 @@ async fn cold_snapshot_then_prune_frees_the_log_prefix() {
         let new: Vec<Logged> = records_of(&coord, "gb", T2)
             .into_iter()
             .skip(before)
-            .map(|(_, logged)| logged)
+            .map(|record| record.logged)
             .collect();
         check!(new == record.into_iter().collect::<Vec<_>>(), "{after}");
     }
@@ -170,7 +179,7 @@ async fn run_loop_reacts_to_images_and_timers() {
     // (share.version level, expected: B is snapshotted and pruned)
     for (level, jobs_run) in [(0, false), (1, true)] {
         let dir = tempdir().unwrap();
-        let (coord, clock) = two_keys(dir.path(), config.clone()).await;
+        let TwoKeys { coord, clock } = two_keys(dir.path(), config.clone()).await;
         set_clock(&clock, 60_000);
         let both = with_share_version(image_with_topics(&[(T1, 1), (T2, 1)]), level);
         let (images, receiver) = watch::channel(both);
@@ -184,7 +193,7 @@ async fn run_loop_reacts_to_images_and_timers() {
         check!(
             eventually(|| logged_records(&coord, a_partition)
                 .iter()
-                .any(|(_, logged)| *logged == Logged::Tombstone))
+                .any(|record| record.logged == Logged::Tombstone))
             .await,
             "level {level}"
         );
@@ -200,7 +209,7 @@ async fn run_loop_reacts_to_images_and_timers() {
             tokio::time::sleep(Duration::from_millis(200)).await;
             let snapshots = logged_records(&coord, b_partition)
                 .iter()
-                .filter(|(_, logged)| matches!(logged, Logged::Snapshot(_)))
+                .filter(|record| matches!(record.logged, Logged::Snapshot(_)))
                 .count();
             check!(snapshots == 1, "level {level}");
             check!(part.log_start_offset() == Offset(0), "level {level}");

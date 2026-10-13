@@ -77,12 +77,11 @@ pub(crate) async fn run(params: AutoJoinParams) {
             return;
         }
 
-        let (target, from_bootstrap) =
-            join_target(&controller.quorum_state(), &bootstrap_servers, next_server);
-        if from_bootstrap {
+        let target = join_target(&controller.quorum_state(), &bootstrap_servers, next_server);
+        if target.from_bootstrap {
             next_server = next_server.wrapping_add(1);
         }
-        let target = target.as_str();
+        let target = target.server.as_str();
 
         if let Some(existing) = controller.current_image().voters().get(self_id)
             && existing.directory_id != params.directory_id
@@ -260,23 +259,25 @@ mod tests {
         // RemoveRaftVoter frame has been read.
         let (key_tx, key_rx) = tokio::sync::oneshot::channel::<i16>();
         tokio::spawn(async move {
-            use crate::auto_join::test_support::{negotiate_versions, read_frame};
+            use crate::auto_join::test_support::{AdvertisedApi, negotiate_versions, read_frame};
             if let Ok((mut socket, _)) = listener.accept().await {
                 let apis = [
-                    (
-                        krabka_ids::ApiKey(
+                    AdvertisedApi {
+                        api_key: krabka_ids::ApiKey(
                             krabka_protocol::owned::remove_raft_voter_request::API_KEY,
                         ),
-                        krabka_ids::ApiVersion(
+                        max_version: krabka_ids::ApiVersion(
                             krabka_protocol::owned::remove_raft_voter_request::MAX_VERSION,
                         ),
-                    ),
-                    (
-                        krabka_ids::ApiKey(krabka_protocol::owned::add_raft_voter_request::API_KEY),
-                        krabka_ids::ApiVersion(
+                    },
+                    AdvertisedApi {
+                        api_key: krabka_ids::ApiKey(
+                            krabka_protocol::owned::add_raft_voter_request::API_KEY,
+                        ),
+                        max_version: krabka_ids::ApiVersion(
                             krabka_protocol::owned::add_raft_voter_request::MAX_VERSION,
                         ),
-                    ),
+                    },
                 ];
                 if negotiate_versions(&mut socket, &apis).await.is_ok()
                     && let Ok(frame) = read_frame(&mut socket).await

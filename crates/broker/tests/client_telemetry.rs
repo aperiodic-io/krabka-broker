@@ -83,14 +83,20 @@ type MetricsCluster = Vec<(
     tempfile::TempDir,
 )>;
 
+/// A controller-backed cluster and the client negotiated against it.
+struct TelemetryCluster {
+    cluster: MetricsCluster,
+    client: krabka_client_core::Client,
+}
+
 /// Keep the controller-backed cluster alive alongside its negotiated client.
-async fn start_one_node_with_client_metrics() -> (MetricsCluster, krabka_client_core::Client) {
+async fn start_one_node_with_client_metrics() -> TelemetryCluster {
     let cluster = start_n_node_with(1, |_, cfg| cfg.client_metrics_enable = true)
         .await
         .expect("start_n_node_with");
     let (_, cfg, _dir) = &cluster[0];
     let client = build_client(cfg.listen_addr).await;
-    (cluster, client)
+    TelemetryCluster { cluster, client }
 }
 
 async fn build_client(addr: std::net::SocketAddr) -> krabka_client_core::Client {
@@ -384,7 +390,10 @@ async fn push_telemetry_unknown_instance_rejected() {
 /// handshake, then push a valid OTLP payload. All three must succeed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn push_telemetry_happy_path_after_subscription() {
-    let (_cluster, client) = start_one_node_with_client_metrics().await;
+    let TelemetryCluster {
+        cluster: _cluster,
+        client,
+    } = start_one_node_with_client_metrics().await;
 
     // ── Step 1: configure a match-all subscription ───────────────────────────
     configure_match_all_subscription(&client, "all", "100").await;
@@ -456,7 +465,10 @@ async fn push_telemetry_happy_path_after_subscription() {
 /// stale `subscription_id`, with `UNKNOWN_SUBSCRIPTION_ID` (117).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn push_telemetry_stale_subscription_id_rejected() {
-    let (_cluster, client) = start_one_node_with_client_metrics().await;
+    let TelemetryCluster {
+        cluster: _cluster,
+        client,
+    } = start_one_node_with_client_metrics().await;
 
     let get_resp = enroll_telemetry(&client).await;
     let assigned_id = get_resp.client_instance_id;
@@ -488,7 +500,10 @@ async fn push_telemetry_stale_subscription_id_rejected() {
 /// request reaches the codec check.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn push_telemetry_unsupported_compression_rejected() {
-    let (_cluster, client) = start_one_node_with_client_metrics().await;
+    let TelemetryCluster {
+        cluster: _cluster,
+        client,
+    } = start_one_node_with_client_metrics().await;
 
     let get_resp = enroll_telemetry(&client).await;
     let assigned_id = get_resp.client_instance_id;

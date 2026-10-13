@@ -16,6 +16,20 @@ use {
     krabka_verified::{ChainStep, chain_step},
 };
 
+/// Where the chain continues after the last chained record in the spool.
+struct ChainPosition {
+    /// The sequence number the next chained record takes.
+    next_seq: Seq,
+    /// The chain head after the last chained record.
+    head: [u8; 32],
+}
+
+/// The chain headers a chained record carries.
+struct ChainHeaders {
+    seq: u64,
+    previous: [u8; 32],
+}
+
 impl Spool {
     /// The `(next_seq, head)` from the last chained record in the spool.
     ///
@@ -26,7 +40,8 @@ impl Spool {
     /// Returns an error if the spool file cannot be opened or read.
     pub fn resume_point(&self) -> Result<Option<(u64, [u8; 32])>, AuditError> {
         let records = self.read_all()?;
-        resume_from_records(&records).map(|resume| resume.map(|(seq, head)| (seq.0, head)))
+        resume_from_records(&records)
+            .map(|resume| resume.map(|ChainPosition { next_seq, head }| (next_seq.0, head)))
     }
 }
 
@@ -34,19 +49,22 @@ fn poisoned(reason: &str) -> AuditError {
     AuditError::Poisoned(format!("audit spool resume: {reason}"))
 }
 
-fn resume_from_records(records: &[AuditRecord]) -> Result<Option<(Seq, [u8; 32])>, AuditError> {
-    let mut resume: Option<(Seq, [u8; 32])> = None;
+fn resume_from_records(records: &[AuditRecord]) -> Result<Option<ChainPosition>, AuditError> {
+    let mut resume: Option<ChainPosition> = None;
     for record in records {
         if record.class == AuditEventClass::Checkpoint {
             continue;
         }
-        let (seq, previous) = chain_headers(record)?;
+        let ChainHeaders { seq, previous } = chain_headers(record)?;
         let next_seq = match resume {
             None => seq
                 .checked_add(1)
                 .filter(|next| *next < u64::MAX)
                 .ok_or_else(|| poisoned("chain sequence exhausted"))?,
-            Some((expected, head)) => match chain_step(expected.0, seq, previous == head) {
+            Some(ChainPosition {
+                next_seq: expected,
+                head,
+            }) => match chain_step(expected.0, seq, previous == head) {
                 ChainStep::Continue(next) => next,
                 ChainStep::SequenceMismatch => {
                     return Err(poisoned("noncontiguous chain sequence"));
@@ -55,12 +73,15 @@ fn resume_from_records(records: &[AuditRecord]) -> Result<Option<(Seq, [u8; 32])
                 ChainStep::Exhausted => return Err(poisoned("chain sequence exhausted")),
             },
         };
-        resume = Some((Seq(next_seq), chain_hash(&previous, seq, &record.value)));
+        resume = Some(ChainPosition {
+            next_seq: Seq(next_seq),
+            head: chain_hash(&previous, seq, &record.value),
+        });
     }
     Ok(resume)
 }
 
-fn chain_headers(record: &AuditRecord) -> Result<(u64, [u8; 32]), AuditError> {
+fn chain_headers(record: &AuditRecord) -> Result<ChainHeaders, AuditError> {
     let seq = record
         .headers
         .iter()
@@ -74,6 +95,7 @@ fn chain_headers(record: &AuditRecord) -> Result<(u64, [u8; 32]), AuditError> {
         .and_then(|(_, value)| std::str::from_utf8(value).ok())
         .and_then(from_hex32);
     seq.zip(previous)
+        .map(|(seq, previous)| ChainHeaders { seq, previous })
         .ok_or_else(|| poisoned("missing or invalid chain headers"))
 }
 

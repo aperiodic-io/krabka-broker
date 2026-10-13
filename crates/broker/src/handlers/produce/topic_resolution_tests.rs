@@ -11,15 +11,16 @@
 use {
     super::*,
     crate::{
-        authorizer::AllowAllAuthorizer,
+        authorizer::{AllowAllAuthorizer, Authorizer},
         broker::BrokerHandle,
         codes,
         handlers::test_support::{
-            check_cases, check_denied_topic_cases, create_topic as create_topic_from_test_support,
+            CaseOutcomes, StartedBroker, WireTopic, check_cases, check_denied_topic_cases,
+            create_topic as create_topic_from_test_support,
         },
         test_support::{
             DenyAll, decode_response, encode_request, peer, principal,
-            start_broker_with_authorizer_no_audit as start,
+            start_broker_with_authorizer_no_audit,
         },
     },
     std::sync::Arc,
@@ -32,11 +33,15 @@ const UNKNOWN_ID: WireUuid = WireUuid([0x0b; 16]);
 const UNKNOWN_NAME: &str = "no-such-topic";
 
 use crate::handlers::test_support::{
-    TopicRef, TopicResolutionCase as Case, unauthorized_topic_cases,
+    TopicCaseOutcome, TopicRef, TopicResolutionCase as Case, unauthorized_topic_cases,
 };
 
-/// The actual or the expected outcome of one [`Case`].
-type Outcome = (i16, TopicRef, ProduceResponse);
+type Outcome = TopicCaseOutcome<ProduceResponse>;
+
+async fn start(authorizer: Arc<dyn Authorizer>) -> StartedBroker {
+    let (broker, dir) = start_broker_with_authorizer_no_audit(authorizer).await;
+    StartedBroker { broker, dir }
+}
 
 /// One v2 batch with one record. A leader of a fresh topic appends it at
 /// offset 0.
@@ -87,15 +92,21 @@ async fn create_topic(broker: &BrokerHandle, name: &str) {
 /// to. The expected topic row carries the name and the id as the wire carries
 /// them at `case.version`: the name at v12 and earlier, the id at v13 and
 /// later.
-async fn drive(broker: &BrokerHandle, known: Option<&str>, case: Case) -> (Outcome, Outcome) {
+async fn drive(broker: &BrokerHandle, known: Option<&str>, case: Case) -> CaseOutcomes<Outcome> {
     let known_id = known.map_or(WireUuid::ZERO, |name| {
         let image = broker.controller_image_for_test();
         let topic = image.topic(name).expect("known topic in the image");
         WireUuid(topic.topic_id.into_bytes())
     });
-    let (name, topic_id) = case.topic.wire_reference(
-        (known.unwrap_or_default(), known_id),
-        (UNKNOWN_NAME, UNKNOWN_ID),
+    let WireTopic { name, id: topic_id } = case.topic.wire_reference(
+        WireTopic {
+            name: known.unwrap_or_default(),
+            id: known_id,
+        },
+        WireTopic {
+            name: UNKNOWN_NAME,
+            id: UNKNOWN_ID,
+        },
     );
     let request = ProduceRequest {
         transactional_id: None,
@@ -151,10 +162,7 @@ async fn drive(broker: &BrokerHandle, known: Option<&str>, case: Case) -> (Outco
         }],
         ..Default::default()
     };
-    (
-        (case.version, case.topic, actual),
-        (case.version, case.topic, expected),
-    )
+    CaseOutcomes::for_topic_case(case, actual, expected)
 }
 
 #[tokio::test]
@@ -168,7 +176,7 @@ async fn topic_row_error_follows_version_and_topic_reference() {
         Case::new(13, TopicRef::UnknownId, codes::UNKNOWN_TOPIC_ID),
         Case::new(13, TopicRef::ZeroId, codes::UNKNOWN_TOPIC_ID),
     ];
-    let (broker, _dir) = start(Arc::new(AllowAllAuthorizer)).await;
+    let StartedBroker { broker, dir: _dir } = start(Arc::new(AllowAllAuthorizer)).await;
 
     check_cases(cases.into_iter().enumerate(), async |(row, case)| {
         // Each row retains its own topic so an appended row starts at offset 0.

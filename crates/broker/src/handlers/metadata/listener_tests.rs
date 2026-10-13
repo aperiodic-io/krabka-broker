@@ -33,12 +33,20 @@ use {
 
 const TOPIC: &str = "led";
 
-/// A remote registration with an endpoint `(name, host, port)` for each of
-/// `listeners`, and `rack` as its rack.
+/// The address of one listener of a registered broker.
+#[derive(Clone, Copy)]
+struct ListenerAddress<'a> {
+    name: &'a str,
+    host: &'a str,
+    port: u16,
+}
+
+/// A remote registration with an endpoint for each of `listeners`, and `rack`
+/// as its rack.
 fn registration(
     node_id: u64,
     rack: Option<&str>,
-    listeners: &[(&str, &str, u16)],
+    listeners: &[ListenerAddress<'_>],
 ) -> MetadataRecord {
     MetadataRecord::V1BrokerRegistration(BrokerRegistrationRecord {
         broker_epoch: -1,
@@ -47,10 +55,10 @@ fn registration(
         rack: rack.map(str::to_owned),
         endpoints: listeners
             .iter()
-            .map(|(name, host, port)| BrokerEndpoint {
-                name: (*name).to_owned(),
-                host: (*host).to_owned(),
-                port: *port,
+            .map(|listener| BrokerEndpoint {
+                name: listener.name.to_owned(),
+                host: listener.host.to_owned(),
+                port: listener.port,
                 protocol: krabka_security::ListenerProtocol::Plaintext,
             })
             .collect(),
@@ -76,6 +84,12 @@ fn partition(index: i32, replicas: &[u64]) -> MetadataRecord {
     })
 }
 
+/// The broker that [`cluster`] seeds, and the directory that must outlive it.
+struct Cluster {
+    handle: BrokerHandle,
+    dir: tempfile::TempDir,
+}
+
 /// A broker next to the remote registrations:
 ///
 /// - 2 has `PLAINTEXT` and `EXTERNAL` endpoints;
@@ -86,19 +100,39 @@ fn partition(index: i32, replicas: &[u64]) -> MetadataRecord {
 ///
 /// Topic `led` has four partitions, led by 2, 9 (no registration), 4 and 2,
 /// where the last one also holds the fenced broker 3.
-async fn cluster() -> (BrokerHandle, tempfile::TempDir) {
+async fn cluster() -> Cluster {
     let (handle, dir) = start_broker_no_audit().await;
     let broker = handle.broker_arc_for_test();
     broker
         .controller
         .submit_change(vec![
             registration(2, None, &[
-                ("PLAINTEXT", "b2-plain", 9092),
-                ("EXTERNAL", "b2-ext", 19092),
+                ListenerAddress {
+                    name: "PLAINTEXT",
+                    host: "b2-plain",
+                    port: 9092,
+                },
+                ListenerAddress {
+                    name: "EXTERNAL",
+                    host: "b2-ext",
+                    port: 19092,
+                },
             ]),
-            registration(3, None, &[("PLAINTEXT", "b3-plain", 9092)]),
-            registration(4, None, &[("EXTERNAL", "b4-ext", 19092)]),
-            registration(5, Some("rack-5"), &[("PLAINTEXT", "b5-plain", 9092)]),
+            registration(3, None, &[ListenerAddress {
+                name: "PLAINTEXT",
+                host: "b3-plain",
+                port: 9092,
+            }]),
+            registration(4, None, &[ListenerAddress {
+                name: "EXTERNAL",
+                host: "b4-ext",
+                port: 19092,
+            }]),
+            registration(5, Some("rack-5"), &[ListenerAddress {
+                name: "PLAINTEXT",
+                host: "b5-plain",
+                port: 9092,
+            }]),
             registration(6, None, &[]),
             MetadataRecord::V1Topic(TopicRecord {
                 name: TOPIC.into(),
@@ -114,7 +148,7 @@ async fn cluster() -> (BrokerHandle, tempfile::TempDir) {
         .await
         .expect("seed the cluster");
     fence_remote_broker(&handle, 3).await;
-    (handle, dir)
+    Cluster { handle, dir }
 }
 
 /// The response to `request`, which arrived on `listener`.
@@ -171,7 +205,7 @@ fn row(node_id: i32, host: &str, port: i32, rack: Option<&str>) -> MetadataRespo
 /// and each listed broker is at the address of the connection listener.
 #[tokio::test]
 async fn brokers_are_the_unfenced_ones_with_an_endpoint_on_the_connection_listener() {
-    let (handle, _dir) = cluster().await;
+    let Cluster { handle, dir: _dir } = cluster().await;
 
     let plaintext = metadata(&handle, 12, "PLAINTEXT", &MetadataRequest::default()).await;
     let external = metadata(&handle, 12, "EXTERNAL", &MetadataRequest::default()).await;
@@ -193,43 +227,87 @@ async fn brokers_are_the_unfenced_ones_with_an_endpoint_on_the_connection_listen
     handle.shutdown().await;
 }
 
-/// The columns of one partition row that the tests compare, as `(error code,
-/// leader, replicas, ISR, offline replicas)`.
-type Columns = (i16, i32, Vec<i32>, Vec<i32>, Vec<i32>);
+/// The columns of one partition row that the tests compare.
+#[derive(Debug, PartialEq, Eq)]
+struct Columns {
+    error_code: i16,
+    leader: i32,
+    replicas: Vec<i32>,
+    isr: Vec<i32>,
+    offline_replicas: Vec<i32>,
+}
+
+impl Columns {
+    /// A partition whose only surviving replica is node 2.
+    fn only_node_two(error_code: i16, leader: i32) -> Self {
+        Self {
+            error_code,
+            leader,
+            replicas: vec![2],
+            isr: vec![2],
+            offline_replicas: vec![],
+        }
+    }
+}
+
+/// One response to compare: the request version and listener, and the columns
+/// expected.
+struct ListenerCase<'a> {
+    label: &'a str,
+    version: i16,
+    listener: &'a str,
+    expected: Vec<Columns>,
+}
 
 fn columns(response: &MetadataResponse, version: i16) -> Vec<Columns> {
     response.topics[0]
         .partitions
         .iter()
-        .map(|partition| {
-            (
-                partition.error_code,
-                partition.leader_id,
-                partition.replica_nodes.clone(),
-                partition.isr_nodes.clone(),
-                // `offline_replicas` is on the wire from version 5.
-                if version >= 5 {
-                    partition.offline_replicas.clone()
-                } else {
-                    vec![]
-                },
-            )
+        .map(|partition| Columns {
+            error_code: partition.error_code,
+            leader: partition.leader_id,
+            replicas: partition.replica_nodes.clone(),
+            isr: partition.isr_nodes.clone(),
+            // `offline_replicas` is on the wire from version 5.
+            offline_replicas: if version >= 5 {
+                partition.offline_replicas.clone()
+            } else {
+                vec![]
+            },
         })
         .collect()
 }
 
 fn expected_plaintext_columns(listener_error: i16) -> Vec<Columns> {
     vec![
-        (codes::NONE, 2, vec![2, 1], vec![2, 1], vec![]),
-        (
-            codes::LEADER_NOT_AVAILABLE,
-            -1,
-            vec![9, 2],
-            vec![9, 2],
-            vec![9],
-        ),
-        (listener_error, -1, vec![4, 2], vec![4, 2], vec![4]),
-        (codes::NONE, 2, vec![2, 3], vec![2, 3], vec![3]),
+        Columns {
+            error_code: codes::NONE,
+            leader: 2,
+            replicas: vec![2, 1],
+            isr: vec![2, 1],
+            offline_replicas: vec![],
+        },
+        Columns {
+            error_code: codes::LEADER_NOT_AVAILABLE,
+            leader: -1,
+            replicas: vec![9, 2],
+            isr: vec![9, 2],
+            offline_replicas: vec![9],
+        },
+        Columns {
+            error_code: listener_error,
+            leader: -1,
+            replicas: vec![4, 2],
+            isr: vec![4, 2],
+            offline_replicas: vec![4],
+        },
+        Columns {
+            error_code: codes::NONE,
+            leader: 2,
+            replicas: vec![2, 3],
+            isr: vec![2, 3],
+            offline_replicas: vec![3],
+        },
     ]
 }
 
@@ -241,43 +319,84 @@ fn expected_plaintext_columns(listener_error: i16) -> Vec<Columns> {
 /// `REPLICA_NOT_AVAILABLE` beside a leader that lost one.
 #[tokio::test]
 async fn a_leader_without_an_endpoint_on_the_listener_answers_no_leader_and_an_error() {
-    let (handle, _dir) = cluster().await;
+    let Cluster { handle, dir: _dir } = cluster().await;
     let none = codes::NONE;
     let no_leader = codes::LEADER_NOT_AVAILABLE;
-    let cases: [(&str, i16, &str, Vec<Columns>); 4] = [
-        (
-            "the current version",
-            12,
-            "PLAINTEXT",
-            expected_plaintext_columns(codes::LISTENER_NOT_FOUND),
-        ),
-        (
-            "before LISTENER_NOT_FOUND",
-            5,
-            "PLAINTEXT",
-            expected_plaintext_columns(no_leader),
-        ),
-        (
-            "version 0 drops the replicas that are not alive",
-            0,
-            "PLAINTEXT",
-            vec![
-                (none, 2, vec![2, 1], vec![2, 1], vec![]),
-                (no_leader, -1, vec![2], vec![2], vec![]),
-                (no_leader, -1, vec![2], vec![2], vec![]),
-                (codes::REPLICA_NOT_AVAILABLE, 2, vec![2], vec![2], vec![]),
+    let cases: [ListenerCase<'_>; 4] = [
+        ListenerCase {
+            label: "the current version",
+            version: 12,
+            listener: "PLAINTEXT",
+            expected: expected_plaintext_columns(codes::LISTENER_NOT_FOUND),
+        },
+        ListenerCase {
+            label: "before LISTENER_NOT_FOUND",
+            version: 5,
+            listener: "PLAINTEXT",
+            expected: expected_plaintext_columns(no_leader),
+        },
+        ListenerCase {
+            label: "version 0 drops the replicas that are not alive",
+            version: 0,
+            listener: "PLAINTEXT",
+            expected: vec![
+                Columns {
+                    error_code: none,
+                    leader: 2,
+                    replicas: vec![2, 1],
+                    isr: vec![2, 1],
+                    offline_replicas: vec![],
+                },
+                Columns::only_node_two(no_leader, -1),
+                Columns::only_node_two(no_leader, -1),
+                Columns::only_node_two(codes::REPLICA_NOT_AVAILABLE, 2),
             ],
-        ),
-        ("the other listener", 12, "EXTERNAL", vec![
-            // The local broker 1 has no `EXTERNAL` endpoint, so it is offline.
-            (none, 2, vec![2, 1], vec![2, 1], vec![1]),
-            (no_leader, -1, vec![9, 2], vec![9, 2], vec![9]),
-            (none, 4, vec![4, 2], vec![4, 2], vec![]),
-            (none, 2, vec![2, 3], vec![2, 3], vec![3]),
-        ]),
+        },
+        ListenerCase {
+            label: "the other listener",
+            version: 12,
+            listener: "EXTERNAL",
+            expected: vec![
+                // The local broker 1 has no `EXTERNAL` endpoint, so it is offline.
+                Columns {
+                    error_code: none,
+                    leader: 2,
+                    replicas: vec![2, 1],
+                    isr: vec![2, 1],
+                    offline_replicas: vec![1],
+                },
+                Columns {
+                    error_code: no_leader,
+                    leader: -1,
+                    replicas: vec![9, 2],
+                    isr: vec![9, 2],
+                    offline_replicas: vec![9],
+                },
+                Columns {
+                    error_code: none,
+                    leader: 4,
+                    replicas: vec![4, 2],
+                    isr: vec![4, 2],
+                    offline_replicas: vec![],
+                },
+                Columns {
+                    error_code: none,
+                    leader: 2,
+                    replicas: vec![2, 3],
+                    isr: vec![2, 3],
+                    offline_replicas: vec![3],
+                },
+            ],
+        },
     ];
 
-    for (label, version, listener, expected) in cases {
+    for ListenerCase {
+        label,
+        version,
+        listener,
+        expected,
+    } in cases
+    {
         let response = metadata(&handle, version, listener, &topic_request()).await;
 
         assert!(columns(&response, version) == expected, "{label}");
@@ -289,7 +408,7 @@ async fn a_leader_without_an_endpoint_on_the_listener_answers_no_leader_and_an_e
 /// and carries no error code beside a `-1`.
 #[tokio::test]
 async fn describe_topic_partitions_answers_no_leader_for_a_leader_without_the_listener() {
-    let (handle, _dir) = cluster().await;
+    let Cluster { handle, dir: _dir } = cluster().await;
     let broker = handle.broker_arc_for_test();
     let (user, address) = (principal("describer"), peer());
     let ctx = RequestContext::new(

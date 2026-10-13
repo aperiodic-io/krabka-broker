@@ -13,7 +13,7 @@ use {
 
 #[test]
 fn simultaneous_fills_never_publish_partial_cached_bytes() {
-    let (_dir, cache) = test_cache(4 * 1024 * 1024);
+    let TestCache { dir: _dir, cache } = test_cache(4 * 1024 * 1024);
     let segment = Uuid::new_v4();
     let expected = vec![7; 1024 * 1024];
     let fill_barrier = std::sync::Barrier::new(16);
@@ -45,7 +45,10 @@ fn simultaneous_fills_never_publish_partial_cached_bytes() {
 
 #[test]
 fn stale_temporary_paths_do_not_prevent_cache_replacement() {
-    let (directory, cache) = test_cache(1024);
+    let TestCache {
+        dir: directory,
+        cache,
+    } = test_cache(1024);
     let segment = Uuid::new_v4();
     cache
         .get_or_fetch(segment, IndexType::Offset, || Ok(vec![7; 32]))
@@ -79,15 +82,21 @@ fn counting_fetch(
     }
 }
 
-fn test_cache(budget: u64) -> (tempfile::TempDir, RemoteIndexCache) {
-    let directory = tempfile::tempdir().expect("tempdir");
-    let cache = RemoteIndexCache::new(directory.path(), budget).expect("cache");
-    (directory, cache)
+/// A cache and the temporary directory that backs it.
+struct TestCache {
+    dir: tempfile::TempDir,
+    cache: RemoteIndexCache,
+}
+
+fn test_cache(budget: u64) -> TestCache {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cache = RemoteIndexCache::new(dir.path(), budget).expect("cache");
+    TestCache { dir, cache }
 }
 
 #[test]
 fn second_lookup_of_the_same_index_is_served_without_a_fetch() {
-    let (_dir, cache) = test_cache(1 << 20);
+    let TestCache { dir: _dir, cache } = test_cache(1 << 20);
     let segment = Uuid::new_v4();
     let calls = Arc::new(AtomicUsize::new(0));
 
@@ -116,7 +125,7 @@ fn second_lookup_of_the_same_index_is_served_without_a_fetch() {
 
 #[test]
 fn the_two_index_types_of_one_segment_are_separate_entries() {
-    let (_dir, cache) = test_cache(1 << 20);
+    let TestCache { dir: _dir, cache } = test_cache(1 << 20);
     let segment = Uuid::new_v4();
     let calls = Arc::new(AtomicUsize::new(0));
 
@@ -134,7 +143,7 @@ fn the_two_index_types_of_one_segment_are_separate_entries() {
 #[test]
 fn the_byte_budget_evicts_the_least_recently_used_entry() {
     // Room for exactly two 40-byte entries.
-    let (_dir, cache) = test_cache(80);
+    let TestCache { dir: _dir, cache } = test_cache(80);
     let calls = Arc::new(AtomicUsize::new(0));
     let (first, second, third) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
 
@@ -169,7 +178,7 @@ fn the_byte_budget_evicts_the_least_recently_used_entry() {
 
 #[test]
 fn an_entry_larger_than_the_whole_budget_is_returned_but_not_stored() {
-    let (_dir, cache) = test_cache(16);
+    let TestCache { dir: _dir, cache } = test_cache(16);
     let calls = Arc::new(AtomicUsize::new(0));
     let segment = Uuid::new_v4();
 
@@ -187,7 +196,7 @@ fn an_entry_larger_than_the_whole_budget_is_returned_but_not_stored() {
 
 #[test]
 fn removing_a_segment_releases_every_index_it_held() {
-    let (dir, cache) = test_cache(1 << 20);
+    let TestCache { dir, cache } = test_cache(1 << 20);
     let segment = Uuid::new_v4();
     let calls = Arc::new(AtomicUsize::new(0));
     for index_type in [
@@ -239,7 +248,7 @@ fn a_disabled_cache_fetches_every_time_and_writes_nothing() {
 
 #[test]
 fn a_fetch_failure_is_returned_and_leaves_the_cache_empty() {
-    let (_dir, cache) = test_cache(1 << 20);
+    let TestCache { dir: _dir, cache } = test_cache(1 << 20);
 
     let result = cache.get_or_fetch(Uuid::new_v4(), IndexType::Offset, || {
         Err(RemoteStorageError::Io(std::io::Error::other("boom")))

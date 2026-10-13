@@ -22,6 +22,14 @@ use {
     assert2::assert,
 };
 
+/// The sizes of the responses to the replica fetches of one run.
+struct ReplicaFetchBytes {
+    /// The size of the first response.
+    first: usize,
+    /// The size of the fetch after a second append, when one was asked for.
+    followup: Option<usize>,
+}
+
 /// Sets a leader throttle rate of 512 bytes/sec and the given
 /// `leader.replication.throttled.replicas` list on a topic of one partition,
 /// fills the partition with 8 KB, and returns the size of the response to a
@@ -33,7 +41,7 @@ async fn replica_fetch_bytes(
     list: impl FnOnce(u64) -> String,
     follower_in_isr: bool,
     fetch_again_after_append: bool,
-) -> (usize, Option<usize>) {
+) -> ReplicaFetchBytes {
     let (handle, _dir, addr) = start_single_broker_plaintext().await;
     let node_id = handle.node_id();
 
@@ -110,7 +118,10 @@ async fn replica_fetch_bytes(
         None
     };
     handle.shutdown().await;
-    (resp_bytes, followup_bytes)
+    ReplicaFetchBytes {
+        first: resp_bytes,
+        followup: followup_bytes,
+    }
 }
 
 /// Test 3: After setting a very low leader throttle rate (512 bytes/sec) and
@@ -124,8 +135,10 @@ async fn replica_fetch_bytes(
 /// replicas that leader holds (#1210).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn throttle_rate_caps_fetch_response_size() {
-    let (first_bytes, followup_bytes) =
-        replica_fetch_bytes(|leader| format!("0:{leader}"), false, true).await;
+    let ReplicaFetchBytes {
+        first: first_bytes,
+        followup: followup_bytes,
+    } = replica_fetch_bytes(|leader| format!("0:{leader}"), false, true).await;
 
     // A single indivisible partition payload larger than the burst progresses
     // once; its bounded debt throttles the next fetch, which must return no
@@ -182,7 +195,9 @@ async fn unthrottled_partition_unaffected() {
 /// (#1210).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_list_naming_only_the_follower_throttles_nothing_on_the_leader() {
-    let (resp_bytes, _) = replica_fetch_bytes(|_| "0:2".to_owned(), false, false).await;
+    let ReplicaFetchBytes {
+        first: resp_bytes, ..
+    } = replica_fetch_bytes(|_| "0:2".to_owned(), false, false).await;
 
     assert!(
         resp_bytes >= 4096,
@@ -195,7 +210,9 @@ async fn a_list_naming_only_the_follower_throttles_nothing_on_the_leader() {
 /// the replicas that keep the partition available (#1211).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_follower_in_the_isr_is_not_throttled() {
-    let (resp_bytes, _) = replica_fetch_bytes(|_| "*".to_owned(), true, false).await;
+    let ReplicaFetchBytes {
+        first: resp_bytes, ..
+    } = replica_fetch_bytes(|_| "*".to_owned(), true, false).await;
 
     assert!(
         resp_bytes >= 4096,

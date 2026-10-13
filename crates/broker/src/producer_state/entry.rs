@@ -91,15 +91,25 @@ impl ProducerEntry {
     }
 }
 
+/// Whether a completed append is accepted, and the earlier batches it leaves
+/// retained when it is.
+pub(crate) struct Completion {
+    pub(crate) accepted: bool,
+    pub(crate) earlier: EarlierBatches,
+}
+
 /// The shared live/model completion projection, keeping metadata by physical
 /// offset instead of asynchronous acknowledgement order.
 pub(crate) fn earlier_after_completion(
     existing: Option<ProducerEntry>,
     epoch: i16,
     incoming: RetainedBatch,
-) -> (bool, EarlierBatches) {
+) -> Completion {
     if existing.is_none() {
-        return (true, NO_EARLIER_BATCHES);
+        return Completion {
+            accepted: true,
+            earlier: NO_EARLIER_BATCHES,
+        };
     }
     let mut retained = [incoming; NUM_BATCHES_TO_RETAIN];
     let mut ends = [0; NUM_BATCHES_TO_RETAIN];
@@ -128,7 +138,7 @@ pub(crate) fn earlier_after_completion(
             });
         }
     }
-    (accepted, earlier)
+    Completion { accepted, earlier }
 }
 
 #[derive(Debug, Default)]

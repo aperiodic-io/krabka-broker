@@ -87,7 +87,7 @@ impl RemoteReader {
 mod tests {
     use {
         crate::remote_reader::test_support::{
-            append_time_remote_segment_reader, compressed_remote_segment_reader,
+            ReaderWithDir, append_time_remote_segment_reader, compressed_remote_segment_reader,
             sparse_remote_segment_reader, sparse_remote_segment_reader_with_max_timestamp, tp,
             unordered_timestamps_remote_segment_reader,
         },
@@ -114,7 +114,7 @@ mod tests {
 
     #[tokio::test]
     async fn timestamp_lookup_answers_in_append_time() {
-        let (reader, _dir) = append_time_remote_segment_reader();
+        let ReaderWithDir { reader, dir: _dir } = append_time_remote_segment_reader();
         for (floor, target, expected) in [
             (0, 1_500, Some((10, 1_700))),
             (11, 1_500, Some((11, 1_700))),
@@ -156,7 +156,10 @@ mod tests {
 
     #[tokio::test]
     async fn offset_for_timestamp_scans_before_sparse_ceiling() {
-        let (reader, _remote_dir) = sparse_remote_segment_reader();
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = sparse_remote_segment_reader();
 
         let got = reader
             .offset_for_timestamp(&tp(), 1_500, 0, None)
@@ -169,7 +172,10 @@ mod tests {
 
     #[tokio::test]
     async fn offset_for_timestamp_returns_exact_indexed_record_timestamp() {
-        let (reader, _remote_dir) = sparse_remote_segment_reader();
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = sparse_remote_segment_reader();
 
         let got = reader
             .offset_for_timestamp(&tp(), 2_000, 0, None)
@@ -199,7 +205,10 @@ mod tests {
     /// on the log start offset, never on the index entry's offset.
     #[tokio::test]
     async fn offset_for_timestamp_finds_the_newest_record_before_its_batchs_last_offset() {
-        let (reader, _remote_dir) = unordered_timestamps_remote_segment_reader();
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = unordered_timestamps_remote_segment_reader();
 
         let got = reader
             .offset_for_timestamp(&tp(), 2_400, 0, None)
@@ -233,7 +242,10 @@ mod tests {
     async fn offset_for_timestamp_refuses_a_record_above_the_limit_that_it_reads() {
         use krabka_remote_storage::RemoteStorageError;
 
-        let (reader, _remote_dir) = compressed_remote_segment_reader(1_000);
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = compressed_remote_segment_reader(1_000);
         for (name, target, limit, want) in [
             // The match is in the first batch, so the second is never read.
             (

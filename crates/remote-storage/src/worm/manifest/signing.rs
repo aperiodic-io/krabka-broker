@@ -90,12 +90,17 @@ mod tests {
         uuid::Uuid,
     };
 
-    fn fresh_signer(key_id: &str) -> (FileEd25519Signer, Vec<u8>) {
+    struct FreshSigner {
+        signer: FileEd25519Signer,
+        public_key: Vec<u8>,
+    }
+
+    fn fresh_signer(key_id: &str) -> FreshSigner {
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
         let signer =
             FileEd25519Signer::from_pkcs8_bytes(pkcs8.as_ref(), key_id.to_string()).unwrap();
         let public_key = signer.public_key();
-        (signer, public_key)
+        FreshSigner { signer, public_key }
     }
 
     fn sign_manifest(body: ManifestBody, signer: &FileEd25519Signer) -> SegmentManifest {
@@ -114,7 +119,7 @@ mod tests {
 
     #[test]
     fn manifest_signature_round_trips_and_rejects_tampering() {
-        let (signer, public_key) = fresh_signer(KEY_ID);
+        let FreshSigner { signer, public_key } = fresh_signer(KEY_ID);
         let base = sample_body();
         let authentic = sign_manifest(base.clone(), &signer);
 
@@ -166,7 +171,10 @@ mod tests {
             );
         }
 
-        let (_other_signer, other_public_key) = fresh_signer("worm-key-2");
+        let FreshSigner {
+            public_key: other_public_key,
+            ..
+        } = fresh_signer("worm-key-2");
         check!(!verify_manifest_signature(&authentic, &other_public_key));
     }
 
@@ -221,7 +229,7 @@ mod tests {
 
         // Behaviourally: an audit checkpoint signature over this very head, by
         // this very key, is not a manifest signature.
-        let (signer, public_key) = fresh_signer(KEY_ID);
+        let FreshSigner { signer, public_key } = fresh_signer(KEY_ID);
         let checkpoint_bytes =
             checkpoint_signing_bytes(KEY_ID, Seq(body.chain.seq.0), &head.0, EpochMs(0));
         let cross_purpose = SegmentManifest {

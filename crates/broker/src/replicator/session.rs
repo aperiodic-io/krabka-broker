@@ -118,10 +118,10 @@ impl FollowerFetchSession {
     /// request and a refused session -- both go through [`Self::reset`].
     pub(super) fn build(&mut self, wanted: WantedRows) -> SessionRequest {
         let full = self.is_full();
-        let mut rows: Vec<(&SessionKey, &FetchPartition)> = Vec::new();
+        let mut rows: Vec<WantedRow<'_>> = Vec::new();
         for (key, partition) in &wanted {
             if full || self.sent.get(key) != Some(partition) {
-                rows.push((key, partition));
+                rows.push(WantedRow { key, partition });
             }
         }
         let forgotten = if full {
@@ -150,7 +150,12 @@ impl FollowerFetchSession {
         if self.is_full() {
             return self.build(changed);
         }
-        let topics = fetch_topics(changed.iter().collect());
+        let topics = fetch_topics(
+            changed
+                .iter()
+                .map(|(key, partition)| WantedRow { key, partition })
+                .collect(),
+        );
         let forgotten_topics_data = forgotten_topics(removed.iter());
         for key in removed {
             self.sent.remove(key);
@@ -209,15 +214,21 @@ pub(super) enum SessionOutcome {
     SessionLost,
 }
 
+/// A wanted row and the key it is stored under.
+struct WantedRow<'a> {
+    key: &'a SessionKey,
+    partition: &'a FetchPartition,
+}
+
 /// Groups the chosen rows into one `FetchTopic` per topic, in key order.
 ///
 /// The key owns the identity, so each row's `partition` index is taken from
 /// it: a caller that filled the value's index differently cannot send the
 /// leader a row addressed to a partition other than the one it is diffed
 /// against.
-fn fetch_topics(rows: Vec<(&SessionKey, &FetchPartition)>) -> Vec<FetchTopic> {
+fn fetch_topics(rows: Vec<WantedRow<'_>>) -> Vec<FetchTopic> {
     let mut topics: Vec<FetchTopic> = Vec::new();
-    for (key, partition) in rows {
+    for WantedRow { key, partition } in rows {
         let row = FetchPartition {
             partition: key.partition,
             ..partition.clone()

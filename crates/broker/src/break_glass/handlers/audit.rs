@@ -167,7 +167,13 @@ mod tests {
         }
     }
 
-    fn full_spool() -> (tempfile::TempDir, Spool) {
+    /// A spool with no room left, and the directory that holds it.
+    struct FullSpool {
+        dir: tempfile::TempDir,
+        spool: Spool,
+    }
+
+    fn full_spool() -> FullSpool {
         let existing = AuditRecord::from_event(
             &AuditEvent::Lifecycle {
                 kind: LifecycleKind::BrokerStarted,
@@ -186,11 +192,18 @@ mod tests {
         let dir = tempfile::tempdir().expect("spool tempdir");
         let mut spool = Spool::open(dir.path(), one).expect("open exact spool");
         check!(spool.append(&existing).expect("fill spool"));
-        (dir, spool)
+        FullSpool { dir, spool }
     }
 
-    async fn saturated_transition(mode: AuditMode) -> (Result<(), AuditError>, u64) {
-        let (_dir, spool) = full_spool();
+    /// The outcome of a transition over a full spool, and the number of audit
+    /// records it lost.
+    struct SaturatedTransition {
+        result: Result<(), AuditError>,
+        dropped: u64,
+    }
+
+    async fn saturated_transition(mode: AuditMode) -> SaturatedTransition {
+        let FullSpool { dir: _dir, spool } = full_spool();
         let stats = Arc::new(AuditStats::new());
         let (log, receiver) = AuditLog::new_with_mode_and_spool(8, mode, &spool);
         let writer = AuditWriter::new(receiver, AuditWriterParams {
@@ -222,16 +235,25 @@ mod tests {
         .expect("audit loss is counted");
         log.close();
         writer.await.expect("audit writer stops");
-        (result, stats.dropped())
+        SaturatedTransition {
+            result,
+            dropped: stats.dropped(),
+        }
     }
 
     #[tokio::test]
     async fn saturated_audit_spool_applies_fail_open_and_refuses_fail_closed() {
-        let (open, open_dropped) = saturated_transition(AuditMode::FailOpen).await;
+        let SaturatedTransition {
+            result: open,
+            dropped: open_dropped,
+        } = saturated_transition(AuditMode::FailOpen).await;
         check!(open.is_ok(), "fail-open transition is applied");
         check!(open_dropped == 1, "fail-open audit loss is counted");
 
-        let (closed, closed_dropped) = saturated_transition(AuditMode::FailClosed).await;
+        let SaturatedTransition {
+            result: closed,
+            dropped: closed_dropped,
+        } = saturated_transition(AuditMode::FailClosed).await;
         assert!(let Err(error) = closed);
         check!(error.to_string().contains("spool is full"));
         check!(closed_dropped == 1, "fail-closed refusal is counted");

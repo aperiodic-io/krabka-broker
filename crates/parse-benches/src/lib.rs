@@ -99,6 +99,16 @@ pub struct BenchmarkMetric {
     pub variance_ns: f64,
 }
 
+/// A benchmark measurement together with the name of the benchmark it
+/// belongs to, as read from one line of bencher output.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedMetric {
+    /// Canonical benchmark name.
+    pub name: String,
+    /// The measurement of that benchmark.
+    pub metric: BenchmarkMetric,
+}
+
 /// Aggregated benchmark summary document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BenchmarkSummary {
@@ -333,9 +343,7 @@ pub struct Args {
 ///
 /// Returns [`ParseBenchesError::InvalidNumber`] if matched numeric fields cannot
 /// be parsed into floats.
-pub fn parse_bencher_line(
-    line: &str,
-) -> Result<Option<(String, BenchmarkMetric)>, ParseBenchesError> {
+pub fn parse_bencher_line(line: &str) -> Result<Option<NamedMetric>, ParseBenchesError> {
     let Some(caps) = BENCHER_REGEX.captures(line) else {
         return Ok(None);
     };
@@ -351,10 +359,13 @@ pub fn parse_bencher_line(
         .parse()
         .map_err(|_| ParseBenchesError::InvalidNumber(caps[3].to_string()))?;
 
-    Ok(Some((name, BenchmarkMetric {
-        ns_per_iter,
-        variance_ns,
-    })))
+    Ok(Some(NamedMetric {
+        name,
+        metric: BenchmarkMetric {
+            ns_per_iter,
+            variance_ns,
+        },
+    }))
 }
 
 /// Parses all benchmark metrics from a `.txt` file into the target map.
@@ -372,7 +383,7 @@ pub fn parse_bencher_file(
 
     for line in reader.lines() {
         let line = line?;
-        if let Some((name, metric)) = parse_bencher_line(&line)?
+        if let Some(NamedMetric { name, metric }) = parse_bencher_line(&line)?
             && benchmarks.insert(name.clone(), metric).is_some()
         {
             return Err(ParseBenchesError::DuplicateBenchmark {

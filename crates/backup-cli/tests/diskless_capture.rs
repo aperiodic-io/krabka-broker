@@ -20,6 +20,18 @@ use {
 
 const TOPIC_ID: Uuid = Uuid::from_u128(9);
 
+/// One keyed index record, as a broker flush publishes it.
+struct IndexRecord {
+    key: Bytes,
+    value: Bytes,
+}
+
+/// A record a broker flush commits on `partition` after the capture read the watermarks.
+struct LateRecord {
+    partition: i32,
+    record: IndexRecord,
+}
+
 /// A diskless WAL index as a Kafka-compatible broker serves it to a backup
 /// client: reads work, and every `Produce` to the internal topic fails with
 /// `INVALID_TOPIC_EXCEPTION`, because the client is not `__admin_client`.
@@ -30,14 +42,11 @@ struct InternalTopicLog {
     inner: Arc<InProcessMetadataEventLog>,
     publishes: AtomicUsize,
     subscriptions: AtomicUsize,
-    after_cutoff: Mutex<Option<(i32, Bytes, Bytes)>>,
+    after_cutoff: Mutex<Option<LateRecord>>,
 }
 
 impl InternalTopicLog {
-    fn new(
-        inner: Arc<InProcessMetadataEventLog>,
-        after_cutoff: Option<(i32, Bytes, Bytes)>,
-    ) -> Arc<Self> {
+    fn new(inner: Arc<InProcessMetadataEventLog>, after_cutoff: Option<LateRecord>) -> Arc<Self> {
         Arc::new(Self {
             inner,
             publishes: AtomicUsize::new(0),
@@ -85,7 +94,11 @@ impl MetadataEventLog for InternalTopicLog {
     async fn high_water_marks(&self) -> Result<Vec<i64>, MetadataLogError> {
         let cutoffs = self.inner.high_water_marks().await?;
         let late = self.after_cutoff.lock().unwrap().take();
-        if let Some((partition, key, value)) = late {
+        if let Some(LateRecord {
+            partition,
+            record: IndexRecord { key, value },
+        }) = late
+        {
             self.inner
                 .publish_keyed(partition, key, Some(value))
                 .await?;
@@ -107,9 +120,9 @@ fn entry(first_offset: i64, last_offset: i64, byte_start: u64) -> WalIndexEntry 
 }
 
 /// The keyed index record a broker flush publishes for `entry`.
-fn flush(object_key: &str, entry: WalIndexEntry) -> (Bytes, Bytes) {
+fn flush(object_key: &str, entry: WalIndexEntry) -> IndexRecord {
     let (key, value) = WalFlushRecord::keyed_entry(object_key, entry).unwrap();
-    (key, value)
+    IndexRecord { key, value }
 }
 
 krabka_macros::wal_capture_topic_fixture!(orders, TOPIC_ID, "orders", 1);
@@ -135,9 +148,9 @@ fn expected_capture(
 async fn capture_reads_committed_index_state_to_the_high_watermarks_without_producing() {
     let index = InProcessMetadataEventLog::new(3);
     // p0: a live range, then a broker's replay fence.
-    let (live_key, live_value) = flush("diskless-wal/1/a.ckwl", entry(4, 7, 6));
+    let live = flush("diskless-wal/1/a.ckwl", entry(4, 7, 6));
     index
-        .publish_keyed(0, live_key, Some(live_value))
+        .publish_keyed(0, live.key, Some(live.value))
         .await
         .unwrap();
     index
@@ -145,16 +158,22 @@ async fn capture_reads_committed_index_state_to_the_high_watermarks_without_prod
         .await
         .unwrap();
     // p1: a range that a later tombstone deleted.
-    let (deleted_key, deleted_value) = flush("diskless-wal/1/b.ckwl", entry(8, 9, 0));
+    let deleted = flush("diskless-wal/1/b.ckwl", entry(8, 9, 0));
     index
-        .publish_keyed(1, deleted_key.clone(), Some(deleted_value))
+        .publish_keyed(1, deleted.key.clone(), Some(deleted.value))
         .await
         .unwrap();
-    index.publish_keyed(1, deleted_key, None).await.unwrap();
+    index.publish_keyed(1, deleted.key, None).await.unwrap();
     // p2 stays empty. A flush that commits on p0 after the capture reads the
     // watermarks lies past its cutoff.
     let late = flush("diskless-wal/1/c.ckwl", entry(10, 11, 0));
-    let log = InternalTopicLog::new(index, Some((0, late.0, late.1)));
+    let log = InternalTopicLog::new(
+        index,
+        Some(LateRecord {
+            partition: 0,
+            record: late,
+        }),
+    );
 
     let capture = capture_projection(log.clone(), &orders(), 42)
         .await

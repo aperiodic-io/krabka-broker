@@ -118,7 +118,9 @@ mod tests {
     use {
         super::*,
         crate::{
-            future_log::test_support::{fixture_partition, open_future_log, source_fixture},
+            future_log::test_support::{
+                OpenedFutureLog, fixture_partition, open_future_log, source_fixture,
+            },
             throttle::TokenBucket,
         },
         assert2::assert,
@@ -127,14 +129,17 @@ mod tests {
         tempfile::tempdir,
     };
 
-    fn first_catch_up(
-        part: &Arc<Partition>,
-        target: &std::path::Path,
-    ) -> (Arc<Mutex<Log>>, CatchUpProgress) {
-        let (_future_path, future) = open_future_log(target);
+    fn first_catch_up(part: &Arc<Partition>, target: &std::path::Path) -> FirstCatchUp {
+        let OpenedFutureLog { log: future, .. } = open_future_log(target);
         let progress =
             catch_up(part, &future, mebibytes(1), &TokenBucket::new()).expect("catch up");
-        (future, progress)
+        FirstCatchUp { future, progress }
+    }
+
+    /// The future log after a first catch-up, and the progress it reported.
+    struct FirstCatchUp {
+        future: Arc<Mutex<Log>>,
+        progress: CatchUpProgress,
     }
 
     #[tokio::test]
@@ -148,7 +153,7 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .set_log_start_offset(Offset(2))
             .expect("advance source start");
-        let (future, progress) = first_catch_up(&part, target.path());
+        let FirstCatchUp { future, progress } = first_catch_up(&part, target.path());
         assert!(!progress.caught_up);
         let future = future
             .lock()
@@ -170,7 +175,7 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .reset_to(Offset(5))
             .expect("reset source");
-        let (future, progress) = first_catch_up(&part, target.path());
+        let FirstCatchUp { future, progress } = first_catch_up(&part, target.path());
         assert!(progress.caught_up);
         let future = future
             .lock()
@@ -185,7 +190,7 @@ mod tests {
         let _primary = fixture.primary;
         let target = fixture.target;
         let part = fixture.partition;
-        let (_future_path, future) = open_future_log(target.path());
+        let OpenedFutureLog { log: future, .. } = open_future_log(target.path());
         let throttle = TokenBucket::new();
         throttle
             .set_byte_rate_with_burst(krabka_units::bytes_per_sec(1024), krabka_units::bytes(0));

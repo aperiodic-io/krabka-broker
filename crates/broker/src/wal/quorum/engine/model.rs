@@ -108,7 +108,7 @@ impl Model for WalModel {
                 }
                 Action::Acknowledge => {
                     let expected_success = ack_has_a_majority(&state);
-                    let (logs, result) = drive_ack(&state);
+                    let AckRun { logs, result } = drive_ack(&state);
                     assert2::assert!(
                         result.is_ok() == expected_success,
                         "an acknowledgement succeeds exactly when a majority can hold the leader's log"
@@ -135,7 +135,7 @@ impl Model for WalModel {
                     state.last_ack_failed = false;
                 }
                 Action::CrashRecover => {
-                    let (logs, hwm) = drive_recovery(&state);
+                    let RecoveryRun { logs, hwm } = drive_recovery(&state);
                     state.logs = logs;
                     record_committed_watermark(&mut state, hwm);
                     state.recovered = true;
@@ -247,7 +247,10 @@ fn ack_has_a_majority(state: &WalState) -> bool {
 }
 
 fn drive_append(state: &WalState) -> [Vec<u8>; VOTERS] {
-    let (_directory, logs) = materialize(state);
+    let Materialized {
+        directory: _directory,
+        logs,
+    } = materialize(state);
     logs[state.leader]
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -260,8 +263,17 @@ fn drive_append(state: &WalState) -> [Vec<u8>; VOTERS] {
     observe(&logs)
 }
 
-fn drive_ack(state: &WalState) -> ([Vec<u8>; VOTERS], Result<usize, ()>) {
-    let (_directory, logs) = materialize(state);
+/// What the logs hold after an acknowledgement, and whether it committed.
+struct AckRun {
+    logs: [Vec<u8>; VOTERS],
+    result: Result<usize, ()>,
+}
+
+fn drive_ack(state: &WalState) -> AckRun {
+    let Materialized {
+        directory: _directory,
+        logs,
+    } = materialize(state);
     let replicas = ordered_replicas(state.leader, &logs);
     let engine = WalShardEngine::for_model(replicas, Offset(model_offset(state.hwm)));
     for voter in 0..VOTERS {
@@ -276,19 +288,40 @@ fn drive_ack(state: &WalState) -> ([Vec<u8>; VOTERS], Result<usize, ()>) {
         .block_on(engine.replicate_and_sync(&logs[state.leader], target))
         .map(|hwm| model_index(hwm.0))
         .map_err(|_| ());
-    (observe(&logs), result)
+    AckRun {
+        logs: observe(&logs),
+        result,
+    }
 }
 
-fn drive_recovery(state: &WalState) -> ([Vec<u8>; VOTERS], usize) {
-    let (_directory, logs) = materialize(state);
+/// What the logs hold after a recovery, and the watermark it recovered.
+struct RecoveryRun {
+    logs: [Vec<u8>; VOTERS],
+    hwm: usize,
+}
+
+fn drive_recovery(state: &WalState) -> RecoveryRun {
+    let Materialized {
+        directory: _directory,
+        logs,
+    } = materialize(state);
     let replicas = ordered_replicas(state.leader, &logs);
     let engine = WalShardEngine::new(replicas, OpenMode::Recover)
         .expect("WAL recovery opens every reachable replica set");
     let hwm = model_index(engine.durable_watermark().0);
-    (observe(&logs), hwm)
+    RecoveryRun {
+        logs: observe(&logs),
+        hwm,
+    }
 }
 
-fn materialize(state: &WalState) -> (tempfile::TempDir, [Arc<Mutex<Log>>; VOTERS]) {
+/// The directory that holds the voters' logs, and the logs themselves.
+struct Materialized {
+    directory: tempfile::TempDir,
+    logs: [Arc<Mutex<Log>>; VOTERS],
+}
+
+fn materialize(state: &WalState) -> Materialized {
     let directory = tempfile::tempdir().expect("bounded WAL directory");
     let logs = std::array::from_fn(|voter| {
         let mut log = Log::open(
@@ -307,7 +340,7 @@ fn materialize(state: &WalState) -> (tempfile::TempDir, [Arc<Mutex<Log>>; VOTERS
         log.sync().expect("sync bounded WAL");
         Arc::new(Mutex::new(log))
     });
-    (directory, logs)
+    Materialized { directory, logs }
 }
 
 fn ordered_replicas(leader: usize, logs: &[Arc<Mutex<Log>>; VOTERS]) -> Vec<WalReplica> {

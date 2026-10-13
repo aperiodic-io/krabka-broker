@@ -9,7 +9,7 @@
 //! removes the group of any type.
 
 use {
-    super::test_support::{classic_group_record, replay_log},
+    super::test_support::{LogRecord, ReplayedCoordinator, classic_group_record, replay_log},
     crate::{
         coordinator::{
             persistence::{GroupMetadataValue as ClassicGroupMetadataValue, OffsetCommitValue},
@@ -21,11 +21,7 @@ use {
         error::BrokerError,
     },
     assert2::check,
-    bytes::Bytes,
 };
-
-/// One replayed record: its key, and its value or `None` for a tombstone.
-type LogRecord = (Bytes, Option<Bytes>);
 
 /// What the replay holds under group id `g`.
 #[derive(Debug, PartialEq, Eq)]
@@ -38,63 +34,62 @@ enum Held {
 }
 
 fn consumer_epoch() -> LogRecord {
-    (
+    LogRecord::put(
         encode_key(&NextGenKey::GroupMetadata {
             group_id: "g".into(),
         })
         .unwrap(),
-        Some(
-            GroupMetadataValue {
-                epoch: 2,
-                metadata_hash: 0,
-            }
-            .encode(),
-        ),
+        GroupMetadataValue {
+            epoch: 2,
+            metadata_hash: 0,
+        }
+        .encode(),
     )
 }
 
 fn share_epoch() -> LogRecord {
-    (
+    LogRecord::put(
         encode_share_key(&ShareGroupKey::GroupMetadata {
             group_id: "g".into(),
         })
         .unwrap(),
-        Some(
-            ShareGroupMetadataValue {
-                epoch: 2,
-                metadata_hash: 0,
-            }
-            .encode(),
-        ),
+        ShareGroupMetadataValue {
+            epoch: 2,
+            metadata_hash: 0,
+        }
+        .encode(),
     )
 }
 
 fn offset_commit() -> LogRecord {
-    (
+    LogRecord::put(
         OffsetCommitValue::encode_key("g", "t", 0).unwrap(),
-        Some(
-            OffsetCommitValue {
-                offset: krabka_log::Offset(5),
-                leader_epoch: -1,
-                metadata: String::new(),
-                commit_timestamp_ms: 1,
-                expire_timestamp_ms: None,
-                topic_id: None,
-            }
-            .encode_value(),
-        ),
+        OffsetCommitValue {
+            offset: krabka_log::Offset(5),
+            leader_epoch: -1,
+            metadata: String::new(),
+            commit_timestamp_ms: 1,
+            expire_timestamp_ms: None,
+            topic_id: None,
+        }
+        .encode_value(),
     )
 }
 
 fn classic_group() -> LogRecord {
     let (key, value) = classic_group_record("g", "m1");
-    (key, Some(value))
+    LogRecord::put(key, value)
 }
 
-fn classic_tombstone() -> LogRecord { (ClassicGroupMetadataValue::encode_key("g").unwrap(), None) }
+fn classic_tombstone() -> LogRecord {
+    LogRecord::tombstone(ClassicGroupMetadataValue::encode_key("g").unwrap())
+}
 
 fn replay(records: Vec<LogRecord>) -> Held {
-    let (coordinator, replayed) = replay_log(records);
+    let ReplayedCoordinator {
+        coordinator,
+        replayed,
+    } = replay_log(records);
     let replayed = match replayed {
         Ok(replayed) => replayed,
         Err(BrokerError::Startup(message)) => return Held::Failed(message),

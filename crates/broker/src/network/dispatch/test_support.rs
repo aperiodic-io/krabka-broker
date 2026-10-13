@@ -15,6 +15,12 @@ use {
     tokio_util::codec::Framed,
 };
 
+/// The address a bound serve loop listens on and the future that drives it.
+pub(super) struct ServeLoop<F> {
+    pub(super) addr: SocketAddr,
+    pub(super) serve: F,
+}
+
 /// Bind the real serve loop and return its future so callers can instrument
 /// it before spawning. Multiple-connection cases keep one listener and run
 /// each accepted stream in order, just as their original fixtures did.
@@ -25,7 +31,7 @@ pub(super) async fn serve_loop(
     sasl_mechanisms: Option<Vec<SaslMechanism>>,
     mtls_principal: Option<Principal>,
     connections: usize,
-) -> (SocketAddr, impl Future<Output = ()> + Send + 'static) {
+) -> ServeLoop<impl Future<Output = ()> + Send + 'static> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind loopback");
@@ -39,25 +45,28 @@ pub(super) async fn serve_loop(
         sasl_mechanisms,
         principal_mapper: SslPrincipalMapper::default(),
     };
-    (addr, async move {
-        for _ in 0..connections {
-            let (stream, peer) = listener.accept().await.expect("accept");
-            super::serve_connection_stream(
-                broker.clone(),
-                stream,
-                spec.clone(),
-                peer,
-                mtls_principal.clone(),
-            )
-            .await;
-        }
-    })
+    ServeLoop {
+        addr,
+        serve: async move {
+            for _ in 0..connections {
+                let (stream, peer) = listener.accept().await.expect("accept");
+                super::serve_connection_stream(
+                    broker.clone(),
+                    stream,
+                    spec.clone(),
+                    peer,
+                    mtls_principal.clone(),
+                )
+                .await;
+            }
+        },
+    }
 }
 
 pub(super) async fn plaintext_loop(
     broker: Arc<Broker>,
 ) -> (tokio::task::JoinHandle<()>, Framed<TcpStream, KafkaCodec>) {
-    let (addr, serve) = serve_loop(
+    let ServeLoop { addr, serve } = serve_loop(
         broker,
         "PLAINTEXT",
         ListenerProtocol::Plaintext,

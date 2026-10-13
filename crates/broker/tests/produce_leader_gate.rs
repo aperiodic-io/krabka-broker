@@ -69,10 +69,20 @@ fn one_record_batch(v: &str) -> RecordBatch {
     }
 }
 
+/// What a produce answered with for its one partition.
+struct ProduceAnswer {
+    /// The partition's error code.
+    error_code: i16,
+    /// The leader the broker names in its `current_leader` hint.
+    leader_hint: i32,
+    /// The KIP-951 endpoints of the nodes the hint refers to.
+    node_endpoints: Vec<NodeEndpoint>,
+}
+
 /// Send a single one-record Produce (`acks=1`) for `(topic, partition)` over
 /// `client`'s bootstrap connection. That is, send it directly at whichever
 /// broker the client was built against, and bypass any leader routing. Returns
-/// `(error_code, current_leader_id, node_endpoints)`. The last is the KIP-951
+/// the error code, the `current_leader` id and the node endpoints. The last is the KIP-951
 /// companion to the hint: without it a Java producer cannot resolve the node id
 /// the hint names and falls back to the full `Metadata` round-trip.
 async fn produce_one(
@@ -81,7 +91,7 @@ async fn produce_one(
     topic_id: WireUuid,
     partition: i32,
     value: &str,
-) -> (i16, i32, Vec<NodeEndpoint>) {
+) -> ProduceAnswer {
     let resp = client
         .send(batch_request(
             one_record_batch(value),
@@ -95,11 +105,11 @@ async fn produce_one(
         .await
         .expect("produce round-trip");
     let pr = &resp.responses[0].partition_responses[0];
-    (
-        pr.error_code,
-        pr.current_leader.leader_id,
-        resp.node_endpoints.clone(),
-    )
+    ProduceAnswer {
+        error_code: pr.error_code,
+        leader_hint: pr.current_leader.leader_id,
+        node_endpoints: resp.node_endpoints.clone(),
+    }
 }
 
 use crate::support::partitions::wait_for_local_replica;
@@ -138,8 +148,11 @@ async fn rf3_produce_to_a_follower_is_refused(
         .expect("follower hosts gate-rf3");
 
     let follower_client = connect_client(follower_addr, None).await;
-    let (code, leader_hint, node_endpoints) =
-        produce_one(&follower_client, "gate-rf3", rf3_id, 0, "rf3-to-follower").await;
+    let ProduceAnswer {
+        error_code: code,
+        leader_hint,
+        node_endpoints,
+    } = produce_one(&follower_client, "gate-rf3", rf3_id, 0, "rf3-to-follower").await;
     assert!(
         code == 6,
         "rf=3 Produce to follower node{follower_node} (leader=node{rf3_leader}) must be \
@@ -274,7 +287,11 @@ async fn produce_to_non_leader_is_rejected() {
             .is_none(),
         "test premise: node1 must NOT host gate-rf1/{off_node_part} (rf=1)"
     );
-    let (code, leader_hint, _) = produce_one(
+    let ProduceAnswer {
+        error_code: code,
+        leader_hint,
+        ..
+    } = produce_one(
         &admin,
         "gate-rf1",
         rf1_id,
@@ -310,7 +327,9 @@ async fn produce_to_non_leader_is_rejected() {
         .0
         .local_log_end_offset("gate-rf3", 0)
         .expect("leader hosts gate-rf3");
-    let (code, _, _) = produce_one(&leader3_client, "gate-rf3", rf3_id, 0, "rf3-to-leader").await;
+    let ProduceAnswer {
+        error_code: code, ..
+    } = produce_one(&leader3_client, "gate-rf3", rf3_id, 0, "rf3-to-leader").await;
     assert!(
         code == 0,
         "rf=3 Produce to the leader must succeed; got {code}"
@@ -337,7 +356,9 @@ async fn produce_to_non_leader_is_rejected() {
     // the required success. The rf=1 partition has no replica elsewhere, so
     // nothing else forces this broker's image/replica to be warm by now.
     wait_for_local_replica(&cluster[rf1_leader_idx].0, "gate-rf1", off_node_part).await;
-    let (code, _, _) = produce_one(
+    let ProduceAnswer {
+        error_code: code, ..
+    } = produce_one(
         &leader1_client,
         "gate-rf1",
         rf1_id,

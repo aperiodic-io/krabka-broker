@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn parse_accepts_valid_cidrs() {
-        let cases: &[(&str, IpAddr, u8)] = &[
+        let cases = [
             ("10.0.0.0/8", IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 8),
             (
                 "192.168.0.0/24",
@@ -203,20 +203,14 @@ mod tests {
             ),
         ];
         for (input, ip, prefix_len) in cases {
-            check!(
-                Cidr::parse(input)
-                    == Ok(Cidr {
-                        ip: *ip,
-                        prefix_len: *prefix_len
-                    })
-            );
+            check!(Cidr::parse(input) == Ok(Cidr { ip, prefix_len }));
         }
     }
 
     #[test]
     fn parse_rejects_malformed_cidrs() {
         // commons-net 3.13.0 `SubnetUtils` / `SubnetUtils6` messages.
-        let cases: &[(&str, &str)] = &[
+        let cases = [
             ("not-an-ip/8", "Could not parse [not-an-ip/8]"),
             ("10.0.0.0/thirty", "Could not parse [10.0.0.0/thirty]"),
             ("10.0.0.0/33", "Value [33] not in range [0,32]"),
@@ -252,41 +246,45 @@ mod tests {
         ];
         for (input, reason) in cases {
             check!(
-                Cidr::parse(input) == Err((*reason).to_owned()),
+                Cidr::parse(input) == Err(reason.to_owned()),
                 "input {input}"
             );
         }
     }
 
-    fn check_membership(cidr: &Cidr, cases: &[(IpAddr, bool)]) {
-        for (ip, expected) in cases {
-            check!(cidr.contains(*ip) == *expected, "ip {ip}");
+    fn check_membership(cidr: &Cidr, members: &[IpAddr], non_members: &[IpAddr]) {
+        for ip in members {
+            check!(cidr.contains(*ip), "ip {ip}");
+        }
+        for ip in non_members {
+            check!(!cidr.contains(*ip), "ip {ip}");
         }
     }
 
     #[test]
     fn contains_matches_ipv4_ranges() {
         let cidr = Cidr::parse("10.0.0.0/8").unwrap();
-        let cases: &[(IpAddr, bool)] = &[
-            (IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3)), true),
-            (IpAddr::V4(Ipv4Addr::new(10, 255, 255, 255)), true),
-            (IpAddr::V4(Ipv4Addr::new(11, 0, 0, 1)), false),
-        ];
-        check_membership(&cidr, cases);
+        check_membership(
+            &cidr,
+            &[
+                IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3)),
+                IpAddr::V4(Ipv4Addr::new(10, 255, 255, 255)),
+            ],
+            &[IpAddr::V4(Ipv4Addr::new(11, 0, 0, 1))],
+        );
     }
 
     #[test]
     fn contains_matches_ipv6_ranges() {
         let cidr = Cidr::parse("2001:db8::/32").unwrap();
-        let cases: &[(IpAddr, bool)] = &[
-            (IpAddr::V6("2001:db8::5".parse().unwrap()), true),
-            (
+        check_membership(
+            &cidr,
+            &[
+                IpAddr::V6("2001:db8::5".parse().unwrap()),
                 IpAddr::V6("2001:db8:ffff:ffff:ffff:ffff:ffff:ffff".parse().unwrap()),
-                true,
-            ),
-            (IpAddr::V6("2001:db9::5".parse().unwrap()), false),
-        ];
-        check_membership(&cidr, cases);
+            ],
+            &[IpAddr::V6("2001:db9::5".parse().unwrap())],
+        );
     }
 
     #[test]
@@ -314,7 +312,7 @@ mod tests {
     /// numerically. `SubnetUtils6.SubnetInfo.isInRange` has no such rule.
     #[test]
     fn unspecified_address_matches_only_ipv6_ranges() {
-        let cases: &[(&str, IpAddr, bool)] = &[
+        let cases = [
             ("0.0.0.0/0", IpAddr::V4(Ipv4Addr::UNSPECIFIED), false),
             ("0.0.0.0/8", IpAddr::V4(Ipv4Addr::UNSPECIFIED), false),
             ("0.0.0.0/32", IpAddr::V4(Ipv4Addr::UNSPECIFIED), false),
@@ -329,7 +327,7 @@ mod tests {
         ];
         for (cidr, ip, expected) in cases {
             check!(
-                Cidr::parse(cidr).unwrap().contains(*ip) == *expected,
+                Cidr::parse(cidr).unwrap().contains(ip) == expected,
                 "{cidr} contains {ip}"
             );
         }

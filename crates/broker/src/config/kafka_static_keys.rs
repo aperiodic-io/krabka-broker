@@ -359,11 +359,36 @@ mod tests {
     /// is tuned with, the 5 s follower fetch watchdog of the metadata quorum,
     /// and the 3 s broker heartbeat. The Streams assignor is trunk-only and
     /// has its own unstable-mode test below.
-    const KRABKA_OWN_DEFAULTS: &[(&str, &str)] = &[
-        ("socket.send.buffer.bytes", "1048576"),
-        ("socket.receive.buffer.bytes", "1048576"),
-        ("controller.quorum.fetch.timeout.ms", "5000"),
-        ("broker.heartbeat.interval.ms", "3000"),
+    /// A key and a value, as the tables below write them.
+    struct KeyValue {
+        name: &'static str,
+        value: &'static str,
+    }
+
+    /// A key and the value a config states for it.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Stated {
+        name: &'static str,
+        value: String,
+    }
+
+    const KRABKA_OWN_DEFAULTS: &[KeyValue] = &[
+        KeyValue {
+            name: "socket.send.buffer.bytes",
+            value: "1048576",
+        },
+        KeyValue {
+            name: "socket.receive.buffer.bytes",
+            value: "1048576",
+        },
+        KeyValue {
+            name: "controller.quorum.fetch.timeout.ms",
+            value: "5000",
+        },
+        KeyValue {
+            name: "broker.heartbeat.interval.ms",
+            value: "3000",
+        },
     ];
 
     /// Every key is one Kafka defines, or a group synonym that names a default,
@@ -412,13 +437,21 @@ mod tests {
     #[test]
     fn a_default_config_states_only_the_defaults_krabka_changed() {
         let config = BrokerConfig::default();
-        let stated: Vec<(&str, String)> = KAFKA_STATIC_KEYS
+        let stated: Vec<Stated> = KAFKA_STATIC_KEYS
             .iter()
-            .filter_map(|key| key.static_value(&config).map(|value| (key.name, value)))
+            .filter_map(|key| {
+                key.static_value(&config).map(|value| Stated {
+                    name: key.name,
+                    value,
+                })
+            })
             .collect();
-        let expected: Vec<(&str, String)> = KRABKA_OWN_DEFAULTS
+        let expected: Vec<Stated> = KRABKA_OWN_DEFAULTS
             .iter()
-            .map(|(name, value)| (*name, (*value).to_owned()))
+            .map(|KeyValue { name, value }| Stated {
+                name,
+                value: (*value).to_owned(),
+            })
             .collect();
 
         check!(stated == expected);
@@ -451,7 +484,7 @@ mod tests {
             "metadata.max.retention.ms",
             "metadata.max.idle.interval.ms",
         ];
-        let stated = |metadata_log: krabka_raft::MetadataLogConfig| -> Vec<(&str, String)> {
+        let stated = |metadata_log: krabka_raft::MetadataLogConfig| -> Vec<Stated> {
             let config = BrokerConfig {
                 metadata_log,
                 ..BrokerConfig::default()
@@ -459,7 +492,12 @@ mod tests {
             KAFKA_STATIC_KEYS
                 .iter()
                 .filter(|key| METADATA_LOG_KEYS.contains(&key.name))
-                .filter_map(|key| key.static_value(&config).map(|value| (key.name, value)))
+                .filter_map(|key| {
+                    key.static_value(&config).map(|value| Stated {
+                        name: key.name,
+                        value,
+                    })
+                })
                 .collect()
         };
         let cases = [
@@ -474,7 +512,10 @@ mod tests {
                     max_idle_interval: millis(0),
                     ..krabka_raft::MetadataLogConfig::default()
                 },
-                vec![("metadata.max.idle.interval.ms", "0")],
+                vec![KeyValue {
+                    name: "metadata.max.idle.interval.ms",
+                    value: "0",
+                }],
             ),
             (
                 "no retention limit",
@@ -484,8 +525,14 @@ mod tests {
                     ..krabka_raft::MetadataLogConfig::default()
                 },
                 vec![
-                    ("metadata.max.retention.bytes", "-1"),
-                    ("metadata.max.retention.ms", "-1"),
+                    KeyValue {
+                        name: "metadata.max.retention.bytes",
+                        value: "-1",
+                    },
+                    KeyValue {
+                        name: "metadata.max.retention.ms",
+                        value: "-1",
+                    },
                 ],
             ),
             (
@@ -498,19 +545,37 @@ mod tests {
                     max_idle_interval: millis(250),
                 },
                 vec![
-                    ("metadata.log.segment.bytes", "16777216"),
-                    ("metadata.log.segment.ms", "3600000"),
-                    ("metadata.max.retention.bytes", "0"),
-                    ("metadata.max.retention.ms", "0"),
-                    ("metadata.max.idle.interval.ms", "250"),
+                    KeyValue {
+                        name: "metadata.log.segment.bytes",
+                        value: "16777216",
+                    },
+                    KeyValue {
+                        name: "metadata.log.segment.ms",
+                        value: "3600000",
+                    },
+                    KeyValue {
+                        name: "metadata.max.retention.bytes",
+                        value: "0",
+                    },
+                    KeyValue {
+                        name: "metadata.max.retention.ms",
+                        value: "0",
+                    },
+                    KeyValue {
+                        name: "metadata.max.idle.interval.ms",
+                        value: "250",
+                    },
                 ],
             ),
         ];
 
         for (label, metadata_log, expected) in cases {
-            let expected: Vec<(&str, String)> = expected
+            let expected: Vec<Stated> = expected
                 .into_iter()
-                .map(|(name, value)| (name, value.to_owned()))
+                .map(|KeyValue { name, value }| Stated {
+                    name,
+                    value: value.to_owned(),
+                })
                 .collect();
             check!(stated(metadata_log) == expected, "{label}");
         }

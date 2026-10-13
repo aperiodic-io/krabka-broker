@@ -27,7 +27,14 @@ const SNAPSHOT_NOT_FOUND: i16 = 98;
 const POSITION_OUT_OF_RANGE: i16 = 99;
 const UNKNOWN_TOPIC_OR_PARTITION: i16 = 3;
 
-fn fetch(snapshot: (i64, i32), leader_epoch: i32, position: i64) -> FetchSnapshotRequest {
+/// The `(end_offset, epoch)` of one snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct CheckpointId {
+    end_offset: i64,
+    epoch: i32,
+}
+
+fn fetch(snapshot: CheckpointId, leader_epoch: i32, position: i64) -> FetchSnapshotRequest {
     FetchSnapshotRequest {
         replica_id: -1,
         max_bytes: 1 << 20,
@@ -37,8 +44,8 @@ fn fetch(snapshot: (i64, i32), leader_epoch: i32, position: i64) -> FetchSnapsho
                 partition: 0,
                 current_leader_epoch: leader_epoch,
                 snapshot_id: SnapshotId {
-                    end_offset: snapshot.0,
-                    epoch: snapshot.1,
+                    end_offset: snapshot.end_offset,
+                    epoch: snapshot.epoch,
                     ..Default::default()
                 },
                 position,
@@ -53,7 +60,7 @@ fn fetch(snapshot: (i64, i32), leader_epoch: i32, position: i64) -> FetchSnapsho
 
 /// The `(end_offset, epoch)` of every `<end_offset>-<epoch>.checkpoint` file
 /// under `dir`, which is how the controller names the snapshots it wrote.
-fn checkpoint_ids(dir: &Path) -> Vec<(i64, i32)> {
+fn checkpoint_ids(dir: &Path) -> Vec<CheckpointId> {
     let mut ids = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return ids;
@@ -69,7 +76,7 @@ fn checkpoint_ids(dir: &Path) -> Vec<(i64, i32)> {
             .and_then(|name| name.split_once('-'))
             && let (Ok(end_offset), Ok(epoch)) = (end_offset.parse(), epoch.parse())
         {
-            ids.push((end_offset, epoch));
+            ids.push(CheckpointId { end_offset, epoch });
         }
     }
     ids
@@ -99,7 +106,14 @@ async fn fetch_snapshot_serves_the_named_metadata_snapshot() {
     // A stale leader epoch is refused, and the refusal names the leader and
     // its epoch, which is how a fetcher learns the epoch to send.
     let refused = client
-        .send(fetch((0, 0), 0, 0))
+        .send(fetch(
+            CheckpointId {
+                end_offset: 0,
+                epoch: 0,
+            },
+            0,
+            0,
+        ))
         .await
         .unwrap()
         .topics
@@ -135,8 +149,8 @@ async fn fetch_snapshot_serves_the_named_metadata_snapshot() {
     let part = &out.topics[0].partitions[0];
     assert!(part.error_code == 0, "partition error_code");
     check!(part.index == 0);
-    check!(part.snapshot_id.end_offset == snapshot.0);
-    check!(part.snapshot_id.epoch == snapshot.1);
+    check!(part.snapshot_id.end_offset == snapshot.end_offset);
+    check!(part.snapshot_id.epoch == snapshot.epoch);
     check!(
         part.size > 0,
         "served snapshot reports a non-zero total size"
@@ -152,7 +166,14 @@ async fn fetch_snapshot_serves_the_named_metadata_snapshot() {
     for (what, request, expected) in [
         (
             "an id that no snapshot has",
-            fetch((snapshot.0 + 1, snapshot.1), leader_epoch, 0),
+            fetch(
+                CheckpointId {
+                    end_offset: snapshot.end_offset + 1,
+                    epoch: snapshot.epoch,
+                },
+                leader_epoch,
+                0,
+            ),
             SNAPSHOT_NOT_FOUND,
         ),
         (
@@ -173,7 +194,14 @@ async fn fetch_snapshot_serves_the_named_metadata_snapshot() {
 async fn fetch_snapshot_rejects_non_metadata_topic() {
     let env = support::start().await;
 
-    let mut req = fetch((0, 0), 0, 0);
+    let mut req = fetch(
+        CheckpointId {
+            end_offset: 0,
+            epoch: 0,
+        },
+        0,
+        0,
+    );
     req.topics[0].name = "not-metadata".into();
     let out = env.client.send(req).await.unwrap();
     assert!(out.error_code == 0, "top-level error_code is success");

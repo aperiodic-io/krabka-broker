@@ -161,14 +161,28 @@ mod tests {
 
     #[test]
     fn value_decode_refuses_what_kafka_refuses() {
+        struct Row<'a> {
+            name: &'static str,
+            bytes: &'a [u8],
+        }
+
         let mut version_1 = GOLDEN.to_vec();
         version_1[1] = 1;
-        let rows: [(&str, &[u8]); 3] = [
-            ("value version 1", &version_1),
-            ("truncated value", &GOLDEN[..GOLDEN.len() - 1]),
-            ("empty value", b""),
+        let rows: [Row<'_>; 3] = [
+            Row {
+                name: "value version 1",
+                bytes: &version_1,
+            },
+            Row {
+                name: "truncated value",
+                bytes: &GOLDEN[..GOLDEN.len() - 1],
+            },
+            Row {
+                name: "empty value",
+                bytes: b"",
+            },
         ];
-        for (name, bytes) in rows {
+        for Row { name, bytes } in rows {
             check!(PartitionMetadataValue::decode(bytes).is_err(), "{name}");
         }
     }

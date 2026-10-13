@@ -382,14 +382,35 @@ mod tests {
         ));
     }
 
+    /// A peer address, the host an ACL stores, and the decision for the pair.
+    struct HostCase {
+        peer: &'static str,
+        acl_host: &'static str,
+        expected: AuthorizationResult,
+    }
+
+    fn host_case(
+        peer: &'static str,
+        acl_host: &'static str,
+        expected: AuthorizationResult,
+    ) -> HostCase {
+        HostCase {
+            peer,
+            acl_host,
+            expected,
+        }
+    }
+
     /// Check the same literal host ACL across peer addresses, with a caller-selected metadata version.
-    fn check_host_cases(
-        image: impl Fn() -> krabka_metadata::MetadataImage,
-        cases: &[(&str, &str, AuthorizationResult)],
-    ) {
+    fn check_host_cases(image: impl Fn() -> krabka_metadata::MetadataImage, cases: &[HostCase]) {
         let principal = alice();
         let auth = SimpleAclAuthorizer::new(no_super());
-        for (peer, acl_host, expected) in cases {
+        for HostCase {
+            peer,
+            acl_host,
+            expected,
+        } in cases
+        {
             let img = image_with_acls(image(), [topic_acl().host(acl_host).call()]);
             check_peer(&auth, &principal, &img, peer, *expected, Some(acl_host));
         }
@@ -418,48 +439,48 @@ mod tests {
     /// [`crate::jdk_host_address`].
     #[test]
     fn host_matching_uses_jdk_address_text() {
-        let cases: &[(&str, &str, AuthorizationResult)] = &[
-            ("127.0.0.1:5000", "127.0.0.1", AuthorizationResult::Allow),
-            (
+        let cases = [
+            host_case("127.0.0.1:5000", "127.0.0.1", AuthorizationResult::Allow),
+            host_case(
                 "[::ffff:10.0.0.5]:5000",
                 "10.0.0.5",
                 AuthorizationResult::Allow,
             ),
-            (
+            host_case(
                 "[::ffff:10.0.0.5]:5000",
                 "::ffff:10.0.0.5",
                 AuthorizationResult::Deny,
             ),
-            ("[::1]:5000", "0:0:0:0:0:0:0:1", AuthorizationResult::Allow),
-            ("[::1]:5000", "::1", AuthorizationResult::Deny),
-            (
+            host_case("[::1]:5000", "0:0:0:0:0:0:0:1", AuthorizationResult::Allow),
+            host_case("[::1]:5000", "::1", AuthorizationResult::Deny),
+            host_case(
                 "[2001:db8::5]:5000",
                 "2001:db8:0:0:0:0:0:5",
                 AuthorizationResult::Allow,
             ),
         ];
-        check_host_cases(img, cases);
+        check_host_cases(img, &cases);
     }
 
     /// KIP-1276: a CIDR ACL host matches by numeric range, not by comparing
     /// the peer's JDK host-address text against the CIDR literal.
     #[test]
     fn cidr_host_matches_peer_address_by_range() {
-        let cases: &[(&str, &str, AuthorizationResult)] = &[
-            ("10.1.2.3:5000", "10.0.0.0/8", AuthorizationResult::Allow),
-            ("11.0.0.1:5000", "10.0.0.0/8", AuthorizationResult::Deny),
-            (
+        let cases = [
+            host_case("10.1.2.3:5000", "10.0.0.0/8", AuthorizationResult::Allow),
+            host_case("11.0.0.1:5000", "10.0.0.0/8", AuthorizationResult::Deny),
+            host_case(
                 "[2001:db8::5]:5000",
                 "2001:db8::/32",
                 AuthorizationResult::Allow,
             ),
-            (
+            host_case(
                 "[2001:db9::5]:5000",
                 "2001:db8::/32",
                 AuthorizationResult::Deny,
             ),
         ];
-        check_host_cases(cidr_img, cases);
+        check_host_cases(cidr_img, &cases);
     }
 
     /// Kafka 4.3.1 compares every ACL host as text, and trunk reads a range
@@ -513,12 +534,12 @@ mod tests {
         ]);
         let a = alice();
         let auth = SimpleAclAuthorizer::new(no_super());
-        let cases: &[(&str, AuthorizationResult)] = &[
+        let cases = [
             ("10.1.2.3:5000", AuthorizationResult::Deny),
             ("192.168.0.1:5000", AuthorizationResult::Allow),
         ];
         for (peer, expected) in cases {
-            check_peer(&auth, &a, &img, peer, *expected, None);
+            check_peer(&auth, &a, &img, peer, expected, None);
         }
     }
 

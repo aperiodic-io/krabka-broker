@@ -11,6 +11,12 @@ use {
     tokio::sync::Mutex,
 };
 
+/// A live share partition: its key and its acquisition state.
+struct LeaderCell {
+    key: LeaderKey,
+    cell: Arc<Mutex<AcquisitionState>>,
+}
+
 impl SharePartitionLeaderManager {
     /// Spawns the background acquisition-lock-timeout sweeper.
     ///
@@ -32,14 +38,21 @@ impl SharePartitionLeaderManager {
             loop {
                 tick.tick().await;
                 // Snapshot keys + cells, releasing all DashMap guards first.
-                let cells: Vec<(LeaderKey, Arc<Mutex<AcquisitionState>>)> = mgr
+                let cells: Vec<LeaderCell> = mgr
                     .leaders
                     .iter()
-                    .map(|e| (e.key().clone(), e.value().clone()))
+                    .map(|e| LeaderCell {
+                        key: e.key().clone(),
+                        cell: e.value().clone(),
+                    })
                     .collect();
                 let now = std::time::Instant::now();
                 let image = mgr.controller.current_image();
-                for ((group, topic_id, partition), cell) in cells {
+                for LeaderCell {
+                    key: (group, topic_id, partition),
+                    cell,
+                } in cells
+                {
                     let settings = GroupShareSettings::resolve(&image, &group, &mgr.config);
                     let mut st = cell.lock().await;
                     st.set_dlq_enabled(settings.dlq_enabled);

@@ -268,15 +268,16 @@ mod tests {
     /// producer identity, requested partition set, and API version explicit.
     async fn register_fixture(
         coordinator: &TxnCoordinator,
-        producer: (ProducerId, i16),
+        producer_id: ProducerId,
+        producer_epoch: i16,
         partitions: Vec<TopicPartition>,
         version: i16,
     ) -> i16 {
         coordinator
             .register_partitions(
                 "tid-a",
-                producer.0,
-                producer.1,
+                producer_id,
+                producer_epoch,
                 partitions,
                 TxnVersion::Classic,
                 version,
@@ -290,14 +291,14 @@ mod tests {
         let requested = vec![partition("orders", 4)];
 
         check!(
-            register_fixture(&coordinator, (ProducerId(7), 3), requested.clone(), 3).await
+            register_fixture(&coordinator, ProducerId(7), 3, requested.clone(), 3).await
                 == crate::codes::NOT_COORDINATOR
         );
         coordinator
             .lead_state_partition_for_test(coordinator.partition_for("tid-a"))
             .await;
         check!(
-            register_fixture(&coordinator, (ProducerId(7), 3), requested.clone(), 3).await
+            register_fixture(&coordinator, ProducerId(7), 3, requested.clone(), 3).await
                 == crate::codes::INVALID_PRODUCER_ID_MAPPING
         );
 
@@ -306,7 +307,7 @@ mod tests {
             .state
             .insert("tid-a".into(), Arc::new(Mutex::new(malformed)));
         check!(
-            register_fixture(&coordinator, (ProducerId(7), 3), requested.clone(), 3).await
+            register_fixture(&coordinator, ProducerId(7), 3, requested.clone(), 3).await
                 == crate::codes::INVALID_PRODUCER_ID_MAPPING
         );
 
@@ -319,13 +320,7 @@ mod tests {
             .state
             .insert("tid-a".into(), Arc::new(Mutex::new(entry)));
         check!(
-            register_fixture(
-                &coordinator,
-                (ProducerId(7), i16::MAX),
-                requested.clone(),
-                3
-            )
-            .await
+            register_fixture(&coordinator, ProducerId(7), i16::MAX, requested.clone(), 3).await
                 == crate::codes::CONCURRENT_TRANSACTIONS
         );
 
@@ -336,7 +331,8 @@ mod tests {
             check!(
                 register_fixture(
                     &coordinator,
-                    (ProducerId(7), i16::MIN),
+                    ProducerId(7),
+                    i16::MIN,
                     requested.clone(),
                     ver
                 )
@@ -346,13 +342,7 @@ mod tests {
         }
 
         check!(
-            register_fixture(
-                &coordinator,
-                (ProducerId(-1), i16::MAX),
-                requested.clone(),
-                3
-            )
-            .await
+            register_fixture(&coordinator, ProducerId(-1), i16::MAX, requested.clone(), 3).await
                 == crate::codes::INVALID_PRODUCER_ID_MAPPING
         );
 
@@ -361,7 +351,7 @@ mod tests {
         // PrepareAbort retriable answer rather than a fatal one.
         store_dead_entry(&coordinator);
         check!(
-            register_fixture(&coordinator, (ProducerId(7), i16::MAX), requested, 3).await
+            register_fixture(&coordinator, ProducerId(7), i16::MAX, requested, 3).await
                 == crate::codes::CONCURRENT_TRANSACTIONS
         );
     }
@@ -399,7 +389,8 @@ mod tests {
 
         let first = register_fixture(
             &coordinator,
-            (ProducerId(7), i16::MAX),
+            ProducerId(7),
+            i16::MAX,
             vec![requested.clone()],
             3,
         )
@@ -412,7 +403,8 @@ mod tests {
         // append (#848). The log end offset must not move.
         let retry = register_fixture(
             &coordinator,
-            (ProducerId(7), i16::MAX),
+            ProducerId(7),
+            i16::MAX,
             vec![requested.clone()],
             3,
         )
@@ -423,7 +415,8 @@ mod tests {
         // A new partition in the same request still writes.
         let grown = register_fixture(
             &coordinator,
-            (ProducerId(7), i16::MAX),
+            ProducerId(7),
+            i16::MAX,
             vec![requested.clone(), partition("orders", 0)],
             3,
         )
@@ -439,7 +432,8 @@ mod tests {
 
         let stale = register_fixture(
             &coordinator,
-            (ProducerId(7), i16::MAX - 1),
+            ProducerId(7),
+            i16::MAX - 1,
             vec![partition("payments", 0)],
             3,
         )
@@ -465,7 +459,7 @@ mod tests {
             open_transaction_partition(&coordinator, directory.path(), "tid-a");
 
         let code =
-            register_fixture(&coordinator, (ProducerId(7), 0), vec![requested.clone()], 3).await;
+            register_fixture(&coordinator, ProducerId(7), 0, vec![requested.clone()], 3).await;
         check!(code == crate::codes::NONE);
         check!(transaction_partition.log_end_offset().0 == 1);
         let stored = coordinator.get("tid-a").expect("registered entry");
@@ -486,8 +480,7 @@ mod tests {
         // answers `NOT_COORDINATOR`.
         for _ in 0..2 {
             check!(
-                register_fixture(&coordinator, (ProducerId(7), 0), vec![requested.clone()], 3)
-                    .await
+                register_fixture(&coordinator, ProducerId(7), 0, vec![requested.clone()], 3).await
                     == crate::codes::NOT_COORDINATOR
             );
         }
@@ -531,7 +524,7 @@ mod tests {
             expected.insert(requested.clone());
             let coordinator = Arc::clone(&coordinator);
             tasks.spawn(async move {
-                register_fixture(&coordinator, (ProducerId(7), i16::MAX), vec![requested], 3).await
+                register_fixture(&coordinator, ProducerId(7), i16::MAX, vec![requested], 3).await
             });
         }
         while let Some(result) = tasks.join_next().await {

@@ -131,7 +131,7 @@ mod tests {
     /// A request for partition 0 of the metadata topic, at the given id,
     /// leader epoch and position.
     fn request(
-        snapshot_id: (i64, i32),
+        snapshot_id: ReqSnapshotId,
         current_leader_epoch: i32,
         position: i64,
     ) -> FetchSnapshotRequest {
@@ -143,11 +143,7 @@ mod tests {
                 partitions: vec![ReqPartition {
                     partition: 0,
                     current_leader_epoch,
-                    snapshot_id: ReqSnapshotId {
-                        end_offset: snapshot_id.0,
-                        epoch: snapshot_id.1,
-                        ..Default::default()
-                    },
+                    snapshot_id,
                     position,
                     ..Default::default()
                 }],
@@ -206,7 +202,10 @@ mod tests {
                 &$broker,
                 fetch_snapshot_request::API_KEY,
                 $version,
-                &crate::test_support::encode_request(&request((0, 0), 0, 0), $version),
+                &crate::test_support::encode_request(
+                    &request(ReqSnapshotId::default(), 0, 0),
+                    $version,
+                ),
                 &$context,
             )
             .await;
@@ -273,7 +272,11 @@ mod tests {
         let (snapshot, size, first_page) = loop {
             if let SnapshotRange::Slice(slice) = broker.controller.read_snapshot_range(0, 16) {
                 break (
-                    (slice.end_offset, slice.epoch),
+                    ReqSnapshotId {
+                        end_offset: slice.end_offset,
+                        epoch: slice.epoch,
+                        ..Default::default()
+                    },
                     slice.total_size,
                     slice.bytes,
                 );
@@ -380,7 +383,7 @@ mod tests {
             names_leader,
         } in cases
         {
-            let mut req = request(snapshot, leader_epoch, 0);
+            let mut req = request(snapshot.clone(), leader_epoch, 0);
             edit(&mut req);
             let bytes = super::handle(&broker, version, &encode_request(&req, version), &ctx)
                 .await
@@ -416,8 +419,8 @@ mod tests {
             if partition_code == codes::NONE {
                 let mut page = bytes::BytesMut::new();
                 part.unaligned_records.encode_to(&mut page).unwrap();
-                check!(part.snapshot_id.end_offset == snapshot.0, "{what}");
-                check!(part.snapshot_id.epoch == snapshot.1, "{what}");
+                check!(part.snapshot_id.end_offset == snapshot.end_offset, "{what}");
+                check!(part.snapshot_id.epoch == snapshot.epoch, "{what}");
                 check!(part.size == size, "{what}");
                 check!(part.position == 0, "{what}");
                 check!(page.freeze() == first_page, "{what}: the first page");
@@ -430,7 +433,15 @@ mod tests {
     /// asking an engine.
     #[test]
     fn a_node_without_a_metadata_log_has_no_snapshot_and_no_other_partition() {
-        let mut req = request((7, 1), 1, 0);
+        let mut req = request(
+            ReqSnapshotId {
+                end_offset: 7,
+                epoch: 1,
+                ..Default::default()
+            },
+            1,
+            0,
+        );
         req.topics.push(ReqTopic {
             name: "not-metadata".into(),
             partitions: vec![ReqPartition {

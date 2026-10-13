@@ -60,11 +60,17 @@ fn oauth_session_adapter_returns_the_exact_effective_expiry() {
     );
 }
 
+/// The connection state and the response that a re-authentication left.
+struct Reauthenticated {
+    auth: ConnectionAuth,
+    response: SaslAuthenticateResponse,
+}
+
 async fn reauthenticate(
     validator: &krabka_security::OAuthBearerValidator,
     now_ms: i64,
     token: &str,
-) -> (ConnectionAuth, SaslAuthenticateResponse) {
+) -> Reauthenticated {
     let mut auth = oauth_reauthenticating("alice", now_ms + 1_000);
     let response = handle_authenticate_oauthbearer(
         &oauthbearer_client_response(token),
@@ -74,17 +80,26 @@ async fn reauthenticate(
         None,
     )
     .await;
-    (auth, response)
+    Reauthenticated { auth, response }
 }
 
 #[tokio::test]
 async fn signed_validator_fails_closed_for_stale_or_changing_jwks_cache() {
-    let (now_ms, request, validator, generation, last_successful) = signed_cache_fixture(1);
+    let SignedCacheFixture {
+        now_ms,
+        request,
+        validator,
+        generation,
+        last_successful,
+    } = signed_cache_fixture(1);
 
     let changing = validate_bearer(
         &request.auth_bytes,
         &validator,
-        Some((&generation, &last_successful)),
+        Some(JwksCache {
+            generation: &generation,
+            last_successful_fetch_ms: &last_successful,
+        }),
         || now_ms,
     )
     .await;
@@ -95,7 +110,10 @@ async fn signed_validator_fails_closed_for_stale_or_changing_jwks_cache() {
     let never_fetched = validate_bearer(
         &request.auth_bytes,
         &validator,
-        Some((&generation, &last_successful)),
+        Some(JwksCache {
+            generation: &generation,
+            last_successful_fetch_ms: &last_successful,
+        }),
         || now_ms,
     )
     .await;
@@ -105,7 +123,10 @@ async fn signed_validator_fails_closed_for_stale_or_changing_jwks_cache() {
     let stale = validate_bearer(
         &request.auth_bytes,
         &validator,
-        Some((&generation, &last_successful)),
+        Some(JwksCache {
+            generation: &generation,
+            last_successful_fetch_ms: &last_successful,
+        }),
         || now_ms,
     )
     .await;
@@ -114,12 +135,21 @@ async fn signed_validator_fails_closed_for_stale_or_changing_jwks_cache() {
 
 #[tokio::test]
 async fn signed_validator_uses_a_fresh_stable_jwks_cache() {
-    let (now_ms, request, validator, generation, last_successful) = signed_cache_fixture(2);
+    let SignedCacheFixture {
+        now_ms,
+        request,
+        validator,
+        generation,
+        last_successful,
+    } = signed_cache_fixture(2);
 
     let result = validate_bearer(
         &request.auth_bytes,
         &validator,
-        Some((&generation, &last_successful)),
+        Some(JwksCache {
+            generation: &generation,
+            last_successful_fetch_ms: &last_successful,
+        }),
         || now_ms,
     )
     .await;
@@ -234,7 +264,10 @@ async fn authenticate_during_reauth_same_principal_transitions_back_to_authentic
     let new_token_exp_seconds: i64 = 1_000_000_900;
     let new_token_exp_millis: i64 = new_token_exp_seconds * 1000;
     let token = unsecured_token("alice", new_token_exp_seconds);
-    let (auth, resp) = reauthenticate(&validator, now_ms, &token).await;
+    let Reauthenticated {
+        auth,
+        response: resp,
+    } = reauthenticate(&validator, now_ms, &token).await;
     assert_success_authenticate_response(&resp, b"", new_token_exp_millis - now_ms);
     assert!(matches!(auth, ConnectionAuth::Authenticated {
         mechanism: SaslMechanism::OAuthBearer,
@@ -260,7 +293,10 @@ async fn authenticate_during_reauth_different_principal_rejected_with_sasl_auth_
     let now_ms = 1_000_000_000_000;
     // Token belongs to "bob", but the prior session is "alice".
     let token = unsecured_token("bob", 1_000_000_900);
-    let (auth, resp) = reauthenticate(&validator, now_ms, &token).await;
+    let Reauthenticated {
+        auth,
+        response: resp,
+    } = reauthenticate(&validator, now_ms, &token).await;
     // Kafka's `ensurePrincipalUnchanged` message.
     assert_failed_authenticate_response(
         &resp,
@@ -385,23 +421,25 @@ fn assert_invalid_token_challenge(response: &SaslAuthenticateResponse) {
     assert!(response == &expected);
 }
 
-fn signed_cache_fixture(
-    generation: u64,
-) -> (
-    i64,
-    SaslAuthenticateRequest,
-    krabka_security::OAuthBearerValidator,
-    AtomicU64,
-    AtomicI64,
-) {
+/// A signed validator, a request for it, and the JWKS cache state to check it
+/// against.
+struct SignedCacheFixture {
+    now_ms: i64,
+    request: SaslAuthenticateRequest,
+    validator: krabka_security::OAuthBearerValidator,
+    generation: AtomicU64,
+    last_successful: AtomicI64,
+}
+
+fn signed_cache_fixture(generation: u64) -> SignedCacheFixture {
     let now_ms = 1_000_000;
     let request = oauthbearer_client_response(&unsecured_token("alice", 2_000));
     let validator = signed_validator(Some(secs(1)));
-    (
+    SignedCacheFixture {
         now_ms,
         request,
         validator,
-        AtomicU64::new(generation),
-        AtomicI64::new(now_ms),
-    )
+        generation: AtomicU64::new(generation),
+        last_successful: AtomicI64::new(now_ms),
+    }
 }

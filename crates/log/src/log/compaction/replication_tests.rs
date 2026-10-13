@@ -6,7 +6,8 @@
 use {
     super::*,
     crate::log::test_support::{
-        compacting_segments, compaction_ctx, keyed_batch, set_segment_size, test_log, verbatim_from,
+        EncodedVerbatim, KeyedRecord, TempLog, compacting_segments, compaction_ctx, keyed_batch,
+        set_segment_size, test_log, verbatim_from,
     },
     krabka_ids::{LeaderEpoch, Offset},
     krabka_protocol::records::RecordBatch,
@@ -27,17 +28,53 @@ use {
 fn compacted_leader(dir: &std::path::Path) -> Log {
     let mut log = Log::open(dir, compacting_segments()).unwrap();
     for mut batch in [
-        keyed_batch(0, &[(0, b"k0", b"v0")]),
+        keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"k0",
+            value: b"v0",
+        }]),
         keyed_batch(0, &[
-            (0, b"k1", b"v1"),
-            (1, b"k2", b"v2"),
-            (2, b"k3", b"v3"),
+            KeyedRecord {
+                offset_delta: 0,
+                key: b"k1",
+                value: b"v1",
+            },
+            KeyedRecord {
+                offset_delta: 1,
+                key: b"k2",
+                value: b"v2",
+            },
+            KeyedRecord {
+                offset_delta: 2,
+                key: b"k3",
+                value: b"v3",
+            },
         ]),
-        keyed_batch(0, &[(0, b"k4", b"v4")]),
-        keyed_batch(0, &[(0, b"k2", b"v5")]),
-        keyed_batch(0, &[(0, b"k4", b"v6")]),
-        keyed_batch(0, &[(0, b"k0", b"v7")]),
-        keyed_batch(0, &[(0, b"k9", b"v8")]),
+        keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"k4",
+            value: b"v4",
+        }]),
+        keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"k2",
+            value: b"v5",
+        }]),
+        keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"k4",
+            value: b"v6",
+        }]),
+        keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"k0",
+            value: b"v7",
+        }]),
+        keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"k9",
+            value: b"v8",
+        }]),
     ] {
         log.append(&mut batch).unwrap();
     }
@@ -75,7 +112,8 @@ fn catch_up(leader: &Log, follower: &mut Log, verbatim: bool) {
         for mut batch in response {
             let base_offset = Offset(batch.base_offset);
             if verbatim {
-                let (_, wire) = verbatim_from(&batch, LeaderEpoch(batch.partition_leader_epoch));
+                let EncodedVerbatim { batch: wire, .. } =
+                    verbatim_from(&batch, LeaderEpoch(batch.partition_leader_epoch));
                 follower.append_verbatim_at(&wire, base_offset).unwrap();
             } else {
                 follower.append_at(&mut batch, base_offset).unwrap();
@@ -103,7 +141,10 @@ fn a_follower_catches_up_from_a_compacted_leader() {
     );
 
     for (label, verbatim) in [("verbatim", true), ("owned", false)] {
-        let (_follower_dir, mut follower) = test_log();
+        let TempLog {
+            dir: _follower_dir,
+            log: mut follower,
+        } = test_log();
 
         catch_up(&leader, &mut follower, verbatim);
 
@@ -125,12 +166,19 @@ fn a_follower_catches_up_from_a_compacted_leader() {
 fn a_follower_still_refuses_a_batch_below_its_log_end_offset() {
     let leader_dir = tempdir().unwrap();
     let leader = compacted_leader(leader_dir.path());
-    let (_follower_dir, mut follower) = test_log();
+    let TempLog {
+        dir: _follower_dir,
+        log: mut follower,
+    } = test_log();
     catch_up(&leader, &mut follower, true);
     let leo = follower.log_end_offset();
 
-    let mut stale = keyed_batch(leo.0 - 1, &[(0, b"k9", b"v8")]);
-    let (_, wire) = verbatim_from(&stale, LeaderEpoch(0));
+    let mut stale = keyed_batch(leo.0 - 1, &[KeyedRecord {
+        offset_delta: 0,
+        key: b"k9",
+        value: b"v8",
+    }]);
+    let EncodedVerbatim { batch: wire, .. } = verbatim_from(&stale, LeaderEpoch(0));
     let below = Offset(leo.0 - 1);
 
     assert2::assert!(let Err(LogError::OffsetMismatch { expected, actual }) = follower.append_at(&mut stale, below));

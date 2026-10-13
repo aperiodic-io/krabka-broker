@@ -438,7 +438,10 @@ mod tests {
     // Bind owning fixtures in the original caller scope and declaration order.
     macro_rules! memory_flusher_dependencies {
         ($topic_id:ident, $image:ident, $image_rx:ident, $store:ident; $count:expr) => {
-            let ($topic_id, $image) = orders_image($count);
+            let OrdersImage {
+                topic_id: $topic_id,
+                image: $image,
+            } = orders_image($count);
             let (_, $image_rx) = tokio::sync::watch::channel(Arc::new($image));
             let $store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         };
@@ -448,7 +451,10 @@ mod tests {
         ($dir:ident, $ready:ident, $context:ident, $store:ident) => {
             let $dir = tempdir().unwrap();
             let $ready = Arc::new(AtomicBool::new(false));
-            let ($context, $store) = silent_replay_flusher($dir.path(), Arc::clone(&$ready)).await;
+            let SilentReplay {
+                context: $context,
+                store: $store,
+            } = silent_replay_flusher($dir.path(), Arc::clone(&$ready)).await;
         };
     }
 
@@ -476,7 +482,10 @@ mod tests {
     macro_rules! rotation_fixture {
         ($dir:ident, $topic_id:ident, $context:ident, $cache:ident) => {
             let $dir = tempdir().unwrap();
-            let ($topic_id, $context) = rotation_context($dir.path()).await;
+            let RotationContext {
+                topic_id: $topic_id,
+                context: $context,
+            } = rotation_context($dir.path()).await;
             let $cache = $context.index_log.cache();
         };
     }
@@ -485,8 +494,12 @@ mod tests {
         ($dir:ident, $topic_id:ident, $context:ident, $store:ident, $handle:ident; $($image:tt)+) => {
             let $dir = tempdir().unwrap();
             let $topic_id = Uuid::from_u128(11);
-            let ($context, $store, $handle, $($image)+) =
-                seeded_retention_flusher($dir.path(), $topic_id, AGED_AND_FRESH_RANGES).await;
+            let SeededRetention {
+                context: $context,
+                store: $store,
+                handle: $handle,
+                image: $($image)+,
+            } = seeded_retention_flusher($dir.path(), $topic_id, AGED_AND_FRESH_RANGES).await;
         };
     }
 
@@ -524,7 +537,13 @@ mod tests {
         Reclaimer::new(Duration::ZERO).sweep(context).await;
     }
 
-    fn orders_image(partitions: i32) -> (Uuid, MetadataImage) {
+    /// The id of the `orders` topic, and an image that holds it.
+    struct OrdersImage {
+        topic_id: Uuid,
+        image: MetadataImage,
+    }
+
+    fn orders_image(partitions: i32) -> OrdersImage {
         let topic_id = Uuid::from_u128(11);
         let mut image = MetadataImage::new(Uuid::nil());
         image.apply(&MetadataRecord::V1Topic(TopicRecord {
@@ -533,10 +552,16 @@ mod tests {
             partitions,
             replication_factor: 1,
         }));
-        (topic_id, image)
+        OrdersImage { topic_id, image }
     }
 
-    async fn rotation_context(root: &std::path::Path) -> (Uuid, FlusherContext) {
+    /// The id of the `orders` topic, and a flusher context over it.
+    struct RotationContext {
+        topic_id: Uuid,
+        context: FlusherContext,
+    }
+
+    async fn rotation_context(root: &std::path::Path) -> RotationContext {
         let partitions = Arc::new(PartitionRegistry::new());
         for partition in 0..2 {
             partitions.insert(
@@ -545,13 +570,13 @@ mod tests {
                 test_partition().root(root).partition(partition).call(),
             );
         }
-        let (topic_id, image) = orders_image(2);
+        let OrdersImage { topic_id, image } = orders_image(2);
         let (_, image_rx) = tokio::sync::watch::channel(Arc::new(image));
         let index_log = test_index_log().await;
-        (
+        RotationContext {
             topic_id,
-            test_context!(partitions, image_rx, Arc::new(InMemory::new()), index_log),
-        )
+            context: test_context!(partitions, image_rx, Arc::new(InMemory::new()), index_log),
+        }
     }
 
     #[tokio::test]
@@ -636,7 +661,7 @@ mod tests {
         wait_for_cache(cache, |cache| {
             cache
                 .lookup(topic_id, 0, 0)
-                .is_some_and(|(key, _, _)| key == object_key)
+                .is_some_and(|slice| slice.object_key == object_key)
         })
         .await;
     }
@@ -728,22 +753,33 @@ mod tests {
         assert!(store.head(&Path::from(object_key)).await.is_err());
     }
 
+    /// An object of the retention fixture: its key, the offsets it covers,
+    /// and its batch max timestamp.
+    struct RetentionRange {
+        object_key: &'static str,
+        first_offset: i64,
+        last_offset: i64,
+        max_timestamp_ms: i64,
+    }
+
+    /// What `seeded_retention_flusher` builds.
+    struct SeededRetention {
+        context: FlusherContext,
+        store: Arc<dyn ObjectStore>,
+        handle: Arc<Partition>,
+        image: MetadataImage,
+    }
+
     /// A flusher over one led diskless partition whose projection already
-    /// holds `ranges` -- `(object key, first offset, last offset, batch max
-    /// timestamp)`, one keyed record each -- with each object in the store.
+    /// holds `ranges`, one keyed record each, with each object in the store.
     ///
     /// The partition itself is only here for its log configuration and its
     /// index, which is what the retention pass reads.
     async fn seeded_retention_flusher(
         dir: &std::path::Path,
         topic_id: Uuid,
-        ranges: &[(&str, i64, i64, i64)],
-    ) -> (
-        FlusherContext,
-        Arc<dyn ObjectStore>,
-        Arc<Partition>,
-        MetadataImage,
-    ) {
+        ranges: &[RetentionRange],
+    ) -> SeededRetention {
         let handle = orders_partition(dir);
         let partitions = Arc::new(PartitionRegistry::new());
         partitions.insert(
@@ -753,7 +789,13 @@ mod tests {
         );
         let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         let index = test_index_log().await;
-        for (object_key, first_offset, last_offset, max_timestamp_ms) in ranges.iter().copied() {
+        for &RetentionRange {
+            object_key,
+            first_offset,
+            last_offset,
+            max_timestamp_ms,
+        } in ranges
+        {
             store
                 .put(&Path::from(object_key), PutPayload::from_static(b"object"))
                 .await
@@ -778,17 +820,27 @@ mod tests {
             "orders", topic_id,
         )));
         let (_, image_rx) = tokio::sync::watch::channel(Arc::new(image.clone()));
-        (
-            test_context!(partitions, image_rx, Arc::clone(&store), index),
+        SeededRetention {
+            context: test_context!(partitions, image_rx, Arc::clone(&store), index),
             store,
             handle,
             image,
-        )
+        }
     }
 
-    const AGED_AND_FRESH_RANGES: &[(&str, i64, i64, i64)] = &[
-        ("diskless-wal/7/aged.ckwl", 0, 2, 1_000),
-        ("diskless-wal/7/fresh.ckwl", 3, 5, 5_000),
+    const AGED_AND_FRESH_RANGES: &[RetentionRange] = &[
+        RetentionRange {
+            object_key: "diskless-wal/7/aged.ckwl",
+            first_offset: 0,
+            last_offset: 2,
+            max_timestamp_ms: 1_000,
+        },
+        RetentionRange {
+            object_key: "diskless-wal/7/fresh.ckwl",
+            first_offset: 3,
+            last_offset: 5,
+            max_timestamp_ms: 5_000,
+        },
     ];
 
     fn set_retention(handle: &Partition, retention: krabka_units::Time) {
@@ -880,11 +932,25 @@ mod tests {
         let dir = tempdir().unwrap();
         let tid = Uuid::from_u128(11);
         let entries = [
-            ("diskless-wal/7/first.ckwl", 0, 2, 1_000),
-            ("diskless-wal/7/second.ckwl", 3, 5, 5_000),
+            RetentionRange {
+                object_key: "diskless-wal/7/first.ckwl",
+                first_offset: 0,
+                last_offset: 2,
+                max_timestamp_ms: 1_000,
+            },
+            RetentionRange {
+                object_key: "diskless-wal/7/second.ckwl",
+                first_offset: 3,
+                last_offset: 5,
+                max_timestamp_ms: 5_000,
+            },
         ];
-        let (context, store, handle, image) =
-            seeded_retention_flusher(dir.path(), tid, &entries).await;
+        let SeededRetention {
+            context,
+            store,
+            handle,
+            image,
+        } = seeded_retention_flusher(dir.path(), tid, &entries).await;
         // Kafka's unlimited sentinel for both windows, which is what a topic
         // with `retention.ms=-1` and `retention.bytes=-1` reaches the flusher
         // as. The clock is then irrelevant, so this uses the largest one.
@@ -909,9 +975,24 @@ mod tests {
     async fn a_delete_records_floor_expires_the_ranges_below_it() {
         let dir = tempdir().unwrap();
         let topic_id = Uuid::from_u128(11);
-        let (context, store, handle, image) = seeded_retention_flusher(dir.path(), topic_id, &[
-            ("diskless-wal/7/deleted.ckwl", 0, 2, 1_000),
-            ("diskless-wal/7/kept.ckwl", 3, 5, 1_000),
+        let SeededRetention {
+            context,
+            store,
+            handle,
+            image,
+        } = seeded_retention_flusher(dir.path(), topic_id, &[
+            RetentionRange {
+                object_key: "diskless-wal/7/deleted.ckwl",
+                first_offset: 0,
+                last_offset: 2,
+                max_timestamp_ms: 1_000,
+            },
+            RetentionRange {
+                object_key: "diskless-wal/7/kept.ckwl",
+                first_offset: 3,
+                last_offset: 5,
+                max_timestamp_ms: 1_000,
+            },
         ])
         .await;
         // The local log start is the flusher's trim frontier and says nothing
@@ -1017,14 +1098,17 @@ mod tests {
         assert!(cache.lock().await.flushed_frontier(topic_id, 0) == Some(3));
     }
 
+    /// A flusher context over a silent replay, and the object store behind it.
+    struct SilentReplay {
+        context: FlusherContext,
+        store: Arc<dyn ObjectStore>,
+    }
+
     /// A flusher over one led diskless partition whose index topic already
     /// holds a flush record, but whose replay never delivers -- the shape a
     /// dead partition fetch loop leaves behind, with the stream open and
     /// silent. Returns the context and the object store behind it.
-    async fn silent_replay_flusher(
-        dir: &std::path::Path,
-        ready: Arc<AtomicBool>,
-    ) -> (FlusherContext, Arc<dyn ObjectStore>) {
+    async fn silent_replay_flusher(dir: &std::path::Path, ready: Arc<AtomicBool>) -> SilentReplay {
         let partitions = led_orders_partition(dir);
 
         memory_flusher_dependencies!(topic_id, image, image_rx, store; 1);
@@ -1048,10 +1132,10 @@ mod tests {
         let index = DisklessIndexLog::start(PacedReplayLog::new(event_log, ReplayPace::Never))
             .await
             .unwrap();
-        (
-            test_context!(partitions, image_rx, Arc::clone(&store), index, ready),
+        SilentReplay {
+            context: test_context!(partitions, image_rx, Arc::clone(&store), index, ready),
             store,
-        )
+        }
     }
 
     fn stall_after(timeout: Duration) -> FlushConfig {
@@ -1264,7 +1348,12 @@ mod tests {
 
         assert!(cache.lock().await.flushed_frontier(topic_id, 1).is_none());
         assert!(cache.lock().await.flushed_frontier(topic_id, 2).is_none());
-        let object_key = cache.lock().await.lookup(topic_id, 0, 0).unwrap().0;
+        let object_key = cache
+            .lock()
+            .await
+            .lookup(topic_id, 0, 0)
+            .unwrap()
+            .object_key;
         assert!(object_key.starts_with("diskless-wal/7/"));
         assert!(store.head(&Path::from(object_key)).await.is_ok());
     }

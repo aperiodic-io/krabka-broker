@@ -5,10 +5,15 @@
 
 use {
     super::*,
-    crate::share_coordinator::{
-        config::ShareCoordinatorConfig,
-        coordinator::test_support::{configured_coordinator, image_with_topic},
-        persistence::KEY_SHARE_SNAPSHOT,
+    crate::{
+        coordinator::test_support::LeaderMove,
+        share_coordinator::{
+            config::ShareCoordinatorConfig,
+            coordinator::test_support::{
+                ConfiguredCoordinator, configured_coordinator, image_with_topic,
+            },
+            persistence::KEY_SHARE_SNAPSHOT,
+        },
     },
     assert2::{assert, check},
     krabka_ids::PartitionIndex,
@@ -53,17 +58,27 @@ fn append_errors_answer_as_kafka() {
 
 /// A coordinator with one state partition, open locally, and its term at
 /// leader epoch 0. The write timeout is `timeout`.
-fn one_partition(dir: &std::path::Path, timeout: Duration) -> (ShareCoordinator, Arc<Partition>) {
+/// A coordinator and its one state partition.
+struct OnePartition {
+    coord: ShareCoordinator,
+    part: Arc<Partition>,
+}
+
+fn one_partition(dir: &std::path::Path, timeout: Duration) -> OnePartition {
     let config = ShareCoordinatorConfig {
         state_topic_num_partitions: 1,
         write_timeout: timeout,
         ..ShareCoordinatorConfig::default()
     };
-    let (coord, reg, _clock) = configured_coordinator(dir, config);
+    let ConfiguredCoordinator {
+        coord,
+        registry: reg,
+        clock: _clock,
+    } = configured_coordinator(dir, config);
     let part = reg
         .get(bootstrap::TOPIC, PartitionIndex(0))
         .expect("the state partition is open");
-    (coord, part)
+    OnePartition { coord, part }
 }
 
 const TERM: Term = Term {
@@ -101,7 +116,7 @@ async fn a_record_is_appended_only_as_the_leader_of_the_term() {
     struct Case {
         what: &'static str,
         /// The leader and the epoch that the partition leads at.
-        leads: (u64, i32),
+        leads: LeaderMove,
         /// The leader epoch of the term.
         term_epoch: i32,
         expected: Result<(), &'static str>,
@@ -110,21 +125,30 @@ async fn a_record_is_appended_only_as_the_leader_of_the_term() {
     let cases = [
         Case {
             what: "this broker leads in the term",
-            leads: (1, 4),
+            leads: LeaderMove {
+                leader: 1,
+                epoch: 4,
+            },
             term_epoch: 4,
             expected: Ok(()),
             logged_epochs: vec![4],
         },
         Case {
             what: "another broker leads",
-            leads: (2, 5),
+            leads: LeaderMove {
+                leader: 2,
+                epoch: 5,
+            },
             term_epoch: 4,
             expected: Err("not leader"),
             logged_epochs: vec![],
         },
         Case {
             what: "this broker leads at a newer epoch",
-            leads: (1, 5),
+            leads: LeaderMove {
+                leader: 1,
+                epoch: 5,
+            },
             term_epoch: 4,
             expected: Err("not leader"),
             logged_epochs: vec![],
@@ -132,8 +156,9 @@ async fn a_record_is_appended_only_as_the_leader_of_the_term() {
     ];
     for case in cases {
         let dir = tempdir().unwrap();
-        let (coord, part) = one_partition(dir.path(), Duration::from_secs(30));
-        part.install_leader_change(case.leads.0, case.leads.1).await;
+        let OnePartition { coord, part } = one_partition(dir.path(), Duration::from_secs(30));
+        part.install_leader_change(case.leads.leader, case.leads.epoch)
+            .await;
         let term = Term {
             leader_epoch: case.term_epoch,
             ..TERM
@@ -169,7 +194,7 @@ async fn an_answer_waits_for_the_commit_under_its_term() {
             CommitWaitOutcome::TimedOut => Err("timed out"),
         };
         let dir = tempdir().unwrap();
-        let (coord, part) = one_partition(dir.path(), case.timeout);
+        let OnePartition { coord, part } = one_partition(dir.path(), case.timeout);
         part.install_leader_change(1, 0).await;
         part.replica_state.lock().await.hw = Offset(case.hw_now);
 
@@ -190,7 +215,7 @@ async fn an_answer_waits_for_the_commit_under_its_term() {
 #[tokio::test]
 async fn an_answer_on_a_partition_that_is_not_open_is_not_committed() {
     let dir = tempdir().unwrap();
-    let (coord, _part) = one_partition(dir.path(), Duration::from_secs(30));
+    let OnePartition { coord, .. } = one_partition(dir.path(), Duration::from_secs(30));
     coord.partitions.remove(bootstrap::TOPIC, PartitionIndex(0));
 
     check!(outcome(coord.await_committed(TERM, Offset(0)).await) == Err("not leader"));
@@ -207,7 +232,7 @@ async fn a_prune_trims_only_committed_snapshots() {
         let dir = tempdir().unwrap();
         // Long enough that the first snapshot commits on a loaded runner; the
         // uncommitted row waits it out once.
-        let (coord, part) = one_partition(dir.path(), Duration::from_secs(2));
+        let OnePartition { coord, part } = one_partition(dir.path(), Duration::from_secs(2));
         coord.lead_all_partitions_for_test().await;
         let image = image_with_topic(uuid::Uuid::from_bytes([3; 16]), 1);
         let topic_id = uuid::Uuid::from_bytes([3; 16]);

@@ -230,8 +230,8 @@ mod tests {
         crate::{
             codes,
             handlers::streams_group_describe::test_support::{
-                describe_member, expected_rendered_topology, expected_task_ids, task_map,
-                topology_value,
+                SubtopologyTasks, describe_member, expected_rendered_topology, expected_task_ids,
+                task_map, topology_value,
             },
         },
         assert2::assert,
@@ -401,7 +401,16 @@ mod tests {
 
     #[test]
     fn task_map_to_ids_preserves_sorted_task_maps() {
-        let tasks = task_map_to_ids(&task_map(&[("z", vec![9]), ("a", vec![1, 2])]));
+        let tasks = task_map_to_ids(&task_map(&[
+            SubtopologyTasks {
+                subtopology_id: "z",
+                partitions: vec![9],
+            },
+            SubtopologyTasks {
+                subtopology_id: "a",
+                partitions: vec![1, 2],
+            },
+        ]));
 
         let expected = vec![
             expected_task_ids("a", vec![1, 2]),

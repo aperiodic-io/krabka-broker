@@ -13,6 +13,7 @@
 
 use {
     super::{
+        plan::RowError,
         process_one_partition,
         response::{err_row, ok_row},
     },
@@ -128,7 +129,7 @@ pub(super) fn alter_one(
             ok_row(index)
         }
         Ok(None) => ok_row(index),
-        Err((code, message)) => {
+        Err(RowError { code, message }) => {
             // The pure function knows only that the cancel is unapproved. The
             // gate's own text names the proposal that nearly authorized it, so
             // that is what the row and the audit event carry.
@@ -213,39 +214,53 @@ mod tests {
         img
     }
 
+    /// An image and break-glass config with whether the cancel gate admits the cancel.
+    struct GateCase {
+        label: &'static str,
+        img: MetadataImage,
+        config: BreakGlassConfig,
+        expected: bool,
+    }
+
     #[test]
     fn the_cancel_gate_answers_from_the_proposal_registry() {
         let approved = approved_proposal(BreakGlassAction::CancelReassignment, "foo-0");
-        let cases: [(&'static str, MetadataImage, BreakGlassConfig, bool); 4] = [
-            (
-                "an approved proposal on the partition",
-                img_reassigning(std::slice::from_ref(&approved)),
-                gated_config(),
-                true,
-            ),
-            (
-                "an approved proposal on the whole topic",
-                img_reassigning(&[approved_proposal(
+        let cases: [GateCase; 4] = [
+            GateCase {
+                label: "an approved proposal on the partition",
+                img: img_reassigning(std::slice::from_ref(&approved)),
+                config: gated_config(),
+                expected: true,
+            },
+            GateCase {
+                label: "an approved proposal on the whole topic",
+                img: img_reassigning(&[approved_proposal(
                     BreakGlassAction::CancelReassignment,
                     "foo",
                 )]),
-                gated_config(),
-                true,
-            ),
-            (
-                "no proposal at all",
-                img_reassigning(&[]),
-                gated_config(),
-                false,
-            ),
-            (
-                "no approver set, so nothing is gated",
-                img_reassigning(&[]),
-                BreakGlassConfig::default(),
-                true,
-            ),
+                config: gated_config(),
+                expected: true,
+            },
+            GateCase {
+                label: "no proposal at all",
+                img: img_reassigning(&[]),
+                config: gated_config(),
+                expected: false,
+            },
+            GateCase {
+                label: "no approver set, so nothing is gated",
+                img: img_reassigning(&[]),
+                config: BreakGlassConfig::default(),
+                expected: true,
+            },
         ];
-        for (label, img, config, expected) in cases {
+        for GateCase {
+            label,
+            img,
+            config,
+            expected,
+        } in cases
+        {
             let authorized = authorize_cancel(&img, &config, "foo", 0).is_ok();
             check!(authorized == expected, "case {label}");
         }
@@ -273,7 +288,7 @@ mod tests {
         gated_cancel_fixture!((handle, _dir, broker));
         let proposal = approved_proposal(BreakGlassAction::CancelReassignment, "foo-0");
         let image = img_reassigning(std::slice::from_ref(&proposal));
-        let (row, batch) = cancel(&broker, &image);
+        let CancelOutcome { row, batch } = cancel(&broker, &image);
 
         check!(row.error_code == 0);
         // The consume and the cancel it authorized are one raft append.
@@ -292,7 +307,7 @@ mod tests {
     async fn an_unapproved_cancel_appends_nothing_and_carries_the_gate_text() {
         gated_cancel_fixture!((handle, _dir, broker));
         let image = img_reassigning(&[]);
-        let (row, batch) = cancel(&broker, &image);
+        let CancelOutcome { row, batch } = cancel(&broker, &image);
 
         check!(row.error_code == POLICY_VIOLATION);
         check!(
@@ -422,10 +437,13 @@ mod tests {
         check!(second == Some(APPROVED_PROPOSAL_ID));
         assert!(batch.records == vec![consumed]);
     }
-    fn cancel(
-        broker: &Broker,
-        image: &MetadataImage,
-    ) -> (ReassignablePartitionResponse, ReassignBatch) {
+    /// The response row of a cancel and the records it batched.
+    struct CancelOutcome {
+        row: ReassignablePartitionResponse,
+        batch: ReassignBatch,
+    }
+
+    fn cancel(broker: &Broker, image: &MetadataImage) -> CancelOutcome {
         request_identity!(
             (principal, peer, ctx),
             crate::test_support::principal("admin"),
@@ -451,6 +469,6 @@ mod tests {
             },
             FreezeMutationResolution::Admit,
         );
-        (row, batch)
+        CancelOutcome { row, batch }
     }
 }

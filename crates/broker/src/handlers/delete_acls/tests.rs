@@ -16,9 +16,9 @@ use {
         handlers::{
             acl_test_support::{all_acls, seed_acls},
             delete_acls::test_support::{
-                OPERATION_ANY, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PATTERN_TYPE_MATCH,
-                PATTERN_TYPE_PREFIXED, PERMISSION_ANY, RESOURCE_TYPE_TOPIC, VERSION, acl,
-                configured_authorizer, filter, named_filters, request, test_context,
+                NamedFilter, OPERATION_ANY, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL,
+                PATTERN_TYPE_MATCH, PATTERN_TYPE_PREFIXED, PERMISSION_ANY, RESOURCE_TYPE_TOPIC,
+                VERSION, acl, configured_authorizer, filter, named_filters, request, test_context,
             },
         },
         test_support::{DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx},
@@ -36,7 +36,16 @@ use {
 };
 
 fn orders_and_payments_request() -> DeleteAclsRequest {
-    named_filters(&[("orders", "User:alice"), ("payments", "User:bob")])
+    named_filters(&[
+        NamedFilter {
+            name: "orders",
+            principal: "User:alice",
+        },
+        NamedFilter {
+            name: "payments",
+            principal: "User:bob",
+        },
+    ])
 }
 
 #[tokio::test]
@@ -196,6 +205,13 @@ fn sorted(mut acls: Vec<AclEntry>) -> Vec<AclEntry> {
 /// value, not a wildcard.
 #[tokio::test]
 async fn handle_deletes_exactly_what_kafka_matches() {
+    /// A case name, the filter, and the ACLs it must delete.
+    struct DeleteCase {
+        name: &'static str,
+        filter: DeleteAclsFilter,
+        want_deleted: Vec<AclEntry>,
+    }
+
     broker_fixture!(
         (broker_handle, _dir, broker),
         start_broker(configured_authorizer())
@@ -227,63 +243,68 @@ async fn handle_deletes_exactly_what_kafka_matches() {
         literal_food.clone(),
     ];
 
-    let cases: Vec<(&str, DeleteAclsFilter, Vec<AclEntry>)> = vec![
-        (
-            "empty name and principal delete nothing",
-            topic_filter(PATTERN_TYPE_ANY, Some(""), Some("")),
-            Vec::new(),
-        ),
-        (
-            "empty name deletes nothing",
-            topic_filter(PATTERN_TYPE_ANY, Some(""), None),
-            Vec::new(),
-        ),
-        (
-            "empty principal deletes nothing",
-            topic_filter(PATTERN_TYPE_ANY, None, Some("")),
-            Vec::new(),
-        ),
-        (
-            "null name and principal delete every topic ACL",
-            topic_filter(PATTERN_TYPE_ANY, None, None),
-            seeded.clone(),
-        ),
-        (
-            "ANY with a name compares it exactly",
-            topic_filter(PATTERN_TYPE_ANY, Some("foo"), None),
-            vec![literal_foo.clone()],
-        ),
-        (
-            "MATCH takes the literal, the wildcard and covering prefixes",
-            topic_filter(PATTERN_TYPE_MATCH, Some("foo"), None),
-            vec![
+    let cases: Vec<DeleteCase> = vec![
+        DeleteCase {
+            name: "empty name and principal delete nothing",
+            filter: topic_filter(PATTERN_TYPE_ANY, Some(""), Some("")),
+            want_deleted: Vec::new(),
+        },
+        DeleteCase {
+            name: "empty name deletes nothing",
+            filter: topic_filter(PATTERN_TYPE_ANY, Some(""), None),
+            want_deleted: Vec::new(),
+        },
+        DeleteCase {
+            name: "empty principal deletes nothing",
+            filter: topic_filter(PATTERN_TYPE_ANY, None, Some("")),
+            want_deleted: Vec::new(),
+        },
+        DeleteCase {
+            name: "null name and principal delete every topic ACL",
+            filter: topic_filter(PATTERN_TYPE_ANY, None, None),
+            want_deleted: seeded.clone(),
+        },
+        DeleteCase {
+            name: "ANY with a name compares it exactly",
+            filter: topic_filter(PATTERN_TYPE_ANY, Some("foo"), None),
+            want_deleted: vec![literal_foo.clone()],
+        },
+        DeleteCase {
+            name: "MATCH takes the literal, the wildcard and covering prefixes",
+            filter: topic_filter(PATTERN_TYPE_MATCH, Some("foo"), None),
+            want_deleted: vec![
                 literal_foo.clone(),
                 wildcard_deny.clone(),
                 prefixed_fo.clone(),
             ],
-        ),
-        (
-            "MATCH narrows by principal",
-            topic_filter(PATTERN_TYPE_MATCH, Some("foo"), Some("User:alice")),
-            vec![literal_foo.clone(), prefixed_fo.clone()],
-        ),
-        (
-            "LITERAL with a null name",
-            topic_filter(PATTERN_TYPE_LITERAL, None, None),
-            vec![
+        },
+        DeleteCase {
+            name: "MATCH narrows by principal",
+            filter: topic_filter(PATTERN_TYPE_MATCH, Some("foo"), Some("User:alice")),
+            want_deleted: vec![literal_foo.clone(), prefixed_fo.clone()],
+        },
+        DeleteCase {
+            name: "LITERAL with a null name",
+            filter: topic_filter(PATTERN_TYPE_LITERAL, None, None),
+            want_deleted: vec![
                 literal_foo.clone(),
                 wildcard_deny.clone(),
                 literal_food.clone(),
             ],
-        ),
-        (
-            "PREFIXED with a name compares it exactly",
-            topic_filter(PATTERN_TYPE_PREFIXED, Some("foo"), None),
-            Vec::new(),
-        ),
+        },
+        DeleteCase {
+            name: "PREFIXED with a name compares it exactly",
+            filter: topic_filter(PATTERN_TYPE_PREFIXED, Some("foo"), None),
+            want_deleted: Vec::new(),
+        },
     ];
 
-    for (name, f, want_deleted) in cases {
+    for DeleteCase {
+        name,
+        filter: f,
+        want_deleted,
+    } in cases
+    {
         seed_acls(&broker_handle, seeded.clone()).await;
 
         let mut resp = handle(&broker, request(vec![f]), VERSION, &ctx)
@@ -354,6 +375,13 @@ async fn handle_lists_an_acl_under_every_filter_that_matches_it() {
 /// still run.
 #[tokio::test]
 async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
+    /// An edit that gives a filter an undefined byte, and the message Kafka
+    /// answers with, if the byte is refused.
+    struct UndefinedByteCase {
+        edit: Edit,
+        message: Option<&'static str>,
+    }
+
     type Edit = fn(&mut DeleteAclsFilter);
 
     let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
@@ -362,24 +390,39 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
     let broker = broker_handle.broker_arc_for_test();
     test_ctx!(ctx, "admin");
 
-    let cases: [(Edit, Option<&str>); 7] = [
-        (
-            |f| f.resource_type_filter = 99,
-            Some("Unknown patternFilter."),
-        ),
-        (
-            |f| f.pattern_type_filter = 99,
-            Some("Unknown patternFilter."),
-        ),
-        (|f| f.operation = 99, Some("Unknown entryFilter.")),
-        (|f| f.permission_type = 99, Some("Unknown entryFilter.")),
-        (|f| f.resource_type_filter = 7, None),
-        (|f| f.operation = 13, None),
-        (|f| f.operation = 14, None),
+    let cases: [UndefinedByteCase; 7] = [
+        UndefinedByteCase {
+            edit: |f| f.resource_type_filter = 99,
+            message: Some("Unknown patternFilter."),
+        },
+        UndefinedByteCase {
+            edit: |f| f.pattern_type_filter = 99,
+            message: Some("Unknown patternFilter."),
+        },
+        UndefinedByteCase {
+            edit: |f| f.operation = 99,
+            message: Some("Unknown entryFilter."),
+        },
+        UndefinedByteCase {
+            edit: |f| f.permission_type = 99,
+            message: Some("Unknown entryFilter."),
+        },
+        UndefinedByteCase {
+            edit: |f| f.resource_type_filter = 7,
+            message: None,
+        },
+        UndefinedByteCase {
+            edit: |f| f.operation = 13,
+            message: None,
+        },
+        UndefinedByteCase {
+            edit: |f| f.operation = 14,
+            message: None,
+        },
     ];
     let mut filters: Vec<DeleteAclsFilter> = cases
         .iter()
-        .map(|(edit, _)| {
+        .map(|UndefinedByteCase { edit, .. }| {
             let mut f = topic_filter(PATTERN_TYPE_ANY, None, None);
             edit(&mut f);
             f
@@ -393,7 +436,7 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
 
     let mut filter_results: Vec<DeleteAclsFilterResult> = cases
         .iter()
-        .map(|(_, message)| {
+        .map(|UndefinedByteCase { message, .. }| {
             tagged_wire!(DeleteAclsFilterResult {
                 error_code: if message.is_some() {
                     codes::INVALID_REQUEST

@@ -19,7 +19,7 @@ use {
     },
     object_store::path::Path as ObjectPath,
     std::{
-        collections::{HashMap, HashSet},
+        collections::{BTreeMap, HashMap, HashSet},
         path::Path,
     },
 };
@@ -130,11 +130,19 @@ pub(super) fn add_partitions(
     Ok(())
 }
 
+/// What authenticating a diskless capture established.
+pub(super) struct CaptureAuthentication {
+    /// The objects the signed capture vouches for, by key.
+    pub(super) claims: BTreeMap<String, ObjectEntry>,
+    /// The head of the capture's WORM chain.
+    pub(super) head: String,
+}
+
 pub(super) fn authenticate(
     capture: &DisklessWalCapture,
     trusted: &TrustedManifestKeys,
     args: &RestoreArgs,
-) -> Result<(std::collections::BTreeMap<String, ObjectEntry>, String), RestoreError> {
+) -> Result<CaptureAuthentication, RestoreError> {
     let expected = args.worm_expect_head.iter().find_map(|value| {
         value
             .split_once('=')
@@ -151,7 +159,7 @@ pub(super) fn authenticate(
         .ok_or_else(|| RestoreError::Authenticity {
             reason: "diskless capture has no signed WORM boundary".to_owned(),
         })?;
-    Ok((claims, head))
+    Ok(CaptureAuthentication { claims, head })
 }
 
 pub(super) async fn materialize(
@@ -159,10 +167,10 @@ pub(super) async fn materialize(
     args: &RestoreArgs,
     predicates: &Predicates,
     capture: &DisklessWalCapture,
-    authenticated: Option<&std::collections::BTreeMap<String, ObjectEntry>>,
+    authenticated: Option<&BTreeMap<String, ObjectEntry>>,
 ) -> Result<DisklessRestoreReport, RestoreError> {
     capture.validate().map_err(RestoreError::Integrity)?;
-    let mut cached_object: Option<(String, Bytes)> = None;
+    let mut cached_object: Option<CachedObject> = None;
     let mut reports = Vec::new();
     for partition in capture
         .partitions
@@ -391,14 +399,21 @@ fn limitations() -> Vec<String> {
     ]
 }
 
+/// The most recently fetched WAL object, kept so consecutive ranges in one
+/// object cost a single fetch.
+struct CachedObject {
+    key: String,
+    bytes: Bytes,
+}
+
 async fn fetch_object(
     store: &ArchiveStore,
-    cached: &mut Option<(String, Bytes)>,
+    cached: &mut Option<CachedObject>,
     key: &str,
-    authenticated: Option<&std::collections::BTreeMap<String, ObjectEntry>>,
+    authenticated: Option<&BTreeMap<String, ObjectEntry>>,
 ) -> Result<Bytes, RestoreError> {
-    if let Some((_, bytes)) = cached.as_ref().filter(|(cached_key, _)| cached_key == key) {
-        return Ok(bytes.clone());
+    if let Some(object) = cached.as_ref().filter(|object| object.key == key) {
+        return Ok(object.bytes.clone());
     }
     *cached = None;
     let bytes = fetch_capped(
@@ -408,7 +423,10 @@ async fn fetch_object(
         authenticated,
     )
     .await?;
-    *cached = Some((key.to_owned(), bytes.clone()));
+    *cached = Some(CachedObject {
+        key: key.to_owned(),
+        bytes: bytes.clone(),
+    });
     Ok(bytes)
 }
 

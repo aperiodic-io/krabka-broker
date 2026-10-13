@@ -278,17 +278,34 @@ mod tests {
     /// chose; krabka breaks a tie on the smallest name.
     #[test]
     fn the_preferred_assignor_is_the_most_named_one() {
-        // (each member's `server_assignor`, expected preference)
-        let rows: [(Vec<Option<&str>>, Option<&str>); 4] = [
-            (vec![], None),
-            (vec![None, None], None),
-            (
-                vec![Some("range"), Some("uniform"), Some("uniform"), None],
-                Some("uniform"),
-            ),
-            (vec![Some("uniform"), Some("range")], Some("range")),
+        struct Row<'a> {
+            /// Each member's `server_assignor`.
+            assignors: Vec<Option<&'a str>>,
+            expected: Option<&'a str>,
+        }
+        let rows: [Row<'_>; 4] = [
+            Row {
+                assignors: vec![],
+                expected: None,
+            },
+            Row {
+                assignors: vec![None, None],
+                expected: None,
+            },
+            Row {
+                assignors: vec![Some("range"), Some("uniform"), Some("uniform"), None],
+                expected: Some("uniform"),
+            },
+            Row {
+                assignors: vec![Some("uniform"), Some("range")],
+                expected: Some("range"),
+            },
         ];
-        for (assignors, expected) in rows {
+        for Row {
+            assignors,
+            expected,
+        } in rows
+        {
             let mut state = GroupState::new("g");
             for (i, assignor) in assignors.iter().enumerate() {
                 let mut m = member(&format!("m{i}"));

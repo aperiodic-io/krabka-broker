@@ -31,6 +31,15 @@ pub(crate) struct AclBinding {
     pub(crate) permission: String,
 }
 
+/// The resource a `ResourcePattern(` line names, which the entries under it
+/// belong to.
+#[derive(Clone)]
+struct ResourcePattern {
+    resource_type: String,
+    resource_name: String,
+    pattern_type: String,
+}
+
 /// Parse every binding a `--list` printed, as a set.
 ///
 /// A set rather than a list: the tool walks the authorizer's own iteration
@@ -39,16 +48,21 @@ pub(crate) struct AclBinding {
 /// bindings exist, and that is exactly what a set states.
 pub(crate) fn parse_acls(stdout: &str) -> BTreeSet<AclBinding> {
     let mut bindings = BTreeSet::new();
-    let mut resource: Option<(String, String, String)> = None;
+    let mut resource: Option<ResourcePattern> = None;
     for line in stdout.lines() {
         if line.contains("ResourcePattern(") {
-            resource = Some((
-                field(line, "resourceType=").unwrap_or_default(),
-                field(line, "name=").unwrap_or_default(),
-                field(line, "patternType=").unwrap_or_default(),
-            ));
+            resource = Some(ResourcePattern {
+                resource_type: field(line, "resourceType=").unwrap_or_default(),
+                resource_name: field(line, "name=").unwrap_or_default(),
+                pattern_type: field(line, "patternType=").unwrap_or_default(),
+            });
         } else if line.contains("principal=") {
-            let Some((resource_type, resource_name, pattern_type)) = resource.clone() else {
+            let Some(ResourcePattern {
+                resource_type,
+                resource_name,
+                pattern_type,
+            }) = resource.clone()
+            else {
                 continue;
             };
             bindings.insert(AclBinding {

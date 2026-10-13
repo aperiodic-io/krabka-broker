@@ -183,13 +183,28 @@ fn probes() -> BTreeMap<ApiKeyCode, Probe> {
     .collect()
 }
 
+/// An api key at one version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ApiKeyVersion {
+    api_key: ApiKeyCode,
+    version: ApiVersion,
+}
+
+/// An api key and the reach of the quota it is charged under.
+#[derive(Debug, PartialEq, Eq)]
+struct ApiKeyReach {
+    api_key: ApiKeyCode,
+    reach: QuotaReach,
+}
+
 /// Every `(api_key, version)` pair the broker dispatches, in ascending order.
-fn advertised_pairs() -> Vec<(ApiKeyCode, ApiVersion)> {
-    let mut pairs: Vec<(ApiKeyCode, ApiVersion)> = dispatched_apis()
+fn advertised_pairs() -> Vec<ApiKeyVersion> {
+    let mut pairs: Vec<ApiKeyVersion> = dispatched_apis()
         .iter()
         .flat_map(|api| {
-            let key = api.api_key;
-            (api.min_version..=api.max_version).map(move |version| (key, version))
+            let api_key = api.api_key;
+            (api.min_version..=api.max_version)
+                .map(move |version| ApiKeyVersion { api_key, version })
         })
         .collect();
     pairs.sort_unstable();
@@ -210,7 +225,7 @@ fn every_advertised_api_is_classified() {
     let probes = probes();
     let mut unclassified: Vec<ApiKeyCode> = advertised_pairs()
         .into_iter()
-        .map(|(api_key, _)| api_key)
+        .map(|pair| pair.api_key)
         .filter(|api_key| !probes.contains_key(api_key))
         .collect();
     unclassified.dedup();
@@ -228,7 +243,7 @@ fn throttle_table_matches_every_advertised_response_schema() {
     let probes = probes();
     let mismatches: Vec<Mismatch> = advertised_pairs()
         .into_iter()
-        .filter_map(|(api_key, version)| {
+        .filter_map(|ApiKeyVersion { api_key, version }| {
             let encoder = probes.get(&api_key)?(version);
             let table_says_leading = throttle_is_leading_field(api_key, version);
             (table_says_leading != (encoder == ThrottlePosition::Leading)).then_some(Mismatch {
@@ -246,18 +261,20 @@ fn throttle_table_matches_every_advertised_response_schema() {
 #[test]
 fn throttle_echo_divergences_are_the_recorded_ones() {
     let probes = probes();
-    let buried: Vec<(ApiKeyCode, ApiVersion)> = advertised_pairs()
+    let buried: Vec<ApiKeyVersion> = advertised_pairs()
         .into_iter()
-        .filter(|&(api_key, version)| {
+        .filter(|&ApiKeyVersion { api_key, version }| {
             probes
                 .get(&api_key)
                 .is_some_and(|probe| probe(version) == ThrottlePosition::Buried)
         })
         .collect();
 
-    let mut recorded: Vec<(ApiKeyCode, ApiVersion)> = THROTTLE_ECHO_DIVERGENCES
+    let mut recorded: Vec<ApiKeyVersion> = THROTTLE_ECHO_DIVERGENCES
         .iter()
-        .flat_map(|&(api_key, min, max, _)| (min..=max).map(move |version| (api_key, version)))
+        .flat_map(|&(api_key, min, max, _)| {
+            (min..=max).map(move |version| ApiKeyVersion { api_key, version })
+        })
         .collect();
     recorded.sort_unstable();
 
@@ -274,7 +291,7 @@ fn recorded_reach_matches_the_dispatch_registry() {
     use crate::handlers::RequestQuotaPolicy;
 
     let registry = build_registry();
-    let observed: Vec<(ApiKeyCode, QuotaReach)> = THROTTLE_ECHO_DIVERGENCES
+    let observed: Vec<ApiKeyReach> = THROTTLE_ECHO_DIVERGENCES
         .iter()
         .map(|&(api_key, ..)| {
             let policy = registry
@@ -291,12 +308,12 @@ fn recorded_reach_matches_the_dispatch_registry() {
                 RequestQuotaPolicy::ApplyFallbackAccounting => QuotaReach::FallbackAccounted,
                 RequestQuotaPolicy::InlineExempt => QuotaReach::UnsupportedVersionOnly,
             };
-            (api_key, reach)
+            ApiKeyReach { api_key, reach }
         })
         .collect();
-    let recorded: Vec<(ApiKeyCode, QuotaReach)> = THROTTLE_ECHO_DIVERGENCES
+    let recorded: Vec<ApiKeyReach> = THROTTLE_ECHO_DIVERGENCES
         .iter()
-        .map(|&(api_key, _, _, reach)| (api_key, reach))
+        .map(|&(api_key, _, _, reach)| ApiKeyReach { api_key, reach })
         .collect();
 
     assert!(observed == recorded);

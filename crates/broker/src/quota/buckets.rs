@@ -22,12 +22,26 @@ pub struct BucketEntry {
     pub last_accessed: Mutex<Instant>,
 }
 
+/// Where a bucket is stored: its quota key and its canonical entity key.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BucketKey {
+    pub quota_key: String,
+    pub entity_key: EntityKey,
+}
+
+/// A live bucket and the key it is stored under.
+#[derive(Debug)]
+pub struct LiveBucket {
+    pub key: BucketKey,
+    pub entry: Arc<BucketEntry>,
+}
+
 #[derive(Debug)]
 pub struct QuotaBuckets {
     /// Keyed by (`quota_key`, canonical entity key). There is one bucket for
     /// each (`quota_type`, entity) pair, allocated lazily on the first
     /// lookup.
-    buckets: DashMap<(String, EntityKey), Arc<BucketEntry>>,
+    buckets: DashMap<BucketKey, Arc<BucketEntry>>,
     controller_mutations: DashMap<EntityKey, Arc<Mutex<ControllerMutationBucket>>>,
     quota_window: Time,
     /// The addresses the image's `ip` quota entity names stand for.
@@ -89,7 +103,10 @@ impl QuotaBuckets {
         entity_key: &EntityKey,
         initial_rate: f64,
     ) -> Arc<TokenBucket> {
-        let key = (quota_key.to_string(), entity_key.clone());
+        let key = BucketKey {
+            quota_key: quota_key.to_string(),
+            entity_key: entity_key.clone(),
+        };
         if let Some(entry) = self.buckets.get(&key) {
             *entry.last_accessed.lock().unwrap() = Instant::now();
             return entry.bucket.clone();
@@ -108,12 +125,13 @@ impl QuotaBuckets {
         entry.bucket.clone()
     }
 
-    /// Iterates over every (`quota_key`, `entity_key`, bucket entry) triple.
+    /// Iterates over every live bucket with the key it is stored under.
     /// The refresh task uses it to push new rates after an image change.
-    pub fn iter(&self) -> impl Iterator<Item = ((String, EntityKey), Arc<BucketEntry>)> + '_ {
-        self.buckets
-            .iter()
-            .map(|r| (r.key().clone(), r.value().clone()))
+    pub fn iter(&self) -> impl Iterator<Item = LiveBucket> + '_ {
+        self.buckets.iter().map(|r| LiveBucket {
+            key: r.key().clone(),
+            entry: r.value().clone(),
+        })
     }
 
     /// Expire buckets unused for more than `max_age` (Kafka uses 1 hour).
@@ -134,21 +152,27 @@ impl QuotaBuckets {
     ) -> Vec<(String, Option<String>, Option<String>)> {
         let now = Instant::now();
         let mut expired = Vec::new();
-        self.buckets.retain(|(quota_key, entity_key), entry| {
-            let last = *entry.last_accessed.lock().unwrap();
-            if now.duration_since(last) > max_age {
-                let field = |name: &str| {
-                    entity_key
-                        .iter()
-                        .find(|(entity_type, _)| entity_type == name)
-                        .and_then(|(_, value)| value.clone())
-                };
-                expired.push((quota_key.clone(), field("user"), field("client-id")));
-                false
-            } else {
-                true
-            }
-        });
+        self.buckets.retain(
+            |BucketKey {
+                 quota_key,
+                 entity_key,
+             },
+             entry| {
+                let last = *entry.last_accessed.lock().unwrap();
+                if now.duration_since(last) > max_age {
+                    let field = |name: &str| {
+                        entity_key
+                            .iter()
+                            .find(|(entity_type, _)| entity_type == name)
+                            .and_then(|(_, value)| value.clone())
+                    };
+                    expired.push((quota_key.clone(), field("user"), field("client-id")));
+                    false
+                } else {
+                    true
+                }
+            },
+        );
         expired
     }
 

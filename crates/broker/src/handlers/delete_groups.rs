@@ -173,16 +173,22 @@ mod tests {
     /// `GROUP_AUTHORIZATION_FAILED` rows after the coordinator's rows.
     #[tokio::test]
     async fn handle_deduplicates_ids_and_appends_denied_rows() {
+        /// A group id and the error code its result row carries.
+        struct GroupRow {
+            group_id: &'static str,
+            error_code: i16,
+        }
+
         let (broker_handle, _dir) =
             start_group_broker_no_audit(Arc::new(DenyGroupNamedDenied)).await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((p, peer), principal("alice"));
-        let response = |rows: &[(&str, i16)]| DeleteGroupsResponse {
+        let response = |rows: &[GroupRow]| DeleteGroupsResponse {
             results: rows
                 .iter()
-                .map(|(group_id, error_code)| DeletableGroupResult {
-                    group_id: (*group_id).to_string(),
-                    error_code: *error_code,
+                .map(|row| DeletableGroupResult {
+                    group_id: row.group_id.to_string(),
+                    error_code: row.error_code,
                     ..Default::default()
                 })
                 .collect(),
@@ -192,24 +198,45 @@ mod tests {
             (
                 &["denied", "missing"][..],
                 response(&[
-                    ("missing", codes::GROUP_ID_NOT_FOUND),
-                    ("denied", codes::GROUP_AUTHORIZATION_FAILED),
+                    GroupRow {
+                        group_id: "missing",
+                        error_code: codes::GROUP_ID_NOT_FOUND,
+                    },
+                    GroupRow {
+                        group_id: "denied",
+                        error_code: codes::GROUP_AUTHORIZATION_FAILED,
+                    },
                 ]),
             ),
             (
                 &["missing", "missing"][..],
-                response(&[("missing", codes::GROUP_ID_NOT_FOUND)]),
+                response(&[GroupRow {
+                    group_id: "missing",
+                    error_code: codes::GROUP_ID_NOT_FOUND,
+                }]),
             ),
             (
                 &["denied", "denied"][..],
-                response(&[("denied", codes::GROUP_AUTHORIZATION_FAILED)]),
+                response(&[GroupRow {
+                    group_id: "denied",
+                    error_code: codes::GROUP_AUTHORIZATION_FAILED,
+                }]),
             ),
             (
                 &["denied", "a", "denied", "b", "a"][..],
                 response(&[
-                    ("a", codes::GROUP_ID_NOT_FOUND),
-                    ("b", codes::GROUP_ID_NOT_FOUND),
-                    ("denied", codes::GROUP_AUTHORIZATION_FAILED),
+                    GroupRow {
+                        group_id: "a",
+                        error_code: codes::GROUP_ID_NOT_FOUND,
+                    },
+                    GroupRow {
+                        group_id: "b",
+                        error_code: codes::GROUP_ID_NOT_FOUND,
+                    },
+                    GroupRow {
+                        group_id: "denied",
+                        error_code: codes::GROUP_AUTHORIZATION_FAILED,
+                    },
                 ]),
             ),
         ];

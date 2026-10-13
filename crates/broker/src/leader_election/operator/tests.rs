@@ -76,21 +76,42 @@ async fn preferred_election_rejects_exhausted_metadata_epochs() {
 #[tokio::test]
 async fn preferred_election_error_cases() {
     // Replicas are always [1, 2, 3]; the preferred leader is replica 1.
-    // (current_leader, isr, alive, expected)
-    let cases: [(u64, &[u64], &[u64], ElectError); 3] = [
+    struct Case {
+        leader: u64,
+        isr: &'static [u64],
+        alive: &'static [u64],
+        expected: ElectError,
+    }
+    let cases = [
         // Preferred replica 1 is already the leader.
-        (
-            1,
-            &[1, 2, 3],
-            &[1, 2, 3],
-            ElectError::PreferredAlreadyLeader,
-        ),
+        Case {
+            leader: 1,
+            isr: &[1, 2, 3],
+            alive: &[1, 2, 3],
+            expected: ElectError::PreferredAlreadyLeader,
+        },
         // Preferred replica 1 is not in the ISR.
-        (2, &[2, 3], &[1, 2, 3], ElectError::PreferredNotInIsr),
+        Case {
+            leader: 2,
+            isr: &[2, 3],
+            alive: &[1, 2, 3],
+            expected: ElectError::PreferredNotInIsr,
+        },
         // Preferred replica 1 is in the ISR but dead.
-        (2, &[1, 2, 3], &[2, 3], ElectError::PreferredNotAlive),
+        Case {
+            leader: 2,
+            isr: &[1, 2, 3],
+            alive: &[2, 3],
+            expected: ElectError::PreferredNotAlive,
+        },
     ];
-    for (leader, isr, alive, expected) in cases {
+    for Case {
+        leader,
+        isr,
+        alive,
+        expected,
+    } in cases
+    {
         let img = img_with_partition()
             .topic("foo")
             .leader(leader)
@@ -217,6 +238,12 @@ async fn operator_unclean_election_skips_a_witness_replica() {
 /// are `[1, 2, 3]` on directories `d1, d2, d3`; every broker is alive.
 #[tokio::test]
 async fn elections_skip_a_replica_on_a_dead_log_dir() {
+    /// The new leader and ISR.
+    #[derive(Debug, PartialEq)]
+    struct Elected {
+        leader: u64,
+        isr: Vec<u64>,
+    }
     struct Case {
         name: &'static str,
         election: ElectionType,
@@ -224,8 +251,7 @@ async fn elections_skip_a_replica_on_a_dead_log_dir() {
         isr: &'static [u64],
         /// The brokers whose directory of this partition is offline.
         dead_dirs: &'static [u64],
-        /// The new leader and ISR.
-        expected: Result<(u64, Vec<u64>), ElectError>,
+        expected: Result<Elected, ElectError>,
     }
     let case = |name, election, leader, isr, dead_dirs, expected| Case {
         name,
@@ -242,7 +268,10 @@ async fn elections_skip_a_replica_on_a_dead_log_dir() {
             1,
             &[1],
             &[1],
-            Ok((2, vec![2])),
+            Ok(Elected {
+                leader: 2,
+                isr: vec![2],
+            }),
         ),
         case(
             "unclean: nothing is on a dead disk",
@@ -290,7 +319,10 @@ async fn elections_skip_a_replica_on_a_dead_log_dir() {
             2,
             &[1, 2],
             &[3],
-            Ok((1, vec![1, 2])),
+            Ok(Elected {
+                leader: 1,
+                isr: vec![1, 2],
+            }),
         ),
     ];
     for Case {
@@ -320,8 +352,12 @@ async fn elections_skip_a_replica_on_a_dead_log_dir() {
         let alive = alive_set(&[1, 2, 3]);
 
         let got =
-            select_new_leader_for_partition(&img, &alive, &no_witnesses(), "foo", 0, election)
-                .map(|pr| (pr.leader.0, pr.isr.iter().map(|n| n.0).collect::<Vec<_>>()));
+            select_new_leader_for_partition(&img, &alive, &no_witnesses(), "foo", 0, election).map(
+                |pr| Elected {
+                    leader: pr.leader.0,
+                    isr: pr.isr.iter().map(|n| n.0).collect(),
+                },
+            );
 
         assert!(got == expected, "{name}");
     }

@@ -1041,31 +1041,50 @@ mod tests {
 
     #[test]
     fn created_topic_names_lists_only_names_absent_from_the_image() {
+        struct Scenario {
+            case: &'static str,
+            records: Vec<MetadataRecord>,
+            expected: Vec<&'static str>,
+        }
+
         let topic = |name: &str, id: u128| {
             MetadataRecord::V1Topic(single_partition_topic(name, Uuid::from_u128(id)))
         };
         let mut image = MetadataImage::default();
         image.apply(&topic("existing", 1));
 
-        let cases: [(&str, Vec<MetadataRecord>, Vec<&str>); 4] = [
-            ("new topic", vec![topic("new", 2)], vec!["new"]),
-            ("existing topic", vec![topic("existing", 1)], vec![]),
-            (
-                "name repeated in one batch",
-                vec![topic("new", 2), topic("new", 3), topic("other", 4)],
-                vec!["new", "other"],
-            ),
-            (
-                "no topic records",
-                vec![MetadataRecord::V1DeleteTopic(
+        let cases = [
+            Scenario {
+                case: "new topic",
+                records: vec![topic("new", 2)],
+                expected: vec!["new"],
+            },
+            Scenario {
+                case: "existing topic",
+                records: vec![topic("existing", 1)],
+                expected: vec![],
+            },
+            Scenario {
+                case: "name repeated in one batch",
+                records: vec![topic("new", 2), topic("new", 3), topic("other", 4)],
+                expected: vec!["new", "other"],
+            },
+            Scenario {
+                case: "no topic records",
+                records: vec![MetadataRecord::V1DeleteTopic(
                     krabka_metadata::DeleteTopicRecord {
                         name: "existing".into(),
                     },
                 )],
-                vec![],
-            ),
+                expected: vec![],
+            },
         ];
-        for (case, records, expected) in cases {
+        for Scenario {
+            case,
+            records,
+            expected,
+        } in cases
+        {
             assert2::check!(
                 created_topic_names(&image, &records) == expected,
                 "case: {case}"

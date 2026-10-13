@@ -38,6 +38,22 @@ use {
 #[cfg(test)]
 mod tests;
 
+/// A partition with a recovery in flight.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct InFlightKey {
+    topic: String,
+    partition: i32,
+}
+
+/// What a recovery planned against: the partition epoch and replicas it read,
+/// and whether the current leader was alive then.
+#[derive(Clone, Copy)]
+struct SelectedRecovery<'a> {
+    partition_epoch: i32,
+    replicas: &'a [u64],
+    current_leader_alive: bool,
+}
+
 /// The controller-side Unclean Recovery Manager.
 ///
 /// It receives [`RecoveryJob`] values, dedups the in-flight work for each
@@ -52,7 +68,7 @@ pub(crate) struct UncleanRecoveryManager {
     listener_protocol: krabka_security::ListenerProtocol,
     metrics: BrokerMetrics,
     policy: RecoveryPolicy,
-    in_flight: Arc<Mutex<HashSet<(String, i32)>>>,
+    in_flight: Arc<Mutex<HashSet<InFlightKey>>>,
 }
 
 impl UncleanRecoveryManager {
@@ -98,7 +114,10 @@ impl UncleanRecoveryManager {
     /// the same partition, runs the recovery, then releases the in-flight slot
     /// and replies if the caller supplied a reply channel.
     async fn recover_one(self: Arc<Self>, job: RecoveryJob) {
-        let key = (job.topic.clone(), job.partition);
+        let key = InFlightKey {
+            topic: job.topic.clone(),
+            partition: job.partition,
+        };
         {
             let mut set = self.in_flight.lock().await;
             if !set.insert(key.clone()) {
@@ -229,17 +248,11 @@ impl UncleanRecoveryManager {
         };
         let current_leader_alive = self.liveness.is_alive(pr.leader.0).await;
 
-        self.commit_elected_leader(
-            job,
-            &image,
-            pr,
-            election,
-            (
-                selected_partition_epoch,
-                &selected_replicas,
-                current_leader_alive,
-            ),
-        )
+        self.commit_elected_leader(job, &image, pr, election, SelectedRecovery {
+            partition_epoch: selected_partition_epoch,
+            replicas: &selected_replicas,
+            current_leader_alive,
+        })
         .await
     }
 
@@ -297,9 +310,13 @@ impl UncleanRecoveryManager {
         image: &Arc<MetadataImage>,
         pr: &PartitionRecord,
         election: Election,
-        selected: (i32, &[u64], bool),
+        selected: SelectedRecovery<'_>,
     ) -> RecoveryOutcome {
-        let (selected_partition_epoch, selected_replicas, current_leader_alive) = selected;
+        let SelectedRecovery {
+            partition_epoch: selected_partition_epoch,
+            replicas: selected_replicas,
+            current_leader_alive,
+        } = selected;
         let winner = election.leader;
         let current_replicas: Vec<u64> = pr.replicas.iter().map(|node| node.0).collect();
         if !unclean_recovery_commit_admission(

@@ -19,6 +19,14 @@ use {
     uuid::Uuid,
 };
 
+/// A partition the sweep is about to trim, with the segment files it had
+/// before the sweep.
+struct Observed<'a> {
+    topic: &'a str,
+    partition: Arc<Partition>,
+    before: Vec<String>,
+}
+
 /// The failure counter's value for one `(topic, partition, reason)`.
 fn failures(metrics: &BrokerMetrics, topic: &str, reason: CleanerFailureReason) -> u64 {
     metrics
@@ -97,7 +105,7 @@ async fn a_sweep_trims_a_follower_replica_as_well_as_a_led_one() {
     let registry = PartitionRegistry::new();
     // This broker is node 7: it leads `led` and merely follows `followed`.
     let cases = [("led", NodeId(7)), ("followed", NodeId(8))];
-    let mut observed: Vec<(&str, Arc<Partition>, Vec<String>)> = Vec::new();
+    let mut observed: Vec<Observed<'_>> = Vec::new();
     for (topic, leader) in cases {
         let partition = expired_partition(&dir, CommittedPartitionSetup {
             topic,
@@ -107,13 +115,22 @@ async fn a_sweep_trims_a_follower_replica_as_well_as_a_led_one() {
         .await;
         let before = segment_files(&dir, topic);
         registry.insert(topic.into(), PartitionIndex(0), Arc::clone(&partition));
-        observed.push((topic, partition, before));
+        observed.push(Observed {
+            topic,
+            partition,
+            before,
+        });
     }
 
     let metrics = BrokerMetrics::new();
     tick_all(&registry, None, &metrics).await;
 
-    for (topic, partition, before) in observed {
+    for Observed {
+        topic,
+        partition,
+        before,
+    } in observed
+    {
         let after = segment_files(&dir, topic);
         check!(
             after.len() < before.len(),

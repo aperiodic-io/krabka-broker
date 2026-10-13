@@ -124,10 +124,16 @@ mod tests {
         assert2::{assert, check},
     };
 
-    fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    /// A config key and its value.
+    struct ConfigPair<'a> {
+        key: &'a str,
+        value: &'a str,
+    }
+
+    fn map(pairs: &[ConfigPair<'_>]) -> BTreeMap<String, String> {
         pairs
             .iter()
-            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .map(|ConfigPair { key, value }| ((*key).to_string(), (*value).to_string()))
             .collect()
     }
 
@@ -138,17 +144,26 @@ mod tests {
             ("an override map without the key", Some(map(&[])), false),
             (
                 "the key set to false",
-                Some(map(&[(DISKLESS, "false")])),
+                Some(map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "false",
+                }])),
                 false,
             ),
             (
                 "the key set in upper case",
-                Some(map(&[(DISKLESS, " TRUE ")])),
+                Some(map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: " TRUE ",
+                }])),
                 true,
             ),
             (
                 "the key set to true",
-                Some(map(&[(DISKLESS, "true")])),
+                Some(map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "true",
+                }])),
                 true,
             ),
         ] {
@@ -193,25 +208,70 @@ mod tests {
             DisklessConflict::TieredStorage => (REMOTE_STORAGE_ENABLE, "true", vec![
                 (
                     "diskless with tiering explicitly off",
-                    map(&[(DISKLESS, "true"), (REMOTE_STORAGE_ENABLE, "false")]),
+                    map(&[
+                        ConfigPair {
+                            key: DISKLESS,
+                            value: "true",
+                        },
+                        ConfigPair {
+                            key: REMOTE_STORAGE_ENABLE,
+                            value: "false",
+                        },
+                    ]),
                 ),
                 (
                     "tiering with diskless explicitly off",
-                    map(&[(DISKLESS, "false"), (REMOTE_STORAGE_ENABLE, "true")]),
+                    map(&[
+                        ConfigPair {
+                            key: DISKLESS,
+                            value: "false",
+                        },
+                        ConfigPair {
+                            key: REMOTE_STORAGE_ENABLE,
+                            value: "true",
+                        },
+                    ]),
                 ),
-                ("diskless alone", map(&[(DISKLESS, "true")])),
-                ("tiering alone", map(&[(REMOTE_STORAGE_ENABLE, "true")])),
+                (
+                    "diskless alone",
+                    map(&[ConfigPair {
+                        key: DISKLESS,
+                        value: "true",
+                    }]),
+                ),
+                (
+                    "tiering alone",
+                    map(&[ConfigPair {
+                        key: REMOTE_STORAGE_ENABLE,
+                        value: "true",
+                    }]),
+                ),
             ]),
             DisklessConflict::ScheduledDelivery => (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, vec![
                 (
                     "an immediate diskless topic",
-                    map(&[(DISKLESS, "true"), (DELIVERY_MODE, "immediate")]),
+                    map(&[
+                        ConfigPair {
+                            key: DISKLESS,
+                            value: "true",
+                        },
+                        ConfigPair {
+                            key: DELIVERY_MODE,
+                            value: "immediate",
+                        },
+                    ]),
                 ),
                 (
                     "a scheduled local-log topic",
                     map(&[
-                        (DISKLESS, "false"),
-                        (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
+                        ConfigPair {
+                            key: DISKLESS,
+                            value: "false",
+                        },
+                        ConfigPair {
+                            key: DELIVERY_MODE,
+                            value: DELIVERY_MODE_SCHEDULED,
+                        },
                     ]),
                 ),
             ]),
@@ -220,7 +280,16 @@ mod tests {
             assert2::check!(validate_topic_config_map(&overrides).is_ok(), "{label}");
         }
 
-        let overrides = map(&[(DISKLESS, "true"), (key, conflicting_value)]);
+        let overrides = map(&[
+            ConfigPair {
+                key: DISKLESS,
+                value: "true",
+            },
+            ConfigPair {
+                key,
+                value: conflicting_value,
+            },
+        ]);
         let error = validate_topic_config_map(&overrides).unwrap_err();
         assert2::check!(error.contains(DISKLESS), "got: {error}");
         assert2::check!(error.contains(key), "got: {error}");
@@ -231,44 +300,80 @@ mod tests {
         for (label, current, next, want_ok) in [
             (
                 "the same value restated",
-                Some(map(&[(DISKLESS, "true")])),
-                map(&[(DISKLESS, "true")]),
+                Some(map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "true",
+                }])),
+                map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "true",
+                }]),
                 true,
             ),
             (
                 "an ordinary key added to a diskless topic",
-                Some(map(&[(DISKLESS, "true")])),
-                map(&[(DISKLESS, "true"), ("retention.ms", "60000")]),
+                Some(map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "true",
+                }])),
+                map(&[
+                    ConfigPair {
+                        key: DISKLESS,
+                        value: "true",
+                    },
+                    ConfigPair {
+                        key: "retention.ms",
+                        value: "60000",
+                    },
+                ]),
                 true,
             ),
             (
                 "an explicit false dropped, which resolves the same way",
-                Some(map(&[(DISKLESS, "false")])),
+                Some(map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "false",
+                }])),
                 map(&[]),
                 true,
             ),
             (
                 "turning the flag off on a diskless topic",
-                Some(map(&[(DISKLESS, "true")])),
-                map(&[(DISKLESS, "false")]),
+                Some(map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "true",
+                }])),
+                map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "false",
+                }]),
                 false,
             ),
             (
                 "dropping the key from a diskless topic, as a replacement does",
-                Some(map(&[(DISKLESS, "true")])),
+                Some(map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "true",
+                }])),
                 map(&[]),
                 false,
             ),
             (
                 "turning the flag on for a local-log topic",
                 Some(map(&[])),
-                map(&[(DISKLESS, "true")]),
+                map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "true",
+                }]),
                 false,
             ),
             (
                 "turning the flag on for a topic with no overrides at all",
                 None,
-                map(&[(DISKLESS, "true")]),
+                map(&[ConfigPair {
+                    key: DISKLESS,
+                    value: "true",
+                }]),
                 false,
             ),
         ] {
@@ -281,7 +386,14 @@ mod tests {
 
     #[test]
     fn the_refusal_names_the_key_and_says_it_is_fixed_at_creation() {
-        let error = validate_diskless_unchanged(None, &map(&[(DISKLESS, "true")])).unwrap_err();
+        let error = validate_diskless_unchanged(
+            None,
+            &map(&[ConfigPair {
+                key: DISKLESS,
+                value: "true",
+            }]),
+        )
+        .unwrap_err();
 
         assert!(error.contains(DISKLESS), "got: {error}");
         assert!(

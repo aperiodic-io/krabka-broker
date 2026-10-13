@@ -436,7 +436,7 @@ impl ClientMetricsManager {
 mod tests {
     use {
         super::{
-            test_support::{attrs, expect_assignment, img_with},
+            test_support::{all_metrics_img, attrs, expect_assignment},
             *,
         },
         crate::{client_metrics::config::INTERVAL_MS_DEFAULT, test_support::KafkaErrorCode},
@@ -448,24 +448,32 @@ mod tests {
         ClientMetricsManager::new(krabka_units::kibibytes(1), INTERVAL_MS_DEFAULT)
     }
 
+    /// A manager, the image that subscribes it, the attributes of one client
+    /// instance, that instance's subscription id, and the clock reading to push at.
+    struct InstanceFixture {
+        manager: ClientMetricsManager,
+        image: MetadataImage,
+        attributes: super::ClientAttributes,
+        id: i32,
+        now: Instant,
+    }
+
     #[bon::builder]
-    fn instance_fixture(
-        #[builder(default = "60000")] interval: &'_ str,
-    ) -> (
-        ClientMetricsManager,
-        MetadataImage,
-        super::ClientAttributes,
-        i32,
-        Instant,
-    ) {
+    fn instance_fixture(#[builder(default = "60000")] interval: &'_ str) -> InstanceFixture {
         let manager = manager();
-        let image = img_with("all", &[("metrics", "*"), ("interval.ms", interval)]);
+        let image = all_metrics_img(interval);
         let attributes = attrs();
         let id = subscription_id(
             &compute_subscription(&image, &attributes, INTERVAL_MS_DEFAULT),
             attributes.client_instance_id,
         );
-        (manager, image, attributes, id, Instant::now())
+        InstanceFixture {
+            manager,
+            image,
+            attributes,
+            id,
+            now: Instant::now(),
+        }
     }
 
     #[derive(Clone, Copy, Default)]
@@ -558,7 +566,7 @@ mod tests {
     #[test]
     fn push_checks_follow_kafkas_order_and_timestamps() {
         let m = manager();
-        let img = img_with("all", &[("metrics", "*"), ("interval.ms", "60000")]);
+        let img = all_metrics_img("60000");
         let attrs = attrs();
         let t = Instant::now();
         let right = expect_assignment(m.get_subscription_at(&img, &attrs, t)).subscription_id;
@@ -663,55 +671,83 @@ mod tests {
     fn the_terminating_flag_follows_the_target() {
         use UnstableApiVersions::{Disabled, Enabled};
 
-        // (seconds after the get, terminating, compression supported, outcome)
-        type Move = (u64, bool, bool, Outcome);
+        /// One push, and what the manager answers with.
+        struct Move {
+            /// Seconds after the get.
+            after_secs: u64,
+            terminating: bool,
+            compression_supported: bool,
+            outcome: Outcome,
+        }
+        struct Row {
+            name: &'static str,
+            unstable: UnstableApiVersions,
+            steps: [Move; 3],
+        }
+        let mv = |after_secs, terminating, compression_supported, outcome| Move {
+            after_secs,
+            terminating,
+            compression_supported,
+            outcome,
+        };
         let unsupported = || reject_push(KafkaErrorCode(codes::UNSUPPORTED_COMPRESSION_TYPE));
         let locked = || reject_push(KafkaErrorCode(codes::INVALID_REQUEST));
-        let rows: [(&str, UnstableApiVersions, [Move; 3]); 4] = [
-            (
-                "4.3.1: a rejected terminating push locks the instance",
-                Disabled,
-                [
-                    (0, true, false, unsupported()),
-                    (60, false, true, locked()),
-                    (120, false, true, ACCEPT),
+        let rows: [Row; 4] = [
+            Row {
+                name: "4.3.1: a rejected terminating push locks the instance",
+                unstable: Disabled,
+                steps: [
+                    mv(0, true, false, unsupported()),
+                    mv(60, false, true, locked()),
+                    mv(120, false, true, ACCEPT),
                 ],
-            ),
-            (
-                "trunk: a rejected terminating push leaves the instance open",
-                Enabled,
-                [
-                    (0, true, false, unsupported()),
-                    (60, false, true, ACCEPT),
-                    (120, false, true, ACCEPT),
+            },
+            Row {
+                name: "trunk: a rejected terminating push leaves the instance open",
+                unstable: Enabled,
+                steps: [
+                    mv(0, true, false, unsupported()),
+                    mv(60, false, true, ACCEPT),
+                    mv(120, false, true, ACCEPT),
                 ],
-            ),
-            (
-                "4.3.1: the push that the lock refuses resets the flag",
-                Disabled,
-                [
-                    (0, true, true, ACCEPT),
-                    (60, false, true, locked()),
-                    (120, false, true, ACCEPT),
+            },
+            Row {
+                name: "4.3.1: the push that the lock refuses resets the flag",
+                unstable: Disabled,
+                steps: [
+                    mv(0, true, true, ACCEPT),
+                    mv(60, false, true, locked()),
+                    mv(120, false, true, ACCEPT),
                 ],
-            ),
-            (
-                "trunk: an accepted terminating push locks until expiry",
-                Enabled,
-                [
-                    (0, true, true, ACCEPT),
-                    (60, false, true, locked()),
-                    (120, false, true, locked()),
+            },
+            Row {
+                name: "trunk: an accepted terminating push locks until expiry",
+                unstable: Enabled,
+                steps: [
+                    mv(0, true, true, ACCEPT),
+                    mv(60, false, true, locked()),
+                    mv(120, false, true, locked()),
                 ],
-            ),
+            },
         ];
-        let img = img_with("all", &[("metrics", "*"), ("interval.ms", "60000")]);
+        let img = all_metrics_img("60000");
         let attrs = attrs();
-        for (name, unstable, steps) in rows {
+        for Row {
+            name,
+            unstable,
+            steps,
+        } in rows
+        {
             let m = manager();
             let t = Instant::now();
             let id = expect_assignment(m.get_subscription_at(&img, &attrs, t)).subscription_id;
-            for (secs, terminating, compression_supported, expected) in steps {
+            for Move {
+                after_secs: secs,
+                terminating,
+                compression_supported,
+                outcome: expected,
+            } in steps
+            {
                 let check = PushCheck {
                     terminating,
                     compression_supported,
@@ -737,7 +773,7 @@ mod tests {
     /// reserved ids get `INVALID_REQUEST` (#673).
     #[test]
     fn push_without_an_instance_builds_one() {
-        let img = img_with("all", &[("metrics", "*"), ("interval.ms", "60000")]);
+        let img = all_metrics_img("60000");
         let attrs = attrs();
         let current = subscription_id(
             &compute_subscription(&img, &attrs, INTERVAL_MS_DEFAULT),
@@ -792,8 +828,8 @@ mod tests {
     #[test]
     fn a_subscription_change_rebuilds_the_instance() {
         let m = manager();
-        let before = img_with("all", &[("metrics", "*"), ("interval.ms", "60000")]);
-        let after = img_with("all", &[("metrics", "*"), ("interval.ms", "30000")]);
+        let before = all_metrics_img("60000");
+        let after = all_metrics_img("30000");
         let attrs = attrs();
         let t = Instant::now();
         let secs = |s| t + Duration::from_secs(s);
@@ -861,7 +897,7 @@ mod tests {
     #[test]
     fn get_throttle_follows_kafka() {
         let m = manager();
-        let img = img_with("all", &[("metrics", "*"), ("interval.ms", "100")]);
+        let img = all_metrics_img("100");
         let attrs = attrs();
         let t = Instant::now();
         let ms = |n| t + Duration::from_millis(n);
@@ -956,7 +992,7 @@ mod tests {
     #[test]
     fn closing_the_connection_drops_the_instance() {
         let m = manager();
-        let img = img_with("all", &[("metrics", "*"), ("interval.ms", "60000")]);
+        let img = all_metrics_img("60000");
         let t = Instant::now();
         let get = |connection: &str, secs| {
             m.get_subscription_at(&img, &attrs_on(connection), t + Duration::from_secs(secs))
@@ -999,7 +1035,13 @@ mod tests {
             ("at three intervals", "60000", 180, true),
         ];
         for (name, interval, idle, expired) in rows {
-            let (m, img, attrs, id, t) = instance_fixture().interval(interval).call();
+            let InstanceFixture {
+                manager: m,
+                image: img,
+                attributes: attrs,
+                id,
+                now: t,
+            } = instance_fixture().interval(interval).call();
             let terminate = PushCheck {
                 terminating: true,
                 ..push(TelemetrySubscriptionId(id))
@@ -1037,7 +1079,13 @@ mod tests {
     /// old connection later does not drop the instance built since.
     #[test]
     fn an_expired_instances_connection_does_not_own_its_successor() {
-        let (m, img, _attrs, id, t) = instance_fixture().call();
+        let InstanceFixture {
+            manager: m,
+            image: img,
+            id,
+            now: t,
+            ..
+        } = instance_fixture().call();
         let secs = |s| t + Duration::from_secs(s);
         let terminate = PushCheck {
             terminating: true,

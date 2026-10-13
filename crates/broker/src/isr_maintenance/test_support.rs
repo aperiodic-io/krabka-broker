@@ -58,10 +58,17 @@ pub(super) struct IsrSetup<'a> {
     pub partition_epoch: PartitionEpoch,
 }
 
+/// A follower that was last caught up `caught_up_age` ago.
+#[derive(Clone, Copy)]
+pub(super) struct StaleFollower {
+    pub node: NodeId,
+    pub caught_up_age: Duration,
+}
+
 pub(super) async fn set_replica_state(
     part: &Partition,
     record: MetadataRecord,
-    stale_followers: &[(NodeId, Duration)],
+    stale_followers: &[StaleFollower],
 ) {
     let MetadataRecord::V1Partition(record) = record else {
         unreachable!("the test fixture must be a partition record");
@@ -70,7 +77,11 @@ pub(super) async fn set_replica_state(
     let mut st = part.replica_state.lock().await;
     st.install_isr(&record.isr, &record.replicas, record.leader, now);
     st.current_leader_epoch = record.leader_epoch;
-    for &(follower, last_caught_up_age) in stale_followers {
+    for &StaleFollower {
+        node: follower,
+        caught_up_age: last_caught_up_age,
+    } in stale_followers
+    {
         st.per_follower.insert(follower, FollowerStats {
             leo: Offset(0),
             last_fetch: None,

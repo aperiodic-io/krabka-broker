@@ -87,7 +87,7 @@ impl Cause {
 /// back needs no operator step.
 #[derive(Debug, Default)]
 pub(crate) struct UncleanablePartitions {
-    inner: BTreeMap<(String, i32), Cause>,
+    inner: BTreeMap<PartitionKey, Cause>,
 }
 
 impl UncleanablePartitions {
@@ -97,7 +97,7 @@ impl UncleanablePartitions {
     /// Whether the sweep must leave `key` alone: a pass on it would refuse the
     /// same record again, because `record_limit` is still the limit that
     /// refused it.
-    fn is_held(&self, key: &(String, i32), record_limit: Option<ByteSize>) -> bool {
+    fn is_held(&self, key: &PartitionKey, record_limit: Option<ByteSize>) -> bool {
         matches!(
             self.inner.get(key),
             Some(Cause::RecordTooLarge { limit })
@@ -107,9 +107,16 @@ impl UncleanablePartitions {
 
     /// Drop every entry that `swept` does not name, which is what releases a
     /// partition this broker no longer hosts or no longer compacts.
-    fn retain_swept(&mut self, swept: &BTreeSet<(String, i32)>) {
+    fn retain_swept(&mut self, swept: &BTreeSet<PartitionKey>) {
         self.inner.retain(|key, _| swept.contains(key));
     }
+}
+
+/// A partition's identity, by topic name and partition index.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PartitionKey {
+    topic: String,
+    partition: i32,
 }
 
 use crate::metrics::cleaner_failure_reason as failure_reason;
@@ -146,7 +153,7 @@ pub(crate) async fn tick_all(
     // Every partition this sweep considered its work, whether or not it was
     // due a pass. What is not in it is not this cleaner's any more, so it
     // leaves the uncleanable set at the end of the sweep.
-    let mut swept: BTreeSet<(String, i32)> = BTreeSet::new();
+    let mut swept: BTreeSet<PartitionKey> = BTreeSet::new();
     let mut failed = false;
     for partition in snapshot {
         // Kafka bounds a pass at the last stable offset, not the high
@@ -189,7 +196,10 @@ pub(crate) async fn tick_all(
         // A partition that is merely not due yet keeps the uncleanable mark
         // an earlier failure left on it, because the failure is still there;
         // only a pass that succeeds clears it.
-        let key = (partition.topic.clone(), partition.index.get());
+        let key = PartitionKey {
+            topic: partition.topic.clone(),
+            partition: partition.index.get(),
+        };
         swept.insert(key.clone());
         if !due {
             continue;

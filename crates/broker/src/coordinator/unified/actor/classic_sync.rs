@@ -90,7 +90,7 @@ mod tests {
             actor::{
                 DescribeMember, GroupActorMessage,
                 test_support::{
-                    decode_assignment, last_classic_metadata, make_coordinator,
+                    RejoinedClassic, decode_assignment, last_classic_metadata, make_coordinator,
                     make_coordinator_with_topic_policy, rpc, seed_and_upgrade,
                     seed_completing_classic, upgrade_and_rejoin_classic, upgrade_coordinator,
                 },
@@ -106,12 +106,19 @@ mod tests {
     type Partitions = std::collections::HashMap<krabka_protocol::primitives::uuid::Uuid, Vec<i32>>;
 
     /// What a member holds and at which epoch, as `Describe` reports it.
-    fn held(member: &DescribeMember) -> (i32, Partitions, Partitions) {
-        (
-            member.member_epoch,
-            member.assigned_partitions.clone(),
-            member.partitions_pending_revocation.clone(),
-        )
+    #[derive(Debug, PartialEq)]
+    struct HeldPartitions {
+        member_epoch: i32,
+        assigned: Partitions,
+        pending_revocation: Partitions,
+    }
+
+    fn held(member: &DescribeMember) -> HeldPartitions {
+        HeldPartitions {
+            member_epoch: member.member_epoch,
+            assigned: member.assigned_partitions.clone(),
+            pending_revocation: member.partitions_pending_revocation.clone(),
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -251,7 +258,10 @@ mod tests {
     async fn native_member_sync_group_is_rejected_and_changes_no_assignment() {
         let (coord, _log) = upgrade_coordinator();
         // The hosted classic member syncs, so it holds both partitions of "t".
-        let (handle, join) = upgrade_and_rejoin_classic(&coord).await;
+        let RejoinedClassic {
+            handle,
+            joined: join,
+        } = upgrade_and_rejoin_classic(&coord).await;
         assert!(
             rpc::classic_sync(&handle, "m-classic", join.generation_id)
                 .await
@@ -284,7 +294,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn failover_keeps_a_synced_hosted_classic_member_in_sync() {
         let (coord, _log) = upgrade_coordinator();
-        let (handle, join) = upgrade_and_rejoin_classic(&coord).await;
+        let RejoinedClassic {
+            handle,
+            joined: join,
+        } = upgrade_and_rejoin_classic(&coord).await;
         let sync = rpc::classic_sync(&handle, "m-classic", join.generation_id).await;
         assert!(sync.error_code == codes::NONE);
 
@@ -317,7 +330,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_sync_after_a_reconciling_join_writes_nothing() {
         let (coord, log) = upgrade_coordinator();
-        let (handle, join) = upgrade_and_rejoin_classic(&coord).await;
+        let RejoinedClassic {
+            handle,
+            joined: join,
+        } = upgrade_and_rejoin_classic(&coord).await;
         let before = rpc::describe_member(&handle, "m-classic").await;
         let batches_before = log.batches().await.len();
 

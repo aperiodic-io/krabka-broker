@@ -260,8 +260,22 @@ mod tests {
         }
     }
 
-    /// A parsed table as `(label, [(api, value)])`, or the parse error.
-    type Parsed = Result<Vec<(String, Vec<(String, String)>)>, String>;
+    /// One parsed section: its label and its entries.
+    #[derive(Debug, PartialEq)]
+    struct ParsedSection {
+        label: String,
+        entries: Vec<ParsedEntry>,
+    }
+
+    /// One parsed entry: the API name and the value text, empty when absent.
+    #[derive(Debug, PartialEq)]
+    struct ParsedEntry {
+        api: String,
+        value: String,
+    }
+
+    /// A parsed table, or the parse error.
+    type Parsed = Result<Vec<ParsedSection>, String>;
 
     fn parse(source: &str) -> Parsed {
         let tokens: TokenStream = source.parse().map_err(|e| format!("{e:?}"))?;
@@ -274,10 +288,16 @@ mod tests {
                     .iter()
                     .map(|e| {
                         let value = e.value.as_ref().map(ToString::to_string);
-                        (e.names.api.text().to_owned(), value.unwrap_or_default())
+                        ParsedEntry {
+                            api: e.names.api.text().to_owned(),
+                            value: value.unwrap_or_default(),
+                        }
                     })
                     .collect();
-                (s.label.text().to_owned(), entries)
+                ParsedSection {
+                    label: s.label.text().to_owned(),
+                    entries,
+                }
             })
             .collect())
     }
@@ -288,11 +308,23 @@ mod tests {
         assert!(
             parsed
                 == Ok(vec![
-                    ("a".to_owned(), vec![
-                        ("One".to_owned(), String::new()),
-                        ("Two".to_owned(), "x :: y :: handle".to_owned()),
-                    ]),
-                    ("b".to_owned(), vec![]),
+                    ParsedSection {
+                        label: "a".to_owned(),
+                        entries: vec![
+                            ParsedEntry {
+                                api: "One".to_owned(),
+                                value: String::new(),
+                            },
+                            ParsedEntry {
+                                api: "Two".to_owned(),
+                                value: "x :: y :: handle".to_owned(),
+                            },
+                        ],
+                    },
+                    ParsedSection {
+                        label: "b".to_owned(),
+                        entries: vec![],
+                    },
                 ])
         );
     }

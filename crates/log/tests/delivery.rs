@@ -33,13 +33,19 @@ fn scheduled_config(segment_size: ByteSize) -> LogConfig {
 mod scheduled;
 use scheduled::batch_at;
 
-fn log_of(config: LogConfig, activations: &[i64]) -> (tempfile::TempDir, Log) {
+/// An open log and the temporary directory that holds it.
+struct TempLog {
+    dir: tempfile::TempDir,
+    log: Log,
+}
+
+fn log_of(config: LogConfig, activations: &[i64]) -> TempLog {
     let dir = tempdir().unwrap();
     let mut log = Log::open(dir.path(), config).unwrap();
     for ts in activations {
         log.append(&mut batch_at(*ts)).unwrap();
     }
-    (dir, log)
+    TempLog { dir, log }
 }
 
 /// `segment_size = 1` byte rolls before every append after the first, so each
@@ -51,7 +57,7 @@ const ONE_SEGMENT: ByteSize = gibibytes(1);
 
 #[test]
 fn an_unscheduled_topic_makes_every_durable_record_visible() {
-    let (_dir, mut log) = log_of(LogConfig::default(), &[PAST_MS, FUTURE_MS]);
+    let TempLog { dir: _dir, mut log } = log_of(LogConfig::default(), &[PAST_MS, FUTURE_MS]);
 
     let advance = log.advance_delivery_watermark(NOW_MS);
 
@@ -75,7 +81,7 @@ fn an_unscheduled_topic_makes_every_durable_record_visible() {
 /// is a fetch limit, and a limit is a prefix.
 #[test]
 fn the_watermark_stops_at_the_first_batch_that_is_not_due_yet() {
-    let (_dir, mut log) = log_of(scheduled_config(ONE_SEGMENT), &[
+    let TempLog { dir: _dir, mut log } = log_of(scheduled_config(ONE_SEGMENT), &[
         PAST_MS, PAST_MS, FUTURE_MS, PAST_MS,
     ]);
 
@@ -97,7 +103,7 @@ fn the_watermark_stops_at_the_first_batch_that_is_not_due_yet() {
 /// reports is exactly the instant the same call would let it through.
 #[test]
 fn a_batch_is_held_until_the_clock_bound_has_also_elapsed() {
-    let (_dir, mut log) = log_of(scheduled_config(ONE_SEGMENT), &[PAST_MS, NOW_MS]);
+    let TempLog { dir: _dir, mut log } = log_of(scheduled_config(ONE_SEGMENT), &[PAST_MS, NOW_MS]);
 
     let held = log.advance_delivery_watermark(NOW_MS);
     check!(
@@ -130,7 +136,7 @@ fn the_configured_bound_decides_the_deadline() {
         delivery_clock_uncertainty: millis(1_000),
         ..scheduled_config(ONE_SEGMENT)
     };
-    let (_dir, mut log) = log_of(config, &[NOW_MS]);
+    let TempLog { dir: _dir, mut log } = log_of(config, &[NOW_MS]);
 
     let advance = log.advance_delivery_watermark(NOW_MS);
 
@@ -150,7 +156,7 @@ fn the_configured_bound_decides_the_deadline() {
 /// has already been served.
 #[test]
 fn the_watermark_never_moves_backwards() {
-    let (_dir, mut log) = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
+    let TempLog { dir: _dir, mut log } = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
         PAST_MS, FUTURE_MS,
     ]);
 
@@ -168,7 +174,7 @@ fn the_watermark_never_moves_backwards() {
 /// watermark.
 #[test]
 fn the_walk_crosses_segments() {
-    let (_dir, mut log) = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
+    let TempLog { dir: _dir, mut log } = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
         PAST_MS, PAST_MS, FUTURE_MS, PAST_MS,
     ]);
 
@@ -246,7 +252,7 @@ fn a_log_opened_without_validation_still_holds_an_undue_batch() {
 #[test]
 fn pending_ranges_cover_whole_batches_and_merge_when_adjacent() {
     // offsets 0-1 due, 2-3 and 4-5 waiting (adjacent), 6-7 due, 8-9 waiting.
-    let (_dir, log) = log_of(scheduled_config(ONE_SEGMENT), &[
+    let TempLog { dir: _dir, log } = log_of(scheduled_config(ONE_SEGMENT), &[
         PAST_MS, FUTURE_MS, FUTURE_MS, PAST_MS, FUTURE_MS,
     ]);
 
@@ -259,7 +265,7 @@ fn pending_ranges_cover_whole_batches_and_merge_when_adjacent() {
 /// share reader fetches with `read_raw`, which is batch-granular.
 #[test]
 fn a_window_that_splits_a_batch_reports_the_whole_batch() {
-    let (_dir, log) = log_of(scheduled_config(ONE_SEGMENT), &[PAST_MS, FUTURE_MS]);
+    let TempLog { dir: _dir, log } = log_of(scheduled_config(ONE_SEGMENT), &[PAST_MS, FUTURE_MS]);
 
     // Offset 3 is the second half of the batch that spans 2-3.
     check!(
@@ -269,7 +275,7 @@ fn a_window_that_splits_a_batch_reports_the_whole_batch() {
 
 #[test]
 fn pending_ranges_span_segments_and_stay_inside_the_log() {
-    let (_dir, log) = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
+    let TempLog { dir: _dir, log } = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
         FUTURE_MS, FUTURE_MS, PAST_MS,
     ]);
 
@@ -309,7 +315,8 @@ fn size_retention_never_evicts_a_segment_holding_an_undelivered_record() {
         retention_size: Some(ByteSize::ZERO),
         ..scheduled_config(ONE_BATCH_PER_SEGMENT)
     };
-    let (_dir, mut log) = log_of(config, &[PAST_MS, PAST_MS, FUTURE_MS, FUTURE_MS, PAST_MS]);
+    let TempLog { dir: _dir, mut log } =
+        log_of(config, &[PAST_MS, PAST_MS, FUTURE_MS, FUTURE_MS, PAST_MS]);
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_millis(u64::try_from(NOW_MS).unwrap());
     log.tick(now, Offset(i64::MAX)).unwrap();
@@ -334,7 +341,7 @@ fn size_retention_on_an_unscheduled_topic_is_untouched_by_the_guard() {
         segment_size: ONE_BATCH_PER_SEGMENT,
         ..LogConfig::default()
     };
-    let (_dir, mut log) = log_of(config, &[PAST_MS, PAST_MS, PAST_MS]);
+    let TempLog { dir: _dir, mut log } = log_of(config, &[PAST_MS, PAST_MS, PAST_MS]);
 
     let epoch_offset = Duration::from_millis(NOW_MS as u64);
     log.tick(SystemTime::UNIX_EPOCH + epoch_offset, Offset(i64::MAX))
@@ -351,7 +358,7 @@ fn size_retention_on_an_unscheduled_topic_is_untouched_by_the_guard() {
 /// that no record asks for any more.
 #[test]
 fn a_truncation_drops_the_deadline_it_invalidates() {
-    let (_dir, mut log) = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
+    let TempLog { dir: _dir, mut log } = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
         PAST_MS, FUTURE_MS, PAST_MS,
     ]);
 
@@ -384,7 +391,7 @@ fn a_truncation_drops_the_deadline_it_invalidates() {
 /// time.
 #[test]
 fn a_batch_appended_over_a_truncated_tail_is_still_held_until_it_is_due() {
-    let (_dir, mut log) = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
+    let TempLog { dir: _dir, mut log } = log_of(scheduled_config(ONE_BATCH_PER_SEGMENT), &[
         PAST_MS, PAST_MS, PAST_MS,
     ]);
 

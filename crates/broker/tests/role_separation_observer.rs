@@ -247,18 +247,31 @@ async fn broker_only_node_observes_and_forwards() {
     cluster.shutdown().await;
 }
 
+/// A restarted node and the health state its startup marked.
+struct RestartedBroker {
+    handle: BrokerHandle,
+    health: HealthState,
+}
+
+/// A broker row of a `DescribeCluster` answer.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ListedBroker {
+    broker_id: i32,
+    is_fenced: bool,
+}
+
 /// Restart a broker-only node on the same ports and log dir it was using, and
 /// return the [`HealthState`] its startup marked, so the caller can read the
 /// readiness verdict the node would serve on `/readyz`.
 ///
 /// The vacated ports are not always immediately bindable on Linux, so this
 /// retries `AddrInUse` the way `support::start_reusing_addrs` does.
-async fn restart_broker_only(cfg: &BrokerConfig) -> (BrokerHandle, HealthState) {
+async fn restart_broker_only(cfg: &BrokerConfig) -> RestartedBroker {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let health = HealthState::new(DEFAULT_READINESS_MAX_METADATA_LAG);
         match Broker::start_with_health(cfg.clone(), health.clone()).await {
-            Ok(handle) => return (handle, health),
+            Ok(handle) => return RestartedBroker { handle, health },
             Err(error) if Instant::now() < deadline => {
                 tracing::warn!(%error, "broker-only restart failed; retrying");
                 tokio::time::sleep(Duration::from_millis(200)).await;
@@ -337,7 +350,10 @@ async fn a_broker_only_node_recovers_after_the_controller_prunes_past_its_fetch_
         ..
     } = cluster;
     brokers.remove(0).shutdown().await;
-    let (restarted, health) = restart_broker_only(&cfg).await;
+    let RestartedBroker {
+        handle: restarted,
+        health,
+    } = restart_broker_only(&cfg).await;
 
     // It rebuilt its whole image from the snapshot the controller pointed it
     // at: every topic committed before the restart is there, including the ones
@@ -409,13 +425,25 @@ async fn heartbeats_keep_brokers_unfenced_in_a_role_separated_cluster() {
             .await
             .unwrap();
         assert!(resp.error_code == 0);
-        let rows: BTreeSet<(i32, bool)> = resp
+        let rows: BTreeSet<ListedBroker> = resp
             .brokers
             .iter()
-            .map(|row| (row.broker_id, row.is_fenced))
+            .map(|row| ListedBroker {
+                broker_id: row.broker_id,
+                is_fenced: row.is_fenced,
+            })
             .collect();
         assert!(
-            rows == BTreeSet::from([(2, false), (3, false)]),
+            rows == BTreeSet::from([
+                ListedBroker {
+                    broker_id: 2,
+                    is_fenced: false,
+                },
+                ListedBroker {
+                    broker_id: 3,
+                    is_fenced: false,
+                },
+            ]),
             "DescribeCluster on node {} must list both brokers unfenced",
             broker.node_id()
         );
@@ -855,7 +883,10 @@ async fn a_separate_metadata_log_directory_rolls_cleans_and_restores_a_wiped_nod
     brokers.remove(0).shutdown().await;
     std::fs::remove_dir_all(&broker_data).unwrap();
     std::fs::remove_dir_all(&broker_metadata).unwrap();
-    let (restarted, _health) = restart_broker_only(&broker_cfg).await;
+    let RestartedBroker {
+        handle: restarted,
+        health: _health,
+    } = restart_broker_only(&broker_cfg).await;
     for topic in &topic_names {
         restarted.wait_until_partition_present(topic, 0).await;
     }

@@ -90,29 +90,43 @@ enum Action {
     Replay,
 }
 
-type TaskMapProjection = Vec<(String, Vec<i32>)>;
-type MemberProjection = (
-    String,
-    i32,
-    i32,
-    i8,
-    TaskMapProjection,
-    TaskMapProjection,
-    TaskMapProjection,
-    TaskMapProjection,
-    Instant,
-);
-type DurableMemberProjection = (
-    String,
-    i32,
-    i32,
-    i8,
-    TaskMapProjection,
-    TaskMapProjection,
-    TaskMapProjection,
-    TaskMapProjection,
-);
-type TargetProjection = Vec<(String, TaskMapProjection)>;
+/// The partitions of one subtopology.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct SubtopologyProjection {
+    subtopology: String,
+    partitions: Vec<i32>,
+}
+
+type TaskMapProjection = Vec<SubtopologyProjection>;
+
+/// The state of a member that a restart restores.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct DurableMemberProjection {
+    member_id: String,
+    member_epoch: i32,
+    previous_member_epoch: i32,
+    assignment_state: i8,
+    active: TaskMapProjection,
+    active_pending_revocation: TaskMapProjection,
+    standby: TaskMapProjection,
+    warmup: TaskMapProjection,
+}
+
+/// A member's durable state, and when it was last seen.
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct MemberProjection {
+    durable: DurableMemberProjection,
+    last_seen: Instant,
+}
+
+/// The tasks of one member's target assignment.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct MemberTargetProjection {
+    member_id: String,
+    tasks: TaskMapProjection,
+}
+
+type TargetProjection = Vec<MemberTargetProjection>;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 struct Projection {
@@ -216,7 +230,10 @@ fn at(state: &State) -> Instant {
 
 fn task_map_projection(map: &BTreeMap<String, Vec<i32>>) -> TaskMapProjection {
     map.iter()
-        .map(|(subtopology, partitions)| (subtopology.clone(), partitions.clone()))
+        .map(|(subtopology, partitions)| SubtopologyProjection {
+            subtopology: subtopology.clone(),
+            partitions: partitions.clone(),
+        })
         .collect()
 }
 
@@ -225,46 +242,38 @@ fn target_projection(
 ) -> TargetProjection {
     let mut projection: TargetProjection = target
         .iter()
-        .map(|(member, tasks)| (member.clone(), task_map_projection(tasks)))
+        .map(|(member, tasks)| MemberTargetProjection {
+            member_id: member.clone(),
+            tasks: task_map_projection(tasks),
+        })
         .collect();
     projection.sort();
     projection
 }
 
 fn durable_member(member: &StreamsMemberState) -> DurableMemberProjection {
-    (
-        member.member_id.clone(),
-        member.member_epoch,
-        member.previous_member_epoch,
-        member.assignment_state.as_i8(),
-        task_map_projection(&member.active),
-        task_map_projection(&member.active_pending_revocation),
-        task_map_projection(&member.standby),
-        task_map_projection(&member.warmup),
-    )
+    DurableMemberProjection {
+        member_id: member.member_id.clone(),
+        member_epoch: member.member_epoch,
+        previous_member_epoch: member.previous_member_epoch,
+        assignment_state: member.assignment_state.as_i8(),
+        active: task_map_projection(&member.active),
+        active_pending_revocation: task_map_projection(&member.active_pending_revocation),
+        standby: task_map_projection(&member.standby),
+        warmup: task_map_projection(&member.warmup),
+    }
 }
 
 fn member_projection(group: &StreamsGroupState) -> Vec<MemberProjection> {
     let mut projection: Vec<MemberProjection> = group
         .members
         .values()
-        .map(|member| {
-            let (id, epoch, previous, state, active, pending, standby, warmup) =
-                durable_member(member);
-            (
-                id,
-                epoch,
-                previous,
-                state,
-                active,
-                pending,
-                standby,
-                warmup,
-                member.last_seen,
-            )
+        .map(|member| MemberProjection {
+            durable: durable_member(member),
+            last_seen: member.last_seen,
         })
         .collect();
-    projection.sort_by(|left, right| left.0.cmp(&right.0));
+    projection.sort_by(|left, right| left.durable.member_id.cmp(&right.durable.member_id));
     projection
 }
 
@@ -275,28 +284,30 @@ fn durable_member_projection(group: &StreamsGroupState) -> Vec<DurableMemberProj
     projection
 }
 
-type DurableProjection = (
-    i32,
-    i32,
-    i32,
-    &'static str,
-    Vec<DurableMemberProjection>,
-    TargetProjection,
-    TargetProjection,
-    TargetProjection,
-);
+/// What a restart from the log restores of a group.
+#[derive(Debug, PartialEq, Eq)]
+struct DurableProjection {
+    group_epoch: i32,
+    assignment_epoch: i32,
+    topology_epoch: i32,
+    phase: &'static str,
+    members: Vec<DurableMemberProjection>,
+    target_active: TargetProjection,
+    target_standby: TargetProjection,
+    target_warmup: TargetProjection,
+}
 
 fn durable_projection(actor: &ActorState) -> DurableProjection {
-    (
-        actor.state.group_epoch,
-        actor.state.assignment_epoch,
-        actor.state.topology_epoch,
-        actor.state.phase.as_str(),
-        durable_member_projection(&actor.state),
-        target_projection(&actor.state.target.active),
-        target_projection(&actor.state.target.standby),
-        target_projection(&actor.state.target.warmup),
-    )
+    DurableProjection {
+        group_epoch: actor.state.group_epoch,
+        assignment_epoch: actor.state.assignment_epoch,
+        topology_epoch: actor.state.topology_epoch,
+        phase: actor.state.phase.as_str(),
+        members: durable_member_projection(&actor.state),
+        target_active: target_projection(&actor.state.target.active),
+        target_standby: target_projection(&actor.state.target.standby),
+        target_warmup: target_projection(&actor.state.target.warmup),
+    }
 }
 
 /// The tasks of all three roles that a heartbeat of `member_id` reports: its

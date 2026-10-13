@@ -74,7 +74,11 @@ fn entry(
 
 #[tokio::test]
 async fn alter_barrier_groups_refuses_a_name_of_32768_bytes_and_creates_nothing() {
-    let (handle, _dir, broker) = anonymous_broker().await;
+    let AnonymousBroker {
+        handle,
+        dir: _dir,
+        broker,
+    } = anonymous_broker().await;
     let (principal, peer) = (principal("ANONYMOUS"), peer());
     let long = "n".repeat(MAX_STRING_BYTES + 1);
     let request = AlterBarrierGroupsRequest {
@@ -97,16 +101,23 @@ async fn alter_barrier_groups_refuses_a_name_of_32768_bytes_and_creates_nothing(
     .expect("the request is answered");
 
     let response: AlterBarrierGroupsResponse = decode_response(&answer, VERSION);
-    let rows: Vec<(usize, i16)> = response
+    let rows: Vec<AnsweredRow> = response
         .results
         .iter()
-        .map(|row| (row.group.len(), row.error_code))
+        .map(|row| AnsweredRow {
+            group_len: row.group.len(),
+            error_code: row.error_code,
+        })
         .collect();
+    let invalid = |group_len| AnsweredRow {
+        group_len,
+        error_code: codes::INVALID_REQUEST,
+    };
     check!(
         rows == vec![
-            (long.len(), codes::INVALID_REQUEST),
-            ("short".len(), codes::INVALID_REQUEST),
-            (long.len(), codes::INVALID_REQUEST),
+            invalid(long.len()),
+            invalid("short".len()),
+            invalid(long.len())
         ]
     );
     check!(
@@ -121,7 +132,11 @@ async fn alter_barrier_groups_refuses_a_name_of_32768_bytes_and_creates_nothing(
 
 #[tokio::test]
 async fn write_barrier_markers_refuses_a_group_of_32768_bytes_on_every_partition() {
-    let (handle, _dir, broker) = anonymous_broker().await;
+    let AnonymousBroker {
+        handle,
+        dir: _dir,
+        broker,
+    } = anonymous_broker().await;
     let (principal, peer) = (principal("ANONYMOUS"), peer());
     // The broker leads no `orders` partition, so a request that passes the
     // name check answers NOT_LEADER_OR_FOLLOWER for it.
@@ -167,9 +182,27 @@ async fn write_barrier_markers_refuses_a_group_of_32768_bytes_on_every_partition
     handle.shutdown().await;
 }
 
-async fn anonymous_broker() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
+/// A started broker that allows every request, with its data directory.
+struct AnonymousBroker {
+    handle: BrokerHandle,
+    dir: tempfile::TempDir,
+    broker: Arc<Broker>,
+}
+
+/// The answer a group row of an `AlterBarrierGroups` response carries.
+#[derive(Debug, PartialEq, Eq)]
+struct AnsweredRow {
+    group_len: usize,
+    error_code: i16,
+}
+
+async fn anonymous_broker() -> AnonymousBroker {
     let (handle, dir) =
         start_broker_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
     let broker = handle.broker_arc_for_test();
-    (handle, dir, broker)
+    AnonymousBroker {
+        handle,
+        dir,
+        broker,
+    }
 }

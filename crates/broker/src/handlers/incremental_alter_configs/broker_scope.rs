@@ -8,7 +8,7 @@
 //! live in [`crate::config_keys::broker_dynamic`].
 
 use {
-    super::{OP_APPEND, OP_DELETE, OP_SET, OP_SUBTRACT},
+    super::{OP_APPEND, OP_DELETE, OP_SET, OP_SUBTRACT, submit_or_refuse},
     crate::{
         api_catalog::UnstableApiVersions,
         codes,
@@ -22,7 +22,7 @@ use {
         },
         cordoned_log_dirs::CORDONED_LOG_DIRS,
     },
-    krabka_metadata::{BrokerConfigRecord, MetadataImage, MetadataRecord, NodeId},
+    krabka_metadata::{BrokerConfigRecord, MetadataRecord},
     krabka_protocol::owned::{
         incremental_alter_configs_request::AlterConfigsResource,
         incremental_alter_configs_response::AlterConfigsResourceResponse,
@@ -207,21 +207,11 @@ pub(super) fn preprocess_broker_resource(
 
 pub(super) fn handle_broker_scoped(
     resource: &AlterConfigsResource,
-    image: &MetadataImage,
-    serving: NodeId,
-    (log_dirs, unstable): (&[std::path::PathBuf], UnstableApiVersions),
+    context: BrokerConfigContext<'_>,
     out: &mut AlterConfigsResourceResponse,
     to_submit: &mut Vec<MetadataRecord>,
 ) {
-    match broker_records(resource, BrokerConfigContext {
-        image,
-        serving,
-        log_dirs,
-        unstable,
-    }) {
-        Ok(records) => to_submit.extend(records),
-        Err(error) => super::set_error_response(out, error),
-    }
+    submit_or_refuse(broker_records(resource, context), out, to_submit);
 }
 
 #[cfg(test)]
@@ -241,6 +231,7 @@ mod tests {
             throttle::LEADER_THROTTLED_RATE_KEY,
         },
         assert2::check,
+        krabka_metadata::{MetadataImage, NodeId},
         krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig,
     };
 
@@ -263,7 +254,15 @@ mod tests {
         })
     }
 
-    fn image_with(configs: &[(NodeId, &str, &str)], elr: bool) -> MetadataImage {
+    /// One stored dynamic config of a broker resource.
+    #[derive(Clone, Copy)]
+    struct StoredConfig<'a> {
+        node: NodeId,
+        key: &'a str,
+        value: &'a str,
+    }
+
+    fn image_with(configs: &[StoredConfig<'_>], elr: bool) -> MetadataImage {
         let mut image = make_image_with_broker(SERVING);
         image.apply(&MetadataRecord::V1BrokerRegistration(
             krabka_metadata::BrokerRegistrationRecord {
@@ -271,7 +270,7 @@ mod tests {
                 ..broker_registration(krabka_raft::NodeId(2))
             },
         ));
-        for (node, key, value) in configs {
+        for StoredConfig { node, key, value } in configs {
             image.apply(&record(*node, key, Some(value)));
         }
         if elr {
@@ -286,15 +285,21 @@ mod tests {
     }
 
     /// One row of the broker-resource table.
-    type Case<'a> = (
-        &'a str,
-        MetadataImage,
-        Vec<AlterableConfig>,
-        Result<Vec<MetadataRecord>, (i16, &'a str)>,
-    );
+    struct Case<'a> {
+        name: &'a str,
+        image: MetadataImage,
+        configs: Vec<AlterableConfig>,
+        want: Result<Vec<MetadataRecord>, (i16, &'a str)>,
+    }
 
     fn check_broker_record_cases(cases: Vec<Case<'_>>, setup: BrokerConfigMutationSetup<'_>) {
-        for (name, image, configs, want) in cases {
+        for Case {
+            name,
+            image,
+            configs,
+            want,
+        } in cases
+        {
             let resource = make_resource(name, configs.clone());
             let got = broker_records(
                 &resource,
@@ -318,183 +323,190 @@ mod tests {
         let rate = LEADER_THROTTLED_RATE_KEY;
         let min_isr = config_keys::MIN_INSYNC_REPLICAS;
         let cases: Vec<Case<'_>> = vec![
-            (
-                "1",
-                image_with(&[], false),
-                vec![make_set_cfg(rate, "2048")],
-                Ok(vec![record(SERVING, rate, Some("2048"))]),
-            ),
-            (
-                "2",
-                image_with(&[], false),
-                vec![make_set_cfg(rate, "2048")],
-                Err((
+            Case {
+                name: "1",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg(rate, "2048")],
+                want: Ok(vec![record(SERVING, rate, Some("2048"))]),
+            },
+            Case {
+                name: "2",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg(rate, "2048")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "Unexpected broker id, expected 1, but received 2",
                 )),
-            ),
-            (
-                "x",
-                image_with(&[], false),
-                vec![make_set_cfg(rate, "2048")],
-                Err((
+            },
+            Case {
+                name: "x",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg(rate, "2048")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "Node id must be an integer, but it is: x",
                 )),
-            ),
-            (
-                "1",
-                image_with(&[], false),
-                vec![op(rate, 7, "1")],
-                Err((codes::INVALID_REQUEST, "Unknown operations type 7")),
-            ),
-            (
-                "",
-                image_with(&[], false),
-                vec![make_set_cfg("log.retention.ms", "86400000")],
-                Ok(vec![record(cluster, "log.retention.ms", Some("86400000"))]),
-            ),
-            (
-                "",
-                image_with(&[], false),
-                vec![make_set_cfg("num.io.threads", "16")],
-                Ok(vec![record(cluster, "num.io.threads", Some("16"))]),
-            ),
-            (
-                "1",
-                image_with(&[], false),
-                vec![make_set_cfg(
+            },
+            Case {
+                name: "1",
+                image: image_with(&[], false),
+                configs: vec![op(rate, 7, "1")],
+                want: Err((codes::INVALID_REQUEST, "Unknown operations type 7")),
+            },
+            Case {
+                name: "",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg("log.retention.ms", "86400000")],
+                want: Ok(vec![record(cluster, "log.retention.ms", Some("86400000"))]),
+            },
+            Case {
+                name: "",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg("num.io.threads", "16")],
+                want: Ok(vec![record(cluster, "num.io.threads", Some("16"))]),
+            },
+            Case {
+                name: "1",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg(
                     "listener.name.client.ssl.keystore.location",
                     "/k",
                 )],
-                Ok(vec![record(
+                want: Ok(vec![record(
                     SERVING,
                     "listener.name.client.ssl.keystore.location",
                     Some("/k"),
                 )]),
-            ),
-            (
-                "",
-                image_with(&[], false),
-                vec![make_set_cfg("log.dirs", "/tmp")],
-                Err((
+            },
+            Case {
+                name: "",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg("log.dirs", "/tmp")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "Cannot update these configs dynamically: [log.dirs]",
                 )),
-            ),
+            },
             // `kafka-configs --entity-type brokers --entity-default
             // --add-config auto.leader.rebalance.enable=false` is refused, as
             // is every other `KafkaConfig` key that is not dynamic.
-            (
-                "",
-                image_with(&[], false),
-                vec![make_set_cfg("auto.leader.rebalance.enable", "false")],
-                Err((
+            Case {
+                name: "",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg("auto.leader.rebalance.enable", "false")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "Cannot update these configs dynamically: [auto.leader.rebalance.enable]",
                 )),
-            ),
-            (
-                "",
-                image_with(&[], false),
-                vec![make_set_cfg("max.connections", "-5")],
-                Err((
+            },
+            Case {
+                name: "",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg("max.connections", "-5")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "Invalid value -5 for configuration max.connections: Value must be at least 0",
                 )),
-            ),
-            (
-                "",
-                image_with(&[], false),
-                vec![op("metric.reporters", OP_APPEND, "com.example.Reporter")],
-                Ok(vec![record(
+            },
+            Case {
+                name: "",
+                image: image_with(&[], false),
+                configs: vec![op("metric.reporters", OP_APPEND, "com.example.Reporter")],
+                want: Ok(vec![record(
                     krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID,
                     "metric.reporters",
                     Some("org.apache.kafka.common.metrics.JmxReporter,com.example.Reporter"),
                 )]),
-            ),
-            (
-                "1",
-                image_with(&[], false),
-                vec![make_set_cfg(rate, "-5")],
-                Err((
+            },
+            Case {
+                name: "1",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg(rate, "-5")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "Invalid value -5 for configuration leader.replication.throttled.rate: \
                      Value must be at least 0",
                 )),
-            ),
-            (
-                "1",
-                image_with(&[], false),
-                vec![make_set_cfg(
+            },
+            Case {
+                name: "1",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg(
                     config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
                     "true",
                 )],
-                Ok(vec![record(
+                want: Ok(vec![record(
                     SERVING,
                     config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
                     Some("true"),
                 )]),
-            ),
-            (
-                "1",
-                image_with(&[], false),
-                vec![make_set_cfg(min_isr, "2")],
-                Ok(vec![record(SERVING, min_isr, Some("2"))]),
-            ),
-            (
-                "1",
-                image_with(&[], true),
-                vec![make_set_cfg(min_isr, "2")],
-                Err((
+            },
+            Case {
+                name: "1",
+                image: image_with(&[], false),
+                configs: vec![make_set_cfg(min_isr, "2")],
+                want: Ok(vec![record(SERVING, min_isr, Some("2"))]),
+            },
+            Case {
+                name: "1",
+                image: image_with(&[], true),
+                configs: vec![make_set_cfg(min_isr, "2")],
+                want: Err((
                     codes::INVALID_CONFIG,
                     "Broker-level min.insync.replicas cannot be altered while ELR is enabled.",
                 )),
-            ),
-            (
-                "",
-                image_with(&[], true),
-                vec![make_del_cfg(min_isr)],
-                Err((
+            },
+            Case {
+                name: "",
+                image: image_with(&[], true),
+                configs: vec![make_del_cfg(min_isr)],
+                want: Err((
                     codes::INVALID_CONFIG,
                     "Cluster-level min.insync.replicas cannot be removed while ELR is enabled.",
                 )),
-            ),
-            (
-                "1",
-                image_with(&[], false),
-                vec![op(rate, OP_APPEND, "1")],
-                Err((
+            },
+            Case {
+                name: "1",
+                image: image_with(&[], false),
+                configs: vec![op(rate, OP_APPEND, "1")],
+                want: Err((
                     codes::INVALID_CONFIG,
                     "Config value append is not allowed for config key: \
                      leader.replication.throttled.rate",
                 )),
-            ),
-            (
-                "1",
-                image_with(&[], false),
-                vec![op("not.a.kafka.key", OP_SUBTRACT, "1")],
-                Err((
+            },
+            Case {
+                name: "1",
+                image: image_with(&[], false),
+                configs: vec![op("not.a.kafka.key", OP_SUBTRACT, "1")],
+                want: Err((
                     codes::INVALID_CONFIG,
                     "Unknown config name: not.a.kafka.key",
                 )),
-            ),
-            (
-                "",
-                image_with(&[], false),
-                vec![op("log.cleanup.policy", OP_APPEND, "compact")],
-                Ok(vec![record(
+            },
+            Case {
+                name: "",
+                image: image_with(&[], false),
+                configs: vec![op("log.cleanup.policy", OP_APPEND, "compact")],
+                want: Ok(vec![record(
                     cluster,
                     "log.cleanup.policy",
                     Some("delete,compact"),
                 )]),
-            ),
-            (
-                "",
-                image_with(&[(cluster, "log.cleanup.policy", "compact,delete")], false),
-                vec![op("log.cleanup.policy", OP_SUBTRACT, "delete")],
-                Ok(vec![record(cluster, "log.cleanup.policy", Some("compact"))]),
-            ),
+            },
+            Case {
+                name: "",
+                image: image_with(
+                    &[StoredConfig {
+                        node: cluster,
+                        key: "log.cleanup.policy",
+                        value: "compact,delete",
+                    }],
+                    false,
+                ),
+                configs: vec![op("log.cleanup.policy", OP_SUBTRACT, "delete")],
+                want: Ok(vec![record(cluster, "log.cleanup.policy", Some("compact"))]),
+            },
         ];
         check_broker_record_cases(cases, BrokerConfigMutationSetup::default());
     }
@@ -571,7 +583,7 @@ mod tests {
             std::path::PathBuf::from("/tmp/d1"),
             std::path::PathBuf::from("/tmp/d2"),
         ];
-        let at_level = |level: i16, configs: &[(NodeId, &str, &str)]| {
+        let at_level = |level: i16, configs: &[StoredConfig<'_>]| {
             let mut image = image_with(configs, false);
             image.apply(&MetadataRecord::V1FeatureLevel(
                 krabka_metadata::FeatureLevelRecord {
@@ -587,81 +599,89 @@ mod tests {
              metadata.version >= 4.3-IV0",
         );
         let cases: Vec<Case<'_>> = vec![
-            (
-                "1",
-                at_level(30, &[]),
-                vec![make_set_cfg(KEY, "/tmp/d1")],
-                Ok(vec![record(SERVING, KEY, Some("/tmp/d1"))]),
-            ),
-            (
-                "1",
-                at_level(30, &[]),
-                vec![make_set_cfg(KEY, "*")],
-                Ok(vec![record(SERVING, KEY, Some("*"))]),
-            ),
-            (
-                "1",
-                at_level(30, &[(SERVING, KEY, "/tmp/d1")]),
-                vec![op(KEY, OP_APPEND, "/tmp/d2")],
-                Ok(vec![record(SERVING, KEY, Some("/tmp/d1,/tmp/d2"))]),
-            ),
-            (
-                "1",
-                at_level(30, &[(SERVING, KEY, "/tmp/d1,/tmp/d2")]),
-                vec![op(KEY, OP_SUBTRACT, "/tmp/d1")],
-                Ok(vec![record(SERVING, KEY, Some("/tmp/d2"))]),
-            ),
-            (
-                "1",
-                at_level(30, &[]),
-                vec![make_set_cfg(KEY, "/tmp/nope")],
-                Err((
+            Case {
+                name: "1",
+                image: at_level(30, &[]),
+                configs: vec![make_set_cfg(KEY, "/tmp/d1")],
+                want: Ok(vec![record(SERVING, KEY, Some("/tmp/d1"))]),
+            },
+            Case {
+                name: "1",
+                image: at_level(30, &[]),
+                configs: vec![make_set_cfg(KEY, "*")],
+                want: Ok(vec![record(SERVING, KEY, Some("*"))]),
+            },
+            Case {
+                name: "1",
+                image: at_level(30, &[StoredConfig {
+                    node: SERVING,
+                    key: KEY,
+                    value: "/tmp/d1",
+                }]),
+                configs: vec![op(KEY, OP_APPEND, "/tmp/d2")],
+                want: Ok(vec![record(SERVING, KEY, Some("/tmp/d1,/tmp/d2"))]),
+            },
+            Case {
+                name: "1",
+                image: at_level(30, &[StoredConfig {
+                    node: SERVING,
+                    key: KEY,
+                    value: "/tmp/d1,/tmp/d2",
+                }]),
+                configs: vec![op(KEY, OP_SUBTRACT, "/tmp/d1")],
+                want: Ok(vec![record(SERVING, KEY, Some("/tmp/d2"))]),
+            },
+            Case {
+                name: "1",
+                image: at_level(30, &[]),
+                configs: vec![make_set_cfg(KEY, "/tmp/nope")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "requirement failed: All entries in cordoned.log.dirs must be present in \
                      log.dirs or log.dir. Missing entries : /tmp/nope",
                 )),
-            ),
-            (
-                "1",
-                at_level(30, &[]),
-                vec![make_set_cfg(KEY, "*,/tmp/d1")],
-                Err((
+            },
+            Case {
+                name: "1",
+                image: at_level(30, &[]),
+                configs: vec![make_set_cfg(KEY, "*,/tmp/d1")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "requirement failed: When cordoned.log.dirs is set to *, it must not \
                      contain other values",
                 )),
-            ),
-            (
-                "1",
-                at_level(30, &[]),
-                vec![make_set_cfg(KEY, "/tmp/d1,")],
-                Err((
+            },
+            Case {
+                name: "1",
+                image: at_level(30, &[]),
+                configs: vec![make_set_cfg(KEY, "/tmp/d1,")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "Configuration 'cordoned.log.dirs' values must not be empty.",
                 )),
-            ),
-            (
-                "",
-                at_level(30, &[]),
-                vec![make_set_cfg(KEY, "/tmp/d1")],
-                Err((
+            },
+            Case {
+                name: "",
+                image: at_level(30, &[]),
+                configs: vec![make_set_cfg(KEY, "/tmp/d1")],
+                want: Err((
                     codes::INVALID_REQUEST,
                     "Cannot update these configs at default cluster level, broker id must be \
                      specified: [cordoned.log.dirs]",
                 )),
-            ),
-            (
-                "1",
-                at_level(29, &[]),
-                vec![make_set_cfg(KEY, "")],
-                Err(disabled),
-            ),
-            (
-                "1",
-                at_level(29, &[]),
-                vec![make_del_cfg(KEY)],
-                Err(disabled),
-            ),
+            },
+            Case {
+                name: "1",
+                image: at_level(29, &[]),
+                configs: vec![make_set_cfg(KEY, "")],
+                want: Err(disabled),
+            },
+            Case {
+                name: "1",
+                image: at_level(29, &[]),
+                configs: vec![make_del_cfg(KEY)],
+                want: Err(disabled),
+            },
         ];
         check_broker_record_cases(cases, BrokerConfigMutationSetup {
             log_dirs: &log_dirs,

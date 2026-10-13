@@ -9,11 +9,11 @@ use {
         io::{FileIo, LogIo},
         leader_epoch_checkpoint::EpochEntry,
         log::test_support::{
-            abort_marker, append_transaction, assert_empty_append_state, assert_only_active,
-            check_append_time_lookup, configured_test_log, gzip_value, install_stamps,
-            log_append_time_log, rolling_test_log, sample_batch, sample_batch_with_epoch,
-            sample_log, stamped_test_log, test_batch_at, test_log, tiny_segments,
-            transactional_batch, verbatim_from, write_with_budget,
+            EncodedVerbatim, TempLog, abort_marker, append_transaction, assert_empty_append_state,
+            assert_only_active, check_append_time_lookup, configured_test_log, gzip_value,
+            install_stamps, log_append_time_log, rolling_test_log, sample_batch,
+            sample_batch_with_epoch, sample_log, stamped_test_log, test_batch_at, test_log,
+            tiny_segments, transactional_batch, verbatim_from, write_with_budget,
         },
         name::log_path,
         retention::now_ms,
@@ -92,7 +92,7 @@ fn assert_storage_full(error: &LogError) {
 
 #[test]
 fn partial_write_rolls_back_cursor_and_recovers_pre_append_state() {
-    let (dir, mut log) = test_log();
+    let TempLog { dir, mut log } = test_log();
     fail_after_bytes(&mut log, 16);
 
     let error = log.append(&mut sample_batch(2)).unwrap_err();
@@ -107,7 +107,7 @@ fn partial_write_rolls_back_cursor_and_recovers_pre_append_state() {
 
 #[test]
 fn shorter_append_after_partial_write_leaves_no_physical_tail() {
-    let (dir, mut log) = test_log();
+    let TempLog { dir, mut log } = test_log();
     let mut first = sample_batch(1);
     log.append(&mut first).unwrap();
     let log_path = log_path(dir.path(), 0);
@@ -177,67 +177,87 @@ fn sync_failure_rolls_back_leo_producer_and_transaction_state() {
 /// call that appends at `(log, position, leader_epoch)`.
 type AppendPath<'a> = Box<dyn Fn(&mut Log, usize, i32) + 'a>;
 
+/// A name for an append path, and the call that appends through it.
+struct AppendRoute<'a> {
+    path: &'static str,
+    append: AppendPath<'a>,
+}
+
+/// A row of offered epochs and the checkpoint entries they leave.
+struct EpochRow {
+    name: &'static str,
+    offered: &'static [i32],
+    expected: Vec<EpochEntry>,
+}
+
 #[test]
 fn every_appended_batch_is_assigned_its_leader_epoch() {
     let entry = |epoch, start_offset| EpochEntry {
         epoch: LeaderEpoch(epoch),
         start_offset: Offset(start_offset),
     };
-    let rows: [(&str, &[i32], Vec<EpochEntry>); 3] = [
-        (
-            "unknown epochs record nothing and a repeat is a no-op",
-            &[-1, 5, 5, 6, -1],
-            vec![entry(5, 1), entry(6, 3)],
-        ),
-        (
-            "an older epoch truncates the entries it does not follow",
-            &[1, 3, 2],
-            vec![entry(1, 0), entry(2, 2)],
-        ),
-        (
-            "an epoch older than every entry replaces them all",
-            &[4, 6, 3],
-            vec![entry(3, 2)],
-        ),
+    let rows = [
+        EpochRow {
+            name: "unknown epochs record nothing and a repeat is a no-op",
+            offered: &[-1, 5, 5, 6, -1],
+            expected: vec![entry(5, 1), entry(6, 3)],
+        },
+        EpochRow {
+            name: "an older epoch truncates the entries it does not follow",
+            offered: &[1, 3, 2],
+            expected: vec![entry(1, 0), entry(2, 2)],
+        },
+        EpochRow {
+            name: "an epoch older than every entry replaces them all",
+            offered: &[4, 6, 3],
+            expected: vec![entry(3, 2)],
+        },
     ];
 
-    for (name, offered, expected) in rows {
+    for EpochRow {
+        name,
+        offered,
+        expected,
+    } in rows
+    {
         let at = |i: usize| Offset(i64::try_from(i).unwrap());
-        let paths: [(&str, AppendPath<'_>); 4] = [
-            (
-                "append",
-                Box::new(|log, _, epoch| {
+        let paths: [AppendRoute<'_>; 4] = [
+            AppendRoute {
+                path: "append",
+                append: Box::new(|log, _, epoch| {
                     let mut batch = sample_batch(1);
                     batch.partition_leader_epoch = epoch;
                     log.append(&mut batch).expect("append");
                 }),
-            ),
-            (
-                "append_at",
-                Box::new(|log, i, epoch| {
+            },
+            AppendRoute {
+                path: "append_at",
+                append: Box::new(|log, i, epoch| {
                     let mut batch = sample_batch(1);
                     batch.partition_leader_epoch = epoch;
                     log.append_at(&mut batch, at(i)).expect("append_at");
                 }),
-            ),
-            (
-                "append_verbatim",
-                Box::new(|log, _, epoch| {
-                    let (_wire, vb) = verbatim_from(&test_batch_at(0), LeaderEpoch(epoch));
+            },
+            AppendRoute {
+                path: "append_verbatim",
+                append: Box::new(|log, _, epoch| {
+                    let EncodedVerbatim { batch: vb, .. } =
+                        verbatim_from(&test_batch_at(0), LeaderEpoch(epoch));
                     log.append_verbatim(&vb).expect("append_verbatim");
                 }),
-            ),
-            (
-                "append_verbatim_at",
-                Box::new(|log, i, epoch| {
-                    let (_wire, vb) = verbatim_from(&test_batch_at(0), LeaderEpoch(epoch));
+            },
+            AppendRoute {
+                path: "append_verbatim_at",
+                append: Box::new(|log, i, epoch| {
+                    let EncodedVerbatim { batch: vb, .. } =
+                        verbatim_from(&test_batch_at(0), LeaderEpoch(epoch));
                     log.append_verbatim_at(&vb, at(i))
                         .expect("append_verbatim_at");
                 }),
-            ),
+            },
         ];
-        for (path, append) in &paths {
-            let (_dir, mut log) = test_log();
+        for AppendRoute { path, append } in &paths {
+            let TempLog { dir: _dir, mut log } = test_log();
             for (i, epoch) in offered.iter().enumerate() {
                 append(&mut log, i, *epoch);
             }
@@ -251,7 +271,7 @@ fn every_appended_batch_is_assigned_its_leader_epoch() {
 
 #[test]
 fn append_at_uses_reconciled_frontier_floor() {
-    let (dir, mut log) = test_log();
+    let TempLog { dir, mut log } = test_log();
     let mut prefix = test_batch_at(0);
     log.append(&mut prefix).unwrap();
 
@@ -275,7 +295,7 @@ fn append_at_uses_reconciled_frontier_floor() {
 /// log's later reads, not the write.
 #[test]
 fn a_replicated_batch_is_not_held_to_the_decompressed_record_limit() {
-    let (_dir, mut log) = configured_test_log(LogConfig {
+    let TempLog { dir: _dir, mut log } = configured_test_log(LogConfig {
         max_decompressed_record: Some(bytes(100)),
         ..LogConfig::default()
     });
@@ -289,7 +309,7 @@ fn a_replicated_batch_is_not_held_to_the_decompressed_record_limit() {
 
 #[test]
 fn assigned_append_uses_reconciled_frontier_floor() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     log.append(&mut test_batch_at(0)).unwrap();
     log.reconcile_next_offset(Offset(3));
 
@@ -303,7 +323,7 @@ fn assigned_append_uses_reconciled_frontier_floor() {
 
 #[test]
 fn invalid_interval_is_write_free_and_a_corrected_retry_succeeds() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let mut invalid = sample_batch(1);
     invalid.last_offset_delta = -1;
 
@@ -319,7 +339,7 @@ fn invalid_interval_is_write_free_and_a_corrected_retry_succeeds() {
 
 #[test]
 fn successor_overflow_is_rejected_before_log_mutation() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     log.reconcile_next_offset(Offset(i64::MAX));
     let mut batch = sample_batch(1);
 
@@ -331,7 +351,7 @@ fn successor_overflow_is_rejected_before_log_mutation() {
 
 #[test]
 fn sidecar_failure_rolls_back_bytes_frontiers_and_allows_retry() {
-    let (_dir, mut log) = stamped_test_log(100, 1);
+    let TempLog { dir: _dir, mut log } = stamped_test_log(100, 1);
     log.stamp_indexes.clear();
 
     let error = log.append(&mut sample_batch(1)).unwrap_err();
@@ -349,17 +369,23 @@ fn sidecar_failure_rolls_back_bytes_frontiers_and_allows_retry() {
 
 #[test]
 fn segment_bytes_are_synced_before_durable_sidecars() {
-    let (_dir, mut stamped_log) = stamped_test_log(100, 1);
+    let TempLog {
+        dir: _dir,
+        log: mut stamped_log,
+    } = stamped_test_log(100, 1);
     let stamp_syncs = std::sync::Arc::new(CountSync(std::sync::atomic::AtomicUsize::new(0)));
     stamped_log.test_set_io(stamp_syncs.clone());
 
     stamped_log.append(&mut sample_batch(1)).unwrap();
     assert!(stamp_syncs.0.load(std::sync::atomic::Ordering::Relaxed) == 1);
 
-    let (_dir, mut transaction_log) = test_log();
+    let TempLog {
+        dir: _dir,
+        log: mut transaction_log,
+    } = test_log();
     let txn_syncs = std::sync::Arc::new(CountSync(std::sync::atomic::AtomicUsize::new(0)));
     transaction_log.test_set_io(txn_syncs.clone());
-    append_transaction(&mut transaction_log, (7, 0), &["value"]);
+    append_transaction(&mut transaction_log, 7, 0, &["value"]);
     assert!(txn_syncs.0.load(std::sync::atomic::Ordering::Relaxed) == 0);
 
     transaction_log.append(&mut abort_marker(7, 0)).unwrap();
@@ -368,7 +394,7 @@ fn segment_bytes_are_synced_before_durable_sidecars() {
 
 #[test]
 fn post_roll_failure_restores_the_previous_active_segment() {
-    let (_dir, mut log) = configured_test_log(LogConfig {
+    let TempLog { dir: _dir, mut log } = configured_test_log(LogConfig {
         flush_on_append: true,
         ..tiny_segments()
     });
@@ -412,7 +438,7 @@ fn post_roll_partial_write_restores_the_previous_active_segment() {
 
 #[test]
 fn append_assigns_monotonic_offsets() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let mut b1 = sample_batch(3);
     let mut b2 = sample_batch(2);
     let (first_offset, _) = log.append(&mut b1).unwrap();
@@ -424,7 +450,7 @@ fn append_assigns_monotonic_offsets() {
 
 #[test]
 fn append_at_matching_offset_preserves_caller_offset() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let mut b = sample_batch(3);
     // Pretend the caller (a replicator) already knows the leader's
     // assigned offset for this batch is 0.
@@ -442,7 +468,7 @@ fn append_at_matching_offset_preserves_caller_offset() {
 /// offset, the duplicate or divergence a replicator has to notice.
 #[test]
 fn append_at_below_the_log_end_offset_errors() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     log.append(&mut sample_batch(3)).unwrap();
     let mut b = sample_batch(2);
     let err = log.append_at(&mut b, Offset(2)).unwrap_err();
@@ -458,7 +484,7 @@ fn append_at_below_the_log_end_offset_errors() {
 /// compacted leader's log has between two batches.
 #[test]
 fn append_at_past_the_log_end_offset_leaves_a_hole() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     log.append_at(&mut sample_batch(2), Offset(0)).unwrap();
     let mut b = sample_batch(2);
 
@@ -479,7 +505,7 @@ fn append_at_past_the_log_end_offset_leaves_a_hole() {
 #[test]
 fn segment_rolls_when_bytes_exceeded() {
     // tiny so we roll fast
-    let (dir, _log) = sample_log(
+    let TempLog { dir, log: _log } = sample_log(
         LogConfig {
             segment_size: bytes(200),
             ..LogConfig::default()
@@ -501,31 +527,59 @@ fn segment_rolls_when_bytes_exceeded() {
 fn segment_ms_rolls_against_the_incoming_batch_timestamp() {
     use krabka_units::prelude::{gibibytes, millis};
 
-    // `(segment_ms, first_ts, incoming_ts, expect_roll, label)`.
-    let cases: [(u32, i64, i64, bool, &str); 4] = [
-        (10_000, 0, 10_001, true, "gap exceeds segment.ms"),
-        (
-            10_000,
-            0,
-            10_000,
-            false,
-            "gap equal to segment.ms does not roll",
-        ),
-        (10_000, 0, 5_000, false, "within segment.ms"),
+    /// `segment.ms`, the first and incoming batch timestamps, whether the
+    /// incoming batch rolls, and a label.
+    struct RollCase {
+        segment_ms: u32,
+        first_ts: i64,
+        incoming_ts: i64,
+        expect_roll: bool,
+        label: &'static str,
+    }
+
+    let cases = [
+        RollCase {
+            segment_ms: 10_000,
+            first_ts: 0,
+            incoming_ts: 10_001,
+            expect_roll: true,
+            label: "gap exceeds segment.ms",
+        },
+        RollCase {
+            segment_ms: 10_000,
+            first_ts: 0,
+            incoming_ts: 10_000,
+            expect_roll: false,
+            label: "gap equal to segment.ms does not roll",
+        },
+        RollCase {
+            segment_ms: 10_000,
+            first_ts: 0,
+            incoming_ts: 5_000,
+            expect_roll: false,
+            label: "within segment.ms",
+        },
         // A backfill batch with an old timestamp: the gap is measured from
         // the batch's own stamp, not from when it arrived, so a producer
         // backfilling old records rolls on krabka exactly when it would on
         // Kafka and not otherwise.
-        (
-            10_000,
-            100_000,
-            80_000,
-            false,
-            "backfill batch narrows the gap",
-        ),
+        RollCase {
+            segment_ms: 10_000,
+            first_ts: 100_000,
+            incoming_ts: 80_000,
+            expect_roll: false,
+            label: "backfill batch narrows the gap",
+        },
     ];
-    for (segment_ms, first_ts, incoming_ts, expect_roll, label) in cases {
-        let (_dir, mut log) = configured_test_log(LogConfig {
+    for RollCase {
+        segment_ms,
+        first_ts,
+        incoming_ts,
+        expect_roll,
+        label,
+    } in cases
+    {
+        let TempLog { dir: _dir, mut log } = configured_test_log(LogConfig {
             segment_size: gibibytes(1),
             segment_roll_interval: millis(segment_ms),
             ..LogConfig::default()
@@ -552,7 +606,7 @@ fn segment_ms_rolls_against_the_incoming_batch_timestamp() {
 fn an_idle_partition_never_rolls() {
     use krabka_units::prelude::millis;
 
-    let (_dir, mut log) = configured_test_log(LogConfig {
+    let TempLog { dir: _dir, mut log } = configured_test_log(LogConfig {
         segment_roll_interval: millis(1),
         ..LogConfig::default()
     });
@@ -573,41 +627,55 @@ fn an_idle_partition_never_rolls() {
 fn a_full_offset_or_time_index_rolls_the_segment() {
     use krabka_units::prelude::mebibytes;
 
-    // `(label, segment.index.bytes, rising timestamps, segment bases)`.
-    let cases: [(&str, ByteSize, bool, Vec<i64>); 5] = [
-        (
-            "a time index too small for an entry rolls every batch",
-            bytes(12),
-            true,
-            (0..10).collect(),
-        ),
-        (
-            "two time-index slots fill after one entry",
-            bytes(24),
-            true,
-            vec![0, 2, 4, 6, 8],
-        ),
-        (
-            "three time-index slots fill after two entries",
-            bytes(36),
-            true,
-            vec![0, 3, 6, 9],
-        ),
-        (
-            "a flat clock leaves the four offset-index slots to fill",
-            bytes(36),
-            false,
-            vec![0, 5],
-        ),
-        (
-            "Kafka's default holds every entry",
-            mebibytes(10),
-            true,
-            vec![0],
-        ),
+    /// A label, `segment.index.bytes`, whether timestamps rise, and the
+    /// expected segment bases.
+    struct IndexRollCase {
+        label: &'static str,
+        segment_index_size: ByteSize,
+        rising: bool,
+        expected: Vec<i64>,
+    }
+
+    let cases = [
+        IndexRollCase {
+            label: "a time index too small for an entry rolls every batch",
+            segment_index_size: bytes(12),
+            rising: true,
+            expected: (0..10).collect(),
+        },
+        IndexRollCase {
+            label: "two time-index slots fill after one entry",
+            segment_index_size: bytes(24),
+            rising: true,
+            expected: vec![0, 2, 4, 6, 8],
+        },
+        IndexRollCase {
+            label: "three time-index slots fill after two entries",
+            segment_index_size: bytes(36),
+            rising: true,
+            expected: vec![0, 3, 6, 9],
+        },
+        IndexRollCase {
+            label: "a flat clock leaves the four offset-index slots to fill",
+            segment_index_size: bytes(36),
+            rising: false,
+            expected: vec![0, 5],
+        },
+        IndexRollCase {
+            label: "Kafka's default holds every entry",
+            segment_index_size: mebibytes(10),
+            rising: true,
+            expected: vec![0],
+        },
     ];
-    for (label, segment_index_size, rising, expected) in cases {
-        let (_dir, mut log) = configured_test_log(LogConfig {
+    for IndexRollCase {
+        label,
+        segment_index_size,
+        rising,
+        expected,
+    } in cases
+    {
+        let TempLog { dir: _dir, mut log } = configured_test_log(LogConfig {
             index_interval: bytes(1),
             segment_index_size,
             ..LogConfig::default()
@@ -666,7 +734,7 @@ fn roll_reopens_stampindex_for_new_segment() {
 
 #[test]
 fn append_records_epoch_transition() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let mut b = sample_batch_with_epoch(3, 0);
     log.append(&mut b).unwrap();
     let mut b2 = sample_batch_with_epoch(2, 1); // 2 records at epoch 1
@@ -703,7 +771,7 @@ fn only_batch(log: &Log) -> RecordBatch {
 /// record while the bit is set.
 #[test]
 fn log_append_time_stamps_the_batch_and_leaves_the_producer_timestamps_alone() {
-    let (dir, mut log) = log_append_time_log();
+    let TempLog { dir, mut log } = log_append_time_log();
     let mut produced = test_batch_at(0);
     produced.base_timestamp = 1_000;
     produced.max_timestamp = 1_000;
@@ -739,7 +807,7 @@ fn log_append_time_stamps_the_batch_and_leaves_the_producer_timestamps_alone() {
 /// `logAppendTimeMs` to report and the records keep the producer's clock.
 #[test]
 fn create_time_leaves_the_batch_untouched_and_reports_no_stamp() {
-    let (dir, mut log) = test_log();
+    let TempLog { dir, mut log } = test_log();
     let mut produced = test_batch_at(0);
     let expected = RecordBatch {
         base_offset: 0,
@@ -759,7 +827,7 @@ fn create_time_leaves_the_batch_untouched_and_reports_no_stamp() {
 /// producer's own timestamp finds nothing, and the stamp finds the batch.
 #[test]
 fn offset_for_timestamp_answers_in_append_time() {
-    let (dir, mut log) = log_append_time_log();
+    let TempLog { dir, mut log } = log_append_time_log();
     let mut produced = test_batch_at(0);
     // Far enough in the past that no clock reading can collide with it.
     produced.base_timestamp = 1_000;
@@ -775,7 +843,7 @@ fn offset_for_timestamp_answers_in_append_time() {
 
 /// A log on a topic with `delivery.mode=scheduled` and, when `monotonic`,
 /// `delivery.schedule.monotonic=true`.
-fn scheduled_log(monotonic: ScheduleOrder) -> (tempfile::TempDir, Log) {
+fn scheduled_log(monotonic: ScheduleOrder) -> TempLog {
     let dir = tempdir().unwrap();
     let log = Log::open(dir.path(), LogConfig {
         delivery_policy: DeliveryPolicy::Scheduled,
@@ -783,7 +851,7 @@ fn scheduled_log(monotonic: ScheduleOrder) -> (tempfile::TempDir, Log) {
         ..LogConfig::default()
     })
     .unwrap();
-    (dir, log)
+    TempLog { dir, log }
 }
 
 /// A one-record batch whose delivery time — its `max_timestamp` on a
@@ -801,18 +869,49 @@ fn batch_delivered_at(delivery_ms: i64) -> RecordBatch {
 /// a refusal appends nothing.
 #[test]
 fn a_monotonic_scheduled_log_refuses_a_batch_that_precedes_its_schedule() {
-    /// `(delivery_ms, refused, label)`.
-    const CASES: [(i64, bool, &str); 5] = [
-        (2_001, false, "after the largest delivery time held"),
-        (2_000, false, "equal to it, which does not run backwards"),
-        (1_999, true, "one millisecond before it"),
-        (1_500, true, "between the two batches already scheduled"),
-        (0, true, "behind the whole schedule"),
+    /// The batch's delivery time, whether it is refused, and a label.
+    struct RefusalCase {
+        delivery_ms: i64,
+        refused: bool,
+        label: &'static str,
+    }
+
+    const CASES: [RefusalCase; 5] = [
+        RefusalCase {
+            delivery_ms: 2_001,
+            refused: false,
+            label: "after the largest delivery time held",
+        },
+        RefusalCase {
+            delivery_ms: 2_000,
+            refused: false,
+            label: "equal to it, which does not run backwards",
+        },
+        RefusalCase {
+            delivery_ms: 1_999,
+            refused: true,
+            label: "one millisecond before it",
+        },
+        RefusalCase {
+            delivery_ms: 1_500,
+            refused: true,
+            label: "between the two batches already scheduled",
+        },
+        RefusalCase {
+            delivery_ms: 0,
+            refused: true,
+            label: "behind the whole schedule",
+        },
     ];
 
-    for (delivery_ms, refused, label) in CASES {
+    for RefusalCase {
+        delivery_ms,
+        refused,
+        label,
+    } in CASES
+    {
         for verbatim in [false, true] {
-            let (dir, mut log) = scheduled_log(ScheduleOrder::Monotonic);
+            let TempLog { dir, mut log } = scheduled_log(ScheduleOrder::Monotonic);
             for seeded in [1_000, 2_000] {
                 log.append(&mut batch_delivered_at(seeded))
                     .expect("seed the partition schedule");
@@ -820,7 +919,7 @@ fn a_monotonic_scheduled_log_refuses_a_batch_that_precedes_its_schedule() {
             let end = log.log_end_offset();
 
             let result = if verbatim {
-                let (_wire, batch) =
+                let EncodedVerbatim { batch, .. } =
                     verbatim_from(&batch_delivered_at(delivery_ms), LeaderEpoch(1));
                 log.append_verbatim(&batch).map(|(base, _stamp)| base)
             } else {
@@ -850,12 +949,12 @@ fn a_monotonic_scheduled_log_refuses_a_batch_that_precedes_its_schedule() {
 /// admit the batch that the case above refuses.
 #[test]
 fn only_a_monotonic_scheduled_log_reads_the_schedule() {
-    let (dir, mut log) = scheduled_log(ScheduleOrder::Unordered);
+    let TempLog { dir, mut log } = scheduled_log(ScheduleOrder::Unordered);
     log.append(&mut batch_delivered_at(2_000)).unwrap();
     check!(log.append(&mut batch_delivered_at(0)).is_ok());
     drop(dir);
 
-    let (dir, mut log) = test_log();
+    let TempLog { dir, mut log } = test_log();
     log.append(&mut batch_delivered_at(2_000)).unwrap();
     check!(log.append(&mut batch_delivered_at(0)).is_ok());
     drop(dir);

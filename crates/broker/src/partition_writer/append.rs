@@ -25,17 +25,20 @@ type AppendOutcome = (
     Vec<krabka_log::ProducerSnapshotEntry>,
 );
 
+/// The group's held log lock and the topic's configured compression codec.
+struct LockedLog<'a> {
+    guard: std::sync::MutexGuard<'a, Log>,
+    target: Option<CompressionType>,
+}
+
 /// Hold the group's log lock after releasing any replicated transactions.
-fn prepare_log(
-    log: &Mutex<Log>,
-    high_watermark: Option<Offset>,
-) -> (std::sync::MutexGuard<'_, Log>, Option<CompressionType>) {
+fn prepare_log(log: &Mutex<Log>, high_watermark: Option<Offset>) -> LockedLog<'_> {
     let mut guard = lock_log(log);
     if let Some(high_watermark) = high_watermark {
         guard.release_replicated_transactions(high_watermark);
     }
     let target = guard.config_snapshot().compression_type;
-    (guard, target)
+    LockedLog { guard, target }
 }
 
 /// Append owned bytes at an assigned offset, or let the leader stamp them.
@@ -46,7 +49,7 @@ fn append_owned(
 ) -> Result<AppendedBatch, krabka_log::LogError> {
     match base {
         Some(base) => log.append_at(batch, base).map(|()| at_offset(base)),
-        None => log.append(batch).map(appended),
+        None => log.append(batch).map(|(base, stamp)| appended(base, stamp)),
     }
 }
 
@@ -61,7 +64,9 @@ fn append_data(
     let result = match data {
         ProduceData::Verbatim(batch) => match base {
             Some(base) => log.append_verbatim_at(&batch, base).map(at_offset),
-            None => log.append_verbatim(&batch).map(appended),
+            None => log
+                .append_verbatim(&batch)
+                .map(|(base, stamp)| appended(base, stamp)),
         },
         ProduceData::Owned(mut batch) | ProduceData::OwnedControl(mut batch) => {
             append_owned(log, &mut batch, base)
@@ -98,7 +103,7 @@ fn capture_control_entry(
 
 /// The writer's answer for a batch the log both placed and, when the partition
 /// asks for it, stamped.
-fn appended((base_offset, log_append_time_ms): (Offset, Option<i64>)) -> AppendedBatch {
+fn appended(base_offset: Offset, log_append_time_ms: Option<i64>) -> AppendedBatch {
     AppendedBatch {
         base_offset,
         log_append_time_ms,
@@ -163,7 +168,7 @@ fn append_produce_batch(
     high_watermark: Option<Offset>,
     (datas, checks): CheckedBatches,
 ) -> AppendOutcome {
-    let (mut guard, target) = prepare_log(log, high_watermark);
+    let LockedLog { mut guard, target } = prepare_log(log, high_watermark);
     if let Some(results) = try_append_direct_group(&mut guard, &datas, &checks) {
         return (results, guard.log_end_offset(), Vec::new());
     }
@@ -215,7 +220,7 @@ fn try_append_direct_group(
             // the following batches can share its Direct I/O write.
             results.push(
                 log.append_verbatim(remaining[0])
-                    .map(appended)
+                    .map(|(base, stamp)| appended(base, stamp))
                     .map_err(Into::into),
             );
             remaining = &remaining[1..];
@@ -270,7 +275,7 @@ fn append_produce_batch_at(
     high_watermark: Option<Offset>,
     (datas, checks): CheckedBatches,
 ) -> AppendOutcome {
-    let (mut guard, target) = prepare_log(log, high_watermark);
+    let LockedLog { mut guard, target } = prepare_log(log, high_watermark);
     let mut next = base;
     let mut results = Vec::with_capacity(datas.len());
     let mut control_entries = Vec::new();

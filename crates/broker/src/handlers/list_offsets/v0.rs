@@ -2,10 +2,11 @@
 
 use {
     super::{
+        DescribeSplit, IndexedTopic, PartitionRow, TopicPartitions,
         bound::{fetch_bound, last_fetchable_offset},
         leadership::resolve_for_broker,
         remote::concurrently,
-        resolve::{LatestContext, resolve_latest},
+        resolve::{LatestContext, LatestSnapshot, TopicPartitionName, resolve_latest},
     },
     crate::{
         broker::Broker, codes, config_keys::resolve_remote_list_offsets_timeout,
@@ -140,10 +141,18 @@ async fn resolve_partition(
         match resolve_latest(LatestContext {
             broker,
             partition: &partition,
-            topic: (topic, request.index),
+            topic: TopicPartitionName {
+                name: topic,
+                partition: request.index,
+            },
             remote_timeout: timeout,
             remote_topic_id,
-            snapshot: (&config, local_end, local_start, deleted_below),
+            snapshot: LatestSnapshot {
+                config: &config,
+                local_end,
+                local_log_start: local_start,
+                deleted_below,
+            },
         })
         .await
         {
@@ -171,14 +180,16 @@ pub(super) async fn handle(
 ) -> Result<Bytes, BrokerError> {
     let request = decode(req_bytes)?;
     let acl_image = broker.controller.current_image();
-    let duplicates = super::duplicate_partition_keys(request.topics.iter().map(|topic| {
-        (
-            topic.name.as_str(),
-            topic.partitions.iter().map(|part| part.index),
-        )
-    }));
+    let duplicates =
+        super::duplicate_partition_keys(request.topics.iter().map(|topic| TopicPartitions {
+            name: topic.name.as_str(),
+            partitions: topic.partitions.iter().map(|part| part.index),
+        }));
 
-    let (authorized_topics, denied_topics) = super::partition_topics_by_describe(
+    let DescribeSplit {
+        authorized: authorized_topics,
+        denied: denied_topics,
+    } = super::partition_topics_by_describe(
         request.topics,
         |topic| &topic.name,
         broker,
@@ -188,10 +199,16 @@ pub(super) async fn handle(
 
     let dup_ref = &duplicates;
     let mut topics = concurrently(authorized_topics.into_iter().map(
-        |(topic_index, topic)| async move {
+        |IndexedTopic {
+             index: topic_index,
+             topic,
+         }| async move {
             let name = topic.name;
             let partitions = concurrently(topic.partitions.into_iter().map(|partition| {
-                let is_duplicate = dup_ref.contains(&(topic_index, partition.index));
+                let is_duplicate = dup_ref.contains(&PartitionRow {
+                    topic_index,
+                    partition: partition.index,
+                });
                 let name = name.clone();
                 async move {
                     if is_duplicate {
@@ -207,7 +224,7 @@ pub(super) async fn handle(
     ))
     .await;
 
-    topics.extend(denied_topics.into_iter().map(|(_, topic)| {
+    topics.extend(denied_topics.into_iter().map(|IndexedTopic { topic, .. }| {
         let partitions = topic
             .partitions
             .into_iter()
@@ -222,8 +239,16 @@ pub(super) async fn handle(
     Ok(encode(&topics))
 }
 
+/// What a v0 lookup of the latest offset of one partition answered.
 #[cfg(test)]
-pub(super) async fn latest_offsets_for_test(broker: &Broker, topic: &str) -> (i16, Vec<i64>) {
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct LatestOffsets {
+    pub(super) error_code: i16,
+    pub(super) offsets: Vec<i64>,
+}
+
+#[cfg(test)]
+pub(super) async fn latest_offsets_for_test(broker: &Broker, topic: &str) -> LatestOffsets {
     let response = resolve_partition(
         broker,
         topic,
@@ -235,7 +260,10 @@ pub(super) async fn latest_offsets_for_test(broker: &Broker, topic: &str) -> (i1
         -1,
     )
     .await;
-    (response.error_code, response.offsets)
+    LatestOffsets {
+        error_code: response.error_code,
+        offsets: response.offsets,
+    }
 }
 
 #[cfg(test)]

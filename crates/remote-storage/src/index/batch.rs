@@ -232,18 +232,31 @@ mod tests {
         assert!(matches!(error, RemoteStorageError::Io(_)));
     }
 
-    /// A batch at `base_offset` with one record per `(timestamp, value length)`
-    /// pair, compressed with `codec`.
+    /// A record's timestamp and the length of its value.
+    struct SizedRecord {
+        timestamp: i64,
+        value_len: usize,
+    }
+
+    const fn sized(timestamp: i64, value_len: usize) -> SizedRecord {
+        SizedRecord {
+            timestamp,
+            value_len,
+        }
+    }
+
+    /// A batch at `base_offset` with one record per [`SizedRecord`], compressed
+    /// with `codec`.
     fn sized_batch_at(
         base_offset: i64,
-        records: &[(i64, usize)],
+        records: &[SizedRecord],
         codec: krabka_compression::CompressionType,
     ) -> RecordBatch {
-        let timestamps: Vec<i64> = records.iter().map(|(timestamp, _)| *timestamp).collect();
+        let timestamps: Vec<i64> = records.iter().map(|record| record.timestamp).collect();
         let mut batch = timestamped_batch_at(base_offset, &timestamps, b'z');
         batch.attributes = batch.attributes.with_compression(codec);
-        for (record, (_, value_len)) in batch.records.iter_mut().zip(records) {
-            record.value = Some(Bytes::from(vec![b'z'; *value_len]));
+        for (record, sized) in batch.records.iter_mut().zip(records) {
+            record.value = Some(Bytes::from(vec![b'z'; sized.value_len]));
         }
         batch
     }
@@ -263,8 +276,8 @@ mod tests {
 
         let layout = |codec| {
             encoded(&[
-                sized_batch_at(10, &[(1_000, 10)], codec),
-                sized_batch_at(11, &[(1_100, 1_000), (1_200, 10)], codec),
+                sized_batch_at(10, &[sized(1_000, 10)], codec),
+                sized_batch_at(11, &[sized(1_100, 1_000), sized(1_200, 10)], codec),
             ])
         };
         for (name, codec, floor_offset, target, limit, want) in [

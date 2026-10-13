@@ -124,6 +124,14 @@ async fn create_acls_non_super_user_rejected() {
     }
 }
 
+/// One ACL binding the broker still reports after a delete.
+#[derive(Debug, PartialEq)]
+struct SurvivingBinding {
+    resource_name: String,
+    operation: i8,
+    permission_type: i8,
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_acls_removes_matching() {
     let (_log_dir, handle, addr) = start_admin_with(&[("admin", "admin-secret")]).await;
@@ -202,10 +210,14 @@ async fn delete_acls_removes_matching() {
     // on whether the broker groups by resource or emits one resource per
     // ACL — the contract is "the deleted binding is gone, the other one
     // is still there".
-    let mut surviving: Vec<(String, i8, i8)> = Vec::new();
+    let mut surviving: Vec<SurvivingBinding> = Vec::new();
     for r in &describe_resp.resources {
         for a in &r.acls {
-            surviving.push((r.resource_name.clone(), a.operation, a.permission_type));
+            surviving.push(SurvivingBinding {
+                resource_name: r.resource_name.clone(),
+                operation: a.operation,
+                permission_type: a.permission_type,
+            });
         }
     }
     assert!(
@@ -213,7 +225,12 @@ async fn delete_acls_removes_matching() {
         "exactly one binding must remain, got {surviving:?}"
     );
     assert!(
-        surviving[0] == ("bar".to_string(), OPERATION_WRITE, PERMISSION_ALLOW),
+        surviving[0]
+            == SurvivingBinding {
+                resource_name: "bar".to_string(),
+                operation: OPERATION_WRITE,
+                permission_type: PERMISSION_ALLOW,
+            },
         "the surviving binding must be Write-on-bar, got {:?}",
         surviving[0]
     );

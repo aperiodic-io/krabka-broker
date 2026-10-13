@@ -306,18 +306,25 @@ fn inbound_fetch_keys_observers_by_directory_id() {
         });
     }
 
-    let observers: Vec<(NodeId, uuid::Uuid)> = engine
+    let observers: Vec<ReplicaKey> = engine
         .quorum_state_snapshot()
         .observers
         .iter()
-        .map(|observer| (observer.id, observer.directory_id))
+        .map(|observer| ReplicaKey {
+            id: observer.id,
+            directory_id: observer.directory_id,
+        })
         .collect();
+    let observer = |directory_id| ReplicaKey {
+        id: NodeId(2),
+        directory_id,
+    };
     assert2::assert!(
         observers
             == vec![
-                (NodeId(2), uuid::Uuid::nil()),
-                (NodeId(2), dir_id),
-                (NodeId(2), other_dir_id),
+                observer(uuid::Uuid::nil()),
+                observer(dir_id),
+                observer(other_dir_id),
             ]
     );
 }

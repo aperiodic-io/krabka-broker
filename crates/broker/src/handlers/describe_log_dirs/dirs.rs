@@ -65,11 +65,17 @@ pub(super) fn absolute_path(dir: &std::path::Path) -> String {
 /// the path vanishes during a reconfigure, or on a permission error. The JVM
 /// admin tools tolerate `-1` and skip the column.
 pub(super) fn log_dir_capacity(dir: &std::path::Path) -> (i64, i64) {
-    disk_stats(dir).unwrap_or((-1, -1))
+    disk_stats(dir).map_or((-1, -1), |stats| (stats.total, stats.usable))
+}
+
+/// The capacity of a filesystem, in bytes.
+struct DiskStats {
+    total: i64,
+    usable: i64,
 }
 
 #[cfg(unix)]
-fn disk_stats(dir: &std::path::Path) -> Option<(i64, i64)> {
+fn disk_stats(dir: &std::path::Path) -> Option<DiskStats> {
     let stat = rustix::fs::statvfs(dir).ok()?;
     // `f_frsize` is the fragment size in bytes; multiplying by the
     // block counts yields capacity in bytes. Both fields come back as
@@ -82,11 +88,11 @@ fn disk_stats(dir: &std::path::Path) -> Option<(i64, i64)> {
     let usable = i64::try_from(stat.f_bavail)
         .unwrap_or(i64::MAX)
         .saturating_mul(frsize);
-    Some((total, usable))
+    Some(DiskStats { total, usable })
 }
 
 #[cfg(not(unix))]
-fn disk_stats(_dir: &std::path::Path) -> Option<(i64, i64)> { None }
+fn disk_stats(_dir: &std::path::Path) -> Option<DiskStats> { None }
 
 // Both tests below are unix-only, so the module itself is gated: on another
 // platform there would be no test left to use the `assert2` imports.

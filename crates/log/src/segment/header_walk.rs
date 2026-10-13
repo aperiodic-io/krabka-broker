@@ -7,7 +7,7 @@
 
 use {
     super::Segment,
-    crate::{config::DEFAULT_TIMESTAMP_SCAN_WINDOW, error::LogError},
+    crate::{config::DEFAULT_TIMESTAMP_SCAN_WINDOW, error::LogError, index::OffsetIndexEntry},
     krabka_ids::Offset,
     krabka_protocol::records::{HEADER_LEN, RecordBatchHeader},
     krabka_units::prelude::ByteSizeExt,
@@ -42,10 +42,13 @@ impl Segment {
     /// next segment while records in this one remain unread.
     pub(super) fn read_start_position(&self, target_rel: u32) -> Result<u64, LogError> {
         let position = match self.offset_index.floor_entry(target_rel) {
-            Some((indexed_last, position)) if indexed_last == target_rel => {
+            Some(OffsetIndexEntry {
+                relative_offset,
+                position,
+            }) if relative_offset == target_rel => {
                 return Ok(u64::from(position));
             }
-            Some((_, position)) => u64::from(position),
+            Some(OffsetIndexEntry { position, .. }) => u64::from(position),
             None => 0,
         };
         let target = self.base_offset.0 + i64::from(target_rel);
@@ -118,8 +121,8 @@ mod tests {
         crate::{
             config::DEFAULT_INDEX_INTERVAL,
             segment::test_support::{
-                DENSE_INDEX, FIRST_HEADER_WALK_BATCH, SECOND_HEADER_WALK_BATCH, sample_batch,
-                seeded_fixture,
+                DENSE_INDEX, FIRST_HEADER_WALK_BATCH, SECOND_HEADER_WALK_BATCH, TempSegment,
+                sample_batch, seeded_fixture,
             },
         },
         std::ops::ControlFlow,
@@ -128,7 +131,10 @@ mod tests {
 
     #[test]
     fn position_for_and_walk_batch_headers_semantics() {
-        let (_dir, mut seg) = seeded_fixture()
+        let TempSegment {
+            dir: _dir,
+            segment: mut seg,
+        } = seeded_fixture()
             .offset(10)
             .batches(&[FIRST_HEADER_WALK_BATCH])
             .call();
@@ -200,7 +206,10 @@ mod tests {
     /// it, so a small byte budget is not spent stepping over the indexed one.
     #[test]
     fn a_read_past_an_indexed_batch_starts_at_the_batch_after_it() {
-        let (_dir, mut seg) = seeded_fixture()
+        let TempSegment {
+            dir: _dir,
+            segment: mut seg,
+        } = seeded_fixture()
             .offset(10)
             .batches(&[FIRST_HEADER_WALK_BATCH, SECOND_HEADER_WALK_BATCH])
             .call();

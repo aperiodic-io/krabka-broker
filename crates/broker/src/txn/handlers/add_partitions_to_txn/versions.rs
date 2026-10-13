@@ -238,7 +238,9 @@ mod tests {
             txn::handlers::add_partitions_to_txn::{
                 handle,
                 test_support::{
-                    enlisted, seed_transaction, start_coordinator, topic, topic_result,
+                    CoordinatorBroker, PartitionCode, PartitionSpec, TopicRows, TopicSpec,
+                    enlisted, partition_set, seed_transaction, start_coordinator, topic,
+                    topic_result,
                 },
             },
         },
@@ -282,6 +284,131 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
+    struct Entry {
+        epoch: i16,
+        verify_only: bool,
+        topics: &'static [TopicSpec],
+    }
+    fn entry(epoch: i16, verify_only: bool, topics: &'static [TopicSpec]) -> Entry {
+        Entry {
+            epoch,
+            verify_only,
+            topics,
+        }
+    }
+    /// The topic rows one entry answers.
+    type Rows = &'static [TopicRows];
+    struct Case {
+        name: &'static str,
+        entries: [Entry; 2],
+        /// Per entry, the rows it answers.
+        results: [Rows; 2],
+        /// The partitions in the transaction after the request.
+        enlisted: &'static [PartitionSpec],
+    }
+    const EPOCH: i16 = 2;
+    const NONE: i16 = codes::NONE;
+    const FENCED: i16 = codes::PRODUCER_FENCED;
+    const UNKNOWN: i16 = codes::UNKNOWN_TOPIC_OR_PARTITION;
+    const NOT_ATTEMPTED: i16 = codes::OPERATION_NOT_ATTEMPTED;
+
+    const ONLY_A: &[TopicSpec] = &[TopicSpec {
+        name: "a",
+        partitions: &[0],
+    }];
+    const ONLY_B: &[TopicSpec] = &[TopicSpec {
+        name: "b",
+        partitions: &[0],
+    }];
+    const B_AND_MISSING: &[TopicSpec] = &[
+        TopicSpec {
+            name: "b",
+            partitions: &[0],
+        },
+        TopicSpec {
+            name: "missing",
+            partitions: &[0],
+        },
+    ];
+    const A_NONE: Rows = &[TopicRows {
+        name: "a",
+        rows: &[PartitionCode {
+            partition: 0,
+            code: NONE,
+        }],
+    }];
+    const B_NONE: Rows = &[TopicRows {
+        name: "b",
+        rows: &[PartitionCode {
+            partition: 0,
+            code: NONE,
+        }],
+    }];
+    const A_FENCED: Rows = &[TopicRows {
+        name: "a",
+        rows: &[PartitionCode {
+            partition: 0,
+            code: FENCED,
+        }],
+    }];
+    const B_NOT_ATTEMPTED_MISSING_UNKNOWN: Rows = &[
+        TopicRows {
+            name: "b",
+            rows: &[PartitionCode {
+                partition: 0,
+                code: NOT_ATTEMPTED,
+            }],
+        },
+        TopicRows {
+            name: "missing",
+            rows: &[PartitionCode {
+                partition: 0,
+                code: UNKNOWN,
+            }],
+        },
+    ];
+    const ENLISTED_B: &[PartitionSpec] = &[PartitionSpec {
+        topic: "b",
+        partition: 0,
+    }];
+
+    /// The cases of the repeated transactional id: two entries each, the rows
+    /// each answers, and the partitions enlisted afterwards.
+    fn repeated_id_cases() -> [Case; 4] {
+        [
+            Case {
+                name: "both entries add the second entry's partitions",
+                entries: [entry(EPOCH, false, ONLY_A), entry(EPOCH, false, ONLY_B)],
+                results: [A_NONE, A_NONE],
+                enlisted: ENLISTED_B,
+            },
+            Case {
+                name: "each entry is checked with its own producer epoch",
+                entries: [entry(EPOCH - 1, false, ONLY_A), entry(EPOCH, false, ONLY_B)],
+                results: [A_FENCED, A_NONE],
+                enlisted: ENLISTED_B,
+            },
+            Case {
+                name: "a failed partition check lists the checked partitions",
+                entries: [
+                    entry(EPOCH, false, ONLY_A),
+                    entry(EPOCH, false, B_AND_MISSING),
+                ],
+                results: [
+                    B_NOT_ATTEMPTED_MISSING_UNKNOWN,
+                    B_NOT_ATTEMPTED_MISSING_UNKNOWN,
+                ],
+                enlisted: &[],
+            },
+            Case {
+                name: "the verify-only entry verifies what the add entry added",
+                entries: [entry(EPOCH, false, ONLY_A), entry(EPOCH, true, ONLY_B)],
+                results: [A_NONE, B_NONE],
+                enlisted: ENLISTED_B,
+            },
+        ]
+    }
+
     /// #883: a v4+ request that names one transactional id twice is answered
     /// the way Kafka 4.3.1's `KafkaApis.handleAddPartitionsToTxnRequest`
     /// answers it. The generated collections keep every entry, so each entry
@@ -292,81 +419,12 @@ mod tests {
     /// `errorResponseForTransaction` finds).
     #[tokio::test]
     async fn handle_v4_answers_every_entry_of_a_repeated_transactional_id() {
-        struct Entry {
-            epoch: i16,
-            verify_only: bool,
-            topics: &'static [(&'static str, &'static [i32])],
-        }
-        fn entry(
-            epoch: i16,
-            verify_only: bool,
-            topics: &'static [(&'static str, &'static [i32])],
-        ) -> Entry {
-            Entry {
-                epoch,
-                verify_only,
-                topics,
-            }
-        }
-        /// The `(topic, [(partition, code)])` rows one entry answers.
-        type Rows = &'static [(&'static str, &'static [(i32, i16)])];
-        struct Case {
-            name: &'static str,
-            entries: [Entry; 2],
-            /// Per entry, the rows it answers.
-            results: [Rows; 2],
-            /// The partitions in the transaction after the request.
-            enlisted: &'static [(&'static str, i32)],
-        }
-        const EPOCH: i16 = 2;
-        const NONE: i16 = codes::NONE;
-        const FENCED: i16 = codes::PRODUCER_FENCED;
-        const UNKNOWN: i16 = codes::UNKNOWN_TOPIC_OR_PARTITION;
-        const NOT_ATTEMPTED: i16 = codes::OPERATION_NOT_ATTEMPTED;
-        let cases = [
-            Case {
-                name: "both entries add the second entry's partitions",
-                entries: [
-                    entry(EPOCH, false, &[("a", &[0])]),
-                    entry(EPOCH, false, &[("b", &[0])]),
-                ],
-                results: [&[("a", &[(0, NONE)])], &[("a", &[(0, NONE)])]],
-                enlisted: &[("b", 0)],
-            },
-            Case {
-                name: "each entry is checked with its own producer epoch",
-                entries: [
-                    entry(EPOCH - 1, false, &[("a", &[0])]),
-                    entry(EPOCH, false, &[("b", &[0])]),
-                ],
-                results: [&[("a", &[(0, FENCED)])], &[("a", &[(0, NONE)])]],
-                enlisted: &[("b", 0)],
-            },
-            Case {
-                name: "a failed partition check lists the checked partitions",
-                entries: [
-                    entry(EPOCH, false, &[("a", &[0])]),
-                    entry(EPOCH, false, &[("b", &[0]), ("missing", &[0])]),
-                ],
-                results: [
-                    &[("b", &[(0, NOT_ATTEMPTED)]), ("missing", &[(0, UNKNOWN)])],
-                    &[("b", &[(0, NOT_ATTEMPTED)]), ("missing", &[(0, UNKNOWN)])],
-                ],
-                enlisted: &[],
-            },
-            Case {
-                name: "the verify-only entry verifies what the add entry added",
-                entries: [
-                    entry(EPOCH, false, &[("a", &[0])]),
-                    entry(EPOCH, true, &[("b", &[0])]),
-                ],
-                results: [&[("a", &[(0, NONE)])], &[("b", &[(0, NONE)])]],
-                enlisted: &[("b", 0)],
-            },
-        ];
+        let cases = repeated_id_cases();
 
-        let (broker_handle, _dir) =
-            start_coordinator(Arc::new(ControllerPeerAllowed(DenyAll))).await;
+        let CoordinatorBroker {
+            handle: broker_handle,
+            dir: _dir,
+        } = start_coordinator(Arc::new(ControllerPeerAllowed(DenyAll))).await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "ANONYMOUS");
         for (index, case) in (0_i64..).zip(&cases) {
@@ -385,7 +443,7 @@ mod tests {
                         topics: entry
                             .topics
                             .iter()
-                            .map(|&(name, partitions)| topic(name, partitions))
+                            .map(|&TopicSpec { name, partitions }| topic(name, partitions))
                             .collect(),
                         ..Default::default()
                     })
@@ -403,7 +461,7 @@ mod tests {
                         transactional_id: tid.clone(),
                         topic_results: rows
                             .iter()
-                            .map(|&(name, rows)| topic_result(name, rows))
+                            .map(|&TopicRows { name, rows }| topic_result(name, rows))
                             .collect(),
                         ..Default::default()
                     })
@@ -411,12 +469,11 @@ mod tests {
                 ..Default::default()
             };
             assert!(resp == expected, "{}", case.name);
-            let want: std::collections::BTreeSet<(String, i32)> = case
-                .enlisted
-                .iter()
-                .map(|&(topic, partition)| (topic.to_owned(), partition))
-                .collect();
-            assert!(enlisted(&broker, &tid).await == want, "{}", case.name);
+            assert!(
+                enlisted(&broker, &tid).await == partition_set(case.enlisted),
+                "{}",
+                case.name
+            );
         }
         broker_handle.shutdown().await;
     }
@@ -441,8 +498,14 @@ mod tests {
             error_code: codes::NONE,
             results_by_transaction: vec![],
             results_by_topic_v3_and_below: vec![topic_result("alpha", &[
-                (3, codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED),
-                (4, codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED),
+                PartitionCode {
+                    partition: 3,
+                    code: codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED,
+                },
+                PartitionCode {
+                    partition: 4,
+                    code: codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED,
+                },
             ])],
             unknown_tagged_fields: krabka_protocol::UnknownTaggedFields(vec![]),
         };

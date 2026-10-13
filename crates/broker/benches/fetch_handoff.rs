@@ -47,7 +47,26 @@ const PARTITION_COUNTS: [usize; 3] = [1, 16, 200];
 /// 200 partitions rarely finds a full `fetch.max.bytes` waiting on each. The
 /// larger shape is the check that the hand-off stops mattering once there are
 /// real bytes to move.
-const SHAPES: [(&str, i32, usize); 2] = [("1rec_1KiB", 1, 1024), ("100rec_1KiB", 100, 1024)];
+const SHAPES: [BatchShape; 2] = [
+    BatchShape {
+        label: "1rec_1KiB",
+        records: 1,
+        payload: 1024,
+    },
+    BatchShape {
+        label: "100rec_1KiB",
+        records: 100,
+        payload: 1024,
+    },
+];
+
+/// One batch shape the sweep covers: its report label, the record count of each
+/// partition's batch and the payload size of each record.
+struct BatchShape {
+    label: &'static str,
+    records: i32,
+    payload: usize,
+}
 
 /// A read budget larger than any partition the suite builds, so the read is
 /// never clipped and every arm moves the same bytes.
@@ -178,7 +197,12 @@ fn bench_fetch_handoff(c: &mut Criterion) {
     let mut group = c.benchmark_group("broker/fetch_handoff");
     let runtime = runtime();
 
-    for (shape, records, payload) in SHAPES {
+    for BatchShape {
+        label: shape,
+        records,
+        payload,
+    } in SHAPES
+    {
         for count in PARTITION_COUNTS {
             let partitions = partitions(count, records, payload);
             for handoff in Handoff::ALL {
@@ -222,7 +246,12 @@ fn bench_ratio(_c: &mut Criterion) {
         "per/batched",
         "per/in_place"
     );
-    for (shape, records, payload) in SHAPES {
+    for BatchShape {
+        label: shape,
+        records,
+        payload,
+    } in SHAPES
+    {
         for count in PARTITION_COUNTS {
             let partitions = partitions(count, records, payload);
             let micros: Vec<f64> = Handoff::ALL

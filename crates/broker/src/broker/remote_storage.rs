@@ -51,6 +51,13 @@ fn build_diskless_read_handle(
     )))
 }
 
+/// The remote log metadata manager, and the swap point that the topic-backed
+/// manager is installed through once its bootstrap finishes.
+struct RemoteLogMetadata {
+    manager: Arc<dyn krabka_remote_storage::RemoteLogMetadataManager>,
+    swap_target: Option<Arc<krabka_remote_storage_topic::SwappableRlmm>>,
+}
+
 pub(super) fn start_remote_storage(
     config: &BrokerConfig,
     partitions: &Arc<PartitionRegistry>,
@@ -99,19 +106,22 @@ pub(super) fn start_remote_storage(
             })?,
         )?),
     };
-    let (metadata, swap_target): (
-        Arc<dyn krabka_remote_storage::RemoteLogMetadataManager>,
-        Option<Arc<krabka_remote_storage_topic::SwappableRlmm>>,
-    ) = match &config.remote_log_metadata {
+    let RemoteLogMetadata {
+        manager: metadata,
+        swap_target,
+    } = match &config.remote_log_metadata {
         RlmmKind::TopicBacked(_) => {
             let not_ready = Arc::new(krabka_remote_storage_topic::NotReadyRlmm::new());
             let swap = Arc::new(krabka_remote_storage_topic::SwappableRlmm::new(not_ready));
-            (swap.clone(), Some(swap))
+            RemoteLogMetadata {
+                manager: swap.clone(),
+                swap_target: Some(swap),
+            }
         }
-        RlmmKind::InMemory => (
-            Arc::new(krabka_remote_storage::InmemoryRemoteLogMetadataManager::new()),
-            None,
-        ),
+        RlmmKind::InMemory => RemoteLogMetadata {
+            manager: Arc::new(krabka_remote_storage::InmemoryRemoteLogMetadataManager::new()),
+            swap_target: None,
+        },
     };
     // KIP-405's reader bounds. A cache directory that cannot be opened is not
     // a reason to refuse to serve the tier: the reader falls back to

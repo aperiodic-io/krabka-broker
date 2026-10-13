@@ -16,13 +16,17 @@ use {
         broker::{
             DisklessRuntime,
             adapters::ControllerAdapter,
-            audit::start_audit_pipeline,
-            gauges::spawn_broker_gauge_updater,
-            liveness::{LivenessStartup, start_liveness_services},
+            audit::{AuditPipeline, start_audit_pipeline},
+            gauges::{GaugeObservability, GaugeStorage, spawn_broker_gauge_updater},
+            liveness::{
+                LivenessLogDirs, LivenessReporting, LivenessStartup, start_liveness_services,
+            },
             maintenance::{spawn_cluster_data_maintenance, spawn_storage_security_maintenance},
             observability::{ObservabilityStartup, start_observability},
             remote_storage::{RemoteStorageStartup, start_remote_storage},
-            replication::{ReplicatorStorage, spawn_replicator_supervisor},
+            replication::{
+                CoordinatorRefs, ReplicatorRuntime, ReplicatorStorage, spawn_replicator_supervisor,
+            },
             rlmm::{KafkaSwapKickoff, kafka_swap_kickoff},
         },
         client_metrics::ClientMetrics,
@@ -44,7 +48,6 @@ use {
         producer_state::ProducerState,
         quota::{QuotaBuckets, run as run_quota_refresh, run_expiry},
         remote_reader::RemoteReader,
-        share_coordinator::coordinator::ShareCoordinator,
         throttle::{ThrottleState, apply_image, run as run_throttle},
         time_util::now_ms,
         tls_reload::run as run_tls_reload,
@@ -222,24 +225,38 @@ pub(super) struct BrokerRuntimeStartup {
     pub(super) inter_listener_protocol: krabka_security::ListenerProtocol,
 }
 
+/// The local storage the runtime services read: the partitions, the producer
+/// state, and the registries of the log directories.
+pub(super) struct StorageRefs<'a> {
+    pub(super) partitions: &'a Arc<PartitionRegistry>,
+    pub(super) producer_state: &'a Arc<ProducerState>,
+    pub(super) log_dir_status: &'a LogDirRegistry,
+    pub(super) log_dir_ids: &'a LogDirIds,
+}
+
+/// The three things the runtime needs pre-built: the diskless WAL runtime, the
+/// metric registry the coordinators already report into, and the health state
+/// the readiness probe and the gauge sampler both read.
+pub(super) struct RuntimeDeps<'a> {
+    pub(super) diskless_runtime: &'a DisklessRuntime,
+    pub(super) metrics: BrokerMetrics,
+    pub(super) health: Option<HealthState>,
+}
+
 pub(super) async fn start_broker_runtime(
     config: &mut BrokerConfig,
     controller: &Arc<dyn MetadataSource>,
     inter_broker_client: &Arc<InterBrokerClient>,
     tls_dynamic: Option<&Arc<krabka_security::DynamicServerConfig>>,
-    storage: (
-        &Arc<PartitionRegistry>,
-        &Arc<ProducerState>,
-        &LogDirRegistry,
-        &LogDirIds,
-    ),
-    coordinators: (&Arc<TxnCoordinator>, &Arc<ShareCoordinator>),
-    // The three things the runtime needs pre-built: the diskless WAL runtime,
-    // the metric registry the coordinators already report into, and the
-    // health state the readiness probe and the gauge sampler both read.
-    runtime_deps: (&DisklessRuntime, BrokerMetrics, Option<HealthState>),
+    storage: StorageRefs<'_>,
+    coordinators: CoordinatorRefs<'_>,
+    runtime_deps: RuntimeDeps<'_>,
 ) -> Result<BrokerRuntimeStartup, BrokerError> {
-    let (diskless_runtime, metrics, health) = runtime_deps;
+    let RuntimeDeps {
+        diskless_runtime,
+        metrics,
+        health,
+    } = runtime_deps;
     let supervisor_shutdown = CancellationToken::new();
     let throttle_state = Arc::new(ThrottleState::new());
     // KIP-1066: keep the cordoned set in step with this broker's dynamic
@@ -247,28 +264,36 @@ pub(super) async fn start_broker_runtime(
     spawn_watcher(
         controller,
         config.node_id,
-        storage.0.cordoned_log_dirs().clone(),
+        storage.partitions.cordoned_log_dirs().clone(),
         supervisor_shutdown.child_token(),
     );
     let inter_listener_protocol = inter_broker_listener_protocol(config);
-    let (audit_led_partition, audit_log, audit_writer_handle) = start_audit_pipeline(
+    let AuditPipeline {
+        led_partition: audit_led_partition,
+        log: audit_log,
+        writer_handle: audit_writer_handle,
+    } = start_audit_pipeline(
         config,
         &**controller,
-        storage.0,
+        storage.partitions,
         &metrics,
         &supervisor_shutdown,
     );
     let supervisor_handle = spawn_replicator_supervisor(
         config,
         controller,
-        storage.0,
+        storage.partitions,
         coordinators,
         inter_broker_client,
-        (&supervisor_shutdown, &throttle_state, &metrics),
+        ReplicatorRuntime {
+            shutdown: &supervisor_shutdown,
+            throttle_state: &throttle_state,
+            metrics: &metrics,
+        },
         ReplicatorStorage {
-            log_dir_status: storage.2,
-            producer_state: storage.1,
-            log_dir_ids: storage.3,
+            log_dir_status: storage.log_dir_status,
+            producer_state: storage.producer_state,
+            log_dir_ids: storage.log_dir_ids,
             diskless: diskless_runtime,
         },
     );
@@ -283,26 +308,39 @@ pub(super) async fn start_broker_runtime(
         controller,
         inter_broker_client,
         inter_listener_protocol,
-        (&metrics, &audit_log),
+        LivenessReporting {
+            metrics: &metrics,
+            audit_log: &audit_log,
+        },
         &supervisor_shutdown,
-        (storage.2, storage.3, storage.0.cordoned_log_dirs()),
+        LivenessLogDirs {
+            log_dir_status: storage.log_dir_status,
+            log_dir_ids: storage.log_dir_ids,
+            cordoned_log_dirs: storage.partitions.cordoned_log_dirs(),
+        },
     );
     let ObservabilityStartup {
         metrics_bound_addr,
         client_metrics,
     } = start_observability(config, &metrics, &supervisor_shutdown).await?;
     spawn_broker_gauge_updater(
-        (Arc::clone(storage.0), storage.2.clone()),
+        GaugeStorage {
+            partitions: Arc::clone(storage.partitions),
+            log_dir_status: storage.log_dir_status.clone(),
+        },
         Arc::clone(controller),
         Arc::clone(&liveness),
         config.node_id,
-        (metrics.clone(), health),
+        GaugeObservability {
+            metrics: metrics.clone(),
+            health,
+        },
         config,
         supervisor_shutdown.child_token(),
     );
     let disk_scanner_handle = spawn_storage_security_maintenance(
         config,
-        storage.0,
+        storage.partitions,
         controller,
         inter_broker_client,
         &metrics,
@@ -312,8 +350,8 @@ pub(super) async fn start_broker_runtime(
         config,
         controller,
         &liveness,
-        storage.0,
-        storage.1,
+        storage.partitions,
+        storage.producer_state,
         &metrics,
         &supervisor_shutdown,
     );
@@ -326,7 +364,7 @@ pub(super) async fn start_broker_runtime(
             kafka_swap_kickoff(config),
             start_remote_storage(
                 config,
-                storage.0,
+                storage.partitions,
                 controller,
                 &metrics,
                 &supervisor_shutdown,
@@ -340,7 +378,7 @@ pub(super) async fn start_broker_runtime(
         controller,
         tls_dynamic,
         &throttle_state,
-        coordinators.0,
+        coordinators.txn_coordinator,
         &metrics,
         &supervisor_shutdown,
     );

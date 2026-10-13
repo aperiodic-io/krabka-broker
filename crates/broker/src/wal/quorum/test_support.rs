@@ -116,9 +116,15 @@ pub(super) fn fresh_distributed_store(root: &Path) -> QuorumWalStore {
     distributed_store(source_log(root), Uuid::new_v4(), 3)
 }
 
+/// A source log's directory and its open handle.
+pub(super) struct ReopenableSource {
+    pub(super) dir: std::path::PathBuf,
+    pub(super) log: Arc<Mutex<Log>>,
+}
+
 /// Source directory and open handle for tests that close and reopen a quorum.
-pub(super) fn reopenable_source(root: &Path) -> (std::path::PathBuf, Arc<Mutex<Log>>) {
+pub(super) fn reopenable_source(root: &Path) -> ReopenableSource {
     let dir = root.join("source");
     let log = open_log(&dir);
-    (dir, log)
+    ReopenableSource { dir, log }
 }

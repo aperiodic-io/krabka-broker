@@ -64,21 +64,34 @@ const DIRECTORY_ID_BASE64: &str = "AAAAAAAAAAAAAAAAAAAAAQ";
 const JOINER_DIRECTORY_ID: uuid::Uuid = uuid::Uuid::from_u128(2);
 const JOINER_DIRECTORY_ID_BASE64: &str = "AAAAAAAAAAAAAAAAAAAAAg";
 
+/// A running broker and the directory that backs it.
+struct StartedBroker {
+    handle: BrokerHandle,
+    dir: tempfile::TempDir,
+}
+
 /// Boot an in-process Krabka broker listening on `listen_addr()`, advertised as
 /// `host.docker.internal:9092`. A standalone self-bootstrap finalizes the
 /// latest-release feature defaults (metadata.version=25, group.version=1,
 /// transaction.version=2).
-async fn start_host_broker() -> (BrokerHandle, tempfile::TempDir) {
-    support::start_jvm_single("krabka_broker=info,warn", |config| {
+async fn start_host_broker() -> StartedBroker {
+    let (handle, dir) = support::start_jvm_single("krabka_broker=info,warn", |config| {
         config.directory_id = DIRECTORY_ID;
         config.controller_quorum_voters =
             vec![(krabka_broker::NodeId(1), controller_bootstrap().to_string())];
     })
-    .await
+    .await;
+    StartedBroker { handle, dir }
 }
+/// A running controller observer and the directory that backs it.
+struct StartedObserver {
+    handle: krabka_raft::ControllerHandle,
+    dir: tempfile::TempDir,
+}
+
 /// Start a caught-up controller observer without auto-join. The official JVM
 /// `add-controller` command promotes this exact live identity.
-async fn start_host_observer() -> (krabka_raft::ControllerHandle, tempfile::TempDir) {
+async fn start_host_observer() -> StartedObserver {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut config =
         krabka_raft::ControllerConfig::for_tests(krabka_raft::NodeId(2), dir.path().to_path_buf());
@@ -102,7 +115,7 @@ async fn start_host_observer() -> (krabka_raft::ControllerHandle, tempfile::Temp
     let handle = krabka_raft::Controller::start(config)
         .await
         .expect("start observer");
-    (handle, dir)
+    StartedObserver { handle, dir }
 }
 
 /// Run `kafka-features <args>` from the Kafka oracle container that can
@@ -228,7 +241,7 @@ fn alter_feature(verb: &str, spec: &str) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn kafka_features_describe_and_round_trip() {
-    let (handle, _dir) = start_host_broker().await;
+    let StartedBroker { handle, dir: _dir } = start_host_broker().await;
 
     // 1. describe — Krabka advertises + finalizes the feature surface.
     let desc = kafka_features(&["describe"]);
@@ -293,7 +306,10 @@ async fn kafka_features_describe_and_round_trip() {
     // 5. Exercise the official quorum tool on the controller listener. A live
     // observer is promoted by `add-controller`, then removed by
     // `remove-controller` before the last-voter rejection is checked.
-    let (observer, _observer_dir) = start_host_observer().await;
+    let StartedObserver {
+        handle: observer,
+        dir: _observer_dir,
+    } = start_host_observer().await;
     tokio::time::timeout(
         std::time::Duration::from_secs(30),
         observer
@@ -401,7 +417,7 @@ async fn kafka_features_describe_and_round_trip() {
 async fn kafka_features_describes_and_round_trips_elr() {
     const ELR: &str = "eligible.leader.replicas.version";
 
-    let (handle, _dir) = start_host_broker().await;
+    let StartedBroker { handle, dir: _dir } = start_host_broker().await;
 
     let desc = kafka_features(&["describe"]);
     assert!(

@@ -78,8 +78,8 @@ mod tests {
         super::*,
         crate::segment::test_support::{
             FIRST_LARGE_TIMESTAMP_BATCH, NO_LIMIT, ONE_RECORD_BATCH, SECOND_LARGE_TIMESTAMP_BATCH,
-            SECOND_SINGLE_RECORD_BATCH, THIRD_SINGLE_RECORD_BATCH, sample_batch, seeded_fixture,
-            test_segment,
+            SECOND_SINGLE_RECORD_BATCH, THIRD_SINGLE_RECORD_BATCH, TempSegment, sample_batch,
+            seeded_fixture, test_segment,
         },
         krabka_units::prelude::kibibytes,
     };
@@ -92,7 +92,10 @@ mod tests {
     // batch, skipping the offset-103 batch.
     #[test]
     fn read_uses_relative_offset_for_index_lookup() {
-        let (_dir, seg) = super::super::test_support::indexed_segment();
+        let TempSegment {
+            dir: _dir,
+            segment: seg,
+        } = super::super::test_support::indexed_segment();
         let read = seg.read(Offset(103), NO_LIMIT).unwrap();
         assert2::assert!(seg.last_offset() == Offset(105));
         assert2::assert!(
@@ -143,7 +146,10 @@ mod tests {
     /// read stops after one batch.
     #[test]
     fn read_consumed_bytes_gates_max_bytes_budget() {
-        let (_dir, seg) = seeded_fixture()
+        let TempSegment {
+            dir: _dir,
+            segment: seg,
+        } = seeded_fixture()
             .batches(&[
                 ONE_RECORD_BATCH,
                 SECOND_SINGLE_RECORD_BATCH,
@@ -160,7 +166,10 @@ mod tests {
 
     #[test]
     fn read_at_higher_offset_skips_earlier_batches() {
-        let (_dir, mut seg) = test_segment();
+        let TempSegment {
+            dir: _dir,
+            segment: mut seg,
+        } = test_segment();
         seg.append(
             &sample_batch()
                 .offset(FIRST_LARGE_TIMESTAMP_BATCH.offset.0)
@@ -206,7 +215,10 @@ mod tests {
 
     #[test]
     fn read_past_last_offset_returns_empty() {
-        let (_dir, mut seg) = test_segment();
+        let TempSegment {
+            dir: _dir,
+            segment: mut seg,
+        } = test_segment();
         seg.append(
             &sample_batch().records(2).timestamp(1_000).call(),
             kibibytes(4),

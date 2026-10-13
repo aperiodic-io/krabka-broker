@@ -64,22 +64,32 @@ mod tests {
             },
             *,
         },
-        crate::config_keys::test_support::topic_config_record,
         assert2::{assert, check},
         krabka_log::LogConfig,
     };
 
+    /// A config override of a topic.
+    #[derive(Debug)]
+    struct TopicOverride<'a> {
+        key: &'a str,
+        value: &'a str,
+    }
+
     /// A metadata image whose topic `t` carries exactly `overrides`.
-    fn image_with_topic_config(overrides: &[(&str, &str)]) -> krabka_metadata::MetadataImage {
+    fn image_with_topic_config(overrides: &[TopicOverride<'_>]) -> krabka_metadata::MetadataImage {
         use {
-            krabka_metadata::{MetadataImage, MetadataRecord},
+            krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
             uuid::Uuid,
         };
 
         let mut image = MetadataImage::new(Uuid::nil());
-        image.apply(&MetadataRecord::V1TopicConfig(
-            topic_config_record().overrides(overrides).call(),
-        ));
+        image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
+            topic: "t".into(),
+            overrides: overrides
+                .iter()
+                .map(|TopicOverride { key, value }| ((*key).to_string(), (*value).to_string()))
+                .collect(),
+        }));
         image
     }
 
@@ -159,27 +169,48 @@ mod tests {
             (Vec::new(), None),
             (
                 vec![
-                    (SCHEMA_VALIDATION_KEY, "false"),
-                    (SCHEMA_VALIDATION_VALUE, "false"),
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_KEY,
+                        value: "false",
+                    },
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_VALUE,
+                        value: "false",
+                    },
                 ],
                 None,
             ),
             // The mode alone does not turn the check on.
             (
-                vec![(SCHEMA_VALIDATION_MODE, SCHEMA_VALIDATION_MODE_FULL)],
+                vec![TopicOverride {
+                    key: SCHEMA_VALIDATION_MODE,
+                    value: SCHEMA_VALIDATION_MODE_FULL,
+                }],
                 None,
             ),
             (
                 vec![
-                    (SCHEMA_VALIDATION_KEY, "false"),
-                    (SCHEMA_VALIDATION_VALUE, "false"),
-                    (SCHEMA_VALIDATION_MODE, SCHEMA_VALIDATION_MODE_FULL),
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_KEY,
+                        value: "false",
+                    },
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_VALUE,
+                        value: "false",
+                    },
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_MODE,
+                        value: SCHEMA_VALIDATION_MODE_FULL,
+                    },
                 ],
                 None,
             ),
             // Either boolean alone gives a gate, and the mode defaults to `id`.
             (
-                vec![(SCHEMA_VALIDATION_KEY, "true")],
+                vec![TopicOverride {
+                    key: SCHEMA_VALIDATION_KEY,
+                    value: "true",
+                }],
                 Some(SchemaGate {
                     key: true,
                     value: false,
@@ -187,7 +218,10 @@ mod tests {
                 }),
             ),
             (
-                vec![(SCHEMA_VALIDATION_VALUE, "true")],
+                vec![TopicOverride {
+                    key: SCHEMA_VALIDATION_VALUE,
+                    value: "true",
+                }],
                 Some(SchemaGate {
                     key: false,
                     value: true,
@@ -196,8 +230,14 @@ mod tests {
             ),
             (
                 vec![
-                    (SCHEMA_VALIDATION_VALUE, "true"),
-                    (SCHEMA_VALIDATION_MODE, SCHEMA_VALIDATION_MODE_ID),
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_VALUE,
+                        value: "true",
+                    },
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_MODE,
+                        value: SCHEMA_VALIDATION_MODE_ID,
+                    },
                 ],
                 Some(SchemaGate {
                     key: false,
@@ -207,8 +247,14 @@ mod tests {
             ),
             (
                 vec![
-                    (SCHEMA_VALIDATION_KEY, "true"),
-                    (SCHEMA_VALIDATION_MODE, SCHEMA_VALIDATION_MODE_FULL),
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_KEY,
+                        value: "true",
+                    },
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_MODE,
+                        value: SCHEMA_VALIDATION_MODE_FULL,
+                    },
                 ],
                 Some(SchemaGate {
                     key: true,
@@ -218,9 +264,18 @@ mod tests {
             ),
             (
                 vec![
-                    (SCHEMA_VALIDATION_KEY, "true"),
-                    (SCHEMA_VALIDATION_VALUE, "true"),
-                    (SCHEMA_VALIDATION_MODE, SCHEMA_VALIDATION_MODE_FULL),
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_KEY,
+                        value: "true",
+                    },
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_VALUE,
+                        value: "true",
+                    },
+                    TopicOverride {
+                        key: SCHEMA_VALIDATION_MODE,
+                        value: SCHEMA_VALIDATION_MODE_FULL,
+                    },
                 ],
                 Some(SchemaGate {
                     key: true,
@@ -251,8 +306,14 @@ mod tests {
         // A corrupt boolean resolves to `false`, which leaves no gate.
         for value in ["yes", "1", ""] {
             let image = image_with_topic_config(&[
-                (SCHEMA_VALIDATION_KEY, value),
-                (SCHEMA_VALIDATION_VALUE, value),
+                TopicOverride {
+                    key: SCHEMA_VALIDATION_KEY,
+                    value,
+                },
+                TopicOverride {
+                    key: SCHEMA_VALIDATION_VALUE,
+                    value,
+                },
             ]);
             check!(
                 resolve_schema_validation(&image, "t").is_none(),
@@ -263,8 +324,14 @@ mod tests {
         // A corrupt mode resolves to `id`, and the gate stays on.
         for value in ["Full", "body", ""] {
             let image = image_with_topic_config(&[
-                (SCHEMA_VALIDATION_VALUE, "true"),
-                (SCHEMA_VALIDATION_MODE, value),
+                TopicOverride {
+                    key: SCHEMA_VALIDATION_VALUE,
+                    value: "true",
+                },
+                TopicOverride {
+                    key: SCHEMA_VALIDATION_MODE,
+                    value,
+                },
             ]);
             check!(
                 resolve_schema_validation(&image, "t")

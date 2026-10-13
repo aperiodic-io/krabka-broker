@@ -10,7 +10,21 @@ use {
 };
 
 type MutationReply = oneshot::Sender<Result<(), RemoteStorageError>>;
-pub(super) type MutationWaiters = Mutex<HashMap<(i32, i64), MutationReply>>;
+
+/// A published record, named by the metadata partition and offset it landed at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct MutationKey {
+    pub partition: i32,
+    pub offset: i64,
+}
+
+pub(super) type MutationWaiters = Mutex<HashMap<MutationKey, MutationReply>>;
+
+/// A published record's offset and the channel that reports its outcome.
+struct TrackedPublish {
+    offset: i64,
+    reply: oneshot::Receiver<Result<(), RemoteStorageError>>,
+}
 
 impl TopicBasedRemoteLogMetadataManager {
     pub(super) fn publish_and_wait(
@@ -20,7 +34,7 @@ impl TopicBasedRemoteLogMetadataManager {
     ) -> Result<(), RemoteStorageError> {
         let partition = metadata_partition_for(tp, self.log.partition_count());
         self.runtime.block_on(async {
-            let (offset, reply) = tokio::select! {
+            let TrackedPublish { offset, reply } = tokio::select! {
                 biased;
                 () = self.shutdown.cancelled() => return Err(MetadataLogError::Closed.into_storage()),
                 published = self.publish_tracked(partition, event) => published?,
@@ -30,7 +44,10 @@ impl TopicBasedRemoteLogMetadataManager {
                 () = self.shutdown.cancelled() => Err(MetadataLogError::Closed.into_storage()),
                 result = reply => result.unwrap_or_else(|_| Err(MetadataLogError::Closed.into_storage())),
             };
-            self.mutation_waiters.lock().await.remove(&(partition, offset));
+            self.mutation_waiters
+                .lock()
+                .await
+                .remove(&MutationKey { partition, offset });
             result
         })
     }
@@ -39,7 +56,7 @@ impl TopicBasedRemoteLogMetadataManager {
         &self,
         partition: i32,
         event: Bytes,
-    ) -> Result<(i64, oneshot::Receiver<Result<(), RemoteStorageError>>), RemoteStorageError> {
+    ) -> Result<TrackedPublish, RemoteStorageError> {
         // The pump takes this lock before applying a record. Hold it across
         // the publish acknowledgement so even a record consumed before the
         // acknowledgement cannot outrun registration of its exact offset.
@@ -53,8 +70,11 @@ impl TopicBasedRemoteLogMetadataManager {
             .await
             .map_err(MetadataLogError::into_storage)?;
         let (send, receive) = oneshot::channel();
-        waiters.insert((partition, offset), send);
-        Ok((offset, receive))
+        waiters.insert(MutationKey { partition, offset }, send);
+        Ok(TrackedPublish {
+            offset,
+            reply: receive,
+        })
     }
 }
 

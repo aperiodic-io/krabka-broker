@@ -21,17 +21,23 @@ use krabka_protocol::{
 /// Kafka's `UNKNOWN_TOPIC_ID` error code.
 const UNKNOWN_TOPIC_ID: i16 = 100;
 
-/// The topic rows of a `Metadata` request with one row per `(name, id)`.
+/// A topic requested by name, by id, or by both.
+struct TopicRef<'a> {
+    name: Option<&'a str>,
+    topic_id: WireUuid,
+}
+
+/// The topic rows of a `Metadata` request with one row per [`TopicRef`].
 async fn topic_rows(
     client: &krabka_client_core::Client,
-    rows: &[(Option<&str>, WireUuid)],
+    rows: &[TopicRef<'_>],
 ) -> Vec<MetadataResponseTopic> {
     client
         .send(MetadataRequest {
             allow_auto_topic_creation: false,
             ..topic_metadata_request(Some(
                 rows.iter()
-                    .map(|(name, topic_id)| metadata_topic(name.map(Into::into), *topic_id))
+                    .map(|row| metadata_topic(row.name.map(Into::into), row.topic_id))
                     .collect(),
             ))
         })
@@ -45,7 +51,11 @@ async fn metadata_unknown_topic_id_returns_unknown_topic_id() {
     let p = support::start().await;
     let bogus = WireUuid(uuid::Uuid::from_u128(0xfeed_face).into_bytes());
 
-    let rows = topic_rows(&p.client, &[(None, bogus)]).await;
+    let rows = topic_rows(&p.client, &[TopicRef {
+        name: None,
+        topic_id: bogus,
+    }])
+    .await;
 
     assert!(
         rows == vec![MetadataResponseTopic {
@@ -68,11 +78,19 @@ async fn metadata_name_and_id_of_different_topics_describes_the_id() {
             .await
             .expect("create topic");
     }
-    let by_name = topic_rows(&p.client, &[(Some("m_b"), WireUuid::ZERO)]).await;
+    let by_name = topic_rows(&p.client, &[TopicRef {
+        name: Some("m_b"),
+        topic_id: WireUuid::ZERO,
+    }])
+    .await;
     let id_b = by_name[0].topic_id;
 
     // The row names "m_a" but carries m_b's id. Kafka uses the id.
-    let by_id = topic_rows(&p.client, &[(Some("m_a"), id_b)]).await;
+    let by_id = topic_rows(&p.client, &[TopicRef {
+        name: Some("m_a"),
+        topic_id: id_b,
+    }])
+    .await;
 
     assert!(by_id == by_name);
 }

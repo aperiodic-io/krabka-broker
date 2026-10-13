@@ -6,7 +6,7 @@
 
 use {
     super::{
-        OP_DELETE, OP_SET,
+        OP_DELETE, OP_SET, submit_or_refuse,
         topic_scope::{merge_list_op, not_a_list},
     },
     crate::{
@@ -80,10 +80,11 @@ pub(super) fn handle_group_scoped(
     out: &mut AlterConfigsResourceResponse,
     to_submit: &mut Vec<MetadataRecord>,
 ) {
-    match group_record(resource, image, bounds, unstable) {
-        Ok(record) => to_submit.push(record),
-        Err(error) => super::set_error_response(out, error),
-    }
+    submit_or_refuse(
+        group_record(resource, image, bounds, unstable).map(|record| [record]),
+        out,
+        to_submit,
+    );
 }
 
 #[cfg(test)]
@@ -96,17 +97,14 @@ mod tests {
             },
             handlers::incremental_alter_configs::{
                 RESOURCE_TYPE_GROUP,
-                test_support::{make_scoped_resource, make_set_cfg},
+                test_support::{Handled, make_scoped_resource, make_set_cfg},
             },
         },
         assert2::assert,
         krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig,
     };
 
-    fn drive(
-        resource: &AlterConfigsResource,
-        unstable: UnstableApiVersions,
-    ) -> (AlterConfigsResourceResponse, Vec<MetadataRecord>) {
+    fn drive(resource: &AlterConfigsResource, unstable: UnstableApiVersions) -> Handled {
         let mut out = AlterConfigsResourceResponse::default();
         let mut records = Vec::new();
         handle_group_scoped(
@@ -117,7 +115,10 @@ mod tests {
             &mut out,
             &mut records,
         );
-        (out, records)
+        Handled {
+            response: out,
+            records,
+        }
     }
 
     /// Kafka's `ControllerConfigurationValidator` accepts every key of
@@ -150,7 +151,10 @@ mod tests {
                 .map(|(name, value)| make_set_cfg(name, value))
                 .collect(),
         );
-        let (out, records) = drive(&resource, UnstableApiVersions::Disabled);
+        let Handled {
+            response: out,
+            records,
+        } = drive(&resource, UnstableApiVersions::Disabled);
         assert!(out.error_code == codes::NONE, "{out:?}");
         assert!(
             records
@@ -168,7 +172,10 @@ mod tests {
                 KEY_NUM_STANDBY_REPLICAS,
                 "1",
             )]);
-        let (out, records) = drive(&resource, UnstableApiVersions::Enabled);
+        let Handled {
+            response: out,
+            records,
+        } = drive(&resource, UnstableApiVersions::Enabled);
         assert!(out.error_code == codes::NONE);
         assert!(matches!(
             records.as_slice(),
@@ -196,7 +203,10 @@ mod tests {
                     KEY_SHARE_AUTO_OFFSET_RESET,
                     value,
                 )]);
-            let (out, records) = drive(&resource, UnstableApiVersions::Enabled);
+            let Handled {
+                response: out,
+                records,
+            } = drive(&resource, UnstableApiVersions::Enabled);
             assert!(
                 out.error_code == want_code,
                 "{KEY_SHARE_AUTO_OFFSET_RESET}={value}"
@@ -224,7 +234,10 @@ mod tests {
                 KEY_SESSION_TIMEOUT_MS,
                 "1000",
             )]);
-        let (out, records) = drive(&resource, UnstableApiVersions::Enabled);
+        let Handled {
+            response: out,
+            records,
+        } = drive(&resource, UnstableApiVersions::Enabled);
         assert!(out.error_code == codes::INVALID_CONFIG);
         assert!(records.is_empty());
     }

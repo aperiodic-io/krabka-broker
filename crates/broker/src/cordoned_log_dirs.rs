@@ -322,13 +322,25 @@ mod tests {
         krabka_metadata::{BrokerConfigRecord, MetadataRecord},
     };
 
-    /// A label, the registered directory ids, the cordoned ids, and whether
-    /// placement may use the broker.
-    type UsableCase<'a> = (&'a str, &'a [u128], Option<&'a [u128]>, bool);
+    struct UsableCase<'a> {
+        label: &'a str,
+        /// The registered directory ids.
+        log_dirs: &'a [u128],
+        /// The cordoned ids.
+        cordoned: Option<&'a [u128]>,
+        /// Whether placement may use the broker.
+        want: bool,
+    }
 
-    /// A label, the stored cordoned ids, the reported set, and whether a
-    /// registration change is written.
-    type HeartbeatCase<'a> = (&'a str, Option<&'a [u128]>, Option<Vec<uuid::Uuid>>, bool);
+    struct HeartbeatCase<'a> {
+        label: &'a str,
+        /// The stored cordoned ids.
+        stored: Option<&'a [u128]>,
+        /// The reported set.
+        reported: Option<Vec<uuid::Uuid>>,
+        /// Whether a registration change is written.
+        writes: bool,
+    }
 
     fn dirs() -> Vec<PathBuf> { vec![PathBuf::from("/d1"), PathBuf::from("/d2")] }
 
@@ -337,42 +349,65 @@ mod tests {
     /// with `log.dirs=/tmp/d1,/tmp/d2`.
     #[test]
     fn values_resolve_as_kafka_validates_them() {
+        struct Case {
+            value: &'static str,
+            want: Result<Vec<PathBuf>, &'static str>,
+        }
+
         let d1 = PathBuf::from("/d1");
         let d2 = PathBuf::from("/d2");
-        let cases: [(&str, Result<Vec<PathBuf>, &str>); 10] = [
-            ("", Ok(vec![])),
-            ("  ", Ok(vec![])),
-            ("/d1", Ok(vec![d1.clone()])),
-            ("/d2 , /d1", Ok(vec![d1.clone(), d2.clone()])),
-            ("/d1,/d1", Ok(vec![d1])),
-            ("*", Ok(vec![PathBuf::from("/d1"), d2])),
-            (
-                "/d1,",
-                Err("Configuration 'cordoned.log.dirs' values must not be empty."),
-            ),
-            (
-                "*,/d1",
-                Err(
+        let cases: [Case; 10] = [
+            Case {
+                value: "",
+                want: Ok(vec![]),
+            },
+            Case {
+                value: "  ",
+                want: Ok(vec![]),
+            },
+            Case {
+                value: "/d1",
+                want: Ok(vec![d1.clone()]),
+            },
+            Case {
+                value: "/d2 , /d1",
+                want: Ok(vec![d1.clone(), d2.clone()]),
+            },
+            Case {
+                value: "/d1,/d1",
+                want: Ok(vec![d1]),
+            },
+            Case {
+                value: "*",
+                want: Ok(vec![PathBuf::from("/d1"), d2]),
+            },
+            Case {
+                value: "/d1,",
+                want: Err("Configuration 'cordoned.log.dirs' values must not be empty."),
+            },
+            Case {
+                value: "*,/d1",
+                want: Err(
                     "requirement failed: When cordoned.log.dirs is set to *, it must not \
                      contain other values",
                 ),
-            ),
-            (
-                "/nope",
-                Err(
+            },
+            Case {
+                value: "/nope",
+                want: Err(
                     "requirement failed: All entries in cordoned.log.dirs must be present in \
                      log.dirs or log.dir. Missing entries : /nope",
                 ),
-            ),
-            (
-                "/x,/d1,/y",
-                Err(
+            },
+            Case {
+                value: "/x,/d1,/y",
+                want: Err(
                     "requirement failed: All entries in cordoned.log.dirs must be present in \
                      log.dirs or log.dir. Missing entries : /x, /y",
                 ),
-            ),
+            },
         ];
-        for (value, want) in cases {
+        for Case { value, want } in cases {
             check!(
                 resolve(value, &dirs()) == want.map_err(str::to_owned),
                 "{value:?}"
@@ -402,13 +437,44 @@ mod tests {
     #[test]
     fn a_broker_is_usable_unless_every_directory_is_cordoned() {
         let cases: [UsableCase<'_>; 5] = [
-            ("not reported yet", &[1, 2], None, true),
-            ("nothing cordoned", &[1, 2], Some(&[]), true),
-            ("one of two cordoned", &[1, 2], Some(&[1]), true),
-            ("every directory cordoned", &[1, 2], Some(&[2, 1]), false),
-            ("no directory ids registered", &[], Some(&[1]), true),
+            UsableCase {
+                label: "not reported yet",
+                log_dirs: &[1, 2],
+                cordoned: None,
+                want: true,
+            },
+            UsableCase {
+                label: "nothing cordoned",
+                log_dirs: &[1, 2],
+                cordoned: Some(&[]),
+                want: true,
+            },
+            UsableCase {
+                label: "one of two cordoned",
+                log_dirs: &[1, 2],
+                cordoned: Some(&[1]),
+                want: true,
+            },
+            UsableCase {
+                label: "every directory cordoned",
+                log_dirs: &[1, 2],
+                cordoned: Some(&[2, 1]),
+                want: false,
+            },
+            UsableCase {
+                label: "no directory ids registered",
+                log_dirs: &[],
+                cordoned: Some(&[1]),
+                want: true,
+            },
         ];
-        for (label, log_dirs, cordoned, want) in cases {
+        for UsableCase {
+            label,
+            log_dirs,
+            cordoned,
+            want,
+        } in cases
+        {
             check!(
                 has_uncordoned_dirs(&registration(log_dirs, cordoned)) == want,
                 "{label}"
@@ -423,18 +489,44 @@ mod tests {
         let one = uuid::Uuid::from_u128(1);
         let two = uuid::Uuid::from_u128(2);
         let cases: [HeartbeatCase<'_>; 5] = [
-            ("the broker has not caught up", None, None, false),
-            ("the first report", None, Some(vec![]), true),
-            (
-                "an unchanged set",
-                Some(&[1, 2]),
-                Some(vec![two, one]),
-                false,
-            ),
-            ("a new directory", Some(&[1]), Some(vec![one, two]), true),
-            ("uncordon everything", Some(&[1]), Some(vec![]), true),
+            HeartbeatCase {
+                label: "the broker has not caught up",
+                stored: None,
+                reported: None,
+                writes: false,
+            },
+            HeartbeatCase {
+                label: "the first report",
+                stored: None,
+                reported: Some(vec![]),
+                writes: true,
+            },
+            HeartbeatCase {
+                label: "an unchanged set",
+                stored: Some(&[1, 2]),
+                reported: Some(vec![two, one]),
+                writes: false,
+            },
+            HeartbeatCase {
+                label: "a new directory",
+                stored: Some(&[1]),
+                reported: Some(vec![one, two]),
+                writes: true,
+            },
+            HeartbeatCase {
+                label: "uncordon everything",
+                stored: Some(&[1]),
+                reported: Some(vec![]),
+                writes: true,
+            },
         ];
-        for (label, stored, reported, writes) in cases {
+        for HeartbeatCase {
+            label,
+            stored,
+            reported,
+            writes,
+        } in cases
+        {
             let mut image = MetadataImage::new(uuid::Uuid::nil());
             let current = registration(&[1, 2], stored);
             image.apply(&MetadataRecord::V1BrokerRegistration(current));
@@ -471,17 +563,37 @@ mod tests {
     /// resolve keeps the set that was in force.
     #[test]
     fn the_set_follows_the_dynamic_value_and_keeps_the_last_good_one() {
+        struct Step {
+            value: Option<&'static str>,
+            want: Vec<PathBuf>,
+        }
+
         let cordoned = CordonedLogDirs::new(dirs(), Some("/d2".into()));
         check!(cordoned.cordoned() == vec![PathBuf::from("/d2")]);
 
-        let steps: [(Option<&str>, Vec<PathBuf>); 5] = [
-            (Some("/d1"), vec![PathBuf::from("/d1")]),
-            (Some("/nope"), vec![PathBuf::from("/d1")]),
-            (Some("*"), dirs()),
-            (Some(""), vec![]),
-            (None, vec![PathBuf::from("/d2")]),
+        let steps: [Step; 5] = [
+            Step {
+                value: Some("/d1"),
+                want: vec![PathBuf::from("/d1")],
+            },
+            Step {
+                value: Some("/nope"),
+                want: vec![PathBuf::from("/d1")],
+            },
+            Step {
+                value: Some("*"),
+                want: dirs(),
+            },
+            Step {
+                value: Some(""),
+                want: vec![],
+            },
+            Step {
+                value: None,
+                want: vec![PathBuf::from("/d2")],
+            },
         ];
-        for (value, want) in steps {
+        for Step { value, want } in steps {
             cordoned.apply_image(&image_with(value), NodeId(1));
             check!(cordoned.cordoned() == want, "{value:?}");
         }

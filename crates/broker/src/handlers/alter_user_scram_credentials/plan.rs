@@ -33,6 +33,18 @@ pub(super) struct AlterationPlan {
     pub(super) records: Vec<MetadataRecord>,
 }
 
+/// A deletion that passed validation, with the mechanism it removes.
+struct StagedDeletion {
+    deletion: ScramCredentialDeletion,
+    mechanism: SaslMechanism,
+}
+
+/// An upsertion that passed validation, with the mechanism it writes.
+struct StagedUpsertion {
+    upsertion: ScramCredentialUpsertion,
+    mechanism: SaslMechanism,
+}
+
 pub(super) fn plan_alterations(
     broker: &Broker,
     req: AlterUserScramCredentialsRequest,
@@ -67,13 +79,21 @@ pub(super) fn plan_alterations(
             continue;
         }
 
-        if let Some((deletion, mechanism)) = deletions.remove(&user) {
+        if let Some(StagedDeletion {
+            deletion,
+            mechanism,
+        }) = deletions.remove(&user)
+        {
             records.push(delete_record(&deletion, mechanism));
             user_results.push(ok_result(deletion.name));
             continue;
         }
 
-        if let Some((upsertion, mechanism)) = upsertions.remove(&user) {
+        if let Some(StagedUpsertion {
+            upsertion,
+            mechanism,
+        }) = upsertions.remove(&user)
+        {
             records.push(upsertion_record(&upsertion, mechanism));
             user_results.push(ok_result(upsertion.name));
         }
@@ -107,7 +127,7 @@ fn stage_deletion(
     broker: &Broker,
     deletion: ScramCredentialDeletion,
     authorized: bool,
-    deletions: &mut HashMap<String, (ScramCredentialDeletion, SaslMechanism)>,
+    deletions: &mut HashMap<String, StagedDeletion>,
     errors: &mut HashMap<String, AlterationError>,
 ) {
     let prior = prior_state(
@@ -127,7 +147,10 @@ fn stage_deletion(
         ScramAlterationDecision::AcceptSha256 | ScramAlterationDecision::AcceptSha512 => {
             let mechanism =
                 decision_mechanism(decision).expect("accepted decision has a mechanism");
-            deletions.insert(deletion.name.clone(), (deletion, mechanism));
+            deletions.insert(deletion.name.clone(), StagedDeletion {
+                deletion,
+                mechanism,
+            });
         }
         _ => {
             let error = decision_error(decision).expect("rejected decision has an error");
@@ -154,8 +177,8 @@ fn prior_state(
 fn stage_upsertion(
     upsertion: ScramCredentialUpsertion,
     authorized: bool,
-    deletions: &mut HashMap<String, (ScramCredentialDeletion, SaslMechanism)>,
-    upsertions: &mut HashMap<String, (ScramCredentialUpsertion, SaslMechanism)>,
+    deletions: &mut HashMap<String, StagedDeletion>,
+    upsertions: &mut HashMap<String, StagedUpsertion>,
     errors: &mut HashMap<String, AlterationError>,
 ) {
     let prior = prior_state(
@@ -176,7 +199,10 @@ fn stage_upsertion(
         ScramAlterationDecision::AcceptSha256 | ScramAlterationDecision::AcceptSha512 => {
             let mechanism =
                 decision_mechanism(decision).expect("accepted decision has a mechanism");
-            upsertions.insert(upsertion.name.clone(), (upsertion, mechanism));
+            upsertions.insert(upsertion.name.clone(), StagedUpsertion {
+                upsertion,
+                mechanism,
+            });
         }
         _ => {
             let error = decision_error(decision).expect("rejected decision has an error");

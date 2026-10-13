@@ -25,34 +25,28 @@ pub async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition
     handle.wait_until_partition_present(topic, partition).await;
 }
 
-/// Starts a 3-broker PLAINTEXT cluster. It returns
-/// (h1, h2, h3, d1, d2, d3, addr1), where addr1 is the listen address of
-/// broker 1. It waits until all 3 brokers see each other registered before it
-/// returns.
-pub async fn start_three_broker_plaintext_cluster() -> (
-    BrokerHandle,
-    BrokerHandle,
-    BrokerHandle,
-    TempDir,
-    TempDir,
-    TempDir,
-    SocketAddr,
-) {
+/// A 3-broker PLAINTEXT cluster: the broker handles, the data directory
+/// behind each, and the listen address of broker 1.
+pub struct ThreeBrokerCluster {
+    pub h1: BrokerHandle,
+    pub h2: BrokerHandle,
+    pub h3: BrokerHandle,
+    pub d1: TempDir,
+    pub d2: TempDir,
+    pub d3: TempDir,
+    pub addr1: SocketAddr,
+}
+
+/// Starts a 3-broker PLAINTEXT cluster. It waits until all 3 brokers see each
+/// other registered before it returns.
+pub async fn start_three_broker_plaintext_cluster() -> ThreeBrokerCluster {
     let cluster = support::start_n_node_with_retry(3).await;
     three_broker_handles(cluster).await
 }
 
 pub async fn start_three_broker_plaintext_cluster_with_log_dirs(
     extra_log_dirs: &[std::path::PathBuf; 3],
-) -> (
-    BrokerHandle,
-    BrokerHandle,
-    BrokerHandle,
-    TempDir,
-    TempDir,
-    TempDir,
-    SocketAddr,
-) {
+) -> ThreeBrokerCluster {
     let cluster = support::start_n_node_with(3, |index, config| {
         config.extra_log_dirs = vec![extra_log_dirs[index].clone()];
     })
@@ -82,20 +76,20 @@ pub async fn controller_leader_addr(handles: &[&BrokerHandle]) -> SocketAddr {
 
 async fn three_broker_handles(
     cluster: Vec<(BrokerHandle, krabka_broker::BrokerConfig, TempDir)>,
-) -> (
-    BrokerHandle,
-    BrokerHandle,
-    BrokerHandle,
-    TempDir,
-    TempDir,
-    TempDir,
-    SocketAddr,
-) {
+) -> ThreeBrokerCluster {
     support::wait_for_all_brokers_registered(&cluster, 3).await;
     let mut it = cluster.into_iter();
     let (h1, _cfg1, d1) = it.next().unwrap();
     let (h2, _cfg2, d2) = it.next().unwrap();
     let (h3, _cfg3, d3) = it.next().unwrap();
     let addr1 = h1.listen_addr();
-    (h1, h2, h3, d1, d2, d3, addr1)
+    ThreeBrokerCluster {
+        h1,
+        h2,
+        h3,
+        d1,
+        d2,
+        d3,
+        addr1,
+    }
 }

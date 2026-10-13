@@ -322,12 +322,18 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
+    /// A topic ACL: the topic it names and the operation it grants.
+    struct TopicGrant {
+        topic: &'static str,
+        operation: AclOperation,
+    }
+
     /// One case of [`topics_are_filtered_by_per_topic_describe`]: the topic
     /// grant `user` gets (`None` means no topic ACL at all) and the topics
     /// the response row should keep.
     struct TopicFilterCase {
         user: &'static str,
-        topic_grant: Option<(&'static str, AclOperation)>,
+        topic_grant: Option<TopicGrant>,
         expected_topics: Vec<TopicData>,
     }
 
@@ -380,12 +386,18 @@ mod tests {
         let cases = [
             TopicFilterCase {
                 user: "star",
-                topic_grant: Some(("*", AclOperation::Describe)),
+                topic_grant: Some(TopicGrant {
+                    topic: "*",
+                    operation: AclOperation::Describe,
+                }),
                 expected_topics: vec![topic_a.clone(), topic_b.clone()],
             },
             TopicFilterCase {
                 user: "topic-a",
-                topic_grant: Some(("a", AclOperation::Describe)),
+                topic_grant: Some(TopicGrant {
+                    topic: "a",
+                    operation: AclOperation::Describe,
+                }),
                 expected_topics: vec![topic_a.clone()],
             },
             TopicFilterCase {
@@ -393,7 +405,10 @@ mod tests {
                 // DENY-vs-ALLOW-implication bug; this relies only on the
                 // already-correct ALLOW side of the implication table).
                 user: "read-b",
-                topic_grant: Some(("b", AclOperation::Read)),
+                topic_grant: Some(TopicGrant {
+                    topic: "b",
+                    operation: AclOperation::Read,
+                }),
                 expected_topics: vec![topic_b.clone()],
             },
             TopicFilterCase {
@@ -409,7 +424,11 @@ mod tests {
             expected_topics,
         } in cases
         {
-            if let Some((grant_topic, operation)) = topic_grant {
+            if let Some(TopicGrant {
+                topic: grant_topic,
+                operation,
+            }) = topic_grant
+            {
                 grant_topic_operation(&broker_handle, user, grant_topic, operation).await;
             }
             // `grant_topic_operation` grants on the `Topic` resource; grant

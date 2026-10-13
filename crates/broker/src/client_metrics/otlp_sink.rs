@@ -16,7 +16,8 @@ use opentelemetry_proto::tonic::{
 };
 use {
     opentelemetry_proto::tonic::metrics::v1::MetricsData,
-    prometheus_client::metrics::counter::Counter, tokio::sync::mpsc,
+    prometheus_client::metrics::counter::Counter,
+    tokio::sync::mpsc::{self, error::TrySendError},
 };
 
 const FORWARD_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -43,8 +44,15 @@ pub(crate) fn build_export_request(
     }
 }
 
+/// A batch of client metrics waiting to be forwarded, and the client instance
+/// that pushed it.
+struct QueuedExport {
+    metrics: MetricsData,
+    client_instance_id: String,
+}
+
 pub(crate) struct OtlpForwarder {
-    tx: std::sync::Mutex<Option<mpsc::Sender<(MetricsData, String)>>>,
+    tx: std::sync::Mutex<Option<mpsc::Sender<QueuedExport>>>,
     task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     dropped: Counter,
 }
@@ -70,11 +78,15 @@ impl OtlpForwarder {
         dropped: Counter,
         failed: Counter,
     ) -> Self {
-        let (tx, mut rx) = mpsc::channel::<(MetricsData, String)>(capacity);
+        let (tx, mut rx) = mpsc::channel::<QueuedExport>(capacity);
         let task = tokio::spawn(async move {
             let http_client = reqwest::Client::new();
             let http_url = format!("{}/v1/metrics", endpoint.trim_end_matches('/'));
-            while let Some((md, instance)) = rx.recv().await {
+            while let Some(QueuedExport {
+                metrics: md,
+                client_instance_id: instance,
+            }) = rx.recv().await
+            {
                 let req = build_export_request(md, &instance);
                 let result = match protocol {
                     krabka_telemetry::OtlpProtocol::HttpProtobuf => {
@@ -147,10 +159,20 @@ impl OtlpForwarder {
             .lock()
             .expect("OTLP forwarder mutex poisoned")
             .as_ref()
-            && let Err(error) = tx.try_send((md, client_instance_id.to_string()))
+            && let Err(error) = tx.try_send(QueuedExport {
+                metrics: md,
+                client_instance_id: client_instance_id.to_string(),
+            })
         {
             self.dropped.inc();
-            tracing::warn!(%error, "client-metrics OTLP forward queue unavailable; dropping");
+            let reason = error.to_string();
+            let (TrySendError::Full(export) | TrySendError::Closed(export)) = error;
+            tracing::warn!(
+                error = %reason,
+                client_instance_id = %export.client_instance_id,
+                resource_metrics = export.metrics.resource_metrics.len(),
+                "client-metrics OTLP forward queue unavailable; dropping"
+            );
         }
     }
 

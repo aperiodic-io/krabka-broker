@@ -430,72 +430,89 @@ mod tests {
             SeedFenced, Tick,
         };
 
-        let cases: &[(&str, &[Step], bool)] = &[
-            ("never seen", &[], false),
-            ("a heartbeat", &[Heartbeat], true),
-            (
-                "a heartbeat at the edge of the timeout",
-                &[Heartbeat, Advance(10)],
-                true,
-            ),
-            (
-                "a heartbeat past the timeout, before the tick",
-                &[Heartbeat, Advance(11)],
-                false,
-            ),
-            (
-                "a heartbeat past the timeout, after the tick",
-                &[Heartbeat, Advance(11), Tick],
-                false,
-            ),
-            (
-                "a fenced broker that still heartbeats",
-                &[FencedHeartbeat],
-                true,
-            ),
-            (
-                "a broker fenced on request that still heartbeats",
-                &[Heartbeat, Fence],
-                true,
-            ),
-            ("a broker only discovered in the image", &[Discover], false),
-            (
-                "an unfenced broker seeded by a new controller",
-                &[Seed],
-                true,
-            ),
-            (
-                "a fenced broker seeded by a new controller",
-                &[FencedHeartbeat, Seed],
-                false,
-            ),
-            (
-                "a broker the image replicates as fenced",
-                &[SeedFenced],
-                false,
-            ),
-            (
-                "a heartbeating broker the image replicates as fenced",
-                &[Heartbeat, SeedFenced],
-                false,
-            ),
-            (
-                "a new incarnation replaced the session",
-                &[Heartbeat, ReplaceIncarnation],
-                false,
-            ),
-            (
-                "the new incarnation heartbeats",
-                &[Heartbeat, ReplaceIncarnation, FencedHeartbeat],
-                true,
-            ),
-            (
-                "a dead broker revived by a heartbeat",
-                &[Heartbeat, Advance(11), Tick, Heartbeat],
-                true,
-            ),
+        struct Case {
+            what: &'static str,
+            steps: &'static [Step],
+            valid: bool,
+        }
+        let cases: &[Case] = &[
+            Case {
+                what: "never seen",
+                steps: &[],
+                valid: false,
+            },
+            Case {
+                what: "a heartbeat",
+                steps: &[Heartbeat],
+                valid: true,
+            },
+            Case {
+                what: "a heartbeat at the edge of the timeout",
+                steps: &[Heartbeat, Advance(10)],
+                valid: true,
+            },
+            Case {
+                what: "a heartbeat past the timeout, before the tick",
+                steps: &[Heartbeat, Advance(11)],
+                valid: false,
+            },
+            Case {
+                what: "a heartbeat past the timeout, after the tick",
+                steps: &[Heartbeat, Advance(11), Tick],
+                valid: false,
+            },
+            Case {
+                what: "a fenced broker that still heartbeats",
+                steps: &[FencedHeartbeat],
+                valid: true,
+            },
+            Case {
+                what: "a broker fenced on request that still heartbeats",
+                steps: &[Heartbeat, Fence],
+                valid: true,
+            },
+            Case {
+                what: "a broker only discovered in the image",
+                steps: &[Discover],
+                valid: false,
+            },
+            Case {
+                what: "an unfenced broker seeded by a new controller",
+                steps: &[Seed],
+                valid: true,
+            },
+            Case {
+                what: "a fenced broker seeded by a new controller",
+                steps: &[FencedHeartbeat, Seed],
+                valid: false,
+            },
+            Case {
+                what: "a broker the image replicates as fenced",
+                steps: &[SeedFenced],
+                valid: false,
+            },
+            Case {
+                what: "a heartbeating broker the image replicates as fenced",
+                steps: &[Heartbeat, SeedFenced],
+                valid: false,
+            },
+            Case {
+                what: "a new incarnation replaced the session",
+                steps: &[Heartbeat, ReplaceIncarnation],
+                valid: false,
+            },
+            Case {
+                what: "the new incarnation heartbeats",
+                steps: &[Heartbeat, ReplaceIncarnation, FencedHeartbeat],
+                valid: true,
+            },
+            Case {
+                what: "a dead broker revived by a heartbeat",
+                steps: &[Heartbeat, Advance(11), Tick, Heartbeat],
+                valid: true,
+            },
         ];
-        for (what, steps, valid) in cases {
+        for Case { what, steps, valid } in cases {
             let clock = TestClock::new();
             let liveness = ControllerLivenessState::with_test_clock(TIMEOUT, &clock);
             for step in *steps {

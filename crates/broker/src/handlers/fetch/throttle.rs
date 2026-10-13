@@ -35,9 +35,19 @@ pub(super) fn throttle_follower_responses(
         &broker.throttle_state.leader_out,
         &broker.metrics,
         image,
-        (broker.config.node_id, krabka_metadata::NodeId(follower)),
+        ReplicaPair {
+            leader: broker.config.node_id,
+            follower: krabka_metadata::NodeId(follower),
+        },
         responses,
     );
+}
+
+/// The leader and the follower of one replica fetch.
+#[derive(Clone, Copy)]
+struct ReplicaPair {
+    leader: krabka_metadata::NodeId,
+    follower: krabka_metadata::NodeId,
 }
 
 /// The KIP-73 leader-side throttle of one follower fetch, run by the leader
@@ -65,7 +75,7 @@ fn throttle_replica_traffic(
     leader_out: &TokenBucket,
     metrics: &BrokerMetrics,
     image: &krabka_metadata::MetadataImage,
-    (leader, follower): (krabka_metadata::NodeId, krabka_metadata::NodeId),
+    ReplicaPair { leader, follower }: ReplicaPair,
     responses: &mut [FetchableTopicResponse],
 ) {
     let mut in_sync_bytes = 0_u64;
@@ -88,7 +98,10 @@ fn throttle_replica_traffic(
                 in_sync_bytes += bytes;
             } else {
                 out_of_sync_bytes += bytes;
-                out_of_sync.push((topic_index, partition_index));
+                out_of_sync.push(ResponseSlot {
+                    topic_index,
+                    partition_index,
+                });
             }
         }
     }
@@ -162,14 +175,20 @@ pub(super) fn consumer_quota_window_bytes(
 
 /// The byte-rate charge a consumer fetch made, in bytes, which a throttled
 /// fetch gives back.
-pub(super) struct ConsumerCharge(Option<(std::sync::Arc<TokenBucket>, u64)>);
+pub(super) struct ConsumerCharge(Option<ChargedBucket>);
+
+/// The bucket a consumer fetch drew from and the bytes it drew.
+struct ChargedBucket {
+    bucket: std::sync::Arc<TokenBucket>,
+    bytes: u64,
+}
 
 impl ConsumerCharge {
     /// Kafka's `quotas.fetch.unrecordQuotaSensor`: a throttled fetch sends
     /// no records, so the bytes it was charged come off the quota. The whole
     /// charge comes back, the debt it left included.
     pub(super) fn refund(self) {
-        if let Some((bucket, bytes)) = self.0 {
+        if let Some(ChargedBucket { bucket, bytes }) = self.0 {
             bucket.refund(bytes);
         }
     }
@@ -187,7 +206,10 @@ pub(super) fn apply_consumer_fetch_quota(
     handler_start: std::time::Instant,
     response_bytes: u64,
 ) -> (i32, ConsumerCharge) {
-    let (data_delay, charge) = consume_consumer_quota(
+    let ConsumerQuotaOutcome {
+        throttle: data_delay,
+        charge,
+    } = consume_consumer_quota(
         image,
         &broker.quota_buckets,
         &context.principal.name,
@@ -226,6 +248,13 @@ pub(super) fn fetch_response_size(response: &FetchResponse, version: i16) -> u64
     u64::try_from(size).unwrap_or(u64::MAX)
 }
 
+/// The position of one partition within a fetch response's topics.
+#[derive(Clone, Copy)]
+struct ResponseSlot {
+    topic_index: usize,
+    partition_index: usize,
+}
+
 /// KIP-73 leader-side throttle: walk `throttled_idxs` in order and drop
 /// whole-partition chunks until the remaining throttled bytes fit in
 /// `budget`, allowing one over-burst partition through when this round had credit.
@@ -235,15 +264,19 @@ pub(super) fn fetch_response_size(response: &FetchResponse, version: i16) -> u64
 /// It returns the bytes it left in place.
 fn truncate_throttled_responses(
     responses: &mut [FetchableTopicResponse],
-    throttled_idxs: &[(usize, usize)],
+    throttled_idxs: &[ResponseSlot],
     budget: u64,
     burst: u64,
 ) -> u64 {
     let mut remaining = budget;
     let mut kept = 0;
     let mut sent_oversized_partition = false;
-    for &(ti, pi) in throttled_idxs {
-        let part = &mut responses[ti].partitions[pi];
+    for &ResponseSlot {
+        topic_index,
+        partition_index,
+    } in throttled_idxs
+    {
+        let part = &mut responses[topic_index].partitions[partition_index];
         let chunk_size = part.records.as_ref().map_or(0, RecordsPayload::payload_len) as u64;
         if chunk_size <= remaining {
             remaining -= chunk_size;
@@ -265,6 +298,13 @@ fn truncate_throttled_responses(
     kept
 }
 
+/// The throttle a consumer fetch earned from its byte-rate quota, with the
+/// charge it made.
+struct ConsumerQuotaOutcome {
+    throttle: QuotaDelay,
+    charge: ConsumerCharge,
+}
+
 /// KIP-13 `consumer_byte_rate` enforcement.
 ///
 /// The function looks up the matching quota for `(principal, client_id)`,
@@ -277,14 +317,20 @@ fn consume_consumer_quota(
     principal: &str,
     client_id: Option<&str>,
     bytes: u64,
-) -> (QuotaDelay, ConsumerCharge) {
+) -> ConsumerQuotaOutcome {
     let Some((entity_key, rate)) =
         lookup_quota_with_key(image, principal, client_id, "consumer_byte_rate")
     else {
-        return (QuotaDelay::zero(), ConsumerCharge(None));
+        return ConsumerQuotaOutcome {
+            throttle: QuotaDelay::zero(),
+            charge: ConsumerCharge(None),
+        };
     };
     if !rate.is_finite() || rate <= 0.0 {
-        return (QuotaDelay::zero(), ConsumerCharge(None));
+        return ConsumerQuotaOutcome {
+            throttle: QuotaDelay::zero(),
+            charge: ConsumerCharge(None),
+        };
     }
     let user = entity_field(&entity_key, "user");
     let client_id_opt = entity_field(&entity_key, "client-id");
@@ -294,20 +340,30 @@ fn consume_consumer_quota(
     // throttle (#1212); a throttled fetch then gives the whole charge back.
     let bucket = buckets.get_or_create("consumer_byte_rate", &entity_key, rate);
     let debt = bucket.record(bytes);
-    let charge = ConsumerCharge(Some((std::sync::Arc::clone(&bucket), bytes)));
+    let charge = ConsumerCharge(Some(ChargedBucket {
+        bucket: std::sync::Arc::clone(&bucket),
+        bytes,
+    }));
     let Some(overage) = debt_tokens(debt) else {
-        return (QuotaDelay::zero(), charge);
+        return ConsumerQuotaOutcome {
+            throttle: QuotaDelay::zero(),
+            charge,
+        };
     };
     let delay_secs = overage / rate;
     // Kafka's `ClientQuotaManager.throttleTime` does not bound a byte-rate
     // throttle.
     let delay = Time::from_secs_f64(delay_secs);
-    (QuotaDelay::new(delay, user, client_id_opt), charge)
+    ConsumerQuotaOutcome {
+        throttle: QuotaDelay::new(delay, user, client_id_opt),
+        charge,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use {
+        super::ConsumerQuotaOutcome,
         crate::{
             handlers::test_support::replicated_partition,
             metrics::BrokerMetrics,
@@ -333,15 +389,15 @@ mod tests {
         let buckets = QuotaBuckets::with_window(secs(1));
         // 3072 bytes over at 1024 B/s is three seconds, reported whole: Kafka
         // does not bound a byte-rate throttle (#709).
-        let (delay_match, _) =
-            super::consume_consumer_quota(&img, &buckets, "alice", Some("app-x"), 4096);
+        let delay_match =
+            super::consume_consumer_quota(&img, &buckets, "alice", Some("app-x"), 4096).throttle;
         assert!(
             delay_match > millis(2_900) && delay_match <= secs(3),
             "tuple quota match should throttle for the whole overage; got {delay_match:?}"
         );
         let buckets2 = QuotaBuckets::with_window(secs(1));
-        let (delay_other, _) =
-            super::consume_consumer_quota(&img, &buckets2, "alice", Some("other"), 4096);
+        let delay_other =
+            super::consume_consumer_quota(&img, &buckets2, "alice", Some("other"), 4096).throttle;
         assert!(
             delay_other == <Time as TimeExt>::ZERO,
             "non-matching client_id should not throttle; got {delay_other:?}"
@@ -360,13 +416,13 @@ mod tests {
         };
 
         let refunded = QuotaBuckets::with_window(secs(1));
-        let (throttle, charge) = consume(&refunded, 1_500);
+        let ConsumerQuotaOutcome { throttle, charge } = consume(&refunded, 1_500);
         charge.refund();
-        let (after_refund, _) = consume(&refunded, 1_000);
+        let after_refund = consume(&refunded, 1_000).throttle;
 
         let kept = QuotaBuckets::with_window(secs(1));
         let _ = consume(&kept, 1_500);
-        let (after_kept, _) = consume(&kept, 1_000);
+        let after_kept = consume(&kept, 1_000).throttle;
 
         assert!(throttle > <Time as TimeExt>::ZERO, "{throttle:?}");
         assert!(after_refund == <Time as TimeExt>::ZERO, "{after_refund:?}");
@@ -383,7 +439,7 @@ mod tests {
         // one-second window gives the bucket a burst of exactly its rate.
         check_fractional_bandwidth("consumer_byte_rate", |image, buckets, bytes| {
             super::consume_consumer_quota(image, buckets, "alice", Some("app"), bytes)
-                .0
+                .throttle
                 .delay
         });
     }
@@ -426,6 +482,28 @@ mod tests {
         image
     }
 
+    /// One partition of a follower fetch: the bytes of records it carries and
+    /// whether the follower is in its ISR.
+    #[derive(Clone, Copy)]
+    struct FetchedPartition {
+        bytes: usize,
+        in_sync: bool,
+    }
+
+    fn synced(bytes: usize) -> FetchedPartition {
+        FetchedPartition {
+            bytes,
+            in_sync: true,
+        }
+    }
+
+    fn unsynced(bytes: usize) -> FetchedPartition {
+        FetchedPartition {
+            bytes,
+            in_sync: false,
+        }
+    }
+
     /// Runs the leader-side throttle of the follower fetch of broker 2 over
     /// one partition per entry of `partitions`, each with that many bytes of
     /// records and with the follower in its ISR or not, and returns the bytes
@@ -433,21 +511,24 @@ mod tests {
     fn throttle_leader_fetch(
         leader_out: &TokenBucket,
         list: &str,
-        partitions: &[(usize, bool)],
+        partitions: &[FetchedPartition],
     ) -> Vec<usize> {
         use krabka_protocol::{
             owned::fetch_response::{FetchableTopicResponse, PartitionData},
             records::RecordsPayload,
         };
-        let in_isr: Vec<bool> = partitions.iter().map(|(_, in_sync)| *in_sync).collect();
+        let in_isr: Vec<bool> = partitions.iter().map(|row| row.in_sync).collect();
         let image = leader_image(list, &in_isr);
         let mut responses = vec![FetchableTopicResponse {
             topic: "t".into(),
             partitions: (0..)
                 .zip(partitions)
-                .map(|(partition_index, (bytes, _))| PartitionData {
+                .map(|(partition_index, row)| PartitionData {
                     partition_index,
-                    records: Some(RecordsPayload::Raw(bytes::Bytes::from(vec![0_u8; *bytes]))),
+                    records: Some(RecordsPayload::Raw(bytes::Bytes::from(vec![
+                        0_u8;
+                        row.bytes
+                    ]))),
                     ..Default::default()
                 })
                 .collect(),
@@ -458,7 +539,10 @@ mod tests {
             leader_out,
             &BrokerMetrics::new(),
             &image,
-            (krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)),
+            super::ReplicaPair {
+                leader: krabka_metadata::NodeId(1),
+                follower: krabka_metadata::NodeId(2),
+            },
             &mut responses,
         );
 
@@ -519,7 +603,7 @@ mod tests {
             ]),
         ];
         for (label, list, bytes, want) in cases {
-            let partitions: Vec<(usize, bool)> = bytes.iter().map(|b| (*b, false)).collect();
+            let partitions: Vec<FetchedPartition> = bytes.iter().map(|b| unsynced(*b)).collect();
             check!(
                 throttle_leader_fetch(&leader_bucket(500), list, &partitions) == want,
                 "{label}"
@@ -534,8 +618,8 @@ mod tests {
     fn an_over_burst_replication_payload_progresses_and_is_charged() {
         let bucket = leader_bucket(500);
 
-        let first = throttle_leader_fetch(&bucket, "*", &[(800, false)]);
-        let second = throttle_leader_fetch(&bucket, "*", &[(800, false)]);
+        let first = throttle_leader_fetch(&bucket, "*", &[unsynced(800)]);
+        let second = throttle_leader_fetch(&bucket, "*", &[unsynced(800)]);
 
         check!((first, second) == (vec![800], vec![0]));
     }
@@ -545,10 +629,10 @@ mod tests {
     /// and its charge leaves the bucket with no immediate follow-up credit.
     #[test]
     fn an_in_sync_follower_is_never_throttled() {
-        let kept = throttle_leader_fetch(&leader_bucket(100), "*", &[(5_000, true), (300, true)]);
+        let kept = throttle_leader_fetch(&leader_bucket(100), "*", &[synced(5_000), synced(300)]);
         let bucket = leader_bucket(100);
-        let first_out_of_sync = throttle_leader_fetch(&bucket, "*", &[(300, false)]);
-        let next_out_of_sync = throttle_leader_fetch(&bucket, "*", &[(300, false)]);
+        let first_out_of_sync = throttle_leader_fetch(&bucket, "*", &[unsynced(300)]);
+        let next_out_of_sync = throttle_leader_fetch(&bucket, "*", &[unsynced(300)]);
 
         check!(
             (kept, first_out_of_sync, next_out_of_sync) == (vec![5_000, 300], vec![300], vec![0])
@@ -565,8 +649,8 @@ mod tests {
 
         // The out-of-sync partition draws first and fits the 1000 bytes the
         // bucket holds; the in-sync partition's 4000 bytes are then recorded.
-        let mixed = throttle_leader_fetch(&bucket, "*", &[(4_000, true), (600, false)]);
-        let next = throttle_leader_fetch(&bucket, "*", &[(600, false)]);
+        let mixed = throttle_leader_fetch(&bucket, "*", &[synced(4_000), unsynced(600)]);
+        let next = throttle_leader_fetch(&bucket, "*", &[unsynced(600)]);
 
         check!((mixed, next) == (vec![4_000, 600], vec![0]));
     }
@@ -583,12 +667,12 @@ mod tests {
         let bucket = TokenBucket::with_clock(clock.clone());
         bucket.set_byte_rate(krabka_units::bytes_per_sec(1_000));
 
-        throttle_leader_fetch(&bucket, "*", &[(100_000, true)]);
-        let during = throttle_leader_fetch(&bucket, "*", &[(600, false)]);
+        throttle_leader_fetch(&bucket, "*", &[synced(100_000)]);
+        let during = throttle_leader_fetch(&bucket, "*", &[unsynced(600)]);
         clock
             .advance(std::time::Duration::from_secs(12))
             .expect("manual time moves forward");
-        let after = throttle_leader_fetch(&bucket, "*", &[(600, false)]);
+        let after = throttle_leader_fetch(&bucket, "*", &[unsynced(600)]);
 
         check!((during, after) == (vec![0], vec![600]));
     }
@@ -601,8 +685,8 @@ mod tests {
     fn the_budget_of_a_dropped_partition_goes_back_to_the_bucket() {
         let bucket = leader_bucket(500);
 
-        let first = throttle_leader_fetch(&bucket, "*", &[(400, false), (400, false)]);
-        let second = throttle_leader_fetch(&bucket, "*", &[(100, false)]);
+        let first = throttle_leader_fetch(&bucket, "*", &[unsynced(400), unsynced(400)]);
+        let second = throttle_leader_fetch(&bucket, "*", &[unsynced(100)]);
 
         check!((first, second) == (vec![400, 0], vec![100]));
     }
@@ -610,7 +694,7 @@ mod tests {
     /// A rate of zero is no throttle, in sync or not.
     #[test]
     fn an_unthrottled_leader_leaves_every_partition_alone() {
-        let kept = throttle_leader_fetch(&TokenBucket::new(), "*", &[(800, false), (800, true)]);
+        let kept = throttle_leader_fetch(&TokenBucket::new(), "*", &[unsynced(800), synced(800)]);
 
         check!(kept == vec![800, 800]);
     }

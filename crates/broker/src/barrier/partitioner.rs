@@ -23,8 +23,25 @@ mod tests {
     // `Utils.abs(Utils.murmur2(s.getBytes(UTF_8))) % 50` implementation.
     #[test]
     fn matches_the_jvm_murmur2_vectors() {
-        let cases: &[(&str, i32)] = &[("my-tid", 43), ("producer-1", 45), ("tx-orders-prod", 26)];
-        for (group, expected) in cases {
+        struct Case {
+            group: &'static str,
+            expected: i32,
+        }
+        let cases: &[Case] = &[
+            Case {
+                group: "my-tid",
+                expected: 43,
+            },
+            Case {
+                group: "producer-1",
+                expected: 45,
+            },
+            Case {
+                group: "tx-orders-prod",
+                expected: 26,
+            },
+        ];
+        for Case { group, expected } in cases {
             assert!(
                 partition_for_group(group, 50) == *expected,
                 "group `{group}` should hash to partition {expected}"

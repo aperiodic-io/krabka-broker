@@ -35,8 +35,8 @@ use {
         DlqError, DlqRequest, DlqSink,
         coalesce::{Admitted, Coalescer, Produce, ProduceTransport},
         record::{RangeContext, RoundBounds, build_round, destination_partition},
-        source::{Fetched, SourceTier, fetch},
-        validate::{ClusterSettings, GroupSettings, TopicState, validate},
+        source::{Fetched, OffsetSpan, SourceTier, fetch},
+        validate::{ClusterSettings, GroupSettings, TopicState, ValidatedGroup, validate},
     },
     crate::{
         auto_topic_creation::AutoTopicCreation,
@@ -450,7 +450,8 @@ impl DlqWriter {
             || {
                 let image = self.controller.current_image();
                 let cluster = ClusterSettings::resolve(&image, self.node_id);
-                validate(&image, group, Some(settings.clone()), &cluster).map(|(_, state)| state)
+                validate(&image, group, Some(settings.clone()), &cluster)
+                    .map(|validated| validated.topic_state)
             },
             || self.topics.create_dead_letter_topic(topic),
         )
@@ -554,7 +555,10 @@ impl DlqSink for DlqWriter {
     async fn write(&self, request: DlqRequest) -> Result<(), DlqError> {
         let image = self.controller.current_image();
         let cluster = ClusterSettings::resolve(&image, self.node_id);
-        let (settings, state) = validate(
+        let ValidatedGroup {
+            settings,
+            topic_state: state,
+        } = validate(
             &image,
             &request.group,
             GroupSettings::resolve(&image, &request.group),
@@ -598,7 +602,7 @@ impl DlqSink for DlqWriter {
                 fetch(
                     source.as_ref(),
                     tier.as_ref(),
-                    (next, last),
+                    OffsetSpan { first: next, last },
                     budget,
                     self.decompression,
                 )
@@ -660,9 +664,18 @@ mod tests {
         records: RoundRecordCount,
     }
 
-    /// An image with the topic `dlq.g`, one partition for each of `leaders`,
-    /// as `(leader, whether that broker is registered)`.
-    fn image_with_topic(leaders: &[(NodeId, BrokerRegistration)]) -> MetadataImage {
+    /// The leader of a partition, and whether that broker is registered.
+    struct TopicLeader {
+        node: NodeId,
+        registration: BrokerRegistration,
+    }
+
+    fn leader(node: NodeId, registration: BrokerRegistration) -> TopicLeader {
+        TopicLeader { node, registration }
+    }
+
+    /// An image with the topic `dlq.g`, one partition for each of `leaders`.
+    fn image_with_topic(leaders: &[TopicLeader]) -> MetadataImage {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&MetadataRecord::V1Topic(TopicRecord {
             name: "dlq.g".into(),
@@ -670,7 +683,14 @@ mod tests {
             partitions: i32::try_from(leaders.len()).unwrap(),
             replication_factor: 1,
         }));
-        for (index, (leader, registered)) in leaders.iter().enumerate() {
+        for (
+            index,
+            TopicLeader {
+                node: leader,
+                registration: registered,
+            },
+        ) in leaders.iter().enumerate()
+        {
             image.apply(&MetadataRecord::V1Partition(PartitionRecord {
                 topic: "dlq.g".into(),
                 partition: i32::try_from(index).unwrap(),
@@ -707,15 +727,15 @@ mod tests {
     #[test]
     fn the_target_follows_the_source_partition_and_waits_for_a_leader() {
         let ready = image_with_topic(&[
-            (NodeId(1), BrokerRegistration::Registered),
-            (NodeId(2), BrokerRegistration::Registered),
-            (NodeId(3), BrokerRegistration::Registered),
+            leader(NodeId(1), BrokerRegistration::Registered),
+            leader(NodeId(2), BrokerRegistration::Registered),
+            leader(NodeId(3), BrokerRegistration::Registered),
         ]);
         // Partition 1 is led by node 9, which has not registered.
         let no_leader = image_with_topic(&[
-            (NodeId(1), BrokerRegistration::Registered),
-            (NodeId(9), BrokerRegistration::AwaitingRegistration),
-            (NodeId(3), BrokerRegistration::Registered),
+            leader(NodeId(1), BrokerRegistration::Registered),
+            leader(NodeId(9), BrokerRegistration::AwaitingRegistration),
+            leader(NodeId(3), BrokerRegistration::Registered),
         ]);
 
         let actual = [
@@ -846,13 +866,19 @@ mod tests {
         );
     }
 
+    /// A target and the batch written to it.
+    struct Round {
+        target: Target,
+        batch: RecordBatch,
+    }
+
     /// A produce round of the tests: `records` records for partition 0 of the
     /// topic `dlq.<id>`.
     #[bon::builder]
     fn round_of(
         #[builder(into, default = FixtureTopicId (1))] id: FixtureTopicId,
         #[builder(into, default = RoundRecordCount (1))] records: RoundRecordCount,
-    ) -> (Target, RecordBatch) {
+    ) -> Round {
         let setup = ProduceRoundSetup { id, records };
         let ProduceRoundSetup { id, records } = setup;
         let id = id.0;
@@ -874,7 +900,7 @@ mod tests {
                 .collect(),
             ..Default::default()
         };
-        (target, batch)
+        Round { target, batch }
     }
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -918,8 +944,14 @@ mod tests {
             first_records,
             second_records,
         };
-        let (first, first_batch) = round_of().records(setup.first_records).call();
-        let (second, second_batch) = round_of().id(2).records(setup.second_records).call();
+        let Round {
+            target: first,
+            batch: first_batch,
+        } = round_of().records(setup.first_records).call();
+        let Round {
+            target: second,
+            batch: second_batch,
+        } = round_of().id(2).records(setup.second_records).call();
         CoalescedWrites {
             sender: Coalescer::new(broker),
             metrics: BrokerMetrics::new(),
@@ -960,20 +992,26 @@ mod tests {
         }
     }
 
+    /// The topics of a request that a broker was sent, and its node.
+    #[derive(Debug, PartialEq, Eq)]
+    struct TopicsSent {
+        node: NodeId,
+        topics: Vec<String>,
+    }
+
     /// The topics of each request that the broker was sent, and its node.
-    fn topics_sent(broker: &FakeBroker) -> Vec<(NodeId, Vec<String>)> {
+    fn topics_sent(broker: &FakeBroker) -> Vec<TopicsSent> {
         broker
             .sent()
             .into_iter()
-            .map(|(node, request)| {
-                (
-                    node,
-                    request
-                        .topic_data
-                        .into_iter()
-                        .map(|topic| topic.name)
-                        .collect(),
-                )
+            .map(|sent| TopicsSent {
+                node: sent.node,
+                topics: sent
+                    .request
+                    .topic_data
+                    .into_iter()
+                    .map(|topic| topic.name)
+                    .collect(),
             })
             .collect()
     }
@@ -1027,7 +1065,10 @@ mod tests {
                     "Unable to produce to the DLQ topic dlq.2-0: error {}.",
                     codes::MESSAGE_TOO_LARGE
                 ))),
-                vec![(NodeId(1), vec!["dlq.1".to_owned(), "dlq.2".to_owned()])],
+                vec![TopicsSent {
+                    node: NodeId(1),
+                    topics: vec!["dlq.1".to_owned(), "dlq.2".to_owned()]
+                }],
                 (2, 1, 0),
                 (0, 1, 1),
             )
@@ -1084,8 +1125,14 @@ mod tests {
                 Ok(()),
                 Ok(()),
                 vec![
-                    (NodeId(1), vec!["dlq.1".to_owned(), "dlq.2".to_owned()]),
-                    (NodeId(2), vec!["dlq.2".to_owned()]),
+                    TopicsSent {
+                        node: NodeId(1),
+                        topics: vec!["dlq.1".to_owned(), "dlq.2".to_owned()]
+                    },
+                    TopicsSent {
+                        node: NodeId(2),
+                        topics: vec!["dlq.2".to_owned()]
+                    },
                 ],
                 (1, 1, 0),
                 (3, 2, 0),
@@ -1099,24 +1146,32 @@ mod tests {
     /// failed write and an attempt for each try.
     #[tokio::test(start_paused = true)]
     async fn a_write_that_runs_out_of_attempts_counts_one_failure() {
+        struct Case {
+            broker: FakeBroker,
+            reason: &'static str,
+        }
+
         let not_leader = |index, request: &ProduceRequest| {
             Ok(answer_rows(request, index, |_, _, _| {
                 codes::NOT_LEADER_OR_FOLLOWER
             }))
         };
         let no_response = |_, _: &ProduceRequest| Err("connection refused".to_owned());
-        let cases: [(FakeBroker, &str); 2] = [
-            (
-                FakeBroker::answering(not_leader),
-                "dlq.1-0 is not led by node 1",
-            ),
-            (FakeBroker::answering(no_response), "connection refused"),
+        let cases: [Case; 2] = [
+            Case {
+                broker: FakeBroker::answering(not_leader),
+                reason: "dlq.1-0 is not led by node 1",
+            },
+            Case {
+                broker: FakeBroker::answering(no_response),
+                reason: "connection refused",
+            },
         ];
 
-        for (broker, reason) in cases {
+        for Case { broker, reason } in cases {
             let sender = Coalescer::new(broker.clone());
             let metrics = BrokerMetrics::new();
-            let (target, batch) = round_of().call();
+            let Round { target, batch } = round_of().call();
 
             let written =
                 produce_round(&sender, &metrics, "g1", &target, || NodeId(1), &batch).await;
@@ -1146,7 +1201,7 @@ mod tests {
         });
         let sender = Coalescer::new(broker.clone());
         let metrics = BrokerMetrics::new();
-        let (target, batch) = round_of().records(2).call();
+        let Round { target, batch } = round_of().records(2).call();
         let write = produce_round(&sender, &metrics, "g1", &target, || NodeId(1), &batch);
         tokio::pin!(write);
 
@@ -1304,14 +1359,18 @@ mod tests {
         assert!(actual == expected);
     }
 
+    /// What `ensure_topic` ended with, and how many requests went out.
+    #[derive(Clone, Debug, PartialEq)]
+    struct EnsureResult {
+        outcome: Result<(), DlqError>,
+        requests: usize,
+    }
+
     /// Runs `ensure_topic` for `dlq.g` with a scripted image and a scripted
     /// controller. `states` is what the image shows at each attempt, and its
     /// last entry holds from then on; each `CreateTopics` gets `answer`.
     /// Returns the outcome and how many requests went out.
-    async fn ensure(
-        states: &[Result<TopicState, DlqError>],
-        answer: i16,
-    ) -> (Result<(), DlqError>, usize) {
+    async fn ensure(states: &[Result<TopicState, DlqError>], answer: i16) -> EnsureResult {
         let looks = std::cell::Cell::new(0_usize);
         let requests = std::cell::Cell::new(0_usize);
         let outcome = ensure_topic(
@@ -1327,7 +1386,10 @@ mod tests {
             },
         )
         .await;
-        (outcome, requests.get())
+        EnsureResult {
+            outcome,
+            requests: requests.get(),
+        }
     }
 
     /// Kafka's retry of a topic creation goes back through `enqueue` and
@@ -1342,12 +1404,21 @@ mod tests {
         let not_enabled = DlqError::Config("DLQ is not enabled on configured DLQ topic".to_owned());
         let cases = [
             // The image shows the topic already: nothing is asked.
-            (vec![Ok(TopicState::Exists)], codes::NONE, (Ok(()), 0)),
-            (vec![Ok(TopicState::Missing)], codes::NONE, (Ok(()), 1)),
+            (vec![Ok(TopicState::Exists)], codes::NONE, EnsureResult {
+                outcome: Ok(()),
+                requests: 0,
+            }),
+            (vec![Ok(TopicState::Missing)], codes::NONE, EnsureResult {
+                outcome: Ok(()),
+                requests: 1,
+            }),
             (
                 vec![Ok(TopicState::Missing), Ok(TopicState::Exists)],
                 codes::TOPIC_ALREADY_EXISTS,
-                (Ok(()), 1),
+                EnsureResult {
+                    outcome: Ok(()),
+                    requests: 1,
+                },
             ),
             (
                 vec![
@@ -1356,35 +1427,41 @@ mod tests {
                     Ok(TopicState::Exists),
                 ],
                 codes::THROTTLING_QUOTA_EXCEEDED,
-                (Ok(()), 2),
+                EnsureResult {
+                    outcome: Ok(()),
+                    requests: 2,
+                },
             ),
             (
                 vec![Ok(TopicState::Missing)],
                 codes::TOPIC_ALREADY_EXISTS,
-                (
-                    Err(DlqError::Write(format!(
+                EnsureResult {
+                    outcome: Err(DlqError::Write(format!(
                         "Exhausted max retries to create the DLQ topic dlq.g: \
                          creating dlq.g: error {}.",
                         codes::TOPIC_ALREADY_EXISTS
                     ))),
-                    5,
-                ),
+                    requests: 5,
+                },
             ),
             (
                 vec![Ok(TopicState::Missing), Err(not_enabled.clone())],
                 codes::TOPIC_ALREADY_EXISTS,
-                (Err(not_enabled), 1),
+                EnsureResult {
+                    outcome: Err(not_enabled),
+                    requests: 1,
+                },
             ),
             (
                 vec![Ok(TopicState::Missing)],
                 codes::TOPIC_AUTHORIZATION_FAILED,
-                (
-                    Err(DlqError::Write(format!(
+                EnsureResult {
+                    outcome: Err(DlqError::Write(format!(
                         "Unable to create the DLQ topic dlq.g: error {}.",
                         codes::TOPIC_AUTHORIZATION_FAILED
                     ))),
-                    1,
-                ),
+                    requests: 1,
+                },
             ),
         ];
         let expected: Vec<_> = cases.iter().map(|(_, _, want)| want.clone()).collect();

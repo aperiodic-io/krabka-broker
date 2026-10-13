@@ -6,6 +6,7 @@ use {
     super::subscription_blob,
     crate::{
         coordinator::unified::{
+            ClientIdentity,
             actor::{
                 ClassicView, CommitFence, CommitRequest, DescribeMember, DescribeView,
                 GroupActorHandle, GroupActorMessage, JoinResult, LeaveResult, SyncResult,
@@ -229,30 +230,45 @@ pub async fn consumer_request(
     handle: &GroupActorHandle,
     request: ConsumerGroupHeartbeatRequest,
 ) -> ConsumerGroupHeartbeatResponse {
-    consumer_request_from(handle, request, ("client-a", "")).await
+    consumer_request_from(handle, request, ClientIdentity {
+        id: "client-a",
+        host: "",
+    })
+    .await
 }
 
 pub async fn consumer_request_as_client(
     handle: &GroupActorHandle,
     request: ConsumerGroupHeartbeatRequest,
 ) -> ConsumerGroupHeartbeatResponse {
-    consumer_request_from(handle, request, ("client", "host")).await
+    consumer_request_from(handle, request, ClientIdentity {
+        id: "client",
+        host: "host",
+    })
+    .await
 }
 
 pub async fn consumer_request_from(
     handle: &GroupActorHandle,
     request: ConsumerGroupHeartbeatRequest,
-    client: (&str, &str),
+    client: ClientIdentity<'_>,
 ) -> ConsumerGroupHeartbeatResponse {
     ask(&handle.tx, |reply| GroupActorMessage::Heartbeat {
         request,
-        client_id: client.0.into(),
-        client_host: client.1.into(),
+        client_id: client.id.into(),
+        client_host: client.host.into(),
         regex_resolver: no_topic_regex_resolver(),
         reply,
     })
     .await
     .unwrap()
+}
+
+/// The partitions of a topic that a member reports it holds.
+#[derive(Clone, Copy)]
+pub struct OwnedPartitions<'a> {
+    pub topic_id: Uuid,
+    pub partitions: &'a [i32],
 }
 
 /// A native consumer heartbeat subscribed to `t` that reports `owned` as the
@@ -261,7 +277,7 @@ pub async fn consumer_heartbeat_owning(
     handle: &GroupActorHandle,
     member_id: &str,
     member_epoch: i32,
-    owned: &[(Uuid, &[i32])],
+    owned: &[OwnedPartitions<'_>],
 ) -> ConsumerGroupHeartbeatResponse {
     consumer_request(handle, ConsumerGroupHeartbeatRequest {
         group_id: "g".into(),
@@ -272,9 +288,9 @@ pub async fn consumer_heartbeat_owning(
         topic_partitions: Some(
             owned
                 .iter()
-                .map(|(topic_id, partitions)| TopicPartitions {
-                    topic_id: *topic_id,
-                    partitions: partitions.to_vec(),
+                .map(|owned| TopicPartitions {
+                    topic_id: owned.topic_id,
+                    partitions: owned.partitions.to_vec(),
                     ..Default::default()
                 })
                 .collect(),

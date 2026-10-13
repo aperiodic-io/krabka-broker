@@ -60,7 +60,15 @@ pub(super) struct AcquireRequest<'a> {
     /// offsets below the local log start.
     pub(super) tier: Option<TieredSource<'a>>,
     /// The durable WAL index and object source of a diskless partition.
-    pub(super) diskless: Option<(&'a DisklessReadHandle, uuid::Uuid)>,
+    pub(super) diskless: Option<DisklessSource<'a>>,
+}
+
+/// The durable WAL index and object source of a diskless partition, and the
+/// topic id that keys it.
+#[derive(Clone, Copy)]
+pub(super) struct DisklessSource<'a> {
+    pub(super) reader: &'a DisklessReadHandle,
+    pub(super) topic_id: uuid::Uuid,
 }
 
 /// Kafka's `ShareAcquireMode` with the request's `BatchSize`.
@@ -134,7 +142,7 @@ pub(super) async fn acquire_read_records(
         .expect("log mutex poisoned")
         .local_log_start_offset();
     let read = if partition.diskless
-        && let Some((reader, topic_id)) = request.diskless
+        && let Some(DisklessSource { reader, topic_id }) = request.diskless
         && from < local_start
     {
         let floor = diskless_logical_start(reader, partition, topic_id).await?;
@@ -165,11 +173,11 @@ pub(super) async fn acquire_read_records(
                 let Some(read) = tier.read(partition, from, request.max_bytes).await? else {
                     return Ok(0);
                 };
-                for (first, last) in &read.unreadable {
-                    state.archive_internal(*first, *last);
+                for span in &read.unreadable {
+                    state.archive_internal(span.first, span.last);
                 }
-                for (first, last) in &read.not_due {
-                    state.defer_internal(*first, *last);
+                for span in &read.not_due {
+                    state.defer_internal(span.first, span.last);
                 }
                 read.bytes
             }
@@ -185,11 +193,14 @@ pub(super) async fn acquire_read_records(
     };
     let read_bytes = batches_within(&read, request.max_bytes, request.min_one_batch)?;
     let bounds = batch_bounds(&read_bytes)?;
-    let Some(&(_, read_last)) = bounds.last() else {
+    let Some(&BatchBounds {
+        last: read_last, ..
+    }) = bounds.last()
+    else {
         return Ok(0);
     };
     let last = Offset(read_last).min(request.upper - 1);
-    let ends: Vec<Offset> = bounds.iter().map(|(_, last)| Offset(*last)).collect();
+    let ends: Vec<Offset> = bounds.iter().map(|batch| Offset(batch.last)).collect();
     let acquired = state.acquire_shaped(
         request.member,
         AcquireShape {
@@ -210,7 +221,7 @@ pub(super) async fn acquire_read_records(
     if !records.is_empty() {
         out.records = Some(RecordsPayload::Raw(records));
     }
-    let bases: Vec<i64> = bounds.iter().map(|(base, _)| *base).collect();
+    let bases: Vec<i64> = bounds.iter().map(|batch| batch.base).collect();
     out.acquired_records = acquired
         .iter()
         .flat_map(|range| rows_of(range, request.mode, &bases))
@@ -298,13 +309,30 @@ pub(super) fn batch_spans(bytes: &Bytes) -> Result<Vec<BatchSpan>, BrokerError> 
     Ok(spans)
 }
 
-/// The `(base_offset, last_offset)` of every v2 batch in `bytes`, in log
+/// The first and last offsets that a v2 batch holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct BatchBounds {
+    pub(super) base: i64,
+    pub(super) last: i64,
+}
+
+/// The `base_offset` and `last_offset` of every v2 batch in `bytes`, in log
 /// order. It reads only the batch headers.
-fn batch_bounds(bytes: &Bytes) -> Result<Vec<(i64, i64)>, BrokerError> {
+fn batch_bounds(bytes: &Bytes) -> Result<Vec<BatchBounds>, BrokerError> {
     Ok(batch_spans(bytes)?
         .into_iter()
-        .map(|span| (span.base, span.last))
+        .map(|span| BatchBounds {
+            base: span.base,
+            last: span.last,
+        })
         .collect())
+}
+
+/// An inclusive range of offsets, `[first, last]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct OffsetSpan {
+    pub(super) first: Offset,
+    pub(super) last: Offset,
 }
 
 /// The byte ranges of `bytes`, joined into one buffer. It copies nothing
@@ -386,7 +414,7 @@ fn batches_within(
 /// that batch, so `Log::read_raw` returns the whole batch again. Kafka reads
 /// the log once per response, so its records never hold a batch twice. This
 /// keeps one copy of each batch, by base offset, in log order.
-pub(super) fn merge_batches(before: &Bytes, added: &Bytes) -> Result<(Bytes, i64), BrokerError> {
+pub(super) fn merge_batches(before: &Bytes, added: &Bytes) -> Result<MergedBatches, BrokerError> {
     let held = batch_spans(before)?;
     let fresh: Vec<BatchSpan> = batch_spans(added)?
         .into_iter()
@@ -395,28 +423,56 @@ pub(super) fn merge_batches(before: &Bytes, added: &Bytes) -> Result<(Bytes, i64
     let added_len =
         i64::try_from(fresh.iter().map(|span| span.bytes.len()).sum::<usize>()).unwrap_or(i64::MAX);
     if fresh.is_empty() {
-        return Ok((before.clone(), 0));
+        return Ok(MergedBatches {
+            records: before.clone(),
+            added_bytes: 0,
+        });
     }
     if held.is_empty() {
-        return Ok((
-            gather(
+        return Ok(MergedBatches {
+            records: gather(
                 added,
                 &fresh.into_iter().map(|span| span.bytes).collect::<Vec<_>>(),
             ),
-            added_len,
-        ));
+            added_bytes: added_len,
+        });
     }
-    let mut all: Vec<(i64, &Bytes, std::ops::Range<usize>)> = held
+    let mut all: Vec<SourcedSpan<'_>> = held
         .into_iter()
-        .map(|span| (span.base, before, span.bytes))
-        .chain(fresh.into_iter().map(|span| (span.base, added, span.bytes)))
+        .map(|span| SourcedSpan {
+            base: span.base,
+            source: before,
+            range: span.bytes,
+        })
+        .chain(fresh.into_iter().map(|span| SourcedSpan {
+            base: span.base,
+            source: added,
+            range: span.bytes,
+        }))
         .collect();
-    all.sort_by_key(|(base, _, _)| *base);
-    let mut blob = BytesMut::with_capacity(all.iter().map(|(_, _, range)| range.len()).sum());
-    for (_, source, range) in all {
+    all.sort_by_key(|span| span.base);
+    let mut blob = BytesMut::with_capacity(all.iter().map(|span| span.range.len()).sum());
+    for SourcedSpan { source, range, .. } in all {
         blob.extend_from_slice(&source[range]);
     }
-    Ok((blob.freeze(), added_len))
+    Ok(MergedBatches {
+        records: blob.freeze(),
+        added_bytes: added_len,
+    })
+}
+
+/// The joined records of [`merge_batches`] and the number of bytes that the
+/// join added.
+pub(super) struct MergedBatches {
+    pub(super) records: Bytes,
+    pub(super) added_bytes: i64,
+}
+
+/// A batch's bytes inside the buffer that holds them, with its base offset.
+struct SourcedSpan<'a> {
+    base: i64,
+    source: &'a Bytes,
+    range: std::ops::Range<usize>,
 }
 
 /// The bytes of a v2 batch in front of its `batch_length` field: the base
@@ -462,16 +518,26 @@ async fn read_raw(
     Ok((raw.total > 0).then_some(raw))
 }
 
-/// The aborted transactions of a window, by producer, as `(first offset,
-/// abort marker offset)` pairs.
+/// An aborted transaction: the offset of its first record and the offset of
+/// its abort marker.
+#[derive(Debug, Clone, Copy)]
+struct AbortedTransaction {
+    first: i64,
+    marker: i64,
+}
+
+/// The aborted transactions of a window, by producer.
 #[derive(Debug, Default)]
-pub(super) struct AbortedRanges(HashMap<i64, Vec<(i64, i64)>>);
+pub(super) struct AbortedRanges(HashMap<i64, Vec<AbortedTransaction>>);
 
 impl AbortedRanges {
     /// Records an aborted transaction of `producer_id` that starts at `first`
     /// and ends at its abort marker, `marker`.
     pub(super) fn add(&mut self, producer_id: i64, first: i64, marker: i64) {
-        self.0.entry(producer_id).or_default().push((first, marker));
+        self.0
+            .entry(producer_id)
+            .or_default()
+            .push(AbortedTransaction { first, marker });
     }
 
     /// Whether a share consumer must never get the batch of `producer_id`
@@ -482,13 +548,13 @@ impl AbortedRanges {
         &self,
         attributes: Attributes,
         producer_id: i64,
-        (base, last): (i64, i64),
+        BatchBounds { base, last }: BatchBounds,
     ) -> bool {
         attributes.is_control_batch()
             || (attributes.is_transactional()
                 && self.0.get(&producer_id).is_some_and(|txns| {
                     txns.iter()
-                        .any(|&(first, marker)| first <= base && last <= marker)
+                        .any(|txn| txn.first <= base && last <= txn.marker)
                 }))
     }
 }
@@ -517,7 +583,7 @@ pub(super) async fn unreadable_batch_ranges(
     start: Offset,
     end: Offset,
     read_committed: bool,
-) -> Result<Vec<(Offset, Offset)>, BrokerError> {
+) -> Result<Vec<OffsetSpan>, BrokerError> {
     if end <= start {
         return Ok(Vec::new());
     }
@@ -543,15 +609,15 @@ pub(super) async fn unreadable_batch_ranges(
                 if batch.base_offset >= end.0 {
                     break;
                 }
-                let unreadable = aborted.excludes(
-                    batch.attributes,
-                    batch.producer_id,
-                    (batch.base_offset, last),
-                );
+                let unreadable =
+                    aborted.excludes(batch.attributes, batch.producer_id, BatchBounds {
+                        base: batch.base_offset,
+                        last,
+                    });
                 let first = Offset(batch.base_offset).max(start);
                 let last = Offset(last).min(end - 1);
                 if unreadable && first <= last {
-                    ranges.push((first, last));
+                    ranges.push(OffsetSpan { first, last });
                 }
             }
             if next <= cursor {
@@ -583,12 +649,15 @@ pub(super) async fn pending_activation_ranges(
     start: Offset,
     end: Offset,
     now_ms: i64,
-) -> Result<Vec<(Offset, Offset)>, BrokerError> {
+) -> Result<Vec<OffsetSpan>, BrokerError> {
     if end <= start {
         return Ok(Vec::new());
     }
     scan_log(part, "activation", move |log| {
         log.pending_activation_ranges(start, end - 1, now_ms)
+            .into_iter()
+            .map(|(first, last)| OffsetSpan { first, last })
+            .collect()
     })
     .await
 }
@@ -649,7 +718,10 @@ mod tests {
                 max_attempts: 5,
                 mode: AcquireMode::RecordLimit,
                 tier: None,
-                diskless: Some((&reader, topic_id)),
+                diskless: Some(DisklessSource {
+                    reader: &reader,
+                    topic_id,
+                }),
             };
             let mut out = PartitionData::default();
             if floor > 0 {
@@ -678,7 +750,10 @@ mod tests {
             assert!(
                 batch_bounds(&bytes).unwrap()
                     == (floor..2)
-                        .map(|offset| (offset, offset))
+                        .map(|offset| BatchBounds {
+                            base: offset,
+                            last: offset
+                        })
                         .collect::<Vec<_>>()
             );
             let mut warm = PartitionData::default();
@@ -717,7 +792,13 @@ mod tests {
         let ranges = pending_activation_ranges(&scheduled, Offset(0), Offset(6), NOW_MS)
             .await
             .expect("scan the schedule");
-        assert!(ranges == vec![(Offset(2), Offset(3))]);
+        assert!(
+            ranges
+                == vec![OffsetSpan {
+                    first: Offset(2),
+                    last: Offset(3)
+                }]
+        );
 
         // The window bound is exclusive, so a window that stops below the
         // waiting batch reports nothing.
@@ -757,25 +838,37 @@ mod tests {
                 "a control batch",
                 transactional.with_control(true),
                 7,
-                (20, 20),
+                BatchBounds { base: 20, last: 20 },
                 true,
             ),
-            ("plain data", Attributes::default(), 7, (12, 14), false),
+            (
+                "plain data",
+                Attributes::default(),
+                7,
+                BatchBounds { base: 12, last: 14 },
+                false,
+            ),
             (
                 "data inside the aborted transaction",
                 transactional,
                 7,
-                (12, 14),
+                BatchBounds { base: 12, last: 14 },
                 true,
             ),
             (
                 "data past the abort marker",
                 transactional,
                 7,
-                (21, 22),
+                BatchBounds { base: 21, last: 22 },
                 false,
             ),
-            ("another producer's data", transactional, 8, (12, 14), false),
+            (
+                "another producer's data",
+                transactional,
+                8,
+                BatchBounds { base: 12, last: 14 },
+                false,
+            ),
         ];
         let mut actual = Vec::new();
         let mut expected = Vec::new();
@@ -788,7 +881,13 @@ mod tests {
 
     /// Three one-record batches of equal size at offsets 0, 1 and 2, whole
     /// and one by one.
-    fn three_batches() -> (Bytes, Vec<Bytes>) {
+    struct ThreeBatches {
+        whole: Bytes,
+        each: Vec<Bytes>,
+    }
+
+    /// The three batches of [`ThreeBatches`] as one buffer and as three.
+    fn three_batches() -> ThreeBatches {
         let batches: Vec<Bytes> = (0..3)
             .map(|base| {
                 let mut one = BytesMut::new();
@@ -805,7 +904,10 @@ mod tests {
                 one.freeze()
             })
             .collect();
-        (batches.concat().into(), batches)
+        ThreeBatches {
+            whole: batches.concat().into(),
+            each: batches,
+        }
     }
 
     /// Kafka's `minOneMessage` lets a read exceed its budget only by its
@@ -814,7 +916,10 @@ mod tests {
     /// just the batches that fit.
     #[test]
     fn only_the_first_batch_may_exceed_the_budget() {
-        let (read, batches) = three_batches();
+        let ThreeBatches {
+            whole: read,
+            each: batches,
+        } = three_batches();
         let size = i32::try_from(batches[0].len()).expect("a small batch");
         let first = batches[0].clone();
         let first_two: Bytes = [batches[0].clone(), batches[1].clone()].concat().into();

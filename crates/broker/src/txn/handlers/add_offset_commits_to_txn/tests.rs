@@ -11,6 +11,13 @@ use {
 const TID: &str = "tid-offsets";
 const NOW: i64 = 1_000_000;
 
+fn producer(id: i64, epoch: i16) -> ProducerIdentity {
+    ProducerIdentity {
+        producer_id: ProducerId(id),
+        producer_epoch: epoch,
+    }
+}
+
 fn offsets_partition(index: i32) -> TopicPartition {
     TopicPartition {
         topic: OFFSETS_TOPIC.to_string(),
@@ -54,61 +61,61 @@ fn the_decision_follows_kafka_order() {
                 pending.producer_id = ProducerId(99);
                 pending
             },
-            (ProducerId(7), 3),
+            producer(7, 3),
             AddOffsetsDecision::Answer(codes::CONCURRENT_TRANSACTIONS),
         ),
         (
             "another producer id",
             entry(TxnState::Ongoing, &[]),
-            (ProducerId(8), 3),
+            producer(8, 3),
             AddOffsetsDecision::Answer(codes::INVALID_PRODUCER_ID_MAPPING),
         ),
         (
             "another epoch",
             entry(TxnState::Ongoing, &[]),
-            (ProducerId(7), 2),
+            producer(7, 2),
             AddOffsetsDecision::Answer(codes::PRODUCER_FENCED),
         ),
         (
             "prepare commit",
             entry(TxnState::PrepareCommit, &[]),
-            (ProducerId(7), 3),
+            producer(7, 3),
             AddOffsetsDecision::Answer(codes::CONCURRENT_TRANSACTIONS),
         ),
         (
             "prepare abort",
             entry(TxnState::PrepareAbort, &[]),
-            (ProducerId(7), 3),
+            producer(7, 3),
             AddOffsetsDecision::Answer(codes::CONCURRENT_TRANSACTIONS),
         ),
         (
             "the ongoing transaction holds the partition",
             entry(TxnState::Ongoing, &[offsets_partition(4)]),
-            (ProducerId(7), 3),
+            producer(7, 3),
             AddOffsetsDecision::Answer(codes::NONE),
         ),
         (
             "the ongoing transaction lacks the partition",
             entry(TxnState::Ongoing, &[offsets_partition(5)]),
-            (ProducerId(7), 3),
+            producer(7, 3),
             AddOffsetsDecision::Append,
         ),
         (
             "an empty transaction",
             entry(TxnState::Empty, &[]),
-            (ProducerId(7), 3),
+            producer(7, 3),
             AddOffsetsDecision::Append,
         ),
         (
             "a completed transaction that held the partition",
             entry(TxnState::CompleteCommit, &[offsets_partition(4)]),
-            (ProducerId(7), 3),
+            producer(7, 3),
             AddOffsetsDecision::Append,
         ),
         (
             "a completed abort",
             entry(TxnState::CompleteAbort, &[]),
-            (ProducerId(7), 3),
+            producer(7, 3),
             AddOffsetsDecision::Append,
         ),
     ];
@@ -162,7 +169,22 @@ fn a_new_entry_has_no_start_time() {
     check!(TxnEntry::new_empty(TID.into(), ProducerId(7), 0, 60_000, NOW).start_ms == -1);
 }
 
-fn coordinator_with_log(directory: &std::path::Path) -> (Arc<TxnCoordinator>, Arc<Partition>) {
+/// A coordinator and the state partition whose log it writes.
+struct LoggedCoordinator {
+    coordinator: Arc<TxnCoordinator>,
+    partition: Arc<Partition>,
+}
+
+/// A coordinator over a real log that already leads state partition 0.
+async fn leading_coordinator(directory: &Path) -> Arc<TxnCoordinator> {
+    let LoggedCoordinator { coordinator, .. } = coordinator_with_log(directory);
+    coordinator
+        .lead_state_partition_for_test(PartitionIndex(0))
+        .await;
+    coordinator
+}
+
+fn coordinator_with_log(directory: &Path) -> LoggedCoordinator {
     let coordinator = Arc::new(TxnCoordinator::new(
         krabka_metadata::NodeId(1),
         Arc::new(PartitionRegistry::new()),
@@ -179,17 +201,10 @@ fn coordinator_with_log(directory: &std::path::Path) -> (Arc<TxnCoordinator>, Ar
         PartitionIndex(0),
         Arc::clone(&partition),
     );
-    (coordinator, partition)
-}
-
-async fn coordinator_with_led_state_partition(
-    directory: &Path,
-) -> (Arc<TxnCoordinator>, Arc<Partition>) {
-    let (coordinator, partition) = coordinator_with_log(directory);
-    coordinator
-        .lead_state_partition_for_test(PartitionIndex(0))
-        .await;
-    (coordinator, partition)
+    LoggedCoordinator {
+        coordinator,
+        partition,
+    }
 }
 
 /// The coordinator answers each case with Kafka's code, and appends only when
@@ -200,7 +215,7 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
         name: &'static str,
         transactional_id: &'static str,
         seeded: TxnEntry,
-        producer: (ProducerId, i16),
+        producer: ProducerIdentity,
         code: i16,
         appends: bool,
     }
@@ -209,7 +224,7 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
             name: "an empty transaction starts",
             transactional_id: TID,
             seeded: entry(TxnState::Empty, &[]),
-            producer: (ProducerId(7), 3),
+            producer: producer(7, 3),
             code: codes::NONE,
             appends: true,
         },
@@ -217,7 +232,7 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
             name: "the partition is already in the ongoing transaction",
             transactional_id: TID,
             seeded: entry(TxnState::Ongoing, &[offsets_partition(4)]),
-            producer: (ProducerId(7), 3),
+            producer: producer(7, 3),
             code: codes::NONE,
             appends: false,
         },
@@ -225,7 +240,7 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
             name: "prepare commit",
             transactional_id: TID,
             seeded: entry(TxnState::PrepareCommit, &[]),
-            producer: (ProducerId(7), 3),
+            producer: producer(7, 3),
             code: codes::CONCURRENT_TRANSACTIONS,
             appends: false,
         },
@@ -233,7 +248,7 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
             name: "another producer id",
             transactional_id: TID,
             seeded: entry(TxnState::Ongoing, &[]),
-            producer: (ProducerId(8), 3),
+            producer: producer(8, 3),
             code: codes::INVALID_PRODUCER_ID_MAPPING,
             appends: false,
         },
@@ -241,7 +256,7 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
             name: "another epoch",
             transactional_id: TID,
             seeded: entry(TxnState::Ongoing, &[]),
-            producer: (ProducerId(7), 2),
+            producer: producer(7, 2),
             code: codes::PRODUCER_FENCED,
             appends: false,
         },
@@ -249,7 +264,7 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
             name: "an empty transactional id",
             transactional_id: "",
             seeded: entry(TxnState::Ongoing, &[]),
-            producer: (ProducerId(7), 3),
+            producer: producer(7, 3),
             code: codes::INVALID_REQUEST,
             appends: false,
         },
@@ -258,7 +273,10 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
     let mut actual = Vec::new();
     for case in cases {
         let directory = tempfile::tempdir().expect("tempdir");
-        let (coordinator, partition) = coordinator_with_log(directory.path());
+        let LoggedCoordinator {
+            coordinator,
+            partition,
+        } = coordinator_with_log(directory.path());
         coordinator
             .lead_state_partition_for_test(PartitionIndex(0))
             .await;
@@ -310,7 +328,7 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
 #[tokio::test]
 async fn a_caller_already_holding_the_handle_sees_the_durable_state() {
     let directory = tempfile::tempdir().expect("tempdir");
-    let (coordinator, _partition) = coordinator_with_led_state_partition(directory.path()).await;
+    let coordinator = leading_coordinator(directory.path()).await;
     coordinator
         .put(entry(TxnState::Ongoing, &[]), TxnVersion::Verified)
         .await
@@ -323,7 +341,7 @@ async fn a_caller_already_holding_the_handle_sees_the_durable_state() {
     let code = add_offsets_partition(
         &coordinator,
         TID,
-        (ProducerId(7), 3),
+        producer(7, 3),
         offsets_partition(4),
         TxnVersion::Verified,
     )
@@ -350,7 +368,7 @@ enum Outcome {
 #[tokio::test]
 async fn the_reaper_does_not_abort_a_transaction_that_add_offsets_just_opened() {
     let directory = tempfile::tempdir().expect("tempdir");
-    let (coordinator, _partition) = coordinator_with_led_state_partition(directory.path()).await;
+    let coordinator = leading_coordinator(directory.path()).await;
     // The previous transaction started and completed long ago.
     let mut completed = entry(TxnState::CompleteCommit, &[]);
     completed.start_ms = 0;
@@ -363,7 +381,7 @@ async fn the_reaper_does_not_abort_a_transaction_that_add_offsets_just_opened() 
     let code = add_offsets_partition(
         &coordinator,
         TID,
-        (ProducerId(7), 3),
+        producer(7, 3),
         offsets_partition(4),
         TxnVersion::Verified,
     )

@@ -19,6 +19,7 @@ use {
         txn::{
             bootstrap,
             state::{TopicPartition, TxnState},
+            util::ProducerIdentity,
             version::TxnVersion,
         },
     },
@@ -187,7 +188,7 @@ impl TxnCoordinator {
             ..Default::default()
         };
         let Some(connection) = self
-            .verification_connection(transport, leader, (&host, port))
+            .verification_connection(transport, leader, &host, port)
             .await
         else {
             return Remote::Failed(codes::NETWORK_EXCEPTION);
@@ -241,12 +242,13 @@ impl TxnCoordinator {
         &self,
         transport: &super::MarkerTransport,
         leader: krabka_metadata::NodeId,
-        (host, port): (&str, u16),
+        host: &str,
+        port: u16,
     ) -> Option<krabka_client_core::Connection> {
         let mut connections = self.verification_connections.lock().await;
         if let Some(cached) = connections.get(&leader)
-            && cached.address.0 == host
-            && cached.address.1 == port
+            && cached.address.host == host
+            && cached.address.port == port
             && !cached.connection.is_closed()
         {
             return Some(cached.connection.clone());
@@ -268,7 +270,10 @@ impl TxnCoordinator {
         {
             Ok(connection) => {
                 if let Some(stale) = connections.insert(leader, super::VerificationConnection {
-                    address: (host.to_string(), port),
+                    address: super::VerificationEndpoint {
+                        host: host.to_string(),
+                        port,
+                    },
                     connection: connection.clone(),
                 }) {
                     stale.connection.close();
@@ -343,9 +348,18 @@ impl TxnCoordinator {
         };
         let entry = entry.lock().await;
         verification_code(
-            (entry.producer_id, entry.producer_epoch, entry.state),
+            HeldTransaction {
+                identity: ProducerIdentity {
+                    producer_id: entry.producer_id,
+                    producer_epoch: entry.producer_epoch,
+                },
+                state: entry.state,
+            },
             entry.partitions.contains(partition),
-            (check.producer_id, check.producer_epoch),
+            ProducerIdentity {
+                producer_id: check.producer_id,
+                producer_epoch: check.producer_epoch,
+            },
         )
     }
 }
@@ -360,17 +374,32 @@ enum Remote {
     Failed(i16),
 }
 
+/// The producer identity and state of the transaction a verify-only check
+/// compares against.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HeldTransaction {
+    pub(crate) identity: ProducerIdentity,
+    pub(crate) state: TxnState,
+}
+
 /// The verify-only answer for one partition, from the transaction's identity,
 /// state and partition set. Kafka's
 /// `TransactionCoordinator.handleVerifyPartitionsInTransaction`.
 pub(crate) fn verification_code(
-    (producer_id, producer_epoch, state): (ProducerId, i16, TxnState),
+    held: HeldTransaction,
     contains_partition: bool,
-    (requested_producer_id, requested_epoch): (ProducerId, i16),
+    requested: ProducerIdentity,
 ) -> i16 {
-    if producer_id != requested_producer_id {
+    let HeldTransaction {
+        identity: ProducerIdentity {
+            producer_id,
+            producer_epoch,
+        },
+        state,
+    } = held;
+    if producer_id != requested.producer_id {
         codes::INVALID_PRODUCER_ID_MAPPING
-    } else if producer_epoch != requested_epoch {
+    } else if producer_epoch != requested.producer_epoch {
         codes::PRODUCER_FENCED
     } else if matches!(state, TxnState::PrepareCommit | TxnState::PrepareAbort) {
         codes::CONCURRENT_TRANSACTIONS

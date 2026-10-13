@@ -106,6 +106,13 @@ fn epochs_for_range(
     out
 }
 
+/// A sealed segment and the exclusive end of its offsets, which is the base
+/// offset of its successor.
+pub(super) struct SealedSegment<'a> {
+    pub(super) segment: &'a Segment,
+    pub(super) next_base: Offset,
+}
+
 /// Kafka's `LogSegment.lastModified()` for the file at `path`: its
 /// modification time in epoch milliseconds, or `0` when it cannot be read,
 /// which is what `java.io.File.lastModified()` returns for an I/O error.
@@ -117,20 +124,21 @@ fn last_modified_ms(path: &Path) -> i64 {
 
 impl Log {
     /// Pair each sealed segment with the exclusive end supplied by its successor.
-    pub(super) fn sealed_segments_with_next_base(
-        &self,
-    ) -> impl Iterator<Item = (&Segment, Offset)> {
+    pub(super) fn sealed_segments_with_next_base(&self) -> impl Iterator<Item = SealedSegment<'_>> {
         let active_base = self
             .active
             .as_ref()
             .map_or_else(|| self.log_end_offset(), Segment::base_offset);
-        self.segments.iter().zip(
-            self.segments
-                .iter()
-                .skip(1)
-                .map(Segment::base_offset)
-                .chain(std::iter::once(active_base)),
-        )
+        self.segments
+            .iter()
+            .zip(
+                self.segments
+                    .iter()
+                    .skip(1)
+                    .map(Segment::base_offset)
+                    .chain(std::iter::once(active_base)),
+            )
+            .map(|(segment, next_base)| SealedSegment { segment, next_base })
     }
 
     /// Kafka's `LogSegment.largestTimestamp()`: the segment's highest record
@@ -203,8 +211,8 @@ impl Log {
 
         let to_drop: Vec<Offset> = self
             .sealed_segments_with_next_base()
-            .filter(|(_, next_base)| *next_base - 1 < target)
-            .map(|(segment, _)| segment.base_offset())
+            .filter(|sealed| sealed.next_base - 1 < target)
+            .map(|sealed| sealed.segment.base_offset())
             .collect();
 
         let removed = to_drop.len();
@@ -283,26 +291,31 @@ impl Log {
         self.sealed_segments_with_next_base()
             // A rollover's snapshot appears only after its records and indexes
             // have flushed. Pending segments stay local until then.
-            .filter(|(_, next_base)| producer_snapshot::path(&self.dir, *next_base).exists())
-            .map(|(seg, next_base)| {
-                let base = seg.base_offset();
-                let last = next_base - 1;
-                let txn = name::txnindex_path(&self.dir, base.0);
-                let log_path = name::log_path(&self.dir, base.0);
-                SegmentExport {
-                    base_offset: base,
-                    last_offset: last,
-                    max_timestamp: self.largest_timestamp(seg),
-                    last_modified_ms: last_modified_ms(&log_path),
-                    size: seg.size(),
-                    log_path,
-                    offset_index_path: name::index_path(&self.dir, base.0),
-                    time_index_path: name::timeindex_path(&self.dir, base.0),
-                    transaction_index_path: txn.exists().then_some(txn),
-                    producer_snapshot_path: producer_snapshot::path(&self.dir, next_base),
-                    leader_epochs: epochs_for_range(&epoch_entries, base, last),
-                }
-            })
+            .filter(|sealed| producer_snapshot::path(&self.dir, sealed.next_base).exists())
+            .map(
+                |SealedSegment {
+                     segment: seg,
+                     next_base,
+                 }| {
+                    let base = seg.base_offset();
+                    let last = next_base - 1;
+                    let txn = name::txnindex_path(&self.dir, base.0);
+                    let log_path = name::log_path(&self.dir, base.0);
+                    SegmentExport {
+                        base_offset: base,
+                        last_offset: last,
+                        max_timestamp: self.largest_timestamp(seg),
+                        last_modified_ms: last_modified_ms(&log_path),
+                        size: seg.size(),
+                        log_path,
+                        offset_index_path: name::index_path(&self.dir, base.0),
+                        time_index_path: name::timeindex_path(&self.dir, base.0),
+                        transaction_index_path: txn.exists().then_some(txn),
+                        producer_snapshot_path: producer_snapshot::path(&self.dir, next_base),
+                        leader_epochs: epochs_for_range(&epoch_entries, base, last),
+                    }
+                },
+            )
             .collect()
     }
 }

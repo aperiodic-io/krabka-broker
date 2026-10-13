@@ -268,8 +268,14 @@ mod tests {
             adding: &'static [u64],
             removing: &'static [u64],
             /// The replicas and ISR the reassignment completes to.
-            expected: Option<(&'static [u64], &'static [u64])>,
+            expected: Option<Completion>,
         }
+        /// The replicas and ISR a reassignment completes to.
+        struct Completion {
+            replicas: &'static [u64],
+            isr: &'static [u64],
+        }
+        let done = |replicas, isr| Completion { replicas, isr };
         let case = |name, replicas, isr, adding, removing, expected| Case {
             name,
             replicas,
@@ -286,7 +292,7 @@ mod tests {
                 &[1, 2, 3],
                 &[3],
                 &[2],
-                Some((&[1, 3], &[1, 3])),
+                Some(done(&[1, 3], &[1, 3])),
             ),
             case(
                 "an addition is not in the ISR",
@@ -318,7 +324,7 @@ mod tests {
                 &[1, 2, 3],
                 &[],
                 &[3],
-                Some((&[1, 2], &[1, 2])),
+                Some(done(&[1, 2], &[1, 2])),
             ),
             case(
                 // [0,1,2,3,4] -> [2,3,4,5] with only 0, 1 and 5 in sync would
@@ -336,7 +342,7 @@ mod tests {
                 &[1, 2, 3],
                 &[3],
                 &[1],
-                Some((&[2, 3, 4], &[2, 3])),
+                Some(done(&[2, 3, 4], &[2, 3])),
             ),
             case(
                 "an increase does not wait for the rest of the target",
@@ -344,7 +350,7 @@ mod tests {
                 &[1, 2, 3],
                 &[3],
                 &[],
-                Some((&[1, 2, 3, 4], &[1, 2, 3])),
+                Some(done(&[1, 2, 3, 4], &[1, 2, 3])),
             ),
         ];
         for Case {
@@ -364,7 +370,7 @@ mod tests {
                 &ids(removing),
             )
             .map(|done| (done.replicas, done.isr));
-            let expected = expected.map(|(replicas, isr)| (ids(replicas), ids(isr)));
+            let expected = expected.map(|Completion { replicas, isr }| (ids(replicas), ids(isr)));
             assert!(got == expected, "{name}");
         }
     }
@@ -379,7 +385,12 @@ mod tests {
             name: &'static str,
             assignment: ReassignmentSetup<'static>,
             /// The leader and ISR of the record the tick submits, if any.
-            expected: Option<(u64, &'static [u64])>,
+            expected: Option<Submitted>,
+        }
+        /// The leader and ISR of a record the tick submits.
+        struct Submitted {
+            leader: u64,
+            isr: &'static [u64],
         }
         fn leader_removed_setup(isr: &[u64]) -> ReassignmentSetup<'static> {
             ReassignmentSetup {
@@ -390,6 +401,7 @@ mod tests {
                 ..Default::default()
             }
         }
+        let submitted = |leader, isr| Submitted { leader, isr };
         let cases = [
             Case {
                 name: "broker 2 is a target replica outside the ISR",
@@ -406,7 +418,7 @@ mod tests {
                     removing: vec![NodeId(3)],
                     ..Default::default()
                 },
-                expected: Some((1, &[1, 2])),
+                expected: Some(submitted(1, &[1, 2])),
             },
             Case {
                 name: "the leader is removed and broker 3 is not in the ISR",
@@ -417,7 +429,7 @@ mod tests {
                 name: "the leader is removed and every target replica is in the ISR",
                 assignment: leader_removed_setup(&[1, 3, 4]),
                 // The handoff goes first; completion follows on the next tick.
-                expected: Some((3, &[1, 3, 4])),
+                expected: Some(submitted(3, &[1, 3, 4])),
             },
         ];
         for Case {
@@ -440,7 +452,7 @@ mod tests {
                 }
                 more => panic!("{case}: {more:?}"),
             };
-            let expected = expected.map(|(leader, isr)| (leader, isr.to_vec()));
+            let expected = expected.map(|Submitted { leader, isr }| (leader, isr.to_vec()));
             assert!(got == expected, "{case}: {updates:?}");
         }
     }

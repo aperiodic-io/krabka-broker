@@ -62,12 +62,18 @@ struct Case {
     name: &'static str,
     topic: &'static str,
     setup: Setup,
-    /// `(epoch offset from the setup epoch, base sequence)` of the batch Kafka
-    /// rejects.
-    rejected: (ProducerEpochOffset, ProducerSequence),
-    /// `(epoch offset from the setup epoch, base sequence)` of the batch Kafka
-    /// accepts.
-    accepted: (ProducerEpochOffset, ProducerSequence),
+    /// The batch Kafka rejects.
+    rejected: ProbeBatch,
+    /// The batch Kafka accepts.
+    accepted: ProbeBatch,
+}
+
+/// A probe batch: its epoch offset from the setup epoch, and its base
+/// sequence.
+#[derive(Clone, Copy)]
+struct ProbeBatch {
+    epoch_offset: ProducerEpochOffset,
+    sequence: ProducerSequence,
 }
 
 struct Identity {
@@ -81,7 +87,8 @@ struct Identity {
 async fn produce(
     client: &Client,
     topic: &str,
-    (batch_transactional_id, batch): (Option<&str>, RecordBatch),
+    batch_transactional_id: Option<&str>,
+    batch: RecordBatch,
 ) -> i16 {
     let id = topic_id(client, topic).await;
     let request = ProduceRequest {
@@ -154,22 +161,20 @@ async fn produce_setup(client: &Client, case: &Case, producer: &Identity) {
     let code = produce(
         client,
         case.topic,
-        (
-            producer.transactional_id,
-            transaction_probe_batch()
-                .producer(ProducerIdentity {
-                    id: producer.producer_id,
-                    epoch: producer.epoch,
-                })
-                .sequence(0)
-                .records(3)
-                .transaction(if producer.transactional_id.is_some() {
-                    BatchTransaction::Transactional
-                } else {
-                    BatchTransaction::Ordinary
-                })
-                .call(),
-        ),
+        producer.transactional_id,
+        transaction_probe_batch()
+            .producer(ProducerIdentity {
+                id: producer.producer_id,
+                epoch: producer.epoch,
+            })
+            .sequence(0)
+            .records(3)
+            .transaction(if producer.transactional_id.is_some() {
+                BatchTransaction::Transactional
+            } else {
+                BatchTransaction::Ordinary
+            })
+            .call(),
     )
     .await;
     assert!(code == 0, "{}: setup produce", case.name);
@@ -238,12 +243,11 @@ async fn set_up(client: &Client, case: &Case) -> Identity {
     }
 }
 
-async fn probe(
-    client: &Client,
-    case: &Case,
-    producer: &Identity,
-    (offset, sequence): (ProducerEpochOffset, ProducerSequence),
-) -> i16 {
+async fn probe(client: &Client, case: &Case, producer: &Identity, batch: ProbeBatch) -> i16 {
+    let ProbeBatch {
+        epoch_offset: offset,
+        sequence,
+    } = batch;
     let epoch = ProducerEpoch(producer.epoch.0 + offset.0);
     if producer.transactional_id.is_some() {
         let added = add_partition(client, producer, case.topic, epoch).await;
@@ -256,21 +260,19 @@ async fn probe(
     produce(
         client,
         case.topic,
-        (
-            producer.transactional_id,
-            transaction_probe_batch()
-                .producer(ProducerIdentity {
-                    id: producer.producer_id,
-                    epoch,
-                })
-                .sequence(sequence)
-                .transaction(if producer.transactional_id.is_some() {
-                    BatchTransaction::Transactional
-                } else {
-                    BatchTransaction::Ordinary
-                })
-                .call(),
-        ),
+        producer.transactional_id,
+        transaction_probe_batch()
+            .producer(ProducerIdentity {
+                id: producer.producer_id,
+                epoch,
+            })
+            .sequence(sequence)
+            .transaction(if producer.transactional_id.is_some() {
+                BatchTransaction::Transactional
+            } else {
+                BatchTransaction::Ordinary
+            })
+            .call(),
     )
     .await
 }
@@ -301,36 +303,44 @@ async fn codes_across_restart(case: &Case) -> [i16; 3] {
     [live_rejected, recovered_rejected, recovered_accepted]
 }
 
+/// A case whose probe at sequence 3 is out of order and whose probe at
+/// sequence 0 is accepted, both at the bumped epoch.
+fn epoch_bump_case(name: &'static str, topic: &'static str, setup: Setup) -> Case {
+    Case {
+        name,
+        topic,
+        setup,
+        rejected: ProbeBatch {
+            epoch_offset: ProducerEpochOffset(0),
+            sequence: ProducerSequence(3),
+        },
+        accepted: ProbeBatch {
+            epoch_offset: ProducerEpochOffset(0),
+            sequence: ProducerSequence(0),
+        },
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn first_sequence_at_a_new_epoch_gets_the_same_answer_before_and_after_restart() {
     let cases = [
-        Case {
-            name: "tv2-commit-bumps-the-epoch",
-            topic: "seq-tv2",
-            setup: Setup::Transaction { downgrade_to: None },
-            rejected: (ProducerEpochOffset(0), ProducerSequence(3)),
-            accepted: (ProducerEpochOffset(0), ProducerSequence(0)),
-        },
-        Case {
-            name: "tv1-cluster-v5-commit-bumps-the-epoch",
-            topic: "seq-tv1",
-            setup: Setup::Transaction {
+        epoch_bump_case(
+            "tv2-commit-bumps-the-epoch",
+            "seq-tv2",
+            Setup::Transaction { downgrade_to: None },
+        ),
+        // The EndTxn v5 request of this client is a TV_2 client whatever
+        // `transaction.version` the cluster finalized (Kafka's
+        // `transactionVersionForEndTxn`), so the commit bumps the epoch as
+        // it does at TV_2.
+        epoch_bump_case(
+            "tv1-cluster-v5-commit-bumps-the-epoch",
+            "seq-tv1",
+            Setup::Transaction {
                 downgrade_to: Some(TransactionFeatureLevel(1)),
             },
-            // The EndTxn v5 request of this client is a TV_2 client whatever
-            // `transaction.version` the cluster finalized (Kafka's
-            // `transactionVersionForEndTxn`), so the commit bumps the epoch as
-            // it does at TV_2.
-            rejected: (ProducerEpochOffset(0), ProducerSequence(3)),
-            accepted: (ProducerEpochOffset(0), ProducerSequence(0)),
-        },
-        Case {
-            name: "idempotent-epoch-bump",
-            topic: "seq-idempotent",
-            setup: Setup::Idempotent,
-            rejected: (ProducerEpochOffset(0), ProducerSequence(3)),
-            accepted: (ProducerEpochOffset(0), ProducerSequence(0)),
-        },
+        ),
+        epoch_bump_case("idempotent-epoch-bump", "seq-idempotent", Setup::Idempotent),
     ];
     for case in &cases {
         let codes = codes_across_restart(case).await;

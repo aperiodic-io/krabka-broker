@@ -9,13 +9,14 @@ use {
     tempfile::tempdir,
 };
 
-async fn fixture(
-    isr: &[u64],
-) -> (
-    tempfile::TempDir,
-    mpsc::Sender<WriterMessage>,
-    ObservedWriter,
-) {
+/// A running writer, its sender, and the directory that backs its log.
+struct Fixture {
+    _dir: tempfile::TempDir,
+    tx: mpsc::Sender<WriterMessage>,
+    observed: ObservedWriter,
+}
+
+async fn fixture(isr: &[u64]) -> Fixture {
     let dir = tempdir().expect("tempdir");
     let log = open_default_log(dir.path());
     let (tx, rx) = mpsc::channel(1);
@@ -23,12 +24,16 @@ async fn fixture(
         replica_state: replica_with_isr(isr).await,
         ..Default::default()
     });
-    (dir, tx, observed)
+    Fixture {
+        _dir: dir,
+        tx,
+        observed,
+    }
 }
 
 #[tokio::test]
 async fn writer_fires_hw_notify_after_produce_when_rf_one() {
-    let (_dir, tx, observed) = fixture(&[1]).await;
+    let Fixture { _dir, tx, observed } = fixture(&[1]).await;
 
     let waiter = observed.hw_advance_notify.notified();
     tokio::pin!(waiter);
@@ -47,7 +52,7 @@ async fn writer_fires_hw_notify_after_produce_when_rf_one() {
 
 #[tokio::test]
 async fn writer_does_not_notify_hw_when_append_leaves_hw_unchanged() {
-    let (_dir, tx, observed) = fixture(&[1, 2]).await;
+    let Fixture { _dir, tx, observed } = fixture(&[1, 2]).await;
 
     let waiter = observed.hw_advance_notify.notified();
     tokio::pin!(waiter);
@@ -68,7 +73,7 @@ async fn writer_does_not_notify_hw_when_append_leaves_hw_unchanged() {
 
 #[tokio::test]
 async fn writer_does_not_advance_hw_when_followers_lagging() {
-    let (_dir, tx, observed) = fixture(&[1, 2, 3]).await;
+    let Fixture { _dir, tx, observed } = fixture(&[1, 2, 3]).await;
 
     let ack_rx = queue_batch(&tx, sample_batch().count(3).call()).await;
     ack_rx.await.expect("ack").expect("append ok");

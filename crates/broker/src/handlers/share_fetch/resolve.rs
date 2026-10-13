@@ -105,9 +105,13 @@ pub(super) fn resolve_row(
     let ack_error = if !acknowledges {
         None
     } else if !acknowledgement_batches_are_valid(
-        ack_batches
-            .iter()
-            .map(|(first, last, types)| (*first, *last, types.as_slice())),
+        ack_batches.iter().map(|batch| {
+            (
+                batch.first_offset,
+                batch.last_offset,
+                batch.acknowledge_types.as_slice(),
+            )
+        }),
         row.supports_renew,
         row.is_renew_ack,
     ) {

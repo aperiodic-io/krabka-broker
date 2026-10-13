@@ -27,7 +27,10 @@ use {
 /// line up by position with the returned `Vec`, so `cpu_micros[ti][pi]`
 /// matches `responses[ti].partitions[pi]`. The caller can then attribute CPU
 /// without a re-key by topic name.
-pub(super) type GroupedResponses = (Vec<FetchableTopicResponse>, Vec<Vec<u64>>);
+pub(super) struct GroupedResponses {
+    pub(super) responses: Vec<FetchableTopicResponse>,
+    pub(super) cpu_micros: Vec<Vec<u64>>,
+}
 
 pub(super) fn group_into_topic_responses(pending: Vec<PendingRead>) -> GroupedResponses {
     let mut responses: Vec<FetchableTopicResponse> = Vec::new();
@@ -55,7 +58,10 @@ pub(super) fn group_into_topic_responses(pending: Vec<PendingRead>) -> GroupedRe
             .expect("an entry was just pushed")
             .push(p.cpu_micros);
     }
-    (responses, cpu_micros)
+    GroupedResponses {
+        responses,
+        cpu_micros,
+    }
 }
 
 /// Clear every row's KIP-951 `CurrentLeader` below Fetch v16.
@@ -116,10 +122,20 @@ pub(super) fn downconvert_legacy_responses(
 
 /// One partition row as the fetch metrics count it: its index, its record
 /// bytes, and whether it carried an error.
-type PartitionMetricRow = (i32, u64, bool);
+struct PartitionMetricRow {
+    partition_index: i32,
+    bytes: u64,
+    failed: bool,
+}
+
+/// The partition rows of one topic, under the shared name that labels its metrics.
+struct TopicMetricRows {
+    topic_name: std::sync::Arc<str>,
+    partitions: Vec<PartitionMetricRow>,
+}
 
 /// The per-topic rows a fetch read, as the fetch metrics count them.
-pub(super) struct FetchMetricRows(Vec<(std::sync::Arc<str>, Vec<PartitionMetricRow>)>);
+pub(super) struct FetchMetricRows(Vec<TopicMetricRows>);
 
 /// Charge each partition's read time to its CPU metric, which counts work
 /// done whether or not the response is sent, and keep the rows the byte and
@@ -146,7 +162,11 @@ pub(super) fn charge_fetch_cpu(
                 .records
                 .as_ref()
                 .map_or(0, RecordsPayload::payload_len) as u64;
-            partitions.push((partition.partition_index, bytes, partition.error_code != 0));
+            partitions.push(PartitionMetricRow {
+                partition_index: partition.partition_index,
+                bytes,
+                failed: partition.error_code != 0,
+            });
             if let Some(micros) = cpu_micros_by_index
                 .get(topic_index)
                 .and_then(|partitions| partitions.get(partition_index))
@@ -158,7 +178,10 @@ pub(super) fn charge_fetch_cpu(
                 );
             }
         }
-        rows.push((topic_name, partitions));
+        rows.push(TopicMetricRows {
+            topic_name,
+            partitions,
+        });
     }
     FetchMetricRows(rows)
 }
@@ -170,9 +193,18 @@ pub(super) fn record_fetch_metrics(
     rows: FetchMetricRows,
     is_follower_fetch: bool,
 ) {
-    for (topic_name, partitions) in rows.0 {
+    for TopicMetricRows {
+        topic_name,
+        partitions,
+    } in rows.0
+    {
         let mut topic_bytes = 0;
-        for (partition_index, bytes, failed) in partitions {
+        for PartitionMetricRow {
+            partition_index,
+            bytes,
+            failed,
+        } in partitions
+        {
             broker
                 .metrics
                 .record_partition_fetch(&topic_name, partition_index, bytes);
@@ -193,7 +225,9 @@ pub(super) fn record_fetch_metrics(
 #[cfg(test)]
 mod tests {
     use {
-        super::{group_into_topic_responses, withhold_current_leader_before_kip_951},
+        super::{
+            GroupedResponses, group_into_topic_responses, withhold_current_leader_before_kip_951,
+        },
         crate::{
             codes::{FENCED_LEADER_EPOCH, TOPIC_AUTHORIZATION_FAILED, UNKNOWN_TOPIC_ID},
             handlers::fetch::{
@@ -249,7 +283,10 @@ mod tests {
         };
         let unknown = refused_partition(0, UNKNOWN_TOPIC_ID);
         let denied = refused_partition(2, TOPIC_AUTHORIZATION_FAILED);
-        let (responses, cpu_micros) = group_into_topic_responses(vec![
+        let GroupedResponses {
+            responses,
+            cpu_micros,
+        } = group_into_topic_responses(vec![
             row("t1", 1, read(0)),
             row("t1", 1, read(1)),
             row("t2", 2, read(0)),

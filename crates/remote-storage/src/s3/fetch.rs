@@ -90,8 +90,8 @@ mod tests {
         super::{IndexType, RemoteStorageError, S3RemoteStorage, WormError},
         crate::{
             s3::test_support::{
-                SeededCopySetup, WormAccess, counting_rsm, rsm, sample_metadata, seeded_blocking,
-                stamped_metadata, worm_rsm,
+                CountingRsm, SeededCopySetup, WormAccess, counting_rsm, rsm, sample_metadata,
+                seeded_blocking, stamped_metadata, worm_rsm,
             },
             storage_manager::RemoteStorageManager,
             test_support::{TransactionIndex, check_sample_indexes},
@@ -117,7 +117,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn whole_index_reads_enforce_the_configured_cap_for_every_index_type() {
-        let (store, counter) = counting_rsm();
+        let CountingRsm { store, counter } = counting_rsm();
         let store = store.with_max_index_bytes(4);
         let md = sample_metadata(uuid::Uuid::from_u128(11));
         for index in IndexType::ALL {
@@ -156,7 +156,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn missing_object_is_one_request() {
-        let (store, counter) = counting_rsm();
+        let CountingRsm { store, counter } = counting_rsm();
         let md = sample_metadata(uuid::Uuid::from_u128(11));
         tokio::task::spawn_blocking(move || {
             let before = counter.attempts(StoreOp::Get);

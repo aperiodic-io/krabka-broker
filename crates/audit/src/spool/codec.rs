@@ -152,21 +152,32 @@ mod tests {
     /// must yield `None` rather than index past the end.
     #[test]
     fn take_u32_reads_at_the_four_byte_boundary() {
-        // (input, decoded, bytes left unread)
-        let cases: &[(&[u8], Option<u32>, usize)] = &[
-            (&[], None, 0),
-            (&[0x00], None, 1),
-            (&[0x00, 0x00, 0x01], None, 3),
-            (&[0x00, 0x00, 0x01, 0x00], Some(256), 0),
-            (&[0x00, 0x00, 0x01, 0x00, 0xff], Some(256), 1),
+        struct Case {
+            input: &'static [u8],
+            want: Option<u32>,
+            want_left: usize,
+        }
+        let case = |input, want, want_left| Case {
+            input,
+            want,
+            want_left,
+        };
+        let cases = [
+            case(&[], None, 0),
+            case(&[0x00], None, 1),
+            case(&[0x00, 0x00, 0x01], None, 3),
+            case(&[0x00, 0x00, 0x01, 0x00], Some(256), 0),
+            case(&[0x00, 0x00, 0x01, 0x00, 0xff], Some(256), 1),
         ];
-        for (input, want, want_left) in cases {
+        for Case {
+            input,
+            want,
+            want_left,
+        } in cases
+        {
             let mut b: &[u8] = input;
             let got = take_u32(&mut b);
-            check!(
-                (got, b.len()) == (*want, *want_left),
-                "take_u32({input:x?})"
-            );
+            check!((got, b.len()) == (want, want_left), "take_u32({input:x?})");
         }
     }
 }

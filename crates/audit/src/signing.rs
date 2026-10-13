@@ -109,30 +109,23 @@ pub fn verify_signature(public_key: &[u8], msg: &[u8], sig: &[u8]) -> bool {
 mod tests {
     use {
         super::*,
+        crate::test_support::{TestSigner, signer_with_key_id},
         assert2::check,
-        ring::{
-            rand::SystemRandom,
-            signature::{Ed25519KeyPair, KeyPair},
-        },
     };
-
-    fn fresh_signer(key_id: &str) -> (FileEd25519Signer, Vec<u8>) {
-        let rng = SystemRandom::new();
-        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).expect("generate");
-        let kp = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).expect("parse");
-        let pubkey = kp.public_key().as_ref().to_vec();
-        let signer = FileEd25519Signer::from_pkcs8_bytes(pkcs8.as_ref(), key_id.to_string())
-            .expect("signer");
-        (signer, pubkey)
-    }
 
     #[test]
     fn sign_then_verify_roundtrips() {
-        let (signer, pubkey) = fresh_signer("k1");
+        let TestSigner {
+            signer,
+            public_key: pubkey,
+        } = signer_with_key_id("k1");
         check!((signer.key_id(), signer.public_key()) == ("k1", pubkey.clone()));
         let msg = b"the quick brown fox";
         let sig = signer.sign(msg);
-        let (_other, other_pub) = fresh_signer("k2");
+        let TestSigner {
+            public_key: other_pub,
+            ..
+        } = signer_with_key_id("k2");
         for (name, key, message, expected) in [
             ("valid signature", pubkey.as_slice(), msg.as_slice(), true),
             (

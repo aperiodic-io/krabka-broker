@@ -293,14 +293,36 @@ mod tests {
 
     #[test]
     fn filtered_batches_round_trip_through_the_wire() {
+        struct Case {
+            dropped: &'static [i32],
+            survivors: &'static [i32],
+            last_offset_delta: i32,
+        }
         let offset_deltas: &[i32] = &[0, 1, 2, 3];
-        let cases: [(&[i32], &[i32], i32); 3] = [
-            (&[1], &[0, 2, 3], 3),
-            (&[3], &[0, 1, 2], 2),
-            (&[0], &[1, 2, 3], 3),
+        let cases = [
+            Case {
+                dropped: &[1],
+                survivors: &[0, 2, 3],
+                last_offset_delta: 3,
+            },
+            Case {
+                dropped: &[3],
+                survivors: &[0, 1, 2],
+                last_offset_delta: 2,
+            },
+            Case {
+                dropped: &[0],
+                survivors: &[1, 2, 3],
+                last_offset_delta: 3,
+            },
         ];
 
-        for (dropped, survivors, last_offset_delta) in cases {
+        for Case {
+            dropped,
+            survivors,
+            last_offset_delta,
+        } in cases
+        {
             let input = batch(offset_deltas);
             let got = filter_batch(&input, |record| !dropped.contains(&record.offset_delta));
 

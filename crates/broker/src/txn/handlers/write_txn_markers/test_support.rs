@@ -47,19 +47,28 @@ pub(super) async fn start_broker() -> (BrokerHandle, tempfile::TempDir) {
 
 /// Find the group's local offsets replica from one current metadata snapshot.
 pub(super) fn local_offsets_partition(broker: &Broker, group_id: &str) -> Arc<Partition> {
-    local_offsets_partition_with_index(broker, group_id).1
+    local_offsets_partition_with_index(broker, group_id).partition
+}
+
+/// A group's local offsets partition, and its index in `__consumer_offsets`.
+pub(super) struct IndexedPartition {
+    pub(super) index: i32,
+    pub(super) partition: Arc<Partition>,
 }
 
 pub(super) fn local_offsets_partition_with_index(
     broker: &Broker,
     group_id: &str,
-) -> (i32, Arc<Partition>) {
+) -> IndexedPartition {
     let partition = partition_for_group(&broker.controller.current_image(), group_id);
     let part = broker
         .partitions
         .get(OFFSETS_TOPIC, PartitionIndex(partition))
         .expect("local offsets partition");
-    (partition, part)
+    IndexedPartition {
+        index: partition,
+        partition: part,
+    }
 }
 
 /// One transaction record with sequence zero and unchanged protocol header defaults.

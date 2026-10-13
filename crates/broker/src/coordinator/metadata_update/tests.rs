@@ -56,7 +56,11 @@ fn partition(name: &str, index: i32, leader: u64) -> MetadataRecord {
 /// a topic change.
 #[test]
 fn changed_topics_are_the_created_changed_and_deleted_topics() {
-    type Row = (&'static str, Vec<MetadataRecord>, Vec<&'static str>);
+    struct Row {
+        name: &'static str,
+        changes: Vec<MetadataRecord>,
+        topics: Vec<&'static str>,
+    }
     let base = [
         topic("orders", 10),
         partition("orders", 0, 1),
@@ -64,46 +68,52 @@ fn changed_topics_are_the_created_changed_and_deleted_topics() {
         partition("payments", 0, 1),
     ];
     let rows: [Row; 8] = [
-        ("no change", vec![], vec![]),
-        (
-            "a topic is created",
-            vec![topic("refunds", 30), partition("refunds", 0, 1)],
-            vec!["refunds"],
-        ),
-        ("a topic grows", vec![partition("orders", 1, 2)], vec![
-            "orders",
-        ]),
-        (
-            "a partition gets a new leader",
-            vec![partition("orders", 0, 2)],
-            vec!["orders"],
-        ),
-        (
-            "a topic is deleted",
-            vec![MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
+        Row {
+            name: "no change",
+            changes: vec![],
+            topics: vec![],
+        },
+        Row {
+            name: "a topic is created",
+            changes: vec![topic("refunds", 30), partition("refunds", 0, 1)],
+            topics: vec!["refunds"],
+        },
+        Row {
+            name: "a topic grows",
+            changes: vec![partition("orders", 1, 2)],
+            topics: vec!["orders"],
+        },
+        Row {
+            name: "a partition gets a new leader",
+            changes: vec![partition("orders", 0, 2)],
+            topics: vec!["orders"],
+        },
+        Row {
+            name: "a topic is deleted",
+            changes: vec![MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
                 name: "payments".into(),
             })],
-            vec!["payments"],
-        ),
-        (
-            "a topic is deleted and created again",
-            vec![
+            topics: vec!["payments"],
+        },
+        Row {
+            name: "a topic is deleted and created again",
+            changes: vec![
                 MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
                     name: "orders".into(),
                 }),
                 topic("orders", 11),
                 partition("orders", 0, 1),
             ],
-            vec!["orders"],
-        ),
-        (
-            "a topic configuration changes",
-            vec![orders_retention_config()],
-            vec![],
-        ),
-        (
-            "a broker registers",
-            vec![MetadataRecord::V1BrokerRegistration(
+            topics: vec!["orders"],
+        },
+        Row {
+            name: "a topic configuration changes",
+            changes: vec![orders_retention_config()],
+            topics: vec![],
+        },
+        Row {
+            name: "a broker registers",
+            changes: vec![MetadataRecord::V1BrokerRegistration(
                 BrokerRegistrationRecord {
                     broker_epoch: 3,
                     incarnation_id: Uuid::from_u128(3),
@@ -112,12 +122,17 @@ fn changed_topics_are_the_created_changed_and_deleted_topics() {
                     ..crate::test_support::broker_registration(krabka_raft::NodeId(3))
                 },
             )],
-            vec![],
-        ),
+            topics: vec![],
+        },
     ];
     let mut found = Vec::new();
     let mut expected = Vec::new();
-    for (name, changes, topics) in rows {
+    for Row {
+        name,
+        changes,
+        topics,
+    } in rows
+    {
         let previous = image(&base);
         let next = image(&[base.as_slice(), changes.as_slice()].concat());
         found.push((name, changed_topics(&previous, &next)));
@@ -141,7 +156,11 @@ fn describe_acl(topic: &str) -> MetadataRecord {
 /// hash, and the next resolution drops a deleted topic.
 #[test]
 fn a_new_topic_or_a_changed_acl_can_change_a_resolution() {
-    type Row = (&'static str, Vec<MetadataRecord>, bool);
+    struct Row {
+        name: &'static str,
+        changes: Vec<MetadataRecord>,
+        may_change: bool,
+    }
     let base = [
         topic("orders", 10),
         partition("orders", 0, 1),
@@ -150,57 +169,74 @@ fn a_new_topic_or_a_changed_acl_can_change_a_resolution() {
         describe_acl("orders"),
     ];
     let rows: [Row; 9] = [
-        ("no change", vec![], false),
-        (
-            "a topic is created",
-            vec![topic("refunds", 30), partition("refunds", 0, 1)],
-            true,
-        ),
-        (
-            "a topic is deleted and created again with a new id",
-            vec![
+        Row {
+            name: "no change",
+            changes: vec![],
+            may_change: false,
+        },
+        Row {
+            name: "a topic is created",
+            changes: vec![topic("refunds", 30), partition("refunds", 0, 1)],
+            may_change: true,
+        },
+        Row {
+            name: "a topic is deleted and created again with a new id",
+            changes: vec![
                 MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
                     name: "orders".into(),
                 }),
                 topic("orders", 11),
                 partition("orders", 0, 1),
             ],
-            true,
-        ),
-        ("an ACL is granted", vec![describe_acl("payments")], true),
-        (
-            "an ACL is deleted",
-            vec![MetadataRecord::V1DeleteAccessControlEntry(
+            may_change: true,
+        },
+        Row {
+            name: "an ACL is granted",
+            changes: vec![describe_acl("payments")],
+            may_change: true,
+        },
+        Row {
+            name: "an ACL is deleted",
+            changes: vec![MetadataRecord::V1DeleteAccessControlEntry(
                 krabka_metadata::AclEntryFilter {
                     resource_type: Some(krabka_metadata::ResourceType::Topic),
                     resource_name: Some("orders".into()),
                     ..Default::default()
                 },
             )],
-            true,
-        ),
-        (
-            "a topic is deleted",
-            vec![MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
+            may_change: true,
+        },
+        Row {
+            name: "a topic is deleted",
+            changes: vec![MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
                 name: "payments".into(),
             })],
-            false,
-        ),
-        ("a topic grows", vec![partition("orders", 1, 2)], false),
-        (
-            "a partition gets a new leader",
-            vec![partition("orders", 0, 2)],
-            false,
-        ),
-        (
-            "a topic configuration changes",
-            vec![orders_retention_config()],
-            false,
-        ),
+            may_change: false,
+        },
+        Row {
+            name: "a topic grows",
+            changes: vec![partition("orders", 1, 2)],
+            may_change: false,
+        },
+        Row {
+            name: "a partition gets a new leader",
+            changes: vec![partition("orders", 0, 2)],
+            may_change: false,
+        },
+        Row {
+            name: "a topic configuration changes",
+            changes: vec![orders_retention_config()],
+            may_change: false,
+        },
     ];
     let mut found = Vec::new();
     let mut expected = Vec::new();
-    for (name, changes, may_change) in rows {
+    for Row {
+        name,
+        changes,
+        may_change,
+    } in rows
+    {
         let previous = image(&base);
         let next = image(&[base.as_slice(), changes.as_slice()].concat());
         found.push((name, regex_resolution_may_change(&previous, &next)));

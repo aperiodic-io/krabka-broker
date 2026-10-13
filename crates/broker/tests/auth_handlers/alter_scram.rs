@@ -9,8 +9,8 @@
 use {
     crate::{
         harness::{
-            admin_plain_password, alice_password, round_trip, sasl_authenticate_round_trip,
-            scram_admin_fixture, wrong_scram_password,
+            RetainedBroker, admin_plain_password, alice_password, round_trip,
+            sasl_authenticate_round_trip, scram_admin_fixture, wrong_scram_password,
         },
         kafka_wire::{decode_named, encode_named, plain_payload, sasl_handshake_on},
         scram::drive_sasl_scram_session,
@@ -55,8 +55,11 @@ pub const KAFKA_MAX_SCRAM_ITERATIONS: i32 = 16_384;
 /// that the upsertion wrote a valid credential to the metadata image.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_super_user_can_provision() {
-    let (_log_dir, handle, addr) =
-        scram_admin_fixture(vec![SaslMechanism::Plain, SaslMechanism::ScramSha512]).await;
+    let RetainedBroker {
+        log_dir: _log_dir,
+        handle,
+        addr,
+    } = scram_admin_fixture(vec![SaslMechanism::Plain, SaslMechanism::ScramSha512]).await;
 
     let req = alice_sha512_request();
     let resp = provision_as_admin(addr, req, "PLAIN auth + AUSCR upsertion").await;
@@ -88,10 +91,14 @@ fn check_single_successful_user(resp: &AlterUserScramCredentialsResponse, expect
 /// uses the SHA-256 wire byte and a 32-byte `salted_password` payload.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_super_user_can_provision_sha256() {
-    let (_log_dir, handle, addr) =
-        scram_admin_fixture(vec![SaslMechanism::Plain, SaslMechanism::ScramSha256]).await;
+    let RetainedBroker {
+        log_dir: _log_dir,
+        handle,
+        addr,
+    } = scram_admin_fixture(vec![SaslMechanism::Plain, SaslMechanism::ScramSha256]).await;
 
-    let (salt, salted) = pbkdf2_salt_and_salted_sha256(alice_password().as_bytes(), 4096);
+    let SaltedPassword { salt, salted } =
+        pbkdf2_salt_and_salted_sha256(alice_password().as_bytes(), 4096);
     let req = scram_upsertion_request(ScramAlgorithm::Sha256, salt, salted.to_vec());
     let resp = provision_as_admin(addr, req, "PLAIN auth + AUSCR upsertion (SHA-256)").await;
     check_single_successful_user(&resp, "alice");
@@ -200,31 +207,37 @@ pub async fn drive_alter_user_scram_credentials_as_plain(
     decode_named::<AlterUserScramCredentialsResponse>(&auscr_resp_bytes, 0, "AUSCR")
 }
 
-/// Compute `(salt, salted_password)` for a SCRAM-SHA-512 wire upsertion.
+/// A SCRAM salt with the `N`-byte salted password PBKDF2 derives from it.
+pub struct SaltedPassword<const N: usize> {
+    pub salt: Vec<u8>,
+    pub salted: [u8; N],
+}
+
+/// Compute the salt and salted password for a SCRAM-SHA-512 wire upsertion.
 ///
 /// The salt is a fixed 16-byte vector, which keeps the test deterministic.
 /// The salted password is the 64-byte PBKDF2-HMAC-SHA-512 output that the
 /// KIP-554 wire request carries.
-pub fn pbkdf2_salt_and_salted(password: &[u8], iterations: u32) -> (Vec<u8>, [u8; 64]) {
+pub fn pbkdf2_salt_and_salted(password: &[u8], iterations: u32) -> SaltedPassword<64> {
     let salt: Vec<u8> = (0..16).collect();
     let salted: [u8; 64] =
         pbkdf2::pbkdf2_hmac_array::<sha2::Sha512, 64>(password, &salt, iterations);
-    (salt, salted)
+    SaltedPassword { salt, salted }
 }
 
 /// SHA-256 analog of [`pbkdf2_salt_and_salted`].
 ///
 /// It produces the 32-byte PBKDF2-HMAC-SHA-256 output for the wire tests.
-fn pbkdf2_salt_and_salted_sha256(password: &[u8], iterations: u32) -> (Vec<u8>, [u8; 32]) {
+fn pbkdf2_salt_and_salted_sha256(password: &[u8], iterations: u32) -> SaltedPassword<32> {
     let salt: Vec<u8> = (0..16).collect();
     let salted: [u8; 32] =
         pbkdf2::pbkdf2_hmac_array::<sha2::Sha256, 32>(password, &salt, iterations);
-    (salt, salted)
+    SaltedPassword { salt, salted }
 }
 
 /// The same deterministic Alice credential for the allow and deny provisioning paths.
 fn alice_sha512_request() -> AlterUserScramCredentialsRequest {
-    let (salt, salted) = pbkdf2_salt_and_salted(alice_password().as_bytes(), 4096);
+    let SaltedPassword { salt, salted } = pbkdf2_salt_and_salted(alice_password().as_bytes(), 4096);
     scram_upsertion_request(ScramAlgorithm::Sha512, salt, salted.to_vec())
 }
 

@@ -16,7 +16,7 @@
 //! batches that the remote read returned.
 
 use {
-    super::records::{AbortedRanges, batch_spans},
+    super::records::{AbortedRanges, BatchBounds, OffsetSpan, batch_spans},
     crate::{
         error::BrokerError, metrics::BrokerMetrics, partition::Partition,
         remote_reader::RemoteReader,
@@ -44,9 +44,9 @@ pub(super) struct TieredRead {
     /// Whole batches, as the remote segment stores them.
     pub(super) bytes: Bytes,
     /// The offsets of the read that a share consumer must never get.
-    pub(super) unreadable: Vec<(Offset, Offset)>,
+    pub(super) unreadable: Vec<OffsetSpan>,
     /// The offsets of the read that KFC-1 scheduled delivery holds back.
-    pub(super) not_due: Vec<(Offset, Offset)>,
+    pub(super) not_due: Vec<OffsetSpan>,
 }
 
 impl TieredSource<'_> {
@@ -116,11 +116,17 @@ impl TieredSource<'_> {
         let now_ms = partition.delivery.now_ms();
         // The first batch can start below `from`, and the offsets before
         // `from` are not this read's to change.
-        let range = |base: i64, last: i64| (Offset(base).max(from), Offset(last));
+        let range = |base: i64, last: i64| OffsetSpan {
+            first: Offset(base).max(from),
+            last: Offset(last),
+        };
         let unreadable = spans
             .iter()
             .filter(|span| {
-                aborted.excludes(span.attributes, span.producer_id, (span.base, span.last))
+                aborted.excludes(span.attributes, span.producer_id, BatchBounds {
+                    base: span.base,
+                    last: span.last,
+                })
             })
             .map(|span| range(span.base, span.last))
             .collect();

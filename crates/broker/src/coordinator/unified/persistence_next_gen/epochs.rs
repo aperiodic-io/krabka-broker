@@ -52,34 +52,40 @@ mod tests {
     /// the default 0.
     #[test]
     fn group_metadata_value_bytes_match_kafka_schema() {
-        // (case, value, Kafka's bytes)
-        let rows: [(&str, GroupMetadataValue, &[u8]); 3] = [
-            (
-                "no subscribed topic: the hash is the default and absent",
-                GroupMetadataValue {
+        struct GoldenRow {
+            case: &'static str,
+            value: GroupMetadataValue,
+            /// Kafka's bytes.
+            bytes: &'static [u8],
+        }
+
+        let rows: [GoldenRow; 3] = [
+            GoldenRow {
+                case: "no subscribed topic: the hash is the default and absent",
+                value: GroupMetadataValue {
                     epoch: 7,
                     metadata_hash: 0,
                 },
-                b"\x00\x00\x00\x00\x00\x07\x00",
-            ),
-            (
-                "a small hash",
-                GroupMetadataValue {
+                bytes: b"\x00\x00\x00\x00\x00\x07\x00",
+            },
+            GoldenRow {
+                case: "a small hash",
+                value: GroupMetadataValue {
                     epoch: 7,
                     metadata_hash: 0x2a,
                 },
-                b"\x00\x00\x00\x00\x00\x07\x01\x00\x08\x00\x00\x00\x00\x00\x00\x00\x2a",
-            ),
-            (
-                "Kafka's group hash of the golden topics foo and bar",
-                GroupMetadataValue {
+                bytes: b"\x00\x00\x00\x00\x00\x07\x01\x00\x08\x00\x00\x00\x00\x00\x00\x00\x2a",
+            },
+            GoldenRow {
+                case: "Kafka's group hash of the golden topics foo and bar",
+                value: GroupMetadataValue {
                     epoch: 2,
                     metadata_hash: -556_879_919_459_959_918,
                 },
-                b"\x00\x00\x00\x00\x00\x02\x01\x00\x08\xf8\x45\x90\xa9\xea\x0a\x7b\x92",
-            ),
+                bytes: b"\x00\x00\x00\x00\x00\x02\x01\x00\x08\xf8\x45\x90\xa9\xea\x0a\x7b\x92",
+            },
         ];
-        for (case, value, bytes) in rows {
+        for GoldenRow { case, value, bytes } in rows {
             check!(&value.encode()[..] == bytes, "{case}");
             check!(
                 GroupMetadataValue::decode(bytes).unwrap() == value,

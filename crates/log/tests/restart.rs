@@ -23,9 +23,18 @@ fn epoch_millis(at: SystemTime) -> i64 {
     .expect("epoch millis fit in i64")
 }
 
-fn test_clock() -> (SystemTime, i64) {
+/// One instant, as a `SystemTime` and as epoch milliseconds.
+struct TestClock {
+    now: SystemTime,
+    now_ms: i64,
+}
+
+fn test_clock() -> TestClock {
     let now = SystemTime::now();
-    (now, epoch_millis(now))
+    TestClock {
+        now,
+        now_ms: epoch_millis(now),
+    }
 }
 
 /// Close the original writer before recovering its durable directory.
@@ -66,7 +75,7 @@ fn keyed_batch_at(key: &str, ts: i64) -> RecordBatch {
 #[test]
 fn a_compacted_segment_keeps_the_maximum_of_the_records_it_kept() {
     let dir = tempdir().unwrap();
-    let (now, now_ms) = test_clock();
+    let TestClock { now, now_ms } = test_clock();
     let stale_ms = now_ms - hours(2).millis_i64();
 
     let config = LogConfig {
@@ -130,7 +139,7 @@ fn retention_after_a_restart_keeps_segments_inside_the_window() {
         ..LogConfig::default()
     };
 
-    let (now, now_ms) = test_clock();
+    let TestClock { now, now_ms } = test_clock();
     let mut log = reopened_log(dir.path(), config, |log| {
         for i in 0..5 {
             log.append(&mut batch_at(now_ms - i64::from(i))).unwrap();
@@ -172,7 +181,7 @@ fn a_reopened_segment_keeps_a_maximum_that_predates_its_newest_batch() {
         ..LogConfig::default()
     };
 
-    let (now, now_ms) = test_clock();
+    let TestClock { now, now_ms } = test_clock();
     let stale_ms = now_ms - hours(2).millis_i64();
     let mut log = reopened_log(dir.path(), config, |log| {
         // The newest record of the first segment is the oldest one in it.
@@ -205,7 +214,7 @@ fn a_reopened_segment_reports_the_timestamp_of_its_newest_batch() {
         ..LogConfig::default()
     };
 
-    let (now, now_ms) = test_clock();
+    let TestClock { now, now_ms } = test_clock();
     // The oldest batch of the first segment is well outside the window; the
     // newest batch of that same segment is inside it. Retention must read the
     // newest one and keep the segment.

@@ -9,8 +9,8 @@ use {
     super::{
         Log,
         control::{
-            ControlBatchKind, batch_control_marker_coordinator_epoch, control_batch_kind,
-            transaction_marker_flags,
+            ControlBatchKind, TransactionMarkerFlags, batch_control_marker_coordinator_epoch,
+            control_batch_kind, transaction_marker_flags,
         },
     },
     crate::{
@@ -19,9 +19,10 @@ use {
         io::FileIo,
         leader_epoch_checkpoint::LeaderEpochCheckpoint,
         log_start_offset_checkpoint, name,
-        producer_snapshot::{self, NUM_BATCHES_TO_RETAIN, ProducerSnapshotEntry},
+        producer_snapshot::{self, LoadedSnapshot, NUM_BATCHES_TO_RETAIN, ProducerSnapshotEntry},
         recovery::{deleted_orphan_recover, swap_orphan_recover},
         segment::Segment,
+        stamp_index::OffsetRange,
         txn_index::TxnIndex,
     },
     krabka_ids::{Offset, ProducerId},
@@ -34,6 +35,33 @@ use {
     },
     tracing::instrument,
 };
+
+/// The last offset of a replayed batch and the offset the replay cursor
+/// advances to after it.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct RecoveredBatchOffsets {
+    pub(super) last: Offset,
+    pub(super) advanced_to: Offset,
+}
+
+/// The sequence and offset a producer's entry ends at after one data batch.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct ProducerTail {
+    pub(super) last_sequence: i32,
+    pub(super) last_offset: Offset,
+}
+
+/// One data batch a producer appended, as the producer state records it.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DataProducerAppend {
+    pub(super) producer_id: ProducerId,
+    pub(super) producer_epoch: i16,
+    pub(super) base_sequence: i32,
+    pub(super) last_offset_delta: i32,
+    pub(super) base_offset: Offset,
+    pub(super) timestamp: i64,
+    pub(super) is_transactional: bool,
+}
 
 impl Log {
     /// Open or create a `Log` at `dir`.
@@ -281,9 +309,9 @@ impl Log {
         let end = self.log_end_offset();
         let range = self.producer_reload_range(end);
         let snapshot = producer_snapshot::reload(&self.dir, range)?;
-        let snapshot_offset = snapshot.as_ref().map(|(offset, _)| offset.0);
-        if let Some((_, entries)) = snapshot {
-            self.producer_state = entries;
+        let snapshot_offset = snapshot.as_ref().map(|loaded| loaded.offset.0);
+        if let Some(LoadedSnapshot { state, .. }) = snapshot {
+            self.producer_state = state;
             for (&producer_id, entry) in &self.producer_state {
                 if let Some(first_offset) = entry.current_txn_first_offset {
                     self.pending.insert(producer_id, first_offset);
@@ -318,7 +346,7 @@ impl Log {
             let mut advanced_to = next;
             for (index, batch) in read.batches.iter().enumerate() {
                 let cursor = Self::replay_cursor(first_read && index == 0, advanced_to, batch);
-                (_, advanced_to) = Self::recovered_batch_offsets(cursor, end, batch)?;
+                advanced_to = Self::recovered_batch_offsets(cursor, end, batch)?.advanced_to;
                 self.apply_recovered_batch_state(batch)?;
                 let covered: Vec<_> = boundaries.range(..=advanced_to).copied().collect();
                 for boundary in covered {
@@ -374,7 +402,10 @@ impl Log {
         }
         self.update_owned_producer_entry(batch)?;
         if batch.attributes.is_control_batch() {
-            let (is_abort, is_commit) = transaction_marker_flags(batch)?;
+            let TransactionMarkerFlags {
+                is_abort,
+                is_commit,
+            } = transaction_marker_flags(batch)?;
             if krabka_verified::transaction_marker_closes(
                 is_abort,
                 is_commit,
@@ -416,7 +447,8 @@ impl Log {
             for (index, batch) in slice.batches.iter().enumerate() {
                 let producer_id = ProducerId(batch.producer_id);
                 let cursor = Self::replay_cursor(is_first_read && index == 0, next, batch);
-                let (last, advanced_to) = Self::recovered_batch_offsets(cursor, end, batch)?;
+                let RecoveredBatchOffsets { last, advanced_to } =
+                    Self::recovered_batch_offsets(cursor, end, batch)?;
                 match control_batch_kind(batch) {
                     // A barrier marker closes no transaction, so it clears no
                     // stamp range. The append path reaches the same result.
@@ -429,7 +461,10 @@ impl Log {
                             self.pending_stamp_ranges
                                 .entry(producer_id)
                                 .or_default()
-                                .push((Offset(batch.base_offset), last));
+                                .push(OffsetRange {
+                                    first: Offset(batch.base_offset),
+                                    last,
+                                });
                         }
                     }
                 }
@@ -444,15 +479,16 @@ impl Log {
         current: Offset,
         end: Offset,
         batch: &RecordBatch,
-    ) -> Result<(Offset, Offset), LogError> {
+    ) -> Result<RecoveredBatchOffsets, LogError> {
         match krabka_verified::replay_batch_cursor_decision(
             current.0,
             end.0,
             Some((batch.base_offset, batch.last_offset_delta)),
         ) {
-            krabka_verified::ReplayCursorDecision::Advance(next) => {
-                Ok((Offset(next - 1), Offset(next)))
-            }
+            krabka_verified::ReplayCursorDecision::Advance(next) => Ok(RecoveredBatchOffsets {
+                last: Offset(next - 1),
+                advanced_to: Offset(next),
+            }),
             krabka_verified::ReplayCursorDecision::Stop => Err(LogError::Corrupt(format!(
                 "log recovery rejected batch at offset {current} before end {end}"
             ))),
@@ -482,7 +518,10 @@ impl Log {
             }
             entry.producer_epoch = batch.producer_epoch;
             entry.timestamp = batch.max_timestamp;
-            let (is_abort, is_commit) = transaction_marker_flags(batch)?;
+            let TransactionMarkerFlags {
+                is_abort,
+                is_commit,
+            } = transaction_marker_flags(batch)?;
             if is_abort || is_commit {
                 entry.current_txn_first_offset = None;
             }
@@ -493,28 +532,34 @@ impl Log {
             }
             return Ok(());
         }
-        self.update_data_producer_entry(
-            (producer_id, batch.producer_epoch),
-            (batch.base_sequence, batch.last_offset_delta),
-            (
-                Offset(batch.base_offset),
-                batch.max_timestamp,
-                batch.attributes.is_transactional(),
-            ),
-        )
+        self.update_data_producer_entry(DataProducerAppend {
+            producer_id,
+            producer_epoch: batch.producer_epoch,
+            base_sequence: batch.base_sequence,
+            last_offset_delta: batch.last_offset_delta,
+            base_offset: Offset(batch.base_offset),
+            timestamp: batch.max_timestamp,
+            is_transactional: batch.attributes.is_transactional(),
+        })
     }
 
     pub(super) fn update_data_producer_entry(
         &mut self,
-        producer: (ProducerId, i16),
-        sequence: (i32, i32),
-        append: (Offset, i64, bool),
+        append: DataProducerAppend,
     ) -> Result<(), LogError> {
-        let (producer_id, producer_epoch) = producer;
-        let (base_sequence, last_offset_delta) = sequence;
-        let (base_offset, timestamp, is_transactional) = append;
-        let Some((last_sequence, last_offset)) =
-            Self::data_producer_tail(producer_id, base_sequence, last_offset_delta, base_offset)?
+        let DataProducerAppend {
+            producer_id,
+            producer_epoch,
+            base_sequence,
+            last_offset_delta,
+            base_offset,
+            timestamp,
+            is_transactional,
+        } = append;
+        let Some(ProducerTail {
+            last_sequence,
+            last_offset,
+        }) = Self::data_producer_tail(producer_id, base_sequence, last_offset_delta, base_offset)?
         else {
             return Ok(());
         };
@@ -550,7 +595,7 @@ impl Log {
         base_sequence: i32,
         last_offset_delta: i32,
         base_offset: Offset,
-    ) -> Result<Option<(i32, Offset)>, LogError> {
+    ) -> Result<Option<ProducerTail>, LogError> {
         if producer_id.get() < 0 || base_sequence < 0 {
             return Ok(None);
         }
@@ -569,7 +614,10 @@ impl Log {
                     "producer offset overflow for producer {producer_id}"
                 ))
             })?;
-        Ok(Some((last_sequence, last_offset)))
+        Ok(Some(ProducerTail {
+            last_sequence,
+            last_offset,
+        }))
     }
 }
 

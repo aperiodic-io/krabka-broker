@@ -15,10 +15,10 @@ use {
         codes,
         error::BrokerError,
         handlers::test_support::{
-            AcknowledgementCode, AcknowledgementPartitionSetup, acknowledge_batches_request,
-            create_topic as create_topic_from_test_support, metadata_topic_record, produce_records,
-            send_acknowledgements, share_fetch_partition_rows, share_fetch_wire,
-            single_replica_partition,
+            AcknowledgementCode, AcknowledgementPartitionSetup, OffsetRun,
+            acknowledge_batches_request, create_topic as create_topic_from_test_support,
+            metadata_topic_record, produce_records, send_acknowledgements,
+            share_fetch_partition_rows, share_fetch_wire, single_replica_partition,
         },
         share_coordinator::bootstrap::TOPIC,
         test_support::initialize_share_state,
@@ -77,7 +77,7 @@ async fn share_fetch(
     group: &str,
     epoch: i32,
     topic_id: WireUuid,
-    accept: Option<(i64, i64)>,
+    accept: Option<OffsetRun>,
 ) -> PartitionData {
     let request = ShareFetchRequest {
         group_id: Some(group.into()),
@@ -92,12 +92,17 @@ async fn share_fetch(
             partitions: vec![FetchPartition {
                 partition_index: 0,
                 acknowledgement_batches: accept
-                    .map(|(first_offset, last_offset)| FetchAcknowledgeBatch {
-                        first_offset,
-                        last_offset,
-                        acknowledge_types: vec![ACCEPT],
-                        ..Default::default()
-                    })
+                    .map(
+                        |OffsetRun {
+                             first_offset,
+                             last_offset,
+                         }| FetchAcknowledgeBatch {
+                            first_offset,
+                            last_offset,
+                            acknowledge_types: vec![ACCEPT],
+                            ..Default::default()
+                        },
+                    )
                     .into_iter()
                     .collect(),
                 ..Default::default()
@@ -124,7 +129,10 @@ async fn share_acknowledge(
     group: &str,
     epoch: i32,
     topic_id: WireUuid,
-    (first_offset, last_offset): (i64, i64),
+    OffsetRun {
+        first_offset,
+        last_offset,
+    }: OffsetRun,
 ) -> i16 {
     let request = acknowledge_batches_request()
         .group(group)
@@ -165,7 +173,7 @@ struct FencedWrite {
     /// Whether the broker still caches the share partition.
     cached: bool,
     /// The offsets that the next `ShareFetch` acquires.
-    next_acquired: Vec<(i64, i64)>,
+    next_acquired: Vec<OffsetRun>,
 }
 
 /// The coordinator raises the state epoch while a member holds records, as a
@@ -189,7 +197,10 @@ async fn a_fenced_state_write_fails_the_acknowledgement_and_drops_the_partition(
         assert!(opened.error_code == codes::NONE, "{opened:?}");
         produce_two_records(&broker, &name).await;
         let fetched = share_fetch(&broker, &name, 1, topic_id, None).await;
-        assert!(acquired(&fetched) == vec![(0, 1)], "{fetched:?}");
+        assert!(
+            acquired(&fetched) == vec![OffsetRun::new(0, 1)],
+            "{fetched:?}"
+        );
 
         let state_epoch = shared
             .share_partition_leaders
@@ -213,11 +224,12 @@ async fn a_fenced_state_write_fails_the_acknowledgement_and_drops_the_partition(
 
         let (acknowledge_error, fetch_error) = match api {
             Api::ShareAcknowledge => (
-                share_acknowledge(&broker, &name, 2, topic_id, (0, 1)).await,
+                share_acknowledge(&broker, &name, 2, topic_id, OffsetRun::new(0, 1)).await,
                 codes::NONE,
             ),
             Api::ShareFetch => {
-                let row = share_fetch(&broker, &name, 2, topic_id, Some((0, 1))).await;
+                let row =
+                    share_fetch(&broker, &name, 2, topic_id, Some(OffsetRun::new(0, 1))).await;
                 (row.acknowledge_error_code, row.error_code)
             }
         };
@@ -240,13 +252,13 @@ async fn a_fenced_state_write_fails_the_acknowledgement_and_drops_the_partition(
             acknowledge_error: codes::NOT_LEADER_OR_FOLLOWER,
             fetch_error: codes::NONE,
             cached: false,
-            next_acquired: vec![(0, 1)],
+            next_acquired: vec![OffsetRun::new(0, 1)],
         }),
         (Api::ShareFetch, FencedWrite {
             acknowledge_error: codes::NOT_LEADER_OR_FOLLOWER,
             fetch_error: codes::NOT_LEADER_OR_FOLLOWER,
             cached: false,
-            next_acquired: vec![(0, 1)],
+            next_acquired: vec![OffsetRun::new(0, 1)],
         }),
     ];
     assert!(actual == expected);
@@ -299,7 +311,14 @@ async fn a_failed_state_read_fails_the_partition_and_caches_nothing() {
         .peek_for_test("fetch-group", topic_uuid(topic_id), 0)
         .is_some();
     let _ = share_fetch(&broker, "acknowledge-group", 0, topic_id, None).await;
-    let acknowledge = share_acknowledge(&broker, "acknowledge-group", 1, topic_id, (0, 1)).await;
+    let acknowledge = share_acknowledge(
+        &broker,
+        "acknowledge-group",
+        1,
+        topic_id,
+        OffsetRun::new(0, 1),
+    )
+    .await;
     let acknowledge_cached = shared
         .share_partition_leaders
         .peek_for_test("acknowledge-group", topic_uuid(topic_id), 0)
@@ -367,7 +386,7 @@ async fn a_read_of_an_uninitialized_state_fails_until_the_state_is_initialized()
             Some(codes::INVALID_REQUEST),
             (codes::UNKNOWN_SERVER_ERROR, false),
             (codes::NONE, true),
-            (codes::NONE, vec![(0, 1)])
+            (codes::NONE, vec![OffsetRun::new(0, 1)])
         )
     );
     broker.shutdown().await;

@@ -121,29 +121,77 @@ async fn kafka_configs_describe_all_shows_effective_values_and_their_sources() {
 #[ignore = "requires Docker"]
 async fn kafka_configs_alter_round_trips_every_registered_topic_key() {
     const TOPIC: &str = "krabka-cfg-every-key-itest";
+    /// A config key and a value for it.
+    struct ConfigSetting {
+        key: &'static str,
+        value: &'static str,
+    }
+
     /// Each key with a value Kafka's own `ConfigDef` accepts for it.
-    const SETTINGS: &[(&str, &str)] = &[
-        ("segment.ms", "60000"),
-        ("segment.index.bytes", "10485760"),
-        ("segment.jitter.ms", "0"),
-        ("min.compaction.lag.ms", "0"),
-        ("max.compaction.lag.ms", "86400000"),
-        ("min.cleanable.dirty.ratio", "0.25"),
-        ("file.delete.delay.ms", "60000"),
-        ("flush.messages", "10000"),
-        ("flush.ms", "1000"),
-        ("index.interval.bytes", "8192"),
-        ("preallocate", "false"),
-        ("message.timestamp.type", "CreateTime"),
-        ("message.timestamp.after.max.ms", "3600000"),
-        ("message.timestamp.before.max.ms", "3600000"),
+    const SETTINGS: &[ConfigSetting] = &[
+        ConfigSetting {
+            key: "segment.ms",
+            value: "60000",
+        },
+        ConfigSetting {
+            key: "segment.index.bytes",
+            value: "10485760",
+        },
+        ConfigSetting {
+            key: "segment.jitter.ms",
+            value: "0",
+        },
+        ConfigSetting {
+            key: "min.compaction.lag.ms",
+            value: "0",
+        },
+        ConfigSetting {
+            key: "max.compaction.lag.ms",
+            value: "86400000",
+        },
+        ConfigSetting {
+            key: "min.cleanable.dirty.ratio",
+            value: "0.25",
+        },
+        ConfigSetting {
+            key: "file.delete.delay.ms",
+            value: "60000",
+        },
+        ConfigSetting {
+            key: "flush.messages",
+            value: "10000",
+        },
+        ConfigSetting {
+            key: "flush.ms",
+            value: "1000",
+        },
+        ConfigSetting {
+            key: "index.interval.bytes",
+            value: "8192",
+        },
+        ConfigSetting {
+            key: "preallocate",
+            value: "false",
+        },
+        ConfigSetting {
+            key: "message.timestamp.type",
+            value: "CreateTime",
+        },
+        ConfigSetting {
+            key: "message.timestamp.after.max.ms",
+            value: "3600000",
+        },
+        ConfigSetting {
+            key: "message.timestamp.before.max.ms",
+            value: "3600000",
+        },
     ];
 
     let (_broker, _dir) = start_console_broker(TOPIC, 1).await;
 
     let added = SETTINGS
         .iter()
-        .map(|(key, value)| format!("{key}={value}"))
+        .map(|ConfigSetting { key, value }| format!("{key}={value}"))
         .collect::<Vec<_>>()
         .join(",");
     docker_run_kafka_tool(&[
@@ -170,7 +218,7 @@ async fn kafka_configs_alter_round_trips_every_registered_topic_key() {
         broker0_advertised(),
     ]);
     let rendered = String::from_utf8_lossy(&out.stdout);
-    for (key, value) in SETTINGS {
+    for ConfigSetting { key, value } in SETTINGS {
         assert!(
             rendered.contains(&format!("{key}={value}")),
             "describe output missing {key}={value}: {rendered}"
@@ -186,35 +234,46 @@ async fn kafka_configs_alter_round_trips_every_registered_topic_key() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn kafka_topics_create_accepts_the_streams_internal_topic_configs() {
-    /// (topic, the `--config` arguments Streams sends, the `--describe`
-    /// substring that proves the broker stored them).
-    const CASES: &[(&str, &[&str], &str)] = &[
-        (
-            "krabka-streams-repartition-itest",
-            &[
+    /// A topic, the `--config` arguments Streams sends, and the `--describe`
+    /// substring that proves the broker stored them.
+    struct StreamsTopicCase {
+        topic: &'static str,
+        configs: &'static [&'static str],
+        expected: &'static str,
+    }
+
+    const CASES: &[StreamsTopicCase] = &[
+        StreamsTopicCase {
+            topic: "krabka-streams-repartition-itest",
+            configs: &[
                 "cleanup.policy=delete",
                 "segment.bytes=52428800",
                 "retention.ms=-1",
                 "message.timestamp.type=CreateTime",
             ],
-            "cleanup.policy=delete",
-        ),
-        (
-            "krabka-streams-windowed-changelog-itest",
-            &[
+            expected: "cleanup.policy=delete",
+        },
+        StreamsTopicCase {
+            topic: "krabka-streams-windowed-changelog-itest",
+            configs: &[
                 "cleanup.policy=compact,delete",
                 "retention.ms=86400000",
                 "min.compaction.lag.ms=0",
                 "message.timestamp.type=CreateTime",
             ],
-            "cleanup.policy=compact,delete",
-        ),
+            expected: "cleanup.policy=compact,delete",
+        },
     ];
 
     let (_broker, _dir) = start_host_broker().await;
     nc_check_connectivity();
 
-    for (topic, configs, expected) in CASES {
+    for StreamsTopicCase {
+        topic,
+        configs,
+        expected,
+    } in CASES
+    {
         let mut create = vec![
             "kafka-topics",
             "--create",

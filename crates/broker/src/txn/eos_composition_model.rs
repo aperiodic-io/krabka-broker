@@ -178,6 +178,13 @@ fn txn_outcome(log: &[Batch], producer: u8, generation: u8) -> Option<Kind> {
         .map(|b| b.kind)
 }
 
+/// A transaction of the model: a producer in one of its generations.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TxnKey {
+    producer: u8,
+    generation: u8,
+}
+
 /// LSO = base offset of the oldest still-OPEN txn (Data present, no marker yet),
 /// else the log end. This is Kafka's first-unstable-offset rule. This function
 /// derives the LSO from the log alone. The txn universe is whatever
@@ -185,10 +192,14 @@ fn txn_outcome(log: &[Batch], producer: u8, generation: u8) -> Option<Kind> {
 /// non-capturing.
 fn lso(log: &[Batch]) -> Offset {
     let mut min_open: Option<i64> = None;
-    let mut seen: Vec<(u8, u8)> = Vec::new();
+    let mut seen: Vec<TxnKey> = Vec::new();
     for (off, b) in log.iter().enumerate() {
-        if b.kind == Kind::Data && !seen.contains(&(b.producer, b.generation)) {
-            seen.push((b.producer, b.generation));
+        let key = TxnKey {
+            producer: b.producer,
+            generation: b.generation,
+        };
+        if b.kind == Kind::Data && !seen.contains(&key) {
+            seen.push(key);
             // First occurrence of this (producer, generation) — its base offset.
             if txn_outcome(log, b.producer, b.generation).is_none() {
                 min_open = Some(min_open.map_or(model_offset(off), |m| m.min(model_offset(off))));

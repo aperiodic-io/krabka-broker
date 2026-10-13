@@ -142,7 +142,7 @@ pub(crate) mod test_support;
 pub(crate) use self::copy::copy_eligible;
 pub(crate) use self::{
     archive::ArchiveMode,
-    copy::{CopyDelay, copy_eligible_delayed},
+    copy::{CopyBound, CopyDelay, CopyIdentity, copy_eligible_delayed},
     delete::cascade_remote_partition_delete,
     local_retention::{LocalRetentionBounds, local_retention_pass},
     remote_retention::{LocalLogFootprint, RemoteRetentionBounds, remote_retention_pass},
@@ -458,17 +458,30 @@ async fn tick_partition(sweep: PartitionSweep<'_>) {
             krabka_ids::LeaderEpoch(partition.current_leader_epoch.load(Ordering::Acquire));
         let _permit = permits.copier().await;
         let delay = copy_delay(
-            (image, node_id, &partition.topic),
+            CopyScope {
+                image,
+                node: node_id,
+                topic: &partition.topic,
+            },
             &log_config,
             tier.unstable_api_versions,
-            (local_log_size, &local_exports),
+            LocalLogFootprint {
+                sealed: &local_exports,
+                size: local_log_size,
+            },
         );
         copy_eligible_delayed(
             tier,
             &tp,
-            (broker_id, leader_epoch),
+            CopyIdentity {
+                broker_id,
+                leader_epoch,
+            },
             exports.clone(),
-            (lso, delay),
+            CopyBound {
+                last_stable_offset: lso,
+                delay,
+            },
         )
         .await;
     }
@@ -515,6 +528,13 @@ async fn tick_partition(sweep: PartitionSweep<'_>) {
     .await;
 }
 
+/// The image, broker and topic that a copy delay is resolved for.
+struct CopyScope<'a> {
+    image: &'a krabka_metadata::MetadataImage,
+    node: NodeId,
+    topic: &'a str,
+}
+
 /// The delay Kafka trunk's `remote.copy.lag.ms` and `remote.copy.lag.bytes`
 /// (KIP-1241) put on the copy pass over `topic`, resolved against the image as
 /// broker `node` sees it. Kafka 4.3.1 has neither key, so a broker not serving
@@ -523,10 +543,13 @@ async fn tick_partition(sweep: PartitionSweep<'_>) {
 /// `local_log_size` is the whole local log and `sealed` its sealed segments, so
 /// what they leave is the active segment.
 fn copy_delay(
-    (image, node, topic): (&krabka_metadata::MetadataImage, NodeId, &str),
+    CopyScope { image, node, topic }: CopyScope<'_>,
     log_config: &krabka_log::LogConfig,
     unstable: UnstableApiVersions,
-    (local_log_size, sealed): (ByteSize, &[krabka_log::SegmentExport]),
+    LocalLogFootprint {
+        sealed,
+        size: local_log_size,
+    }: LocalLogFootprint<'_>,
 ) -> CopyDelay {
     if unstable != UnstableApiVersions::Enabled {
         return CopyDelay::IMMEDIATE;
@@ -648,14 +671,18 @@ pub(crate) use copy_segment::{ProducerSnapshotExport, export_epoch_map, export_s
 mod tests {
     use {
         super::{
-            test_support::{fixed_source, rolled_tiered_partition_with_config, tier, tp},
+            test_support::{
+                SealedRange, SweepCounts, TempDirs, fixed_source,
+                rolled_tiered_partition_with_config, sealed_ranges, tier, tp,
+            },
             *,
         },
         crate::{
             api_catalog::UnstableApiVersions,
             metadata_source::MetadataSource,
             remote_log_manager::{
-                local_retention::finished_segment_ranges, test_support as fixtures,
+                local_retention::{OffsetRange, finished_segment_ranges},
+                test_support as fixtures,
             },
         },
         assert2::{assert, check},
@@ -695,7 +722,10 @@ mod tests {
 
     #[tokio::test]
     async fn run_ticks_and_copies_eligible_segments() {
-        let (log_dir, remote_dir) = fixtures::temporary_dirs();
+        let TempDirs {
+            local: log_dir,
+            remote: remote_dir,
+        } = fixtures::temporary_dirs();
         let partitions = Arc::new(PartitionRegistry::new());
         let partition = rolled_tiered_partition(log_dir.path());
         let export_count = fixtures::sealed_segment_count(&partition);
@@ -748,8 +778,8 @@ mod tests {
     // local log start, which is what `ListOffsets(EARLIEST_LOCAL)` answers.
     #[derive(Debug, PartialEq, Eq)]
     struct Tiered {
-        remote: Vec<(i64, i64)>,
-        local_sealed: Vec<(Offset, Offset)>,
+        remote: Vec<OffsetRange>,
+        local_sealed: Vec<SealedRange>,
         local_log_start: Offset,
     }
 
@@ -792,14 +822,14 @@ mod tests {
                 "the first sweep rolls the breached active segment",
                 Tiered {
                     remote: vec![],
-                    local_sealed: vec![(Offset(0), Offset(5))],
+                    local_sealed: vec![SealedRange::new(Offset(0), Offset(5))],
                     local_log_start: Offset(0),
                 },
             ),
             (
                 "the second sweep copies it and drops it from local disk",
                 Tiered {
-                    remote: vec![(0, 5)],
+                    remote: vec![OffsetRange::new(0, 5)],
                     local_sealed: vec![],
                     local_log_start: Offset(6),
                 },
@@ -813,11 +843,7 @@ mod tests {
             log.sync().expect("flush rolled segments");
             let observed = Tiered {
                 remote: finished_segment_ranges(&rlmm.list_remote_log_segments(&tp()).unwrap()),
-                local_sealed: log
-                    .tierable_segments()
-                    .iter()
-                    .map(|export| (export.base_offset, export.last_offset))
-                    .collect(),
+                local_sealed: sealed_ranges(&mut log),
                 local_log_start: log.local_log_start_offset(),
             };
             check!(observed == expected, "{sweep}");
@@ -1160,7 +1186,10 @@ mod tests {
 
         fixtures::sweep_mutable(&partitions, &controller, &rsm, &rlmm).await;
 
-        let (remote_finished, local_sealed_after) = sweep_counts(&partition, &rlmm);
+        let SweepCounts {
+            remote_finished,
+            local_sealed: local_sealed_after,
+        } = sweep_counts(&partition, &rlmm);
         FollowerSweep {
             sealed_before,
             remote_finished,

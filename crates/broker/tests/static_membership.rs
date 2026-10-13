@@ -56,14 +56,21 @@ fn join_request(group_id: &str, member_id: &str, instance_id: Option<&str>) -> J
     }
 }
 
+/// A static member, the generation it joined at and the assignment it was synced.
+struct StaticMember {
+    member_id: String,
+    generation_id: i32,
+    assignment: Bytes,
+}
+
 /// Boot a group with one static member and sync an assignment for it.
-/// Returns the assigned `(member_id, generation_id, assignment)`.
+/// Returns the assigned member id, generation id and assignment.
 async fn bootstrap_static_member(
     client: &krabka_client_core::Client,
     group_id: &str,
     instance_id: &str,
     assignment: Bytes,
-) -> (String, i32, Bytes) {
+) -> StaticMember {
     // 1. Empty member_id → a static member joins at once with a generated
     //    `<instance id>-<uuid>` member id and becomes the leader. Kafka's
     //    `MEMBER_ID_REQUIRED` round trip is for dynamic members only.
@@ -93,14 +100,22 @@ async fn bootstrap_static_member(
     assert!(r3.error_code == 0);
     assert!(r3.assignment == assignment);
 
-    (mid, generation, assignment)
+    StaticMember {
+        member_id: mid,
+        generation_id: generation,
+        assignment,
+    }
 }
 
 #[tokio::test]
 async fn static_rejoin_preserves_assignment_and_generation() {
     let p = start().await;
 
-    let (mid1, gen1, assignment) = bootstrap_static_member(
+    let StaticMember {
+        member_id: mid1,
+        generation_id: gen1,
+        assignment,
+    } = bootstrap_static_member(
         &p.client,
         "g-static-1",
         "instance-A",
@@ -192,7 +207,11 @@ async fn static_rejoin_preserves_assignment_and_generation() {
 async fn second_client_with_same_instance_id_is_fenced() {
     let p = start().await;
 
-    let (mid1, gen1, _) = bootstrap_static_member(
+    let StaticMember {
+        member_id: mid1,
+        generation_id: gen1,
+        ..
+    } = bootstrap_static_member(
         &p.client,
         "g-fence",
         "instance-B",
@@ -251,7 +270,7 @@ async fn second_client_with_same_instance_id_is_fenced() {
 async fn leave_group_resolves_static_member_by_instance_id() {
     let p = start().await;
 
-    let (mid, _gen, _) = bootstrap_static_member(
+    let StaticMember { member_id: mid, .. } = bootstrap_static_member(
         &p.client,
         "g-leave",
         "instance-C",

@@ -13,6 +13,7 @@ use {
                 write_sealed_segment,
             },
         },
+        test_support::{KeyValue, ProducerIdAndEpoch},
     },
     krabka_compression::CompressionType,
     krabka_ids::Offset,
@@ -61,10 +62,14 @@ pub(super) fn decode_all(bytes: &[u8]) -> Vec<RecordBatch> {
 }
 
 /// Decode the written bytes before checking both independent output frontiers.
-fn read_rewrite(out: &RewriteOutput, expected: (i64, i64)) -> Vec<RecordBatch> {
+fn read_rewrite(
+    out: &RewriteOutput,
+    new_base_offset: i64,
+    new_last_offset: i64,
+) -> Vec<RecordBatch> {
     let batches = decode_all(&fs::read(&out.log_swap).unwrap());
-    assert2::assert!(out.new_base_offset == Offset(expected.0));
-    assert2::assert!(out.new_last_offset == Offset(expected.1));
+    assert2::assert!(out.new_base_offset == Offset(new_base_offset));
+    assert2::assert!(out.new_last_offset == Offset(new_last_offset));
     batches
 }
 
@@ -82,7 +87,7 @@ fn rewrite_drops_superseded_records() {
     let first_segment = write_sealed_segment(dir.path(), 0, superseded_records());
     let segment_refs = vec![&first_segment];
     let out = rewrite_simple(dir.path(), &segment_refs);
-    let batches = read_rewrite(&out, (0, 2));
+    let batches = read_rewrite(&out, 0, 2);
     assert2::assert!(
         batches
             == vec![RecordBatch {
@@ -134,7 +139,7 @@ fn rewrite_preserves_absolute_offsets() {
     let out = rewrite_simple(dir.path(), &segment_refs);
     // The batch keeps its original last offset, 103, although the record at
     // 103 is gone: Kafka's `overrideLastOffset(originalBatch.lastOffset())`.
-    let batches = read_rewrite(&out, (100, 103));
+    let batches = read_rewrite(&out, 100, 103);
     assert2::assert!(
         batches
             == vec![RecordBatch {
@@ -215,12 +220,20 @@ fn rewrite_both_commit_markers_survive_when_data_survives() {
     let dir = tempfile::tempdir().unwrap();
     // pid 1000: data batch at offset 0 (key k1), commit marker at offset 1.
     // pid 2000: data batch at offset 2 (key k2), commit marker at offset 3.
-    let data1 = transactional_record().payload((b"k1", b"v1")).call();
+    let data1 = transactional_record()
+        .payload(KeyValue {
+            key: b"k1",
+            value: b"v1",
+        })
+        .call();
     let marker1 = control_batch(1, 1000, 1 /* COMMIT */);
     let data2 = transactional_record()
         .offset(2)
         .producer(2000)
-        .payload((b"k2", b"v2"))
+        .payload(KeyValue {
+            key: b"k2",
+            value: b"v2",
+        })
         .call();
     let marker2 = control_batch(3, 2000, 1 /* COMMIT */);
     let expected = vec![
@@ -233,7 +246,7 @@ fn rewrite_both_commit_markers_survive_when_data_survives() {
     let segment_refs = vec![&seg];
     let out = rewrite_simple(dir.path(), &segment_refs);
 
-    let batches = read_rewrite(&out, (0, 3));
+    let batches = read_rewrite(&out, 0, 3);
     assert2::assert!(batches == expected);
 }
 
@@ -263,7 +276,7 @@ fn rewrite_tombstone_gets_horizon_stamp() {
     );
     let mut record = make_record(0, Some(b"k1"), None);
     record.timestamp_delta = -(now + ret);
-    let batches = read_rewrite(&out, (0, 0));
+    let batches = read_rewrite(&out, 0, 0);
     assert2::assert!(
         batches
             == vec![RecordBatch {
@@ -308,7 +321,7 @@ fn rewrite_marker_dropped_when_data_gone_and_horizon_elapsed() {
         },
         &HashMap::new(),
     );
-    let batches = read_rewrite(&out, (0, 1));
+    let batches = read_rewrite(&out, 0, 1);
     assert2::assert!(
         batches
             == vec![RecordBatch {
@@ -357,7 +370,7 @@ fn rewrite_retain_empty_for_active_producer() {
         },
         &active,
     );
-    let batches = read_rewrite(&out, (0, 1));
+    let batches = read_rewrite(&out, 0, 1);
     assert2::assert!(
         batches
             == vec![
@@ -404,7 +417,7 @@ fn rewrite_retain_empty_extends_last_offset() {
     let out = rewrite_simple(dir.path(), &segment_refs);
 
     // The emptied batch is re-emitted as a bare header at base_offset 100.
-    let batches = read_rewrite(&out, (0, 105));
+    let batches = read_rewrite(&out, 0, 105);
     assert2::assert!(
         batches
             == vec![keyed_value_batch(0, b"k1", b"v1"), RecordBatch {
@@ -419,16 +432,12 @@ fn rewrite_retain_empty_extends_last_offset() {
 
 /// A one-record batch at `base` from `producer_id` at `producer_epoch`. A
 /// `None` key makes the record one the cleaner always drops.
-fn one_record_batch(
-    base: i64,
-    (producer_id, producer_epoch): (i64, i16),
-    key: Option<&[u8]>,
-) -> RecordBatch {
+fn one_record_batch(base: i64, producer: ProducerIdAndEpoch, key: Option<&[u8]>) -> RecordBatch {
     RecordBatch {
         base_offset: base,
         last_offset_delta: 0,
-        producer_id,
-        producer_epoch,
+        producer_id: producer.id,
+        producer_epoch: producer.epoch,
         records: vec![make_record(0, key, Some(b"v"))],
         ..RecordBatch::default()
     }
@@ -447,7 +456,9 @@ fn retain_empty_follows_kafkas_cleaner_rules() {
     marker.producer_epoch = 7;
     marker.base_timestamp = 100;
     marker.attributes = marker.attributes.with_delete_horizon(true);
-    let kept = |base| one_record_batch(base, (-1, -1), Some(b"k"));
+    let anonymous = ProducerIdAndEpoch { id: -1, epoch: -1 };
+    let producer = ProducerIdAndEpoch { id: 1000, epoch: 7 };
+    let kept = |base| one_record_batch(base, anonymous, Some(b"k"));
     let dropped = |base, producer| one_record_batch(base, producer, None);
     let last = |last_data_offset, producer_epoch| ProducerLastRecord {
         last_data_offset,
@@ -456,13 +467,13 @@ fn retain_empty_follows_kafkas_cleaner_rules() {
     let cases = [
         (
             "the producer's last data batch keeps its header",
-            vec![dropped(0, (1000, 7)), dropped(1, (1000, 7)), kept(2)],
+            vec![dropped(0, producer), dropped(1, producer), kept(2)],
             Some(last(Some(Offset(1)), 7)),
             vec![1, 2],
         ),
         (
             "a producer that is not active keeps nothing",
-            vec![dropped(0, (1000, 7)), dropped(1, (1000, 7)), kept(2)],
+            vec![dropped(0, producer), dropped(1, producer), kept(2)],
             None,
             vec![2],
         ),
@@ -480,13 +491,13 @@ fn retain_empty_follows_kafkas_cleaner_rules() {
         ),
         (
             "a data batch of a marker-only producer does not",
-            vec![dropped(0, (1000, 7)), kept(1)],
+            vec![dropped(0, producer), kept(1)],
             Some(last(None, 7)),
             vec![1],
         ),
         (
             "only the last batch of the round is kept empty",
-            vec![kept(0), dropped(1, (-1, -1)), dropped(2, (-1, -1))],
+            vec![kept(0), dropped(1, anonymous), dropped(2, anonymous)],
             None,
             vec![0, 2],
         ),
@@ -586,8 +597,16 @@ fn a_retained_empty_batch_has_no_compression_horizon_or_base_timestamp() {
 #[test]
 fn only_the_last_group_of_a_round_keeps_an_emptied_last_batch() {
     let dir = tempfile::tempdir().unwrap();
-    let first = write_sealed_batches(dir.path(), &[one_record_batch(0, (-1, -1), None)]);
-    let second = write_sealed_batches(dir.path(), &[one_record_batch(1, (-1, -1), None)]);
+    let first = write_sealed_batches(dir.path(), &[one_record_batch(
+        0,
+        ProducerIdAndEpoch { id: -1, epoch: -1 },
+        None,
+    )]);
+    let second = write_sealed_batches(dir.path(), &[one_record_batch(
+        1,
+        ProducerIdAndEpoch { id: -1, epoch: -1 },
+        None,
+    )]);
     let map = build_offset_map(&[&first, &second], vec![], None).unwrap();
     let active = HashMap::new();
     let round = CleaningRound {

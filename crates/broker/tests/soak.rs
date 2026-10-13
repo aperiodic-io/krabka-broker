@@ -125,7 +125,7 @@ mod probe;
 use {
     crate::{
         cluster::SoakCluster,
-        drift::{Bound, Series},
+        drift::{Bound, BoundedSeries, Series},
         support::{load_test::*, producer::producer_record, topics::topic_configs},
     },
     assert2::{assert, check},
@@ -263,23 +263,62 @@ async fn producer(bootstrap: &str) -> Producer {
 async fn create_topics(bootstrap: &str) {
     let topics = vec![
         topic(RETENTION_TOPIC, 6, &[
-            ("cleanup.policy", "delete"),
-            ("internal.segment.bytes", "65536"),
-            ("segment.ms", "5000"),
-            ("retention.ms", "60000"),
-            ("retention.bytes", "4194304"),
+            ConfigEntry {
+                name: "cleanup.policy",
+                value: "delete",
+            },
+            ConfigEntry {
+                name: "internal.segment.bytes",
+                value: "65536",
+            },
+            ConfigEntry {
+                name: "segment.ms",
+                value: "5000",
+            },
+            ConfigEntry {
+                name: "retention.ms",
+                value: "60000",
+            },
+            ConfigEntry {
+                name: "retention.bytes",
+                value: "4194304",
+            },
         ]),
         topic(COMPACTED_TOPIC, 3, &[
-            ("cleanup.policy", "compact"),
-            ("internal.segment.bytes", "65536"),
-            ("segment.ms", "5000"),
-            ("min.cleanable.dirty.ratio", "0.01"),
-            ("min.compaction.lag.ms", "0"),
+            ConfigEntry {
+                name: "cleanup.policy",
+                value: "compact",
+            },
+            ConfigEntry {
+                name: "internal.segment.bytes",
+                value: "65536",
+            },
+            ConfigEntry {
+                name: "segment.ms",
+                value: "5000",
+            },
+            ConfigEntry {
+                name: "min.cleanable.dirty.ratio",
+                value: "0.01",
+            },
+            ConfigEntry {
+                name: "min.compaction.lag.ms",
+                value: "0",
+            },
         ]),
         topic(VERIFY_TOPIC, 1, &[
-            ("cleanup.policy", "delete"),
-            ("retention.ms", "-1"),
-            ("retention.bytes", "-1"),
+            ConfigEntry {
+                name: "cleanup.policy",
+                value: "delete",
+            },
+            ConfigEntry {
+                name: "retention.ms",
+                value: "-1",
+            },
+            ConfigEntry {
+                name: "retention.bytes",
+                value: "-1",
+            },
         ]),
     ];
 
@@ -307,7 +346,13 @@ async fn create_topics(bootstrap: &str) {
     panic!("could not create the soak topics on {bootstrap}: {last}");
 }
 
-fn topic(name: &str, partitions: i32, configs: &[(&str, &str)]) -> CreatableTopic {
+/// One topic config name and the value it is set to.
+struct ConfigEntry {
+    name: &'static str,
+    value: &'static str,
+}
+
+fn topic(name: &str, partitions: i32, configs: &[ConfigEntry]) -> CreatableTopic {
     CreatableTopic {
         name: name.into(),
         num_partitions: partitions,
@@ -315,9 +360,20 @@ fn topic(name: &str, partitions: i32, configs: &[(&str, &str)]) -> CreatableTopi
         // partition, so each one's descriptors and log directory carry the
         // whole load rather than a third of it.
         replication_factor: 3,
-        configs: topic_configs(configs.iter().copied()),
+        configs: topic_configs(
+            configs
+                .iter()
+                .map(|ConfigEntry { name, value }| (*name, *value)),
+        ),
         ..Default::default()
     }
+}
+
+/// One broker's cleaner counters at a sample.
+struct CleanerCounters {
+    runs: f64,
+    failures: f64,
+    compactions: f64,
 }
 
 /// The state the load tasks share with the sampler.
@@ -603,7 +659,7 @@ async fn a_three_broker_cluster_holds_its_resources_over_a_soak() {
         .iter()
         .map(|broker| BrokerSamples::new(&broker.name))
         .collect();
-    let mut baseline: Option<Vec<(f64, f64, f64)>> = None;
+    let mut baseline: Option<Vec<CleanerCounters>> = None;
 
     let started = Instant::now();
     let mut taken = 0u32;
@@ -639,11 +695,11 @@ async fn a_three_broker_cluster_holds_its_resources_over_a_soak() {
             sample.cleaner_runs = probe::sum_metric(&body, CLEANER_RUNS);
             sample.cleaner_failures = probe::sum_metric(&body, CLEANER_FAILURES);
             sample.compactions = probe::sum_metric(&body, COMPACTIONS);
-            counters.push((
-                sample.cleaner_runs,
-                sample.cleaner_failures,
-                sample.compactions,
-            ));
+            counters.push(CleanerCounters {
+                runs: sample.cleaner_runs,
+                failures: sample.cleaner_failures,
+                compactions: sample.compactions,
+            });
         }
         if baseline.is_none() {
             baseline = Some(counters);
@@ -684,12 +740,12 @@ async fn a_three_broker_cluster_holds_its_resources_over_a_soak() {
     let baseline = baseline.expect("the sampler took at least one sample");
     let mut sweeps = 0.0;
     let mut compactions = 0.0;
-    for ((first_runs, first_failures, first_compactions), sample) in baseline.iter().zip(&samples) {
-        sweeps += sample.cleaner_runs - first_runs;
-        compactions += sample.compactions - first_compactions;
+    for (first, sample) in baseline.iter().zip(&samples) {
+        sweeps += sample.cleaner_runs - first.runs;
+        compactions += sample.compactions - first.compactions;
         // A counter, so any rise at all is a failed sweep: `< 1.0` is "the
         // counter did not move", written without a float equality.
-        let failures = sample.cleaner_failures - first_failures;
+        let failures = sample.cleaner_failures - first.failures;
         check!(
             failures < 1.0,
             "{}: the cleaner failed {failures} sweeps",
@@ -722,10 +778,22 @@ async fn a_three_broker_cluster_holds_its_resources_over_a_soak() {
     let [rss, fds, series, log_dir] = bounds();
     let mut judged = Vec::new();
     for sample in samples {
-        judged.push((sample.rss, rss));
-        judged.push((sample.fds, fds));
-        judged.push((sample.series_count, series));
-        judged.push((sample.log_dir, log_dir));
+        judged.push(BoundedSeries {
+            series: sample.rss,
+            bound: rss,
+        });
+        judged.push(BoundedSeries {
+            series: sample.fds,
+            bound: fds,
+        });
+        judged.push(BoundedSeries {
+            series: sample.series_count,
+            bound: series,
+        });
+        judged.push(BoundedSeries {
+            series: sample.log_dir,
+            bound: log_dir,
+        });
     }
     let verdicts = drift::judge_all(&judged);
     for verdict in &verdicts {

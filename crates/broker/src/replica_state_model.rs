@@ -90,24 +90,44 @@ impl IsrState {
     /// Normalized, timestamp-free projection for Eq/Hash. The real state holds
     /// non-`Hash` `HashMap`/`HashSet` and non-deterministic timestamps. Neither
     /// of them is safety-relevant here.
-    fn project(&self) -> (Vec<NodeId>, Vec<(NodeId, Offset)>, Offset, i32, Offset) {
+    fn project(&self) -> IsrProjection {
         let mut isr: Vec<NodeId> = self.rs.isr.iter().copied().collect();
         isr.sort_unstable();
-        let mut pf: Vec<(NodeId, Offset)> = self
+        let mut follower_leos: Vec<FollowerLeo> = self
             .rs
             .per_follower
             .iter()
-            .map(|(k, v)| (*k, v.leo))
+            .map(|(node, stats)| FollowerLeo {
+                node: *node,
+                leo: stats.leo,
+            })
             .collect();
-        pf.sort_unstable();
-        (
+        follower_leos.sort_unstable();
+        IsrProjection {
             isr,
-            pf,
-            self.rs.hw,
-            self.rs.current_leader_epoch.0,
-            self.leader_leo,
-        )
+            follower_leos,
+            hw: self.rs.hw,
+            leader_epoch: self.rs.current_leader_epoch.0,
+            leader_leo: self.leader_leo,
+        }
     }
+}
+
+/// A follower and the log end offset the leader has recorded for it.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct FollowerLeo {
+    node: NodeId,
+    leo: Offset,
+}
+
+/// The part of an [`IsrState`] that its equality and hash look at.
+#[derive(PartialEq, Eq, Hash)]
+struct IsrProjection {
+    isr: Vec<NodeId>,
+    follower_leos: Vec<FollowerLeo>,
+    hw: Offset,
+    leader_epoch: i32,
+    leader_leo: Offset,
 }
 
 impl PartialEq for IsrState {

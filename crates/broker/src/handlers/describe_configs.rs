@@ -199,24 +199,29 @@ pub(crate) fn handle(
     // `Cluster("kafka-cluster")`. On Deny stamp the result entry with the
     // matching authorization-failed code. Kafka's `ConfigHelper` answers
     // every authorized resource first and every denied one after them.
-    let (authorized, denied): (Vec<_>, Vec<_>) = req
-        .resources
-        .iter()
-        .map(|r| {
-            let failure = resource_authz_failure(
-                broker.config.authorizer.as_ref(),
-                &image,
-                ctx.principal,
-                ctx.peer,
+    let mut authorized = Vec::new();
+    let mut denied = Vec::new();
+    for r in &req.resources {
+        let failure = resource_authz_failure(
+            broker.config.authorizer.as_ref(),
+            &image,
+            ctx.principal,
+            ctx.peer,
+            r.resource_type,
+            &r.resource_name,
+        );
+        match failure {
+            None => authorized.push(r),
+            Some(code) => denied.push(denied_result(
                 r.resource_type,
-                &r.resource_name,
-            );
-            (r, failure)
-        })
-        .partition(|(_, failure)| failure.is_none());
+                r.resource_name.clone(),
+                code,
+            )),
+        }
+    }
     let results: Vec<DescribeConfigsResult> = authorized
         .into_iter()
-        .map(|(r, _)| {
+        .map(|r| {
             describe_one(
                 &image,
                 r,
@@ -233,9 +238,7 @@ pub(crate) fn handle(
                 options,
             )
         })
-        .chain(denied.into_iter().filter_map(|(r, failure)| {
-            failure.map(|code| denied_result(r.resource_type, r.resource_name.clone(), code))
-        }))
+        .chain(denied)
         .collect();
 
     DescribeConfigsResponse {

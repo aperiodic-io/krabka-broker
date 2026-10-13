@@ -8,50 +8,95 @@ fn a_verify_only_answer_follows_kafka() {
     let cases = [
         (
             "another producer id",
-            (ProducerId(8), 3, TxnState::Ongoing),
+            HeldTransaction {
+                identity: ProducerIdentity {
+                    producer_id: ProducerId(8),
+                    producer_epoch: 3,
+                },
+                state: TxnState::Ongoing,
+            },
             true,
             codes::INVALID_PRODUCER_ID_MAPPING,
         ),
         (
             "another epoch",
-            (producer, 4, TxnState::Ongoing),
+            HeldTransaction {
+                identity: ProducerIdentity {
+                    producer_id: producer,
+                    producer_epoch: 4,
+                },
+                state: TxnState::Ongoing,
+            },
             true,
             codes::PRODUCER_FENCED,
         ),
         (
             "prepare commit",
-            (producer, 3, TxnState::PrepareCommit),
+            HeldTransaction {
+                identity: ProducerIdentity {
+                    producer_id: producer,
+                    producer_epoch: 3,
+                },
+                state: TxnState::PrepareCommit,
+            },
             true,
             codes::CONCURRENT_TRANSACTIONS,
         ),
         (
             "prepare abort",
-            (producer, 3, TxnState::PrepareAbort),
+            HeldTransaction {
+                identity: ProducerIdentity {
+                    producer_id: producer,
+                    producer_epoch: 3,
+                },
+                state: TxnState::PrepareAbort,
+            },
             false,
             codes::CONCURRENT_TRANSACTIONS,
         ),
         (
             "partition in the transaction",
-            (producer, 3, TxnState::Ongoing),
+            HeldTransaction {
+                identity: ProducerIdentity {
+                    producer_id: producer,
+                    producer_epoch: 3,
+                },
+                state: TxnState::Ongoing,
+            },
             true,
             codes::NONE,
         ),
         (
             "partition not in the transaction",
-            (producer, 3, TxnState::Ongoing),
+            HeldTransaction {
+                identity: ProducerIdentity {
+                    producer_id: producer,
+                    producer_epoch: 3,
+                },
+                state: TxnState::Ongoing,
+            },
             false,
             codes::TRANSACTION_ABORTABLE,
         ),
         (
             "complete commit",
-            (producer, 3, TxnState::CompleteCommit),
+            HeldTransaction {
+                identity: ProducerIdentity {
+                    producer_id: producer,
+                    producer_epoch: 3,
+                },
+                state: TxnState::CompleteCommit,
+            },
             false,
             codes::TRANSACTION_ABORTABLE,
         ),
     ];
     for (name, entry, contains, want) in cases {
         assert!(
-            verification_code(entry, contains, (producer, 3)) == want,
+            verification_code(entry, contains, ProducerIdentity {
+                producer_id: producer,
+                producer_epoch: 3
+            }) == want,
             "{name}"
         );
     }
@@ -73,9 +118,14 @@ fn the_verification_knob_reads_the_broker_then_the_cluster_then_the_static_value
     };
 
     const NODE: NodeId = NodeId(1);
-    let image = |records: &[(NodeId, &str)]| {
+    /// A dynamic config value set for one broker, or for the cluster.
+    struct DynamicValue<'a> {
+        node_id: NodeId,
+        value: &'a str,
+    }
+    let image = |records: &[DynamicValue<'_>]| {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
-        for (node_id, value) in records {
+        for DynamicValue { node_id, value } in records {
             image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
                 node_id: *node_id,
                 config_name: PARTITION_VERIFICATION_ENABLE.to_owned(),
@@ -84,7 +134,11 @@ fn the_verification_knob_reads_the_broker_then_the_cluster_then_the_static_value
         }
         image
     };
-    let cluster = |value| (DEFAULT_BROKER_CONFIG_NODE_ID, value);
+    let cluster = |value| DynamicValue {
+        node_id: DEFAULT_BROKER_CONFIG_NODE_ID,
+        value,
+    };
+    let broker = |node_id, value| DynamicValue { node_id, value };
     // (label, dynamic records, the static value, the answer)
     let cases = [
         ("no config", image(&[]), true, true),
@@ -110,49 +164,49 @@ fn the_verification_knob_reads_the_broker_then_the_cluster_then_the_static_value
         ),
         (
             "broker on over cluster off",
-            image(&[cluster("false"), (NODE, "true")]),
+            image(&[cluster("false"), broker(NODE, "true")]),
             true,
             true,
         ),
         (
             "broker off over cluster on",
-            image(&[cluster("true"), (NODE, "false")]),
+            image(&[cluster("true"), broker(NODE, "false")]),
             true,
             false,
         ),
         (
             "broker on over static off",
-            image(&[(NODE, "true")]),
+            image(&[broker(NODE, "true")]),
             false,
             true,
         ),
         (
             "broker off over static on",
-            image(&[(NODE, "false")]),
+            image(&[broker(NODE, "false")]),
             true,
             false,
         ),
         (
             "another broker's value",
-            image(&[(NodeId(2), "false")]),
+            image(&[broker(NodeId(2), "false")]),
             true,
             true,
         ),
         (
             "another broker's value, static off",
-            image(&[(NodeId(2), "true")]),
+            image(&[broker(NodeId(2), "true")]),
             false,
             false,
         ),
         (
             "not a boolean falls to static on",
-            image(&[(NODE, "no")]),
+            image(&[broker(NODE, "no")]),
             true,
             true,
         ),
         (
             "not a boolean falls to static off",
-            image(&[(NODE, "no")]),
+            image(&[broker(NODE, "no")]),
             false,
             false,
         ),

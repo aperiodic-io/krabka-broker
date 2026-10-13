@@ -89,21 +89,26 @@ const PRINCIPAL: &str = "bench-principal";
 /// The requests below name their topic, as `Fetch` v12 and earlier do.
 const NAME_FETCH_VERSION: i16 = 12;
 
+/// One partition of a session's partition set: its key and cached state.
+#[derive(Clone)]
+struct CachedPartition {
+    key: FetchSessionKey,
+    state: CachedPartitionState,
+}
+
 /// The partition set the handler hands `try_allocate` after serving a fetch.
-fn partition_set() -> Vec<(FetchSessionKey, CachedPartitionState)> {
+fn partition_set() -> Vec<CachedPartition> {
     (0..PARTITIONS)
-        .map(|partition| {
-            (
-                FetchSessionKey {
-                    topic_name: TOPIC.to_string(),
-                    topic_id: WireUuid::ZERO,
-                    partition,
-                },
-                CachedPartitionState {
-                    max_bytes: 1024 * 1024,
-                    ..CachedPartitionState::default()
-                },
-            )
+        .map(|partition| CachedPartition {
+            key: FetchSessionKey {
+                topic_name: TOPIC.to_string(),
+                topic_id: WireUuid::ZERO,
+                partition,
+            },
+            state: CachedPartitionState {
+                max_bytes: 1024 * 1024,
+                ..CachedPartitionState::default()
+            },
         })
         .collect()
 }
@@ -133,17 +138,33 @@ fn new_session_request() -> FetchRequest {
 /// by before each turn so the least recently used session is always stale.
 const STALE: Duration = Duration::from_secs(121);
 
+/// A cache and the manual clock it stamps sessions from.
+struct ClockedCache {
+    cache: FetchSessionCache,
+    clock: Arc<ManualMonotonicClock>,
+}
+
 /// A cache holding `occupancy` percent of [`SLOTS`] live consumer sessions,
 /// and the manual clock it stamps sessions from.
-fn prefilled(occupancy: usize) -> (FetchSessionCache, Arc<ManualMonotonicClock>) {
+fn prefilled(occupancy: usize) -> ClockedCache {
     let clock = ManualMonotonicClock::new_shared();
     let cache = FetchSessionCache::with_clock(SLOTS, clock.clone());
     let template = partition_set();
     for _ in 0..(SLOTS * occupancy / 100) {
-        let id = cache.try_allocate(false, false, PRINCIPAL.to_string(), template.clone());
+        let partitions = template
+            .iter()
+            .map(|partition| (partition.key.clone(), partition.state.clone()))
+            .collect();
+        let id = cache.try_allocate(false, false, PRINCIPAL.to_string(), partitions);
         assert!(id != INVALID_SESSION_ID, "prefill was refused a session");
     }
-    (cache, clock)
+    ClockedCache { cache, clock }
+}
+
+/// Borrowed views of a [`ClockedCache`], which worker threads share.
+struct CacheRefs<'a> {
+    cache: &'a FetchSessionCache,
+    clock: &'a ManualMonotonicClock,
 }
 
 /// Run `ops` session turns against `cache`, returning the time they took.
@@ -160,15 +181,18 @@ fn prefilled(occupancy: usize) -> (FetchSessionCache, Arc<ManualMonotonicClock>)
 /// constant addition to every row, so the ratios this suite reports are
 /// unaffected.
 fn timed_session_turns(
-    (cache, clock): (&FetchSessionCache, &ManualMonotonicClock),
+    CacheRefs { cache, clock }: CacheRefs<'_>,
     request: &FetchRequest,
-    template: &[(FetchSessionKey, CachedPartitionState)],
+    template: &[CachedPartition],
     close_explicitly: bool,
     ops: u64,
 ) -> Duration {
     let mut elapsed = Duration::ZERO;
     for _ in 0..ops {
-        let partitions = template.to_vec();
+        let partitions = template
+            .iter()
+            .map(|partition| (partition.key.clone(), partition.state.clone()))
+            .collect();
         let principal = PRINCIPAL.to_string();
         clock.advance(STALE).expect("manual time moves forward");
 
@@ -196,7 +220,7 @@ fn timed_session_turns(
 /// thread spawn out of the measurement and makes `total / iters` the mean
 /// latency of one turn, contention included.
 fn timed_across_threads(occupancy: usize, threads: u32, iters: u64) -> Duration {
-    let (cache, clock) = prefilled(occupancy);
+    let ClockedCache { cache, clock } = prefilled(occupancy);
     let cache = Arc::new(cache);
     let request = new_session_request();
     let template = partition_set();
@@ -214,7 +238,16 @@ fn timed_across_threads(occupancy: usize, threads: u32, iters: u64) -> Duration 
                 let request = &request;
                 let template = &template;
                 scope.spawn(move || {
-                    timed_session_turns((&cache, &clock), request, template, close_explicitly, ops)
+                    timed_session_turns(
+                        CacheRefs {
+                            cache: &cache,
+                            clock: &clock,
+                        },
+                        request,
+                        template,
+                        close_explicitly,
+                        ops,
+                    )
                 })
             })
             .collect();

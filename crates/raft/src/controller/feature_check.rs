@@ -53,7 +53,13 @@ fn range_text(min: i16, max: i16) -> String {
 
 /// Kafka's `QuorumFeatures.DISABLED`, the range of a feature that the
 /// controller does not support.
-const UNKNOWN_FEATURE_RANGE: (i16, i16) = (0, 0);
+const UNKNOWN_FEATURE_RANGE: LevelRange = LevelRange { min: 0, max: 0 };
+
+/// The levels a controller supports of one feature, inclusive.
+struct LevelRange {
+    min: i16,
+    max: i16,
+}
 
 /// The refusal for the first finalized feature of `image` whose level this
 /// controller does not support under `unstable`, or `None` when it supports
@@ -65,9 +71,11 @@ pub(super) fn unsupported_feature_level(
     image.finalized_features().iter().find_map(|(name, level)| {
         // `QuorumFeatures.localSupportedFeature`: a feature this controller
         // does not know is `DISABLED`, supported at level 0 only.
-        let (min, max) = krabka_metadata::feature(name).map_or(UNKNOWN_FEATURE_RANGE, |feature| {
-            supported_feature_range(feature, unstable)
-        });
+        let LevelRange { min, max } =
+            krabka_metadata::feature(name).map_or(UNKNOWN_FEATURE_RANGE, |feature| {
+                let (min, max) = supported_feature_range(feature, unstable);
+                LevelRange { min, max }
+            });
         (!(min..=max).contains(level)).then(|| {
             format!(
                 "Tried to apply FeatureLevelRecord FeatureLevelRecord(name='{name}', \
@@ -88,15 +96,19 @@ mod tests {
     };
 
     /// An image that finalized each of `levels`.
-    fn image_at(levels: &[(&str, i16)]) -> MetadataImage {
+    fn image_at(levels: &[FeatureLevelRecord]) -> MetadataImage {
         let mut image = MetadataImage::new(Uuid::nil());
-        for (name, level) in levels {
-            image.apply(&MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
-                name: (*name).into(),
-                level: *level,
-            }));
+        for level in levels {
+            image.apply(&MetadataRecord::V1FeatureLevel(level.clone()));
         }
         image
+    }
+
+    fn finalized(name: &str, level: i16) -> FeatureLevelRecord {
+        FeatureLevelRecord {
+            name: name.into(),
+            level,
+        }
     }
 
     fn refusal(name: &str, level: i16, range: &str) -> String {
@@ -115,55 +127,61 @@ mod tests {
         for (what, levels, unstable, expected) in [
             (
                 "the latest production level",
-                vec![("metadata.version", 30)],
+                vec![finalized("metadata.version", 30)],
                 Disabled,
                 None,
             ),
             (
                 "an unstable level with the flag off",
-                vec![("metadata.version", 33)],
+                vec![finalized("metadata.version", 33)],
                 Disabled,
                 Some(refusal("metadata.version", 33, "7-30")),
             ),
             (
                 "an unstable level with the flag on",
-                vec![("metadata.version", 33)],
+                vec![finalized("metadata.version", 33)],
                 Enabled,
                 None,
             ),
             (
                 "a feature above its range",
-                vec![("share.version", 5)],
+                vec![finalized("share.version", 5)],
                 Enabled,
                 Some(refusal("share.version", 5, "0-2")),
             ),
             (
                 "a level below the range",
-                vec![("metadata.version", 3)],
+                vec![finalized("metadata.version", 3)],
                 Enabled,
                 Some(refusal("metadata.version", 3, "7-34")),
             ),
             (
                 "the first of two refused features",
-                vec![("metadata.version", 33), ("share.version", 5)],
+                vec![
+                    finalized("metadata.version", 33),
+                    finalized("share.version", 5),
+                ],
                 Disabled,
                 Some(refusal("metadata.version", 33, "7-30")),
             ),
             (
                 "a feature this controller does not know",
-                vec![("some.future.feature", 9)],
+                vec![finalized("some.future.feature", 9)],
                 Disabled,
                 Some(refusal("some.future.feature", 9, "0")),
             ),
             (
                 "a feature this controller does not know, with the flag on",
-                vec![("some.future.feature", 1)],
+                vec![finalized("some.future.feature", 1)],
                 Enabled,
                 Some(refusal("some.future.feature", 1, "0")),
             ),
             (
                 "a known feature at a level it supports beside an unknown one",
-                vec![("metadata.version", 30), ("some.future.feature", 2)],
+                vec![
+                    finalized("metadata.version", 30),
+                    finalized("some.future.feature", 2),
+                ],
                 Disabled,
                 Some(refusal("some.future.feature", 2, "0")),
             ),

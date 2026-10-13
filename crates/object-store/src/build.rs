@@ -158,7 +158,7 @@ mod tests {
         super::{object_store, *},
         crate::{
             config::{GcsConfig, ObjectStoreConfig, S3Config},
-            test_support::{http_listener, round_trip, s3_config},
+            test_support::{HttpListener, http_listener, round_trip, s3_config},
         },
         assert2::{assert, check},
         object_store::ObjectStoreExt as _,
@@ -253,7 +253,7 @@ mod tests {
     /// who set it.
     #[tokio::test]
     async fn s3_request_timeout_bounds_a_stalled_store() {
-        let (listener, endpoint) = http_listener().await;
+        let HttpListener { listener, endpoint } = http_listener().await;
         // Hold the accepted sockets open for the length of the test: dropping
         // them would answer the request with a reset, which is not a stall.
         let server = tokio::spawn(async move {
@@ -292,7 +292,7 @@ mod tests {
     async fn s3_max_retries_bounds_the_attempts_against_a_throttling_store() {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-        let (listener, endpoint) = http_listener().await;
+        let HttpListener { listener, endpoint } = http_listener().await;
         let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counter = Arc::clone(&attempts);
         let server = tokio::spawn(async move {

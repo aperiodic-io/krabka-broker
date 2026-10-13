@@ -378,13 +378,32 @@ mod tests {
             .map_err(|error| error.to_string())
     }
 
+    /// A config value, and whether the operator supplied it.
+    #[derive(Debug, PartialEq)]
+    struct Supplied<T> {
+        value: T,
+        supplied: bool,
+    }
+
+    /// One file-loading case: a label, the file, and the outcome it loads to.
+    struct ConfigCase<S, T> {
+        label: &'static str,
+        source: S,
+        want: Result<T, String>,
+    }
+
     fn check_config_cases<const N: usize, S: AsRef<str>, T: std::fmt::Debug + PartialEq>(
-        cases: [(&str, S, Result<T, String>); N],
+        cases: [ConfigCase<S, T>; N],
         read: impl Fn(&BrokerConfig) -> T,
     ) {
         let mut actual = Vec::with_capacity(N);
         let mut expected = Vec::with_capacity(N);
-        for (label, source, want) in cases {
+        for ConfigCase {
+            label,
+            source,
+            want,
+        } in cases
+        {
             actual.push((label, file_outcome(source.as_ref(), &read)));
             expected.push((label, want));
         }
@@ -546,74 +565,92 @@ connections_max_idle = "5s"
     #[test]
     fn boolean_keys_are_read_from_server_properties() {
         /// The value and the operator-supplied flag of one key.
-        type Read = fn(&BrokerConfig) -> (bool, bool);
+        type Read = fn(&BrokerConfig) -> Supplied<bool>;
         /// A label, the key it reads, the file, and the value, flag or error.
-        type Case = (
-            &'static str,
-            Read,
-            &'static str,
-            Result<(bool, bool), String>,
-        );
-        let delete: Read = |cfg| {
-            (
-                cfg.delete_topic_enable,
-                cfg.static_config_origins.topic_admin.delete_topic_enable,
-            )
+        struct Case {
+            label: &'static str,
+            read: Read,
+            source: &'static str,
+            want: Result<Supplied<bool>, String>,
+        }
+        let delete: Read = |cfg| Supplied {
+            value: cfg.delete_topic_enable,
+            supplied: cfg.static_config_origins.topic_admin.delete_topic_enable,
         };
-        let auto_create: Read = |cfg| {
-            (
-                cfg.auto_create_topics_enable,
-                cfg.static_config_origins
-                    .topic_admin
-                    .auto_create_topics_enable,
-            )
+        let auto_create: Read = |cfg| Supplied {
+            value: cfg.auto_create_topics_enable,
+            supplied: cfg
+                .static_config_origins
+                .topic_admin
+                .auto_create_topics_enable,
         };
         let cases: [Case; 6] = [
-            (
-                "delete not named",
-                delete,
-                "broker_id = 0\n",
-                Ok((true, false)),
-            ),
-            (
-                "delete false",
-                delete,
-                "[server_properties]\n\"delete.topic.enable\" = \"false\"\n",
-                Ok((false, true)),
-            ),
-            (
-                "delete upper case",
-                delete,
-                "[server_properties]\n\"delete.topic.enable\" = \"TRUE\"\n",
-                Ok((true, true)),
-            ),
-            (
-                "delete a word",
-                delete,
-                "[server_properties]\n\"delete.topic.enable\" = \"maybe\"\n",
-                Err(
+            Case {
+                label: "delete not named",
+                read: delete,
+                source: "broker_id = 0\n",
+                want: Ok(Supplied {
+                    value: true,
+                    supplied: false,
+                }),
+            },
+            Case {
+                label: "delete false",
+                read: delete,
+                source: "[server_properties]\n\"delete.topic.enable\" = \"false\"\n",
+                want: Ok(Supplied {
+                    value: false,
+                    supplied: true,
+                }),
+            },
+            Case {
+                label: "delete upper case",
+                read: delete,
+                source: "[server_properties]\n\"delete.topic.enable\" = \"TRUE\"\n",
+                want: Ok(Supplied {
+                    value: true,
+                    supplied: true,
+                }),
+            },
+            Case {
+                label: "delete a word",
+                read: delete,
+                source: "[server_properties]\n\"delete.topic.enable\" = \"maybe\"\n",
+                want: Err(
                     "invalid config: server_properties `delete.topic.enable` must be `true` or \
                      `false`, got `maybe`"
                         .to_owned(),
                 ),
-            ),
-            (
-                "auto-create not named",
-                auto_create,
-                "broker_id = 0\n",
-                Ok((true, false)),
-            ),
-            (
-                "auto-create false",
-                auto_create,
-                "[server_properties]\n\"auto.create.topics.enable\" = \"False\"\n",
-                Ok((false, true)),
-            ),
+            },
+            Case {
+                label: "auto-create not named",
+                read: auto_create,
+                source: "broker_id = 0\n",
+                want: Ok(Supplied {
+                    value: true,
+                    supplied: false,
+                }),
+            },
+            Case {
+                label: "auto-create false",
+                read: auto_create,
+                source: "[server_properties]\n\"auto.create.topics.enable\" = \"False\"\n",
+                want: Ok(Supplied {
+                    value: false,
+                    supplied: true,
+                }),
+            },
         ];
         let mut actual = Vec::with_capacity(cases.len());
         let mut expected = Vec::with_capacity(cases.len());
-        for (label, read, src, want) in cases {
-            let result = file_outcome(src, read);
+        for Case {
+            label,
+            read,
+            source,
+            want,
+        } in cases
+        {
+            let result = file_outcome(source, read);
             actual.push((label, result));
             expected.push((label, want));
         }
@@ -629,49 +666,58 @@ connections_max_idle = "5s"
     fn log_roll_ms_is_read_from_server_properties() {
         use krabka_units::convert::TimeExt as _;
 
-        /// The roll interval in milliseconds and the operator-supplied flag,
-        /// or the error.
-        type Outcome = Result<(i64, bool), String>;
         let property =
             |value: &str| format!("[server_properties]\n\"log.roll.ms\" = \"{value}\"\n");
-        let cases: [(&str, String, Outcome); 5] = [
-            (
-                "not named",
-                "broker_id = 0\n".to_owned(),
-                Ok((604_800_000, false)),
-            ),
-            ("named", property("3000"), Ok((3000, true))),
-            (
-                "named at the segment.ms default",
-                property("604800000"),
-                Ok((604_800_000, true)),
-            ),
-            (
-                "zero",
-                property("0"),
-                Err(
+        let cases: [ConfigCase<String, Supplied<i64>>; 5] = [
+            ConfigCase {
+                label: "not named",
+                source: "broker_id = 0\n".to_owned(),
+                want: Ok(Supplied {
+                    value: 604_800_000,
+                    supplied: false,
+                }),
+            },
+            ConfigCase {
+                label: "named",
+                source: property("3000"),
+                want: Ok(Supplied {
+                    value: 3000,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "named at the segment.ms default",
+                source: property("604800000"),
+                want: Ok(Supplied {
+                    value: 604_800_000,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "zero",
+                source: property("0"),
+                want: Err(
                     "invalid config: server_properties `log.roll.ms` must be a positive integer, \
                      got `0`"
                         .to_owned(),
                 ),
-            ),
-            (
-                "a word",
-                property("soon"),
-                Err(
+            },
+            ConfigCase {
+                label: "a word",
+                source: property("soon"),
+                want: Err(
                     "invalid config: server_properties `log.roll.ms` must be a positive integer, \
                      got `soon`"
                         .to_owned(),
                 ),
-            ),
+            },
         ];
-        check_config_cases(cases, |cfg| {
-            (
-                cfg.log_config.segment_roll_interval.millis_i64(),
-                cfg.static_config_origins
-                    .supplied_kafka_keys
-                    .contains("log.roll.ms"),
-            )
+        check_config_cases(cases, |cfg| Supplied {
+            value: cfg.log_config.segment_roll_interval.millis_i64(),
+            supplied: cfg
+                .static_config_origins
+                .supplied_kafka_keys
+                .contains("log.roll.ms"),
         });
     }
 
@@ -679,49 +725,58 @@ connections_max_idle = "5s"
     fn the_consumer_group_migration_policy_is_read_from_server_properties() {
         use crate::coordinator::unified::config::ConsumerGroupMigrationPolicy as Policy;
 
-        /// The policy and the operator-supplied flag, or the error.
-        type Outcome = Result<(Policy, bool), String>;
         let property = |value: &str| {
             format!("[server_properties]\n\"group.consumer.migration.policy\" = \"{value}\"\n")
         };
-        let cases: [(&str, String, Outcome); 5] = [
-            (
-                "not named",
-                "broker_id = 0\n".to_owned(),
-                Ok((Policy::Bidirectional, false)),
-            ),
-            (
-                "disabled",
-                property("disabled"),
-                Ok((Policy::Disabled, true)),
-            ),
-            (
-                "upper case",
-                property("DOWNGRADE"),
-                Ok((Policy::Downgrade, true)),
-            ),
-            (
-                "mixed case",
-                property("Upgrade"),
-                Ok((Policy::Upgrade, true)),
-            ),
-            (
-                "not a policy",
-                property("sideways"),
-                Err(
+        let cases: [ConfigCase<String, Supplied<Policy>>; 5] = [
+            ConfigCase {
+                label: "not named",
+                source: "broker_id = 0\n".to_owned(),
+                want: Ok(Supplied {
+                    value: Policy::Bidirectional,
+                    supplied: false,
+                }),
+            },
+            ConfigCase {
+                label: "disabled",
+                source: property("disabled"),
+                want: Ok(Supplied {
+                    value: Policy::Disabled,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "upper case",
+                source: property("DOWNGRADE"),
+                want: Ok(Supplied {
+                    value: Policy::Downgrade,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "mixed case",
+                source: property("Upgrade"),
+                want: Ok(Supplied {
+                    value: Policy::Upgrade,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "not a policy",
+                source: property("sideways"),
+                want: Err(
                     "invalid config: server_properties `group.consumer.migration.policy` must be \
                      one of `disabled`, `upgrade`, `downgrade` or `bidirectional`, got `sideways`"
                         .to_owned(),
                 ),
-            ),
+            },
         ];
-        check_config_cases(cases, |cfg| {
-            (
-                cfg.next_gen_consumer_group.migration_policy,
-                cfg.static_config_origins
-                    .supplied_kafka_keys
-                    .contains("group.consumer.migration.policy"),
-            )
+        check_config_cases(cases, |cfg| Supplied {
+            value: cfg.next_gen_consumer_group.migration_policy,
+            supplied: cfg
+                .static_config_origins
+                .supplied_kafka_keys
+                .contains("group.consumer.migration.policy"),
         });
     }
 
@@ -731,44 +786,80 @@ connections_max_idle = "5s"
     /// property, and either source records that the operator named the key.
     #[test]
     fn partition_verification_is_read_from_the_runtime_table_and_server_properties() {
-        /// The value and the operator-supplied flag, or the error.
-        type Outcome = Result<(bool, bool), String>;
         const KEY: &str = "transaction.partition.verification.enable";
         let property = |value: &str| format!("[server_properties]\n\"{KEY}\" = \"{value}\"\n");
         let runtime = |value: &str| {
             format!("[runtime]\ntransaction_partition_verification_enable = {value}\n")
         };
-        // A label, the file, and the outcome it loads to.
-        let cases: [(&str, String, Outcome); 8] = [
-            ("not named", "broker_id = 0\n".to_owned(), Ok((true, false))),
-            ("property false", property("false"), Ok((false, true))),
-            ("property upper case", property("TRUE"), Ok((true, true))),
-            (
-                "property a word",
-                property("maybe"),
-                Err(format!(
+        let cases: [ConfigCase<String, Supplied<bool>>; 8] = [
+            ConfigCase {
+                label: "not named",
+                source: "broker_id = 0\n".to_owned(),
+                want: Ok(Supplied {
+                    value: true,
+                    supplied: false,
+                }),
+            },
+            ConfigCase {
+                label: "property false",
+                source: property("false"),
+                want: Ok(Supplied {
+                    value: false,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "property upper case",
+                source: property("TRUE"),
+                want: Ok(Supplied {
+                    value: true,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "property a word",
+                source: property("maybe"),
+                want: Err(format!(
                     "invalid config: server_properties `{KEY}` must be `true` or `false`, got \
                      `maybe`"
                 )),
-            ),
-            ("runtime false", runtime("false"), Ok((false, true))),
-            ("runtime at the default", runtime("true"), Ok((true, true))),
-            (
-                "runtime true over a false property",
-                format!("{}{}", runtime("true"), property("false")),
-                Ok((true, true)),
-            ),
-            (
-                "runtime false over a true property",
-                format!("{}{}", runtime("false"), property("true")),
-                Ok((false, true)),
-            ),
+            },
+            ConfigCase {
+                label: "runtime false",
+                source: runtime("false"),
+                want: Ok(Supplied {
+                    value: false,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "runtime at the default",
+                source: runtime("true"),
+                want: Ok(Supplied {
+                    value: true,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "runtime true over a false property",
+                source: format!("{}{}", runtime("true"), property("false")),
+                want: Ok(Supplied {
+                    value: true,
+                    supplied: true,
+                }),
+            },
+            ConfigCase {
+                label: "runtime false over a true property",
+                source: format!("{}{}", runtime("false"), property("true")),
+                want: Ok(Supplied {
+                    value: false,
+                    supplied: true,
+                }),
+            },
         ];
-        check_config_cases(cases, |cfg| {
-            (
-                cfg.transaction_partition_verification_enable,
-                cfg.static_config_origins.supplied_kafka_keys.contains(KEY),
-            )
+        check_config_cases(cases, |cfg| Supplied {
+            value: cfg.transaction_partition_verification_enable,
+            supplied: cfg.static_config_origins.supplied_kafka_keys.contains(KEY),
         });
     }
 

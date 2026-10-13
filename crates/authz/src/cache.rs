@@ -126,7 +126,7 @@ mod tests {
         let cache = AclCache::new(entries.clone());
 
         // Probes covering every matching code path.
-        let probes: &[(ResourceType, &str)] = &[
+        let probes = [
             (ResourceType::Topic, "foo"),      // literal exact hit (+ "*" wildcard)
             (ResourceType::Topic, "*"),        // querying the wildcard resource itself
             (ResourceType::Topic, "team-foo"), // prefixed hit (+ "*" wildcard)
@@ -138,7 +138,7 @@ mod tests {
             (ResourceType::Cluster, "kafka-cluster"), // wrong type → empty in both
         ];
 
-        for &(rt, name) in probes {
+        for (rt, name) in probes {
             let from_image = sorted_keys(AclSource::matching_acls(&image, rt, name));
             let from_cache = sorted_keys(AclSource::matching_acls(&cache, rt, name));
             assert2::assert!(from_image == from_cache);

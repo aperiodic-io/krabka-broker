@@ -25,11 +25,18 @@ pub(crate) fn plan_file(topic: &str, staying: u64, new_node: u64) -> TempFileMou
     write_temp_file("reassignment.json", &json)
 }
 
+/// The node whose broker was stopped, and the three broker slots with that one
+/// emptied.
+pub(crate) struct OfflineTarget {
+    pub(crate) target: u64,
+    pub(crate) handles: [Option<BrokerHandle>; 3],
+}
+
 pub(crate) async fn offline_target(
     brokers: [BrokerHandle; 3],
     current: &PartitionRecord,
     controller_leader: u64,
-) -> (u64, [Option<BrokerHandle>; 3]) {
+) -> OfflineTarget {
     let target = (2_u64..=3)
         .find(|node| {
             *node != controller_leader && !current.replicas.iter().any(|replica| replica.0 == *node)
@@ -41,7 +48,7 @@ pub(crate) async fn offline_target(
         .expect("offline target handle")
         .shutdown()
         .await;
-    (target, handles)
+    OfflineTarget { target, handles }
 }
 
 pub(crate) fn assert_reassigned(broker: &BrokerHandle, topic: &str, staying: u64, new_node: u64) {
@@ -79,7 +86,7 @@ pub(crate) async fn offline_for_partition(
         .partition_record_for_test(topic, 0)
         .expect(context);
     let controller = brokers[0].wait_until_controller_leader().await.0;
-    let (target, handles) = offline_target(brokers, &current, controller).await;
+    let OfflineTarget { target, handles } = offline_target(brokers, &current, controller).await;
     (target, handles, current)
 }
 

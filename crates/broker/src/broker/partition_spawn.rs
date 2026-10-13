@@ -33,23 +33,42 @@ use {
     },
 };
 
-type PartitionWal = (
-    Option<SharedWal>,
-    Option<krabka_log::Offset>,
-    Option<Arc<WalShardEngine>>,
-);
+/// The diskless WAL services of a partition. Every field is `None` for a
+/// partition that is not diskless.
+struct PartitionWal {
+    wal: Option<SharedWal>,
+    /// The durable watermark the WAL recovered, which seeds the replica state.
+    durable_watermark: Option<krabka_log::Offset>,
+    engine: Option<Arc<WalShardEngine>>,
+}
+
+/// The topic and partition a WAL serves.
+#[derive(Clone, Copy)]
+struct PartitionIdentity<'a> {
+    topic: &'a str,
+    topic_id: Option<uuid::Uuid>,
+    partition_id: PartitionIndex,
+}
 
 fn partition_wal(
-    identity: (&str, Option<uuid::Uuid>, PartitionIndex),
+    identity: PartitionIdentity<'_>,
     log: Arc<Mutex<krabka_log::Log>>,
     diskless: bool,
     hot_tail: Option<Arc<HotTailCache>>,
     wal_shards: Option<Arc<WalShardRegistry>>,
     replica_count: usize,
 ) -> Result<PartitionWal, BrokerError> {
-    let (topic, topic_id, partition_id) = identity;
+    let PartitionIdentity {
+        topic,
+        topic_id,
+        partition_id,
+    } = identity;
     if !diskless {
-        return Ok((None, None, None));
+        return Ok(PartitionWal {
+            wal: None,
+            durable_watermark: None,
+            engine: None,
+        });
     }
     let topic_id = topic_id.ok_or_else(|| {
         BrokerError::Replication(format!(
@@ -79,11 +98,11 @@ fn partition_wal(
     );
     let durable_watermark = wal.engine().durable_watermark();
     let engine = wal.engine();
-    Ok((
-        Some(Arc::new(wal) as SharedWal),
-        Some(durable_watermark),
-        Some(engine),
-    ))
+    Ok(PartitionWal {
+        wal: Some(Arc::new(wal) as SharedWal),
+        durable_watermark: Some(durable_watermark),
+        engine: Some(engine),
+    })
 }
 
 /// Create the partition runtime (mpsc channel + writer task + notify).
@@ -219,8 +238,16 @@ pub(crate) fn try_spawn_partition_with_replication_target(
         sequencer,
     } = runtime;
     let log = Arc::new(Mutex::new(log));
-    let (wal, recovered_durable_watermark, wal_engine) = partition_wal(
-        (&topic, topic_id, partition_id),
+    let PartitionWal {
+        wal,
+        durable_watermark: recovered_durable_watermark,
+        engine: wal_engine,
+    } = partition_wal(
+        PartitionIdentity {
+            topic: &topic,
+            topic_id,
+            partition_id,
+        },
         Arc::clone(&log),
         diskless,
         hot_tail,

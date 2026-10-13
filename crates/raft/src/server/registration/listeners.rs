@@ -8,37 +8,54 @@ use {
     krabka_security::ListenerProtocol, std::collections::HashSet,
 };
 
+/// A listener as the registration request carries it, borrowed from the
+/// request.
+#[derive(Clone, Copy, Debug)]
+struct WireListener<'a> {
+    name: &'a str,
+    host: &'a str,
+    port: u16,
+    /// The wire code of the security protocol.
+    protocol: i16,
+}
+
 pub(super) fn decode_controller_listeners(
     listeners: &[controller_registration_request::Listener],
 ) -> Result<Vec<BrokerEndpoint>, String> {
-    decode_listeners(listeners.iter().map(|listener| {
-        (
-            listener.name.as_str(),
-            listener.host.as_str(),
-            listener.port,
-            listener.security_protocol,
-        )
+    decode_listeners(listeners.iter().map(|listener| WireListener {
+        name: listener.name.as_str(),
+        host: listener.host.as_str(),
+        port: listener.port,
+        protocol: listener.security_protocol,
     }))
 }
 
 fn decode_listeners<'a>(
-    listeners: impl Iterator<Item = (&'a str, &'a str, u16, i16)>,
+    listeners: impl Iterator<Item = WireListener<'a>>,
 ) -> Result<Vec<BrokerEndpoint>, String> {
     let mut names = HashSet::new();
     let endpoints = listeners
-        .map(|(name, host, port, protocol)| {
-            if name.is_empty() || host.is_empty() || port == 0 || !names.insert(name.to_owned()) {
-                return Err("invalid or duplicate registration listener".into());
-            }
-            let protocol = protocol_from_wire(protocol)
-                .ok_or_else(|| "unknown listener security protocol".to_owned())?;
-            Ok(BrokerEndpoint {
-                name: name.to_owned(),
-                host: host.to_owned(),
-                port,
-                protocol,
-            })
-        })
+        .map(
+            |WireListener {
+                 name,
+                 host,
+                 port,
+                 protocol,
+             }| {
+                if name.is_empty() || host.is_empty() || port == 0 || !names.insert(name.to_owned())
+                {
+                    return Err("invalid or duplicate registration listener".into());
+                }
+                let protocol = protocol_from_wire(protocol)
+                    .ok_or_else(|| "unknown listener security protocol".to_owned())?;
+                Ok(BrokerEndpoint {
+                    name: name.to_owned(),
+                    host: host.to_owned(),
+                    port,
+                    protocol,
+                })
+            },
+        )
         .collect::<Result<Vec<_>, String>>()?;
     if endpoints.is_empty() {
         return Err("registration has no listeners".into());
@@ -105,42 +122,73 @@ mod tests {
     /// name, and an empty set is rejected outright.
     #[test]
     fn registration_listeners_must_be_usable_and_uniquely_named() {
-        type Row<'a> = (&'a str, Vec<(&'a str, &'a str, u16, i16)>, bool);
-        let cases: Vec<Row<'_>> = vec![
-            (
-                "one usable listener",
-                vec![("PLAINTEXT", "host", 9092, 0)],
-                true,
-            ),
-            (
-                "two, differently named",
-                vec![("PLAINTEXT", "host", 9092, 0), ("SSL", "host", 9093, 1)],
-                true,
-            ),
-            ("none at all", vec![], false),
-            ("a nameless listener", vec![("", "host", 9092, 0)], false),
-            (
-                "a hostless listener",
-                vec![("PLAINTEXT", "", 9092, 0)],
-                false,
-            ),
-            ("port zero", vec![("PLAINTEXT", "host", 0, 0)], false),
-            (
-                "a repeated name",
-                vec![
-                    ("PLAINTEXT", "host", 9092, 0),
-                    ("PLAINTEXT", "host", 9093, 0),
+        struct Row<'a> {
+            what: &'a str,
+            listeners: Vec<WireListener<'a>>,
+            accepted: bool,
+        }
+
+        let listener = |name, host, port, protocol| WireListener {
+            name,
+            host,
+            port,
+            protocol,
+        };
+        let cases = vec![
+            Row {
+                what: "one usable listener",
+                listeners: vec![listener("PLAINTEXT", "host", 9092, 0)],
+                accepted: true,
+            },
+            Row {
+                what: "two, differently named",
+                listeners: vec![
+                    listener("PLAINTEXT", "host", 9092, 0),
+                    listener("SSL", "host", 9093, 1),
                 ],
-                false,
-            ),
-            (
-                "an unknown security protocol",
-                vec![("PLAINTEXT", "host", 9092, 9)],
-                false,
-            ),
+                accepted: true,
+            },
+            Row {
+                what: "none at all",
+                listeners: vec![],
+                accepted: false,
+            },
+            Row {
+                what: "a nameless listener",
+                listeners: vec![listener("", "host", 9092, 0)],
+                accepted: false,
+            },
+            Row {
+                what: "a hostless listener",
+                listeners: vec![listener("PLAINTEXT", "", 9092, 0)],
+                accepted: false,
+            },
+            Row {
+                what: "port zero",
+                listeners: vec![listener("PLAINTEXT", "host", 0, 0)],
+                accepted: false,
+            },
+            Row {
+                what: "a repeated name",
+                listeners: vec![
+                    listener("PLAINTEXT", "host", 9092, 0),
+                    listener("PLAINTEXT", "host", 9093, 0),
+                ],
+                accepted: false,
+            },
+            Row {
+                what: "an unknown security protocol",
+                listeners: vec![listener("PLAINTEXT", "host", 9092, 9)],
+                accepted: false,
+            },
         ];
-        for (what, listeners, accepted) in cases {
-            let got = decode_listeners(listeners.iter().map(|&(n, h, p, proto)| (n, h, p, proto)));
+        for Row {
+            what,
+            listeners,
+            accepted,
+        } in cases
+        {
+            let got = decode_listeners(listeners.iter().copied());
             check!(got.is_ok() == accepted, "{what}: {got:?}");
         }
     }

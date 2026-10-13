@@ -12,15 +12,14 @@ use {
         long_poll::{LongPollOutcome, arm_waits, long_poll},
         pending::PendingPartition,
         records::{
-            AcquireMode, AcquireRequest, acquire_read_records, merge_batches,
-            pending_activation_ranges, read_budget, unreadable_batch_ranges,
+            AcquireMode, AcquireRequest, DisklessSource, MergedBatches, acquire_read_records,
+            merge_batches, pending_activation_ranges, read_budget, unreadable_batch_ranges,
         },
         tiered::TieredSource,
     },
     crate::{
         broker::Broker,
         codes,
-        diskless::read::DisklessReadHandle,
         error::BrokerError,
         partition::Partition,
         share_partition::{
@@ -209,10 +208,10 @@ async fn grow_readable_window(
         let end_before = state.end_offset;
         materialize_within_deferral_bound(state, upper, max_record_locks);
         let scan_start = scan_from.max(state.start_offset).max(log_start);
-        for (first, last) in
+        for span in
             unreadable_batch_ranges(partition, scan_start, state.end_offset, read_committed).await?
         {
-            state.archive_internal(first, last);
+            state.archive_internal(span.first, span.last);
         }
         if state.end_offset == end_before || state.has_available() {
             return Ok(());
@@ -240,7 +239,7 @@ struct GrowAndAcquireArgs<'a> {
     mode: AcquireMode,
     now: Instant,
     tier: Option<TieredSource<'a>>,
-    diskless: Option<(&'a DisklessReadHandle, uuid::Uuid)>,
+    diskless: Option<DisklessSource<'a>>,
 }
 
 /// Grows the readable window, promotes due deferrals, and acquires records
@@ -285,8 +284,8 @@ async fn grow_and_acquire(
     let deferred =
         pending_activation_ranges(part, st.start_offset, st.end_offset, part.delivery.now_ms())
             .await?;
-    for (first, last) in deferred {
-        st.defer_internal(first, last);
+    for span in deferred {
+        st.defer_internal(span.first, span.last);
     }
     if remaining_records <= 0 {
         return Ok(0);
@@ -397,10 +396,13 @@ async fn acquire_pass(
                 renewal,
                 max_attempts: settings.delivery_count_limit,
             };
-            let batches = p
-                .ack_batches
-                .iter()
-                .map(|(first, last, types)| (*first, *last, types.as_slice()));
+            let batches = p.ack_batches.iter().map(|batch| {
+                (
+                    batch.first_offset,
+                    batch.last_offset,
+                    batch.acknowledge_types.as_slice(),
+                )
+            });
             let code = mgr
                 .apply_durably(group, p.topic_id, p.partition_index, &cell, &mut st, |st| {
                     apply_acknowledgements(st, &application, batches)
@@ -502,7 +504,10 @@ async fn acquire_pass(
             diskless: broker
                 .diskless_read
                 .as_deref()
-                .map(|reader| (reader, p.topic_id)),
+                .map(|reader| DisklessSource {
+                    reader,
+                    topic_id: p.topic_id,
+                }),
         };
         // This pass's records land in `fresh`, then join what earlier passes
         // put in the row.
@@ -612,11 +617,17 @@ fn append_records(out: &mut PartitionData, fresh: PartitionData) -> Result<i64, 
     let Some(RecordsPayload::Raw(added)) = fresh.records else {
         return Ok(0);
     };
-    let (joined, added_len) = match out.records.take() {
+    let MergedBatches {
+        records: joined,
+        added_bytes: added_len,
+    } = match out.records.take() {
         Some(RecordsPayload::Raw(before)) if !before.is_empty() => merge_batches(&before, &added)?,
         _ => {
             let added_len = i64::try_from(added.len()).unwrap_or(i64::MAX);
-            (added, added_len)
+            MergedBatches {
+                records: added,
+                added_bytes: added_len,
+            }
         }
     };
     out.records = Some(RecordsPayload::Raw(joined));
@@ -810,10 +821,10 @@ mod tests {
             ),
             (BrokerError::Io(io()), codes::UNKNOWN_SERVER_ERROR),
         ];
-        let (got, want): (Vec<_>, Vec<_>) = cases
+        let (got, want) = cases
             .iter()
             .map(|(err, code)| (read_failure_code(err), *code))
-            .unzip();
+            .unzip::<_, _, Vec<_>, Vec<_>>();
         assert!(got == want);
     }
 

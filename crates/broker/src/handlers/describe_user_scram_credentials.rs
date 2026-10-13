@@ -255,13 +255,26 @@ mod tests {
 
     use {super::*, crate::authorizer::AuthorizationResult};
 
-    fn img_with_scram(users: &[(&str, SaslMechanism, u32)]) -> MetadataImage {
+    /// A SCRAM credential to seed: its user, mechanism and iteration count.
+    #[derive(Clone, Copy)]
+    struct SeededUser<'a> {
+        user: &'a str,
+        mechanism: SaslMechanism,
+        iterations: u32,
+    }
+
+    fn img_with_scram(users: &[SeededUser<'_>]) -> MetadataImage {
         let mut img = MetadataImage::new(uuid::Uuid::nil());
-        for (user, mech, iters) in users {
+        for SeededUser {
+            user,
+            mechanism,
+            iterations,
+        } in users
+        {
             img.apply(&MetadataRecord::V1ScramCredential(ScramCredentialRecord {
                 user: (*user).into(),
-                mechanism: *mech,
-                iterations: *iters,
+                mechanism: *mechanism,
+                iterations: *iterations,
                 salt: vec![1, 2, 3],
                 server_key: vec![4, 5, 6],
                 stored_key: vec![7, 8, 9],
@@ -291,9 +304,23 @@ mod tests {
 
     krabka_macros::scram_users_fixture!(scram_users_request);
 
+    const ALICE: SeededUser<'static> = SeededUser {
+        user: "alice",
+        mechanism: SaslMechanism::ScramSha512,
+        iterations: 4096,
+    };
+
+    const ALICE_ONLY: [SeededUser<'static>; 1] = [ALICE];
+
+    const ALICE_AND_BOB: [SeededUser<'static>; 2] = [ALICE, SeededUser {
+        user: "bob",
+        mechanism: SaslMechanism::ScramSha512,
+        iterations: 8192,
+    }];
+
     fn run_handle_filter(
         users_filter: Option<Vec<String>>,
-        seeded: &[(&str, SaslMechanism, u32)],
+        seeded: &[SeededUser<'_>],
     ) -> DescribeUserScramCredentialsResponse {
         let req = scram_users_request(users_filter);
         let image = img_with_scram(seeded);
@@ -302,10 +329,7 @@ mod tests {
 
     #[test]
     fn describe_all_users_when_filter_none() {
-        let resp = run_handle_filter(None, &[
-            ("alice", SaslMechanism::ScramSha512, 4096),
-            ("bob", SaslMechanism::ScramSha512, 8192),
-        ]);
+        let resp = run_handle_filter(None, &ALICE_AND_BOB);
         assert!(resp.results.len() == 2);
         let users: Vec<&str> = resp.results.iter().map(|r| r.user.as_str()).collect();
         assert!(users.contains(&"alice") && users.contains(&"bob"));
@@ -313,10 +337,7 @@ mod tests {
 
     #[test]
     fn describe_filter_returns_only_listed_users() {
-        let resp = run_handle_filter(Some(vec!["alice".into()]), &[
-            ("alice", SaslMechanism::ScramSha512, 4096),
-            ("bob", SaslMechanism::ScramSha512, 8192),
-        ]);
+        let resp = run_handle_filter(Some(vec!["alice".into()]), &ALICE_AND_BOB);
         let expected = vec![tagged_wire!(DescribeUserScramCredentialsResult {
             user: "alice".to_string(),
             error_code: 0,
@@ -331,11 +352,7 @@ mod tests {
 
     #[test]
     fn unknown_user_returns_resource_not_found() {
-        let resp = run_handle_filter(Some(vec!["ghost".into()]), &[(
-            "alice",
-            SaslMechanism::ScramSha512,
-            4096,
-        )]);
+        let resp = run_handle_filter(Some(vec!["ghost".into()]), &ALICE_ONLY);
         let expected = vec![tagged_wire!(DescribeUserScramCredentialsResult {
             user: "ghost".to_string(),
             error_code: 91,
@@ -351,10 +368,10 @@ mod tests {
     fn duplicate_requested_user_returns_single_duplicate_resource_row() {
         const KAFKA_DUPLICATE_RESOURCE: i16 = 92;
 
-        let resp = run_handle_filter(Some(vec!["alice".into(), "bob".into(), "alice".into()]), &[
-            ("alice", SaslMechanism::ScramSha512, 4096),
-            ("bob", SaslMechanism::ScramSha512, 8192),
-        ]);
+        let resp = run_handle_filter(
+            Some(vec!["alice".into(), "bob".into(), "alice".into()]),
+            &ALICE_AND_BOB,
+        );
 
         assert!(
             resp.results.len() == 2,
@@ -387,8 +404,16 @@ mod tests {
     #[test]
     fn credential_infos_are_ordered_by_kafka_scram_mechanism_type() {
         let resp = run_handle_filter(Some(vec!["alice".into()]), &[
-            ("alice", SaslMechanism::ScramSha512, 8192),
-            ("alice", SaslMechanism::ScramSha256, 4096),
+            SeededUser {
+                user: "alice",
+                mechanism: SaslMechanism::ScramSha512,
+                iterations: 8192,
+            },
+            SeededUser {
+                user: "alice",
+                mechanism: SaslMechanism::ScramSha256,
+                iterations: 4096,
+            },
         ]);
 
         let alice = resp

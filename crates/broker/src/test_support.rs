@@ -121,15 +121,22 @@ use {
 
 /// The localhost ECDSA pair used by reload and socket-drain tests.
 pub(crate) fn localhost_ecdsa_pair() -> (rcgen::Certificate, rcgen::KeyPair) {
-    ecdsa_pair_for_host("localhost")
+    let EcdsaPair { cert, key } = ecdsa_pair_for_host("localhost");
+    (cert, key)
+}
+
+/// A self-signed certificate and the key that signed it.
+pub(crate) struct EcdsaPair {
+    pub(crate) cert: rcgen::Certificate,
+    pub(crate) key: rcgen::KeyPair,
 }
 
 /// A fresh self-signed ECDSA fixture with the caller's exact host SAN.
-pub(crate) fn ecdsa_pair_for_host(host: &str) -> (rcgen::Certificate, rcgen::KeyPair) {
+pub(crate) fn ecdsa_pair_for_host(host: &str) -> EcdsaPair {
     let params = rcgen::CertificateParams::new(vec![host.to_string()]).unwrap();
     let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
     let cert = params.self_signed(&key).unwrap();
-    (cert, key)
+    EcdsaPair { cert, key }
 }
 
 /// Advertise every finalized feature from zero through its finalized level.
@@ -182,12 +189,18 @@ pub(crate) fn ed25519_public_key_file(
     (pair, path)
 }
 
+/// A bound TLS listener, its acceptor and the path of its trust bundle.
+pub(crate) struct LoopbackTlsListener {
+    pub(crate) listener: tokio::net::TcpListener,
+    pub(crate) acceptor: TlsAcceptor,
+    pub(crate) cert_path: std::path::PathBuf,
+}
+
 /// Binds an HTTPS fixture with a fresh loopback certificate and returns the
 /// trust bundle path. The directory stays alive for background client requests.
-pub(crate) async fn loopback_tls_listener()
--> (tokio::net::TcpListener, TlsAcceptor, std::path::PathBuf) {
+pub(crate) async fn loopback_tls_listener() -> LoopbackTlsListener {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let (cert, key) = ecdsa_pair_for_host("127.0.0.1");
+    let EcdsaPair { cert, key } = ecdsa_pair_for_host("127.0.0.1");
     let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
     let cert_path = dir.path().join("cert.pem");
     std::fs::write(&cert_path, cert.pem()).unwrap();
@@ -203,22 +216,32 @@ pub(crate) async fn loopback_tls_listener()
         .with_single_cert(certs, priv_key)
         .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    (listener, TlsAcceptor::from(Arc::new(server_cfg)), cert_path)
+    LoopbackTlsListener {
+        listener,
+        acceptor: TlsAcceptor::from(Arc::new(server_cfg)),
+        cert_path,
+    }
+}
+
+/// A running TLS server: where it listens, how to stop it and the path of its
+/// trust bundle.
+pub(crate) struct LoopbackTlsServer {
+    pub(crate) addr: std::net::SocketAddr,
+    pub(crate) shutdown: tokio_util::sync::CancellationToken,
+    pub(crate) cert_path: std::path::PathBuf,
 }
 
 /// Serve concurrent TLS connections with the caller's protocol handler until shutdown.
-pub(crate) async fn serve_loopback_tls<F, Fut>(
-    handler: F,
-) -> (
-    std::net::SocketAddr,
-    tokio_util::sync::CancellationToken,
-    std::path::PathBuf,
-)
+pub(crate) async fn serve_loopback_tls<F, Fut>(handler: F) -> LoopbackTlsServer
 where
     F: Fn(tokio_rustls::server::TlsStream<tokio::net::TcpStream>) -> Fut + Clone + Send + 'static,
     Fut: std::future::Future<Output = ()> + Send + 'static,
 {
-    let (listener, acceptor, cert_path) = loopback_tls_listener().await;
+    let LoopbackTlsListener {
+        listener,
+        acceptor,
+        cert_path,
+    } = loopback_tls_listener().await;
     let addr = listener.local_addr().unwrap();
     let shutdown = tokio_util::sync::CancellationToken::new();
     let srv_shutdown = shutdown.clone();
@@ -237,7 +260,11 @@ where
             }
         }
     });
-    (addr, shutdown, cert_path)
+    LoopbackTlsServer {
+        addr,
+        shutdown,
+        cert_path,
+    }
 }
 
 fn temporary_partition_impl(

@@ -36,51 +36,85 @@ mod tests {
     /// metadata partition directory, marks a restart.
     #[test]
     fn rejoin_needs_durable_raft_state_in_the_metadata_partition_directory() {
-        /// Files relative to the metadata log directory, with their bytes.
-        type Files = &'static [(&'static str, &'static [u8])];
-        // (what, files, expected mode)
-        let cases: [(&str, Files, BootstrapMode); 7] = [
-            ("an empty directory", &[], BootstrapMode::Bootstrap),
-            (
-                "only what krabka format wrote",
-                &[
-                    ("bootstrap.json", b"{}"),
-                    (
-                        "__cluster_metadata-0/00000000000000000000-0000000000.checkpoint",
-                        b"snapshot",
-                    ),
+        /// A file relative to the metadata log directory, with its bytes.
+        struct File {
+            path: &'static str,
+            contents: &'static [u8],
+        }
+        struct Case {
+            what: &'static str,
+            files: &'static [File],
+            expected: BootstrapMode,
+        }
+        let cases: [Case; 7] = [
+            Case {
+                what: "an empty directory",
+                files: &[],
+                expected: BootstrapMode::Bootstrap,
+            },
+            Case {
+                what: "only what krabka format wrote",
+                files: &[
+                    File {
+                        path: "bootstrap.json",
+                        contents: b"{}",
+                    },
+                    File {
+                        path: "__cluster_metadata-0/00000000000000000000-0000000000.checkpoint",
+                        contents: b"snapshot",
+                    },
                 ],
-                BootstrapMode::Bootstrap,
-            ),
-            (
-                "an empty segment from a node killed mid-election",
-                &[("__cluster_metadata-0/00000000000000000000.log", b"")],
-                BootstrapMode::Bootstrap,
-            ),
-            (
-                "a persisted quorum state",
-                &[("__cluster_metadata-0/quorum-state", b"{}")],
-                BootstrapMode::Rejoin,
-            ),
-            (
-                "a segment that holds records",
-                &[("__cluster_metadata-0/00000000000000000000.log", b"segment")],
-                BootstrapMode::Rejoin,
-            ),
-            (
-                "the old krabka layout",
-                &[("__cluster_metadata/quorum-state", b"{}")],
-                BootstrapMode::Bootstrap,
-            ),
-            (
-                "a partition directory",
-                &[("orders-0/00000000000000000000.log", b"segment")],
-                BootstrapMode::Bootstrap,
-            ),
+                expected: BootstrapMode::Bootstrap,
+            },
+            Case {
+                what: "an empty segment from a node killed mid-election",
+                files: &[File {
+                    path: "__cluster_metadata-0/00000000000000000000.log",
+                    contents: b"",
+                }],
+                expected: BootstrapMode::Bootstrap,
+            },
+            Case {
+                what: "a persisted quorum state",
+                files: &[File {
+                    path: "__cluster_metadata-0/quorum-state",
+                    contents: b"{}",
+                }],
+                expected: BootstrapMode::Rejoin,
+            },
+            Case {
+                what: "a segment that holds records",
+                files: &[File {
+                    path: "__cluster_metadata-0/00000000000000000000.log",
+                    contents: b"segment",
+                }],
+                expected: BootstrapMode::Rejoin,
+            },
+            Case {
+                what: "the old krabka layout",
+                files: &[File {
+                    path: "__cluster_metadata/quorum-state",
+                    contents: b"{}",
+                }],
+                expected: BootstrapMode::Bootstrap,
+            },
+            Case {
+                what: "a partition directory",
+                files: &[File {
+                    path: "orders-0/00000000000000000000.log",
+                    contents: b"segment",
+                }],
+                expected: BootstrapMode::Bootstrap,
+            },
         ];
-        for (what, files, expected) in cases {
+        for Case {
+            what,
+            files,
+            expected,
+        } in cases
+        {
             let dir = tempdir().unwrap();
-            for (path, contents) in files {
+            for File { path, contents } in files {
                 let path = dir.path().join(path);
                 std::fs::create_dir_all(path.parent().unwrap()).unwrap();
                 std::fs::write(path, contents).unwrap();

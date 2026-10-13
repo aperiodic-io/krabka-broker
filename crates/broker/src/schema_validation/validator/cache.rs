@@ -43,10 +43,24 @@ pub(super) struct SchemaBody {
     pub(super) reference_order: Vec<String>,
 }
 
+/// A subject at one version, as a schema reference names it.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct SubjectVersion {
+    subject: String,
+    version: i32,
+}
+
+/// The schema sources a root schema's references resolve to, and the order
+/// they must be loaded in.
+struct ReferenceSources {
+    sources: HashMap<String, String>,
+    order: Vec<String>,
+}
+
 struct ReferenceClosure {
     sources: HashMap<String, String>,
     order: Vec<String>,
-    resolving: HashSet<(String, i32)>,
+    resolving: HashSet<SubjectVersion>,
     fetched_count: usize,
     fetched_bytes: usize,
     remaining_bytes: usize,
@@ -168,7 +182,10 @@ impl SchemaValidator {
                     detail: format!("schema closure exceeds {MAX_REFERENCE_BYTES} bytes"),
                 });
             }
-            let (references, reference_order) = self
+            let ReferenceSources {
+                sources: references,
+                order: reference_order,
+            } = self
                 .reference_sources_ordered(
                     &fetched.references,
                     MAX_REFERENCE_BYTES - fetched.schema.len(),
@@ -192,7 +209,7 @@ impl SchemaValidator {
         &self,
         references: &[SchemaReference],
         remaining_bytes: usize,
-    ) -> Result<(HashMap<String, String>, Vec<String>), SchemaSerdeError> {
+    ) -> Result<ReferenceSources, SchemaSerdeError> {
         let mut closure = ReferenceClosure {
             sources: HashMap::new(),
             order: Vec::new(),
@@ -203,7 +220,10 @@ impl SchemaValidator {
         };
         self.resolve_reference_sources(references, &mut closure, 0)
             .await?;
-        Ok((closure.sources, closure.order))
+        Ok(ReferenceSources {
+            sources: closure.sources,
+            order: closure.order,
+        })
     }
 
     async fn resolve_reference_sources(
@@ -222,7 +242,10 @@ impl SchemaValidator {
             if closure.sources.contains_key(&reference.name) {
                 continue;
             }
-            let key = (reference.subject.clone(), reference.version);
+            let key = SubjectVersion {
+                subject: reference.subject.clone(),
+                version: reference.version,
+            };
             if !closure.resolving.insert(key.clone()) {
                 return Err(SchemaSerdeError::Schema(format!(
                     "cyclic schema reference at {} version {}",
@@ -305,13 +328,22 @@ mod tests {
         },
     };
 
-    fn clocked_validator(uri: String) -> (Arc<ManualMonotonicClock>, SchemaValidator) {
+    /// A validator and the manual timeline that drives its clock.
+    struct ClockedValidator {
+        timeline: Arc<ManualMonotonicClock>,
+        validator: SchemaValidator,
+    }
+
+    fn clocked_validator(uri: String) -> ClockedValidator {
         let timeline = ManualMonotonicClock::new_shared();
         let clock = timeline.new_wall_clock(SystemTime::now());
         let validator =
             SchemaValidator::with_clock(uri, false, 100, minutes(5), secs(5), None, clock)
                 .expect("validator");
-        (timeline, validator)
+        ClockedValidator {
+            timeline,
+            validator,
+        }
     }
 
     #[tokio::test]
@@ -465,7 +497,10 @@ mod tests {
         )
         .await;
 
-        let (timeline, v) = clocked_validator(server.uri());
+        let ClockedValidator {
+            timeline,
+            validator: v,
+        } = clocked_validator(server.uri());
         let field = framed(KNOWN_ID, b"anything");
 
         let got = value_check(&v, ValidationMode::Id, &field).await;
@@ -493,7 +528,10 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let (timeline, v) = clocked_validator(server.uri());
+        let ClockedValidator {
+            timeline,
+            validator: v,
+        } = clocked_validator(server.uri());
         let field = framed(KNOWN_ID, b"anything");
 
         for _ in 0..2 {
@@ -532,7 +570,7 @@ mod tests {
         let result = v
             .reference_sources_ordered(&root, MAX_REFERENCE_BYTES)
             .await;
-        assert!(let Ok((sources, order)) = result);
+        assert!(let Ok(ReferenceSources { sources, order }) = result);
         check!(sources.len() == DEPTH);
         check!(order.len() == DEPTH);
     }

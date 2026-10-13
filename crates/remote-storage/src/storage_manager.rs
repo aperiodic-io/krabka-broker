@@ -255,6 +255,12 @@ pub struct LogSegmentData {
     pub leader_epoch_index: Bytes,
 }
 
+/// One artifact of a segment copy: the key suffix it lands under and its source.
+pub(crate) struct SegmentArtifact<'a> {
+    pub suffix: &'static str,
+    pub body: ArtifactBody<'a>,
+}
+
 /// The source of one remote segment artifact.
 pub enum ArtifactBody<'a> {
     File(&'a Path),
@@ -263,33 +269,36 @@ pub enum ArtifactBody<'a> {
 
 impl LogSegmentData {
     /// Walk the copy order shared by filesystem and object-store backends.
-    pub(crate) fn artifacts(&self) -> impl Iterator<Item = (&'static str, ArtifactBody<'_>)> {
+    pub(crate) fn artifacts(&self) -> impl Iterator<Item = SegmentArtifact<'_>> {
         [
-            Some((
-                LOG_FILE_SUFFIX,
-                ArtifactBody::File(self.log_segment.as_path()),
-            )),
-            Some((
-                IndexType::Offset.suffix(),
-                ArtifactBody::File(self.offset_index.as_path()),
-            )),
-            Some((
-                IndexType::Timestamp.suffix(),
-                ArtifactBody::File(self.time_index.as_path()),
-            )),
-            self.producer_snapshot_index.as_deref().map(|path| {
-                (
-                    IndexType::ProducerSnapshot.suffix(),
-                    ArtifactBody::File(path),
-                )
+            Some(SegmentArtifact {
+                suffix: LOG_FILE_SUFFIX,
+                body: ArtifactBody::File(self.log_segment.as_path()),
             }),
-            Some((
-                IndexType::LeaderEpoch.suffix(),
-                ArtifactBody::Memory(&self.leader_epoch_index),
-            )),
+            Some(SegmentArtifact {
+                suffix: IndexType::Offset.suffix(),
+                body: ArtifactBody::File(self.offset_index.as_path()),
+            }),
+            Some(SegmentArtifact {
+                suffix: IndexType::Timestamp.suffix(),
+                body: ArtifactBody::File(self.time_index.as_path()),
+            }),
+            self.producer_snapshot_index
+                .as_deref()
+                .map(|path| SegmentArtifact {
+                    suffix: IndexType::ProducerSnapshot.suffix(),
+                    body: ArtifactBody::File(path),
+                }),
+            Some(SegmentArtifact {
+                suffix: IndexType::LeaderEpoch.suffix(),
+                body: ArtifactBody::Memory(&self.leader_epoch_index),
+            }),
             self.transaction_index
                 .as_deref()
-                .map(|path| (IndexType::Transaction.suffix(), ArtifactBody::File(path))),
+                .map(|path| SegmentArtifact {
+                    suffix: IndexType::Transaction.suffix(),
+                    body: ArtifactBody::File(path),
+                }),
         ]
         .into_iter()
         .flatten()

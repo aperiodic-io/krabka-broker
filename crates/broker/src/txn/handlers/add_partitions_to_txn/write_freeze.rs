@@ -74,7 +74,7 @@ mod tests {
         super::*,
         crate::{
             authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
-            broker::{Broker, BrokerHandle},
+            broker::Broker,
             test_support::{
                 configure_single_partition_transactions, start_broker_no_audit_with, test_ctx,
                 topic_freeze_record,
@@ -83,7 +83,9 @@ mod tests {
                 bootstrap::TOPIC,
                 handlers::add_partitions_to_txn::{
                     handle,
-                    test_support::{seed_topic, topic, topic_result},
+                    test_support::{
+                        CoordinatorBroker, PartitionCode, seed_topic, topic, topic_result,
+                    },
                 },
                 state::TxnEntry,
                 version::resolve_txn_version,
@@ -113,6 +115,13 @@ mod tests {
     const FROZEN_TOPIC: &str = "tenant-a.orders";
     const UNFROZEN_TOPIC: &str = "events";
 
+    /// The scope and pattern type of the one freeze a broker starts with.
+    #[derive(Clone, Copy)]
+    struct FreezeSpec<'a> {
+        scope: &'a str,
+        pattern_type: PatternType,
+    }
+
     fn freeze_record(scope: &str, pattern_type: PatternType) -> TopicFreezeRecord {
         topic_freeze_record()
             .scope(scope)
@@ -124,6 +133,12 @@ mod tests {
 
     #[test]
     fn frozen_topics_keeps_the_covered_names_and_nothing_else() {
+        /// One case: the topics the request names, and the names the gate keeps.
+        struct Case {
+            label: &'static str,
+            names: &'static [&'static str],
+            want: &'static [&'static str],
+        }
         let image = image_with_freezes()
             .scopes(&[
                 ("orders", PatternType::Literal),
@@ -131,32 +146,35 @@ mod tests {
             ])
             .call();
 
-        // (label, the topics the request names, the names the gate keeps)
-        let cases: [(&str, &[&str], &[&str]); 5] = [
-            (
-                "a literal freeze covers the one topic it names",
-                &["orders"],
-                &["orders"],
-            ),
-            (
-                "a prefix freeze covers every topic under it",
-                &["tenant-a.billing"],
-                &["tenant-a.billing"],
-            ),
-            ("an unfrozen topic is left out", &["events"], &[]),
-            (
-                "an internal topic is never frozen",
-                &["__consumer_offsets"],
-                &[],
-            ),
-            (
-                "one request mixing all of them keeps only the covered names",
-                &["orders", "tenant-a.billing", "events"],
-                &["orders", "tenant-a.billing"],
-            ),
+        let cases = [
+            Case {
+                label: "a literal freeze covers the one topic it names",
+                names: &["orders"],
+                want: &["orders"],
+            },
+            Case {
+                label: "a prefix freeze covers every topic under it",
+                names: &["tenant-a.billing"],
+                want: &["tenant-a.billing"],
+            },
+            Case {
+                label: "an unfrozen topic is left out",
+                names: &["events"],
+                want: &[],
+            },
+            Case {
+                label: "an internal topic is never frozen",
+                names: &["__consumer_offsets"],
+                want: &[],
+            },
+            Case {
+                label: "one request mixing all of them keeps only the covered names",
+                names: &["orders", "tenant-a.billing", "events"],
+                want: &["orders", "tenant-a.billing"],
+            },
         ];
 
-        for (label, names, want) in cases {
+        for Case { label, names, want } in cases {
             let topics: Vec<_> = names.iter().map(|name| topic(name, &[0])).collect();
             let expected: HashSet<String> = want.iter().map(|name| (*name).to_owned()).collect();
             check!(
@@ -230,8 +248,8 @@ mod tests {
     /// so the coordinator check passes and the freeze gate behind it runs.
     async fn start_frozen_coordinator(
         authorizer: Arc<dyn Authorizer>,
-        freeze: (&str, PatternType),
-    ) -> (BrokerHandle, tempfile::TempDir) {
+        freeze: FreezeSpec<'_>,
+    ) -> CoordinatorBroker {
         let (handle, dir) = start_broker_no_audit_with(move |cfg| {
             configure_single_partition_transactions(cfg, authorizer);
         })
@@ -257,7 +275,8 @@ mod tests {
         broker
             .controller
             .submit_change(vec![MetadataRecord::V1TopicFreeze(freeze_record(
-                freeze.0, freeze.1,
+                freeze.scope,
+                freeze.pattern_type,
             ))])
             .await
             .expect("submit the freeze");
@@ -289,7 +308,7 @@ mod tests {
             )
             .await
             .expect("seed the open transaction");
-        (handle, dir)
+        CoordinatorBroker { handle, dir }
     }
 
     /// The two-topic request every freeze case sends, in the shape the given
@@ -335,6 +354,27 @@ mod tests {
         }
     }
 
+    /// The rows of the two-topic freeze case: both partitions of the frozen
+    /// topic answer `frozen`, and the unfrozen topic's partition `unfrozen`.
+    fn expected_rows(frozen: i16, unfrozen: i16) -> Vec<AddPartitionsToTxnTopicResult> {
+        vec![
+            topic_result(FROZEN_TOPIC, &[
+                PartitionCode {
+                    partition: 0,
+                    code: frozen,
+                },
+                PartitionCode {
+                    partition: 1,
+                    code: frozen,
+                },
+            ]),
+            topic_result(UNFROZEN_TOPIC, &[PartitionCode {
+                partition: 0,
+                code: unfrozen,
+            }]),
+        ]
+    }
+
     async fn anonymous_freeze_request(broker: &Broker, version: i16) -> AddPartitionsToTxnResponse {
         test_ctx!(ctx, "ANONYMOUS");
         handle(broker, freeze_case_request(version), version, &ctx)
@@ -363,18 +403,18 @@ mod tests {
             ),
             ("v4, a prefix freeze", 4, "tenant-a.", PatternType::Prefixed),
         ] {
-            let (broker_handle, _dir) =
-                start_frozen_coordinator(Arc::new(AllowAllAuthorizer), (scope, pattern_type)).await;
+            let CoordinatorBroker {
+                handle: broker_handle,
+                dir: _dir,
+            } = start_frozen_coordinator(Arc::new(AllowAllAuthorizer), FreezeSpec {
+                scope,
+                pattern_type,
+            })
+            .await;
             let broker = broker_handle.broker_arc_for_test();
             let resp = anonymous_freeze_request(&broker, version).await;
 
-            let expected = vec![
-                topic_result(FROZEN_TOPIC, &[
-                    (0, codes::POLICY_VIOLATION),
-                    (1, codes::POLICY_VIOLATION),
-                ]),
-                topic_result(UNFROZEN_TOPIC, &[(0, codes::NONE)]),
-            ];
+            let expected = expected_rows(codes::POLICY_VIOLATION, codes::NONE);
             check!(topic_rows(&resp, version) == expected, "{label}");
 
             // The refusal is the enlistment itself and not only the code: no
@@ -402,10 +442,13 @@ mod tests {
         // Only a client version checks topic `Write`. A v4+ request comes from
         // a broker that holds `ClusterAction`, and it checks no topic ACL.
         for (label, version) in [("v3", 3)] {
-            let (broker_handle, _dir) = start_frozen_coordinator(
-                Arc::new(DenyTopicWrites),
-                (FROZEN_TOPIC, PatternType::Literal),
-            )
+            let CoordinatorBroker {
+                handle: broker_handle,
+                dir: _dir,
+            } = start_frozen_coordinator(Arc::new(DenyTopicWrites), FreezeSpec {
+                scope: FROZEN_TOPIC,
+                pattern_type: PatternType::Literal,
+            })
             .await;
             let broker = broker_handle.broker_arc_for_test();
             let resp = anonymous_freeze_request(&broker, version).await;
@@ -413,13 +456,10 @@ mod tests {
             // Both topics report the ACL deny. The frozen one reports 29 and
             // not 44: its freeze state never reaches a caller with no right
             // to read it.
-            let expected = vec![
-                topic_result(FROZEN_TOPIC, &[
-                    (0, codes::TOPIC_AUTHORIZATION_FAILED),
-                    (1, codes::TOPIC_AUTHORIZATION_FAILED),
-                ]),
-                topic_result(UNFROZEN_TOPIC, &[(0, codes::TOPIC_AUTHORIZATION_FAILED)]),
-            ];
+            let expected = expected_rows(
+                codes::TOPIC_AUTHORIZATION_FAILED,
+                codes::TOPIC_AUTHORIZATION_FAILED,
+            );
             check!(topic_rows(&resp, version) == expected, "{label}");
 
             broker_handle.shutdown().await;

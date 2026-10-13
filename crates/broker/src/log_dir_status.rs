@@ -294,6 +294,13 @@ mod tests {
         tempfile::tempdir,
     };
 
+    /// An offline entry with its reason reduced to the OS-independent part.
+    #[derive(Debug, PartialEq, Eq)]
+    struct OfflineShape {
+        path: PathBuf,
+        reason_is_empty: bool,
+    }
+
     #[test]
     fn probe_writable_tempdir_is_online() {
         let tmp = tempdir().unwrap();
@@ -335,15 +342,22 @@ mod tests {
         std::fs::write(&blocker, b"i am not a directory").unwrap();
         let reg = LogDirRegistry::probe(std::slice::from_ref(&blocker));
         assert!(reg.is_offline(&blocker));
-        // The reason string is OS-dependent, so pin (path, reason-is-empty)
-        // pairs instead of the raw message.
-        let offline: Vec<(PathBuf, bool)> = reg
+        // The reason string is OS-dependent, so pin the path and whether the
+        // reason is empty instead of the raw message.
+        let offline: Vec<OfflineShape> = reg
             .offline()
             .iter()
-            .map(|(path, reason)| (path.clone(), reason.is_empty()))
+            .map(|(path, reason)| OfflineShape {
+                path: path.clone(),
+                reason_is_empty: reason.is_empty(),
+            })
             .collect();
         assert!(
-            offline == vec![(blocker, false)],
+            offline
+                == vec![OfflineShape {
+                    path: blocker,
+                    reason_is_empty: false,
+                }],
             "offline entry must carry a non-empty reason",
         );
     }

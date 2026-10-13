@@ -433,15 +433,23 @@ async fn create_topic_with_partitions(
     }
 }
 
-/// One Produce carrying every partition of `topic`, returning each row's
-/// `(index, error_code)`.
+/// One partition row of a Produce response: its index and error code.
+#[derive(Debug)]
+struct PartitionAnswer {
+    /// Only the failure messages name it.
+    _index: i32,
+    error_code: i16,
+}
+
+/// One Produce carrying every partition of `topic`, returning each row's index
+/// and error code.
 async fn produce_every_partition(
     bootstrap: &str,
     topic: &str,
     partitions: i32,
     acks: i16,
     timeout_ms: i32,
-) -> Vec<(i32, i16)> {
+) -> Vec<PartitionAnswer> {
     let client = connect_client(bootstrap.to_string(), None).await;
     let topic_id = topic_id_for(&client, topic).await;
     let resp = client
@@ -467,7 +475,10 @@ async fn produce_every_partition(
     resp.responses[0]
         .partition_responses
         .iter()
-        .map(|row| (row.index, row.error_code))
+        .map(|row| PartitionAnswer {
+            _index: row.index,
+            error_code: row.error_code,
+        })
         .collect()
 }
 
@@ -529,7 +540,7 @@ async fn acks_all_waits_for_every_partition_at_once_not_one_after_another() {
         .iter()
         // `REQUEST_TIMED_OUT` (7): the append is on the leader's log and the
         // high watermark never reached it.
-        .filter(|(_, code)| *code == 7)
+        .filter(|row| row.error_code == 7)
         .count();
     check!(i32::try_from(rows.len()) == Ok(OVERLAP_PARTITIONS));
     check!(

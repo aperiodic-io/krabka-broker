@@ -7,8 +7,8 @@ use {
     super::*,
     crate::{
         cleaner::test_support::{
-            CompactionSetup, block_compaction_swap, compactable_partition, record_count,
-            register_compactable,
+            CompactablePartition, CompactionSetup, block_compaction_swap, compactable_partition,
+            record_count, register_compactable,
         },
         log_dir_status::LogDirRegistry,
         metrics::{CleanerFailureLabel, CleanerFailureReason},
@@ -47,19 +47,24 @@ async fn hosted_compact_partition() -> HostedCompactPartition {
     }
 }
 
-async fn blocked_sweep(
-    dir: &TempDir,
-    registry: &PartitionRegistry,
-) -> (
-    Vec<std::path::PathBuf>,
-    BrokerMetrics,
-    UncleanablePartitions,
-) {
+/// A sweep that compaction could not finish: the paths that block it, and the
+/// metrics and uncleanable set it left behind.
+struct BlockedSweep {
+    blocked: Vec<std::path::PathBuf>,
+    metrics: BrokerMetrics,
+    uncleanable: UncleanablePartitions,
+}
+
+async fn blocked_sweep(dir: &TempDir, registry: &PartitionRegistry) -> BlockedSweep {
     let blocked = block_compaction_swap(dir, "orders");
     let metrics = BrokerMetrics::new();
     let mut uncleanable = UncleanablePartitions::default();
     tick_all(registry, None, &metrics, &mut uncleanable).await;
-    (blocked, metrics, uncleanable)
+    BlockedSweep {
+        blocked,
+        metrics,
+        uncleanable,
+    }
 }
 
 /// The cleanup policy is the only thing that makes a partition the cleaner's
@@ -227,13 +232,28 @@ async fn compactable_topics(
     dir: &TempDir,
     registry: &PartitionRegistry,
     topics: &[&'static str],
-) -> Vec<(&'static str, Arc<Partition>, usize)> {
+) -> Vec<CompactableTopic> {
     let mut built = Vec::new();
     for &topic in topics {
-        let (partition, before) = register_compactable(dir, registry, topic).await;
-        built.push((topic, partition, before));
+        let CompactablePartition {
+            partition,
+            record_count: before,
+        } = register_compactable(dir, registry, topic).await;
+        built.push(CompactableTopic {
+            topic,
+            partition,
+            before,
+        });
     }
     built
+}
+
+/// A registered compactable partition of `topic`, and its record count
+/// before the sweep.
+struct CompactableTopic {
+    topic: &'static str,
+    partition: Arc<Partition>,
+    before: usize,
 }
 
 #[tokio::test]
@@ -270,7 +290,15 @@ async fn tick_all_skips_a_frozen_partition_and_compacts_an_unfrozen_control() {
         ("tenant-a.orders", false),
         ("unfrozen", true),
     ];
-    for ((topic, partition, before), (label, expect_compacted)) in cases.iter().zip(expected) {
+    for (
+        CompactableTopic {
+            topic,
+            partition,
+            before,
+        },
+        (label, expect_compacted),
+    ) in cases.iter().zip(expected)
+    {
         check!(*topic == label);
         check!(
             (record_count(partition) < *before) == expect_compacted,
@@ -284,7 +312,9 @@ async fn tick_all_compacts_again_once_the_thaw_leaves_the_image() {
     let dir = tempfile::tempdir().expect("log root");
     let registry = PartitionRegistry::new();
     let cases = compactable_topics(&dir, &registry, &["orders"]).await;
-    let (_, partition, before) = &cases[0];
+    let CompactableTopic {
+        partition, before, ..
+    } = &cases[0];
     let mut image = image_with_freezes()
         .scopes(&[("orders", PatternType::Literal)])
         .call();
@@ -389,7 +419,11 @@ async fn tick_all_accounts_a_failed_compaction_and_takes_the_log_dir_offline() {
     let before = record_count(&partition);
     // A directory where the rewrite must create its `.cleaned` file: the open
     // fails with EISDIR, which is a storage error the filesystem raises.
-    let (blocked, metrics, mut uncleanable) = blocked_sweep(&dir, &registry).await;
+    let BlockedSweep {
+        blocked,
+        metrics,
+        mut uncleanable,
+    } = blocked_sweep(&dir, &registry).await;
 
     check!(record_count(&partition) == before, "nothing was compacted");
     check!(failures(&metrics, "orders", CleanerFailureReason::Io) == 1);
@@ -541,7 +575,11 @@ async fn a_partition_this_broker_stops_hosting_leaves_the_uncleanable_set() {
         registry,
         partition,
     } = hosted_compact_partition().await;
-    let (blocked, metrics, mut uncleanable) = blocked_sweep(&dir, &registry).await;
+    let BlockedSweep {
+        blocked,
+        metrics,
+        mut uncleanable,
+    } = blocked_sweep(&dir, &registry).await;
     check!(metrics.log_cleaner_uncleanable_partitions.get() == 1);
 
     // Another broker takes the leadership. The replica stays here, so the

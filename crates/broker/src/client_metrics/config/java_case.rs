@@ -29,8 +29,15 @@
 
 use std::{fmt::Write as _, sync::OnceLock};
 
+/// An inclusive range of code points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct CodeRange {
+    pub(super) start: u32,
+    pub(super) end: u32,
+}
+
 /// Inclusive code point ranges, in order, that neither overlap nor touch.
-pub(super) type Ranges = Vec<(u32, u32)>;
+pub(super) type Ranges = Vec<CodeRange>;
 
 /// A code point that Java's case mapping does not leave as it is.
 #[derive(Debug, Clone, Copy)]
@@ -44,7 +51,10 @@ struct Mapping {
 }
 
 /// The first and last surrogate code points, which no `char` can be.
-const SURROGATES: (u32, u32) = (0xD800, 0xDFFF);
+const SURROGATES: CodeRange = CodeRange {
+    start: 0xD800,
+    end: 0xDFFF,
+};
 
 /// A class that matches nothing, where a set has no member that a `char` can
 /// be.
@@ -138,12 +148,12 @@ fn single_u(lower: u32) -> impl Iterator<Item = u32> {
 fn normalize(mut ranges: Ranges) -> Ranges {
     ranges.sort_unstable();
     let mut merged: Ranges = Vec::with_capacity(ranges.len());
-    for (start, end) in ranges {
+    for CodeRange { start, end } in ranges {
         match merged.last_mut() {
-            Some((_, last_end)) if start <= last_end.saturating_add(1) => {
+            Some(CodeRange { end: last_end, .. }) if start <= last_end.saturating_add(1) => {
                 *last_end = (*last_end).max(end);
             }
-            _ => merged.push((start, end)),
+            _ => merged.push(CodeRange { start, end }),
         }
     }
     merged
@@ -151,7 +161,15 @@ fn normalize(mut ranges: Ranges) -> Ranges {
 
 /// The code points as single-point ranges, normalized.
 fn points(codes: impl IntoIterator<Item = u32>) -> Ranges {
-    normalize(codes.into_iter().map(|code| (code, code)).collect())
+    normalize(
+        codes
+            .into_iter()
+            .map(|code| CodeRange {
+                start: code,
+                end: code,
+            })
+            .collect(),
+    )
 }
 
 /// Whether Java's mapping gives `code` a case.
@@ -213,12 +231,15 @@ pub(super) fn literal(code: u32, in_run: impl FnOnce() -> bool) -> Option<Ranges
 /// or lower case of its upper case, is.
 pub(super) fn range(lo: u32, hi: u32) -> Ranges {
     let inside = |code: u32| (lo..=hi).contains(&code);
-    let mut ranges = vec![(lo, hi)];
+    let mut ranges = vec![CodeRange { start: lo, end: hi }];
     ranges.extend(
         table()
             .iter()
             .filter(|mapping| inside(mapping.upper) || inside(mapping.key))
-            .map(|mapping| (mapping.code, mapping.code)),
+            .map(|mapping| CodeRange {
+                start: mapping.code,
+                end: mapping.code,
+            }),
     );
     normalize(ranges)
 }
@@ -237,12 +258,16 @@ fn push_code(out: &mut String, code: u32) {
 /// The range `start` to `end`, less a surrogate at either end, which no `char`
 /// can be and `fancy_regex` refuses to read. A range that has the surrogates
 /// in the middle is as it is.
-fn without_surrogate_ends(start: u32, end: u32) -> Option<(u32, u32)> {
-    let (first, last) = SURROGATES;
+fn without_surrogate_ends(range: CodeRange) -> Option<CodeRange> {
+    let CodeRange { start, end } = range;
+    let CodeRange {
+        start: first,
+        end: last,
+    } = SURROGATES;
     let is_surrogate = |code: u32| (first..=last).contains(&code);
     let start = if is_surrogate(start) { last + 1 } else { start };
     let end = if is_surrogate(end) { first - 1 } else { end };
-    (start <= end).then_some((start, end))
+    (start <= end).then_some(CodeRange { start, end })
 }
 
 /// Writes `ranges` as the members of a class. Where they hold nothing but
@@ -255,22 +280,29 @@ fn without_surrogate_ends(start: u32, end: u32) -> Option<(u32, u32)> {
 /// there are joined into one. Two members of a class that do so, such as two
 /// ranges of a pattern, are still negated wrongly, as they are when a pattern
 /// names the two chars itself.
-pub(super) fn push_members(out: &mut String, ranges: &[(u32, u32)]) {
-    let (first, last) = SURROGATES;
+pub(super) fn push_members(out: &mut String, ranges: &[CodeRange]) {
+    let CodeRange {
+        start: first,
+        end: last,
+    } = SURROGATES;
     let mut kept: Ranges = Vec::with_capacity(ranges.len());
-    for (start, end) in ranges
+    for CodeRange { start, end } in ranges
         .iter()
-        .filter_map(|&(start, end)| without_surrogate_ends(start, end))
+        .filter_map(|&range| without_surrogate_ends(range))
     {
         match kept.last_mut() {
-            Some((_, kept_end)) if *kept_end == first - 1 && start == last + 1 => *kept_end = end,
-            _ => kept.push((start, end)),
+            Some(CodeRange { end: kept_end, .. })
+                if *kept_end == first - 1 && start == last + 1 =>
+            {
+                *kept_end = end;
+            }
+            _ => kept.push(CodeRange { start, end }),
         }
     }
     if kept.is_empty() {
         out.push_str(NO_CODE_POINT);
     }
-    for (start, end) in kept {
+    for CodeRange { start, end } in kept {
         push_code(out, start);
         if end > start {
             out.push('-');
@@ -281,11 +313,11 @@ pub(super) fn push_members(out: &mut String, ranges: &[(u32, u32)]) {
 
 /// Writes `ranges` as an expression that matches one char from them, outside
 /// a class.
-pub(super) fn push_class(out: &mut String, ranges: &[(u32, u32)]) {
-    if let [(only, last)] = ranges
-        && only == last
+pub(super) fn push_class(out: &mut String, ranges: &[CodeRange]) {
+    if let [CodeRange { start, end }] = ranges
+        && start == end
     {
-        push_code(out, *only);
+        push_code(out, *start);
     } else {
         out.push('[');
         push_members(out, ranges);
@@ -299,10 +331,10 @@ mod tests {
 
     /// The ranges as `lo-hi,lo-hi` in hex, a point as `lo` alone, which is how
     /// the tests below give what JDK 17 matches.
-    fn text(ranges: &[(u32, u32)]) -> String {
+    fn text(ranges: &[CodeRange]) -> String {
         ranges
             .iter()
-            .map(|&(lo, hi)| {
+            .map(|&CodeRange { start: lo, end: hi }| {
                 if lo == hi {
                     format!("{lo:x}")
                 } else {
@@ -313,7 +345,7 @@ mod tests {
             .join(",")
     }
 
-    fn members(ranges: &[(u32, u32)]) -> String {
+    fn members(ranges: &[CodeRange]) -> String {
         let mut out = String::new();
         push_members(&mut out, ranges);
         out
@@ -470,21 +502,118 @@ mod tests {
 
     #[test]
     fn a_set_is_written_as_the_members_of_a_class() {
-        // (ranges, members)
-        let cases: [(&[(u32, u32)], &str); 11] = [
-            (&[(0x41, 0x5A), (0x61, 0x7A)], "A-Za-z"),
-            (&[(0x2D, 0x2D)], "\\x{2D}"),
-            (&[(0x5B, 0x60)], "\\x{5B}-\\x{60}"),
-            (&[(0x17F, 0x17F), (0x212A, 0x212A)], "\\x{17F}\\x{212A}"),
-            (&[(0xD000, 0x0010_FFFF)], "\\x{D000}-\\x{10FFFF}"),
-            (&[(0x41, 0xDBFF)], "A-\\x{D7FF}"),
-            (&[(0xD800, 0xE001)], "\\x{E000}-\\x{E001}"),
-            (&[(0xD7FF, 0xE000)], "\\x{D7FF}-\\x{E000}"),
-            (&[(0xD7FF, 0xD7FF), (0xE000, 0xE000)], "\\x{D7FF}-\\x{E000}"),
-            (&[(0x61, 0xD7FF), (0xE000, 0xE001)], "a-\\x{E001}"),
-            (&[(0xD800, 0xDFFF)], NO_CODE_POINT),
+        struct Case {
+            ranges: &'static [CodeRange],
+            members: &'static str,
+        }
+        let cases: [Case; 11] = [
+            Case {
+                ranges: &[
+                    CodeRange {
+                        start: 0x41,
+                        end: 0x5A,
+                    },
+                    CodeRange {
+                        start: 0x61,
+                        end: 0x7A,
+                    },
+                ],
+                members: "A-Za-z",
+            },
+            Case {
+                ranges: &[CodeRange {
+                    start: 0x2D,
+                    end: 0x2D,
+                }],
+                members: "\\x{2D}",
+            },
+            Case {
+                ranges: &[CodeRange {
+                    start: 0x5B,
+                    end: 0x60,
+                }],
+                members: "\\x{5B}-\\x{60}",
+            },
+            Case {
+                ranges: &[
+                    CodeRange {
+                        start: 0x17F,
+                        end: 0x17F,
+                    },
+                    CodeRange {
+                        start: 0x212A,
+                        end: 0x212A,
+                    },
+                ],
+                members: "\\x{17F}\\x{212A}",
+            },
+            Case {
+                ranges: &[CodeRange {
+                    start: 0xD000,
+                    end: 0x0010_FFFF,
+                }],
+                members: "\\x{D000}-\\x{10FFFF}",
+            },
+            Case {
+                ranges: &[CodeRange {
+                    start: 0x41,
+                    end: 0xDBFF,
+                }],
+                members: "A-\\x{D7FF}",
+            },
+            Case {
+                ranges: &[CodeRange {
+                    start: 0xD800,
+                    end: 0xE001,
+                }],
+                members: "\\x{E000}-\\x{E001}",
+            },
+            Case {
+                ranges: &[CodeRange {
+                    start: 0xD7FF,
+                    end: 0xE000,
+                }],
+                members: "\\x{D7FF}-\\x{E000}",
+            },
+            Case {
+                ranges: &[
+                    CodeRange {
+                        start: 0xD7FF,
+                        end: 0xD7FF,
+                    },
+                    CodeRange {
+                        start: 0xE000,
+                        end: 0xE000,
+                    },
+                ],
+                members: "\\x{D7FF}-\\x{E000}",
+            },
+            Case {
+                ranges: &[
+                    CodeRange {
+                        start: 0x61,
+                        end: 0xD7FF,
+                    },
+                    CodeRange {
+                        start: 0xE000,
+                        end: 0xE001,
+                    },
+                ],
+                members: "a-\\x{E001}",
+            },
+            Case {
+                ranges: &[CodeRange {
+                    start: 0xD800,
+                    end: 0xDFFF,
+                }],
+                members: NO_CODE_POINT,
+            },
         ];
-        for (ranges, expected) in cases {
+        for Case {
+            ranges,
+            members: expected,
+        } in cases
+        {
             check!(members(ranges) == expected, "{ranges:x?}");
         }
     }

@@ -39,9 +39,15 @@ pub(super) fn fixture_v1_null() -> Message {
     }
 }
 
-pub(super) fn round_trip(message: &Message) -> (bytes::BytesMut, Message) {
+/// The wire bytes of an encoded message and the message decoded back from them.
+pub(super) struct RoundTrip {
+    pub(super) buffer: bytes::BytesMut,
+    pub(super) decoded: Message,
+}
+
+pub(super) fn round_trip(message: &Message) -> RoundTrip {
     let mut buffer = bytes::BytesMut::new();
     message.encode_into(&mut buffer);
     let decoded = Message::decode_from(&mut &buffer[..], message.encoded_len()).unwrap();
-    (buffer, decoded)
+    RoundTrip { buffer, decoded }
 }

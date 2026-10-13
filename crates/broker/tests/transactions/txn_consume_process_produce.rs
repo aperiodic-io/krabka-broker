@@ -55,7 +55,7 @@ async fn send_offsets_to_transaction_atomic_with_records() {
         let txn = producer.begin_transaction().await.unwrap();
 
         // Read all 5 records from input.
-        let mut last_offset: Option<((String, i32), i64)> = None;
+        let mut last_offset = None;
         let mut read = 0usize;
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         while read < 5 && std::time::Instant::now() < deadline {

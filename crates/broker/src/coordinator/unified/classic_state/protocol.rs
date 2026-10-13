@@ -149,27 +149,41 @@ mod tests {
     #[test]
     fn each_member_votes_for_its_most_preferred_candidate() {
         type Prefs = &'static [&'static str];
-        let rows: [(&str, &[Prefs], Option<&str>); 4] = [
-            ("one member", &[&["range", "sticky"]], Some("range")),
-            (
-                "first choices outside the intersection still vote",
-                &[
+        struct Row {
+            name: &'static str,
+            prefs: &'static [Prefs],
+            want: Option<&'static str>,
+        }
+
+        let rows: [Row; 4] = [
+            Row {
+                name: "one member",
+                prefs: &[&["range", "sticky"]],
+                want: Some("range"),
+            },
+            Row {
+                name: "first choices outside the intersection still vote",
+                prefs: &[
                     &["roundrobin", "sticky", "range"],
                     &["cooperative", "sticky", "range"],
                     &["range", "sticky"],
                 ],
-                Some("sticky"),
-            ),
-            (
-                "majority of first choices",
-                &[&["range", "sticky"], &["range", "sticky"], &[
+                want: Some("sticky"),
+            },
+            Row {
+                name: "majority of first choices",
+                prefs: &[&["range", "sticky"], &["range", "sticky"], &[
                     "sticky", "range",
                 ]],
-                Some("range"),
-            ),
-            ("no shared protocol", &[&["range"], &["sticky"]], None),
+                want: Some("range"),
+            },
+            Row {
+                name: "no shared protocol",
+                prefs: &[&["range"], &["sticky"]],
+                want: None,
+            },
         ];
-        for (name, prefs, want) in rows {
+        for Row { name, prefs, want } in rows {
             let members: HashMap<String, Member> = prefs
                 .iter()
                 .enumerate()

@@ -47,21 +47,47 @@ mod tests {
         krabka_remote_storage::{MANIFEST_BODY_DOMAIN, MANIFEST_DOMAIN},
     };
 
+    /// A signing scheme's domain separator and the name a failure reports it by.
+    struct SigningDomain {
+        name: &'static str,
+        separator: &'static [u8],
+    }
+
     /// Every domain separator in the workspace, with the name a failure
     /// reports. Add a row here whenever a new signing scheme lands.
-    const WORKSPACE_DOMAINS: [(&str, &[u8]); 5] = [
-        ("FREEZE_DOMAIN", FREEZE_DOMAIN),
-        ("BREAK_GLASS_DOMAIN", BREAK_GLASS_DOMAIN),
-        ("CHECKPOINT_DOMAIN", CHECKPOINT_DOMAIN),
-        ("MANIFEST_DOMAIN", MANIFEST_DOMAIN),
-        ("MANIFEST_BODY_DOMAIN", MANIFEST_BODY_DOMAIN),
+    const WORKSPACE_DOMAINS: [SigningDomain; 5] = [
+        SigningDomain {
+            name: "FREEZE_DOMAIN",
+            separator: FREEZE_DOMAIN,
+        },
+        SigningDomain {
+            name: "BREAK_GLASS_DOMAIN",
+            separator: BREAK_GLASS_DOMAIN,
+        },
+        SigningDomain {
+            name: "CHECKPOINT_DOMAIN",
+            separator: CHECKPOINT_DOMAIN,
+        },
+        SigningDomain {
+            name: "MANIFEST_DOMAIN",
+            separator: MANIFEST_DOMAIN,
+        },
+        SigningDomain {
+            name: "MANIFEST_BODY_DOMAIN",
+            separator: MANIFEST_BODY_DOMAIN,
+        },
     ];
 
     #[test]
     fn every_workspace_domain_separator_differs_pairwise() {
-        for (index, (left_name, left)) in WORKSPACE_DOMAINS.iter().enumerate() {
-            for (right_name, right) in &WORKSPACE_DOMAINS[index + 1..] {
-                check!(left != right, "{left_name} and {right_name}");
+        for (index, left) in WORKSPACE_DOMAINS.iter().enumerate() {
+            for right in &WORKSPACE_DOMAINS[index + 1..] {
+                check!(
+                    left.separator != right.separator,
+                    "{} and {}",
+                    left.name,
+                    right.name
+                );
             }
         }
     }
@@ -72,14 +98,16 @@ mod tests {
     /// this test is what keeps the `\0` from being dropped.
     #[test]
     fn no_workspace_domain_separator_starts_another_one() {
-        for (left_index, (left_name, left)) in WORKSPACE_DOMAINS.iter().enumerate() {
-            for (right_index, (right_name, right)) in WORKSPACE_DOMAINS.iter().enumerate() {
+        for (left_index, left) in WORKSPACE_DOMAINS.iter().enumerate() {
+            for (right_index, right) in WORKSPACE_DOMAINS.iter().enumerate() {
                 if left_index == right_index {
                     continue;
                 }
                 check!(
-                    !left.starts_with(right),
-                    "{left_name} starts with {right_name}"
+                    !left.separator.starts_with(right.separator),
+                    "{} starts with {}",
+                    left.name,
+                    right.name
                 );
             }
         }

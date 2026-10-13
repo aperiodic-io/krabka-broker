@@ -88,6 +88,13 @@ pub(crate) async fn run(
     tracing::info!("offset-retention sweep shutting down");
 }
 
+/// A group that a sweep changed, and what the sweep did to it.
+#[derive(Debug, PartialEq)]
+pub(crate) struct ReapedGroup {
+    pub group_id: String,
+    pub outcome: ReapOutcome,
+}
+
 /// One pass over the coordinator's groups.
 ///
 /// `owned` answers whether this broker leads the `__consumer_offsets`
@@ -102,7 +109,7 @@ pub(crate) async fn sweep(
     now_ms: i64,
     retention_ms: i64,
     empty_grace_ms: i64,
-) -> Vec<(String, ReapOutcome)> {
+) -> Vec<ReapedGroup> {
     let group_ids = coordinator.group_ids();
     let mut changed = Vec::new();
     for group_id in group_ids {
@@ -126,7 +133,7 @@ pub(crate) async fn sweep(
             forget_group(coordinator, &group_id, &handle);
         }
         if outcome.group_deleted || !outcome.reaped.is_empty() {
-            changed.push((group_id, outcome));
+            changed.push(ReapedGroup { group_id, outcome });
         }
     }
     changed

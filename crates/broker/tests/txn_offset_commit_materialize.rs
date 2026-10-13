@@ -28,8 +28,8 @@ use {
         },
         topics::{creatable_topic, create_topic_request},
         transactions::{
-            EndTransactionSetup, ProducerIdentity, TransactionOutcome, end_transaction_request,
-            init_producer_request, txn_offset_partition, txn_offset_topic,
+            EndTransactionSetup, ProducerEpoch, ProducerIdentity, TransactionOutcome,
+            end_transaction_request, init_producer_request, txn_offset_partition, txn_offset_topic,
         },
     },
     assert2::assert,
@@ -132,14 +132,14 @@ async fn fetch_offset(
 }
 
 /// Drive `InitProducerId → AddOffsetsToTxn → TxnOffsetCommit(offset)` for
-/// `(tid, group_id)`. Returns `(producer_id, producer_epoch)` so the caller
-/// can finalize the transaction with `EndTxn`.
+/// `(tid, group_id)`. Returns the producer identity so the caller can finalize
+/// the transaction with `EndTxn`.
 async fn begin_and_commit_offsets(
     client: &krabka_client_core::Client,
     tid: &str,
     group_id: &str,
     offset: i64,
-) -> (i64, i16) {
+) -> ProducerIdentity {
     support::find_coordinator(client, support::KEY_TYPE_TRANSACTION, tid).await;
     // Even after FindCoordinator resolves, InitProducerId can briefly observe
     // NOT_COORDINATOR while the elected leader installs locally — retry it.
@@ -204,7 +204,10 @@ async fn begin_and_commit_offsets(
         "TxnOffsetCommit: {toc:?}"
     );
 
-    (pid, epoch)
+    ProducerIdentity {
+        id: krabka_ids::ProducerId(pid),
+        epoch: ProducerEpoch(epoch),
+    }
 }
 
 /// The COMMIT marker materializes the buffered txn offsets into the group's
@@ -219,7 +222,7 @@ async fn txn_offset_commit_visible_via_offset_fetch_after_commit_marker() {
     let tid = "tid-commit";
     let group = "g-commit";
 
-    let (pid, epoch) = begin_and_commit_offsets(&p.client, tid, group, 3).await;
+    let producer = begin_and_commit_offsets(&p.client, tid, group, 3).await;
 
     // Pre-commit: the transactional offset is held under the LSO and NOT yet
     // surfaced — Kafka makes it visible to OffsetFetch only after the marker.
@@ -230,7 +233,7 @@ async fn txn_offset_commit_visible_via_offset_fetch_after_commit_marker() {
 
     // EndTxn(commit) writes the COMMIT marker → materializes the buffer.
     finish_transaction(&p.client, tid, EndTransactionSetup {
-        producer: ProducerIdentity::from_wire((pid, epoch)),
+        producer,
         ..Default::default()
     })
     .await;
@@ -255,11 +258,11 @@ async fn txn_offset_commit_dropped_on_abort_marker() {
     let tid = "tid-abort";
     let group = "g-abort";
 
-    let (pid, epoch) = begin_and_commit_offsets(&p.client, tid, group, 5).await;
+    let producer = begin_and_commit_offsets(&p.client, tid, group, 5).await;
 
     // EndTxn(abort): the buffer is dropped without applying.
     finish_transaction(&p.client, tid, EndTransactionSetup {
-        producer: ProducerIdentity::from_wire((pid, epoch)),
+        producer,
         outcome: TransactionOutcome::Abort,
     })
     .await;
@@ -406,7 +409,7 @@ async fn require_stable_offset_fetch_tracks_transaction_outcome(
     let group = format!("g-require-stable-{label}");
 
     commit_stable_offset(&p.client, &group, krabka_ids::Offset(3)).await;
-    let (pid, epoch) = begin_and_commit_offsets(&p.client, &tid, &group, 9).await;
+    let producer = begin_and_commit_offsets(&p.client, &tid, &group, 9).await;
 
     let unstable = OffsetFetchResponsePartitions {
         partition_index: 0,
@@ -422,11 +425,7 @@ async fn require_stable_offset_fetch_tracks_transaction_outcome(
     let relaxed = fetch_at_v10(&p.client, &group, topic_id, OffsetStability::AllowPending).await;
     assert2::assert!(relaxed == v10_response(&group, topic_id, stable_row(krabka_ids::Offset(3))));
 
-    finish_transaction(&p.client, &tid, EndTransactionSetup {
-        producer: ProducerIdentity::from_wire((pid, epoch)),
-        outcome,
-    })
-    .await;
+    finish_transaction(&p.client, &tid, EndTransactionSetup { producer, outcome }).await;
 
     let settled = fetch_at_v10(&p.client, &group, topic_id, OffsetStability::RequireStable).await;
     assert2::assert!(

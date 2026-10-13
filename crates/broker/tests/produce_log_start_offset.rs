@@ -74,7 +74,13 @@ const PRODUCER_ID: i64 = 777;
 /// with it in `log_append_time_ms`.
 const BATCH_MAX_TIMESTAMP: i64 = 12_345;
 
-async fn seeded_orders() -> (support::InProcess, WireUuid) {
+/// A broker holding the `orders` topic with its first records appended.
+struct SeededOrders {
+    process: support::InProcess,
+    topic_id: WireUuid,
+}
+
+async fn seeded_orders() -> SeededOrders {
     let process = Box::pin(support::start()).await;
     let topic = create_topic(&process.broker, &process.client, "orders").await;
     for offset in 0..APPENDED_BEFORE_TRIM {
@@ -83,13 +89,19 @@ async fn seeded_orders() -> (support::InProcess, WireUuid) {
             "the untrimmed partition starts at 0"
         );
     }
-    (process, topic)
+    SeededOrders {
+        process,
+        topic_id: topic,
+    }
 }
 
 /// An accepted produce reports the partition's real log start offset.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_accepted_produce_reports_the_trimmed_log_start_offset() {
-    let (p, topic_id) = seeded_orders().await;
+    let SeededOrders {
+        process: p,
+        topic_id,
+    } = seeded_orders().await;
 
     check!(
         trim(&p.client, "orders", TRIM_TO).await
@@ -117,7 +129,10 @@ async fn an_accepted_produce_reports_the_trimmed_log_start_offset() {
 /// a fix that reached only the append would leave this one at -1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_idempotent_retry_reports_the_trimmed_log_start_offset() {
-    let (p, topic_id) = seeded_orders().await;
+    let SeededOrders {
+        process: p,
+        topic_id,
+    } = seeded_orders().await;
 
     check!(trim(&p.client, "orders", TRIM_TO).await.low_watermark == TRIM_TO);
 

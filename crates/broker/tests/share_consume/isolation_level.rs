@@ -15,8 +15,8 @@ use {
         support::{
             producer::{producer_record, transactional_producer},
             share::{
-                ShareBrokerFixture, ShareFetchSetup, ShareSessionEpoch, join_consume_member,
-                permitted_topic_fixture, record_values,
+                ShareFetchSetup, ShareSessionEpoch, join_consume_member, permitted_topic_fixture,
+                record_values,
             },
         },
     },
@@ -51,8 +51,18 @@ async fn set_isolation_level(broker: &BrokerHandle, group: &str, level: &str) {
         .expect("set share.isolation.level");
 }
 
+/// A transaction-ready broker and the owners that keep it running.
+struct IsolationFixture {
+    permit: tokio::sync::OwnedSemaphorePermit,
+    broker: BrokerHandle,
+    client: std::sync::Arc<krabka_client_core::Client>,
+    dir: tempfile::TempDir,
+    tid: uuid::Uuid,
+    bootstrap: String,
+}
+
 /// Prepare a transaction-ready empty share group with its exact isolation override.
-async fn isolation_fixture(level: Option<&str>) -> ShareBrokerFixture {
+async fn isolation_fixture(level: Option<&str>) -> IsolationFixture {
     let (permit, broker, client, dir, tid) = Box::pin(permitted_topic_fixture().call()).await;
     let bootstrap = broker.listen_addr().to_string();
     bootstrap_share_state(&broker, &client, "g1").await;
@@ -60,7 +70,14 @@ async fn isolation_fixture(level: Option<&str>) -> ShareBrokerFixture {
         set_isolation_level(&broker, "g1", level).await;
     }
     broker.wait_until_transaction_coordinator_ready().await;
-    (permit, broker, client, dir, tid, bootstrap)
+    IsolationFixture {
+        permit,
+        broker,
+        client,
+        dir,
+        tid,
+        bootstrap,
+    }
 }
 
 /// F2 (`read_committed`): with `share.isolation.level = read_committed`, a
@@ -75,8 +92,14 @@ async fn isolation_fixture(level: Option<&str>) -> ShareBrokerFixture {
 /// that the broker merely deferred the records and did not lose them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn read_committed_skips_open_txn_then_sees_committed() {
-    let (_permit, broker, client, _dir, tid, bootstrap) =
-        isolation_fixture(Some(READ_COMMITTED)).await;
+    let IsolationFixture {
+        permit: _permit,
+        broker,
+        client,
+        dir: _dir,
+        tid,
+        bootstrap,
+    } = isolation_fixture(Some(READ_COMMITTED)).await;
 
     // Open a transaction and send 3 records WITHOUT committing: HWM=3, LSO=0.
     let producer = transactional_producer(bootstrap.clone(), "share-rc-tid").await;
@@ -206,7 +229,14 @@ async fn aborted_transaction_data_is_archived_under_read_committed() {
 /// `isolation_level` is the group's `share.isolation.level`, or `None` for a
 /// group with no override.
 async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) -> Seen {
-    let (_permit, broker, client, _dir, tid, bootstrap) = isolation_fixture(isolation_level).await;
+    let IsolationFixture {
+        permit: _permit,
+        broker,
+        client,
+        dir: _dir,
+        tid,
+        bootstrap,
+    } = isolation_fixture(isolation_level).await;
 
     let producer = transactional_producer(bootstrap.clone(), "share-aborted-tid").await;
     let txn = producer.begin_transaction().await.unwrap();

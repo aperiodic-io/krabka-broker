@@ -231,13 +231,18 @@ async fn a_registration_change_waits_for_an_uncommitted_registration() {
     ctrl.shutdown().await;
 }
 
+/// A log value decoded with Kafka's metadata record schemas, and the version
+/// of the schema it was written at.
+#[derive(Debug, PartialEq)]
+struct KafkaRecord {
+    record: krabka_protocol::records::metadata::KraftMetadataRecord,
+    version: i16,
+}
+
 /// Every value the log holds from `start`, decoded with Kafka's metadata
 /// record schemas: what `kafka-dump-log --cluster-metadata-decoder` or a JVM
 /// controller in a mixed quorum reads.
-fn kafka_records_from(
-    engine: &Engine,
-    start: Offset,
-) -> Vec<(krabka_protocol::records::metadata::KraftMetadataRecord, i16)> {
+fn kafka_records_from(engine: &Engine, start: Offset) -> Vec<KafkaRecord> {
     engine
         .log
         .read_decoded(start, DEFAULT_METADATA_RAFT_FETCH_MAX)
@@ -247,8 +252,10 @@ fn kafka_records_from(
         .flat_map(|batch| batch.records.iter())
         .filter_map(|record| record.value.as_ref())
         .map(|value| {
-            krabka_protocol::records::metadata::KraftMetadataRecord::decode_value(value)
-                .expect("a Kafka metadata record")
+            let (record, version) =
+                krabka_protocol::records::metadata::KraftMetadataRecord::decode_value(value)
+                    .expect("a Kafka metadata record");
+            KafkaRecord { record, version }
         })
         .collect()
 }
@@ -303,8 +310,8 @@ fn registration_transitions_are_written_as_kafkas_records() {
         })
     };
     let kafka_change = |fenced: i8, in_controlled_shutdown: i8, version: i16| {
-        vec![(
-            KraftMetadataRecord::BrokerRegistrationChange(KChange {
+        vec![KafkaRecord {
+            record: KraftMetadataRecord::BrokerRegistrationChange(KChange {
                 broker_id: 7,
                 broker_epoch: epoch,
                 fenced,
@@ -312,7 +319,7 @@ fn registration_transitions_are_written_as_kafkas_records() {
                 ..KChange::default()
             }),
             version,
-        )]
+        }]
     };
     let with = |fenced: bool, in_controlled_shutdown: bool| {
         Some(krabka_metadata::BrokerRegistrationRecord {
@@ -347,19 +354,19 @@ fn registration_transitions_are_written_as_kafkas_records() {
                 node_id: NodeId(7),
                 broker_epoch: epoch,
             }),
-            vec![(
-                KraftMetadataRecord::UnregisterBroker(KUnregister {
+            vec![KafkaRecord {
+                record: KraftMetadataRecord::UnregisterBroker(KUnregister {
                     broker_id: 7,
                     broker_epoch: epoch,
                     ..KUnregister::default()
                 }),
-                0,
-            )],
+                version: 0,
+            }],
             None,
         ),
     ];
 
-    assert!(let [(KraftMetadataRecord::RegisterBroker(written), _)] = registered_records.as_slice());
+    assert!(let [KafkaRecord { record: KraftMetadataRecord::RegisterBroker(written), .. }] = registered_records.as_slice());
     check!(
         (
             written.broker_epoch,
@@ -411,7 +418,7 @@ fn a_registration_change_at_a_replaced_epoch_is_dropped() {
     // written, and no `BrokerRegistrationChangeRecord` (17).
     let written: Vec<_> = kafka_records_from(&engine, start)
         .into_iter()
-        .map(|(record, _)| record.api_key())
+        .map(|decoded| decoded.record.api_key())
         .collect();
     check!(written == vec![2, 3]);
     check!(

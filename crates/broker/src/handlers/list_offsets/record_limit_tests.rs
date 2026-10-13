@@ -13,7 +13,7 @@
 use {
     super::{
         sentinels::{MAX_TIMESTAMP, UNKNOWN_EPOCH, UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
-        test_support::{client_for, create_topic, list_one},
+        test_support::{ClientBroker, client_for, create_topic, list_one},
     },
     crate::{
         api_catalog::UnstableApiVersions, broker::BrokerHandle, codes,
@@ -40,9 +40,7 @@ const RETENTION_KEY: &str = "log.retention.ms";
 /// A broker with one topic holding two gzip batches: a small record stamped
 /// 1000 at offset 0, and a record with a 1000-byte value stamped 2000 at
 /// offset 1.
-async fn broker_with_records(
-    unstable: UnstableApiVersions,
-) -> (BrokerHandle, krabka_client_core::Client, tempfile::TempDir) {
+async fn broker_with_records(unstable: UnstableApiVersions) -> ClientBroker<tempfile::TempDir> {
     let (broker, dir) = start_broker_no_audit_with(move |config| {
         config.features.unstable_api_versions = unstable;
     })
@@ -71,7 +69,11 @@ async fn broker_with_records(
     }
     // A lookup is answered up to the high watermark.
     partition.replica_state.lock().await.hw = krabka_log::Offset(2);
-    (broker, client, dir)
+    ClientBroker {
+        broker,
+        client,
+        dirs: dir,
+    }
 }
 
 /// Store the cluster-wide `max.decompressed.message.bytes`, and wait until the
@@ -141,7 +143,11 @@ fn refused() -> ListOffsetsPartitionResponse {
 /// read it and no other, and raising it answers them again.
 #[tokio::test]
 async fn a_trunk_broker_refuses_a_lookup_that_reads_an_oversized_record() {
-    let (broker, client, _dir) = broker_with_records(UnstableApiVersions::Enabled).await;
+    let ClientBroker {
+        broker,
+        client,
+        dirs: _dir,
+    } = broker_with_records(UnstableApiVersions::Enabled).await;
 
     // No limit is set, so nothing is refused.
     assert!(list_one(&client, TOPIC, 1_500).await == found(1, 2_000));
@@ -174,7 +180,11 @@ async fn a_trunk_broker_refuses_a_lookup_that_reads_an_oversized_record() {
 /// of it, so a lookup answers as it always did.
 #[tokio::test]
 async fn a_default_broker_ignores_the_limit_on_a_lookup() {
-    let (broker, client, _dir) = broker_with_records(UnstableApiVersions::Disabled).await;
+    let ClientBroker {
+        broker,
+        client,
+        dirs: _dir,
+    } = broker_with_records(UnstableApiVersions::Disabled).await;
 
     set_cluster_limit(&broker, "100", 1).await;
 

@@ -55,7 +55,7 @@ const CLIENT_ID: &str = "krabka-opa-test";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Boots a single-broker `SASL_PLAINTEXT` cluster whose
-/// `BrokerConfig.authorizer` is an [`OpaAuthorizer`] that points at `opa_url`.
+/// `BrokerConfig.authorizer` is an [`OpaAuthorizer`] that points at the `opa` mock.
 ///
 /// `admin` is a super-user in BOTH the authorizer, so it bypasses the OPA HTTP
 /// call, AND `BrokerConfig.super_users`, so the broker-level super-user checks
@@ -66,9 +66,8 @@ const CLIENT_ID: &str = "krabka-opa-test";
 /// test. The second authorization check in `produce_allowed_by_opa_succeeds`
 /// always fetches from the mock again, so the assertion does not depend on
 /// in-process cache hits from earlier requests in the same test process.
-fn start_broker_with_opa_authorizer(
-    opa_url: String,
-) -> impl std::future::Future<Output = (BrokerHandle, TempDir, SocketAddr)> {
+async fn start_broker_with_opa_authorizer(opa: MockServer) -> OpaFixture {
+    let opa_url = format!("{}/v1/data/kafka/authz/allow", opa.uri());
     let (log_dir, mut cfg) = sasl_temp_config(vec![SaslMechanism::Plain]);
     cfg.plain_credentials
         .insert("admin".to_string(), "admin-secret".to_string());
@@ -94,7 +93,7 @@ fn start_broker_with_opa_authorizer(
     // PLAINTEXT controller listener as ANONYMOUS; like a Kafka inter-broker
     // principal it needs `ClusterAction`, or the broker never unfences.
     super_users.insert("ANONYMOUS".to_string());
-    let opa = OpaAuthorizer::new(
+    let authorizer = OpaAuthorizer::new(
         super_users,
         opa_url,
         /* allow_on_error */ false,
@@ -109,9 +108,24 @@ fn start_broker_with_opa_authorizer(
         krabka_units::secs(5),
     )
     .expect("OpaAuthorizer::new must succeed inside a tokio runtime");
-    cfg.authorizer = std::sync::Arc::new(opa);
+    cfg.authorizer = std::sync::Arc::new(authorizer);
 
-    Box::pin(start_broker(cfg, log_dir))
+    let (handle, dir, addr) = Box::pin(start_broker(cfg, log_dir)).await;
+    OpaFixture {
+        opa,
+        handle,
+        dir,
+        addr,
+    }
+}
+
+/// An OPA mock and the broker that asks it, with the directory backing the
+/// broker and its address.
+struct OpaFixture {
+    opa: MockServer,
+    handle: BrokerHandle,
+    dir: TempDir,
+    addr: SocketAddr,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,7 +211,12 @@ async fn produce_when_partition_ready(
 /// goes through OPA, which always denies it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn produce_blocked_by_opa_returns_topic_authorization_failed() {
-    let (_opa, handle, _dir, addr) = opa_fixture(false).await;
+    let OpaFixture {
+        opa: _opa,
+        handle,
+        dir: _dir,
+        addr,
+    } = opa_fixture(false).await;
 
     // Bootstrap the topic via admin (super-user → OPA bypassed).
     create_topic_as_admin(addr, "blocked-topic").await;
@@ -237,7 +256,12 @@ async fn produce_blocked_by_opa_returns_topic_authorization_failed() {
 /// `MetadataImage`, so the test needs no fixed sleep.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn produce_allowed_by_opa_succeeds() {
-    let (_opa, handle, _dir, addr) = opa_fixture(true).await;
+    let OpaFixture {
+        opa: _opa,
+        handle,
+        dir: _dir,
+        addr,
+    } = opa_fixture(true).await;
 
     create_topic_as_admin(addr, "permitted-topic").await;
 
@@ -256,7 +280,7 @@ async fn produce_allowed_by_opa_succeeds() {
     );
 }
 
-async fn opa_fixture(allowed: bool) -> (MockServer, BrokerHandle, TempDir, SocketAddr) {
+async fn opa_fixture(allowed: bool) -> OpaFixture {
     let opa = MockServer::start().await;
     Mock::given(method("POST"))
         .respond_with(
@@ -264,7 +288,5 @@ async fn opa_fixture(allowed: bool) -> (MockServer, BrokerHandle, TempDir, Socke
         )
         .mount(&opa)
         .await;
-    let url = format!("{}/v1/data/kafka/authz/allow", opa.uri());
-    let (broker, dir, addr) = start_broker_with_opa_authorizer(url).await;
-    (opa, broker, dir, addr)
+    start_broker_with_opa_authorizer(opa).await
 }

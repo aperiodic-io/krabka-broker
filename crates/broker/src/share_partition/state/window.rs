@@ -41,6 +41,14 @@ pub(super) fn give_back(
     }
 }
 
+/// The inclusive range of offsets that an acknowledgement covers once the SPSO
+/// has cut it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AckBounds {
+    pub(crate) first: Offset,
+    pub(crate) last: Offset,
+}
+
 impl AcquisitionState {
     /// Archive eligible runs, retaining the caller's range predicate and
     /// choice of whether to clear acquisition. Dirty marking and SPSO movement
@@ -122,11 +130,7 @@ impl AcquisitionState {
     ///
     /// `INVALID_RECORD_STATE` when nothing was ever handed out, and
     /// `INVALID_REQUEST` when the range runs past the last offset that was.
-    pub(crate) fn ack_bounds(
-        &self,
-        first: Offset,
-        last: Offset,
-    ) -> Result<Option<(Offset, Offset)>, i16> {
+    pub(crate) fn ack_bounds(&self, first: Offset, last: Offset) -> Result<Option<AckBounds>, i16> {
         if last < self.start_offset {
             return Ok(None);
         }
@@ -134,7 +138,10 @@ impl AcquisitionState {
         if last >= end {
             return Err(INVALID_REQUEST);
         }
-        Ok(Some((first.max(self.start_offset), last)))
+        Ok(Some(AckBounds {
+            first: first.max(self.start_offset),
+            last,
+        }))
     }
 
     /// Validates an acquired acknowledgement range and carves out its boundaries.
@@ -150,7 +157,7 @@ impl AcquisitionState {
         if first > last {
             return Err(INVALID_RECORD_STATE);
         }
-        let Some((first, last)) = self.ack_bounds(first, last)? else {
+        let Some(AckBounds { first, last }) = self.ack_bounds(first, last)? else {
             return Ok(None);
         };
         if !self.range_acquired_by(member, first, last) {

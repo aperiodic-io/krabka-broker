@@ -30,6 +30,20 @@ pub fn test_metadata_log() -> MetadataLogConfig {
     }
 }
 
+/// A running engine and the temporary data directory it runs over, which the
+/// test keeps alive for as long as it uses the engine.
+pub struct EngineInDir {
+    pub engine: Engine,
+    pub dir: tempfile::TempDir,
+}
+
+/// A spawned controller and the temporary data directory it runs over, which
+/// the test keeps alive for as long as it uses the controller.
+pub struct ControllerInDir {
+    pub controller: KraftController,
+    pub dir: tempfile::TempDir,
+}
+
 pub fn voter_set(ids: &[NodeId]) -> krabka_metadata::voters::VoterSet {
     krabka_metadata::voters::VoterSet::from_voters(ids.iter().map(|&id| {
         krabka_metadata::voters::Voter {

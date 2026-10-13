@@ -24,6 +24,8 @@
 //! The image ships a JRE rather than a JDK, so the dump runs on the host's
 //! `java` against the jars copied out of it.
 
+use crate::codes::NamedCode;
+
 /// The image digest [`KAFKA_ERROR_TABLE`] was extracted from.
 ///
 /// `the_error_table_records_the_image_the_build_pins` compares this with the
@@ -39,140 +41,545 @@ pub(super) const KAFKA_ERROR_TABLE_IMAGE_DIGEST: &str =
     "sha256:ccd1314e47ec76909e01f86308b4dcf2064f19f7c89759234322314b0e319e26";
 
 /// Name and wire code of every variant of the Apache Kafka `Errors` enum.
-pub(super) const KAFKA_ERROR_TABLE: &[(&str, i16)] = &[
-    ("UNKNOWN_SERVER_ERROR", -1),
-    ("NONE", 0),
-    ("OFFSET_OUT_OF_RANGE", 1),
-    ("CORRUPT_MESSAGE", 2),
-    ("UNKNOWN_TOPIC_OR_PARTITION", 3),
-    ("INVALID_FETCH_SIZE", 4),
-    ("LEADER_NOT_AVAILABLE", 5),
-    ("NOT_LEADER_OR_FOLLOWER", 6),
-    ("REQUEST_TIMED_OUT", 7),
-    ("BROKER_NOT_AVAILABLE", 8),
-    ("REPLICA_NOT_AVAILABLE", 9),
-    ("MESSAGE_TOO_LARGE", 10),
-    ("STALE_CONTROLLER_EPOCH", 11),
-    ("OFFSET_METADATA_TOO_LARGE", 12),
-    ("NETWORK_EXCEPTION", 13),
-    ("COORDINATOR_LOAD_IN_PROGRESS", 14),
-    ("COORDINATOR_NOT_AVAILABLE", 15),
-    ("NOT_COORDINATOR", 16),
-    ("INVALID_TOPIC_EXCEPTION", 17),
-    ("RECORD_LIST_TOO_LARGE", 18),
-    ("NOT_ENOUGH_REPLICAS", 19),
-    ("NOT_ENOUGH_REPLICAS_AFTER_APPEND", 20),
-    ("INVALID_REQUIRED_ACKS", 21),
-    ("ILLEGAL_GENERATION", 22),
-    ("INCONSISTENT_GROUP_PROTOCOL", 23),
-    ("INVALID_GROUP_ID", 24),
-    ("UNKNOWN_MEMBER_ID", 25),
-    ("INVALID_SESSION_TIMEOUT", 26),
-    ("REBALANCE_IN_PROGRESS", 27),
-    ("INVALID_COMMIT_OFFSET_SIZE", 28),
-    ("TOPIC_AUTHORIZATION_FAILED", 29),
-    ("GROUP_AUTHORIZATION_FAILED", 30),
-    ("CLUSTER_AUTHORIZATION_FAILED", 31),
-    ("INVALID_TIMESTAMP", 32),
-    ("UNSUPPORTED_SASL_MECHANISM", 33),
-    ("ILLEGAL_SASL_STATE", 34),
-    ("UNSUPPORTED_VERSION", 35),
-    ("TOPIC_ALREADY_EXISTS", 36),
-    ("INVALID_PARTITIONS", 37),
-    ("INVALID_REPLICATION_FACTOR", 38),
-    ("INVALID_REPLICA_ASSIGNMENT", 39),
-    ("INVALID_CONFIG", 40),
-    ("NOT_CONTROLLER", 41),
-    ("INVALID_REQUEST", 42),
-    ("UNSUPPORTED_FOR_MESSAGE_FORMAT", 43),
-    ("POLICY_VIOLATION", 44),
-    ("OUT_OF_ORDER_SEQUENCE_NUMBER", 45),
-    ("DUPLICATE_SEQUENCE_NUMBER", 46),
-    ("INVALID_PRODUCER_EPOCH", 47),
-    ("INVALID_TXN_STATE", 48),
-    ("INVALID_PRODUCER_ID_MAPPING", 49),
-    ("INVALID_TRANSACTION_TIMEOUT", 50),
-    ("CONCURRENT_TRANSACTIONS", 51),
-    ("TRANSACTION_COORDINATOR_FENCED", 52),
-    ("TRANSACTIONAL_ID_AUTHORIZATION_FAILED", 53),
-    ("SECURITY_DISABLED", 54),
-    ("OPERATION_NOT_ATTEMPTED", 55),
-    ("KAFKA_STORAGE_ERROR", 56),
-    ("LOG_DIR_NOT_FOUND", 57),
-    ("SASL_AUTHENTICATION_FAILED", 58),
-    ("UNKNOWN_PRODUCER_ID", 59),
-    ("REASSIGNMENT_IN_PROGRESS", 60),
-    ("DELEGATION_TOKEN_AUTH_DISABLED", 61),
-    ("DELEGATION_TOKEN_NOT_FOUND", 62),
-    ("DELEGATION_TOKEN_OWNER_MISMATCH", 63),
-    ("DELEGATION_TOKEN_REQUEST_NOT_ALLOWED", 64),
-    ("DELEGATION_TOKEN_AUTHORIZATION_FAILED", 65),
-    ("DELEGATION_TOKEN_EXPIRED", 66),
-    ("INVALID_PRINCIPAL_TYPE", 67),
-    ("NON_EMPTY_GROUP", 68),
-    ("GROUP_ID_NOT_FOUND", 69),
-    ("FETCH_SESSION_ID_NOT_FOUND", 70),
-    ("INVALID_FETCH_SESSION_EPOCH", 71),
-    ("LISTENER_NOT_FOUND", 72),
-    ("TOPIC_DELETION_DISABLED", 73),
-    ("FENCED_LEADER_EPOCH", 74),
-    ("UNKNOWN_LEADER_EPOCH", 75),
-    ("UNSUPPORTED_COMPRESSION_TYPE", 76),
-    ("STALE_BROKER_EPOCH", 77),
-    ("OFFSET_NOT_AVAILABLE", 78),
-    ("MEMBER_ID_REQUIRED", 79),
-    ("PREFERRED_LEADER_NOT_AVAILABLE", 80),
-    ("GROUP_MAX_SIZE_REACHED", 81),
-    ("FENCED_INSTANCE_ID", 82),
-    ("ELIGIBLE_LEADERS_NOT_AVAILABLE", 83),
-    ("ELECTION_NOT_NEEDED", 84),
-    ("NO_REASSIGNMENT_IN_PROGRESS", 85),
-    ("GROUP_SUBSCRIBED_TO_TOPIC", 86),
-    ("INVALID_RECORD", 87),
-    ("UNSTABLE_OFFSET_COMMIT", 88),
-    ("THROTTLING_QUOTA_EXCEEDED", 89),
-    ("PRODUCER_FENCED", 90),
-    ("RESOURCE_NOT_FOUND", 91),
-    ("DUPLICATE_RESOURCE", 92),
-    ("UNACCEPTABLE_CREDENTIAL", 93),
-    ("INCONSISTENT_VOTER_SET", 94),
-    ("INVALID_UPDATE_VERSION", 95),
-    ("FEATURE_UPDATE_FAILED", 96),
-    ("PRINCIPAL_DESERIALIZATION_FAILURE", 97),
-    ("SNAPSHOT_NOT_FOUND", 98),
-    ("POSITION_OUT_OF_RANGE", 99),
-    ("UNKNOWN_TOPIC_ID", 100),
-    ("DUPLICATE_BROKER_REGISTRATION", 101),
-    ("BROKER_ID_NOT_REGISTERED", 102),
-    ("INCONSISTENT_TOPIC_ID", 103),
-    ("INCONSISTENT_CLUSTER_ID", 104),
-    ("TRANSACTIONAL_ID_NOT_FOUND", 105),
-    ("FETCH_SESSION_TOPIC_ID_ERROR", 106),
-    ("INELIGIBLE_REPLICA", 107),
-    ("NEW_LEADER_ELECTED", 108),
-    ("OFFSET_MOVED_TO_TIERED_STORAGE", 109),
-    ("FENCED_MEMBER_EPOCH", 110),
-    ("UNRELEASED_INSTANCE_ID", 111),
-    ("UNSUPPORTED_ASSIGNOR", 112),
-    ("STALE_MEMBER_EPOCH", 113),
-    ("MISMATCHED_ENDPOINT_TYPE", 114),
-    ("UNSUPPORTED_ENDPOINT_TYPE", 115),
-    ("UNKNOWN_CONTROLLER_ID", 116),
-    ("UNKNOWN_SUBSCRIPTION_ID", 117),
-    ("TELEMETRY_TOO_LARGE", 118),
-    ("INVALID_REGISTRATION", 119),
-    ("TRANSACTION_ABORTABLE", 120),
-    ("INVALID_RECORD_STATE", 121),
-    ("SHARE_SESSION_NOT_FOUND", 122),
-    ("INVALID_SHARE_SESSION_EPOCH", 123),
-    ("FENCED_STATE_EPOCH", 124),
-    ("INVALID_VOTER_KEY", 125),
-    ("DUPLICATE_VOTER", 126),
-    ("VOTER_NOT_FOUND", 127),
-    ("INVALID_REGULAR_EXPRESSION", 128),
-    ("REBOOTSTRAP_REQUIRED", 129),
-    ("STREAMS_INVALID_TOPOLOGY", 130),
-    ("STREAMS_INVALID_TOPOLOGY_EPOCH", 131),
-    ("STREAMS_TOPOLOGY_FENCED", 132),
-    ("SHARE_SESSION_LIMIT_REACHED", 133),
+pub(super) const KAFKA_ERROR_TABLE: &[NamedCode] = &[
+    NamedCode {
+        name: "UNKNOWN_SERVER_ERROR",
+        code: -1,
+    },
+    NamedCode {
+        name: "NONE",
+        code: 0,
+    },
+    NamedCode {
+        name: "OFFSET_OUT_OF_RANGE",
+        code: 1,
+    },
+    NamedCode {
+        name: "CORRUPT_MESSAGE",
+        code: 2,
+    },
+    NamedCode {
+        name: "UNKNOWN_TOPIC_OR_PARTITION",
+        code: 3,
+    },
+    NamedCode {
+        name: "INVALID_FETCH_SIZE",
+        code: 4,
+    },
+    NamedCode {
+        name: "LEADER_NOT_AVAILABLE",
+        code: 5,
+    },
+    NamedCode {
+        name: "NOT_LEADER_OR_FOLLOWER",
+        code: 6,
+    },
+    NamedCode {
+        name: "REQUEST_TIMED_OUT",
+        code: 7,
+    },
+    NamedCode {
+        name: "BROKER_NOT_AVAILABLE",
+        code: 8,
+    },
+    NamedCode {
+        name: "REPLICA_NOT_AVAILABLE",
+        code: 9,
+    },
+    NamedCode {
+        name: "MESSAGE_TOO_LARGE",
+        code: 10,
+    },
+    NamedCode {
+        name: "STALE_CONTROLLER_EPOCH",
+        code: 11,
+    },
+    NamedCode {
+        name: "OFFSET_METADATA_TOO_LARGE",
+        code: 12,
+    },
+    NamedCode {
+        name: "NETWORK_EXCEPTION",
+        code: 13,
+    },
+    NamedCode {
+        name: "COORDINATOR_LOAD_IN_PROGRESS",
+        code: 14,
+    },
+    NamedCode {
+        name: "COORDINATOR_NOT_AVAILABLE",
+        code: 15,
+    },
+    NamedCode {
+        name: "NOT_COORDINATOR",
+        code: 16,
+    },
+    NamedCode {
+        name: "INVALID_TOPIC_EXCEPTION",
+        code: 17,
+    },
+    NamedCode {
+        name: "RECORD_LIST_TOO_LARGE",
+        code: 18,
+    },
+    NamedCode {
+        name: "NOT_ENOUGH_REPLICAS",
+        code: 19,
+    },
+    NamedCode {
+        name: "NOT_ENOUGH_REPLICAS_AFTER_APPEND",
+        code: 20,
+    },
+    NamedCode {
+        name: "INVALID_REQUIRED_ACKS",
+        code: 21,
+    },
+    NamedCode {
+        name: "ILLEGAL_GENERATION",
+        code: 22,
+    },
+    NamedCode {
+        name: "INCONSISTENT_GROUP_PROTOCOL",
+        code: 23,
+    },
+    NamedCode {
+        name: "INVALID_GROUP_ID",
+        code: 24,
+    },
+    NamedCode {
+        name: "UNKNOWN_MEMBER_ID",
+        code: 25,
+    },
+    NamedCode {
+        name: "INVALID_SESSION_TIMEOUT",
+        code: 26,
+    },
+    NamedCode {
+        name: "REBALANCE_IN_PROGRESS",
+        code: 27,
+    },
+    NamedCode {
+        name: "INVALID_COMMIT_OFFSET_SIZE",
+        code: 28,
+    },
+    NamedCode {
+        name: "TOPIC_AUTHORIZATION_FAILED",
+        code: 29,
+    },
+    NamedCode {
+        name: "GROUP_AUTHORIZATION_FAILED",
+        code: 30,
+    },
+    NamedCode {
+        name: "CLUSTER_AUTHORIZATION_FAILED",
+        code: 31,
+    },
+    NamedCode {
+        name: "INVALID_TIMESTAMP",
+        code: 32,
+    },
+    NamedCode {
+        name: "UNSUPPORTED_SASL_MECHANISM",
+        code: 33,
+    },
+    NamedCode {
+        name: "ILLEGAL_SASL_STATE",
+        code: 34,
+    },
+    NamedCode {
+        name: "UNSUPPORTED_VERSION",
+        code: 35,
+    },
+    NamedCode {
+        name: "TOPIC_ALREADY_EXISTS",
+        code: 36,
+    },
+    NamedCode {
+        name: "INVALID_PARTITIONS",
+        code: 37,
+    },
+    NamedCode {
+        name: "INVALID_REPLICATION_FACTOR",
+        code: 38,
+    },
+    NamedCode {
+        name: "INVALID_REPLICA_ASSIGNMENT",
+        code: 39,
+    },
+    NamedCode {
+        name: "INVALID_CONFIG",
+        code: 40,
+    },
+    NamedCode {
+        name: "NOT_CONTROLLER",
+        code: 41,
+    },
+    NamedCode {
+        name: "INVALID_REQUEST",
+        code: 42,
+    },
+    NamedCode {
+        name: "UNSUPPORTED_FOR_MESSAGE_FORMAT",
+        code: 43,
+    },
+    NamedCode {
+        name: "POLICY_VIOLATION",
+        code: 44,
+    },
+    NamedCode {
+        name: "OUT_OF_ORDER_SEQUENCE_NUMBER",
+        code: 45,
+    },
+    NamedCode {
+        name: "DUPLICATE_SEQUENCE_NUMBER",
+        code: 46,
+    },
+    NamedCode {
+        name: "INVALID_PRODUCER_EPOCH",
+        code: 47,
+    },
+    NamedCode {
+        name: "INVALID_TXN_STATE",
+        code: 48,
+    },
+    NamedCode {
+        name: "INVALID_PRODUCER_ID_MAPPING",
+        code: 49,
+    },
+    NamedCode {
+        name: "INVALID_TRANSACTION_TIMEOUT",
+        code: 50,
+    },
+    NamedCode {
+        name: "CONCURRENT_TRANSACTIONS",
+        code: 51,
+    },
+    NamedCode {
+        name: "TRANSACTION_COORDINATOR_FENCED",
+        code: 52,
+    },
+    NamedCode {
+        name: "TRANSACTIONAL_ID_AUTHORIZATION_FAILED",
+        code: 53,
+    },
+    NamedCode {
+        name: "SECURITY_DISABLED",
+        code: 54,
+    },
+    NamedCode {
+        name: "OPERATION_NOT_ATTEMPTED",
+        code: 55,
+    },
+    NamedCode {
+        name: "KAFKA_STORAGE_ERROR",
+        code: 56,
+    },
+    NamedCode {
+        name: "LOG_DIR_NOT_FOUND",
+        code: 57,
+    },
+    NamedCode {
+        name: "SASL_AUTHENTICATION_FAILED",
+        code: 58,
+    },
+    NamedCode {
+        name: "UNKNOWN_PRODUCER_ID",
+        code: 59,
+    },
+    NamedCode {
+        name: "REASSIGNMENT_IN_PROGRESS",
+        code: 60,
+    },
+    NamedCode {
+        name: "DELEGATION_TOKEN_AUTH_DISABLED",
+        code: 61,
+    },
+    NamedCode {
+        name: "DELEGATION_TOKEN_NOT_FOUND",
+        code: 62,
+    },
+    NamedCode {
+        name: "DELEGATION_TOKEN_OWNER_MISMATCH",
+        code: 63,
+    },
+    NamedCode {
+        name: "DELEGATION_TOKEN_REQUEST_NOT_ALLOWED",
+        code: 64,
+    },
+    NamedCode {
+        name: "DELEGATION_TOKEN_AUTHORIZATION_FAILED",
+        code: 65,
+    },
+    NamedCode {
+        name: "DELEGATION_TOKEN_EXPIRED",
+        code: 66,
+    },
+    NamedCode {
+        name: "INVALID_PRINCIPAL_TYPE",
+        code: 67,
+    },
+    NamedCode {
+        name: "NON_EMPTY_GROUP",
+        code: 68,
+    },
+    NamedCode {
+        name: "GROUP_ID_NOT_FOUND",
+        code: 69,
+    },
+    NamedCode {
+        name: "FETCH_SESSION_ID_NOT_FOUND",
+        code: 70,
+    },
+    NamedCode {
+        name: "INVALID_FETCH_SESSION_EPOCH",
+        code: 71,
+    },
+    NamedCode {
+        name: "LISTENER_NOT_FOUND",
+        code: 72,
+    },
+    NamedCode {
+        name: "TOPIC_DELETION_DISABLED",
+        code: 73,
+    },
+    NamedCode {
+        name: "FENCED_LEADER_EPOCH",
+        code: 74,
+    },
+    NamedCode {
+        name: "UNKNOWN_LEADER_EPOCH",
+        code: 75,
+    },
+    NamedCode {
+        name: "UNSUPPORTED_COMPRESSION_TYPE",
+        code: 76,
+    },
+    NamedCode {
+        name: "STALE_BROKER_EPOCH",
+        code: 77,
+    },
+    NamedCode {
+        name: "OFFSET_NOT_AVAILABLE",
+        code: 78,
+    },
+    NamedCode {
+        name: "MEMBER_ID_REQUIRED",
+        code: 79,
+    },
+    NamedCode {
+        name: "PREFERRED_LEADER_NOT_AVAILABLE",
+        code: 80,
+    },
+    NamedCode {
+        name: "GROUP_MAX_SIZE_REACHED",
+        code: 81,
+    },
+    NamedCode {
+        name: "FENCED_INSTANCE_ID",
+        code: 82,
+    },
+    NamedCode {
+        name: "ELIGIBLE_LEADERS_NOT_AVAILABLE",
+        code: 83,
+    },
+    NamedCode {
+        name: "ELECTION_NOT_NEEDED",
+        code: 84,
+    },
+    NamedCode {
+        name: "NO_REASSIGNMENT_IN_PROGRESS",
+        code: 85,
+    },
+    NamedCode {
+        name: "GROUP_SUBSCRIBED_TO_TOPIC",
+        code: 86,
+    },
+    NamedCode {
+        name: "INVALID_RECORD",
+        code: 87,
+    },
+    NamedCode {
+        name: "UNSTABLE_OFFSET_COMMIT",
+        code: 88,
+    },
+    NamedCode {
+        name: "THROTTLING_QUOTA_EXCEEDED",
+        code: 89,
+    },
+    NamedCode {
+        name: "PRODUCER_FENCED",
+        code: 90,
+    },
+    NamedCode {
+        name: "RESOURCE_NOT_FOUND",
+        code: 91,
+    },
+    NamedCode {
+        name: "DUPLICATE_RESOURCE",
+        code: 92,
+    },
+    NamedCode {
+        name: "UNACCEPTABLE_CREDENTIAL",
+        code: 93,
+    },
+    NamedCode {
+        name: "INCONSISTENT_VOTER_SET",
+        code: 94,
+    },
+    NamedCode {
+        name: "INVALID_UPDATE_VERSION",
+        code: 95,
+    },
+    NamedCode {
+        name: "FEATURE_UPDATE_FAILED",
+        code: 96,
+    },
+    NamedCode {
+        name: "PRINCIPAL_DESERIALIZATION_FAILURE",
+        code: 97,
+    },
+    NamedCode {
+        name: "SNAPSHOT_NOT_FOUND",
+        code: 98,
+    },
+    NamedCode {
+        name: "POSITION_OUT_OF_RANGE",
+        code: 99,
+    },
+    NamedCode {
+        name: "UNKNOWN_TOPIC_ID",
+        code: 100,
+    },
+    NamedCode {
+        name: "DUPLICATE_BROKER_REGISTRATION",
+        code: 101,
+    },
+    NamedCode {
+        name: "BROKER_ID_NOT_REGISTERED",
+        code: 102,
+    },
+    NamedCode {
+        name: "INCONSISTENT_TOPIC_ID",
+        code: 103,
+    },
+    NamedCode {
+        name: "INCONSISTENT_CLUSTER_ID",
+        code: 104,
+    },
+    NamedCode {
+        name: "TRANSACTIONAL_ID_NOT_FOUND",
+        code: 105,
+    },
+    NamedCode {
+        name: "FETCH_SESSION_TOPIC_ID_ERROR",
+        code: 106,
+    },
+    NamedCode {
+        name: "INELIGIBLE_REPLICA",
+        code: 107,
+    },
+    NamedCode {
+        name: "NEW_LEADER_ELECTED",
+        code: 108,
+    },
+    NamedCode {
+        name: "OFFSET_MOVED_TO_TIERED_STORAGE",
+        code: 109,
+    },
+    NamedCode {
+        name: "FENCED_MEMBER_EPOCH",
+        code: 110,
+    },
+    NamedCode {
+        name: "UNRELEASED_INSTANCE_ID",
+        code: 111,
+    },
+    NamedCode {
+        name: "UNSUPPORTED_ASSIGNOR",
+        code: 112,
+    },
+    NamedCode {
+        name: "STALE_MEMBER_EPOCH",
+        code: 113,
+    },
+    NamedCode {
+        name: "MISMATCHED_ENDPOINT_TYPE",
+        code: 114,
+    },
+    NamedCode {
+        name: "UNSUPPORTED_ENDPOINT_TYPE",
+        code: 115,
+    },
+    NamedCode {
+        name: "UNKNOWN_CONTROLLER_ID",
+        code: 116,
+    },
+    NamedCode {
+        name: "UNKNOWN_SUBSCRIPTION_ID",
+        code: 117,
+    },
+    NamedCode {
+        name: "TELEMETRY_TOO_LARGE",
+        code: 118,
+    },
+    NamedCode {
+        name: "INVALID_REGISTRATION",
+        code: 119,
+    },
+    NamedCode {
+        name: "TRANSACTION_ABORTABLE",
+        code: 120,
+    },
+    NamedCode {
+        name: "INVALID_RECORD_STATE",
+        code: 121,
+    },
+    NamedCode {
+        name: "SHARE_SESSION_NOT_FOUND",
+        code: 122,
+    },
+    NamedCode {
+        name: "INVALID_SHARE_SESSION_EPOCH",
+        code: 123,
+    },
+    NamedCode {
+        name: "FENCED_STATE_EPOCH",
+        code: 124,
+    },
+    NamedCode {
+        name: "INVALID_VOTER_KEY",
+        code: 125,
+    },
+    NamedCode {
+        name: "DUPLICATE_VOTER",
+        code: 126,
+    },
+    NamedCode {
+        name: "VOTER_NOT_FOUND",
+        code: 127,
+    },
+    NamedCode {
+        name: "INVALID_REGULAR_EXPRESSION",
+        code: 128,
+    },
+    NamedCode {
+        name: "REBOOTSTRAP_REQUIRED",
+        code: 129,
+    },
+    NamedCode {
+        name: "STREAMS_INVALID_TOPOLOGY",
+        code: 130,
+    },
+    NamedCode {
+        name: "STREAMS_INVALID_TOPOLOGY_EPOCH",
+        code: 131,
+    },
+    NamedCode {
+        name: "STREAMS_TOPOLOGY_FENCED",
+        code: 132,
+    },
+    NamedCode {
+        name: "SHARE_SESSION_LIMIT_REACHED",
+        code: 133,
+    },
 ];

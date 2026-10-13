@@ -15,6 +15,7 @@ use {
         sink::{AuditError, AuditRecord, AuditSink, MemorySink},
         spool::Spool,
         stats::AuditStats,
+        test_support::TempSpool,
     },
     krabka_units::prelude::{ByteSize, Time, hours, mebibytes, millis},
     qubit_clock::{ManualMonotonicClock, MonotonicClock as _, Timer},
@@ -79,23 +80,32 @@ pub async fn finish_lifecycle_writer(
     finish_writer(log, handle).await;
 }
 
-pub fn failed_sink_stats() -> (Arc<FailableSink>, Arc<AuditStats>) {
+/// A failable sink and the stats a writer reports its outcomes to.
+pub struct SinkStats {
+    pub sink: Arc<FailableSink>,
+    pub stats: Arc<AuditStats>,
+}
+
+pub fn failed_sink_stats() -> SinkStats {
     let sink = Arc::new(FailableSink::default());
     sink.set_fail(true);
-    (sink, Arc::new(AuditStats::new()))
+    SinkStats {
+        sink,
+        stats: Arc::new(AuditStats::new()),
+    }
 }
 
-pub fn healthy_sink_stats() -> (Arc<FailableSink>, Arc<AuditStats>) {
-    (
-        Arc::new(FailableSink::default()),
-        Arc::new(AuditStats::new()),
-    )
+pub fn healthy_sink_stats() -> SinkStats {
+    SinkStats {
+        sink: Arc::new(FailableSink::default()),
+        stats: Arc::new(AuditStats::new()),
+    }
 }
 
-pub fn roomy_spool() -> (tempfile::TempDir, Spool) {
-    let directory = tempfile::tempdir().unwrap();
-    let spool = Spool::open(directory.path(), ROOMY_CAP).unwrap();
-    (directory, spool)
+pub fn roomy_spool() -> TempSpool {
+    let dir = tempfile::tempdir().unwrap();
+    let spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
+    TempSpool { dir, spool }
 }
 
 pub fn record_sequences(records: &[AuditRecord]) -> Vec<String> {
@@ -264,6 +274,12 @@ pub fn quiet_params(
 /// tests that do not exercise the tickers stay quiet and deterministic.
 pub fn dormant_timer() -> Arc<dyn Timer> { ManualMonotonicClock::new_shared().new_timer() }
 
+/// Writer params with the clock their timer was made from.
+pub struct ClockedParams {
+    pub params: AuditWriterParams,
+    pub clock: Arc<ManualMonotonicClock>,
+}
+
 /// Like [`params`], but also returns the [`ManualMonotonicClock`] the writer's
 /// timer was made from.
 ///
@@ -274,11 +290,11 @@ pub fn params_with_clock(
     sink: Arc<dyn AuditSink>,
     spool: Spool,
     stats: Arc<AuditStats>,
-) -> (AuditWriterParams, Arc<ManualMonotonicClock>) {
+) -> ClockedParams {
     let clock = ManualMonotonicClock::new_shared();
     let mut p = params(sink, spool, stats);
     p.timer = clock.new_timer();
-    (p, clock)
+    ClockedParams { params: p, clock }
 }
 
 /// Polls `cond` on every executor turn until it holds.

@@ -174,14 +174,10 @@ pub async fn start_mixed_cluster(container: &str, jvm_is_controller: bool) -> Mi
     });
     format_at_kafka_4_0(dir1.path(), &cid_str, &cfg1).await;
     format_at_kafka_4_0(dir2.path(), &cid_str, &cfg2).await;
-    let (c1, c2): (BrokerHandle, BrokerHandle) = {
-        let s1 = tokio::spawn(Broker::start(cfg1));
-        let s2 = tokio::spawn(Broker::start(cfg2));
-        (
-            s1.await.unwrap().expect("krabka voter 1"),
-            s2.await.unwrap().expect("krabka voter 2"),
-        )
-    };
+    let s1 = tokio::spawn(Broker::start(cfg1));
+    let s2 = tokio::spawn(Broker::start(cfg2));
+    let c1: BrokerHandle = s1.await.unwrap().expect("krabka voter 1");
+    let c2: BrokerHandle = s2.await.unwrap().expect("krabka voter 2");
 
     // Start JVM node 3, optionally as a controller voter. The capability test
     // uses broker-only mode so UpdateFeatures deterministically reaches Krabka.
@@ -321,18 +317,24 @@ pub fn single_leader_record(
     }
 }
 
+/// A registered mixed cluster and the name of its JVM container.
+pub struct RegisteredMixedCluster {
+    pub container: String,
+    pub cluster: MixedCluster,
+}
+
 /// A registered mixed topology, with a uniquely named JVM container.
 pub async fn registered_mixed_cluster(
     container_prefix: &str,
     context: &str,
-) -> (String, MixedCluster) {
+) -> RegisteredMixedCluster {
     let container = support::unique_container_name(container_prefix);
     let cluster = start_mixed_cluster(&container, true).await;
     assert2::assert!(
         cluster.wait_for_brokers(3, Duration::from_mins(2)).await,
         "{context}"
     );
-    (container, cluster)
+    RegisteredMixedCluster { container, cluster }
 }
 
 /// Verify the committed prefix independently of the input records that seeded it.
@@ -382,7 +384,8 @@ pub async fn prepare_divergence(
                 "eight",
             ),
         };
-    let (container, cluster) = registered_mixed_cluster(container_prefix, join_context).await;
+    let RegisteredMixedCluster { container, cluster } =
+        registered_mixed_cluster(container_prefix, join_context).await;
     let bootstrap = cluster.bootstrap_all.clone();
     create_and_wait_for_isr(&bootstrap, topic, required, isr_context).await;
     produce_committed_prefix(&bootstrap, topic, prefix, count);

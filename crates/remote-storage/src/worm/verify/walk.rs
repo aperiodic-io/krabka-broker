@@ -13,8 +13,8 @@ use {
         manifest_read::KeyedManifest,
         objects::check_objects,
         report::{
-            EpochSpan, ObjectProtectionReport, PartitionVerifyReport, VerifyBreak, extend_span,
-            offset_gaps,
+            EpochSpan, ObjectProtectionReport, PartitionVerifyReport, SegmentSpan,
+            VerifiedPartition, VerifyBreak, extend_span, offset_gaps,
         },
         signature::{SignatureState, signature_state},
     },
@@ -27,6 +27,12 @@ use {
     std::{collections::BTreeMap, sync::Arc},
 };
 
+/// The last manifest the walk accepted.
+struct LastManifest {
+    key: String,
+    seq: ManifestSeq,
+}
+
 /// Everything the chain walk accumulates for one partition.
 #[derive(Default)]
 pub(super) struct Walk {
@@ -37,9 +43,9 @@ pub(super) struct Walk {
     unsigned: u64,
     untrusted: u64,
     epochs: Vec<EpochSpan>,
-    segments: Vec<(i64, i64)>,
+    segments: Vec<SegmentSpan>,
     head: Option<ChainHead>,
-    last: Option<(String, ManifestSeq)>,
+    last: Option<LastManifest>,
     first_break: Option<VerifyBreak>,
     authenticated_objects: BTreeMap<String, ObjectEntry>,
 }
@@ -61,10 +67,15 @@ impl Walk {
                 self.bucket_retention_objects.record(&object.key);
             }
         }
-        self.segments
-            .push((body.segment.start_offset, body.segment.end_offset));
+        self.segments.push(SegmentSpan {
+            start: body.segment.start_offset,
+            end: body.segment.end_offset,
+        });
         self.head = Some(head);
-        self.last = Some((key.to_string(), body.chain.seq));
+        self.last = Some(LastManifest {
+            key: key.to_string(),
+            seq: body.chain.seq,
+        });
     }
 
     /// Stop at the first failure, retaining the already verified part of the run.
@@ -90,7 +101,7 @@ impl Walk {
         dir: &str,
         orphan_objects: Vec<String>,
         request: &VerifyRequest,
-    ) -> (PartitionVerifyReport, BTreeMap<String, ObjectEntry>) {
+    ) -> VerifiedPartition {
         let first_break = self
             .first_break
             .take()
@@ -114,7 +125,10 @@ impl Walk {
             ok,
             first_break,
         };
-        (report, self.authenticated_objects)
+        VerifiedPartition {
+            report,
+            objects: self.authenticated_objects,
+        }
     }
 
     /// The break that [`VerifyRequest::expect_head`] raises when the archive
@@ -129,7 +143,7 @@ impl Walk {
         // break names the directory that should have held one.
         let (manifest_key, seq) = self.last.as_ref().map_or_else(
             || (dir.to_string(), None),
-            |(key, seq)| (key.clone(), Some(*seq)),
+            |last| (last.key.clone(), Some(last.seq)),
         );
         Some(VerifyBreak {
             manifest_key,
@@ -158,7 +172,7 @@ pub(super) async fn walk_partition(
         // head is a new run, so it never continues an older head.
         let mut head = ChainHead::GENESIS;
         let mut expected_seq = 0u64;
-        for (key, manifest) in run {
+        for KeyedManifest { key, manifest } in run {
             let body = &manifest.body;
             let next_seq = match chain_continuation(manifest, expected_seq, head) {
                 Ok(next_seq) => next_seq,
@@ -202,27 +216,31 @@ pub(super) async fn walk_partition(
 fn chain_runs(decoded: &[KeyedManifest]) -> Vec<Vec<&KeyedManifest>> {
     let mut runs: BTreeMap<EpochId, Vec<&KeyedManifest>> = BTreeMap::new();
     for entry in decoded {
-        runs.entry(entry.1.body.chain.epoch_id)
+        runs.entry(entry.manifest.body.chain.epoch_id)
             .or_default()
             .push(entry);
     }
     let mut ordered: Vec<Vec<&KeyedManifest>> = runs.into_values().collect();
     for run in &mut ordered {
         run.sort_by(|a, b| {
-            a.1.body
+            a.manifest
+                .body
                 .chain
                 .seq
-                .cmp(&b.1.body.chain.seq)
-                .then_with(|| a.0.cmp(&b.0))
+                .cmp(&b.manifest.body.chain.seq)
+                .then_with(|| a.key.cmp(&b.key))
         });
     }
     ordered.sort_by_key(|run| {
         let start = run
             .iter()
-            .map(|(_, manifest)| manifest.body.segment.start_offset)
+            .map(|entry| entry.manifest.body.segment.start_offset)
             .min()
             .unwrap_or(i64::MAX);
-        (start, run.first().map(|(_, m)| m.body.chain.epoch_id))
+        (
+            start,
+            run.first().map(|entry| entry.manifest.body.chain.epoch_id),
+        )
     });
     ordered
 }

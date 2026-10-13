@@ -5,7 +5,10 @@
 //! archive-wide roll-up an auditor grades. The assembly helpers here turn the
 //! walk's accumulated state into those values.
 
-use crate::worm::manifest::{ChainHead, EpochId, ManifestBody, ManifestSeq};
+use {
+    crate::worm::manifest::{ChainHead, EpochId, ManifestBody, ManifestSeq, ObjectEntry},
+    std::collections::BTreeMap,
+};
 
 const PROTECTION_SAMPLE_LIMIT: usize = 10;
 
@@ -147,6 +150,12 @@ impl ArchiveVerifyReport {
     }
 }
 
+/// A partition's report and the signed claims of the objects its walk accepted.
+pub(super) struct VerifiedPartition {
+    pub report: PartitionVerifyReport,
+    pub objects: BTreeMap<String, ObjectEntry>,
+}
+
 /// A partition whose manifests could not all be decoded, so no walk ran.
 pub(super) fn broken_before_walk(
     dir: &str,
@@ -194,12 +203,19 @@ pub(super) fn extend_span(span: &mut Option<EpochSpan>, body: &ManifestBody, hea
     }
 }
 
+/// The offsets one verified segment covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct SegmentSpan {
+    pub start: i64,
+    pub end: i64,
+}
+
 /// Holes between the offset ranges the verified segments cover.
-pub(super) fn offset_gaps(segments: &mut [(i64, i64)]) -> Vec<OffsetGap> {
+pub(super) fn offset_gaps(segments: &mut [SegmentSpan]) -> Vec<OffsetGap> {
     segments.sort_unstable();
     let mut gaps = Vec::new();
     let mut covered: Option<i64> = None;
-    for &(start, end) in &*segments {
+    for &SegmentSpan { start, end } in &*segments {
         if let Some(after) = covered
             && start > after.saturating_add(1)
         {

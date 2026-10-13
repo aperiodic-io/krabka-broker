@@ -138,7 +138,7 @@ mod tests {
     use {
         super::*,
         crate::segment::test_support::{
-            RecordTimestamp, SampleBatchSetup, seeded_segment, test_segment,
+            RecordTimestamp, SampleBatchSetup, TempSegment, seeded_segment, test_segment,
         },
         tempfile::tempdir,
     };
@@ -189,7 +189,7 @@ mod tests {
     /// A segment with no bytes takes the shortcut: there is nothing to walk.
     #[test]
     fn an_empty_segment_is_wholly_active() {
-        let (dir, seg) = test_segment();
+        let TempSegment { dir, segment: seg } = test_segment();
 
         assert2::check!(seg.is_wholly_active(0, 1_000));
         let scan = seg.scan_activation(Offset(0), 0, 1_000).unwrap();

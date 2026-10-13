@@ -10,7 +10,8 @@
 
 use {
     crate::{
-        controller_endpoint::{ControllerDialer, current_leader_endpoint},
+        controller_endpoint::{ControllerDialer, LeaderEndpoint, current_leader_endpoint},
+        host_port::HostPort,
         metadata_source::MetadataSource,
     },
     krabka_protocol::owned::assign_replicas_to_dirs_request::{
@@ -120,8 +121,11 @@ pub(crate) async fn send_assignments(
     client_id: &str,
     req: AssignReplicasToDirsRequest,
 ) -> Result<(), String> {
-    let (leader_id, _, host, port) =
-        current_leader_endpoint(controller.as_ref(), &dialer.quorum_voters)?;
+    let LeaderEndpoint {
+        leader_id,
+        endpoint: HostPort { host, port },
+        ..
+    } = current_leader_endpoint(controller.as_ref(), &dialer.quorum_voters)?;
 
     let connection = dialer
         .outbound_client
@@ -177,7 +181,7 @@ fn validate_assign_response(
 mod tests {
     use {
         super::*,
-        crate::{BrokerHandle, metadata_source::MetadataSource, test_support::FakeMetadataSource},
+        crate::{metadata_source::MetadataSource, test_support::FakeMetadataSource},
         assert2::{assert, check},
         krabka_metadata::MetadataImage,
         krabka_protocol::{Decode, Encode},
@@ -266,8 +270,7 @@ mod tests {
     }
 
     use crate::test_support::{
-        plaintext_controller_dialer_with_voters as plaintext_dialer,
-        start_controller as start_test_controller, voter_image,
+        plaintext_controller_dialer_with_voters as plaintext_dialer, start_controller, voter_image,
     };
 
     /// What a broker-only node sees of a controller-only leader: a voter with a
@@ -283,12 +286,6 @@ mod tests {
                 port: controller_addr.port(),
             }])
             .call()
-    }
-
-    /// Boot a single-node broker that leads the metadata quorum, and hand back
-    /// the address of the controller listener KIP-919 puts api key 73 on.
-    async fn start_controller() -> (BrokerHandle, SocketAddr, tempfile::TempDir) {
-        start_test_controller().await
     }
 
     #[tokio::test]

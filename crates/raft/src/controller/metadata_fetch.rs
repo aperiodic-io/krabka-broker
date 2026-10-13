@@ -143,18 +143,26 @@ mod tests {
         found
     }
 
-    async fn committed_topic(name: &str, label: &str) -> (TempDir, ControllerHandle) {
+    /// A bootstrapped controller with one committed topic, and the data
+    /// directory it must outlive.
+    struct SeededController {
+        dir: TempDir,
+        ctrl: ControllerHandle,
+    }
+
+    async fn committed_topic(name: &str, label: &str) -> SeededController {
         let (dir, ctrl) = bootstrap_controller("bootstrap").await;
         wait_for_leader(&ctrl).await;
         submit_change_with_timeout(&ctrl, vec![committable_topic_record(name)], label)
             .await
             .expect("submit");
-        (dir, ctrl)
+        SeededController { dir, ctrl }
     }
 
     #[tokio::test]
     async fn metadata_records_serves_committed_topic() {
-        let (_dir, ctrl) = committed_topic("t", "metadata_records seed").await;
+        let SeededController { dir: _dir, ctrl } =
+            committed_topic("t", "metadata_records seed").await;
 
         let slice = tokio::time::timeout(
             TEST_OP_TIMEOUT.to_std(),
@@ -169,7 +177,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_metadata_from_returns_committed_records() {
-        let (_dir, ctrl) = committed_topic("fetched", "fetch_metadata seed").await;
+        let SeededController { dir: _dir, ctrl } =
+            committed_topic("fetched", "fetch_metadata seed").await;
 
         let addr = ctrl.controller_bound_addr();
         let resp = tokio::time::timeout(

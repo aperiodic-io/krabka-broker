@@ -45,9 +45,17 @@ pub(crate) struct PendingMarker {
     partition: Arc<Partition>,
     /// The leader and the leader epoch that the partition had installed when
     /// it took the marker.
-    term: (u64, i32),
+    term: MarkerTerm,
     /// The offset that the high watermark has to reach.
     end_offset: Offset,
+}
+
+/// The leader node and leader epoch a partition had installed when it took a
+/// marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MarkerTerm {
+    leader: u64,
+    epoch: i32,
 }
 
 /// Append `marker` to `partition` as its leader, as Kafka's
@@ -93,7 +101,10 @@ pub(crate) async fn append_marker_as_leader(
     }
     let end_offset =
         append_marker_and_materialize(partition, group_coordinator, topic, marker).await?;
-    let term = (transition.leader_node_id.0, transition.leader_epoch.0);
+    let term = MarkerTerm {
+        leader: transition.leader_node_id.0,
+        epoch: transition.leader_epoch.0,
+    };
     drop(transition);
     Ok(PendingMarker {
         partition: Arc::clone(partition),
@@ -118,7 +129,7 @@ impl PendingMarker {
     /// `min.insync.replicas`, as `Partition.checkEnoughReplicasReachOffset`
     /// answers.
     pub(crate) async fn committed(self, deadline: Instant) -> Result<(), BrokerError> {
-        let (leader, epoch) = self.term;
+        let MarkerTerm { leader, epoch } = self.term;
         let waited = self
             .partition
             .await_committed_while(self.end_offset, deadline, None, |partition, _| {

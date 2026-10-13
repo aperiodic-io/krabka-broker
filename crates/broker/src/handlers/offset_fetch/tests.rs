@@ -125,8 +125,21 @@ async fn named_topic_fetch_returns_committed_offset() {
 const TXN_RECORDS_AT: i64 = 10;
 const TXN_MARKER_AT: i64 = 11;
 
+/// A topic-partition that an unresolved transaction wrote an offset for.
+struct PendingKey {
+    topic: String,
+    partition: krabka_ids::PartitionIndex,
+}
+
+/// An offset that a committed transaction publishes.
+struct CommittedTxnOffset {
+    topic: String,
+    partition: i32,
+    entry: OffsetEntry,
+}
+
 #[derive(derive_more::From, derive_more::Into, Default)]
-struct TxnOffsetCommits(Vec<((String, i32), OffsetEntry)>);
+struct TxnOffsetCommits(Vec<CommittedTxnOffset>);
 
 // Mark (topic, partition) keys as written by an unresolved transaction, the
 // way `TxnOffsetCommit` does once its records are durable.
@@ -136,9 +149,8 @@ async fn seed_pending_txn_offsets(
     #[builder(default = "grp")] group: &'_ str,
     #[builder(into, default = krabka_ids :: ProducerId (91))] producer: krabka_ids::ProducerId,
     #[builder(into, default = Offset (TXN_RECORDS_AT))] written_at: Offset,
-    #[builder(default = vec ! [("orders" . into () , krabka_ids :: PartitionIndex (0))])] keys: Vec<
-        (String, krabka_ids::PartitionIndex),
-    >,
+    #[builder(default = vec ! [PendingKey { topic : "orders" . into () , partition : krabka_ids :: PartitionIndex (0) }])]
+    keys: Vec<PendingKey>,
 ) {
     let h = broker
         .group_coordinator
@@ -149,7 +161,7 @@ async fn seed_pending_txn_offsets(
         written_at: written_at.0,
         keys: keys
             .into_iter()
-            .map(|(topic, partition)| (topic, partition.0))
+            .map(|PendingKey { topic, partition }| (topic, partition.0))
             .collect(),
         reply: tx,
     })
@@ -180,7 +192,11 @@ async fn resolve_pending_txn_offsets(
     h.tx.send(GroupActorMessage::ResolveTxnOffsets {
         producer_id: producer.0,
         resolved_through: resolved_through.0,
-        committed: committed.0,
+        committed: committed
+            .0
+            .into_iter()
+            .map(|offset| ((offset.topic, offset.partition), offset.entry))
+            .collect(),
         reply: tx,
     })
     .await
@@ -320,7 +336,7 @@ const UNKNOWN_NAME: &str = "no-such-topic";
 /// An id that no topic in the topic-reference tables has.
 const UNKNOWN_ID: WireUuid = WireUuid([0x0b; 16]);
 
-use crate::handlers::test_support::{DenyTopics, TopicRef};
+use crate::handlers::test_support::{DenyTopics, TopicRef, WireTopic};
 
 /// Create the known topic and return its id. Seed a committed offset for
 /// `(KNOWN_NAME, 0)`, and one for the empty topic name, which a zero-id row
@@ -371,22 +387,35 @@ struct TopicReferenceSetup {
     partition: OffsetFetchResponsePartitions,
 }
 
+/// The request row for a topic reference and the response row it expects.
+struct TopicReferenceRows {
+    request: OffsetFetchRequestTopics,
+    response: OffsetFetchResponseTopics,
+}
+
 #[bon::builder]
 fn topic_reference_rows(
     #[builder(into, default = OffsetFetchVersion (9))] version: OffsetFetchVersion,
     #[builder(default = TopicRef :: KnownName)] topic: TopicRef,
     #[builder(default)] known_id: WireUuid,
     #[builder(default = no_offset_row (codes :: NONE))] partition: OffsetFetchResponsePartitions,
-) -> (OffsetFetchRequestTopics, OffsetFetchResponseTopics) {
+) -> TopicReferenceRows {
     let setup = TopicReferenceSetup {
         version,
         topic,
         known_id,
         partition,
     };
-    let (name, topic_id) = setup
-        .topic
-        .wire_reference((KNOWN_NAME, setup.known_id), (UNKNOWN_NAME, UNKNOWN_ID));
+    let WireTopic { name, id: topic_id } = setup.topic.wire_reference(
+        WireTopic {
+            name: KNOWN_NAME,
+            id: setup.known_id,
+        },
+        WireTopic {
+            name: UNKNOWN_NAME,
+            id: UNKNOWN_ID,
+        },
+    );
     let request = OffsetFetchRequestTopics {
         name: name.to_string(),
         topic_id,
@@ -405,7 +434,7 @@ fn topic_reference_rows(
         partitions: vec![setup.partition],
         ..Default::default()
     };
-    (request, response)
+    TopicReferenceRows { request, response }
 }
 
 fn groups_request(topics: Vec<OffsetFetchRequestTopics>) -> OffsetFetchRequest {
@@ -459,29 +488,42 @@ fn seeded_row() -> OffsetFetchResponsePartitions {
     }
 }
 
-type TopicReferenceCase = (OffsetFetchVersion, TopicRef, OffsetFetchResponsePartitions);
+struct TopicReferenceCase {
+    version: OffsetFetchVersion,
+    topic: TopicRef,
+    partition: OffsetFetchResponsePartitions,
+}
 
 fn unresolved_topic_reference_cases() -> [TopicReferenceCase; 2] {
     [
-        (
-            OffsetFetchVersion(10),
-            TopicRef::UnknownId,
-            no_offset_row(codes::UNKNOWN_TOPIC_ID),
-        ),
-        (
-            OffsetFetchVersion(10),
-            TopicRef::ZeroId,
-            no_offset_row(codes::UNKNOWN_TOPIC_ID),
-        ),
+        TopicReferenceCase {
+            version: OffsetFetchVersion(10),
+            topic: TopicRef::UnknownId,
+            partition: no_offset_row(codes::UNKNOWN_TOPIC_ID),
+        },
+        TopicReferenceCase {
+            version: OffsetFetchVersion(10),
+            topic: TopicRef::ZeroId,
+            partition: no_offset_row(codes::UNKNOWN_TOPIC_ID),
+        },
     ]
 }
 
-async fn topic_reference_broker(
-    authorizer: Arc<dyn Authorizer>,
-) -> (BrokerHandle, tempfile::TempDir, WireUuid) {
+/// A started broker seeded with the known topic, and the id of that topic.
+struct TopicReferenceBroker {
+    handle: BrokerHandle,
+    dir: tempfile::TempDir,
+    topic_id: WireUuid,
+}
+
+async fn topic_reference_broker(authorizer: Arc<dyn Authorizer>) -> TopicReferenceBroker {
     let (handle, directory) = start_group_broker_no_audit(authorizer).await;
     let topic_id = seed_topic_reference_group(&handle).await;
-    (handle, directory, topic_id)
+    TopicReferenceBroker {
+        handle,
+        dir: directory,
+        topic_id,
+    }
 }
 
 async fn seed_unresolved_name_offset(broker: &Broker) {
@@ -499,12 +541,24 @@ async fn run_topic_reference_table(
     authorizer: Arc<dyn Authorizer>,
     cases: Vec<TopicReferenceCase>,
 ) {
-    let (broker_handle, _dir, known_id) = topic_reference_broker(authorizer).await;
+    let TopicReferenceBroker {
+        handle: broker_handle,
+        dir: _dir,
+        topic_id: known_id,
+    } = topic_reference_broker(authorizer).await;
     let broker = broker_handle.broker_arc_for_test();
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
-    for (version, topic, partition) in cases {
-        let (request_row, response_row) = topic_reference_rows()
+    for TopicReferenceCase {
+        version,
+        topic,
+        partition,
+    } in cases
+    {
+        let TopicReferenceRows {
+            request: request_row,
+            response: response_row,
+        } = topic_reference_rows()
             .version(version)
             .topic(topic)
             .known_id(known_id)
@@ -526,13 +580,21 @@ async fn topic_row_error_follows_version_and_topic_reference() {
     run_topic_reference_table(
         Arc::new(AllowAllAuthorizer),
         vec![
-            (OffsetFetchVersion(9), TopicRef::KnownName, seeded_row()),
-            (
-                OffsetFetchVersion(9),
-                TopicRef::UnknownName,
-                no_offset_row(codes::NONE),
-            ),
-            (OffsetFetchVersion(10), TopicRef::KnownId, seeded_row()),
+            TopicReferenceCase {
+                version: OffsetFetchVersion(9),
+                topic: TopicRef::KnownName,
+                partition: seeded_row(),
+            },
+            TopicReferenceCase {
+                version: OffsetFetchVersion(9),
+                topic: TopicRef::UnknownName,
+                partition: no_offset_row(codes::NONE),
+            },
+            TopicReferenceCase {
+                version: OffsetFetchVersion(10),
+                topic: TopicRef::KnownId,
+                partition: seeded_row(),
+            },
         ]
         .into_iter()
         .chain(unresolved_topic_reference_cases())
@@ -547,16 +609,16 @@ async fn unresolved_id_answers_before_topic_authorization() {
     run_topic_reference_table(
         Arc::new(DenyTopics),
         vec![
-            (
-                OffsetFetchVersion(9),
-                TopicRef::KnownName,
-                no_offset_row(codes::TOPIC_AUTHORIZATION_FAILED),
-            ),
-            (
-                OffsetFetchVersion(10),
-                TopicRef::KnownId,
-                no_offset_row(codes::TOPIC_AUTHORIZATION_FAILED),
-            ),
+            TopicReferenceCase {
+                version: OffsetFetchVersion(9),
+                topic: TopicRef::KnownName,
+                partition: no_offset_row(codes::TOPIC_AUTHORIZATION_FAILED),
+            },
+            TopicReferenceCase {
+                version: OffsetFetchVersion(10),
+                topic: TopicRef::KnownId,
+                partition: no_offset_row(codes::TOPIC_AUTHORIZATION_FAILED),
+            },
         ]
         .into_iter()
         .chain(unresolved_topic_reference_cases())
@@ -571,16 +633,25 @@ async fn unresolved_id_answers_before_topic_authorization() {
 #[tokio::test]
 async fn refused_topics_follow_the_answered_topics() {
     const VERSION: i16 = 10;
-    let (broker_handle, _dir, known_id) =
-        topic_reference_broker(Arc::new(AllowAllAuthorizer)).await;
+    let TopicReferenceBroker {
+        handle: broker_handle,
+        dir: _dir,
+        topic_id: known_id,
+    } = topic_reference_broker(Arc::new(AllowAllAuthorizer)).await;
     let broker = broker_handle.broker_arc_for_test();
-    let (zero_request, zero_response) = topic_reference_rows()
+    let TopicReferenceRows {
+        request: zero_request,
+        response: zero_response,
+    } = topic_reference_rows()
         .version(VERSION)
         .topic(TopicRef::ZeroId)
         .known_id(known_id)
         .partition(no_offset_row(codes::UNKNOWN_TOPIC_ID))
         .call();
-    let (known_request, known_response) = topic_reference_rows()
+    let TopicReferenceRows {
+        request: known_request,
+        response: known_response,
+    } = topic_reference_rows()
         .version(VERSION)
         .topic(TopicRef::KnownId)
         .known_id(known_id)
@@ -639,12 +710,18 @@ fn legacy_refused_row() -> OffsetFetchResponsePartition {
     }
 }
 
+/// A topic name and its one legacy partition row.
+struct LegacyTopic<'a> {
+    name: &'a str,
+    partition: OffsetFetchResponsePartition,
+}
+
 /// A legacy (v0 to v7) response that carries one partition row per topic.
-fn legacy_response(topics: Vec<(&str, OffsetFetchResponsePartition)>) -> OffsetFetchResponse {
+fn legacy_response(topics: Vec<LegacyTopic<'_>>) -> OffsetFetchResponse {
     OffsetFetchResponse {
         topics: topics
             .into_iter()
-            .map(|(name, partition)| OffsetFetchResponseTopic {
+            .map(|LegacyTopic { name, partition }| OffsetFetchResponseTopic {
                 name: name.to_string(),
                 partitions: vec![partition],
                 ..Default::default()
@@ -707,15 +784,26 @@ fn named_topic(name: &str, partition: OffsetFetchResponsePartitions) -> OffsetFe
     }
 }
 
+/// One request, its version, and the whole response it expects.
+struct ResponseCase<'a> {
+    case: &'a str,
+    version: i16,
+    request: OffsetFetchRequest,
+    response: OffsetFetchResponse,
+}
+
 /// Sends each case's request and compares every whole response with the one
 /// that the case expects.
-async fn run_response_table(
-    broker: &Broker,
-    cases: Vec<(&str, i16, OffsetFetchRequest, OffsetFetchResponse)>,
-) {
+async fn run_response_table(broker: &Broker, cases: Vec<ResponseCase<'_>>) {
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
-    for (case, version, request, response) in cases {
+    for ResponseCase {
+        case,
+        version,
+        request,
+        response,
+    } in cases
+    {
         actual.push((case, fetch(broker, version, &request).await));
         expected.push((case, response));
     }
@@ -728,45 +816,57 @@ async fn run_response_table(
 /// it with `TOPIC_AUTHORIZATION_FAILED`.
 #[tokio::test]
 async fn topics_are_authorized_with_describe_and_fetch_all_hides_refused_topics() {
-    let (broker_handle, _dir, _known_id) =
-        topic_reference_broker(Arc::new(DescribeKnownTopic)).await;
+    let TopicReferenceBroker {
+        handle: broker_handle,
+        dir: _dir,
+        topic_id: _known_id,
+    } = topic_reference_broker(Arc::new(DescribeKnownTopic)).await;
     let broker = broker_handle.broker_arc_for_test();
     seed_unresolved_name_offset(&broker).await;
     let both: &[&str] = &[UNKNOWN_NAME, KNOWN_NAME];
     run_response_table(&broker, vec![
-        (
-            "v7 explicit list",
-            7,
-            legacy_request(Some(both)),
-            legacy_response(vec![
-                (KNOWN_NAME, legacy_seeded_row()),
-                (UNKNOWN_NAME, legacy_refused_row()),
+        ResponseCase {
+            case: "v7 explicit list",
+            version: 7,
+            request: legacy_request(Some(both)),
+            response: legacy_response(vec![
+                LegacyTopic {
+                    name: KNOWN_NAME,
+                    partition: legacy_seeded_row(),
+                },
+                LegacyTopic {
+                    name: UNKNOWN_NAME,
+                    partition: legacy_refused_row(),
+                },
             ]),
-        ),
-        (
-            "v7 fetch-all",
-            7,
-            legacy_request(None),
-            legacy_response(vec![(KNOWN_NAME, legacy_seeded_row())]),
-        ),
-        (
-            "v9 explicit list",
-            9,
-            named_groups_request(Some(both)),
-            groups_response(vec![
+        },
+        ResponseCase {
+            case: "v7 fetch-all",
+            version: 7,
+            request: legacy_request(None),
+            response: legacy_response(vec![LegacyTopic {
+                name: KNOWN_NAME,
+                partition: legacy_seeded_row(),
+            }]),
+        },
+        ResponseCase {
+            case: "v9 explicit list",
+            version: 9,
+            request: named_groups_request(Some(both)),
+            response: groups_response(vec![
                 named_topic(KNOWN_NAME, seeded_row()),
                 named_topic(
                     UNKNOWN_NAME,
                     no_offset_row(codes::TOPIC_AUTHORIZATION_FAILED),
                 ),
             ]),
-        ),
-        (
-            "v9 fetch-all",
-            9,
-            named_groups_request(None),
-            groups_response(vec![named_topic(KNOWN_NAME, seeded_row())]),
-        ),
+        },
+        ResponseCase {
+            case: "v9 fetch-all",
+            version: 9,
+            request: named_groups_request(None),
+            response: groups_response(vec![named_topic(KNOWN_NAME, seeded_row())]),
+        },
     ])
     .await;
     broker_handle.shutdown().await;
@@ -777,8 +877,11 @@ async fn topics_are_authorized_with_describe_and_fetch_all_hides_refused_topics(
 /// topics come in name order.
 #[tokio::test]
 async fn fetch_all_leaves_out_topics_without_an_id_at_v10() {
-    let (broker_handle, _dir, known_id) =
-        topic_reference_broker(Arc::new(AllowAllAuthorizer)).await;
+    let TopicReferenceBroker {
+        handle: broker_handle,
+        dir: _dir,
+        topic_id: known_id,
+    } = topic_reference_broker(Arc::new(AllowAllAuthorizer)).await;
     let broker = broker_handle.broker_arc_for_test();
     seed_unresolved_name_offset(&broker).await;
     let offset_row = |committed_offset| OffsetFetchResponsePartitions {
@@ -786,26 +889,26 @@ async fn fetch_all_leaves_out_topics_without_an_id_at_v10() {
         ..seeded_row()
     };
     run_response_table(&broker, vec![
-        (
-            "v9 fetch-all",
-            9,
-            named_groups_request(None),
-            groups_response(vec![
+        ResponseCase {
+            case: "v9 fetch-all",
+            version: 9,
+            request: named_groups_request(None),
+            response: groups_response(vec![
                 named_topic("", offset_row(7)),
                 named_topic(UNKNOWN_NAME, offset_row(9)),
                 named_topic(KNOWN_NAME, seeded_row()),
             ]),
-        ),
-        (
-            "v10 fetch-all",
-            10,
-            named_groups_request(None),
-            groups_response(vec![OffsetFetchResponseTopics {
+        },
+        ResponseCase {
+            case: "v10 fetch-all",
+            version: 10,
+            request: named_groups_request(None),
+            response: groups_response(vec![OffsetFetchResponseTopics {
                 topic_id: known_id,
                 partitions: vec![seeded_row()],
                 ..Default::default()
             }]),
-        ),
+        },
     ])
     .await;
     broker_handle.shutdown().await;
@@ -1024,7 +1127,11 @@ async fn require_stable(version: i16, shape: RequireStableShape) {
     resolve_pending_txn_offsets()
         .broker(&broker)
         .producer(PRODUCER_ID)
-        .committed(vec![(("orders".to_string(), 0), committed_entry(77))])
+        .committed(vec![CommittedTxnOffset {
+            topic: "orders".to_string(),
+            partition: 0,
+            entry: committed_entry(77),
+        }])
         .call()
         .await;
     let resolved = fetch(&broker, version, &strict_request).await;

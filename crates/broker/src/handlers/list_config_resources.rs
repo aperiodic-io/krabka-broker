@@ -201,9 +201,21 @@ mod tests {
 
     const LISTENER: &str = "PLAINTEXT";
 
+    /// A resource that a listing names: its type and name.
+    #[derive(Clone, Copy)]
+    struct ListedResource<'a> {
+        resource_type: i8,
+        name: &'a str,
+    }
+
     /// A case name, the request version, its `resource_types`, and the
-    /// `(type, name)` rows expected in order.
-    type Case<'a> = (&'a str, i16, Vec<i8>, Vec<(i8, &'a str)>);
+    /// rows expected in order.
+    struct Case<'a> {
+        name: &'a str,
+        version: i16,
+        requested: Vec<i8>,
+        expected: Vec<ListedResource<'a>>,
+    }
 
     fn broker_on(id: u64, listener: &str) -> MetadataRecord {
         MetadataRecord::V1BrokerRegistration(BrokerRegistrationRecord {
@@ -247,15 +259,27 @@ mod tests {
         img
     }
 
-    fn rows(expected: &[(i8, &str)]) -> Vec<ConfigResource> {
+    const fn listed(resource_type: i8, name: &str) -> ListedResource<'_> {
+        ListedResource {
+            resource_type,
+            name,
+        }
+    }
+
+    fn rows(expected: &[ListedResource<'_>]) -> Vec<ConfigResource> {
         expected
             .iter()
-            .map(|&(resource_type, name)| {
-                tagged_wire!(ConfigResource {
-                    resource_name: name.to_string(),
-                    resource_type,
-                })
-            })
+            .map(
+                |&ListedResource {
+                     resource_type,
+                     name,
+                 }| {
+                    tagged_wire!(ConfigResource {
+                        resource_name: name.to_string(),
+                        resource_type,
+                    })
+                },
+            )
             .collect()
     }
 
@@ -278,60 +302,76 @@ mod tests {
     fn collect_resources_matches_kafka_filter_and_order() {
         let img = populated_image();
         let all = [
-            (RESOURCE_TYPE_GROUP, "g-1"),
-            (RESOURCE_TYPE_CLIENT_METRICS, "sub-1"),
-            (RESOURCE_TYPE_BROKER_LOGGER, "2"),
-            (RESOURCE_TYPE_BROKER_LOGGER, "10"),
-            (RESOURCE_TYPE_BROKER, "2"),
-            (RESOURCE_TYPE_BROKER, "10"),
-            (RESOURCE_TYPE_TOPIC, "t-a"),
-            (RESOURCE_TYPE_TOPIC, "t-b"),
+            listed(RESOURCE_TYPE_GROUP, "g-1"),
+            listed(RESOURCE_TYPE_CLIENT_METRICS, "sub-1"),
+            listed(RESOURCE_TYPE_BROKER_LOGGER, "2"),
+            listed(RESOURCE_TYPE_BROKER_LOGGER, "10"),
+            listed(RESOURCE_TYPE_BROKER, "2"),
+            listed(RESOURCE_TYPE_BROKER, "10"),
+            listed(RESOURCE_TYPE_TOPIC, "t-a"),
+            listed(RESOURCE_TYPE_TOPIC, "t-b"),
         ];
         let cases: Vec<Case<'_>> = vec![
-            ("v0 lists client metrics", 0, vec![], vec![(
-                RESOURCE_TYPE_CLIENT_METRICS,
-                "sub-1",
-            )]),
-            ("v1 empty filter lists every type", 1, vec![], all.to_vec()),
-            (
-                "v1 repeated topic type lists once",
-                1,
-                vec![RESOURCE_TYPE_TOPIC, RESOURCE_TYPE_TOPIC],
-                vec![(RESOURCE_TYPE_TOPIC, "t-a"), (RESOURCE_TYPE_TOPIC, "t-b")],
-            ),
-            (
-                "v1 filter order does not change row order",
-                1,
-                vec![
+            Case {
+                name: "v0 lists client metrics",
+                version: 0,
+                requested: vec![],
+                expected: vec![listed(RESOURCE_TYPE_CLIENT_METRICS, "sub-1")],
+            },
+            Case {
+                name: "v1 empty filter lists every type",
+                version: 1,
+                requested: vec![],
+                expected: all.to_vec(),
+            },
+            Case {
+                name: "v1 repeated topic type lists once",
+                version: 1,
+                requested: vec![RESOURCE_TYPE_TOPIC, RESOURCE_TYPE_TOPIC],
+                expected: vec![
+                    listed(RESOURCE_TYPE_TOPIC, "t-a"),
+                    listed(RESOURCE_TYPE_TOPIC, "t-b"),
+                ],
+            },
+            Case {
+                name: "v1 filter order does not change row order",
+                version: 1,
+                requested: vec![
                     RESOURCE_TYPE_TOPIC,
                     RESOURCE_TYPE_BROKER,
                     RESOURCE_TYPE_GROUP,
                 ],
-                vec![
-                    (RESOURCE_TYPE_GROUP, "g-1"),
-                    (RESOURCE_TYPE_BROKER, "2"),
-                    (RESOURCE_TYPE_BROKER, "10"),
-                    (RESOURCE_TYPE_TOPIC, "t-a"),
-                    (RESOURCE_TYPE_TOPIC, "t-b"),
+                expected: vec![
+                    listed(RESOURCE_TYPE_GROUP, "g-1"),
+                    listed(RESOURCE_TYPE_BROKER, "2"),
+                    listed(RESOURCE_TYPE_BROKER, "10"),
+                    listed(RESOURCE_TYPE_TOPIC, "t-a"),
+                    listed(RESOURCE_TYPE_TOPIC, "t-b"),
                 ],
-            ),
-            (
-                "v1 broker logger names one resource per node on the listener",
-                1,
-                vec![RESOURCE_TYPE_BROKER_LOGGER],
-                vec![
-                    (RESOURCE_TYPE_BROKER_LOGGER, "2"),
-                    (RESOURCE_TYPE_BROKER_LOGGER, "10"),
+            },
+            Case {
+                name: "v1 broker logger names one resource per node on the listener",
+                version: 1,
+                requested: vec![RESOURCE_TYPE_BROKER_LOGGER],
+                expected: vec![
+                    listed(RESOURCE_TYPE_BROKER_LOGGER, "2"),
+                    listed(RESOURCE_TYPE_BROKER_LOGGER, "10"),
                 ],
-            ),
-            (
-                "v1 client metrics filter",
-                1,
-                vec![RESOURCE_TYPE_CLIENT_METRICS],
-                vec![(RESOURCE_TYPE_CLIENT_METRICS, "sub-1")],
-            ),
+            },
+            Case {
+                name: "v1 client metrics filter",
+                version: 1,
+                requested: vec![RESOURCE_TYPE_CLIENT_METRICS],
+                expected: vec![listed(RESOURCE_TYPE_CLIENT_METRICS, "sub-1")],
+            },
         ];
-        for (name, version, requested, expected) in cases {
+        for Case {
+            name,
+            version,
+            requested,
+            expected,
+        } in cases
+        {
             let out = collect_resources(&img, version, &requested, LISTENER);
             assert2::check!(out == rows(&expected), "case {name}");
         }

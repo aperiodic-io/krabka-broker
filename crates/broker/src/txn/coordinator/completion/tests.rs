@@ -19,11 +19,17 @@ fn only_a_prepare_state_has_a_completion() {
     let cases = [
         (
             TxnState::PrepareCommit,
-            Some((MarkerType::Commit, TxnState::CompleteCommit)),
+            Some(PreparedCompletion {
+                marker: MarkerType::Commit,
+                complete: TxnState::CompleteCommit,
+            }),
         ),
         (
             TxnState::PrepareAbort,
-            Some((MarkerType::Abort, TxnState::CompleteAbort)),
+            Some(PreparedCompletion {
+                marker: MarkerType::Abort,
+                complete: TxnState::CompleteAbort,
+            }),
         ),
         (TxnState::Empty, None),
         (TxnState::Ongoing, None),
@@ -144,6 +150,12 @@ async fn loaded_coordinator(
     coordinator
 }
 
+/// A coordinator and the tempdir that must outlive it.
+struct SeededCoordinator {
+    coordinator: Arc<TxnCoordinator>,
+    _dir: TempDir,
+}
+
 /// A coordinator that persisted `entry` as the leader of
 /// `__transaction_state-0`, after which `leader` was elected at a higher
 /// leader epoch. `data_partition` hosts the data partition locally, so a
@@ -152,7 +164,7 @@ async fn coordinator(
     entry: TxnEntry,
     leader: NodeId,
     data_partition: DataPartitionPresence,
-) -> (Arc<TxnCoordinator>, TempDir) {
+) -> SeededCoordinator {
     let dir = tempfile::tempdir().expect("tempdir");
     let coordinator = loaded_coordinator(dir.path(), data_partition).await;
     coordinator
@@ -166,7 +178,10 @@ async fn coordinator(
         .await
         .finished()
         .await;
-    (coordinator, dir)
+    SeededCoordinator {
+        coordinator,
+        _dir: dir,
+    }
 }
 
 async fn current(coordinator: &TxnCoordinator) -> Option<TxnEntry> {
@@ -231,7 +246,7 @@ async fn one_attempt_completes_retries_or_leaves_the_entry_alone() {
         },
     ];
     for case in cases {
-        let (coordinator, _dir) =
+        let SeededCoordinator { coordinator, _dir } =
             coordinator(case.entry.clone(), case.leader, case.data_partition).await;
         let attempt = coordinator
             .complete_prepared_transaction(TID, TxnVersion::Verified)
@@ -290,7 +305,7 @@ async fn a_client_transaction_version_zero_completion_stays_classic() {
 
 #[tokio::test]
 async fn recovery_queues_every_prepared_transaction_for_completion() {
-    let (coordinator, _dir) = coordinator(
+    let SeededCoordinator { coordinator, _dir } = coordinator(
         prepared_entry(TxnState::PrepareCommit),
         NodeId(1),
         DataPartitionPresence::Hosted,

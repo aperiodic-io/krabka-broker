@@ -41,7 +41,7 @@ fn main() {
     };
 
     let mut emitted = 0_usize;
-    for (name, digest) in source.lines().filter_map(pinned_image) {
+    for ImagePin { name, digest } in source.lines().filter_map(pinned_image) {
         println!(
             "cargo::rustc-env=KRABKA_PINNED_IMAGE_{}={digest}",
             name.to_uppercase()
@@ -62,16 +62,24 @@ fn main() {
     }
 }
 
-/// The repository name and digest of one `pull_image` tuple, if this is one.
+/// The name and digest of one pinned container image.
+struct ImagePin<'a> {
+    name: &'a str,
+    digest: &'a str,
+}
+
+/// The name and digest of one `pull_image` tuple, if this is one.
 ///
 /// The tuples read `("name", "registry", "repository", "tag", "sha256:...")`,
 /// so a line qualifies when it holds exactly five quoted fields and the last is
 /// a digest. Anything else -- a comment, the loop header, an unrelated list --
 /// is not a pin and is skipped.
-fn pinned_image(line: &str) -> Option<(&str, &str)> {
+fn pinned_image(line: &str) -> Option<ImagePin<'_>> {
     let fields: Vec<&str> = line.split('"').skip(1).step_by(2).collect();
     let [name, _registry, _repository, _tag, digest] = fields[..] else {
         return None;
     };
-    digest.starts_with("sha256:").then_some((name, digest))
+    digest
+        .starts_with("sha256:")
+        .then_some(ImagePin { name, digest })
 }

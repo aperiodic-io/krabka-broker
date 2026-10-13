@@ -7,7 +7,7 @@ use {
     super::{
         framing::{NextBatch, PartitionPayload, V2_HEADER_LEN, next_batch},
         owned_decode::decode_owned_batch,
-        topic_settings::TimestampPolicy,
+        topic_settings::{TimestampPolicy, TimestampWindow},
     },
     crate::{codes, metrics::BrokerMetrics, time_util::now_ms},
     bytes::Bytes,
@@ -354,7 +354,7 @@ fn timestamp_error(
     index: i32,
     offset: i64,
     timestamp: i64,
-    window: (i64, i64),
+    window: TimestampWindow,
 ) -> BatchIndexAndErrorMessage {
     BatchIndexAndErrorMessage {
         batch_index: index,
@@ -363,11 +363,11 @@ fn timestamp_error(
     }
 }
 
-fn invalid_timestamp_message(offset: i64, timestamp: i64, window: (i64, i64)) -> String {
+fn invalid_timestamp_message(offset: i64, timestamp: i64, window: TimestampWindow) -> String {
     format!(
         "Timestamp {timestamp} of message with offset {offset} is out of range. The timestamp \
          should be within [{}, {}]",
-        window.0, window.1
+        window.low, window.high
     )
 }
 

@@ -493,30 +493,36 @@ mod tests {
         }
     }
 
+    /// A log and the temporary directory it lives in, which must outlive it.
+    struct LogInDir {
+        log: KraftLog,
+        dir: tempfile::TempDir,
+    }
+
     #[bon::builder]
     fn seeded_log(
         #[builder(into, default = KraftSeedCount (5))] records: KraftSeedCount,
-    ) -> (KraftLog, tempfile::TempDir) {
+    ) -> LogInDir {
         let setup = KraftLogSeedSetup { records };
-        let (mut log, dir) = open_tmp();
+        let LogInDir { mut log, dir } = open_tmp();
         append_seeded_records()
             .log(&mut log)
             .records(setup.records)
             .call();
-        (log, dir)
+        LogInDir { log, dir }
     }
 
-    fn open_tmp() -> (KraftLog, tempfile::TempDir) {
+    fn open_tmp() -> LogInDir {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("open");
-        (log, dir)
+        LogInDir { log, dir }
     }
 
     krabka_macros::epoch_record_batch_fixture!(batch);
 
     #[test]
     fn opens_empty_at_offset_zero() {
-        let (log, _dir) = open_tmp();
+        let LogInDir { log, dir: _dir } = open_tmp();
         check!(
             (
                 log.log_start_offset().0,
@@ -528,7 +534,7 @@ mod tests {
 
     #[test]
     fn append_assigns_sequential_offsets_and_reads_back() {
-        let (mut log, _dir) = open_tmp();
+        let LogInDir { mut log, dir: _dir } = open_tmp();
         let off0 = log.append(&mut batch(0, 1, b"a"), 0).unwrap();
         let off1 = log.append(&mut batch(0, 1, b"b"), 0).unwrap();
         assert2::assert!((off0, off1, log.log_end_offset()) == (Offset(0), Offset(1), Offset(2)));
@@ -544,7 +550,7 @@ mod tests {
 
     #[test]
     fn append_stamps_the_batch_create_time_the_snapshot_header_reads_back() {
-        let (mut log, _dir) = open_tmp();
+        let LogInDir { mut log, dir: _dir } = open_tmp();
         // Two batches with distinct create-times, committed one at a time: the
         // KIP-630 header timestamp names the last batch a snapshot *contains*,
         // so it follows the high watermark rather than the log end.
@@ -576,7 +582,7 @@ mod tests {
 
     #[test]
     fn no_contained_record_has_no_timestamp() {
-        let (mut log, _dir) = open_tmp();
+        let LogInDir { mut log, dir: _dir } = open_tmp();
         // Nothing committed yet: an empty log, and a log whose records are all
         // still uncommitted, both have no last contained record to name.
         let empty = log.last_committed_timestamp_ms();
@@ -602,7 +608,7 @@ mod tests {
 
     #[test]
     fn append_return_matches_assigned_base_and_advances_public_end_offset() {
-        let (mut log, _dir) = open_tmp();
+        let LogInDir { mut log, dir: _dir } = open_tmp();
 
         let first = log.append(&mut batch(0, 1, b"a"), 0).unwrap();
         let second = log.append(&mut batch(0, 1, b"b"), 0).unwrap();
@@ -624,7 +630,7 @@ mod tests {
 
     #[test]
     fn public_hwm_accessor_tracks_committed_offset_after_advance_and_snapshot() {
-        let (mut log, _dir) = seeded_log().records(3).call();
+        let LogInDir { mut log, dir: _dir } = seeded_log().records(3).call();
         log.advance_hwm(Offset(2));
         assert2::assert!(log.hwm() == 2);
 
@@ -640,7 +646,7 @@ mod tests {
 
     #[test]
     fn append_at_preserves_leader_offset() {
-        let (mut log, _dir) = open_tmp();
+        let LogInDir { mut log, dir: _dir } = open_tmp();
         // follower applies a leader-assigned batch at offset 0
         log.append_at(&mut batch(0, 2, b"x"), Offset(0)).unwrap();
         assert2::assert!(log.log_end_offset().0 == 1);
@@ -651,7 +657,7 @@ mod tests {
 
     #[test]
     fn logview_reports_end_offset_and_last_epoch() {
-        let (mut log, _dir) = open_tmp();
+        let LogInDir { mut log, dir: _dir } = open_tmp();
         log.append(&mut batch(0, 1, b"a"), 0).unwrap();
         log.append(&mut batch(0, 3, b"b"), 0).unwrap(); // epoch jumps to 3
         assert2::assert!(LogView::end_offset(&log) == 2);
@@ -660,7 +666,7 @@ mod tests {
 
     #[test]
     fn logview_end_offset_for_epoch_follows_kafka() {
-        let (mut log, _dir) = open_tmp();
+        let LogInDir { mut log, dir: _dir } = open_tmp();
         log.append(&mut batch(0, 2, b"a"), 0).unwrap(); // epoch 2 @ [0,1)
         log.append(&mut batch(0, 4, b"b"), 0).unwrap(); // epoch 4 @ [1,2)
         let at = |offset, epoch| LogOffsetMetadata { offset, epoch };
@@ -677,13 +683,13 @@ mod tests {
 
     #[test]
     fn empty_log_last_epoch_is_zero() {
-        let (log, _dir) = open_tmp();
+        let LogInDir { log, dir: _dir } = open_tmp();
         assert2::assert!(LogView::last_epoch(&log) == 0);
     }
 
     #[test]
     fn read_committed_never_returns_bytes_past_hwm() {
-        let (mut log, _dir) = seeded_log().call(); // offsets 0..5
+        let LogInDir { mut log, dir: _dir } = seeded_log().call(); // offsets 0..5
         log.advance_hwm(Offset(3));
         let r = log.read_committed(Offset(0), TEST_READ_BUDGET).unwrap();
         // bytes contain only batches with base_offset < 3 (offsets 0,1,2)
@@ -696,7 +702,7 @@ mod tests {
 
     #[test]
     fn advance_hwm_is_monotonic_and_clamped_to_log_end() {
-        let (mut log, _dir) = open_tmp();
+        let LogInDir { mut log, dir: _dir } = open_tmp();
         log.append(&mut batch(0, 1, b"x"), 0).unwrap(); // log_end = 1
         log.advance_hwm(Offset(5)); // clamp to log_end
         assert2::assert!(log.hwm() == 1);
@@ -706,7 +712,7 @@ mod tests {
 
     #[test]
     fn prune_to_advances_log_start_and_is_noop_when_behind() {
-        let (mut log, _dir) = seeded_log().call();
+        let LogInDir { mut log, dir: _dir } = seeded_log().call();
         log.advance_hwm(log.log_end_offset());
         assert2::assert!(log.log_start_offset() == 0);
         log.prune_to(Offset(3)).unwrap();
@@ -717,7 +723,7 @@ mod tests {
 
     #[test]
     fn timestamp_below_returns_none_for_out_of_bounds() {
-        let (mut log, _dir) = seeded_log().call();
+        let LogInDir { mut log, dir: _dir } = seeded_log().call();
         log.advance_hwm(log.log_end_offset());
         log.prune_to(Offset(3)).unwrap();
 
@@ -747,7 +753,7 @@ mod tests {
 
     #[test]
     fn install_snapshot_resets_log_to_empty_at_offset() {
-        let (mut log, _dir) = seeded_log().records(4).call();
+        let LogInDir { mut log, dir: _dir } = seeded_log().records(4).call();
         log.install_snapshot(Offset(100)).unwrap();
         check!(
             (
@@ -762,7 +768,7 @@ mod tests {
 
     #[test]
     fn truncate_to_drops_log_end_and_hwm() {
-        let (mut log, _dir) = seeded_log().call();
+        let LogInDir { mut log, dir: _dir } = seeded_log().call();
         log.advance_hwm(Offset(5));
         log.truncate_to(Offset(2)).unwrap();
         assert2::assert!(log.log_end_offset().0 == 2);
@@ -772,7 +778,7 @@ mod tests {
     #[test]
     fn truncation_inside_a_batch_clamps_hwm_to_the_retained_end() {
         for hwm in [0, 1, 2, 3] {
-            let (mut log, dir) = open_tmp();
+            let LogInDir { mut log, dir } = open_tmp();
             log.append(&mut batch(0, 1, b"retained"), 0).unwrap();
             let mut tail = batch(0, 1, b"discarded");
             tail.last_offset_delta = 1;
@@ -798,7 +804,7 @@ mod tests {
     /// start: it truncates and moves the start down onto the target.
     #[test]
     fn truncate_below_log_start_lowers_the_log_start() {
-        let (mut log, _dir) = seeded_log().records(4).call();
+        let LogInDir { mut log, dir: _dir } = seeded_log().records(4).call();
         log.prune_to(Offset(2)).unwrap();
 
         log.truncate_to(Offset(1)).unwrap();
@@ -904,18 +910,18 @@ mod tests {
     const HIGH_WATERMARK_V0_FIXTURE: &[u8] = b"0\n3\n";
 
     /// A log with four committed one-record batches, its high watermark at 3.
-    fn log_with_hwm_three() -> (KraftLog, tempfile::TempDir) {
-        let (mut log, dir) = open_tmp();
+    fn log_with_hwm_three() -> LogInDir {
+        let LogInDir { mut log, dir } = open_tmp();
         for _ in 0..4 {
             log.append(&mut batch(0, 1, b"x"), 0).expect("append");
         }
         log.advance_hwm(Offset(3));
-        (log, dir)
+        LogInDir { log, dir }
     }
 
     #[test]
     fn the_high_watermark_file_matches_the_version_zero_fixture() {
-        let (log, dir) = log_with_hwm_three();
+        let LogInDir { log, dir } = log_with_hwm_three();
         drop(log);
 
         let written = std::fs::read(dir.path().join(HIGH_WATERMARK_FILE)).expect("read");
@@ -958,27 +964,49 @@ mod tests {
     /// is merely damaged is a cache miss, and the log start is used.
     #[test]
     fn open_refuses_an_unknown_high_watermark_version_and_drops_a_damaged_one() {
-        let cases: [(&str, &[u8], Result<Offset, PersistedFormatError>); 5] = [
-            ("current version", HIGH_WATERMARK_V0_FIXTURE, Ok(Offset(3))),
-            (
-                "0.x layout",
-                b"3",
-                Err(PersistedFormatError::MissingVersion),
-            ),
-            (
-                "future version",
-                b"7\n3\n",
-                Err(PersistedFormatError::UnsupportedVersion {
+        struct Scenario {
+            case: &'static str,
+            contents: &'static [u8],
+            want: Result<Offset, PersistedFormatError>,
+        }
+        let cases = [
+            Scenario {
+                case: "current version",
+                contents: HIGH_WATERMARK_V0_FIXTURE,
+                want: Ok(Offset(3)),
+            },
+            Scenario {
+                case: "0.x layout",
+                contents: b"3",
+                want: Err(PersistedFormatError::MissingVersion),
+            },
+            Scenario {
+                case: "future version",
+                contents: b"7\n3\n",
+                want: Err(PersistedFormatError::UnsupportedVersion {
                     found: 7,
                     min: 0,
                     max: 0,
                 }),
-            ),
-            ("empty after a crash", b"", Ok(Offset(0))),
-            ("not utf-8", b"0\n\xff\n", Ok(Offset(0))),
+            },
+            Scenario {
+                case: "empty after a crash",
+                contents: b"",
+                want: Ok(Offset(0)),
+            },
+            Scenario {
+                case: "not utf-8",
+                contents: b"0\n\xff\n",
+                want: Ok(Offset(0)),
+            },
         ];
-        for (case, contents, want) in cases {
-            let (log, dir) = log_with_hwm_three();
+        for Scenario {
+            case,
+            contents,
+            want,
+        } in cases
+        {
+            let LogInDir { log, dir } = log_with_hwm_three();
             drop(log);
             let path = dir.path().join(HIGH_WATERMARK_FILE);
             std::fs::write(&path, contents).expect("write the high-watermark file");

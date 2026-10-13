@@ -55,8 +55,14 @@ fn listeners() -> &'static support::JvmListeners {
     LISTENERS.get_or_init(support::JvmListeners::allocate)
 }
 
+/// A running broker and the directory that backs it.
+struct StartedBroker {
+    broker: BrokerHandle,
+    dir: tempfile::TempDir,
+}
+
 /// Boot a single-node in-process broker that self-bootstraps its own quorum.
-async fn start_broker() -> (BrokerHandle, tempfile::TempDir) {
+async fn start_broker() -> StartedBroker {
     support::init_tracing();
     let dir = tempfile::tempdir().expect("tempdir");
     let listeners = listeners();
@@ -80,7 +86,10 @@ async fn start_broker() -> (BrokerHandle, tempfile::TempDir) {
     let handle = Broker::start(config).await.expect("start broker");
     handle.wait_until_controller_leader().await;
     handle.wait_until_brokers_registered(1).await;
-    (handle, dir)
+    StartedBroker {
+        broker: handle,
+        dir,
+    }
 }
 
 /// `AdminClient` properties every tool container is given.
@@ -136,7 +145,10 @@ fn combined(output: &std::process::Output) -> String { support::combined_output(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires Docker"]
 async fn kafka_configs_describes_and_alters_broker_loggers() {
-    let (_broker, _dir) = start_broker().await;
+    let StartedBroker {
+        broker: _broker,
+        dir: _dir,
+    } = start_broker().await;
 
     let all = kafka_configs(&["--describe", "--all"]).await;
     assert!(

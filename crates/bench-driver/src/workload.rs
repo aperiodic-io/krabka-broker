@@ -53,7 +53,13 @@ use {
 /// histogram locally, so the hot path holds no shared locks. `run()` then merges
 /// them into the `samples` series.
 type AckResult = Result<RecordMetadata, ProducerError>;
-type AckFuture = Pin<Box<dyn Future<Output = (AckResult, Instant)> + Send>>;
+type AckFuture = Pin<Box<dyn Future<Output = SettledAck> + Send>>;
+
+/// A send that settled, with the instant it was enqueued.
+struct SettledAck {
+    result: AckResult,
+    sent_at: Instant,
+}
 
 pub const MAX_CLIENT_REQUEST_TIMEOUT: Time = millis(2_147_483_647);
 pub const DEFAULT_PRODUCER_REQUEST_TIMEOUT: Time = secs(2);
@@ -280,10 +286,18 @@ pub struct TlsParams {
     /// `demo-broker-headless.<ns>.svc.cluster.local`, and for Strimzi it is
     /// `demo-kafka-bootstrap`.
     pub server_name: String,
-    /// Optional mTLS client identity `(cert_pem, key_pem)`. One-way TLS with
-    /// `None` is enough for the benchmark. Set this only if the listener
-    /// requires client auth.
-    pub client_identity: Option<(PathBuf, PathBuf)>,
+    /// Optional mTLS client identity. One-way TLS with `None` is enough for the
+    /// benchmark. Set this only if the listener requires client auth.
+    pub client_identity: Option<ClientIdentity>,
+}
+
+/// The PEM files of an mTLS client identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientIdentity {
+    /// Path of the PEM certificate chain.
+    pub cert_pem: PathBuf,
+    /// Path of the PEM private key.
+    pub key_pem: PathBuf,
 }
 
 impl TlsParams {
@@ -299,9 +313,9 @@ impl TlsParams {
         tls.key_store = self
             .client_identity
             .clone()
-            .map(|(certificate_chain, private_key)| KeyStore::PemFiles {
-                certificate_chain,
-                private_key,
+            .map(|identity| KeyStore::PemFiles {
+                certificate_chain: identity.cert_pem,
+                private_key: identity.key_pem,
                 key_password: None,
             });
         ClientSecurity {
@@ -335,8 +349,10 @@ pub async fn run(scenario: Scenario, cfg: DriverConfig) -> Result<RunOutput> {
     let mut notes: Vec<String> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
 
-    let (failover_active, skipped) =
-        validate_topology(&scenario, &cfg, wallclock_start, &mut notes);
+    let TopologyCheck {
+        failover_active,
+        skipped,
+    } = validate_topology(&scenario, &cfg, wallclock_start, &mut notes);
     if let Some(output) = skipped {
         return Ok(output);
     }
@@ -357,7 +373,11 @@ pub async fn run(scenario: Scenario, cfg: DriverConfig) -> Result<RunOutput> {
         &cfg,
         security.as_ref(),
         grid,
-        (&stop, &first_ack_unix_ms, &kill_at_ms),
+        &SharedHandles {
+            stop: &stop,
+            first_ack: &first_ack_unix_ms,
+            kill_at: &kill_at_ms,
+        },
     );
 
     let mut cons_set: JoinSet<ConsumerOut> = JoinSet::new();
@@ -456,29 +476,44 @@ pub async fn run(scenario: Scenario, cfg: DriverConfig) -> Result<RunOutput> {
 
     let samples = build_samples(
         grid.interval(),
-        (&prod_iv_msgs, &prod_iv_hist),
-        (&cons_iv_msgs, &cons_iv_hist),
+        &IntervalTallies {
+            messages: &prod_iv_msgs,
+            histograms: &prod_iv_hist,
+        },
+        &IntervalTallies {
+            messages: &cons_iv_msgs,
+            histograms: &cons_iv_hist,
+        },
     );
 
     let wallclock_end = Utc::now().timestamp_millis();
-    let (resource, broker_samples) = capture_resources(
+    let ResourceCapture {
+        resource,
+        broker_samples,
+    } = capture_resources(
         &scenario,
         &cfg,
-        (wallclock_start, wallclock_end),
+        WallclockWindow {
+            start_ms: wallclock_start,
+            end_ms: wallclock_end,
+        },
         grid.meas_end_ns,
         prod_msgs,
         &mut notes,
     )
     .await;
 
-    let (disturbance, first_ack) = finalize_timing(
+    let RunTiming {
+        disturbance,
+        first_ack,
+    } = finalize_timing(
         failover_active,
-        (
-            kill_at_ms.load(Ordering::SeqCst),
-            earliest_recovery_ms,
-            prod_dropped,
-            max_spike,
-        ),
+        FailoverStamps {
+            kill_at_ms: kill_at_ms.load(Ordering::SeqCst),
+            recovery_at_ms: earliest_recovery_ms,
+            dropped: prod_dropped,
+            latency_spike_max: max_spike,
+        },
         first_ack_unix_ms.load(Ordering::SeqCst),
         wallclock_start,
     );
@@ -534,10 +569,17 @@ fn client_security(cfg: &DriverConfig) -> Option<ClientSecurity> {
     security
 }
 
+/// The per-interval message counts and latency histograms that one side of the
+/// run (producers or consumers) tallied.
+struct IntervalTallies<'a> {
+    messages: &'a [u64],
+    histograms: &'a [Histogram<u64>],
+}
+
 fn build_samples(
     interval: Time,
-    producer: (&[u64], &[Histogram<u64>]),
-    consumer: (&[u64], &[Histogram<u64>]),
+    producer: &IntervalTallies<'_>,
+    consumer: &IntervalTallies<'_>,
 ) -> Vec<Sample> {
     let interval_ms = nonnegative_i64_to_u64(interval.millis_i64());
     // The histogram counts microseconds; an empty slice measured nothing.
@@ -549,7 +591,7 @@ fn build_samples(
         }
     };
     producer
-        .0
+        .messages
         .iter()
         .enumerate()
         .map(|(index, messages)| Sample {
@@ -559,36 +601,40 @@ fn build_samples(
                     .saturating_mul(interval_ms),
             ),
             producer_rate: event_rate(*messages, interval),
-            consumer_rate: event_rate(consumer.0[index], interval),
-            producer_p50: percentile(&producer.1[index], 0.50),
-            producer_p99: percentile(&producer.1[index], 0.99),
-            consumer_e2e_p99: percentile(&consumer.1[index], 0.99),
+            consumer_rate: event_rate(consumer.messages[index], interval),
+            producer_p50: percentile(&producer.histograms[index], 0.50),
+            producer_p99: percentile(&producer.histograms[index], 0.99),
+            consumer_e2e_p99: percentile(&consumer.histograms[index], 0.99),
         })
         .collect()
 }
 
-/// The disturbance a failover run measured, and the run's first-ack extent.
-///
-/// A disturbance is written only when the delete actually landed and a record
-/// was acknowledged after it. `failover.0` is the shared kill marker, which
-/// stays zero when the pod delete failed; `failover.1` is the first ack at or
-/// after that marker. Either one at zero means the run has no failover
-/// evidence, and an empty disturbance is the honest answer. The report's gate
-/// reads that as a violation rather than as an instant recovery.
-/// Say in the artifact why a failover run carries no disturbance.
-///
-/// Without this the JSON looks like an ordinary run and the reader has to
-/// guess whether the schedule ran at all.
+/// The run-phase signal, the first-ack stamp, and the kill marker that every
+/// producer task shares.
+#[derive(Clone, Copy)]
+struct SharedHandles<'a> {
+    stop: &'a Arc<AtomicU8>,
+    first_ack: &'a Arc<AtomicU64>,
+    kill_at: &'a Arc<AtomicU64>,
+}
+
 /// Spawn one producer task per `scenario.producers`.
+///
+/// The three shared handles travel together because they are one thing: the
+/// run-phase signal, the first-ack stamp, and the kill marker every task reads.
 fn spawn_producers(
     tasks: &mut JoinSet<ProducerOut>,
     scenario: &Scenario,
     cfg: &DriverConfig,
     security: Option<&ClientSecurity>,
     grid: Grid,
-    shared: (&Arc<AtomicU8>, &Arc<AtomicU64>, &Arc<AtomicU64>),
+    shared: &SharedHandles<'_>,
 ) {
-    let (stop, first_ack, kill_at) = shared;
+    let SharedHandles {
+        stop,
+        first_ack,
+        kill_at,
+    } = *shared;
     for idx in 0..scenario.producers {
         tasks.spawn(run_producer(ProducerTask {
             idx,
@@ -654,18 +700,46 @@ fn note_missing_disturbance(
     });
 }
 
+/// What the producers measured around a failover kill.
+#[derive(Debug, Clone, Copy)]
+struct FailoverStamps {
+    /// Epoch milliseconds of the pod delete, or zero when it never landed.
+    kill_at_ms: u64,
+    /// Epoch milliseconds of the first ack at or after the kill, or zero.
+    recovery_at_ms: u64,
+    /// Sends the producers counted as dropped.
+    dropped: u64,
+    /// The largest ack latency seen after the kill.
+    latency_spike_max: Time,
+}
+
+/// The disturbance a run measured and the extent from run start to the first
+/// ack.
+struct RunTiming {
+    disturbance: Option<Disturbance>,
+    first_ack: Time,
+}
+
+/// The disturbance a failover run measured, and the run's first-ack extent.
+///
+/// A disturbance is written only when the delete actually landed and a record
+/// was acknowledged after it. `failover.kill_at_ms` is the shared kill marker,
+/// which stays zero when the pod delete failed; `failover.recovery_at_ms` is
+/// the first ack at or after that marker. Either one at zero means the run has
+/// no failover evidence, and an empty disturbance is the honest answer. The
+/// report's gate reads that as a violation rather than as an instant recovery.
 fn finalize_timing(
     failover_active: bool,
-    failover: (u64, u64, u64, Time),
+    failover: FailoverStamps,
     first_ack: u64,
     wallclock_start: i64,
-) -> (Option<Disturbance>, Time) {
-    let measured_kill = failover.0 > 0 && failover.1 >= failover.0;
+) -> RunTiming {
+    let measured_kill = failover.kill_at_ms > 0 && failover.recovery_at_ms >= failover.kill_at_ms;
     let disturbance = (failover_active && measured_kill).then_some(Disturbance {
-        kill_at_ms: TimeOffsetMs(failover.0),
-        recovery_at_ms: TimeOffsetMs(failover.1),
-        dropped: MessageCount(failover.2),
-        latency_spike_max: failover.3,
+        kill_at_ms: TimeOffsetMs(failover.kill_at_ms),
+        recovery_at_ms: TimeOffsetMs(failover.recovery_at_ms),
+        dropped: MessageCount(failover.dropped),
+        latency_spike_max: failover.latency_spike_max,
     });
     // Both stamps are epoch milliseconds — coordinates — so their difference is
     // the extent from run start to the first ack. No ack at all means no extent.
@@ -679,7 +753,17 @@ fn finalize_timing(
                 .max(0),
         )
     };
-    (disturbance, first_ack)
+    RunTiming {
+        disturbance,
+        first_ack,
+    }
+}
+
+/// Whether failover is active for the run, and the early output of a run that
+/// the topology cannot host.
+struct TopologyCheck {
+    failover_active: bool,
+    skipped: Option<RunOutput>,
 }
 
 fn validate_topology(
@@ -687,7 +771,7 @@ fn validate_topology(
     cfg: &DriverConfig,
     wallclock_start: i64,
     notes: &mut Vec<String>,
-) -> (bool, Option<RunOutput>) {
+) -> TopologyCheck {
     let failover_active =
         scenario.failover.is_some() && scenario.replication_factor >= 3 && cfg.broker_count >= 3;
     if scenario.failover.is_some() && !failover_active {
@@ -697,7 +781,10 @@ fn validate_topology(
         && scenario.replication_factor >= 3
         && cfg.broker_count < 3;
     if !topology_mismatch {
-        return (failover_active, None);
+        return TopologyCheck {
+            failover_active,
+            skipped: None,
+        };
     }
     notes.push(format!(
         "skipped:topology-mismatch (rf={} brokers={})",
@@ -710,7 +797,10 @@ fn validate_topology(
         std::mem::take(notes),
         Vec::new(),
     );
-    (failover_active, Some(output))
+    TopologyCheck {
+        failover_active,
+        skipped: Some(output),
+    }
 }
 
 /// Capture broker CPU and memory for the window the run measured.
@@ -720,23 +810,42 @@ fn validate_topology(
 /// draining the producers happens in between, and a failover run can wait out
 /// its final-drain timeout there. The queries are evaluated at the close of the
 /// window, so the lookback covers what was measured.
+/// The wall-clock window of a run, in epoch milliseconds.
+#[derive(Debug, Clone, Copy)]
+struct WallclockWindow {
+    start_ms: i64,
+    end_ms: i64,
+}
+
+/// The resource summary of a run and its broker resource time series.
+struct ResourceCapture {
+    resource: Resource,
+    broker_samples: Vec<BrokerSample>,
+}
+
 async fn capture_resources(
     scenario: &Scenario,
     cfg: &DriverConfig,
-    wallclock: (i64, i64),
+    wallclock: WallclockWindow,
     measured_until_ns: u64,
     produced: u64,
     notes: &mut Vec<String>,
-) -> (Resource, Vec<BrokerSample>) {
+) -> ResourceCapture {
     let Some(url) = &cfg.prometheus_url else {
         notes.push("prometheus-url-not-set".into());
-        return (Resource::default(), Vec::new());
+        return ResourceCapture {
+            resource: Resource::default(),
+            broker_samples: Vec::new(),
+        };
     };
     let client = match PromClient::new(url, cfg.prometheus_request_timeout) {
         Ok(client) => client,
         Err(error) => {
             notes.push(format!("prometheus-client-failed: {error}"));
-            return (Resource::default(), Vec::new());
+            return ResourceCapture {
+                resource: Resource::default(),
+                broker_samples: Vec::new(),
+            };
         }
     };
     let resource = match client
@@ -760,13 +869,16 @@ async fn capture_resources(
         .capture_resource_series(
             cfg.stack,
             &cfg.namespace,
-            to_f64(wallclock.0) / 1000.0,
-            to_f64(wallclock.1) / 1000.0,
+            to_f64(wallclock.start_ms) / 1000.0,
+            to_f64(wallclock.end_ms) / 1000.0,
             15,
         )
         .await
         .unwrap_or_default();
-    (resource, broker_samples)
+    ResourceCapture {
+        resource,
+        broker_samples,
+    }
 }
 
 fn spawn_failover(
@@ -1085,13 +1197,21 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
         // Drain every ack that has already settled — promptly, so the recorded
         // latency is the real send→ack time, not how long a record waited in
         // the in-flight set behind an older stuck send.
-        while let Some((res, t0)) = inflight.next().now_or_never().flatten() {
+        while let Some(SettledAck {
+            result: res,
+            sent_at: t0,
+        }) = inflight.next().now_or_never().flatten()
+        {
             handle_ack!(res, t0);
         }
         // Back-pressure: at capacity, block until any send completes. Waiting
         // for the oldest can make one dead-leader send hide live-partition acks.
         while inflight.len() >= max_inflight {
-            if let Some((res, t0)) = inflight.next().await {
+            if let Some(SettledAck {
+                result: res,
+                sent_at: t0,
+            }) = inflight.next().await
+            {
                 handle_ack!(res, t0);
             }
         }
@@ -1113,7 +1233,12 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
         };
         let t0 = Instant::now();
         match producer.enqueue(rec).await {
-            Ok(delivery) => inflight.push(Box::pin(async move { (delivery.await, t0) })),
+            Ok(delivery) => inflight.push(Box::pin(async move {
+                SettledAck {
+                    result: delivery.await,
+                    sent_at: t0,
+                }
+            })),
             Err(error) => handle_ack!(Err::<RecordMetadata, _>(error), t0),
         }
     }
@@ -1134,7 +1259,10 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
             break;
         }
         match tokio::time::timeout_at(drain_until, inflight.next()).await {
-            Ok(Some((res, t0))) => handle_ack!(res, t0),
+            Ok(Some(SettledAck {
+                result: res,
+                sent_at: t0,
+            })) => handle_ack!(res, t0),
             Ok(None) => break,
             Err(_) => {
                 let unresolved = inflight.len() as u64;
@@ -1389,14 +1517,15 @@ mod tests {
 
     fn scenario(rf: i16) -> Scenario { short_scenario(rf) }
 
-    async fn producer_broker(
-        metadata_error: i16,
-        delivery_error: i16,
-    ) -> (
-        krabka_client_core::MockBroker,
-        tokio::sync::oneshot::Receiver<()>,
-        Arc<AtomicU64>,
-    ) {
+    /// A mock broker for the producer pipeline test, with the signal that a
+    /// metadata request named a topic and the largest batch it saw.
+    struct ProducerBrokerFixture {
+        broker: krabka_client_core::MockBroker,
+        started: tokio::sync::oneshot::Receiver<()>,
+        largest_batch: Arc<AtomicU64>,
+    }
+
+    async fn producer_broker(metadata_error: i16, delivery_error: i16) -> ProducerBrokerFixture {
         use {
             bytes::BytesMut,
             krabka_protocol::{
@@ -1523,14 +1652,21 @@ mod tests {
         })
         .await;
         port.store(broker.addr.port(), Ordering::SeqCst);
-        (broker, receiving, largest_batch)
+        ProducerBrokerFixture {
+            broker,
+            started: receiving,
+            largest_batch,
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn producer_pipeline_counts_delivery_and_admission_outcomes() {
         for (metadata_error, delivery_error) in [(0, 0), (0, 29), (29, 0)] {
-            let (broker, started, largest_batch) =
-                producer_broker(metadata_error, delivery_error).await;
+            let ProducerBrokerFixture {
+                broker,
+                started,
+                largest_batch,
+            } = producer_broker(metadata_error, delivery_error).await;
             let mut scenario = scenario(1);
             scenario.linger = millis(20);
             let stop = Arc::new(AtomicU8::new(STATE_MEASURING));
@@ -1694,7 +1830,10 @@ mod tests {
         let params = TlsParams {
             ca_path: "/etc/bench-ca/ca.crt".into(),
             server_name: "demo-kafka-bootstrap".into(),
-            client_identity: Some(("/c/tls.crt".into(), "/c/tls.key".into())),
+            client_identity: Some(ClientIdentity {
+                cert_pem: "/c/tls.crt".into(),
+                key_pem: "/c/tls.key".into(),
+            }),
         };
         let sec = params.to_security();
         let tls = sec.tls.expect("TLS config present");
@@ -1749,7 +1888,17 @@ mod tests {
     /// disturbance and the gate treats it as missing evidence.
     #[test]
     fn finalize_timing_records_no_disturbance_without_a_kill() {
-        let (disturbance, _) = finalize_timing(true, (0, 5_000, 3, millis(9)), 1_000, 0);
+        let RunTiming { disturbance, .. } = finalize_timing(
+            true,
+            FailoverStamps {
+                kill_at_ms: 0,
+                recovery_at_ms: 5_000,
+                dropped: 3,
+                latency_spike_max: millis(9),
+            },
+            1_000,
+            0,
+        );
         check!(disturbance.is_none());
     }
 
@@ -1758,13 +1907,33 @@ mod tests {
     /// the kill at all.
     #[test]
     fn finalize_timing_records_no_disturbance_without_an_ack_after_the_kill() {
-        let (disturbance, _) = finalize_timing(true, (5_000, 0, 3, millis(9)), 1_000, 0);
+        let RunTiming { disturbance, .. } = finalize_timing(
+            true,
+            FailoverStamps {
+                kill_at_ms: 5_000,
+                recovery_at_ms: 0,
+                dropped: 3,
+                latency_spike_max: millis(9),
+            },
+            1_000,
+            0,
+        );
         check!(disturbance.is_none());
     }
 
     #[test]
     fn finalize_timing_records_a_measured_kill() {
-        let (disturbance, _) = finalize_timing(true, (5_000, 7_500, 3, millis(9)), 1_000, 0);
+        let RunTiming { disturbance, .. } = finalize_timing(
+            true,
+            FailoverStamps {
+                kill_at_ms: 5_000,
+                recovery_at_ms: 7_500,
+                dropped: 3,
+                latency_spike_max: millis(9),
+            },
+            1_000,
+            0,
+        );
         let disturbance = disturbance.expect("a measured kill gives a disturbance");
         check!(disturbance.kill_at_ms == TimeOffsetMs(5_000));
         check!(disturbance.recovery_at_ms == TimeOffsetMs(7_500));

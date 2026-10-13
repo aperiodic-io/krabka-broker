@@ -156,8 +156,23 @@ fn timed_shared(calls: u64) -> Duration {
 /// they took.
 type TimedRun = fn(u64) -> Duration;
 
+/// One case: the name it is reported under and the run that measures it.
+struct Case {
+    name: &'static str,
+    run: TimedRun,
+}
+
 /// The two cases, in report order.
-const CASES: [(&str, TimedRun); 2] = [("owned_string", timed_owned), ("shared_arc", timed_shared)];
+const CASES: [Case; 2] = [
+    Case {
+        name: "owned_string",
+        run: timed_owned,
+    },
+    Case {
+        name: "shared_arc",
+        run: timed_shared,
+    },
+];
 
 fn bench_replication_in(c: &mut Criterion) {
     let mut group = c.benchmark_group("broker/metric_labels");
@@ -166,8 +181,8 @@ fn bench_replication_in(c: &mut Criterion) {
     // would spend minutes on two cases that are already stable at ten.
     group.sample_size(10);
 
-    for (case, run) in CASES {
-        group.bench_function(format!("record_replication_in/{case}"), |b| {
+    for Case { name, run } in CASES {
+        group.bench_function(format!("record_replication_in/{name}"), |b| {
             b.iter_custom(|iters| (0..iters).map(|_| run(u64::from(CALLS))).sum());
         });
     }
@@ -195,7 +210,7 @@ fn bench_ratio(_c: &mut Criterion) {
     );
     let nanos: Vec<f64> = CASES
         .into_iter()
-        .map(|(_, run)| {
+        .map(|Case { run, .. }| {
             (0..RUNS)
                 .map(|_| run(u64::from(CALLS)).as_secs_f64() * 1.0e9 / f64::from(CALLS))
                 .fold(f64::INFINITY, f64::min)

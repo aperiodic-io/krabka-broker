@@ -11,13 +11,13 @@
 
 use {
     super::{
-        Config, FetcherConfig, FollowedKey,
+        Config, FetcherConfig, FollowedKey, FollowedSnapshot,
         connection::{connect_with_backoff, sleep_or_cancel},
         ensure_local_partition,
         follower_throttle::{FetchThrottleDecision, follower_partition_fetch_cap},
         raw_fetch::RawFetchRequest,
         replication_target_changed,
-        response::{FollowedIndex, RoundEntry, RowAction, apply_response_indexed},
+        response::{FollowedIndex, KeyedAction, RoundEntry, RowAction, apply_response_indexed},
         session::{FollowerFetchSession, SessionKey, SessionOutcome, WantedRows},
     },
     krabka_client_core::{ClientError, Connection},
@@ -91,11 +91,13 @@ pub(super) async fn run_fetcher_loop(fetcher: &FetcherConfig) -> Result<(), Stri
             return Ok(());
         }
 
-        if let Some((generation, snapshot)) =
-            fetcher.followed.snapshot_if_changed(followed_generation)
+        if let Some(FollowedSnapshot {
+            generation,
+            entries,
+        }) = fetcher.followed.snapshot_if_changed(followed_generation)
         {
             followed_generation = generation;
-            followed = snapshot;
+            followed = entries;
             followed_index = FollowedIndex::new(&followed);
             dirty = followed.keys().cloned().collect();
             request_epochs.retain(|key, _| followed.contains_key(key));
@@ -210,14 +212,14 @@ pub(super) async fn run_fetcher_loop(fetcher: &FetcherConfig) -> Result<(), Stri
             dirty.remove(key);
         }
         let mut backoff: Option<Time> = None;
-        for (key, action) in actions {
+        for KeyedAction { key, action } in actions {
             match action {
                 RowAction::Continue => {
                     dirty.insert(key);
                 }
                 RowAction::Drop => {
                     dirty.remove(&key);
-                    info!(topic = %key.0, partition = key.1.get(),
+                    info!(topic = %key.topic, partition = key.partition.get(),
                         "replicator.not_leader; holding the partition back until \
                          the metadata image settles");
                     delayed.insert(
@@ -243,7 +245,7 @@ pub(super) async fn run_fetcher_loop(fetcher: &FetcherConfig) -> Result<(), Stri
                     // session without the partition, and the supervisor does
                     // not hand it back while its log directory is offline.
                     dirty.remove(&key);
-                    warn!(topic = %key.0, partition = key.1.get(),
+                    warn!(topic = %key.topic, partition = key.partition.get(),
                         "replicator: log directory offline; no longer following the partition");
                     drop_partition(fetcher, &key);
                 }
@@ -431,7 +433,7 @@ mod tests {
             replicator::{
                 FollowedPartitions,
                 test_support::{
-                    LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID,
+                    ConfigWithDir, LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID,
                     image_with_follower_throttle, image_with_leader, test_config,
                 },
             },
@@ -442,22 +444,25 @@ mod tests {
         krabka_units::{bytes, millis},
     };
 
-    fn followed_partition(
-        cfg: Config,
-    ) -> BTreeMap<(Arc<str>, krabka_ids::PartitionIndex), Arc<Config>> {
-        [((Arc::clone(&cfg.topic), cfg.partition), Arc::new(cfg))]
-            .into_iter()
-            .collect()
+    fn followed_partition(cfg: Config) -> BTreeMap<FollowedKey, Arc<Config>> {
+        [(followed_key(&cfg), Arc::new(cfg))].into_iter().collect()
+    }
+
+    fn followed_key(cfg: &Config) -> FollowedKey {
+        FollowedKey {
+            topic: Arc::clone(&cfg.topic),
+            partition: cfg.partition,
+        }
     }
 
     /// A throttled fetcher whose follower-in bucket is empty, so every
     /// partition it follows wants a fetch this round and none may have one.
-    fn throttled_out() -> (Config, tempfile::TempDir) {
+    fn throttled_out() -> ConfigWithDir {
         let (cfg, log_dir) = test_config(image_with_follower_throttle("*"));
         cfg.throttle_state
             .follower_in
             .set_byte_rate_with_burst(krabka_units::bytes_per_sec(1024), bytes(0));
-        (cfg, log_dir)
+        ConfigWithDir { cfg, dir: log_dir }
     }
 
     /// A fetcher over `followed`, dialling nowhere. Every test here drives the
@@ -609,7 +614,7 @@ mod tests {
     /// rather than spin through an empty round at the fetch interval.
     #[test]
     fn a_round_the_throttle_emptied_reports_itself_as_throttled() {
-        let (cfg, _log_dir) = throttled_out();
+        let ConfigWithDir { cfg, dir: _log_dir } = throttled_out();
         let followed = followed_partition(cfg);
 
         let round = plan_round(&followed, &DelayedUntil::new());
@@ -625,8 +630,8 @@ mod tests {
     /// round came back empty.
     #[test]
     fn a_delayed_partition_is_skipped_before_the_throttle_is_consulted() {
-        let (cfg, _log_dir) = throttled_out();
-        let key = (Arc::clone(&cfg.topic), cfg.partition);
+        let ConfigWithDir { cfg, dir: _log_dir } = throttled_out();
+        let key = followed_key(&cfg);
         let mut followed = BTreeMap::new();
         followed.insert(key.clone(), Arc::new(cfg));
         let mut delayed = DelayedUntil::new();
@@ -657,7 +662,7 @@ mod tests {
     async fn an_incremental_round_does_not_replan_caught_up_partitions() {
         let (cfg, _log_dir) = test_config(image_with_leader(LEADER_ID));
         ensure_local_partition(&cfg).unwrap();
-        let key = (Arc::clone(&cfg.topic), cfg.partition);
+        let key = followed_key(&cfg);
         let followed = [(key, Arc::new(cfg))].into_iter().collect();
 
         let round = plan_changed(
@@ -695,9 +700,15 @@ mod tests {
         let topic = Arc::clone(&cfg.topic);
         let partition = cfg.partition;
         let followed: FollowedPartitions = Arc::new(super::super::FollowedPartitionsState::new(
-            [((Arc::clone(&topic), partition), Arc::new(cfg))]
-                .into_iter()
-                .collect(),
+            [(
+                FollowedKey {
+                    topic: Arc::clone(&topic),
+                    partition,
+                },
+                Arc::new(cfg),
+            )]
+            .into_iter()
+            .collect(),
         ));
         // `test_config` points the fetcher at port 9, the discard port, so the
         // dial never completes and the loop cannot get past it.

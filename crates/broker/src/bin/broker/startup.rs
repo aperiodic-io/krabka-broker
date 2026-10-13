@@ -20,7 +20,17 @@ use {
 
 /// Where the broker's own client metrics go, when OTLP is on: the endpoint and
 /// the protocol of the exporter that the telemetry setup has just built.
-type ClientMetricsOtlp = (Option<String>, OtlpProtocol);
+struct ClientMetricsOtlp {
+    endpoint: Option<String>,
+    protocol: OtlpProtocol,
+}
+
+/// The config that startup assembles, and the controlled-shutdown drain
+/// timeout the file and the flags settle on.
+struct AssembledConfig {
+    config: BrokerConfig,
+    controlled_shutdown_drain_timeout: Time,
+}
 
 #[tokio::main]
 pub async fn broker_main() -> Result<(), Box<dyn std::error::Error>> {
@@ -46,10 +56,10 @@ pub async fn broker_main() -> Result<(), Box<dyn std::error::Error>> {
         env!("CARGO_PKG_VERSION"),
         "krabka-broker",
     )?;
-    let client_metrics_otlp = (
-        otlp.as_ref().map(|cfg| cfg.endpoint.clone()),
-        otlp.as_ref().map_or(OtlpProtocol::Grpc, |cfg| cfg.protocol),
-    );
+    let client_metrics_otlp = ClientMetricsOtlp {
+        endpoint: otlp.as_ref().map(|cfg| cfg.endpoint.clone()),
+        protocol: otlp.as_ref().map_or(OtlpProtocol::Grpc, |cfg| cfg.protocol),
+    };
     let telemetry = krabka_broker::telemetry::init(
         otlp,
         // The stdout filter. This is the one `BROKER_LOGGER` retargets, and
@@ -143,8 +153,11 @@ fn raise_open_file_limit() {
 fn broker_config(
     args: &mut Args,
     file_config: Option<FileConfig>,
-    (client_metrics_otlp_endpoint, client_metrics_otlp_protocol): ClientMetricsOtlp,
-) -> Result<(BrokerConfig, Time), Box<dyn std::error::Error>> {
+    ClientMetricsOtlp {
+        endpoint: client_metrics_otlp_endpoint,
+        protocol: client_metrics_otlp_protocol,
+    }: ClientMetricsOtlp,
+) -> Result<AssembledConfig, Box<dyn std::error::Error>> {
     let file_shutdown_timeout = file_config
         .as_ref()
         .and_then(|file| file.runtime.as_ref())
@@ -178,7 +191,10 @@ fn broker_config(
     seed_standalone_voter(&mut config)?;
     let controlled_shutdown_drain_timeout =
         args.apply_runtime_to(&mut config, file_shutdown_timeout)?;
-    Ok((config, controlled_shutdown_drain_timeout))
+    Ok(AssembledConfig {
+        config,
+        controlled_shutdown_drain_timeout,
+    })
 }
 
 /// Makes a controller with no voter set and no bootstrap servers the single
@@ -216,8 +232,10 @@ async fn run(
     #[cfg(unix)]
     raise_open_file_limit();
     let health_listen_addr = parse_optional_listen_addr(&args.health_listen_addr)?;
-    let (mut config, controlled_shutdown_drain_timeout) =
-        broker_config(&mut args, file_config, client_metrics_otlp)?;
+    let AssembledConfig {
+        mut config,
+        controlled_shutdown_drain_timeout,
+    } = broker_config(&mut args, file_config, client_metrics_otlp)?;
     // The handle behind the `BROKER_LOGGER` config resource. It drives the
     // stdout layer that the telemetry setup installed, so `kafka-configs
     // --entity-type broker-loggers --alter` retargets the filter of the
@@ -451,14 +469,17 @@ mod tests {
 
     /// What the process would run after a start: the probe state and its
     /// shutdown token, as `run` builds them.
-    fn probes() -> (
-        krabka_broker::HealthState,
-        tokio_util::sync::CancellationToken,
-    ) {
-        (
-            krabka_broker::HealthState::new(1_000),
-            tokio_util::sync::CancellationToken::new(),
-        )
+    fn probes() -> Probes {
+        Probes {
+            health: krabka_broker::HealthState::new(1_000),
+            shutdown: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+
+    /// The probe state and its shutdown token.
+    struct Probes {
+        health: krabka_broker::HealthState,
+        shutdown: tokio_util::sync::CancellationToken,
     }
 
     // The `PENDING_CONTROLLED_SHUTDOWN` ordinal of `HealthState::broker_state`,
@@ -480,7 +501,10 @@ mod tests {
             let dir = tempdir().unwrap();
             let handle = start_broker(dir.path()).await;
             make_the_controller_fault(&handle).await;
-            let (health, health_shutdown) = probes();
+            let Probes {
+                health,
+                shutdown: health_shutdown,
+            } = probes();
 
             let outcome = serve(
                 handle,
@@ -514,7 +538,10 @@ mod tests {
     async fn a_signal_stops_the_broker_successfully_and_leaves_the_clean_shutdown_proof() {
         let dir = tempdir().unwrap();
         let handle = start_broker(dir.path()).await;
-        let (health, health_shutdown) = probes();
+        let Probes {
+            health,
+            shutdown: health_shutdown,
+        } = probes();
 
         let outcome = serve(
             handle,
@@ -535,25 +562,34 @@ mod tests {
     // to it boxed, as `run` boxes what `?` and `serve` return.
     #[test]
     fn only_the_fatal_fault_of_the_controller_halts_the_process() {
-        let rows: [(&str, Box<dyn std::error::Error>, bool); 4] = [
-            (
-                "the controller's fatal fault",
-                BrokerError::FatalFault(FAULT.to_owned()).into(),
-                true,
-            ),
-            (
-                "another failure of the start",
-                BrokerError::Startup("no leader".to_owned()).into(),
-                false,
-            ),
-            (
-                "a broker that is shutting down",
-                BrokerError::Shutdown.into(),
-                false,
-            ),
-            ("a bare message", "failed to read the config".into(), false),
+        struct Row {
+            name: &'static str,
+            error: Box<dyn std::error::Error>,
+            halts: bool,
+        }
+        let rows: [Row; 4] = [
+            Row {
+                name: "the controller's fatal fault",
+                error: BrokerError::FatalFault(FAULT.to_owned()).into(),
+                halts: true,
+            },
+            Row {
+                name: "another failure of the start",
+                error: BrokerError::Startup("no leader".to_owned()).into(),
+                halts: false,
+            },
+            Row {
+                name: "a broker that is shutting down",
+                error: BrokerError::Shutdown.into(),
+                halts: false,
+            },
+            Row {
+                name: "a bare message",
+                error: "failed to read the config".into(),
+                halts: false,
+            },
         ];
-        for (name, error, halts) in rows {
+        for Row { name, error, halts } in rows {
             assert!(is_fatal_fault(error.as_ref()) == halts, "{name}: {error}");
         }
     }
@@ -573,9 +609,12 @@ mod tests {
         )
         .expect("flags parse");
         let file = args.load_config_file()?;
-        broker_config(&mut args, file, (None, OtlpProtocol::Grpc))
-            .map(|(config, _)| config)
-            .map_err(|error| error.to_string())
+        broker_config(&mut args, file, ClientMetricsOtlp {
+            endpoint: None,
+            protocol: OtlpProtocol::Grpc,
+        })
+        .map(|assembled| assembled.config)
+        .map_err(|error| error.to_string())
     }
 
     // A Kafka cluster with a single controller: node 2 is a broker, and its
@@ -630,40 +669,53 @@ mod tests {
     /// of `log.dirs`. A separate directory is not a data directory.
     #[test]
     fn the_metadata_log_directory_comes_from_the_flag_then_the_file_then_log_dir() {
-        /// What the case is, the flags, the file, the metadata dir and the
-        /// data dirs.
-        type Case = (
-            &'static str,
-            &'static [&'static str],
-            &'static str,
-            &'static str,
-            &'static [&'static str],
-        );
+        struct Case {
+            what: &'static str,
+            flags: &'static [&'static str],
+            toml: &'static str,
+            /// The metadata directory the config resolves.
+            metadata: &'static str,
+            /// The data directories the config resolves.
+            data: &'static [&'static str],
+        }
         let cases: [Case; 4] = [
-            ("neither", &[], "log_dir = \"/data\"\n", "/data", &["/data"]),
-            (
-                "the file",
-                &[],
-                "log_dir = \"/data\"\nmetadata_log_dir = \"/meta\"\n",
-                "/meta",
-                &["/data"],
-            ),
-            (
-                "the flag over the file",
-                &["--metadata-log-dir=/flag"],
-                "log_dir = \"/data\"\nmetadata_log_dir = \"/meta\"\n",
-                "/flag",
-                &["/data"],
-            ),
-            (
-                "one of the data directories",
-                &["--metadata-log-dir=/more"],
-                "log_dir = \"/data\"\nextra_log_dirs = [\"/more\"]\n",
-                "/more",
-                &["/data", "/more"],
-            ),
+            Case {
+                what: "neither",
+                flags: &[],
+                toml: "log_dir = \"/data\"\n",
+                metadata: "/data",
+                data: &["/data"],
+            },
+            Case {
+                what: "the file",
+                flags: &[],
+                toml: "log_dir = \"/data\"\nmetadata_log_dir = \"/meta\"\n",
+                metadata: "/meta",
+                data: &["/data"],
+            },
+            Case {
+                what: "the flag over the file",
+                flags: &["--metadata-log-dir=/flag"],
+                toml: "log_dir = \"/data\"\nmetadata_log_dir = \"/meta\"\n",
+                metadata: "/flag",
+                data: &["/data"],
+            },
+            Case {
+                what: "one of the data directories",
+                flags: &["--metadata-log-dir=/more"],
+                toml: "log_dir = \"/data\"\nextra_log_dirs = [\"/more\"]\n",
+                metadata: "/more",
+                data: &["/data", "/more"],
+            },
         ];
-        for (what, flags, toml, metadata, data) in cases {
+        for Case {
+            what,
+            flags,
+            toml,
+            metadata,
+            data,
+        } in cases
+        {
             let config = configured(flags, toml).unwrap_or_else(|error| panic!("{what}: {error}"));
             assert!(
                 (config.metadata_dir().to_path_buf(), config.all_log_dirs())
@@ -680,18 +732,45 @@ mod tests {
 
     #[test]
     fn the_flag_wins_over_the_file_and_the_file_over_the_default() {
-        let cases: [(&str, &[&str], &str, i32); 4] = [
-            ("the file alone", &[], "broker_id = 2\n", 2),
-            (
-                "the flag over the file",
-                &["--broker-id=7"],
-                "broker_id = 2\n",
-                7,
-            ),
-            ("the flag alone", &["--broker-id=7"], "", 7),
-            ("neither", &[], "", krabka_broker::config::DEFAULT_BROKER_ID),
+        struct Case {
+            name: &'static str,
+            flags: &'static [&'static str],
+            toml: &'static str,
+            id: i32,
+        }
+        let cases: [Case; 4] = [
+            Case {
+                name: "the file alone",
+                flags: &[],
+                toml: "broker_id = 2\n",
+                id: 2,
+            },
+            Case {
+                name: "the flag over the file",
+                flags: &["--broker-id=7"],
+                toml: "broker_id = 2\n",
+                id: 7,
+            },
+            Case {
+                name: "the flag alone",
+                flags: &["--broker-id=7"],
+                toml: "",
+                id: 7,
+            },
+            Case {
+                name: "neither",
+                flags: &[],
+                toml: "",
+                id: krabka_broker::config::DEFAULT_BROKER_ID,
+            },
         ];
-        for (name, flags, toml, id) in cases {
+        for Case {
+            name,
+            flags,
+            toml,
+            id,
+        } in cases
+        {
             let config = configured(flags, toml).unwrap_or_else(|error| panic!("{name}: {error}"));
             let node_id = krabka_broker::NodeId(u64::try_from(id).expect("a positive id"));
             assert!(
@@ -703,45 +782,63 @@ mod tests {
 
     #[test]
     fn only_a_controller_without_voters_or_bootstrap_servers_seeds_itself() {
-        type Outcome = Result<Vec<(krabka_broker::NodeId, String)>, String>;
+        /// A voter of the static quorum.
+        #[derive(Debug, PartialEq, Eq)]
+        struct Voter {
+            node_id: krabka_broker::NodeId,
+            endpoint: String,
+        }
+        type Outcome = Result<Vec<Voter>, String>;
+        struct Case {
+            name: &'static str,
+            toml: &'static str,
+            want: Outcome,
+        }
+        let voter = |id, endpoint: &str| Voter {
+            node_id: krabka_broker::NodeId(id),
+            endpoint: endpoint.to_owned(),
+        };
         let refused = "If using process.roles, either controller.quorum.bootstrap.servers must \
                        contain the set of bootstrap controllers or controller.quorum.voters must \
                        contain a parseable set of controllers.";
-        let cases: [(&str, &str, Outcome); 5] = [
-            (
-                "a combined node alone",
-                "broker_id = 4\n",
-                Ok(vec![(krabka_broker::NodeId(4), "0.0.0.0:9093".to_owned())]),
-            ),
-            (
-                "a dynamic-quorum controller",
-                "broker_id = 3001\nbootstrap_servers = [\"ducker02:9592\"]\n\
+        let cases: [Case; 5] = [
+            Case {
+                name: "a combined node alone",
+                toml: "broker_id = 4\n",
+                want: Ok(vec![voter(4, "0.0.0.0:9093")]),
+            },
+            Case {
+                name: "a dynamic-quorum controller",
+                toml: "broker_id = 3001\nbootstrap_servers = [\"ducker02:9592\"]\n\
                  [process]\nroles = [\"controller\"]\n",
-                Ok(vec![]),
-            ),
-            (
-                "a dynamic-quorum broker",
-                "broker_id = 1\nbootstrap_servers = [\"ducker02:9592\"]\n\
+                want: Ok(vec![]),
+            },
+            Case {
+                name: "a dynamic-quorum broker",
+                toml: "broker_id = 1\nbootstrap_servers = [\"ducker02:9592\"]\n\
                  [process]\nroles = [\"broker\"]\n",
-                Ok(vec![]),
-            ),
-            (
-                "a static-quorum broker",
-                "broker_id = 1\ncontroller_quorum_voters = [\"3001@ducker02:9592\"]\n\
+                want: Ok(vec![]),
+            },
+            Case {
+                name: "a static-quorum broker",
+                toml: "broker_id = 1\ncontroller_quorum_voters = [\"3001@ducker02:9592\"]\n\
                  [process]\nroles = [\"broker\"]\n",
-                Ok(vec![(
-                    krabka_broker::NodeId(3001),
-                    "ducker02:9592".to_owned(),
-                )]),
-            ),
-            (
-                "a broker with no controller to reach",
-                "broker_id = 1\n[process]\nroles = [\"broker\"]\n",
-                Err(refused.to_owned()),
-            ),
+                want: Ok(vec![voter(3001, "ducker02:9592")]),
+            },
+            Case {
+                name: "a broker with no controller to reach",
+                toml: "broker_id = 1\n[process]\nroles = [\"broker\"]\n",
+                want: Err(refused.to_owned()),
+            },
         ];
-        for (name, toml, want) in cases {
-            let voters = configured(&[], toml).map(|config| config.controller_quorum_voters);
+        for Case { name, toml, want } in cases {
+            let voters = configured(&[], toml).map(|config| {
+                config
+                    .controller_quorum_voters
+                    .into_iter()
+                    .map(|(node_id, endpoint)| Voter { node_id, endpoint })
+                    .collect()
+            });
             assert!(voters == want, "{name}");
         }
     }

@@ -57,6 +57,12 @@ const ORACLE_BOOT_BUDGET: Duration = Duration::from_mins(1);
 /// The pause between a readiness probe that failed and the next one.
 const ORACLE_BOOT_GAP: Duration = Duration::from_secs(1);
 
+/// A booted krabka broker, with the data directory that backs it.
+pub(crate) struct KrabkaBroker {
+    pub(crate) handle: BrokerHandle,
+    pub(crate) dir: tempfile::TempDir,
+}
+
 /// Boot an in-process krabka broker on `listeners`, advertised under the name
 /// the tool containers resolve through `--add-host`.
 ///
@@ -72,7 +78,7 @@ const ORACLE_BOOT_GAP: Duration = Duration::from_secs(1);
 /// single-listener krabka instead and it would read back the eleven extra keys
 /// this suite exists to have removed, because there the one listener carries
 /// both kinds of traffic.
-pub(crate) async fn start_krabka(listeners: &JvmListeners) -> (BrokerHandle, tempfile::TempDir) {
+pub(crate) async fn start_krabka(listeners: &JvmListeners) -> KrabkaBroker {
     init_tracing();
     let dir = tempfile::tempdir().expect("tempdir");
     let controller_addr: std::net::SocketAddr =
@@ -117,7 +123,7 @@ pub(crate) async fn start_krabka(listeners: &JvmListeners) -> (BrokerHandle, tem
         "KRABKA[test] broker started listen={} advertised={} inter_broker={}",
         listeners.listen, listeners.advertised, inter_broker_addr
     );
-    (handle, dir)
+    KrabkaBroker { handle, dir }
 }
 
 /// Run the tool from a throwaway container against the krabka broker that

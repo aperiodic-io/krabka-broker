@@ -8,7 +8,7 @@
 use {
     super::{
         ALICE, BOB, CLUSTER_ID, NOW_MS, OTHER_CLUSTER_ID, SigningFixture, check_against, signed,
-        signing_fixture,
+        signed_at, signing_fixture,
     },
     crate::{
         codes,
@@ -23,76 +23,81 @@ use {
 /// has to be reachable and each one has to name its own check.
 #[test]
 fn each_refusal_names_its_own_check_under_one_code() {
+    struct Case<'a> {
+        label: &'static str,
+        record: TopicFreezeRecord,
+        check: FreezeSignatureCheck<'a>,
+        expected: SignatureRefusal,
+    }
+
     let SigningFixture {
         trust,
         good,
         replaced,
     } = signing_fixture();
 
-    let cases: Vec<(
-        &str,
-        TopicFreezeRecord,
-        FreezeSignatureCheck<'_>,
-        SignatureRefusal,
-    )> = vec![
-        (
-            "an unknown key_id",
-            TopicFreezeRecord {
+    let cases: Vec<Case<'_>> = vec![
+        Case {
+            label: "an unknown key_id",
+            record: TopicFreezeRecord {
                 key_id: "carol-yubi".to_owned(),
                 ..signed(&trust.alice, CLUSTER_ID, &good)
             },
-            check_against(&trust, ALICE),
-            SignatureRefusal::UnknownKeyId,
-        ),
-        (
-            "an author the key does not speak for",
-            signed(&trust.alice, CLUSTER_ID, &TopicFreezeRecord {
+            check: check_against(&trust, ALICE),
+            expected: SignatureRefusal::UnknownKeyId,
+        },
+        Case {
+            label: "an author the key does not speak for",
+            record: signed(&trust.alice, CLUSTER_ID, &TopicFreezeRecord {
                 set_by: BOB.to_owned(),
                 ..good.clone()
             }),
-            check_against(&trust, BOB),
-            SignatureRefusal::AuthorIsNotTheKeyPrincipal,
-        ),
-        (
-            "an author that is not the connection principal",
-            signed(&trust.alice, CLUSTER_ID, &good),
-            check_against(&trust, BOB),
-            SignatureRefusal::AuthorIsNotTheConnectionPrincipal,
-        ),
-        (
-            "a timestamp outside the skew window",
-            signed(&trust.alice, CLUSTER_ID, &TopicFreezeRecord {
-                set_at_ms: NOW_MS + minutes(5).millis_i64() + 1,
-                ..good.clone()
-            }),
-            check_against(&trust, ALICE),
-            SignatureRefusal::TimestampOutsideSkewWindow,
-        ),
-        (
-            "a replayed timestamp",
-            signed(&trust.alice, CLUSTER_ID, &good),
-            FreezeSignatureCheck {
+            check: check_against(&trust, BOB),
+            expected: SignatureRefusal::AuthorIsNotTheKeyPrincipal,
+        },
+        Case {
+            label: "an author that is not the connection principal",
+            record: signed(&trust.alice, CLUSTER_ID, &good),
+            check: check_against(&trust, BOB),
+            expected: SignatureRefusal::AuthorIsNotTheConnectionPrincipal,
+        },
+        Case {
+            label: "a timestamp outside the skew window",
+            record: signed_at(&trust.alice, NOW_MS + minutes(5).millis_i64() + 1, &good),
+            check: check_against(&trust, ALICE),
+            expected: SignatureRefusal::TimestampOutsideSkewWindow,
+        },
+        Case {
+            label: "a replayed timestamp",
+            record: signed(&trust.alice, CLUSTER_ID, &good),
+            check: FreezeSignatureCheck {
                 replaces: Some(&replaced),
                 ..check_against(&trust, ALICE)
             },
-            SignatureRefusal::TimestampNotNewerThanTheEntryItReplaces,
-        ),
-        (
-            "a signature over another cluster",
-            signed(&trust.alice, OTHER_CLUSTER_ID, &good),
-            check_against(&trust, ALICE),
-            SignatureRefusal::SignatureDidNotVerify,
-        ),
+            expected: SignatureRefusal::TimestampNotNewerThanTheEntryItReplaces,
+        },
+        Case {
+            label: "a signature over another cluster",
+            record: signed(&trust.alice, OTHER_CLUSTER_ID, &good),
+            check: check_against(&trust, ALICE),
+            expected: SignatureRefusal::SignatureDidNotVerify,
+        },
     ];
 
     let mut messages: Vec<&'static str> = Vec::new();
-    for (label, record, check, expected) in cases {
+    for Case {
+        label,
+        record,
+        check,
+        expected,
+    } in cases
+    {
         check!(
             verify_freeze_signature(&check, &record) == Err(expected),
             "{label}"
         );
         check!(
-            expected.wire().0 == codes::OPERATOR_SIGNATURE_INVALID,
+            expected.wire().code == codes::OPERATOR_SIGNATURE_INVALID,
             "{label}"
         );
         messages.push(expected.message());

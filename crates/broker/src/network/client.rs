@@ -9,7 +9,10 @@
 #[cfg(not(target_family = "wasm"))]
 use krabka_units::convert::ByteSizeExt as _;
 use {
-    crate::{config::InterBrokerCredentials, host_port::parse_host_port},
+    crate::{
+        config::InterBrokerCredentials,
+        host_port::{HostPort, parse_host_port},
+    },
     krabka_client_core::ClientDuplex,
     krabka_security::ListenerProtocol,
     krabka_units::{ByteSize, mebibytes},
@@ -331,7 +334,7 @@ impl krabka_raft::OutboundDialer for InterBrokerDialer {
         // (the openraft `Node.addr` string). For SocketAddr-style
         // addresses we honour the configured `server_name` for SNI
         // separately from the literal host string.
-        let (host, port) = parse_host_port(addr).ok_or_else(|| {
+        let HostPort { host, port } = parse_host_port(addr).ok_or_else(|| {
             krabka_client_core::ClientError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("invalid raft peer address {addr:?}"),

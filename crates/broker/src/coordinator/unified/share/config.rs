@@ -105,8 +105,9 @@ impl ShareGroupConfig {
 mod tests {
     use {
         super::*,
-        crate::{
-            coordinator::unified::config::MAX_ASSIGNMENT_INTERVAL, test_support::string_pairs,
+        crate::coordinator::{
+            test_support::{ConfigEntry, config_map, entry},
+            unified::config::MAX_ASSIGNMENT_INTERVAL,
         },
         assert2::assert,
         std::{borrow::Cow, collections::BTreeMap},
@@ -147,70 +148,92 @@ mod tests {
     /// leave it.
     #[test]
     fn for_group_applies_each_share_override() {
+        struct Row {
+            entries: Vec<ConfigEntry<'static>>,
+            config: ShareGroupConfig,
+        }
+
         let broker = ShareGroupConfig::default();
-        let with = |entries: &[(&str, &str)]| {
-            let overrides: BTreeMap<String, String> = string_pairs(entries);
+        let with = |entries: &[ConfigEntry<'_>]| {
+            let overrides: BTreeMap<String, String> = config_map(entries);
             broker.for_group(Some(&overrides)).into_owned()
         };
-        let rows: Vec<(&[(&str, &str)], ShareGroupConfig)> = vec![
-            (&[], broker.clone()),
-            (&[("share.session.timeout.ms", "50000")], ShareGroupConfig {
-                session_timeout: Duration::from_secs(50),
-                ..broker.clone()
-            }),
-            (
-                &[("share.heartbeat.interval.ms", "7000")],
-                ShareGroupConfig {
+        let rows: Vec<Row> = vec![
+            Row {
+                entries: vec![],
+                config: broker.clone(),
+            },
+            Row {
+                entries: vec![entry("share.session.timeout.ms", "50000")],
+                config: ShareGroupConfig {
+                    session_timeout: Duration::from_secs(50),
+                    ..broker.clone()
+                },
+            },
+            Row {
+                entries: vec![entry("share.heartbeat.interval.ms", "7000")],
+                config: ShareGroupConfig {
                     heartbeat_interval: Duration::from_secs(7),
                     ..broker.clone()
                 },
-            ),
-            (&[("share.assignment.interval.ms", "0")], ShareGroupConfig {
-                assignment_interval: Duration::ZERO,
-                ..broker.clone()
-            }),
-            (
-                &[
-                    ("consumer.session.timeout.ms", "50000"),
-                    ("share.heartbeat.interval.ms", "many"),
+            },
+            Row {
+                entries: vec![entry("share.assignment.interval.ms", "0")],
+                config: ShareGroupConfig {
+                    assignment_interval: Duration::ZERO,
+                    ..broker.clone()
+                },
+            },
+            Row {
+                entries: vec![
+                    entry("consumer.session.timeout.ms", "50000"),
+                    entry("share.heartbeat.interval.ms", "many"),
                 ],
-                broker.clone(),
-            ),
+                config: broker.clone(),
+            },
             // `GroupConfig.evaluate` caps a value to the broker's bounds.
-            (&[("share.session.timeout.ms", "1000")], ShareGroupConfig {
-                session_timeout: broker.min_session_timeout,
-                ..broker.clone()
-            }),
-            (
-                &[("share.session.timeout.ms", "3600000")],
-                ShareGroupConfig {
+            Row {
+                entries: vec![entry("share.session.timeout.ms", "1000")],
+                config: ShareGroupConfig {
+                    session_timeout: broker.min_session_timeout,
+                    ..broker.clone()
+                },
+            },
+            Row {
+                entries: vec![entry("share.session.timeout.ms", "3600000")],
+                config: ShareGroupConfig {
                     session_timeout: broker.max_session_timeout,
                     ..broker.clone()
                 },
-            ),
-            (&[("share.heartbeat.interval.ms", "0")], ShareGroupConfig {
-                heartbeat_interval: broker.min_heartbeat_interval,
-                ..broker.clone()
-            }),
-            (
-                &[("share.heartbeat.interval.ms", "60000")],
-                ShareGroupConfig {
+            },
+            Row {
+                entries: vec![entry("share.heartbeat.interval.ms", "0")],
+                config: ShareGroupConfig {
+                    heartbeat_interval: broker.min_heartbeat_interval,
+                    ..broker.clone()
+                },
+            },
+            Row {
+                entries: vec![entry("share.heartbeat.interval.ms", "60000")],
+                config: ShareGroupConfig {
                     heartbeat_interval: broker.max_heartbeat_interval,
                     ..broker.clone()
                 },
-            ),
-            (
-                &[("share.assignment.interval.ms", "3600000")],
-                ShareGroupConfig {
+            },
+            Row {
+                entries: vec![entry("share.assignment.interval.ms", "3600000")],
+                config: ShareGroupConfig {
                     assignment_interval: MAX_ASSIGNMENT_INTERVAL,
                     ..broker.clone()
                 },
-            ),
+            },
         ];
-        let (actual, expected): (Vec<_>, Vec<_>) = rows
-            .into_iter()
-            .map(|(entries, config)| (with(entries), config))
-            .unzip();
+        let mut actual = Vec::new();
+        let mut expected = Vec::new();
+        for Row { entries, config } in rows {
+            actual.push(with(&entries));
+            expected.push(config);
+        }
         assert!(actual == expected);
         assert!(matches!(broker.for_group(None), Cow::Borrowed(_)));
     }

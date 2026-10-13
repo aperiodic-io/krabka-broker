@@ -6,7 +6,9 @@
 use {
     super::{test_support::DEFAULT_MAX_FRAME_BYTES, *},
     crate::{
-        api_catalog::{INTER_BROKER_ONLY_APIS, UnstableApiVersions, dispatched_apis},
+        api_catalog::{
+            INTER_BROKER_ONLY_APIS, LegacyRequestVersions, UnstableApiVersions, dispatched_apis,
+        },
         authorizer::AuthorizationResult,
         codes,
         config::BrokerConfig,
@@ -16,7 +18,7 @@ use {
             SaslMechanismLabel, UNKNOWN_LABEL,
         },
         network::{
-            dispatch::test_support::{plaintext_loop, serve_loop},
+            dispatch::test_support::{ServeLoop, plaintext_loop, serve_loop},
             request::peek_api_key,
             response_header_len,
         },
@@ -177,7 +179,7 @@ async fn inter_broker_only_apis_close_the_connection_on_a_client_listener() {
         let (handle, _dir) = start_broker_with(|_| {}).await;
         let broker = handle.broker_arc_for_test();
 
-        let (addr, serve) = serve_loop(
+        let ServeLoop { addr, serve } = serve_loop(
             broker,
             "EXTERNAL",
             krabka_security::ListenerProtocol::Plaintext,
@@ -212,13 +214,27 @@ enum Outcome {
     ApiVersionsV0(krabka_protocol::owned::api_versions_response::ApiVersionsResponse),
 }
 
-/// Sends each `(api_key, version)` frame on its own connection to a broker
-/// started from `cfg` and returns what the serve loop did with it, and the
-/// broker's metrics once every connection is done.
+/// A request frame to send: an api key at a version.
+#[derive(Clone, Copy)]
+struct FrameRequest {
+    api_key: i16,
+    version: i16,
+}
+
+/// What the serve loop did with each frame, and the broker's metrics once
+/// every connection was done.
+struct DrivenFrames {
+    outcomes: Vec<Outcome>,
+    metrics: BrokerMetrics,
+}
+
+/// Sends each frame on its own connection to a broker started from `cfg` and
+/// returns what the serve loop did with it, and the broker's metrics once
+/// every connection is done.
 async fn drive_one_frame_per_connection(
     cfg: BrokerConfig,
-    requests: &[(i16, i16)],
-) -> (Vec<Outcome>, BrokerMetrics) {
+    requests: &[FrameRequest],
+) -> DrivenFrames {
     use krabka_protocol::{Decode, owned::api_versions_response::ApiVersionsResponse};
 
     let handle = Broker::start(cfg).await.expect("start broker");
@@ -227,7 +243,7 @@ async fn drive_one_frame_per_connection(
     let registry = build_registry();
     let connections = requests.len();
 
-    let (addr, serve) = serve_loop(
+    let ServeLoop { addr, serve } = serve_loop(
         broker,
         "PLAINTEXT",
         krabka_security::ListenerProtocol::Plaintext,
@@ -239,7 +255,7 @@ async fn drive_one_frame_per_connection(
     let server = tokio::spawn(serve);
 
     let mut outcomes = Vec::with_capacity(connections);
-    for (correlation_id, &(api_key, version)) in requests.iter().enumerate() {
+    for (correlation_id, &FrameRequest { api_key, version }) in requests.iter().enumerate() {
         let correlation_id = i32::try_from(correlation_id).expect("correlation id");
         let flexible = registry
             .get(api_key)
@@ -275,7 +291,7 @@ async fn drive_one_frame_per_connection(
         .await
         .expect("serve loop joins after every connection");
     handle.shutdown().await;
-    (outcomes, metrics)
+    DrivenFrames { outcomes, metrics }
 }
 
 /// #844: Kafka's `Processor.parseRequestHeader` throws
@@ -291,6 +307,13 @@ async fn drive_one_frame_per_connection(
 async fn unsupported_versions_close_the_connection_except_api_versions() {
     use krabka_protocol::owned::api_versions_response::{ApiVersion, ApiVersionsResponse};
 
+    /// A frame and the outcome it must get.
+    struct VersionCase {
+        api_key: i16,
+        version: i16,
+        expected: Outcome,
+    }
+
     let api_versions_v0 = ApiVersionsResponse {
         error_code: codes::UNSUPPORTED_VERSION,
         api_keys: vec![ApiVersion {
@@ -301,7 +324,7 @@ async fn unsupported_versions_close_the_connection_except_api_versions() {
         }],
         ..Default::default()
     };
-    let mut cases: Vec<(i16, i16, Outcome)> = Vec::new();
+    let mut cases: Vec<VersionCase> = Vec::new();
     for api in dispatched_apis() {
         let outcome = || {
             if api.api_key == API_VERSIONS_KEY {
@@ -314,18 +337,41 @@ async fn unsupported_versions_close_the_connection_except_api_versions() {
             .max_version
             .checked_add(1)
             .expect("maximum API version has a successor");
-        cases.push((api.api_key, above, outcome()));
-        cases.push((api.api_key, api.min_version - 1, outcome()));
+        cases.push(VersionCase {
+            api_key: api.api_key,
+            version: above,
+            expected: outcome(),
+        });
+        cases.push(VersionCase {
+            api_key: api.api_key,
+            version: api.min_version - 1,
+            expected: outcome(),
+        });
     }
-    cases.push((i16::MAX, 0, Outcome::Closed));
+    cases.push(VersionCase {
+        api_key: i16::MAX,
+        version: 0,
+        expected: Outcome::Closed,
+    });
 
     let (_dir, cfg) = broker_config();
-    let requests: Vec<(i16, i16)> = cases
+    let requests: Vec<FrameRequest> = cases
         .iter()
-        .map(|(key, version, _)| (*key, *version))
+        .map(|case| FrameRequest {
+            api_key: case.api_key,
+            version: case.version,
+        })
         .collect();
-    let (outcomes, metrics) = drive_one_frame_per_connection(cfg, &requests).await;
-    for ((api_key, version, expected), actual) in cases.into_iter().zip(outcomes) {
+    let DrivenFrames { outcomes, metrics } = drive_one_frame_per_connection(cfg, &requests).await;
+    for (
+        VersionCase {
+            api_key,
+            version,
+            expected,
+        },
+        actual,
+    ) in cases.into_iter().zip(outcomes)
+    {
         check!(actual == expected, "api_key {api_key} at version {version}");
     }
 
@@ -333,6 +379,50 @@ async fn unsupported_versions_close_the_connection_except_api_versions() {
         api_key: UNKNOWN_LABEL.into(),
     };
     check!(metrics.api_requests.get_or_create(&unknown).get() == 1);
+}
+
+/// A frame, the gates in force and whether the broker refuses it.
+#[derive(Clone, Copy)]
+struct GatedVersion {
+    api_key: i16,
+    name: &'static str,
+    frame_version: i16,
+    unstable: UnstableApiVersions,
+    legacy: LegacyRequestVersions,
+    refused: bool,
+}
+
+async fn assert_gated_version(case: GatedVersion) {
+    let GatedVersion {
+        api_key,
+        name,
+        frame_version,
+        unstable,
+        legacy,
+        refused,
+    } = case;
+    let (_dir, mut cfg) = broker_config();
+    cfg.features.unstable_api_versions = unstable;
+    cfg.features.legacy_request_versions = legacy;
+    let DrivenFrames { outcomes, metrics } = drive_one_frame_per_connection(cfg, &[FrameRequest {
+        api_key,
+        version: frame_version,
+    }])
+    .await;
+    let label = format!("{name} v{frame_version} {unstable:?} {legacy:?}");
+    check!(outcomes == vec![Outcome::Closed], "{label}");
+    let metric = ApiKeyLabel {
+        api_key: name.into(),
+    };
+    check!(
+        (metrics
+            .unsupported_api_requests
+            .get_or_create(&metric)
+            .get()
+            == 1)
+            == refused,
+        "{label}"
+    );
 }
 
 /// #646, #784: under Kafka's `unstable.api.versions.enable` and krabka's
@@ -349,72 +439,166 @@ async fn unsupported_versions_close_the_connection_except_api_versions() {
 #[tokio::test]
 async fn a_gated_version_is_refused_unless_its_switch_is_on() {
     use crate::api_catalog::{
-        LegacyRequestVersions::{self, Disabled as NoLegacy, Enabled as Legacy},
-        UnstableApiVersions::{self, Disabled as Strict, Enabled as Trunk},
+        LegacyRequestVersions::{Disabled as NoLegacy, Enabled as Legacy},
+        UnstableApiVersions::{Disabled as Strict, Enabled as Trunk},
     };
 
-    let cases: &[(
-        i16,
-        &str,
-        i16,
-        UnstableApiVersions,
-        LegacyRequestVersions,
-        bool,
-    )] = &[
-        (22, "InitProducerId", 6, Strict, NoLegacy, true),
-        (22, "InitProducerId", 5, Strict, NoLegacy, false),
-        (22, "InitProducerId", 6, Trunk, NoLegacy, false),
-        (28, "TxnOffsetCommit", 6, Strict, NoLegacy, true),
-        (28, "TxnOffsetCommit", 6, Trunk, NoLegacy, false),
-        (88, "StreamsGroupHeartbeat", 1, Strict, NoLegacy, true),
-        (88, "StreamsGroupHeartbeat", 1, Trunk, NoLegacy, false),
-        (89, "StreamsGroupDescribe", 1, Strict, NoLegacy, true),
-        (
-            93,
-            "StreamsGroupTopologyDescriptionUpdate",
-            0,
-            Strict,
-            NoLegacy,
-            true,
-        ),
-        (
-            93,
-            "StreamsGroupTopologyDescriptionUpdate",
-            0,
-            Trunk,
-            NoLegacy,
-            false,
-        ),
-        (94, "UnregisterController", 0, Strict, NoLegacy, true),
-        (94, "UnregisterController", 0, Trunk, NoLegacy, false),
-        (0, "Produce", 2, Strict, NoLegacy, true),
-        (0, "Produce", 0, Trunk, NoLegacy, true),
-        (0, "Produce", 2, Strict, Legacy, false),
-        (1, "Fetch", 3, Strict, NoLegacy, true),
-        (1, "Fetch", 3, Strict, Legacy, false),
-        (2, "ListOffsets", 0, Strict, NoLegacy, true),
-        (2, "ListOffsets", 0, Strict, Legacy, false),
+    let cases: &[GatedVersion] = &[
+        GatedVersion {
+            api_key: 22,
+            name: "InitProducerId",
+            frame_version: 6,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 22,
+            name: "InitProducerId",
+            frame_version: 5,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: false,
+        },
+        GatedVersion {
+            api_key: 22,
+            name: "InitProducerId",
+            frame_version: 6,
+            unstable: Trunk,
+            legacy: NoLegacy,
+            refused: false,
+        },
+        GatedVersion {
+            api_key: 28,
+            name: "TxnOffsetCommit",
+            frame_version: 6,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 28,
+            name: "TxnOffsetCommit",
+            frame_version: 6,
+            unstable: Trunk,
+            legacy: NoLegacy,
+            refused: false,
+        },
+        GatedVersion {
+            api_key: 88,
+            name: "StreamsGroupHeartbeat",
+            frame_version: 1,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 88,
+            name: "StreamsGroupHeartbeat",
+            frame_version: 1,
+            unstable: Trunk,
+            legacy: NoLegacy,
+            refused: false,
+        },
+        GatedVersion {
+            api_key: 89,
+            name: "StreamsGroupDescribe",
+            frame_version: 1,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 93,
+            name: "StreamsGroupTopologyDescriptionUpdate",
+            frame_version: 0,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 93,
+            name: "StreamsGroupTopologyDescriptionUpdate",
+            frame_version: 0,
+            unstable: Trunk,
+            legacy: NoLegacy,
+            refused: false,
+        },
+        GatedVersion {
+            api_key: 94,
+            name: "UnregisterController",
+            frame_version: 0,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 94,
+            name: "UnregisterController",
+            frame_version: 0,
+            unstable: Trunk,
+            legacy: NoLegacy,
+            refused: false,
+        },
+        GatedVersion {
+            api_key: 0,
+            name: "Produce",
+            frame_version: 2,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 0,
+            name: "Produce",
+            frame_version: 0,
+            unstable: Trunk,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 0,
+            name: "Produce",
+            frame_version: 2,
+            unstable: Strict,
+            legacy: Legacy,
+            refused: false,
+        },
+        GatedVersion {
+            api_key: 1,
+            name: "Fetch",
+            frame_version: 3,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 1,
+            name: "Fetch",
+            frame_version: 3,
+            unstable: Strict,
+            legacy: Legacy,
+            refused: false,
+        },
+        GatedVersion {
+            api_key: 2,
+            name: "ListOffsets",
+            frame_version: 0,
+            unstable: Strict,
+            legacy: NoLegacy,
+            refused: true,
+        },
+        GatedVersion {
+            api_key: 2,
+            name: "ListOffsets",
+            frame_version: 0,
+            unstable: Strict,
+            legacy: Legacy,
+            refused: false,
+        },
     ];
-    for &(api_key, name, frame_version, unstable, legacy, refused) in cases {
-        let (_dir, mut cfg) = broker_config();
-        cfg.features.unstable_api_versions = unstable;
-        cfg.features.legacy_request_versions = legacy;
-        let (outcomes, metrics) =
-            drive_one_frame_per_connection(cfg, &[(api_key, frame_version)]).await;
-        let label = format!("{name} v{frame_version} {unstable:?} {legacy:?}");
-        check!(outcomes == vec![Outcome::Closed], "{label}");
-        let metric = ApiKeyLabel {
-            api_key: name.into(),
-        };
-        check!(
-            (metrics
-                .unsupported_api_requests
-                .get_or_create(&metric)
-                .get()
-                == 1)
-                == refused,
-            "{label}"
-        );
+    for &case in cases {
+        assert_gated_version(case).await;
     }
 }
 
@@ -427,7 +611,11 @@ async fn api_versions_v5_is_unsupported_unless_unstable_api_versions_are_enabled
     use krabka_protocol::owned::api_versions_response::{ApiVersion, ApiVersionsResponse};
 
     let (_dir, cfg) = broker_config();
-    let (outcomes, _) = drive_one_frame_per_connection(cfg, &[(API_VERSIONS_KEY, 5)]).await;
+    let DrivenFrames { outcomes, .. } = drive_one_frame_per_connection(cfg, &[FrameRequest {
+        api_key: API_VERSIONS_KEY,
+        version: 5,
+    }])
+    .await;
     check!(
         outcomes
             == vec![Outcome::ApiVersionsV0(ApiVersionsResponse {
@@ -455,7 +643,8 @@ async fn serve_frames(
     let broker = handle.broker_arc_for_test();
     let metrics = broker.metrics.clone();
 
-    let (addr, serve) = serve_loop(broker, "TESTS", protocol, mechanisms, None, 1).await;
+    let ServeLoop { addr, serve } =
+        serve_loop(broker, "TESTS", protocol, mechanisms, None, 1).await;
     let server = tokio::spawn(serve);
 
     let mut framed = test_support::connect_framed(addr, "connect").await;
@@ -470,40 +659,48 @@ async fn serve_frames(
     metrics
 }
 
+/// One `connection_closes` series: its reason label and its count.
+#[derive(Debug, PartialEq, Eq)]
+struct CloseCount {
+    reason: &'static str,
+    count: u64,
+}
+
+/// A [`CloseCount`] of `reason`.
+const fn close(reason: &'static str, count: u64) -> CloseCount { CloseCount { reason, count } }
+
 /// Every `connection_closes` series, in the enum's own order, so a test can
 /// compare the whole family rather than one label of it.
-fn close_counts(metrics: &BrokerMetrics) -> Vec<(&'static str, u64)> {
+fn close_counts(metrics: &BrokerMetrics) -> Vec<CloseCount> {
     ConnectionCloseReason::ALL
         .into_iter()
-        .map(|reason| {
-            (
-                reason.as_str(),
-                metrics
-                    .connection_closes
-                    .get_or_create(&ConnectionCloseReasonLabel { reason })
-                    .get(),
-            )
+        .map(|reason| CloseCount {
+            reason: reason.as_str(),
+            count: metrics
+                .connection_closes
+                .get_or_create(&ConnectionCloseReasonLabel { reason })
+                .get(),
         })
         .collect()
 }
 
-fn active_closes(metrics: &BrokerMetrics) -> Vec<(&'static str, u64)> {
+fn active_closes(metrics: &BrokerMetrics) -> Vec<CloseCount> {
     close_counts(metrics)
         .into_iter()
-        .filter(|(_, count)| *count > 0)
+        .filter(|closes| closes.count > 0)
         .collect()
 }
 
 /// The family with no series moved, which is what every other scenario's
 /// expectation is a single edit away from.
-fn no_closes() -> Vec<(&'static str, u64)> {
+fn no_closes() -> Vec<CloseCount> {
     vec![
-        ("idle", 0),
-        ("sasl_session_expired", 0),
-        ("decode_error", 0),
-        ("peer_closed", 0),
-        ("max_connections", 0),
-        ("max_connections_per_ip", 0),
+        close("idle", 0),
+        close("sasl_session_expired", 0),
+        close("decode_error", 0),
+        close("peer_closed", 0),
+        close("max_connections", 0),
+        close("max_connections_per_ip", 0),
     ]
 }
 
@@ -523,12 +720,12 @@ async fn a_frame_that_is_not_a_request_closes_the_connection_as_a_decode_error()
     assert!(
         close_counts(&metrics)
             == vec![
-                ("idle", 0),
-                ("sasl_session_expired", 0),
-                ("decode_error", 1),
-                ("peer_closed", 0),
-                ("max_connections", 0),
-                ("max_connections_per_ip", 0),
+                close("idle", 0),
+                close("sasl_session_expired", 0),
+                close("decode_error", 1),
+                close("peer_closed", 0),
+                close("max_connections", 0),
+                close("max_connections_per_ip", 0),
             ]
     );
 }
@@ -795,7 +992,8 @@ async fn a_sasl_frame_on_a_non_sasl_listener_keeps_the_principal() {
     for (case, protocol, mtls_principal, sasl_frame, expected_answer, expected_topic_error) in cases
     {
         let broker = handle.broker_arc_for_test();
-        let (addr, serve) = serve_loop(broker, "TESTS", protocol, None, mtls_principal, 1).await;
+        let ServeLoop { addr, serve } =
+            serve_loop(broker, "TESTS", protocol, None, mtls_principal, 1).await;
         let server = tokio::spawn(serve);
         let mut framed = test_support::connect_framed(addr, "connect").await;
 
@@ -872,7 +1070,7 @@ async fn a_sasl_frame_on_a_non_sasl_listener_keeps_the_principal() {
 /// response writes through is a socket, and an in-memory pipe is not one.
 mod request_budget {
     use {
-        super::{KafkaCodec, active_closes, request_frame},
+        super::{KafkaCodec, active_closes, close, request_frame},
         crate::{BrokerHandle, broker::Broker, network::dispatch::test_support::plaintext_loop},
         assert2::{assert, check},
         futures_util::{SinkExt as _, StreamExt as _},
@@ -1017,7 +1215,7 @@ mod request_budget {
             .loop_task
             .await
             .expect("serve loop joins after the refusal");
-        check!(active_closes(&broker.metrics) == vec![("decode_error", 1)]);
+        check!(active_closes(&broker.metrics) == vec![close("decode_error", 1)]);
         handle.shutdown().await;
     }
 
@@ -1065,7 +1263,7 @@ mod request_budget {
         .await
         .expect("every permit comes back once the requests are answered");
         // The client hung up; the budget refused nothing.
-        check!(active_closes(&broker.metrics) == vec![("peer_closed", 1)]);
+        check!(active_closes(&broker.metrics) == vec![close("peer_closed", 1)]);
         handle.shutdown().await;
     }
 }
@@ -1080,7 +1278,11 @@ mod log_levels {
         super::{DEFAULT_MAX_FRAME_BYTES, request_frame},
         crate::{
             broker::Broker,
-            network::{codec, dispatch::test_support::serve_loop, test_support::broker_config},
+            network::{
+                codec,
+                dispatch::test_support::{ServeLoop, serve_loop},
+                test_support::broker_config,
+            },
             test_support::LogCapture,
         },
         assert2::assert,
@@ -1099,9 +1301,24 @@ mod log_levels {
         Idle,
     }
 
+    /// One line the dispatch module logged: its level and its message.
+    #[derive(Debug, PartialEq, Eq)]
+    struct LoggedLine {
+        level: Level,
+        message: String,
+    }
+
+    /// A [`LoggedLine`] of `level` with `message`.
+    fn logged(level: Level, message: &str) -> LoggedLine {
+        LoggedLine {
+            level,
+            message: message.to_string(),
+        }
+    }
+
     // Serves one connection to `peer`, and returns what the dispatch module
     // logged at DEBUG or above about that connection.
-    async fn logged_serving(peer: Peer) -> Vec<(Level, String)> {
+    async fn logged_serving(peer: Peer) -> Vec<LoggedLine> {
         let (_dir, mut cfg) = broker_config();
         if matches!(peer, Peer::Idle) {
             cfg.connections_max_idle = Some(krabka_units::millis(100));
@@ -1111,7 +1328,7 @@ mod log_levels {
 
         let capture = LogCapture::default();
         let _capturing = tracing::dispatcher::set_default(&capture.dispatch());
-        let (addr, serve) = serve_loop(
+        let ServeLoop { addr, serve } = serve_loop(
             broker,
             "PLAINTEXT",
             krabka_security::ListenerProtocol::Plaintext,
@@ -1162,45 +1379,42 @@ mod log_levels {
                 event.target.starts_with("krabka_broker::network::dispatch")
                     && event.level <= Level::DEBUG
             })
-            .map(|event| (event.level, event.message))
+            .map(|event| LoggedLine {
+                level: event.level,
+                message: event.message,
+            })
             .collect()
     }
 
     #[tokio::test]
     async fn the_serve_loop_logs_connections_and_requests_at_debug() {
-        let opened = (Level::DEBUG, "connection opened");
-        let closed = (Level::DEBUG, "connection closed");
+        let opened = || logged(Level::DEBUG, "connection opened");
+        let closed = || logged(Level::DEBUG, "connection closed");
         let cases = [
             (Peer::OneRequest, vec![
-                opened,
-                (Level::DEBUG, "dispatching request"),
-                closed,
+                opened(),
+                logged(Level::DEBUG, "dispatching request"),
+                closed(),
             ]),
             (Peer::NotARequest, vec![
-                opened,
-                (Level::WARN, "frame too small to peek api_key, closing"),
-                closed,
+                opened(),
+                logged(Level::WARN, "frame too small to peek api_key, closing"),
+                closed(),
             ]),
             (Peer::Idle, vec![
-                opened,
-                (
+                opened(),
+                logged(
                     Level::DEBUG,
                     "connection idle past connections.max.idle.ms, closing",
                 ),
-                closed,
+                closed(),
             ]),
         ];
         let mut logged_rows = Vec::new();
         let mut expected_rows = Vec::new();
         for (peer, expected) in cases {
             logged_rows.push((peer, logged_serving(peer).await));
-            expected_rows.push((
-                peer,
-                expected
-                    .into_iter()
-                    .map(|(level, message)| (level, message.to_string()))
-                    .collect::<Vec<_>>(),
-            ));
+            expected_rows.push((peer, expected));
         }
         assert!(logged_rows == expected_rows);
     }

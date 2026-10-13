@@ -55,7 +55,10 @@ fn expand_original(
     let source: Vec<_> = group.stream().into_iter().collect();
     let arms = render_arms(
         &source,
-        ranges.iter().map(|arm| (&arm.native, arm.gated)),
+        ranges.iter().map(|arm| ArmSlice {
+            range: &arm.native,
+            gated: arm.gated,
+        }),
         || {
             NativeTokenStream::from(platform_cfg())
                 .into_iter()
@@ -78,7 +81,10 @@ fn expand_parsed(input: TokenStream, kind: MatchKind) -> Result<TokenStream, Par
     };
     group.tokens = render_arms(
         &group.tokens,
-        ranges.iter().map(|arm| (&arm.parsed, arm.gated)),
+        ranges.iter().map(|arm| ArmSlice {
+            range: &arm.parsed,
+            gated: arm.gated,
+        }),
         || platform_cfg().into_iter().collect(),
     )
     .into_iter()
@@ -109,7 +115,7 @@ fn arm_ranges(input: &TokenStream, kind: MatchKind) -> Result<Vec<ArmRange>, Par
         let file = match kind {
             MatchKind::WriteOp => write_op_kind(&arm, &mut variants)?,
             MatchKind::RecordsPayload => {
-                let (file, portable) = record_kinds(&arm.pat);
+                let RecordKinds { file, portable } = record_kinds(&arm.pat);
                 if file && portable {
                     return Err(ParseError::new(
                         arm.span(),
@@ -146,13 +152,19 @@ fn arm_ranges(input: &TokenStream, kind: MatchKind) -> Result<Vec<ArmRange>, Par
     }
 }
 
+/// The tokens of one arm, and whether the arm needs the platform `cfg`.
+struct ArmSlice<'a> {
+    range: &'a Range<usize>,
+    gated: bool,
+}
+
 fn render_arms<'a, T: Clone>(
     source: &[T],
-    ranges: impl Iterator<Item = (&'a Range<usize>, bool)>,
+    ranges: impl Iterator<Item = ArmSlice<'a>>,
     cfg: impl Fn() -> Vec<T>,
 ) -> Vec<T> {
     let mut output = Vec::new();
-    for (range, gated) in ranges {
+    for ArmSlice { range, gated } in ranges {
         if gated {
             output.extend(cfg());
         }
@@ -211,31 +223,50 @@ fn path_identifiers(path: TokenStream) -> Vec<String> {
         .collect()
 }
 
+/// Whether a pattern matches the `FileRegions` variant, and whether it matches
+/// any other, portable, variant.
+#[derive(Clone, Copy)]
+struct RecordKinds {
+    file: bool,
+    portable: bool,
+}
+
 /// Recurse through `Result` wrappers and or-patterns, without gating a portable alternative.
-fn record_kinds(pattern: &Pattern) -> (bool, bool) {
+fn record_kinds(pattern: &Pattern) -> RecordKinds {
     match pattern {
         Pattern::TupleStruct(pattern) => {
             let identifiers = path_identifiers(pattern.path.to_token_stream());
             if let [.., owner, variant] = identifiers.as_slice()
                 && owner == "RecordsPayload"
             {
-                return (variant == "FileRegions", variant != "FileRegions");
+                return RecordKinds {
+                    file: variant == "FileRegions",
+                    portable: variant != "FileRegions",
+                };
             }
             combine_kinds(pattern.elems.iter())
         }
         Pattern::Or(pattern) => combine_kinds(pattern.cases.iter()),
         Pattern::Paren(pattern) => record_kinds(&pattern.content),
         Pattern::Reference(pattern) => record_kinds(&pattern.pat),
-        _ => (false, true),
+        _ => RecordKinds {
+            file: false,
+            portable: true,
+        },
     }
 }
 
-fn combine_kinds<'a>(patterns: impl Iterator<Item = &'a Pattern>) -> (bool, bool) {
-    patterns
-        .map(record_kinds)
-        .fold((false, false), |(file, portable), next| {
-            (file || next.0, portable || next.1)
-        })
+fn combine_kinds<'a>(patterns: impl Iterator<Item = &'a Pattern>) -> RecordKinds {
+    patterns.map(record_kinds).fold(
+        RecordKinds {
+            file: false,
+            portable: false,
+        },
+        |kinds, next| RecordKinds {
+            file: kinds.file || next.file,
+            portable: kinds.portable || next.portable,
+        },
+    )
 }
 
 pub(crate) fn platform_cfg() -> TokenStream {

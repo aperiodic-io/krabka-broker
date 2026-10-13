@@ -21,7 +21,7 @@ use {
         wire::{CONTROL, accepted, create_topic, frozen_topic_with_record, refused},
     },
     assert2::{assert, check},
-    krabka_broker::{Broker, BrokerConfig, BrokerHandle, codes},
+    krabka_broker::{Broker, BrokerConfig, codes},
     krabka_client_core::Client,
     krabka_protocol::{
         krabka::freeze::PATTERN_TYPE_LITERAL,
@@ -34,13 +34,17 @@ use {
 ///
 /// The harness leaves `metrics_listen_addr` unset, and the one case that
 /// scrapes `/metrics` over HTTP needs a socket to scrape.
-async fn start_with_metrics() -> (BrokerHandle, Client, tempfile::TempDir) {
+async fn start_with_metrics() -> support::InProcess {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let mut config = BrokerConfig::for_tests(tempdir.path().to_path_buf());
     config.metrics_listen_addr = Some("127.0.0.1:0".parse().expect("a loopback address"));
     let broker = Broker::start(config).await.expect("broker start");
     let client = connect_to_broker(&broker).await;
-    (broker, client, tempdir)
+    support::InProcess {
+        broker,
+        client,
+        _tempdir: tempdir,
+    }
 }
 
 /// Scrape the `OpenMetrics` body from the broker's `/metrics` endpoint.
@@ -76,7 +80,11 @@ async fn fetch_record_count(client: &Client, topic: &str, topic_id: WireUuid) ->
 /// broker scraped zero for them, because nothing on a real request moved them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fetch_metadata_and_the_metrics_endpoint_still_answer_for_a_frozen_topic() {
-    let (broker, client, _dir) = start_with_metrics().await;
+    let support::InProcess {
+        broker,
+        client,
+        _tempdir,
+    } = start_with_metrics().await;
     let metrics_addr = broker
         .metrics_addr()
         .expect("the metrics listener is bound");

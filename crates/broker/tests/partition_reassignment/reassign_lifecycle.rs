@@ -11,7 +11,8 @@ use {
         kafka_wire::create_automatic_topic_plaintext,
         log_dir_wire::{alter_replica_log_dirs, describe_log_dirs},
         plaintext_cluster::{
-            broker_id, controller_leader_addr, node_id, start_three_broker_plaintext_cluster,
+            ThreeBrokerCluster, broker_id, controller_leader_addr, node_id,
+            start_three_broker_plaintext_cluster,
             start_three_broker_plaintext_cluster_with_log_dirs, wait_partition_exists,
         },
         plaintext_wire::CLIENT_ID,
@@ -37,8 +38,15 @@ async fn preplacement_log_dir_preference_survives_until_reassignment_materialize
         tempfile::tempdir().unwrap(),
     ];
     let paths = extras.each_ref().map(|dir| dir.path().to_path_buf());
-    let (h1, h2, h3, _d1, _d2, _d3, addr) =
-        start_three_broker_plaintext_cluster_with_log_dirs(&paths).await;
+    let ThreeBrokerCluster {
+        h1,
+        h2,
+        h3,
+        d1: _d1,
+        d2: _d2,
+        d3: _d3,
+        addr1: addr,
+    } = start_three_broker_plaintext_cluster_with_log_dirs(&paths).await;
     create_automatic_topic_plaintext()
         .addr(addr)
         .client_id(CLIENT_ID)
@@ -114,7 +122,15 @@ async fn preplacement_log_dir_preference_survives_until_reassignment_materialize
 async fn alter_then_complete_via_isr_catchup() {
     let _g = case_lock!();
 
-    let (h1, h2, h3, _d1, _d2, _d3, _addr1) = foo_cluster().await;
+    let ThreeBrokerCluster {
+        h1,
+        h2,
+        h3,
+        d1: _d1,
+        d2: _d2,
+        d3: _d3,
+        ..
+    } = foo_cluster().await;
 
     // Find which brokers are in `replicas` initially — choose target accordingly.
     let pr = h1.partition_record_for_test("foo", 0).expect("partition");
@@ -192,7 +208,9 @@ async fn alter_then_complete_via_isr_catchup() {
 async fn list_in_flight_returns_pending_rows() {
     let _g = case_lock!();
 
-    let (h1, h2, h3, _d1, _d2, _d3, _addr) = foo_cluster().await;
+    let cluster = foo_cluster().await;
+    let h1 = cluster.h1;
+    let (h2, h3) = (cluster.h2, cluster.h3);
 
     let pr = h1.partition_record_for_test("foo", 0).expect("partition");
     let new_replica: i32 = (1..=3)
@@ -214,18 +232,21 @@ async fn list_in_flight_returns_pending_rows() {
     let listed = drive_list_reassignments(raft_addr, None).await;
     let foo = listed
         .iter()
-        .find(|(n, _)| n == "foo")
+        .find(|topic| topic.name == "foo")
         .expect("foo should appear in list");
     assert!(
-        foo.1.len() == 1,
+        foo.partitions.len() == 1,
         "expected 1 partition in-flight; got {:?}",
-        foo.1
+        foo.partitions
     );
-    check!(foo.1[0].0 == 0, "expected partition_index=0");
     check!(
-        foo.1[0].2 == vec![new_replica],
+        foo.partitions[0].partition_index == 0,
+        "expected partition_index=0"
+    );
+    check!(
+        foo.partitions[0].adding_replicas == vec![new_replica],
         "expected adding_replicas=[new_replica]; got {:?}",
-        foo.1[0].2
+        foo.partitions[0].adding_replicas
     );
 
     // Clean up.
@@ -241,7 +262,7 @@ async fn list_in_flight_returns_pending_rows() {
 async fn cancel_via_null_replicas_reverts() {
     let _lock = case_lock!();
     let cluster = foo_cluster().await;
-    let (h1, h2, h3) = (cluster.0, cluster.1, cluster.2);
+    let (h1, h2, h3) = (cluster.h1, cluster.h2, cluster.h3);
 
     let pr = h1.partition_record_for_test("foo", 0).expect("partition");
     let original_replicas = pr.replicas.clone();
@@ -341,18 +362,10 @@ async fn cancel_via_null_replicas_reverts() {
     }
 }
 
-async fn foo_cluster() -> (
-    krabka_broker::BrokerHandle,
-    krabka_broker::BrokerHandle,
-    krabka_broker::BrokerHandle,
-    tempfile::TempDir,
-    tempfile::TempDir,
-    tempfile::TempDir,
-    std::net::SocketAddr,
-) {
+async fn foo_cluster() -> ThreeBrokerCluster {
     let cluster = start_three_broker_plaintext_cluster().await;
     create_automatic_topic_plaintext()
-        .addr(cluster.6)
+        .addr(cluster.addr1)
         .client_id(CLIENT_ID)
         .topic(ConfiguredTopicSetup {
             name: "foo".into(),
@@ -361,6 +374,6 @@ async fn foo_cluster() -> (
         })
         .call()
         .await;
-    wait_partition_exists(&cluster.0, "foo", 0).await;
+    wait_partition_exists(&cluster.h1, "foo", 0).await;
     cluster
 }

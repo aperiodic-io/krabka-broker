@@ -132,18 +132,20 @@ mod tests {
         super::*,
         crate::{
             NodeId,
-            chain::{ChainState, GENESIS_HEAD},
+            chain::{ChainLink, ChainState, GENESIS_HEAD},
             event::AuditEventClass,
             log::{
                 AuditLog, AuditMode,
                 test_support::{
-                    FailableSink, REPLAY_EVERY, ROOMY_CAP, await_until, emit_lifecycle,
-                    failed_sink_stats, finish_writer, healthy_sink_stats, life, params,
-                    params_with_clock, product, record_sequences, spawn_writer, test_signer,
+                    ClockedParams, FailableSink, REPLAY_EVERY, ROOMY_CAP, SinkStats, await_until,
+                    emit_lifecycle, failed_sink_stats, finish_writer, healthy_sink_stats, life,
+                    params, params_with_clock, product, record_sequences, spawn_writer,
+                    test_signer,
                 },
             },
             spool::Spool,
             stats::AuditStats,
+            test_support::TestSigner,
         },
         assert2::check,
         krabka_units::prelude::{ByteSizeExt as _, TimeExt as _, bytes},
@@ -183,13 +185,14 @@ mod tests {
         };
         let directory = tempfile::tempdir().unwrap();
         let (signer, public_key) = checkpoint_every_n.map_or((None, None), |_| {
-            let (signer, public_key) = test_signer();
+            let TestSigner { signer, public_key } = test_signer();
             (Some(signer), Some(public_key))
         });
-        let (sink, stats) = failed_sink_stats();
+        let SinkStats { sink, stats } = failed_sink_stats();
         let (log, rx) = AuditLog::new(64);
         let spool = Spool::open(directory.path(), cap).unwrap();
-        let (mut params, clock) = params_with_clock(sink.clone(), spool, stats.clone());
+        let ClockedParams { mut params, clock } =
+            params_with_clock(sink.clone(), spool, stats.clone());
         params.signer = signer;
         params.checkpoint_every_n = checkpoint_every_n.unwrap_or(0);
         FailingSpoolFixture {
@@ -203,13 +206,15 @@ mod tests {
         }
     }
 
-    fn fail_closed_writer(
-        sink: Arc<FailableSink>,
-        spool: Spool,
-    ) -> (Arc<AuditLog>, tokio::task::JoinHandle<()>) {
+    struct RunningWriter {
+        log: Arc<AuditLog>,
+        handle: tokio::task::JoinHandle<()>,
+    }
+
+    fn fail_closed_writer(sink: Arc<FailableSink>, spool: Spool) -> RunningWriter {
         let (log, receiver) = AuditLog::new_with_mode(8, AuditMode::FailClosed);
         let handle = spawn_writer(receiver, params(sink, spool, Arc::new(AuditStats::new())));
-        (log, handle)
+        RunningWriter { log, handle }
     }
 
     async fn check_required_failure(log: &AuditLog, reason: &str) {
@@ -300,7 +305,7 @@ mod tests {
     #[tokio::test]
     async fn direct_writes_when_sink_healthy_do_not_spool() {
         let dir = tempfile::tempdir().unwrap();
-        let (sink, stats) = healthy_sink_stats(); // healthy
+        let SinkStats { sink, stats } = healthy_sink_stats(); // healthy
         let (log, rx) = AuditLog::new(16);
         let spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
         let h = spawn_writer(rx, params(sink.clone(), spool, stats.clone()));
@@ -312,7 +317,7 @@ mod tests {
     #[tokio::test]
     async fn fail_closed_write_requests_durable_sink_acknowledgement() {
         let dir = tempfile::tempdir().unwrap();
-        let (sink, stats) = healthy_sink_stats();
+        let SinkStats { sink, stats } = healthy_sink_stats();
         let (log, receiver) = AuditLog::new_with_mode(8, AuditMode::FailClosed);
         let spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
         let handle = spawn_writer(receiver, params(sink.clone(), spool, Arc::clone(&stats)));
@@ -335,7 +340,7 @@ mod tests {
         let sink = Arc::new(FailableSink::default());
         sink.set_indeterminate(true);
         let spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
-        let (log, handle) = fail_closed_writer(sink, spool);
+        let RunningWriter { log, handle } = fail_closed_writer(sink, spool);
 
         check_required_failure(&log, "indeterminate").await;
         handle.await.unwrap();
@@ -356,14 +361,15 @@ mod tests {
         let mut chain = ChainState::new();
         for event in [life(NodeId(1)), life(NodeId(2))] {
             let mut record = AuditRecord::from_event(&event, &product());
-            let (seq, previous) = chain.extend(&record.value);
-            record.push_chain_headers(seq, &previous);
+            let ChainLink { seq, prev_head } = chain.extend(&record.value);
+            record.push_chain_headers(seq, &prev_head);
             check!(spool.append(&record).unwrap());
         }
         let sink = Arc::new(FailableSink::default());
         sink.set_indeterminate_after(1);
         let (log, receiver) = AuditLog::new(8);
-        let (params, clock) = params_with_clock(sink.clone(), spool, Arc::new(AuditStats::new()));
+        let ClockedParams { params, clock } =
+            params_with_clock(sink.clone(), spool, Arc::new(AuditStats::new()));
         let handle = spawn_writer(receiver, params);
 
         tokio::task::yield_now().await;
@@ -433,7 +439,7 @@ mod tests {
             s.append(&rec).unwrap();
             s.size()
         };
-        let (sink, stats) = failed_sink_stats(); // stay in spool mode (no replay), so drops accumulate
+        let SinkStats { sink, stats } = failed_sink_stats(); // stay in spool mode (no replay), so drops accumulate
         let (log, rx) = AuditLog::new(64);
         let spool = Spool::open(dir.path(), one).unwrap();
         let h = spawn_writer(rx, params(sink.clone(), spool, stats.clone()));
@@ -462,7 +468,7 @@ mod tests {
         check!(spool.append(&existing).unwrap());
         let sink = Arc::new(FailableSink::default());
         sink.set_fail(true);
-        let (log, handle) = fail_closed_writer(sink, spool);
+        let RunningWriter { log, handle } = fail_closed_writer(sink, spool);
 
         check_required_failure(&log, "spool is full").await;
 
@@ -476,10 +482,10 @@ mod tests {
         let one = record_size(probe.path(), &first);
 
         let dir = tempfile::tempdir().unwrap();
-        let (sink, stats) = failed_sink_stats();
+        let SinkStats { sink, stats } = failed_sink_stats();
         let spool = Spool::open(dir.path(), one).unwrap();
         let (log, receiver) = AuditLog::new_with_mode_and_spool(8, AuditMode::FailOpen, &spool);
-        let (params, clock) = params_with_clock(sink.clone(), spool, stats.clone());
+        let ClockedParams { params, clock } = params_with_clock(sink.clone(), spool, stats.clone());
         let handle = spawn_writer(receiver, params);
 
         emit_lifecycle(&log, &[NodeId(0), NodeId(1), NodeId(2)]);

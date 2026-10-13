@@ -10,7 +10,7 @@ use {
     super::{
         ActorServices, FALLBACK_REBALANCE_TIMEOUT_MS, FALLBACK_SESSION_TIMEOUT_MS, JoinResult,
         ParkedWaiters, chrono_now_ms,
-        heartbeat::{member_update_records, replace_static_member},
+        heartbeat::{MemberUpdateRecords, member_update_records, replace_static_member},
         member_state::{MemberChange, after_member_update, update_subscription},
         pending_records::PendingRecords,
         persistence::{Recorder, flush_classic_metadata, flush_pending},
@@ -481,8 +481,10 @@ async fn classic_join_hosted(
         .await;
     }
     let update = after_member_update(state, config, services.metadata, change, &regexes);
-    let (pending, resolutions) =
-        member_update_records(recorder, state, update, &member_id, replacement);
+    let MemberUpdateRecords {
+        pending,
+        resolutions,
+    } = member_update_records(recorder, state, update, &member_id, replacement);
     let flushed = flush_pending(
         state,
         pending,
@@ -1119,11 +1121,16 @@ mod tests {
         );
     }
 
-    /// The keys of `batch`, each with whether its record is a tombstone, and
-    /// `None` for a key outside the consumer-group family.
-    fn batch_shape(
-        batch: &krabka_protocol::records::RecordBatch,
-    ) -> Vec<(Option<NextGenKey>, bool)> {
+    /// One record of a batch: its key, `None` for a key outside the
+    /// consumer-group family, and whether the record is a tombstone.
+    #[derive(Debug, PartialEq)]
+    struct RecordShape {
+        key: Option<NextGenKey>,
+        tombstone: bool,
+    }
+
+    /// The shape of each record of `batch`.
+    fn batch_shape(batch: &krabka_protocol::records::RecordBatch) -> Vec<RecordShape> {
         use crate::coordinator::unified::persistence::{Key, parse_key};
         batch
             .records
@@ -1133,7 +1140,10 @@ mod tests {
                     Ok(Key::NextGen(key)) => Some(key),
                     _ => None,
                 });
-                (key, record.value.is_none())
+                RecordShape {
+                    key,
+                    tombstone: record.value.is_none(),
+                }
             })
             .collect()
     }
@@ -1141,11 +1151,18 @@ mod tests {
     #[derive(Clone, Copy)]
     struct PersistedBatchCount(usize);
 
+    /// A member id, and the static instance id it holds if any.
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct MemberInstance {
+        member_id: String,
+        group_instance_id: Option<String>,
+    }
+
     /// Exactly one new durable join batch, before the caller checks its scenario-specific keys.
     async fn new_join_batch_shape(
         log: &InMemoryOffsetsLog,
         before: PersistedBatchCount,
-    ) -> Vec<(Option<NextGenKey>, bool)> {
+    ) -> Vec<RecordShape> {
         let batches = log.batches().await;
         check!(batches.len() == before.0 + 1);
         batch_shape(batches.last().expect("the join's batch"))
@@ -1154,51 +1171,51 @@ mod tests {
     /// The records of Kafka's `replaceMember` for `old` replaced by `new`:
     /// the old member's tombstones, then the new member's subscription,
     /// target and current assignment.
-    fn replace_member_shape(old: &str, new: &str) -> Vec<(Option<NextGenKey>, bool)> {
+    fn replace_member_shape(old: &str, new: &str) -> Vec<RecordShape> {
         let group_id = || "g".to_string();
         vec![
-            (
-                Some(NextGenKey::CurrentMemberAssignment {
+            RecordShape {
+                key: Some(NextGenKey::CurrentMemberAssignment {
                     group_id: group_id(),
                     member_id: old.into(),
                 }),
-                true,
-            ),
-            (
-                Some(NextGenKey::TargetAssignmentMember {
+                tombstone: true,
+            },
+            RecordShape {
+                key: Some(NextGenKey::TargetAssignmentMember {
                     group_id: group_id(),
                     member_id: old.into(),
                 }),
-                true,
-            ),
-            (
-                Some(NextGenKey::MemberMetadata {
+                tombstone: true,
+            },
+            RecordShape {
+                key: Some(NextGenKey::MemberMetadata {
                     group_id: group_id(),
                     member_id: old.into(),
                 }),
-                true,
-            ),
-            (
-                Some(NextGenKey::MemberMetadata {
+                tombstone: true,
+            },
+            RecordShape {
+                key: Some(NextGenKey::MemberMetadata {
                     group_id: group_id(),
                     member_id: new.into(),
                 }),
-                false,
-            ),
-            (
-                Some(NextGenKey::TargetAssignmentMember {
+                tombstone: false,
+            },
+            RecordShape {
+                key: Some(NextGenKey::TargetAssignmentMember {
                     group_id: group_id(),
                     member_id: new.into(),
                 }),
-                false,
-            ),
-            (
-                Some(NextGenKey::CurrentMemberAssignment {
+                tombstone: false,
+            },
+            RecordShape {
+                key: Some(NextGenKey::CurrentMemberAssignment {
                     group_id: group_id(),
                     member_id: new.into(),
                 }),
-                false,
-            ),
+                tombstone: false,
+            },
         ]
     }
 
@@ -1415,15 +1432,24 @@ mod tests {
 
         check!(joined == follower_join(&joined.member_id, epoch));
         let view = rpc::classic_inspect(&handle).await;
-        let mut members: Vec<(String, Option<String>)> = view
+        let mut members: Vec<MemberInstance> = view
             .members
             .iter()
-            .map(|member| (member.member_id.clone(), member.group_instance_id.clone()))
+            .map(|member| MemberInstance {
+                member_id: member.member_id.clone(),
+                group_instance_id: member.group_instance_id.clone(),
+            })
             .collect();
         members.sort_unstable();
         let mut want = vec![
-            ("m-classic".to_string(), None),
-            (joined.member_id.clone(), Some("instance-1".to_string())),
+            MemberInstance {
+                member_id: "m-classic".to_string(),
+                group_instance_id: None,
+            },
+            MemberInstance {
+                member_id: joined.member_id.clone(),
+                group_instance_id: Some("instance-1".to_string()),
+            },
         ];
         want.sort_unstable();
         check!(
@@ -1434,19 +1460,22 @@ mod tests {
         check!(
             shape[shape.len() - 3..]
                 == [
-                    (
-                        Some(NextGenKey::PartitionMetadata {
+                    RecordShape {
+                        key: Some(NextGenKey::PartitionMetadata {
                             group_id: "g".into()
                         }),
-                        true
-                    ),
-                    (
-                        Some(NextGenKey::GroupMetadata {
+                        tombstone: true
+                    },
+                    RecordShape {
+                        key: Some(NextGenKey::GroupMetadata {
                             group_id: "g".into()
                         }),
-                        true
-                    ),
-                    (None, false),
+                        tombstone: true
+                    },
+                    RecordShape {
+                        key: None,
+                        tombstone: false
+                    },
                 ]
         );
     }

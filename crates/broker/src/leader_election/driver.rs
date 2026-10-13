@@ -61,7 +61,15 @@ pub(crate) struct LivenessTickState {
     /// The image and dead set of the last sweep that found no dead broker
     /// with a partition still to re-drive. While both are unchanged, the
     /// sweep has nothing new to learn and skips its walk over the image.
-    clean_sweep: Option<(Arc<MetadataImage>, std::collections::HashSet<u64>)>,
+    clean_sweep: Option<CleanSweep>,
+}
+
+/// The inputs of a sweep that found nothing to re-drive.
+struct CleanSweep {
+    /// The image the sweep walked.
+    image: Arc<MetadataImage>,
+    /// The dead brokers it walked it for.
+    dead: std::collections::HashSet<u64>,
 }
 
 /// One tick of the controller-side failover driver. The liveness ticker in
@@ -302,9 +310,9 @@ pub(crate) async fn sweep_dead_leaders(
         return;
     }
     let image = controller.current_image();
-    if let Some((seen_image, seen_dead)) = &state.clean_sweep
-        && Arc::ptr_eq(seen_image, &image)
-        && *seen_dead == dead
+    if let Some(seen) = &state.clean_sweep
+        && Arc::ptr_eq(&seen.image, &image)
+        && seen.dead == dead
     {
         return;
     }
@@ -318,7 +326,7 @@ pub(crate) async fn sweep_dead_leaders(
         stuck.extend(pr.isr.iter().map(|n| n.0).filter(|n| dead.contains(n)));
     }
     if stuck.is_empty() {
-        state.clean_sweep = Some((image, dead));
+        state.clean_sweep = Some(CleanSweep { image, dead });
         return;
     }
     state.clean_sweep = None;

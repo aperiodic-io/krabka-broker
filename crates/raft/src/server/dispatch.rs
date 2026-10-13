@@ -264,6 +264,14 @@ mod tests {
     /// does not decode, and the connection closes.
     #[tokio::test]
     async fn each_peer_api_is_answered_at_the_request_version() {
+        struct Case {
+            name: &'static str,
+            key: i16,
+            version: i16,
+            body: Bytes,
+            decodes: Decodes,
+        }
+
         use krabka_protocol::owned::{
             begin_quorum_epoch_request::{self as bqe_req, BeginQuorumEpochRequest},
             begin_quorum_epoch_response::BeginQuorumEpochResponse,
@@ -343,55 +351,62 @@ mod tests {
             ..Default::default()
         };
 
-        let mut cases: Vec<(&str, i16, i16, Bytes, Decodes)> = Vec::new();
+        let mut cases: Vec<Case> = Vec::new();
         for version in -1..=vote_request::MAX_VERSION {
             let body = encoded(&vote, version.max(0));
-            cases.push((
-                "Vote",
-                api_key::VOTE,
+            cases.push(Case {
+                name: "Vote",
+                key: api_key::VOTE,
                 version,
                 body,
-                decodes_whole::<VoteResponse>,
-            ));
+                decodes: decodes_whole::<VoteResponse>,
+            });
         }
         for version in -1..=begin_quorum_epoch_request::MAX_VERSION {
-            cases.push((
-                "BeginQuorumEpoch",
-                api_key::BEGIN_QUORUM_EPOCH,
+            cases.push(Case {
+                name: "BeginQuorumEpoch",
+                key: api_key::BEGIN_QUORUM_EPOCH,
                 version,
-                encoded(&begin, version.max(0)),
-                decodes_whole::<BeginQuorumEpochResponse>,
-            ));
+                body: encoded(&begin, version.max(0)),
+                decodes: decodes_whole::<BeginQuorumEpochResponse>,
+            });
         }
         for version in -1..=end_quorum_epoch_request::MAX_VERSION {
-            cases.push((
-                "EndQuorumEpoch",
-                api_key::END_QUORUM_EPOCH,
+            cases.push(Case {
+                name: "EndQuorumEpoch",
+                key: api_key::END_QUORUM_EPOCH,
                 version,
-                encoded(&end, version.max(0)),
-                decodes_whole::<EndQuorumEpochResponse>,
-            ));
+                body: encoded(&end, version.max(0)),
+                decodes: decodes_whole::<EndQuorumEpochResponse>,
+            });
         }
         for version in -1..=fetch_snapshot_request::MAX_VERSION {
-            cases.push((
-                "FetchSnapshot",
-                api_key::FETCH_SNAPSHOT,
+            cases.push(Case {
+                name: "FetchSnapshot",
+                key: api_key::FETCH_SNAPSHOT,
                 version,
-                encoded(&snapshot, version.max(0)),
-                decodes_whole::<FetchSnapshotResponse>,
-            ));
+                body: encoded(&snapshot, version.max(0)),
+                decodes: decodes_whole::<FetchSnapshotResponse>,
+            });
         }
         for version in fetch_request::MIN_VERSION - 1..=fetch_request::MAX_VERSION {
-            cases.push((
-                "Fetch",
-                api_key::FETCH,
+            cases.push(Case {
+                name: "Fetch",
+                key: api_key::FETCH,
                 version,
-                encoded(&fetch, version.max(fetch_request::MIN_VERSION)),
-                decodes_whole::<FetchResponse>,
-            ));
+                body: encoded(&fetch, version.max(fetch_request::MIN_VERSION)),
+                decodes: decodes_whole::<FetchResponse>,
+            });
         }
 
-        for (name, key, version, body, decodes) in cases {
+        for Case {
+            name,
+            key,
+            version,
+            body,
+            decodes,
+        } in cases
+        {
             let served = CONTROLLER_LISTENER_APIS
                 .iter()
                 .find(|api| api.api_key == key)

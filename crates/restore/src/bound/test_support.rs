@@ -6,7 +6,7 @@
 use {
     crate::{
         args::{PartitionRef, RestoreArgs, test_support::args_from as parse_args_from},
-        bound::{BatchDecision, Predicates, RecordDecision, record_coordinates},
+        bound::{BatchDecision, Predicates, RecordCoordinates, RecordDecision, record_coordinates},
         error::RestoreError,
     },
     bytes::{Bytes, BytesMut},
@@ -112,7 +112,9 @@ pub(super) fn decide(
     partition: &PartitionRef,
     owned: &RecordBatch,
 ) -> (BatchDecision, Vec<RecordDecision>) {
-    try_decide(predicates, partition, owned).expect("valid record coordinates")
+    let Decisions { batch, records } =
+        try_decide(predicates, partition, owned).expect("valid record coordinates");
+    (batch, records)
 }
 
 /// Assert both independent verdicts returned by the batch/record decision harness.
@@ -128,11 +130,18 @@ pub(super) fn check_decision(
     assert2::check!(records == expected_records);
 }
 
-pub(super) fn try_decide(
+/// The batch-level verdict and the per-record verdicts in batch order.
+#[derive(Debug)]
+struct Decisions {
+    batch: BatchDecision,
+    records: Vec<RecordDecision>,
+}
+
+fn try_decide(
     predicates: &Predicates,
     partition: &PartitionRef,
     owned: &RecordBatch,
-) -> Result<(BatchDecision, Vec<RecordDecision>), RestoreError> {
+) -> Result<Decisions, RestoreError> {
     let encoded = encode(owned);
     let borrowed = borrow(&encoded);
     let header = borrowed.header();
@@ -143,11 +152,17 @@ pub(super) fn try_decide(
         .iter()
         .map(|parsed| {
             let record = parsed?;
-            let (offset, timestamp_ms) = record_coordinates(header, &record)?;
+            let RecordCoordinates {
+                offset,
+                timestamp_ms,
+            } = record_coordinates(header, &record)?;
             Ok(predicates.decide_record(partition, offset, timestamp_ms, producer_id, &record))
         })
         .collect::<Result<Vec<_>, RestoreError>>()?;
-    Ok((batch_decision, record_decisions))
+    Ok(Decisions {
+        batch: batch_decision,
+        records: record_decisions,
+    })
 }
 
 pub(super) fn check_record_parse_error(

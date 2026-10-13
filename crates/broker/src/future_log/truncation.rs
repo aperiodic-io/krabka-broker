@@ -40,6 +40,14 @@ struct TruncationState {
     completed: bool,
 }
 
+/// A current log's answer about an epoch: the epoch it names and where that
+/// epoch ends.
+#[derive(Clone, Copy)]
+struct EpochEnd {
+    epoch: LeaderEpoch,
+    end: Offset,
+}
+
 /// Kafka's `AbstractFetcherThread.getOffsetTruncationState` for the
 /// `ReplicaAlterLogDirsThread`, where the current log answers as the leader.
 ///
@@ -56,12 +64,15 @@ struct TruncationState {
 /// - Otherwise the lowest of the two ends for the epoch and the future log
 ///   end, and the exchange is over.
 fn offset_truncation_state(
-    current: (LeaderEpoch, Offset),
+    current: EpochEnd,
     future: &LeaderEpochCheckpoint,
     future_end: Offset,
     latest_epoch_start: Offset,
 ) -> TruncationState {
-    let (current_epoch, current_end) = current;
+    let EpochEnd {
+        epoch: current_epoch,
+        end: current_end,
+    } = current;
     if current_end < Offset(0) {
         return TruncationState {
             offset: latest_epoch_start,
@@ -119,11 +130,14 @@ pub(super) fn truncate_to_current_epochs(
             }
             return Ok(());
         };
-        let current_reply = current
+        let (reply_epoch, reply_end) = current
             .epoch_checkpoint()
             .epoch_and_offset_for(latest.epoch, current.log_end_offset());
         let state = offset_truncation_state(
-            current_reply,
+            EpochEnd {
+                epoch: reply_epoch,
+                end: reply_end,
+            },
             future.epoch_checkpoint(),
             future_end,
             latest.start_offset,
@@ -154,19 +168,35 @@ mod tests {
         tempfile::tempdir,
     };
 
-    const NO_ANSWER: (LeaderEpoch, Offset) = (LeaderEpoch(-1), Offset(-1));
+    const NO_ANSWER: EpochEnd = EpochEnd {
+        epoch: LeaderEpoch(-1),
+        end: Offset(-1),
+    };
 
-    /// A checkpoint that records `entries`, as `(epoch, start offset)`.
-    fn checkpoint(entries: &[(i32, i64)]) -> (tempfile::TempDir, LeaderEpochCheckpoint) {
+    /// An epoch and the offset it starts at.
+    #[derive(Clone, Copy)]
+    struct EpochStart {
+        epoch: i32,
+        start: i64,
+    }
+
+    /// A checkpoint, and the directory that holds its file.
+    struct CheckpointInDir {
+        dir: tempfile::TempDir,
+        checkpoint: LeaderEpochCheckpoint,
+    }
+
+    /// A checkpoint that records `entries`.
+    fn checkpoint(entries: &[EpochStart]) -> CheckpointInDir {
         let dir = tempdir().unwrap();
         let mut checkpoint =
             LeaderEpochCheckpoint::open(dir.path().join("leader-epoch-checkpoint")).unwrap();
-        for &(epoch, start) in entries {
+        for &EpochStart { epoch, start } in entries {
             checkpoint
                 .append(LeaderEpoch(epoch), Offset(start))
                 .unwrap();
         }
-        (dir, checkpoint)
+        CheckpointInDir { dir, checkpoint }
     }
 
     /// One row per case of `getOffsetTruncationState`: the current log's
@@ -174,40 +204,66 @@ mod tests {
     /// end (15), and the truncation it makes.
     #[test]
     fn the_truncation_state_follows_kafkas_getoffsettruncationstate() {
-        let (_dir, future) = checkpoint(&[(1, 0), (3, 10)]);
+        struct Case {
+            label: &'static str,
+            current: EpochEnd,
+            offset: Offset,
+            completed: bool,
+        }
+
+        let CheckpointInDir {
+            dir: _dir,
+            checkpoint: future,
+        } = checkpoint(&[EpochStart { epoch: 1, start: 0 }, EpochStart {
+            epoch: 3,
+            start: 10,
+        }]);
+        let epoch_end = |epoch, end| EpochEnd { epoch, end };
         let cases = [
-            (
-                "the current log cannot place the epoch",
-                NO_ANSWER,
-                (Offset(10), false),
-            ),
-            (
-                "the epochs agree: the lower end wins",
-                (LeaderEpoch(3), Offset(12)),
-                (Offset(12), true),
-            ),
-            (
-                "the epochs agree and the future log ends first",
-                (LeaderEpoch(3), Offset(40)),
-                (Offset(15), true),
-            ),
-            (
-                "the future log does not know epoch 2: cut to the end of epoch 1",
-                (LeaderEpoch(2), Offset(12)),
-                (Offset(10), false),
-            ),
-            (
-                "the current log ends epoch 1 below the future log's end for it",
-                (LeaderEpoch(1), Offset(4)),
-                (Offset(4), true),
-            ),
-            (
-                "the current log names an epoch below every epoch of the future log",
-                (LeaderEpoch(0), Offset(6)),
-                (Offset(0), true),
-            ),
+            Case {
+                label: "the current log cannot place the epoch",
+                current: NO_ANSWER,
+                offset: Offset(10),
+                completed: false,
+            },
+            Case {
+                label: "the epochs agree: the lower end wins",
+                current: epoch_end(LeaderEpoch(3), Offset(12)),
+                offset: Offset(12),
+                completed: true,
+            },
+            Case {
+                label: "the epochs agree and the future log ends first",
+                current: epoch_end(LeaderEpoch(3), Offset(40)),
+                offset: Offset(15),
+                completed: true,
+            },
+            Case {
+                label: "the future log does not know epoch 2: cut to the end of epoch 1",
+                current: epoch_end(LeaderEpoch(2), Offset(12)),
+                offset: Offset(10),
+                completed: false,
+            },
+            Case {
+                label: "the current log ends epoch 1 below the future log's end for it",
+                current: epoch_end(LeaderEpoch(1), Offset(4)),
+                offset: Offset(4),
+                completed: true,
+            },
+            Case {
+                label: "the current log names an epoch below every epoch of the future log",
+                current: epoch_end(LeaderEpoch(0), Offset(6)),
+                offset: Offset(0),
+                completed: true,
+            },
         ];
-        for (label, current, (offset, completed)) in cases {
+        for Case {
+            label,
+            current,
+            offset,
+            completed,
+        } in cases
+        {
             let state = offset_truncation_state(current, &future, Offset(15), Offset(10));
             assert!(state == TruncationState { offset, completed }, "{label}");
         }

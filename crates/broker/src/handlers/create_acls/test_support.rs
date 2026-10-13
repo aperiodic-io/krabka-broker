@@ -9,6 +9,7 @@ pub(super) use crate::handlers::acl_test_support::{
     OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_LITERAL, PERMISSION_ALLOW, RESOURCE_TYPE_TOPIC,
 };
 use {
+    super::validate::AclRefusal,
     krabka_metadata::AclEntry,
     krabka_protocol::owned::create_acls_request::{AclCreation, CreateAclsRequest},
 };
@@ -40,7 +41,7 @@ pub(super) use crate::handlers::acl_test_support::all_acls;
 
 /// Validates `c` with CIDR ACL hosts supported, which is what every test not
 /// about the CIDR gate wants.
-pub(super) fn validate(c: &AclCreation) -> Result<AclEntry, (i16, String)> {
+pub(super) fn validate(c: &AclCreation) -> Result<AclEntry, AclRefusal> {
     super::validate::validate(c, super::validate::HostCheck::Trunk {
         cidr_hosts_supported: true,
     })

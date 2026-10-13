@@ -69,7 +69,7 @@ mod tests {
                     },
                 },
                 persistence::ShareGroupMetadataValue,
-                state::ShareMemberState,
+                state::{ShareMemberState, share_partition},
             },
             test_support::{check_two_members_expired, expired_session_last_seen},
         },
@@ -156,8 +156,10 @@ mod tests {
         );
         let gone = krabka_protocol::primitives::uuid::Uuid([9; 16]);
         let mut state = ShareGroupState::new("g");
-        state.initialized.extend([(topic_id, 0), (gone, 0)]);
-        state.initializing.insert((gone, 1), 1);
+        state
+            .initialized
+            .extend([share_partition(topic_id, 0), share_partition(gone, 0)]);
+        state.initializing.insert(share_partition(gone, 1), 1);
         state.deleting.insert(gone, "gone".to_owned());
         state.topic_names.insert(topic_id, "t".to_owned());
         state.topic_names.insert(gone, "gone".to_owned());

@@ -109,7 +109,9 @@ fn uuid_hashcode(id: Uuid) -> i32 {
 mod tests {
     use {
         super::*,
-        crate::client_metrics::manager::test_support::{apply_config, attrs, img_with},
+        crate::client_metrics::manager::test_support::{
+            ConfigEntry, apply_config, attrs, img_with,
+        },
         assert2::{assert, check},
         krabka_metadata::{ClientMetricsConfigRecord, MetadataImage, MetadataRecord},
         uuid::Uuid,
@@ -132,17 +134,38 @@ mod tests {
             ("no subscription", MetadataImage::new(Uuid::nil()), 600_000),
             (
                 "a subscription without interval.ms",
-                img_with("all", &[("metrics", "*")]),
+                img_with("all", &[ConfigEntry {
+                    key: "metrics",
+                    value: "*",
+                }]),
                 600_000,
             ),
             (
                 "a subscription below the default",
-                img_with("all", &[("metrics", "*"), ("interval.ms", "60000")]),
+                img_with("all", &[
+                    ConfigEntry {
+                        key: "metrics",
+                        value: "*",
+                    },
+                    ConfigEntry {
+                        key: "interval.ms",
+                        value: "60000",
+                    },
+                ]),
                 60_000,
             ),
             (
                 "a subscription above the default",
-                img_with("all", &[("metrics", "*"), ("interval.ms", "3600000")]),
+                img_with("all", &[
+                    ConfigEntry {
+                        key: "metrics",
+                        value: "*",
+                    },
+                    ConfigEntry {
+                        key: "interval.ms",
+                        value: "3600000",
+                    },
+                ]),
                 600_000,
             ),
         ];
@@ -164,7 +187,16 @@ mod tests {
 
     #[test]
     fn match_all_empty_match_applies() {
-        let img = img_with("all", &[("metrics", "*"), ("interval.ms", "60000")]);
+        let img = img_with("all", &[
+            ConfigEntry {
+                key: "metrics",
+                value: "*",
+            },
+            ConfigEntry {
+                key: "interval.ms",
+                value: "60000",
+            },
+        ]);
         let m = compute_subscription(&img, &attrs());
         check!(m.metrics == vec!["*".to_string()]);
         check!(m.push_interval_ms == 60_000);
@@ -173,15 +205,27 @@ mod tests {
     #[test]
     fn selector_filters_clients() {
         let img = img_with("java-only", &[
-            ("metrics", "a."),
-            ("match", "client_software_name=apache-kafka-java"),
+            ConfigEntry {
+                key: "metrics",
+                value: "a.",
+            },
+            ConfigEntry {
+                key: "match",
+                value: "client_software_name=apache-kafka-java",
+            },
         ]);
         let m = compute_subscription(&img, &attrs());
         check!(m.metrics == vec!["a.".to_string()]);
 
         let img2 = img_with("py-only", &[
-            ("metrics", "a."),
-            ("match", "client_software_name=kafka-python"),
+            ConfigEntry {
+                key: "metrics",
+                value: "a.",
+            },
+            ConfigEntry {
+                key: "match",
+                value: "client_software_name=kafka-python",
+            },
         ]);
         let m2 = compute_subscription(&img2, &attrs());
         assert!(
@@ -192,10 +236,25 @@ mod tests {
 
     #[test]
     fn min_interval_and_metric_union_across_subs() {
-        let mut img = img_with("s1", &[("metrics", "a."), ("interval.ms", "60000")]);
+        let mut img = img_with("s1", &[
+            ConfigEntry {
+                key: "metrics",
+                value: "a.",
+            },
+            ConfigEntry {
+                key: "interval.ms",
+                value: "60000",
+            },
+        ]);
         apply_config(&mut img, "s2", &[
-            ("metrics", "b."),
-            ("interval.ms", "30000"),
+            ConfigEntry {
+                key: "metrics",
+                value: "b.",
+            },
+            ConfigEntry {
+                key: "interval.ms",
+                value: "30000",
+            },
         ]);
         let m = compute_subscription(&img, &attrs());
         let mut got = m.metrics.clone();
@@ -211,19 +270,37 @@ mod tests {
         // `apache/kafka:4.3.1` builds the same set by adding each matching
         // subscription's metrics, and an empty one adds none. The registry
         // row documents the key that way.
-        let img = img_with("empty", &[("metrics", ""), ("interval.ms", "60000")]);
+        let img = img_with("empty", &[
+            ConfigEntry {
+                key: "metrics",
+                value: "",
+            },
+            ConfigEntry {
+                key: "interval.ms",
+                value: "60000",
+            },
+        ]);
         let m = compute_subscription(&img, &attrs());
         assert!(m.metrics.is_empty());
 
-        let unset = img_with("unset", &[("interval.ms", "60000")]);
+        let unset = img_with("unset", &[ConfigEntry {
+            key: "interval.ms",
+            value: "60000",
+        }]);
         let m2 = compute_subscription(&unset, &attrs());
         assert!(m2.metrics.is_empty());
     }
 
     #[test]
     fn star_collapses_union() {
-        let mut img = img_with("s1", &[("metrics", "a.")]);
-        apply_config(&mut img, "s2", &[("metrics", "*")]);
+        let mut img = img_with("s1", &[ConfigEntry {
+            key: "metrics",
+            value: "a.",
+        }]);
+        apply_config(&mut img, "s2", &[ConfigEntry {
+            key: "metrics",
+            value: "*",
+        }]);
         let m = compute_subscription(&img, &attrs());
         check!(m.metrics == vec!["*".to_string()]);
     }
@@ -233,98 +310,192 @@ mod tests {
     /// each selector (#712).
     #[test]
     fn subscription_matches_kafkas_client_metrics_manager() {
-        type Subscription = (&'static str, Vec<(&'static str, &'static str)>);
+        struct Subscription {
+            name: &'static str,
+            configs: Vec<ConfigEntry<'static>>,
+        }
+        struct Row {
+            name: &'static str,
+            subscriptions: Vec<Subscription>,
+            client: ClientAttributes,
+            expected: ComputedSubscription,
+        }
         let with = |client_id: &str, software: &str| ClientAttributes {
             client_id: client_id.into(),
             software_name: software.into(),
             ..attrs()
         };
-        let rows: Vec<(
-            &str,
-            Vec<Subscription>,
-            ClientAttributes,
-            ComputedSubscription,
-        )> = vec![
-            (
-                "an interval above the default is capped",
-                vec![("s1", vec![("metrics", "a."), ("interval.ms", "600000")])],
-                attrs(),
-                ComputedSubscription {
+        let rows: Vec<Row> = vec![
+            Row {
+                name: "an interval above the default is capped",
+                subscriptions: vec![Subscription {
+                    name: "s1",
+                    configs: vec![
+                        ConfigEntry {
+                            key: "metrics",
+                            value: "a.",
+                        },
+                        ConfigEntry {
+                            key: "interval.ms",
+                            value: "600000",
+                        },
+                    ],
+                }],
+                client: attrs(),
+                expected: ComputedSubscription {
                     metrics: vec!["a.".into()],
                     push_interval_ms: 300_000,
                 },
-            ),
-            (
-                "a matched subscription with no metrics lowers the interval",
-                vec![
-                    ("s1", vec![("metrics", "a."), ("interval.ms", "60000")]),
-                    ("s2", vec![("metrics", ""), ("interval.ms", "1000")]),
+            },
+            Row {
+                name: "a matched subscription with no metrics lowers the interval",
+                subscriptions: vec![
+                    Subscription {
+                        name: "s1",
+                        configs: vec![
+                            ConfigEntry {
+                                key: "metrics",
+                                value: "a.",
+                            },
+                            ConfigEntry {
+                                key: "interval.ms",
+                                value: "60000",
+                            },
+                        ],
+                    },
+                    Subscription {
+                        name: "s2",
+                        configs: vec![
+                            ConfigEntry {
+                                key: "metrics",
+                                value: "",
+                            },
+                            ConfigEntry {
+                                key: "interval.ms",
+                                value: "1000",
+                            },
+                        ],
+                    },
                 ],
-                attrs(),
-                ComputedSubscription {
+                client: attrs(),
+                expected: ComputedSubscription {
                     metrics: vec!["a.".into()],
                     push_interval_ms: 1_000,
                 },
-            ),
-            ("no subscription", vec![], attrs(), ComputedSubscription {
-                metrics: vec![],
-                push_interval_ms: 300_000,
-            }),
-            (
-                "an alternation full-matches its longer branch",
-                vec![("s1", vec![
-                    ("metrics", "*"),
-                    ("match", "client_id=app|app-1"),
-                ])],
-                with("app-1", "apache-kafka-java"),
-                ComputedSubscription {
-                    metrics: vec!["*".into()],
-                    push_interval_ms: 300_000,
-                },
-            ),
-            (
-                "a partial match does not match",
-                vec![("s1", vec![("metrics", "*"), ("match", "client_id=app")])],
-                with("app-1", "apache-kafka-java"),
-                ComputedSubscription {
+            },
+            Row {
+                name: "no subscription",
+                subscriptions: vec![],
+                client: attrs(),
+                expected: ComputedSubscription {
                     metrics: vec![],
                     push_interval_ms: 300_000,
                 },
-            ),
-            (
-                "a missing KIP-511 name is unknown",
-                vec![("s1", vec![
-                    ("metrics", "*"),
-                    ("match", "client_software_name=unknown"),
-                ])],
-                with("svc-1", "unknown"),
-                ComputedSubscription {
+            },
+            Row {
+                name: "an alternation full-matches its longer branch",
+                subscriptions: vec![Subscription {
+                    name: "s1",
+                    configs: vec![
+                        ConfigEntry {
+                            key: "metrics",
+                            value: "*",
+                        },
+                        ConfigEntry {
+                            key: "match",
+                            value: "client_id=app|app-1",
+                        },
+                    ],
+                }],
+                client: with("app-1", "apache-kafka-java"),
+                expected: ComputedSubscription {
                     metrics: vec!["*".into()],
                     push_interval_ms: 300_000,
                 },
-            ),
-            (
-                "a repeated selector keeps its last pattern",
-                vec![("s1", vec![
-                    ("metrics", "*"),
-                    ("match", "client_id=a,client_id=b"),
-                ])],
-                with("b", "apache-kafka-java"),
-                ComputedSubscription {
+            },
+            Row {
+                name: "a partial match does not match",
+                subscriptions: vec![Subscription {
+                    name: "s1",
+                    configs: vec![
+                        ConfigEntry {
+                            key: "metrics",
+                            value: "*",
+                        },
+                        ConfigEntry {
+                            key: "match",
+                            value: "client_id=app",
+                        },
+                    ],
+                }],
+                client: with("app-1", "apache-kafka-java"),
+                expected: ComputedSubscription {
+                    metrics: vec![],
+                    push_interval_ms: 300_000,
+                },
+            },
+            Row {
+                name: "a missing KIP-511 name is unknown",
+                subscriptions: vec![Subscription {
+                    name: "s1",
+                    configs: vec![
+                        ConfigEntry {
+                            key: "metrics",
+                            value: "*",
+                        },
+                        ConfigEntry {
+                            key: "match",
+                            value: "client_software_name=unknown",
+                        },
+                    ],
+                }],
+                client: with("svc-1", "unknown"),
+                expected: ComputedSubscription {
                     metrics: vec!["*".into()],
                     push_interval_ms: 300_000,
                 },
-            ),
+            },
+            Row {
+                name: "a repeated selector keeps its last pattern",
+                subscriptions: vec![Subscription {
+                    name: "s1",
+                    configs: vec![
+                        ConfigEntry {
+                            key: "metrics",
+                            value: "*",
+                        },
+                        ConfigEntry {
+                            key: "match",
+                            value: "client_id=a,client_id=b",
+                        },
+                    ],
+                }],
+                client: with("b", "apache-kafka-java"),
+                expected: ComputedSubscription {
+                    metrics: vec!["*".into()],
+                    push_interval_ms: 300_000,
+                },
+            },
         ];
-        for (name, subscriptions, client, expected) in rows {
+        for Row {
+            name,
+            subscriptions,
+            client,
+            expected,
+        } in rows
+        {
             let mut img = MetadataImage::new(Uuid::nil());
-            for (sub_name, configs) in subscriptions {
+            for Subscription {
+                name: sub_name,
+                configs,
+            } in subscriptions
+            {
                 img.apply(&MetadataRecord::V1ClientMetricsConfig(
                     ClientMetricsConfigRecord {
                         name: sub_name.into(),
                         configs: configs
                             .into_iter()
-                            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                            .map(|ConfigEntry { key, value }| (key.to_owned(), value.to_owned()))
                             .collect(),
                     },
                 ));

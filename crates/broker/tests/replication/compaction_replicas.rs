@@ -24,12 +24,14 @@ use {
             records::batch_from_records,
             registered_cluster, shutdown_cluster,
             topics::CreateTopicRequestSetup,
+            transactions::{ProducerEpoch, ProducerIdentity},
         },
     },
     assert2::assert,
     bytes::Bytes,
     krabka_broker::{BrokerHandle, codes},
     krabka_client_core::{Connection, ConnectionOptions},
+    krabka_ids::ProducerId,
     krabka_protocol::{
         owned::create_topics_request::CreatableTopicConfig,
         primitives::uuid::Uuid as WireUuid,
@@ -45,8 +47,38 @@ const TOPIC: &str = "compaction-replicas";
 /// is larger than a segment with `RECORD_LIST_TOO_LARGE`.
 const SEGMENT_BYTES: u32 = 100;
 
-/// The idempotent producer: `(id, epoch)`.
-const IDEMPOTENT: (i64, i16) = (9_201, 0);
+/// The idempotent producer.
+const IDEMPOTENT: ProducerIdentity = ProducerIdentity {
+    id: ProducerId(9_201),
+    epoch: ProducerEpoch(0),
+};
+
+/// The key and value of one record.
+#[derive(Clone, Copy)]
+struct KeyValue {
+    key: &'static str,
+    value: &'static str,
+}
+
+impl KeyValue {
+    const fn new(key: &'static str, value: &'static str) -> Self { Self { key, value } }
+}
+
+/// A producer identity and the sequence its batch starts at.
+#[derive(Clone, Copy)]
+struct SequencedProducer {
+    identity: ProducerIdentity,
+    base_sequence: i32,
+}
+
+/// What a batch from a client with no idempotence carries.
+const NO_PRODUCER: SequencedProducer = SequencedProducer {
+    identity: ProducerIdentity {
+        id: ProducerId(-1),
+        epoch: ProducerEpoch(-1),
+    },
+    base_sequence: -1,
+};
 
 // One batch of a local log after compaction. The compared fields are the
 // ones that carry the state of a producer, and the records.
@@ -54,7 +86,7 @@ krabka_macros::compacted_batch!(Kept, plain);
 
 impl Kept {
     /// The one-record batch of a client with no idempotence at `offset`.
-    fn plain(offset: i64, (key, value): (&'static str, &'static str)) -> Self {
+    fn plain(offset: i64, KeyValue { key, value }: KeyValue) -> Self {
         Self {
             base_offset: offset,
             last_offset: offset,
@@ -82,19 +114,22 @@ async fn connect(address: SocketAddr) -> Connection {
     .expect("connect")
 }
 
-/// A one-record batch of `key` and `value`. `producer` is `(id, epoch,
-/// base_sequence)`, or `None` for a client with no idempotence.
+/// A one-record batch of `key` and `value`. `producer` is the identity and
+/// base sequence, or `None` for a client with no idempotence.
 fn record(
-    producer: Option<(i64, i16, i32)>,
-    (key, value): (&'static str, &'static str),
+    producer: Option<SequencedProducer>,
+    KeyValue { key, value }: KeyValue,
     timestamp: i64,
 ) -> RecordBatch {
-    let (producer_id, producer_epoch, base_sequence) = producer.unwrap_or((-1, -1, -1));
+    let SequencedProducer {
+        identity,
+        base_sequence,
+    } = producer.unwrap_or(NO_PRODUCER);
     RecordBatch {
         base_timestamp: timestamp,
         max_timestamp: timestamp,
-        producer_id,
-        producer_epoch,
+        producer_id: identity.id.0,
+        producer_epoch: identity.epoch.0,
         base_sequence,
         ..batch_from_records(vec![Record {
             key: Some(Bytes::from_static(key.as_bytes())),
@@ -176,14 +211,17 @@ async fn every_replica_keeps_the_last_batch_of_an_active_producer() {
     let leader = connect(cluster[0].0.listen_addr()).await;
 
     let now = now_ms();
-    let (producer_id, producer_epoch) = IDEMPOTENT;
-    let last_of_the_producer = record(Some((producer_id, producer_epoch, 1)), ("b", "p-b"), now);
+    let sequenced = |base_sequence| SequencedProducer {
+        identity: IDEMPOTENT,
+        base_sequence,
+    };
+    let last_of_the_producer = record(Some(sequenced(1)), KeyValue::new("b", "p-b"), now);
     let batches = [
-        record(Some((producer_id, producer_epoch, 0)), ("a", "p-a"), now),
+        record(Some(sequenced(0)), KeyValue::new("a", "p-a"), now),
         last_of_the_producer.clone(),
-        record(None, ("a", "a-2"), now),
-        record(None, ("b", "b-3"), now),
-        record(None, ("c", "c-4"), now),
+        record(None, KeyValue::new("a", "a-2"), now),
+        record(None, KeyValue::new("b", "b-3"), now),
+        record(None, KeyValue::new("c", "c-4"), now),
     ];
     let mut errors = Vec::new();
     for batch in batches {
@@ -215,9 +253,9 @@ async fn every_replica_keeps_the_last_batch_of_an_active_producer() {
     };
     let expected = vec![
         producer_header,
-        Kept::plain(2, ("a", "a-2")),
-        Kept::plain(3, ("b", "b-3")),
-        Kept::plain(4, ("c", "c-4")),
+        Kept::plain(2, KeyValue::new("a", "a-2")),
+        Kept::plain(3, KeyValue::new("b", "b-3")),
+        Kept::plain(4, KeyValue::new("c", "c-4")),
     ];
     assert!(kept == vec![expected; 3]);
 

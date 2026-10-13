@@ -126,7 +126,6 @@ use {
         },
     },
     std::{
-        collections::BTreeMap,
         fmt::{self, Debug, Display},
         io::{Read, Write},
         process::{Child, Command, ExitStatus, Stdio},
@@ -226,10 +225,7 @@ fn log_run<A: Debug>(args: &A, status: &str, stdout: &str, stderr: &str) {
 /// echo is what puts sarama's account of the join in the log at the moment it
 /// happens, rather than in an assertion message that a truncated log never
 /// reaches.
-fn drain<R: Read + Send + 'static>(
-    label: &'static str,
-    mut source: R,
-) -> (Arc<Mutex<Vec<u8>>>, JoinHandle<()>) {
+fn drain<R: Read + Send + 'static>(label: &'static str, mut source: R) -> Drain {
     let sink = Arc::new(Mutex::new(Vec::new()));
     let pump = {
         let sink = Arc::clone(&sink);
@@ -258,7 +254,13 @@ fn drain<R: Read + Send + 'static>(
             }
         })
     };
-    (sink, pump)
+    Drain { sink, pump }
+}
+
+/// The bytes a [`drain`] has collected so far, and the thread collecting them.
+struct Drain {
+    sink: Arc<Mutex<Vec<u8>>>,
+    pump: JoinHandle<()>,
 }
 
 /// Mirror one line of a container's output, until [`ECHO_LINE_BUDGET`] is
@@ -504,8 +506,14 @@ impl GroupConsumer {
             .expect("spawn kaf consume");
         drop(child.stdin.take());
         eprintln!("KRABKA[test] docker run {IMAGE} {args:?} container={container} started");
-        let (stdout, out_pump) = drain("stdout", child.stdout.take().expect("kaf consume stdout"));
-        let (stderr, err_pump) = drain("stderr", child.stderr.take().expect("kaf consume stderr"));
+        let Drain {
+            sink: stdout,
+            pump: out_pump,
+        } = drain("stdout", child.stdout.take().expect("kaf consume stdout"));
+        let Drain {
+            sink: stderr,
+            pump: err_pump,
+        } = drain("stderr", child.stderr.take().expect("kaf consume stderr"));
         Self {
             container: container.to_owned(),
             child,
@@ -671,11 +679,19 @@ async fn await_group_member(
     }
 }
 
+/// The committed offset of one partition of a topic.
+#[derive(Debug, PartialEq, Eq)]
+struct CommittedOffset {
+    topic: String,
+    partition: i32,
+    offset: i64,
+}
+
 /// Poll krabka for the group's committed offsets until one appears.
 async fn await_committed_offsets(
     admin: &mut AdminClient,
     consumer: &mut GroupConsumer,
-) -> Result<BTreeMap<(String, i32), i64>, String> {
+) -> Result<Vec<CommittedOffset>, String> {
     let mut progress = Progress::start("commit");
     let deadline = Instant::now() + COMMIT_TIMEOUT;
     loop {
@@ -694,7 +710,14 @@ async fn await_committed_offsets(
         progress.observe(&format!("OffsetFetch({GROUP}): {offsets:?}"));
         if !offsets.is_empty() {
             progress.finish("committed");
-            return Ok(offsets);
+            return Ok(offsets
+                .into_iter()
+                .map(|((topic, partition), offset)| CommittedOffset {
+                    topic,
+                    partition,
+                    offset,
+                })
+                .collect());
         }
         if Instant::now() >= deadline {
             progress.finish("timed out");
@@ -710,6 +733,13 @@ async fn await_committed_offsets(
     }
 }
 
+/// What [`observe_group_consumer`] saw: the member and the committed offsets.
+#[derive(Debug, Default)]
+struct GroupObservation {
+    member: String,
+    offsets: Vec<CommittedOffset>,
+}
+
 /// Watch the group consumer through both things that have to happen: it joins
 /// [`GROUP`], and the group's committed offset appears. Returns the member's
 /// `client_id` with those offsets, or the reason the wait ended, so that the
@@ -718,10 +748,10 @@ async fn observe_group_consumer(
     client: &Client,
     admin: &mut AdminClient,
     consumer: &mut GroupConsumer,
-) -> Result<(String, BTreeMap<(String, i32), i64>), String> {
+) -> Result<GroupObservation, String> {
     let member = await_group_member(client, consumer).await?;
     let offsets = await_committed_offsets(admin, consumer).await?;
-    Ok((member, offsets))
+    Ok(GroupObservation { member, offsets })
 }
 
 /// `kaf nodes`: `DescribeCluster` in sarama's sense, which is a `Metadata`
@@ -791,10 +821,15 @@ fn topic_describe_matches_partitions(partitions: &[DescribeTopicPartitionsRespon
 
 /// `kaf group describe`: `DescribeGroups` plus `OffsetFetch` plus
 /// `ListOffsets`, checked against the offsets krabka reports for the group.
-fn group_describe_shows_commit(offsets: &BTreeMap<(String, i32), i64>) {
+fn group_describe_shows_commit(offsets: &[CommittedOffset]) {
     let description = run_kaf(&["group", "describe", GROUP], None);
     let rows: Vec<Vec<String>> = description.lines().map(cells).collect();
-    for ((topic, partition), offset) in offsets {
+    for CommittedOffset {
+        topic,
+        partition,
+        offset,
+    } in offsets
+    {
         // Partition, Group Offset, High Watermark, Lag. The one record is the
         // whole log, so the watermark is the committed offset and the lag 0.
         let expected = vec![
@@ -842,7 +877,7 @@ async fn sarama_round_trip_and_cluster_views_agree_with_krabka() {
     // of the run is complete in the output of a failure.
     let consumed_stdout = consumer.stop();
     assert!(outcome.is_ok(), "{}", reason(&outcome));
-    let (member, offsets) = outcome.unwrap_or_default();
+    let GroupObservation { member, offsets } = outcome.unwrap_or_default();
     // The group was joined by *this* client and not by some other member the
     // broker had lying around.
     assert!(
@@ -857,7 +892,12 @@ async fn sarama_round_trip_and_cluster_views_agree_with_krabka() {
     // The record is offset 0, so the group's committed position is 1, on the
     // one partition it was produced to and on no other.
     assert!(
-        offsets == BTreeMap::from([((TOPIC.to_string(), 0), 1)]),
+        offsets
+            == [CommittedOffset {
+                topic: TOPIC.to_string(),
+                partition: 0,
+                offset: 1,
+            }],
         "unexpected committed offsets for {GROUP}: {offsets:?}"
     );
     group_describe_shows_commit(&offsets);

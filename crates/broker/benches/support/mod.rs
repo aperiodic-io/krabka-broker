@@ -32,10 +32,30 @@ impl<T> BoundedResource<T> {
     pub(crate) fn get_mut(&mut self) -> &mut T { &mut self.value }
 }
 
-pub const SHAPES: [(&str, i32, usize); 3] = [
-    ("1rec_100KiB", 1, 100 * 1024),
-    ("100rec_1KiB", 100, 1024),
-    ("1000rec_100B", 1000, 100),
+/// One batch shape a benchmark sweeps: its report label, record count and
+/// per-record payload size.
+pub struct BatchShape {
+    pub label: &'static str,
+    pub records: i32,
+    pub payload: usize,
+}
+
+pub const SHAPES: [BatchShape; 3] = [
+    BatchShape {
+        label: "1rec_100KiB",
+        records: 1,
+        payload: 100 * 1024,
+    },
+    BatchShape {
+        label: "100rec_1KiB",
+        records: 100,
+        payload: 1024,
+    },
+    BatchShape {
+        label: "1000rec_100B",
+        records: 1000,
+        payload: 100,
+    },
 ];
 
 /// Reset the log outside the timed region after this many bytes.

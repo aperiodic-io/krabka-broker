@@ -25,12 +25,26 @@ use {
 
 krabka_macros::bound_start_fixture!(config, bare_config, ::krabka_broker);
 
+/// A running bare broker and the log directory behind it.
+struct BareBroker {
+    broker: BrokerHandle,
+    log_dir: TempDir,
+}
+
+/// A record the metadata log delivered.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Received {
+    partition: i32,
+    offset: i64,
+    payload: Vec<u8>,
+}
+
 /// Boot a bare loopback broker with the pinned-port pattern from
 /// `tiered_storage_topic_rlmm.rs::start_broker_with_topic_rlmm`. This
 /// helper drops the tiered-storage backend and the `remote_log_metadata`
 /// bootstrap, because the test wires `KafkaMetadataEventLog` by hand. It
 /// returns the handle plus the log tempdir, which the caller keeps alive.
-async fn start_bare_broker() -> (BrokerHandle, TempDir) {
+async fn start_bare_broker() -> BareBroker {
     support::init_tracing();
 
     // Pin a loopback port so the metadata-log bootstrap address is
@@ -46,12 +60,15 @@ async fn start_bare_broker() -> (BrokerHandle, TempDir) {
     let broker =
         support::start_first_held(cfg, client_listeners, controller_listeners, "broker start")
             .await;
-    (broker, log_dir)
+    BareBroker { broker, log_dir }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn subscribe_subset_from_nonzero_offset_yields_exact_records() {
-    let (broker, _log_dir) = start_bare_broker().await;
+    let BareBroker {
+        broker,
+        log_dir: _log_dir,
+    } = start_bare_broker().await;
     let bootstrap = format!("127.0.0.1:{}", broker.listen_addr().port());
 
     let mut cfg = KafkaMetadataLogConfig::new(bootstrap);
@@ -77,14 +94,18 @@ async fn subscribe_subset_from_nonzero_offset_yields_exact_records() {
 
     // Expect exactly: (0,1,b), (0,2,c), (1,0,x), (1,1,y). Collect with a
     // deadline; assert no partition-2 record ever arrives.
-    let mut got: Vec<(i32, i64, Vec<u8>)> = Vec::with_capacity(4);
+    let mut got: Vec<Received> = Vec::with_capacity(4);
     let deadline = Instant::now() + Duration::from_secs(15);
     while got.len() < 4 {
         let next = tokio::time::timeout(Duration::from_millis(500), stream.next()).await;
         match next {
             Ok(Some(r)) => {
                 assert!(r.partition != 2, "partition 2 was not assigned");
-                got.push((r.partition, r.offset, r.payload.to_vec()));
+                got.push(Received {
+                    partition: r.partition,
+                    offset: r.offset,
+                    payload: r.payload.to_vec(),
+                });
             }
             Ok(None) => break,
             Err(_) => {} // timeout tick; keep waiting until deadline
@@ -96,10 +117,26 @@ async fn subscribe_subset_from_nonzero_offset_yields_exact_records() {
     }
     got.sort_unstable();
     let expected = [
-        (0, 1, b"b".to_vec()),
-        (0, 2, b"c".to_vec()),
-        (1, 0, b"x".to_vec()),
-        (1, 1, b"y".to_vec()),
+        Received {
+            partition: 0,
+            offset: 1,
+            payload: b"b".to_vec(),
+        },
+        Received {
+            partition: 0,
+            offset: 2,
+            payload: b"c".to_vec(),
+        },
+        Received {
+            partition: 1,
+            offset: 0,
+            payload: b"x".to_vec(),
+        },
+        Received {
+            partition: 1,
+            offset: 1,
+            payload: b"y".to_vec(),
+        },
     ];
     assert!(got == expected);
 

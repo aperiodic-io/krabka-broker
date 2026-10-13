@@ -20,31 +20,62 @@ fn row(fetch_offset: i64) -> FetchPartition {
     }
 }
 
-fn established_session(rows: &[(&str, i32, i64)]) -> FollowerFetchSession {
+/// A partition row to request: its topic, partition and fetch offset.
+struct RowSpec<'a> {
+    topic: &'a str,
+    partition: i32,
+    fetch_offset: i64,
+}
+
+/// A [`RowSpec`] of `topic`, `partition` at `fetch_offset`.
+const fn at(topic: &str, partition: i32, fetch_offset: i64) -> RowSpec<'_> {
+    RowSpec {
+        topic,
+        partition,
+        fetch_offset,
+    }
+}
+
+/// A partition row of a request, as the request names it.
+#[derive(Debug, PartialEq, Eq)]
+struct SentRow {
+    topic: String,
+    partition: i32,
+    fetch_offset: i64,
+}
+
+/// A [`SentRow`] of `topic`, `partition` at `fetch_offset`.
+fn sent(topic: &str, partition: i32, fetch_offset: i64) -> SentRow {
+    SentRow {
+        topic: topic.to_string(),
+        partition,
+        fetch_offset,
+    }
+}
+
+fn established_session(rows: &[RowSpec<'_>]) -> FollowerFetchSession {
     let mut session = FollowerFetchSession::default();
     session.build(wanted(rows));
     check!(session.handle_response(codes::NONE, 42) == SessionOutcome::Usable);
     session
 }
 
-fn wanted(rows: &[(&str, i32, i64)]) -> WantedRows {
+fn wanted(rows: &[RowSpec<'_>]) -> WantedRows {
     rows.iter()
-        .map(|(topic, partition, offset)| (key(topic, *partition), row(*offset)))
+        .map(|spec| (key(spec.topic, spec.partition), row(spec.fetch_offset)))
         .collect()
 }
 
 /// The partitions one request names, flattened for comparison.
-fn sent_rows(request: &SessionRequest) -> Vec<(String, i32, i64)> {
+fn sent_rows(request: &SessionRequest) -> Vec<SentRow> {
     request
         .topics
         .iter()
         .flat_map(|topic| {
-            topic.partitions.iter().map(move |partition| {
-                (
-                    topic.topic.clone(),
-                    partition.partition,
-                    partition.fetch_offset,
-                )
+            topic.partitions.iter().map(move |partition| SentRow {
+                topic: topic.topic.clone(),
+                partition: partition.partition,
+                fetch_offset: partition.fetch_offset,
             })
         })
         .collect()
@@ -54,18 +85,11 @@ fn sent_rows(request: &SessionRequest) -> Vec<(String, i32, i64)> {
 fn the_first_request_names_every_partition_and_asks_for_a_session() {
     let mut session = FollowerFetchSession::default();
 
-    let request = session.build(wanted(&[("a", 0, 10), ("a", 1, 20), ("b", 0, 30)]));
+    let request = session.build(wanted(&[at("a", 0, 10), at("a", 1, 20), at("b", 0, 30)]));
 
     check!(request.session_id == INVALID_SESSION_ID);
     check!(request.session_epoch == INITIAL_EPOCH);
-    check!(
-        sent_rows(&request)
-            == vec![
-                ("a".to_string(), 0, 10),
-                ("a".to_string(), 1, 20),
-                ("b".to_string(), 0, 30),
-            ]
-    );
+    check!(sent_rows(&request) == vec![sent("a", 0, 10), sent("a", 1, 20), sent("b", 0, 30),]);
     check!(request.forgotten_topics_data.is_empty());
     // One topic per name, not one per partition.
     check!(request.topics.len() == 2);
@@ -73,22 +97,22 @@ fn the_first_request_names_every_partition_and_asks_for_a_session() {
 
 #[test]
 fn a_later_request_carries_only_the_partitions_whose_offset_moved() {
-    let mut session = established_session(&[("a", 0, 10), ("a", 1, 20)]);
+    let mut session = established_session(&[at("a", 0, 10), at("a", 1, 20)]);
 
     // Partition 1 appended; partition 0 is caught up and unchanged.
-    let request = session.build(wanted(&[("a", 0, 10), ("a", 1, 25)]));
+    let request = session.build(wanted(&[at("a", 0, 10), at("a", 1, 25)]));
 
     check!(request.session_id == 42);
     check!(request.session_epoch == 1);
-    check!(sent_rows(&request) == vec![("a".to_string(), 1, 25)]);
+    check!(sent_rows(&request) == vec![sent("a", 1, 25)]);
     check!(request.forgotten_topics_data.is_empty());
 }
 
 #[test]
 fn a_round_that_changed_nothing_sends_no_partition_rows_at_all() {
-    let mut session = established_session(&[("a", 0, 10)]);
+    let mut session = established_session(&[at("a", 0, 10)]);
 
-    let request = session.build(wanted(&[("a", 0, 10)]));
+    let request = session.build(wanted(&[at("a", 0, 10)]));
 
     check!(request.topics.is_empty());
     check!(request.session_id == 42);
@@ -96,10 +120,10 @@ fn a_round_that_changed_nothing_sends_no_partition_rows_at_all() {
 
 #[test]
 fn a_partition_this_follower_stopped_following_is_forgotten_once() {
-    let mut session = established_session(&[("a", 0, 10), ("a", 1, 20), ("b", 0, 30)]);
+    let mut session = established_session(&[at("a", 0, 10), at("a", 1, 20), at("b", 0, 30)]);
 
-    let dropped = session.build(wanted(&[("a", 0, 10)]));
-    let after = session.build(wanted(&[("a", 0, 10)]));
+    let dropped = session.build(wanted(&[at("a", 0, 10)]));
+    let after = session.build(wanted(&[at("a", 0, 10)]));
 
     check!(dropped.forgotten_topics_data.len() == 2);
     check!(
@@ -116,11 +140,11 @@ fn a_partition_this_follower_stopped_following_is_forgotten_once() {
 
 #[test]
 fn a_partition_the_follower_added_is_sent_even_when_the_round_is_incremental() {
-    let mut session = established_session(&[("a", 0, 10)]);
+    let mut session = established_session(&[at("a", 0, 10)]);
 
-    let request = session.build(wanted(&[("a", 0, 10), ("a", 1, 0)]));
+    let request = session.build(wanted(&[at("a", 0, 10), at("a", 1, 0)]));
 
-    check!(sent_rows(&request) == vec![("a".to_string(), 1, 0)]);
+    check!(sent_rows(&request) == vec![sent("a", 1, 0)]);
 }
 
 #[test]
@@ -128,7 +152,7 @@ fn the_epoch_advances_once_per_answered_round() {
     let mut session = FollowerFetchSession::default();
     let mut epochs = Vec::new();
     for offset in 0..4 {
-        let request = session.build(wanted(&[("a", 0, offset)]));
+        let request = session.build(wanted(&[at("a", 0, offset)]));
         epochs.push(request.session_epoch);
         session.handle_response(codes::NONE, 42);
     }
@@ -142,40 +166,40 @@ fn a_refused_session_drops_the_round_and_makes_the_next_request_full() {
         codes::FETCH_SESSION_ID_NOT_FOUND,
         codes::INVALID_FETCH_SESSION_EPOCH,
     ] {
-        let mut session = established_session(&[("a", 0, 10), ("a", 1, 20)]);
-        session.build(wanted(&[("a", 0, 11), ("a", 1, 20)]));
+        let mut session = established_session(&[at("a", 0, 10), at("a", 1, 20)]);
+        session.build(wanted(&[at("a", 0, 11), at("a", 1, 20)]));
 
         check!(session.handle_response(refusal, 0) == SessionOutcome::SessionLost);
         check!(session.is_full());
 
-        let recovered = session.build(wanted(&[("a", 0, 11), ("a", 1, 20)]));
+        let recovered = session.build(wanted(&[at("a", 0, 11), at("a", 1, 20)]));
         check!(recovered.session_id == INVALID_SESSION_ID);
         check!(recovered.session_epoch == INITIAL_EPOCH);
-        check!(sent_rows(&recovered) == vec![("a".to_string(), 0, 11), ("a".to_string(), 1, 20)]);
+        check!(sent_rows(&recovered) == vec![sent("a", 0, 11), sent("a", 1, 20)]);
     }
 }
 
 #[test]
 fn a_leader_that_grants_no_session_keeps_every_request_full() {
     let mut session = FollowerFetchSession::default();
-    session.build(wanted(&[("a", 0, 10)]));
+    session.build(wanted(&[at("a", 0, 10)]));
 
     check!(session.handle_response(codes::NONE, INVALID_SESSION_ID) == SessionOutcome::Usable);
     check!(session.is_full());
 
-    let request = session.build(wanted(&[("a", 0, 10)]));
+    let request = session.build(wanted(&[at("a", 0, 10)]));
     check!(request.session_epoch == INITIAL_EPOCH);
-    check!(sent_rows(&request) == vec![("a".to_string(), 0, 10)]);
+    check!(sent_rows(&request) == vec![sent("a", 0, 10)]);
 }
 
 #[test]
 fn a_reset_after_a_lost_request_re_sends_everything() {
-    let mut session = established_session(&[("a", 0, 10), ("a", 1, 20)]);
+    let mut session = established_session(&[at("a", 0, 10), at("a", 1, 20)]);
 
     // The next request never reached the leader, so what it holds is unknown.
     session.reset();
 
-    let request = session.build(wanted(&[("a", 0, 10), ("a", 1, 20)]));
+    let request = session.build(wanted(&[at("a", 0, 10), at("a", 1, 20)]));
     check!(request.session_epoch == INITIAL_EPOCH);
     check!(sent_rows(&request).len() == 2);
 }
@@ -184,8 +208,8 @@ fn a_reset_after_a_lost_request_re_sends_everything() {
 /// refusing the session, so the round is applied and the session survives.
 #[test]
 fn a_top_level_error_that_is_not_a_session_error_leaves_the_session_alone() {
-    let mut session = established_session(&[("a", 0, 10)]);
-    session.build(wanted(&[("a", 0, 11)]));
+    let mut session = established_session(&[at("a", 0, 10)]);
+    session.build(wanted(&[at("a", 0, 11)]));
 
     check!(session.handle_response(codes::UNKNOWN_SERVER_ERROR, 42) == SessionOutcome::Usable);
     check!(!session.is_full());

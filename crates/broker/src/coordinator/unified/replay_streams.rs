@@ -354,21 +354,18 @@ mod tests {
                 StreamsMemberWireState,
             },
             test_support::{
-                AssignmentDeletionProtocol, check_replay_cases, deletion_replay_cases,
-                replay_fixtures, replay_tombstone_constructor, streams_member,
+                AssignmentDeletionProtocol, ReplayCase, ReplayFixtures, check_replay_cases,
+                deletion_replay_cases, group_deletion_with_member_case, replay_fixtures,
+                replay_tombstone_constructor, streams_member,
             },
         },
         std::collections::BTreeMap,
     };
 
-    /// What a log leaves: the group that replay holds, or the message of
-    /// the exception that fails the load.
-    type Outcome = Result<Option<StreamsGroupSeed>, String>;
-
     /// One record of the replayed log.
     #[derive(Clone)]
     enum Record {
-        Group(i32, Option<Vec<(&'static str, &'static str)>>),
+        Group(i32, Option<Vec<LastAssignmentConfig>>),
         Member(&'static str),
         Topology,
         TargetEpoch(i32),
@@ -432,15 +429,7 @@ mod tests {
                     epoch,
                     metadata_hash: 44,
                     validated_topology_epoch: 31,
-                    last_assignment_configs: configs.map(|configs| {
-                        configs
-                            .into_iter()
-                            .map(|(key, value)| LastAssignmentConfig {
-                                key: key.into(),
-                                value: value.into(),
-                            })
-                            .collect()
-                    }),
+                    last_assignment_configs: configs,
                     description: streams::persistence::DescriptionEpochs::default(),
                 })
             }
@@ -477,14 +466,23 @@ mod tests {
         let tombstone = replay_tombstone_constructor(key, Record::Tombstone);
         // Kafka's `StreamsGroup.createGroupTombstoneRecords` for member `m`:
         // the topology tombstone comes after the group's, and is ignored.
-        let (group, kafka_deletion) = replay_fixtures()
+        let ReplayFixtures {
+            expected_seed: group,
+            deletion: kafka_deletion,
+        } = replay_fixtures()
             .seed(StreamsGroupSeed::new_group)
             .tombstone(tombstone)
             .protocol(AssignmentDeletionProtocol::Streams)
             .call();
         let every_record = || {
             vec![
-                Record::Group(30, Some(vec![("num.standby.replicas", "1")])),
+                Record::Group(
+                    30,
+                    Some(vec![LastAssignmentConfig {
+                        key: "num.standby.replicas".into(),
+                        value: "1".into(),
+                    }]),
+                ),
                 Record::Member("m"),
                 Record::Topology,
                 Record::TargetEpoch(32),
@@ -492,11 +490,11 @@ mod tests {
                 Record::Current("m", 7),
             ]
         };
-        let mut rows: Vec<(&str, Vec<Record>, Outcome)> = vec![
-            (
-                "every record of a group",
-                every_record(),
-                group(&|seed| {
+        let mut rows: Vec<ReplayCase<'_, Record, StreamsGroupSeed>> = vec![
+            ReplayCase {
+                case: "every record of a group",
+                records: every_record(),
+                expected: group(&|seed| {
                     seed.group_epoch = 30;
                     seed.metadata_hash = 44;
                     seed.validated_topology_epoch = 31;
@@ -509,28 +507,28 @@ mod tests {
                     seed.target_per_member.insert("m".into(), target());
                     seed.current_per_member.insert("m".into(), current(7));
                 }),
-            ),
-            (
-                "a current assignment creates the group and an uninitialized member",
-                vec![Record::Current("m", 7)],
-                group(&|seed| {
+            },
+            ReplayCase {
+                case: "a current assignment creates the group and an uninitialized member",
+                records: vec![Record::Current("m", 7)],
+                expected: group(&|seed| {
                     seed.members.insert("m".into(), uninitialized_member());
                     seed.current_per_member.insert("m".into(), current(7));
                 }),
-            ),
-            (
-                "a topology creates the group, and its tombstone removes the topology",
-                vec![Record::Topology, tombstone("topology", "")],
-                group(&|_| {}),
-            ),
-            (
-                "the tombstone of a current assignment leaves the member at epoch -1",
-                vec![
+            },
+            ReplayCase {
+                case: "a topology creates the group, and its tombstone removes the topology",
+                records: vec![Record::Topology, tombstone("topology", "")],
+                expected: group(&|_| {}),
+            },
+            ReplayCase {
+                case: "the tombstone of a current assignment leaves the member at epoch -1",
+                records: vec![
                     Record::Member("m"),
                     Record::Current("m", 7),
                     tombstone("current", "m"),
                 ],
-                group(&|seed| {
+                expected: group(&|seed| {
                     seed.members.insert("m".into(), streams_member("m"));
                     seed.current_per_member.insert(
                         "m".into(),
@@ -542,51 +540,60 @@ mod tests {
                         },
                     );
                 }),
-            ),
-            (
-                "a member tombstone before its current assignment tombstone",
-                vec![Record::Member("m"), tombstone("member", "m")],
-                Err(
+            },
+            ReplayCase {
+                case: "a member tombstone before its current assignment tombstone",
+                records: vec![Record::Member("m"), tombstone("member", "m")],
+                expected: Err(
                     "Received a tombstone record to delete member m but did not receive \
                      StreamsGroupCurrentMemberAssignmentValue tombstone."
                         .into(),
                 ),
-            ),
-            crate::coordinator::unified::test_support::group_deletion_with_member_case(
-                Record::Member("m"),
-                tombstone,
-            ),
-            (
-                "a group tombstone with a target left but no member: the streams check \
+            },
+            group_deletion_with_member_case(Record::Member("m"), tombstone),
+            ReplayCase {
+                case: "a group tombstone with a target left but no member: the streams check \
                  does not look at targets",
-                vec![
+                records: vec![
                     Record::Target("m"),
                     tombstone("target", "m"),
                     tombstone("target-epoch", ""),
                     Record::Target("m"),
                     tombstone("group", ""),
                 ],
-                Ok(None),
-            ),
-            (
-                "a group tombstone before the target metadata tombstone",
-                vec![Record::Group(2, None), tombstone("group", "")],
-                Err(
+                expected: Ok(None),
+            },
+            ReplayCase {
+                case: "a group tombstone before the target metadata tombstone",
+                records: vec![Record::Group(2, None), tombstone("group", "")],
+                expected: Err(
                     "Received a tombstone record to delete group g but did not receive \
                      StreamsGroupTargetAssignmentMetadataValue tombstone."
                         .into(),
                 ),
-            ),
-            (
-                "a configuration list that names a key twice",
-                vec![Record::Group(2, Some(vec![("a", "1"), ("a", "2")]))],
-                Err("Duplicate key a (attempted merging values 1 and 2)".into()),
-            ),
-            (
-                "a streams record for a consumer group",
-                vec![Record::ConsumerGroup, Record::Topology],
-                Err("Group g is not a streams group.".into()),
-            ),
+            },
+            ReplayCase {
+                case: "a configuration list that names a key twice",
+                records: vec![Record::Group(
+                    2,
+                    Some(vec![
+                        LastAssignmentConfig {
+                            key: "a".into(),
+                            value: "1".into(),
+                        },
+                        LastAssignmentConfig {
+                            key: "a".into(),
+                            value: "2".into(),
+                        },
+                    ]),
+                )],
+                expected: Err("Duplicate key a (attempted merging values 1 and 2)".into()),
+            },
+            ReplayCase {
+                case: "a streams record for a consumer group",
+                records: vec![Record::ConsumerGroup, Record::Topology],
+                expected: Err("Group g is not a streams group.".into()),
+            },
         ];
         rows.splice(
             3..3,

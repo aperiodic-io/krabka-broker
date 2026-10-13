@@ -47,6 +47,13 @@ const SETTLE: Duration = Duration::from_secs(60);
 
 type Cluster = Vec<(BrokerHandle, BrokerConfig, TempDir)>;
 
+/// The sorted replicas and in-sync replicas of one partition.
+#[derive(Clone, Debug, PartialEq)]
+struct Placement {
+    replicas: Vec<NodeId>,
+    isr: Vec<NodeId>,
+}
+
 async fn client(handle: &BrokerHandle) -> Client {
     connect_owned(
         handle.listen_addr().to_string(),
@@ -250,16 +257,28 @@ async fn a_cleanly_stopped_broker_still_counts_toward_the_replication_factor() {
         nodes.sort_unstable();
         nodes
     };
-    let placed: Vec<(Vec<NodeId>, Vec<NodeId>)> = (0..3)
+    let placed: Vec<Placement> = (0..3)
         .map(|partition| {
             let record = image
                 .partition(SHARE_STATE_TOPIC, partition)
                 .expect("a share-state partition");
-            (sorted(&record.replicas), sorted(&record.isr))
+            Placement {
+                replicas: sorted(&record.replicas),
+                isr: sorted(&record.isr),
+            }
         })
         .collect();
     let every_broker = vec![NodeId(1), NodeId(2), NodeId(3)];
-    assert!(placed == vec![(every_broker, survivors); 3]);
+    assert!(
+        placed
+            == vec![
+                Placement {
+                    replicas: every_broker,
+                    isr: survivors
+                };
+                3
+            ]
+    );
 
     shutdown_cluster(cluster).await;
     drop(stopped_dir);

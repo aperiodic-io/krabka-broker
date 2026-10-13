@@ -39,11 +39,23 @@ use {
             acl::{cluster_acl_record, topic_acl_record},
             client::metric_value,
         },
-        topic_admin::{drive_create_topics_sasl, drive_delete_topics_sasl},
+        topic_admin::{TopicMutationResult, drive_create_topics_sasl, drive_delete_topics_sasl},
     },
     assert2::{assert, check},
     krabka_metadata::AclOperation,
 };
+
+/// Wait until the `controller_mutation_rate` quota is visible in the broker's
+/// metadata image.
+async fn wait_for_mutation_quota_in_image(handle: &krabka_broker::BrokerHandle) {
+    handle
+        .wait_for_image(|img| {
+            img.client_quotas()
+                .values()
+                .any(|configs| configs.contains_key("controller_mutation_rate"))
+        })
+        .await;
+}
 
 /// Install Alice's shared mutation quota and return its complete wire response.
 async fn set_controller_mutation_quota(addr: std::net::SocketAddr) -> Vec<(QuotaEntity, i16)> {
@@ -84,26 +96,24 @@ async fn controller_mutation_rate_throttles_create_topics() {
     // straight from the image on the first consume (the bucket is created
     // lazily with that rate; the refresh task only re-rates existing buckets),
     // so image visibility — not the refresh task — is the real precondition.
-    handle
-        .wait_for_image(|img| {
-            img.client_quotas()
-                .values()
-                .any(|configs| configs.contains_key("controller_mutation_rate"))
-        })
-        .await;
+    wait_for_mutation_quota_in_image(&handle).await;
 
     // This operation crosses the limit but is accepted under strict quota
     // semantics because the bucket was not already exhausted.
-    let (throttle_ms, err_code) =
-        drive_create_topics_sasl(addr, "alice", "alice-secret", "throttled-topic", 10).await;
+    let TopicMutationResult {
+        throttle_time_ms: throttle_ms,
+        error_code: err_code,
+    } = drive_create_topics_sasl(addr, "alice", "alice-secret", "throttled-topic", 10).await;
     check!(
         err_code == 0,
         "create-topics should succeed (alice has Cluster Create ACL)"
     );
     check!(throttle_ms == 0);
 
-    let (throttle_ms, err_code) =
-        drive_create_topics_sasl(addr, "alice", "alice-secret", "rejected-topic", 1).await;
+    let TopicMutationResult {
+        throttle_time_ms: throttle_ms,
+        error_code: err_code,
+    } = drive_create_topics_sasl(addr, "alice", "alice-secret", "rejected-topic", 1).await;
     check!(
         err_code == krabka_broker::codes::THROTTLING_QUOTA_EXCEEDED,
         "expected strict quota rejection, got error {err_code}"
@@ -124,8 +134,10 @@ async fn unthrottled_create_topics_unaffected() {
     // admin is super_user, no ACL seeding needed.
     let _ = handle; // keep alive
 
-    let (throttle_ms, err_code) =
-        drive_create_topics_sasl(addr, "admin", "admin-secret", "unthrottled-topic", 10).await;
+    let TopicMutationResult {
+        throttle_time_ms: throttle_ms,
+        error_code: err_code,
+    } = drive_create_topics_sasl(addr, "admin", "admin-secret", "unthrottled-topic", 10).await;
     assert!(err_code == 0);
     assert!(throttle_ms == 0);
 }
@@ -160,7 +172,8 @@ async fn controller_mutation_rate_throttles_delete_topics() {
         .await;
 
     // Pre-create topic as admin (no quota for admin) with 10 partitions.
-    let (_, ec) = drive_create_topics_sasl(addr, "admin", "admin-secret", "to-delete", 10).await;
+    let TopicMutationResult { error_code: ec, .. } =
+        drive_create_topics_sasl(addr, "admin", "admin-secret", "to-delete", 10).await;
     assert!(ec == 0);
 
     // Grant alice Topic Delete on "to-delete".
@@ -186,16 +199,12 @@ async fn controller_mutation_rate_throttles_delete_topics() {
     assert!(alter[0].1 == 0);
     // Wait for alice's controller_mutation_rate quota to land in the image
     // before deleting; DeleteTopics reads the rate from the image on consume.
-    handle
-        .wait_for_image(|img| {
-            img.client_quotas()
-                .values()
-                .any(|configs| configs.contains_key("controller_mutation_rate"))
-        })
-        .await;
+    wait_for_mutation_quota_in_image(&handle).await;
 
-    let (throttle_ms, err_code) =
-        drive_delete_topics_sasl(addr, "alice", "alice-secret", "to-delete").await;
+    let TopicMutationResult {
+        throttle_time_ms: throttle_ms,
+        error_code: err_code,
+    } = drive_delete_topics_sasl(addr, "alice", "alice-secret", "to-delete").await;
     assert!(err_code == 0);
     assert!(
         throttle_ms > 0,

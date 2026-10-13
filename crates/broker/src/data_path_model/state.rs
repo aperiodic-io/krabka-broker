@@ -17,19 +17,26 @@ use {
     std::hash::{Hash, Hasher},
 };
 
+/// A half-open range of diskless offsets the controller assigned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct AssignedRange {
+    pub(super) start: i64,
+    pub(super) end: i64,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct DpState {
     pub(super) log: [Vec<u8>; NB], // log[b] = Vec<epoch>; offset = index
     pub(super) hwm: i64,           // leader-authoritative high watermark
     pub(super) leader: u8,
     pub(super) leader_epoch: u8,
-    pub(super) isr: u8,                   // bitmask over brokers
-    pub(super) live: u8,                  // bitmask over brokers
+    pub(super) isr: u8,                      // bitmask over brokers
+    pub(super) live: u8,                     // bitmask over brokers
     pub(super) elr: u8, // published KIP-966 eligible-leader replicas, bitmask over brokers
     pub(super) committed: Vec<u8>, // ghost: committed[off] = epoch, for offsets ever <= hwm
     pub(super) wal_acked: Vec<u8>, // ghost: wal_acked[off] = epoch, for offsets made WAL-durable (diskless mode)
     pub(super) seq_next: i64,      // ghost: the image's committed next diskless offset
-    pub(super) assigned: Vec<(i64, i64)>, // ghost: half-open assigned ranges
+    pub(super) assigned: Vec<AssignedRange>, // ghost: half-open assigned ranges
     pub(super) lost: bool,         // ghost: an unclean loss has occurred
     pub(super) elr_trace: u8,      // ghost: what the ELR elections so far did, see `elr_trace`
 }
@@ -55,18 +62,25 @@ pub(super) const ELR_BEAT_LONGER_LOG: u8 = 1 << 1;
 /// election that did it reported itself as losing nothing.
 pub(super) const ELR_DROPPED_COMMITTED: u8 = 1 << 2;
 
-/// The whole of `DpState`, grouped only because a tuple wider than twelve
-/// implements neither `PartialEq` nor `Hash`: leadership, then the two
-/// durability records, then the ghosts an election leaves behind.
-type StateProjection = (
-    Vec<Vec<u8>>,
-    i64,
-    (u8, u8, u8, u8, u8),
-    (Vec<u8>, Vec<u8>),
-    i64,
-    Vec<(i64, i64)>,
-    (bool, u8),
-);
+/// The whole of `DpState`, field for field, so that equality and hash read one
+/// list: leadership, then the two durability records, then the ghosts an
+/// election leaves behind.
+#[derive(PartialEq, Eq, Hash)]
+struct StateProjection {
+    log: Vec<Vec<u8>>,
+    hwm: i64,
+    leader: u8,
+    leader_epoch: u8,
+    isr: u8,
+    live: u8,
+    elr: u8,
+    committed: Vec<u8>,
+    wal_acked: Vec<u8>,
+    seq_next: i64,
+    assigned: Vec<AssignedRange>,
+    lost: bool,
+    elr_trace: u8,
+}
 
 impl DpState {
     pub(super) fn in_sync_nodes(&self) -> Vec<krabka_audit::NodeId> {
@@ -81,21 +95,21 @@ impl DpState {
     }
 
     fn proj(&self) -> StateProjection {
-        (
-            self.log.to_vec(),
-            self.hwm,
-            (
-                self.leader,
-                self.leader_epoch,
-                self.isr,
-                self.live,
-                self.elr,
-            ),
-            (self.committed.clone(), self.wal_acked.clone()),
-            self.seq_next,
-            self.assigned.clone(),
-            (self.lost, self.elr_trace),
-        )
+        StateProjection {
+            log: self.log.to_vec(),
+            hwm: self.hwm,
+            leader: self.leader,
+            leader_epoch: self.leader_epoch,
+            isr: self.isr,
+            live: self.live,
+            elr: self.elr,
+            committed: self.committed.clone(),
+            wal_acked: self.wal_acked.clone(),
+            seq_next: self.seq_next,
+            assigned: self.assigned.clone(),
+            lost: self.lost,
+            elr_trace: self.elr_trace,
+        }
     }
 }
 impl PartialEq for DpState {

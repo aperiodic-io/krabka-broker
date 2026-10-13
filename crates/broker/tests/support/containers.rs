@@ -171,6 +171,20 @@ pub async fn start_jvm_single(
     (broker, dir)
 }
 
+/// A running host broker and the directory that backs it.
+pub struct StartedBroker {
+    pub broker: krabka_broker::BrokerHandle,
+    pub dir: tempfile::TempDir,
+}
+
+/// Boot one broker on this test binary's listeners, which advertise
+/// `host.docker.internal`, so a Docker container's post-Metadata connect
+/// targets a hostname it can resolve.
+pub async fn start_host_broker() -> StartedBroker {
+    let (broker, dir) = start_jvm_single("krabka_broker=info,info", |_| {}).await;
+    StartedBroker { broker, dir }
+}
+
 /// Initialize tracing with the suite's default filter.
 pub fn init_jvm_tracing(default_filter: &str) { super::init_tracing_with(default_filter); }
 

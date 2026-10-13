@@ -16,7 +16,7 @@ use {
                     snapshot_fetch_response_invalid,
                 },
                 test_support::{
-                    CapturedPeerSend, EngineSetup, build_engine_only, elect_single_voter_engine,
+                    CapturedPeerSend, EngineInDir, build_engine_only, elect_single_voter_engine,
                     elect_test_engine_with_helper, one_offset_batch, record_peer_sends,
                     recv_peer_send, recv_peer_send_with_api, submit_change_with_timeout,
                     topic_record,
@@ -76,7 +76,12 @@ fn leader_answer(leader_id: NodeId, leader_epoch: Epoch) -> wire::FetchAnswer {
 }
 
 /// The endpoint every test voter announces (`test_support::voter_set`).
-fn test_endpoint() -> (String, u16) { ("127.0.0.1".to_string(), 9_093) }
+fn test_endpoint() -> wire::LeaderEndpoint {
+    wire::LeaderEndpoint {
+        host: "127.0.0.1".to_string(),
+        port: 9_093,
+    }
+}
 
 /// A Fetch request from `from` in `current_leader_epoch`, at offset 0.
 fn fetch_request(from: NodeId, current_leader_epoch: i32) -> bytes::Bytes {
@@ -97,7 +102,14 @@ fn fetch_request(from: NodeId, current_leader_epoch: i32) -> bytes::Bytes {
 /// engine learns from responses.
 #[derive(Default)]
 struct EndpointRecorder {
-    endpoints: std::sync::Mutex<Vec<(NodeId, String)>>,
+    endpoints: std::sync::Mutex<Vec<LearnedEndpoint>>,
+}
+
+/// The address a transport was told a leader is reached at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LearnedEndpoint {
+    leader: NodeId,
+    address: String,
 }
 
 #[async_trait::async_trait]
@@ -117,7 +129,7 @@ impl PeerSender for EndpointRecorder {
         self.endpoints
             .lock()
             .expect("endpoint lock")
-            .push((leader, address));
+            .push(LearnedEndpoint { leader, address });
     }
 }
 
@@ -274,13 +286,13 @@ enum TwoVoterRole {
     Follower,
 }
 
-fn two_voter_engine(role: TwoVoterRole) -> (Engine, tempfile::TempDir) {
+fn two_voter_engine(role: TwoVoterRole) -> EngineInDir {
     let (mut engine, dir) = build_engine_only().ids(&[NodeId(1), NodeId(2)]).call();
     match role {
         TwoVoterRole::Leader => elect_with_peer(&mut engine, NodeId(2)),
         TwoVoterRole::Follower => become_follower(&mut engine, NodeId(2), 3),
     }
-    (engine, dir)
+    EngineInDir { engine, dir }
 }
 
 #[tokio::test]
@@ -438,7 +450,11 @@ async fn a_leader_refuses_a_fetch_from_another_epoch_and_names_itself() {
 /// id and the successors in the core's order.
 #[tokio::test]
 async fn broadcast_end_quorum_epoch_sends_to_every_other_voter() {
-    let (engine, _dir, mut sends) = broadcast_fixture();
+    let BroadcastFixture {
+        engine,
+        dir: _dir,
+        mut sends,
+    } = broadcast_fixture();
 
     engine.broadcast_end_quorum_epoch(4, &[NodeId(3), NodeId(2)]);
 
@@ -453,8 +469,14 @@ async fn broadcast_end_quorum_epoch_sends_to_every_other_voter() {
                     leader_id: NodeId(1),
                     leader_epoch: 4,
                     preferred_candidates: vec![
-                        (NodeId(3), uuid::Uuid::nil()),
-                        (NodeId(2), uuid::Uuid::nil())
+                        wire::PreferredCandidate {
+                            id: NodeId(3),
+                            directory_id: uuid::Uuid::nil()
+                        },
+                        wire::PreferredCandidate {
+                            id: NodeId(2),
+                            directory_id: uuid::Uuid::nil()
+                        }
                     ],
                 })
         );
@@ -464,21 +486,28 @@ async fn broadcast_end_quorum_epoch_sends_to_every_other_voter() {
     assert2::assert!(peers == vec![NodeId(2), NodeId(3)]);
 }
 
-fn broadcast_fixture() -> (
-    Engine,
-    tempfile::TempDir,
-    tokio::sync::mpsc::UnboundedReceiver<CapturedPeerSend>,
-) {
+/// An engine whose peer sends are captured, with its data directory.
+struct BroadcastFixture {
+    engine: Engine,
+    dir: tempfile::TempDir,
+    sends: tokio::sync::mpsc::UnboundedReceiver<CapturedPeerSend>,
+}
+
+fn broadcast_fixture() -> BroadcastFixture {
     let (mut engine, dir) = build_engine_only().call();
     let sends = record_peer_sends(&mut engine, wire::PeerResponse::Ack { epoch: 4 }.encode());
-    (engine, dir, sends)
+    BroadcastFixture { engine, dir, sends }
 }
 
 /// Kafka's `buildBeginQuorumEpochRequest`: each other voter gets the cluster
 /// id, its own voter key, and the leader's listeners in `LeaderEndpoints`.
 #[tokio::test]
 async fn broadcast_begin_quorum_epoch_names_each_recipient_and_the_leader_endpoints() {
-    let (engine, _dir, mut sends) = broadcast_fixture();
+    let BroadcastFixture {
+        engine,
+        dir: _dir,
+        mut sends,
+    } = broadcast_fixture();
 
     engine.broadcast_begin_quorum_epoch(4);
 
@@ -496,7 +525,11 @@ async fn broadcast_begin_quorum_epoch_names_each_recipient_and_the_leader_endpoi
             voter_directory_id: uuid::Uuid::nil(),
             leader_id: NodeId(1),
             leader_epoch: 4,
-            leader_endpoints: vec![("CONTROLLER".into(), "127.0.0.1".into(), 9_093)],
+            leader_endpoints: vec![krabka_metadata::VoterEndpoint {
+                name: "CONTROLLER".into(),
+                host: "127.0.0.1".into(),
+                port: 9_093,
+            }],
         })
     };
     assert2::assert!(
@@ -583,7 +616,10 @@ async fn quorum_epoch_requests_teach_the_leader_endpoints() {
     begin.leader_endpoints.clear();
     let bare_begin_body = encode(&|body| begin.encode(body, 1).expect("encode"));
 
-    let learned = vec![(NodeId(4), "c4.example:9093".to_string())];
+    let learned = vec![LearnedEndpoint {
+        leader: NodeId(4),
+        address: "c4.example:9093".to_string(),
+    }];
     for (name, api, body, remembered) in [
         (
             "BeginQuorumEpoch",
@@ -629,10 +665,17 @@ async fn quorum_epoch_requests_teach_the_leader_endpoints() {
     }
 }
 
+/// The position a Fetch request is sent at.
+#[derive(Debug, PartialEq, Eq)]
+struct SentFetch {
+    fetch_epoch: u32,
+    fetch_offset: i64,
+}
+
 async fn check_sent_fetch(
     engine: &mut Engine,
     sends: &mut mpsc::UnboundedReceiver<super::test_support::CapturedPeerSend>,
-    expected: (u32, i64),
+    expected: SentFetch,
 ) {
     engine.send_fetch(NodeId(2));
     let send = recv_peer_send(sends).await;
@@ -642,7 +685,12 @@ async fn check_sent_fetch(
             fetch_offset,
             ..
         }) => {
-            assert2::assert!((fetch_epoch, fetch_offset) == expected);
+            assert2::assert!(
+                SentFetch {
+                    fetch_epoch,
+                    fetch_offset
+                } == expected
+            );
         }
         other => panic!("unexpected fetch request: {other:?}"),
     }
@@ -666,14 +714,22 @@ async fn send_fetch_uses_snapshot_epoch_only_until_log_extends_past_boundary() {
     .encode();
     let mut sends = record_peer_sends(&mut engine, fetch_response.clone());
 
-    check_sent_fetch(&mut engine, &mut sends, (7, 10)).await;
+    check_sent_fetch(&mut engine, &mut sends, SentFetch {
+        fetch_epoch: 7,
+        fetch_offset: 10,
+    })
+    .await;
 
     let mut batch = one_offset_batch(10, 9, b"after-snapshot");
     engine
         .log
         .append_at(&mut batch, Offset(10))
         .expect("append after snapshot");
-    check_sent_fetch(&mut engine, &mut sends, (9, 11)).await;
+    check_sent_fetch(&mut engine, &mut sends, SentFetch {
+        fetch_epoch: 9,
+        fetch_offset: 11,
+    })
+    .await;
 }
 
 #[test]
@@ -797,7 +853,10 @@ async fn leaderless_observer_discovers_the_leader_through_a_follower_redirect() 
     let leader_endpoint = wire::QuorumLeader {
         leader_id: Some(NodeId(2)),
         epoch,
-        endpoint: Some(("controller-2".to_string(), 9_093)),
+        endpoint: Some(wire::LeaderEndpoint {
+            host: "controller-2".to_string(),
+            port: 9_093,
+        }),
     };
 
     let redirect = wire::PeerResponse::Fetch(wire::FetchAnswer {
@@ -814,7 +873,10 @@ async fn leaderless_observer_discovers_the_leader_through_a_follower_redirect() 
     }));
     assert2::assert!(
         *transport.endpoints.lock().expect("endpoint lock")
-            == vec![(NodeId(2), "controller-2:9093".to_string())]
+            == vec![LearnedEndpoint {
+                leader: NodeId(2),
+                address: "controller-2:9093".to_string()
+            }]
     );
 
     let served = wire::PeerResponse::Fetch(wire::FetchAnswer {
@@ -1022,7 +1084,10 @@ async fn quorum_high_watermark_keeps_the_leader_s_watermark_past_the_local_clamp
 /// the watermark on that path would report the worst laggard as caught up.
 #[tokio::test]
 async fn quorum_high_watermark_is_recorded_from_a_snapshot_redirect_too() {
-    let (mut engine, _dir) = two_voter_engine(TwoVoterRole::Follower);
+    let EngineInDir {
+        mut engine,
+        dir: _dir,
+    } = two_voter_engine(TwoVoterRole::Follower);
 
     let redirect = wire::PeerResponse::Fetch(wire::FetchAnswer {
         diverging: None,
@@ -1046,7 +1111,10 @@ async fn quorum_high_watermark_is_recorded_from_a_snapshot_redirect_too() {
 /// quorum's, and an observer that drew level with it would call itself ready.
 #[tokio::test]
 async fn a_lagging_follower_serves_the_quorums_committed_offset() {
-    let (mut engine, _dir) = two_voter_engine(TwoVoterRole::Follower);
+    let EngineInDir {
+        mut engine,
+        dir: _dir,
+    } = two_voter_engine(TwoVoterRole::Follower);
 
     engine.on_fetch_response(
         NodeId(2),
@@ -1174,7 +1242,10 @@ async fn a_leader_answers_a_diverging_fetch_without_truncating_its_own_log() {
 
 #[tokio::test]
 async fn quorum_state_snapshot_tracks_fetch_timestamps_and_observers() {
-    let (mut engine, _dir) = two_voter_engine(TwoVoterRole::default());
+    let EngineInDir {
+        mut engine,
+        dir: _dir,
+    } = two_voter_engine(TwoVoterRole::default());
 
     // 1. Before Node 2 fetches, fetch_ms and caught_up_ms are -1
     let snap1 = engine.quorum_state_snapshot();
@@ -1249,10 +1320,10 @@ fn fetch_at(
 
 /// A single-voter leader whose clock started 50 ms ago, so a fetch is stamped
 /// with a nonzero time.
-fn leader_with_a_running_clock() -> (Engine, tempfile::TempDir) {
+fn leader_with_a_running_clock() -> EngineInDir {
     let (mut engine, dir) = super::test_support::single_voter_leader_engine();
     engine.clock_base = Instant::now() - StdDuration::from_millis(50);
-    (engine, dir)
+    EngineInDir { engine, dir }
 }
 
 /// Kafka's `LeaderState.observerStates` tracks a non-voter that fetches like a
@@ -1260,7 +1331,10 @@ fn leader_with_a_running_clock() -> (Engine, tempfile::TempDir) {
 /// caught up, by the two-branch rule of `ReplicaState.updateFollowerState`.
 #[test]
 fn an_observer_is_tracked_with_kafkas_caught_up_rule() {
-    let (mut engine, _dir) = leader_with_a_running_clock();
+    let EngineInDir {
+        mut engine,
+        dir: _dir,
+    } = leader_with_a_running_clock();
     let observer = NodeId(9);
     let directory = uuid::Uuid::from_u128(9);
     let epoch = engine.core.quorum_state().leader_epoch;
@@ -1308,7 +1382,10 @@ fn an_observer_is_tracked_with_kafkas_caught_up_rule() {
 /// its log end, is answered with a divergence and records nothing.
 #[test]
 fn a_diverging_observer_fetch_is_not_progress() {
-    let (mut engine, _dir) = leader_with_a_running_clock();
+    let EngineInDir {
+        mut engine,
+        dir: _dir,
+    } = leader_with_a_running_clock();
     let end = engine.log.log_end_offset().0;
     let epoch = engine.core.quorum_state().leader_epoch;
 
@@ -1331,7 +1408,10 @@ fn a_diverging_observer_fetch_is_not_progress() {
 /// minutes old, and leadership starts over with none.
 #[test]
 fn an_observer_silent_for_five_minutes_is_dropped() {
-    let (mut engine, _dir) = leader_with_a_running_clock();
+    let EngineInDir {
+        mut engine,
+        dir: _dir,
+    } = leader_with_a_running_clock();
     let epoch = engine.core.quorum_state().leader_epoch;
     fetch_at(&mut engine, NodeId(9), uuid::Uuid::from_u128(9), epoch, 0);
     assert!(engine.quorum_state_snapshot().observers.len() == 1);
@@ -1360,7 +1440,10 @@ async fn kraft_controller_metadata_fetch_returns_slice() {
 
 #[tokio::test]
 async fn quorum_state_snapshot_negative_timestamp_fallback() {
-    let (mut engine, _dir) = two_voter_engine(TwoVoterRole::default());
+    let EngineInDir {
+        mut engine,
+        dir: _dir,
+    } = two_voter_engine(TwoVoterRole::default());
 
     // When wall_clock_base is before UNIX_EPOCH, duration_since returns Err,
     // so map_or fallback -1 must be returned for all timestamps.

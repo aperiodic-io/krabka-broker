@@ -54,7 +54,14 @@ mod tests {
         krabka_units::millis,
     };
 
-    async fn periodic_group(fixture: &Fixture) -> (BarrierCoordinator, Arc<dyn MetadataSource>) {
+    /// A coordinator that holds one periodic group, and the metadata source it
+    /// reads.
+    struct PeriodicGroup {
+        coordinator: BarrierCoordinator,
+        controller: Arc<dyn MetadataSource>,
+    }
+
+    async fn periodic_group(fixture: &Fixture) -> PeriodicGroup {
         let coordinator = fixture.coordinator().await;
         let controller = Arc::clone(&fixture.source) as Arc<dyn MetadataSource>;
 
@@ -68,13 +75,19 @@ mod tests {
             )
             .await
             .expect("create group");
-        (coordinator, controller)
+        PeriodicGroup {
+            coordinator,
+            controller,
+        }
     }
 
     #[tokio::test]
     async fn inject_due_injects_due_group() {
         let fixture = Fixture::new();
-        let (coordinator, controller) = periodic_group(&fixture).await;
+        let PeriodicGroup {
+            coordinator,
+            controller,
+        } = periodic_group(&fixture).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
 
@@ -90,7 +103,10 @@ mod tests {
     #[tokio::test]
     async fn run_ticks_and_shuts_down_on_cancellation() {
         let fixture = Fixture::new();
-        let (coordinator, controller) = periodic_group(&fixture).await;
+        let PeriodicGroup {
+            coordinator,
+            controller,
+        } = periodic_group(&fixture).await;
         let coordinator = Arc::new(coordinator);
 
         let shutdown = CancellationToken::new();

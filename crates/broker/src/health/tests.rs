@@ -46,7 +46,13 @@ fn state_at(phase: Phase, max_lag: u64) -> HealthState {
     state
 }
 
-async fn get(state: HealthState, path: &str) -> (StatusCode, String) {
+/// A probe answer: the status and the body.
+struct Probe {
+    status: StatusCode,
+    body: String,
+}
+
+async fn get(state: HealthState, path: &str) -> Probe {
     let resp = router(state)
         .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
         .await
@@ -55,7 +61,10 @@ async fn get(state: HealthState, path: &str) -> (StatusCode, String) {
     let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
         .await
         .unwrap();
-    (status, String::from_utf8(body.to_vec()).unwrap())
+    Probe {
+        status,
+        body: String::from_utf8(body.to_vec()).unwrap(),
+    }
 }
 
 #[test]
@@ -96,7 +105,7 @@ async fn healthz_is_200_at_every_startup_phase() {
         Phase::ListenersBound,
         Phase::QuorumReached(0, 1_000_000),
     ] {
-        let (status, body) = get(state_at(phase, 100), "/healthz").await;
+        let Probe { status, body } = get(state_at(phase, 100), "/healthz").await;
         assert!(status == StatusCode::OK);
         assert!(body == "ok\n");
     }
@@ -111,7 +120,7 @@ async fn readyz_body_names_the_failing_condition() {
         (Phase::QuorumReached(0, 1000), "metadata_lag"),
     ];
     for (phase, condition) in cases {
-        let (status, body) = get(state_at(phase, 100), "/readyz").await;
+        let Probe { status, body } = get(state_at(phase, 100), "/readyz").await;
         assert!(status == StatusCode::SERVICE_UNAVAILABLE);
         assert!(
             body.starts_with(&format!("not ready: {condition}: ")),
@@ -122,7 +131,8 @@ async fn readyz_body_names_the_failing_condition() {
 
 #[tokio::test]
 async fn readyz_is_200_once_every_condition_holds() {
-    let (status, body) = get(state_at(Phase::QuorumReached(1000, 1000), 100), "/readyz").await;
+    let Probe { status, body } =
+        get(state_at(Phase::QuorumReached(1000, 1000), 100), "/readyz").await;
     assert!(status == StatusCode::OK);
     assert!(body == "ready\n");
 }
@@ -135,7 +145,7 @@ async fn shutting_down_flips_readyz_to_503() {
     state.mark_shutting_down();
     assert!(state.readiness() == Err(NotReady::ShuttingDown));
 
-    let (status, body) = get(state, "/readyz").await;
+    let Probe { status, body } = get(state, "/readyz").await;
     assert!(status == StatusCode::SERVICE_UNAVAILABLE);
     assert!(body.starts_with("not ready: shutting_down: "));
 }
@@ -165,8 +175,14 @@ fn metadata_progress_is_installed_once() {
     );
 }
 
-/// One HTTP/1.1 GET against a served socket, returned as `(status, body)`.
-async fn scrape(addr: std::net::SocketAddr, path: &str) -> (String, String) {
+/// A scraped answer: the status line and the body.
+struct Scraped {
+    status_line: String,
+    body: String,
+}
+
+/// One HTTP/1.1 GET against a served socket.
+async fn scrape(addr: std::net::SocketAddr, path: &str) -> Scraped {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -176,10 +192,10 @@ async fn scrape(addr: std::net::SocketAddr, path: &str) -> (String, String) {
     let mut raw = String::new();
     stream.read_to_string(&mut raw).await.unwrap();
     let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((raw.as_str(), ""));
-    (
-        head.lines().next().unwrap_or_default().to_string(),
-        body.to_string(),
-    )
+    Scraped {
+        status_line: head.lines().next().unwrap_or_default().to_string(),
+        body: body.to_string(),
+    }
 }
 
 /// `serve` answers on the socket it reports, and stops when its token is
@@ -203,10 +219,16 @@ async fn serve_answers_on_the_reported_port_until_it_is_cancelled() {
     assert!(bound.port() != 0);
 
     // Nothing has started, so this is the state a kubelet meets first.
-    let (status, body) = scrape(bound, "/healthz").await;
+    let Scraped {
+        status_line: status,
+        body,
+    } = scrape(bound, "/healthz").await;
     assert!(status.contains("200 OK"), "{status}");
     assert!(body == "ok\n");
-    let (status, body) = scrape(bound, "/readyz").await;
+    let Scraped {
+        status_line: status,
+        body,
+    } = scrape(bound, "/readyz").await;
     assert!(status.contains("503 Service Unavailable"), "{status}");
     assert!(body.starts_with("not ready: log_dir_recovery: "), "{body}");
 
@@ -218,7 +240,10 @@ async fn serve_answers_on_the_reported_port_until_it_is_cancelled() {
         node: 1000,
         quorum: 1000,
     }));
-    let (status, body) = scrape(bound, "/readyz").await;
+    let Scraped {
+        status_line: status,
+        body,
+    } = scrape(bound, "/readyz").await;
     assert!(status.contains("200 OK"), "{status}");
     assert!(body == "ready\n");
 

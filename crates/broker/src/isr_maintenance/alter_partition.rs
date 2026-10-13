@@ -7,7 +7,8 @@ use {
     super::request_builder::{IsrChange, build_alter_partition_request},
     crate::{
         codes::NOT_CONTROLLER,
-        controller_endpoint::{ControllerDialer, current_leader_endpoint},
+        controller_endpoint::{ControllerDialer, LeaderEndpoint, current_leader_endpoint},
+        host_port::HostPort,
         metadata_source::MetadataSource,
     },
     krabka_protocol::owned::{
@@ -66,8 +67,11 @@ pub(super) async fn send_alter_partition(
         broker_id,
         dialer,
     } = *link;
-    let (leader_id, image, host, port) =
-        current_leader_endpoint(controller.as_ref(), &dialer.quorum_voters)?;
+    let LeaderEndpoint {
+        leader_id,
+        image,
+        endpoint: HostPort { host, port },
+    } = current_leader_endpoint(controller.as_ref(), &dialer.quorum_voters)?;
 
     let req = build_alter_partition_request(&image, broker_id, change);
     match send_alter_partition_to(dialer, broker_id, &host, port, req).await {
@@ -137,17 +141,30 @@ async fn send_alter_partition_to(
     let sent = connection.send(req).await;
     connection.close();
     let resp = sent.map_err(|e| AlterPartitionSendError::Transport(format!("send: {e}")))?;
-    let (global_err, part_err) = alter_partition_response_errors(&resp);
+    let ResponseErrors {
+        global_err,
+        part_err,
+    } = alter_partition_response_errors(&resp);
     classify_alter_partition_response(global_err, part_err)
 }
 
-fn alter_partition_response_errors(resp: &AlterPartitionResponse) -> (i16, i16) {
+/// The error codes an `AlterPartition` response carries: its own, and the
+/// first partition's.
+struct ResponseErrors {
+    global_err: i16,
+    part_err: i16,
+}
+
+fn alter_partition_response_errors(resp: &AlterPartitionResponse) -> ResponseErrors {
     let part_err = resp
         .topics
         .first()
         .and_then(|t| t.partitions.first())
         .map_or(0, |p| p.error_code);
-    (resp.error_code, part_err)
+    ResponseErrors {
+        global_err: resp.error_code,
+        part_err,
+    }
 }
 
 fn classify_alter_partition_response(

@@ -16,7 +16,13 @@ fn key(user: &str, client_id: &str) -> EntityKey {
     ]
 }
 
-fn alice_fixture() -> (QuotaBuckets, BrokerMetrics) {
+/// A bucket table and the metrics that carry the series its bucket published.
+struct AliceFixture {
+    buckets: QuotaBuckets,
+    metrics: BrokerMetrics,
+}
+
+fn alice_fixture() -> AliceFixture {
     let buckets = QuotaBuckets::new();
     let metrics = BrokerMetrics::new();
     drop(buckets.get_or_create("producer_byte_rate", &key("alice", "app"), 1024.0));
@@ -29,7 +35,7 @@ fn alice_fixture() -> (QuotaBuckets, BrokerMetrics) {
                 client_id: Some("app".into()),
             }),
     );
-    (buckets, metrics)
+    AliceFixture { buckets, metrics }
 }
 
 /// The series names a `/metrics` body carries for the per-entity throttle.
@@ -53,7 +59,7 @@ fn sweep_and_check_expired(buckets: &QuotaBuckets, metrics: &BrokerMetrics) {
 
 #[test]
 fn an_inactive_bucket_and_its_metric_series_are_both_dropped() {
-    let (buckets, metrics) = alice_fixture();
+    let AliceFixture { buckets, metrics } = alice_fixture();
     check!(throttle_series(&metrics).len() == 1);
 
     // Nothing has touched the bucket since it was made, so any positive age
@@ -63,7 +69,7 @@ fn an_inactive_bucket_and_its_metric_series_are_both_dropped() {
 
 #[test]
 fn a_bucket_inside_the_window_keeps_its_series() {
-    let (buckets, metrics) = alice_fixture();
+    let AliceFixture { buckets, metrics } = alice_fixture();
 
     sweep(&buckets, &metrics, secs(3600));
 

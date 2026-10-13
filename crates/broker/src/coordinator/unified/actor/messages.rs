@@ -8,6 +8,7 @@ use {
         codes,
         coordinator::{
             DeleteGroupError, GroupSnapshot,
+            topic_deletion::DeletedTopic,
             unified::{
                 GroupSeed,
                 classic_state::OffsetEntry,
@@ -169,7 +170,7 @@ pub enum GroupActorMessage {
     /// empty when the append fails.
     DeleteTopicOffsets {
         /// The name and the topic id of each deleted topic.
-        topics: Vec<(String, uuid::Uuid)>,
+        topics: Vec<DeletedTopic>,
         reply: oneshot::Sender<Vec<(String, i32)>>,
     },
     /// Kafka's `GroupMetadataManager.onMetadataUpdate` for this group: the

@@ -14,9 +14,9 @@
 use {
     super::{test_support::one_transactional_batch, *},
     crate::{
-        broker::{Broker, BrokerHandle},
+        broker::Broker,
         codes,
-        handlers::test_support::configured_topic_request,
+        handlers::test_support::{StartedBroker, configured_topic_request},
         test_support::{
             KafkaErrorCode, decode_response, dispatch_context, encode_request, peer, principal,
             repeated_records_batch, start_transaction_grant_broker,
@@ -66,7 +66,7 @@ const TXN_ID: &str = "t1";
 /// A grant string a `GrantsInPrincipalName` principal needs to create topics.
 const ADMIN_GRANTS: &str = "Cluster:Create";
 
-async fn boot() -> (BrokerHandle, tempfile::TempDir) {
+async fn boot() -> StartedBroker {
     let (handle, dir) = start_transaction_grant_broker().await;
     handle.wait_until_controller_leader().await;
     handle.wait_until_brokers_registered(1).await;
@@ -76,7 +76,10 @@ async fn boot() -> (BrokerHandle, tempfile::TempDir) {
     // directly, so the topic is created here instead.
     handle.wait_until_transaction_coordinator_ready().await;
     create_topic(&broker, TOPIC).await;
-    (handle, dir)
+    StartedBroker {
+        broker: handle,
+        dir,
+    }
 }
 
 async fn create_topic(broker: &Broker, name: &str) {
@@ -254,7 +257,10 @@ struct Case<'a> {
 ///   Kafka accepts.
 #[tokio::test]
 async fn transactional_id_write_gates_exactly_on_the_batch_not_the_request_field() {
-    let (handle, _dir) = boot().await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = boot().await;
     let broker = handle.broker_arc_for_test();
     let topic_id = {
         let image = handle.controller_image_for_test();
@@ -367,7 +373,10 @@ async fn transactional_id_write_gates_exactly_on_the_batch_not_the_request_field
 /// carries a transactional batch and the `transactional_id` check fails.
 #[tokio::test]
 async fn transactional_denial_precedes_topic_resolution_at_v13() {
-    let (handle, _dir) = boot().await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = boot().await;
     let broker = handle.broker_arc_for_test();
 
     let unknown_id = WireUuid([0x0b; 16]);

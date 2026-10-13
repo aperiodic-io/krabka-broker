@@ -77,12 +77,23 @@ pub(super) fn prepare_fetch_session(
     }
 }
 
+/// Who sent a fetch and at which version, which decide how its session is
+/// cached.
+#[derive(Clone, Copy)]
+pub(super) struct FetchKind {
+    pub(super) is_follower_fetch: bool,
+    pub(super) version: i16,
+}
+
 /// Write a sent response's session state into the cache and return the
 /// response's session id.
 pub(super) fn commit_fetch_session(
     broker: &Broker,
     commit: SessionCommit,
-    (is_follower_fetch, version): (bool, i16),
+    FetchKind {
+        is_follower_fetch,
+        version,
+    }: FetchKind,
     principal_name: &str,
 ) -> i32 {
     let session_id = match commit {
@@ -143,15 +154,27 @@ fn snapshot_response_state(
     // has the resolved name *and* the id, but `effective` (built from
     // `req.topics`) may have only one or the other. Index by both so
     // lookup succeeds in either direction.
-    let mut by_name: HashMap<(String, i32), &EffectivePartition> = HashMap::new();
-    let mut by_id: HashMap<(WireUuid, i32), &EffectivePartition> = HashMap::new();
+    let mut by_name: HashMap<PartitionByName, &EffectivePartition> = HashMap::new();
+    let mut by_id: HashMap<PartitionById, &EffectivePartition> = HashMap::new();
     for et in effective {
         for ep in &et.partitions {
             if !et.topic.is_empty() {
-                by_name.insert((et.topic.clone(), ep.partition), ep);
+                by_name.insert(
+                    PartitionByName {
+                        topic: et.topic.clone(),
+                        partition: ep.partition,
+                    },
+                    ep,
+                );
             }
             if et.topic_id != WireUuid::ZERO {
-                by_id.insert((et.topic_id, ep.partition), ep);
+                by_id.insert(
+                    PartitionById {
+                        topic_id: et.topic_id,
+                        partition: ep.partition,
+                    },
+                    ep,
+                );
             }
         }
     }
@@ -173,8 +196,16 @@ fn snapshot_response_state(
                 ..Default::default()
             };
             let ep = by_id
-                .get(&(tr.topic_id, p.partition_index))
-                .or_else(|| by_name.get(&(tr.topic.clone(), p.partition_index)));
+                .get(&PartitionById {
+                    topic_id: tr.topic_id,
+                    partition: p.partition_index,
+                })
+                .or_else(|| {
+                    by_name.get(&PartitionByName {
+                        topic: tr.topic.clone(),
+                        partition: p.partition_index,
+                    })
+                });
             if let Some(ep) = ep {
                 state.fetch_offset = ep.fetch_offset;
                 state.log_start_offset = ep.log_start_offset;
@@ -199,14 +230,36 @@ fn snapshot_response_state(
 /// therefore matches on either half, id first, exactly as the session diff
 /// does when it merges a request row into the cached set.
 struct CachedIndex<'cache> {
-    by_id: std::collections::HashMap<
-        (WireUuid, i32),
-        (&'cache FetchSessionKey, &'cache CachedPartitionState),
-    >,
-    by_name: std::collections::HashMap<
-        (&'cache str, i32),
-        (&'cache FetchSessionKey, &'cache CachedPartitionState),
-    >,
+    by_id: std::collections::HashMap<PartitionById, CachedEntry<'cache>>,
+    by_name: std::collections::HashMap<PartitionByNameRef<'cache>, CachedEntry<'cache>>,
+}
+
+/// A partition named by its topic id.
+#[derive(PartialEq, Eq, Hash)]
+struct PartitionById {
+    topic_id: WireUuid,
+    partition: i32,
+}
+
+/// A partition named by its topic name.
+#[derive(PartialEq, Eq, Hash)]
+struct PartitionByName {
+    topic: String,
+    partition: i32,
+}
+
+/// A partition named by a borrowed topic name.
+#[derive(PartialEq, Eq, Hash)]
+struct PartitionByNameRef<'a> {
+    topic: &'a str,
+    partition: i32,
+}
+
+/// A cached partition: the key the cache holds it under and its state.
+#[derive(Clone, Copy)]
+struct CachedEntry<'cache> {
+    key: &'cache FetchSessionKey,
+    state: &'cache CachedPartitionState,
 }
 
 impl<'cache> CachedIndex<'cache> {
@@ -219,14 +272,22 @@ impl<'cache> CachedIndex<'cache> {
         };
         for (key, state) in cached {
             if key.topic_id != WireUuid::ZERO {
-                index
-                    .by_id
-                    .insert((key.topic_id, key.partition), (key, state));
+                index.by_id.insert(
+                    PartitionById {
+                        topic_id: key.topic_id,
+                        partition: key.partition,
+                    },
+                    CachedEntry { key, state },
+                );
             }
             if !key.topic_name.is_empty() {
-                index
-                    .by_name
-                    .insert((key.topic_name.as_str(), key.partition), (key, state));
+                index.by_name.insert(
+                    PartitionByNameRef {
+                        topic: key.topic_name.as_str(),
+                        partition: key.partition,
+                    },
+                    CachedEntry { key, state },
+                );
             }
         }
         index
@@ -237,10 +298,18 @@ impl<'cache> CachedIndex<'cache> {
         topic_id: WireUuid,
         topic_name: &str,
         partition: i32,
-    ) -> Option<(&'cache FetchSessionKey, &'cache CachedPartitionState)> {
+    ) -> Option<CachedEntry<'cache>> {
         self.by_id
-            .get(&(topic_id, partition))
-            .or_else(|| self.by_name.get(&(topic_name, partition)))
+            .get(&PartitionById {
+                topic_id,
+                partition,
+            })
+            .or_else(|| {
+                self.by_name.get(&PartitionByNameRef {
+                    topic: topic_name,
+                    partition,
+                })
+            })
             .copied()
     }
 }
@@ -274,7 +343,7 @@ fn filter_incremental_response(
                 // here); it does not compare `lastStableOffset` or the
                 // aborted-transaction list, so those two never force a resend
                 // on their own.
-                Some((_, prev)) => {
+                Some(CachedEntry { state: prev, .. }) => {
                     records_present
                         || p.error_code != codes::NONE
                         || p.error_code != prev.last_error_code
@@ -295,7 +364,7 @@ fn filter_incremental_response(
                         topic_id: tr.topic_id,
                         partition: p.partition_index,
                     },
-                    |(key, _)| key.clone(),
+                    |entry| entry.key.clone(),
                 );
                 sent.push((key, CachedPartitionState {
                     last_high_watermark: p.high_watermark,
@@ -489,6 +558,13 @@ mod tests {
         assert!((responses, sent) == (vec![topic], vec![(key, state)]));
     }
 
+    /// A response topic that survived the filter and the high watermark of its row.
+    #[derive(Debug, PartialEq, Eq)]
+    struct SurvivingTopic {
+        topic: String,
+        high_watermark: i64,
+    }
+
     /// Two topics cached by id alone are two partitions, not one: the filter
     /// must not answer for `b` out of `a`'s cached state.
     #[test]
@@ -501,11 +577,20 @@ mod tests {
 
         let sent = filter_incremental_response(&mut responses, &cached);
 
-        let surviving: Vec<(String, i64)> = responses
+        let surviving: Vec<SurvivingTopic> = responses
             .iter()
-            .map(|topic| (topic.topic.clone(), topic.partitions[0].high_watermark))
+            .map(|topic| SurvivingTopic {
+                topic: topic.topic.clone(),
+                high_watermark: topic.partitions[0].high_watermark,
+            })
             .collect();
-        assert!(surviving == vec![("b".to_owned(), 99)]);
+        assert!(
+            surviving
+                == vec![SurvivingTopic {
+                    topic: "b".to_owned(),
+                    high_watermark: 99
+                }]
+        );
         assert!(sent.len() == 1);
     }
 

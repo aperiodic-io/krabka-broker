@@ -196,9 +196,9 @@ mod tests {
     use {
         super::*,
         crate::fetch_session::test_support::{
-            NAME_FETCH_VERSION, RequestSessionId, SessionRequestSetup, TopicAddressing,
-            allocate_session, allocated_cache, error_code, forgotten_topic, incremental_req, req,
-            seed_resolved_partition, session_key, topic,
+            AllocatedCache, NAME_FETCH_VERSION, RequestSessionId, SessionRequestSetup,
+            TopicAddressing, allocate_session, allocated_cache, error_code, forgotten_topic,
+            incremental_req, req, seed_resolved_partition, session_key, topic,
         },
         assert2::{assert, check},
         krabka_protocol::{
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn stale_epoch_returns_invalid_epoch() {
-        let (cache, id) = allocated_cache().call();
+        let AllocatedCache { cache, id } = allocated_cache().call();
         // Session's expected next_epoch is 1; send epoch=99.
         let r = incremental_req!(id, 99);
         assert!(error_code(&cache, &r, NAME_FETCH_VERSION) == codes::INVALID_FETCH_SESSION_EPOCH);
@@ -257,7 +257,8 @@ mod tests {
             created_with_topic_ids: TopicAddressing,
             epoch: i32,
             version: i16,
-            want: (Option<i16>, i32),
+            want_error_code: Option<i16>,
+            want_next_epoch: i32,
         }
         let cases = [
             Case {
@@ -265,35 +266,40 @@ mod tests {
                 created_with_topic_ids: TopicAddressing::Name,
                 epoch: 1,
                 version: 12,
-                want: (None, 2),
+                want_error_code: None,
+                want_next_epoch: 2,
             },
             Case {
                 name: "name session, v13 incremental",
                 created_with_topic_ids: TopicAddressing::Name,
                 epoch: 1,
                 version: 13,
-                want: (Some(codes::FETCH_SESSION_TOPIC_ID_ERROR), 1),
+                want_error_code: Some(codes::FETCH_SESSION_TOPIC_ID_ERROR),
+                want_next_epoch: 1,
             },
             Case {
                 name: "id session, v17 incremental",
                 created_with_topic_ids: TopicAddressing::Id,
                 epoch: 1,
                 version: 17,
-                want: (None, 2),
+                want_error_code: None,
+                want_next_epoch: 2,
             },
             Case {
                 name: "id session, v12 incremental",
                 created_with_topic_ids: TopicAddressing::Id,
                 epoch: 1,
                 version: 12,
-                want: (Some(codes::FETCH_SESSION_TOPIC_ID_ERROR), 1),
+                want_error_code: Some(codes::FETCH_SESSION_TOPIC_ID_ERROR),
+                want_next_epoch: 1,
             },
             Case {
                 name: "id session, v12 incremental at a stale epoch",
                 created_with_topic_ids: TopicAddressing::Id,
                 epoch: 7,
                 version: 12,
-                want: (Some(codes::INVALID_FETCH_SESSION_EPOCH), 1),
+                want_error_code: Some(codes::INVALID_FETCH_SESSION_EPOCH),
+                want_next_epoch: 1,
             },
         ];
         for case in cases {
@@ -314,13 +320,17 @@ mod tests {
                 other => panic!("{}: unexpected decision {other:?}", case.name),
             };
             let next_epoch = cache.inner.lock().expect("poisoned").sessions[&id].next_epoch;
-            check!((code, next_epoch) == case.want, "{}", case.name);
+            check!(
+                (code, next_epoch) == (case.want_error_code, case.want_next_epoch),
+                "{}",
+                case.name
+            );
         }
     }
 
     #[test]
     fn close_request_closes_the_session_inline() {
-        let (cache, id) = allocated_cache().call();
+        let AllocatedCache { cache, id } = allocated_cache().call();
         let r = incremental_req!(id, FINAL_EPOCH);
         assert!(matches!(
             cache.classify(&r, NAME_FETCH_VERSION),

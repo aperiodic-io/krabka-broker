@@ -370,9 +370,21 @@ struct Case {
     voters: Option<String>,
     /// Whether the startup line names the client listener and the controller
     /// listener.
-    names: (bool, bool),
+    names: NamedListeners,
     /// What the client port and the controller port answer.
-    ports: (Listener, Listener),
+    ports: PortAnswers,
+}
+
+/// Which listeners a node's startup line names.
+struct NamedListeners {
+    client: bool,
+    controller: bool,
+}
+
+/// What a node's client port and controller port answer.
+struct PortAnswers {
+    client: Listener,
+    controller: Listener,
 }
 
 /// Every `process.roles` value opens the listeners of its roles and no other,
@@ -399,24 +411,42 @@ fn each_role_opens_only_its_own_listeners() {
             node_id: 1,
             controller: quorum,
             voters: None,
-            names: (false, true),
-            ports: (Listener::Closed, Listener::Controller),
+            names: NamedListeners {
+                client: false,
+                controller: true,
+            },
+            ports: PortAnswers {
+                client: Listener::Closed,
+                controller: Listener::Controller,
+            },
         },
         Case {
             roles: "broker",
             node_id: 2,
             controller: free_port(),
             voters: Some(format!("1@{quorum}")),
-            names: (true, false),
-            ports: (Listener::Broker, Listener::Closed),
+            names: NamedListeners {
+                client: true,
+                controller: false,
+            },
+            ports: PortAnswers {
+                client: Listener::Broker,
+                controller: Listener::Closed,
+            },
         },
         Case {
             roles: "broker,controller",
             node_id: 3,
             controller: free_port(),
             voters: None,
-            names: (true, true),
-            ports: (Listener::Broker, Listener::Controller),
+            names: NamedListeners {
+                client: true,
+                controller: true,
+            },
+            ports: PortAnswers {
+                client: Listener::Broker,
+                controller: Listener::Controller,
+            },
         },
     ];
 
@@ -453,11 +483,11 @@ fn each_role_opens_only_its_own_listeners() {
         expected.push(Observed {
             roles: case.roles,
             started: Started {
-                listen_addr: case.names.0.then(|| client.to_string()),
-                controller_listen_addr: case.names.1.then(|| controller.clone()),
+                listen_addr: case.names.client.then(|| client.to_string()),
+                controller_listen_addr: case.names.controller.then(|| controller.clone()),
             },
-            client_port: case.ports.0,
-            controller_port: case.ports.1,
+            client_port: case.ports.client,
+            controller_port: case.ports.controller,
         });
         running.push(process);
     }

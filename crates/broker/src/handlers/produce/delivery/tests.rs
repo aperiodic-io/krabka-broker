@@ -12,7 +12,7 @@ use {
             framing::PartitionPayload,
             pipeline::{PartitionInput, process_partition},
             test_support::{
-                PipelineFixture, PipelinePartitionSetup, encode_batch,
+                ConfigOverride, PipelineFixture, PipelinePartitionSetup, encode_batch,
                 image_with_overrides as image_with_delivery, pipeline_input,
             },
             topic_settings::TimestampPolicy,
@@ -38,7 +38,15 @@ use {
 const SCHEDULE_NOW_MS: i64 = 1_700_000_000_000;
 
 // The topic-config overrides one delivery-gate table row applies.
-type DeliveryOverrides = &'static [(&'static str, &'static str)];
+type DeliveryOverrides = &'static [ConfigOverride<'static>];
+
+// One delivery-gate table row: the overrides it applies, the gate they
+// resolve to, and the label a failure reports.
+struct GateCase {
+    overrides: DeliveryOverrides,
+    want: Option<DeliveryGate>,
+    label: &'static str,
+}
 
 // A one-record batch that asks to be delivered at `delivery_ms`.
 fn batch_delivered_at(delivery_ms: i64) -> RecordBatch {
@@ -55,52 +63,78 @@ fn batch_delivered_at(delivery_ms: i64) -> RecordBatch {
 
 #[test]
 fn only_a_scheduled_topic_resolves_a_delivery_gate() {
-    let cases: [(DeliveryOverrides, Option<DeliveryGate>, &str); 6] = [
-        (&[], None, "no topic config at all"),
-        (
-            &[(DELIVERY_MODE, DELIVERY_MODE_IMMEDIATE)],
-            None,
-            "the explicit default",
-        ),
-        (
-            // A mode that is not `scheduled` keeps Kafka's behavior, even
+    let cases: [GateCase; 6] = [
+        GateCase {
+            overrides: &[],
+            want: None,
+            label: "no topic config at all",
+        },
+        GateCase {
+            overrides: &[ConfigOverride {
+                key: DELIVERY_MODE,
+                value: DELIVERY_MODE_IMMEDIATE,
+            }],
+            want: None,
+            label: "the explicit default",
+        },
+        GateCase { overrides: // A mode that is not `scheduled` keeps Kafka's behavior, even
             // when the other two keys are set.
             &[
-                (DELIVERY_MODE, "later"),
-                (DELIVERY_SCHEDULE_MONOTONIC, "true"),
-            ],
-            None,
-            "a corrupt mode alongside the other keys",
-        ),
-        (
-            &[(DELIVERY_MODE, DELIVERY_MODE_SCHEDULED)],
-            Some(DeliveryGate {
+                ConfigOverride { key: DELIVERY_MODE, value: "later" },
+                ConfigOverride { key: DELIVERY_SCHEDULE_MONOTONIC, value: "true" },
+            ], want: None, label: "a corrupt mode alongside the other keys" },
+        GateCase {
+            overrides: &[ConfigOverride {
+                key: DELIVERY_MODE,
+                value: DELIVERY_MODE_SCHEDULED,
+            }],
+            want: Some(DeliveryGate {
                 max_delay: Some(millis(604_800_000)),
             }),
-            "scheduled, with both other keys defaulted",
-        ),
-        (
-            &[
-                (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
-                (DELIVERY_MAX_DELAY_MS, "-1"),
-                (DELIVERY_SCHEDULE_MONOTONIC, "true"),
+            label: "scheduled, with both other keys defaulted",
+        },
+        GateCase {
+            overrides: &[
+                ConfigOverride {
+                    key: DELIVERY_MODE,
+                    value: DELIVERY_MODE_SCHEDULED,
+                },
+                ConfigOverride {
+                    key: DELIVERY_MAX_DELAY_MS,
+                    value: "-1",
+                },
+                ConfigOverride {
+                    key: DELIVERY_SCHEDULE_MONOTONIC,
+                    value: "true",
+                },
             ],
-            Some(DeliveryGate { max_delay: None }),
-            "scheduled, with the unbounded sentinel",
-        ),
-        (
-            &[
-                (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
-                (DELIVERY_MAX_DELAY_MS, "90000"),
+            want: Some(DeliveryGate { max_delay: None }),
+            label: "scheduled, with the unbounded sentinel",
+        },
+        GateCase {
+            overrides: &[
+                ConfigOverride {
+                    key: DELIVERY_MODE,
+                    value: DELIVERY_MODE_SCHEDULED,
+                },
+                ConfigOverride {
+                    key: DELIVERY_MAX_DELAY_MS,
+                    value: "90000",
+                },
             ],
-            Some(DeliveryGate {
+            want: Some(DeliveryGate {
                 max_delay: Some(millis(90_000)),
             }),
-            "scheduled, with an explicit bound",
-        ),
+            label: "scheduled, with an explicit bound",
+        },
     ];
 
-    for (overrides, want, label) in cases {
+    for GateCase {
+        overrides,
+        want,
+        label,
+    } in cases
+    {
         let image = image_with_delivery("t", overrides);
         check!(resolve_delivery_gate(&image, "t") == want, "case: {label}");
     }
@@ -178,9 +212,18 @@ async fn a_scheduled_partition_rejects_and_appends_by_delivery_time() {
 
     let dir = tempfile::tempdir().unwrap();
     let image = Arc::new(image_with_delivery("sched", &[
-        (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
-        (DELIVERY_MAX_DELAY_MS, "3600000"),
-        (DELIVERY_SCHEDULE_MONOTONIC, "true"),
+        ConfigOverride {
+            key: DELIVERY_MODE,
+            value: DELIVERY_MODE_SCHEDULED,
+        },
+        ConfigOverride {
+            key: DELIVERY_MAX_DELAY_MS,
+            value: "3600000",
+        },
+        ConfigOverride {
+            key: DELIVERY_SCHEDULE_MONOTONIC,
+            value: "true",
+        },
     ]));
     let delivery = resolve_delivery_gate(&image, "sched");
     let fixture = PipelineFixture::new(krabka_ids::NodeId(1));

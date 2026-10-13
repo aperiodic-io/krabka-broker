@@ -73,6 +73,12 @@ mod tests {
         uuid::Uuid,
     };
 
+    /// The leader and ISR a partition must end up with.
+    struct ExpectedLeaderAndIsr {
+        leader: u64,
+        isr: &'static [u64],
+    }
+
     /// One partition, and what leaving its ISR does to it.
     struct Case {
         what: &'static str,
@@ -80,7 +86,7 @@ mod tests {
         isr: &'static [u64],
         alive: &'static [u64],
         witnesses: &'static [u64],
-        expected_leader_and_isr: Option<(u64, &'static [u64])>,
+        expected_leader_and_isr: Option<ExpectedLeaderAndIsr>,
         has_leaderships: bool,
     }
 
@@ -95,7 +101,10 @@ mod tests {
                 isr: &[1, 2],
                 alive: &[1, 2],
                 witnesses: &[],
-                expected_leader_and_isr: Some((2, &[2])),
+                expected_leader_and_isr: Some(ExpectedLeaderAndIsr {
+                    leader: 2,
+                    isr: &[2],
+                }),
                 has_leaderships: true,
             },
             Case {
@@ -104,7 +113,10 @@ mod tests {
                 isr: &[2, 1],
                 alive: &[1, 2],
                 witnesses: &[],
-                expected_leader_and_isr: Some((2, &[2])),
+                expected_leader_and_isr: Some(ExpectedLeaderAndIsr {
+                    leader: 2,
+                    isr: &[2],
+                }),
                 has_leaderships: false,
             },
             Case {
@@ -153,7 +165,7 @@ mod tests {
             let expected_changes: Vec<MetadataRecord> = case
                 .expected_leader_and_isr
                 .iter()
-                .map(|(leader, isr)| {
+                .map(|ExpectedLeaderAndIsr { leader, isr }| {
                     let before = image.partition("t", 0).expect("the partition");
                     let moved = *leader != case.leader;
                     MetadataRecord::V1Partition(PartitionRecord {

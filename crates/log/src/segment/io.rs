@@ -94,8 +94,15 @@ fn read_at(file: &File, offset: u64, buf: &mut [u8]) -> std::io::Result<usize> {
     rustix::io::pread(file, buf, offset).map_err(Into::into)
 }
 
+/// A byte range of a `.log` file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ReadAheadSpan {
+    pub(super) offset: u64,
+    pub(super) len: u64,
+}
+
 /// The byte range of `.log` a read from `start_pos` with a `window`-byte
-/// budget asks the kernel to read ahead, as `(offset, len)`.
+/// budget asks the kernel to read ahead.
 ///
 /// A consumer that is behind fetches the window after this one next, so the
 /// range is the window itself, then up to `read_ahead_max` more of what the
@@ -107,12 +114,15 @@ pub(super) fn read_ahead_span(
     window: u64,
     log_size: u64,
     read_ahead_max: u64,
-) -> Option<(u64, u64)> {
+) -> Option<ReadAheadSpan> {
     let end = start_pos
         .saturating_add(window)
         .saturating_add(window.min(read_ahead_max))
         .min(log_size);
-    (end > start_pos).then(|| (start_pos, end - start_pos))
+    (end > start_pos).then(|| ReadAheadSpan {
+        offset: start_pos,
+        len: end - start_pos,
+    })
 }
 
 impl Segment {
@@ -130,7 +140,7 @@ impl Segment {
     /// it reads no batch header past the one it starts at, and sends a slice
     /// that may end in a partial batch.
     pub(super) fn advise_read(&self, start_pos: u64, window: u64, read_ahead_max: ByteSize) {
-        if let Some((offset, len)) =
+        if let Some(ReadAheadSpan { offset, len }) =
             read_ahead_span(start_pos, window, self.log_size, read_ahead_max.bytes_u64())
         {
             self.io.advise_will_need(&self.log_file, offset, len);
@@ -204,14 +214,17 @@ mod tests {
         /// The offset of every call the scripted reader received, in order.
         type SeenOffsets = std::rc::Rc<RefCell<Vec<u64>>>;
 
+        /// A scripted reader and the offsets it has been called with.
+        struct Scripted<R> {
+            read: R,
+            offsets: SeenOffsets,
+        }
+
         /// A reader that replays a script of results and records the offset of
         /// each call.
         fn scripted(
             script: Vec<std::io::Result<usize>>,
-        ) -> (
-            impl Fn(u64, &mut [u8]) -> std::io::Result<usize>,
-            SeenOffsets,
-        ) {
+        ) -> Scripted<impl Fn(u64, &mut [u8]) -> std::io::Result<usize>> {
             let offsets = std::rc::Rc::new(RefCell::new(Vec::new()));
             let seen = std::rc::Rc::clone(&offsets);
             let script = RefCell::new(script.into_iter());
@@ -226,12 +239,12 @@ mod tests {
                     None => Ok(0),
                 }
             };
-            (read, offsets)
+            Scripted { read, offsets }
         }
 
         // Three short reads fill an eight-byte buffer, each resuming where the
         // last stopped.
-        let (read, offsets) = scripted(vec![Ok(3), Ok(4), Ok(1)]);
+        let Scripted { read, offsets } = scripted(vec![Ok(3), Ok(4), Ok(1)]);
         let mut buf = [0u8; 8];
         check!(read_full_with(read, 100, &mut buf).unwrap() == 8);
         check!(
@@ -241,7 +254,7 @@ mod tests {
         );
 
         // An interrupted read is retried at the same offset, not skipped past.
-        let (read, offsets) =
+        let Scripted { read, offsets } =
             scripted(vec![Ok(2), Err(Error::from(ErrorKind::Interrupted)), Ok(2)]);
         let mut buf = [0u8; 4];
         check!(read_full_with(read, 0, &mut buf).unwrap() == 4);
@@ -252,7 +265,7 @@ mod tests {
         );
 
         // End of file stops the loop with whatever was read so far.
-        let (read, _) = scripted(vec![Ok(2), Ok(0), Ok(9)]);
+        let Scripted { read, .. } = scripted(vec![Ok(2), Ok(0), Ok(9)]);
         let mut buf = [0u8; 8];
         check!(
             read_full_with(read, 0, &mut buf).unwrap() == 2,
@@ -260,7 +273,8 @@ mod tests {
         );
 
         // Any other error is returned rather than retried.
-        let (read, _) = scripted(vec![Ok(1), Err(Error::from(ErrorKind::PermissionDenied))]);
+        let Scripted { read, .. } =
+            scripted(vec![Ok(1), Err(Error::from(ErrorKind::PermissionDenied))]);
         let mut buf = [0u8; 4];
         check!(
             read_full_with(read, 0, &mut buf).is_err(),
@@ -268,7 +282,7 @@ mod tests {
         );
 
         // A buffer that is already full asks for nothing at all.
-        let (read, offsets) = scripted(vec![Ok(1)]);
+        let Scripted { read, offsets } = scripted(vec![Ok(1)]);
         let mut empty: [u8; 0] = [];
         check!(read_full_with(read, 0, &mut empty).unwrap() == 0);
         check!(
@@ -337,6 +351,7 @@ mod tests {
     #[test]
     fn the_read_ahead_span_covers_the_window_and_the_next_one() {
         let max = 4 * 1024 * 1024;
+        let span = |offset, len| ReadAheadSpan { offset, len };
         let cases = [
             // (name, start_pos, window, log_size, read_ahead_max, expected)
             (
@@ -345,7 +360,7 @@ mod tests {
                 1_000,
                 10_000,
                 max,
-                Some((100, 2_000)),
+                Some(span(100, 2_000)),
             ),
             (
                 "the next window clamped",
@@ -353,7 +368,7 @@ mod tests {
                 1_000,
                 1_500,
                 max,
-                Some((100, 1_400)),
+                Some(span(100, 1_400)),
             ),
             (
                 "the window itself clamped",
@@ -361,7 +376,7 @@ mod tests {
                 1_000,
                 600,
                 max,
-                Some((100, 500)),
+                Some(span(100, 500)),
             ),
             (
                 "the lookahead capped",
@@ -369,16 +384,23 @@ mod tests {
                 3 * max,
                 10 * max,
                 max,
-                Some((0, 4 * max)),
+                Some(span(0, 4 * max)),
             ),
-            ("a small cap", 100, 1_000, 10_000, 300, Some((100, 1_300))),
+            (
+                "a small cap",
+                100,
+                1_000,
+                10_000,
+                300,
+                Some(span(100, 1_300)),
+            ),
             (
                 "a zero cap hints only the window",
                 100,
                 1_000,
                 10_000,
                 0,
-                Some((100, 1_000)),
+                Some(span(100, 1_000)),
             ),
             ("nothing left", 600, 1_000, 600, max, None),
             ("past the end", 700, 1_000, 600, max, None),
@@ -389,7 +411,7 @@ mod tests {
                 10,
                 u64::MAX,
                 max,
-                Some((u64::MAX - 1, 1)),
+                Some(span(u64::MAX - 1, 1)),
             ),
         ];
         let actual: Vec<_> = cases
@@ -410,14 +432,20 @@ mod tests {
     #[test]
     fn a_verbatim_read_advises_its_window_and_the_next_in_one_hint() {
         use {
-            crate::segment::test_support::{
-                DENSE_INDEX, recording_advice, test_batch_at, test_segment,
+            crate::{
+                segment::test_support::{
+                    DENSE_INDEX, TempSegment, recording_advice, test_batch_at, test_segment,
+                },
+                test_support::AdviceCall,
             },
             krabka_ids::Offset,
             krabka_units::prelude::bytes,
         };
 
-        let (_dir, mut seg) = test_segment();
+        let TempSegment {
+            dir: _dir,
+            segment: mut seg,
+        } = test_segment();
         let mut positions = Vec::new();
         for off in 0..20i64 {
             positions.push(seg.log_size);
@@ -431,7 +459,13 @@ mod tests {
             .read_raw(Offset(2), Offset(20), bytes(u32::try_from(budget).unwrap()))
             .unwrap();
         check!(mid.start_offset == Offset(2));
-        check!(advice.take() == vec![(positions[2], 2 * budget)]);
+        check!(
+            advice.take()
+                == vec![AdviceCall {
+                    offset: positions[2],
+                    len: 2 * budget
+                }]
+        );
 
         // Near the end the hint stops at the end of the file.
         seg.read_raw(
@@ -440,10 +474,16 @@ mod tests {
             bytes(u32::try_from(budget).unwrap()),
         )
         .unwrap();
-        check!(advice.take() == vec![(positions[19], seg.log_size - positions[19])]);
+        check!(
+            advice.take()
+                == vec![AdviceCall {
+                    offset: positions[19],
+                    len: seg.log_size - positions[19]
+                }]
+        );
 
         // A read that finds nothing to serve asks for nothing.
         seg.read_raw(Offset(20), Offset(30), bytes(100)).unwrap();
-        check!(advice.take() == Vec::<(u64, u64)>::new());
+        check!(advice.take() == Vec::<AdviceCall>::new());
     }
 }

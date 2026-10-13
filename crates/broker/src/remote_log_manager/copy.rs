@@ -6,7 +6,7 @@ use {
         RemoteTier,
         archive::ChainPosition,
         copy_segment::{CopyOutcome, copy_one},
-        local_retention::remote_covered_through,
+        local_retention::{OffsetRange, remote_covered_through},
     },
     crate::config_keys::RemoteCopyLag,
     krabka_log::SegmentExport,
@@ -126,7 +126,7 @@ impl CopyDelay {
 /// trusts are one number. It stops at the first gap rather than taking the
 /// highest end offset, which is what makes a failed copy in the middle get
 /// re-copied instead of stranded behind later successes.
-fn copy_start_offset(finished: &[(i64, i64)], local_start: i64) -> i64 {
+fn copy_start_offset(finished: &[OffsetRange], local_start: i64) -> i64 {
     remote_covered_through(finished, local_start)
         .map_or(local_start, |through| through.saturating_add(1))
 }
@@ -136,14 +136,14 @@ fn copy_start_offset(finished: &[(i64, i64)], local_start: i64) -> i64 {
 /// `(100, 199)` are one copy of `0..=199`, which is what makes the merged
 /// interval, and not the segment that happens to sit at an offset, the thing
 /// the copy pass asks about.
-fn merged_coverage(finished: &[(i64, i64)]) -> Vec<(i64, i64)> {
-    let mut ranges: Vec<(i64, i64)> = finished.to_vec();
+fn merged_coverage(finished: &[OffsetRange]) -> Vec<OffsetRange> {
+    let mut ranges = finished.to_vec();
     ranges.sort_unstable();
-    let mut merged: Vec<(i64, i64)> = Vec::with_capacity(ranges.len());
-    for (start, end) in ranges {
+    let mut merged: Vec<OffsetRange> = Vec::with_capacity(ranges.len());
+    for OffsetRange { start, end } in ranges {
         match merged.last_mut() {
-            Some(last) if start <= last.1.saturating_add(1) => last.1 = last.1.max(end),
-            _ => merged.push((start, end)),
+            Some(last) if start <= last.end.saturating_add(1) => last.end = last.end.max(end),
+            _ => merged.push(OffsetRange { start, end }),
         }
     }
     merged
@@ -157,10 +157,10 @@ fn merged_coverage(finished: &[(i64, i64)]) -> Vec<(i64, i64)> {
 /// merged interval has to contain the whole segment: the intervals are
 /// maximal, so a segment that spans two of them spans the hole between them,
 /// and the tier holds no copy of the offsets in it.
-fn tier_holds_whole(merged: &[(i64, i64)], base: i64, last: i64) -> bool {
+fn tier_holds_whole(merged: &[OffsetRange], base: i64, last: i64) -> bool {
     merged
         .iter()
-        .any(|&(start, end)| start <= base && last <= end)
+        .any(|range| range.start <= base && last <= range.end)
 }
 
 /// Copy every sealed segment in `exports` that the remote tier does not
@@ -218,11 +218,32 @@ pub(crate) async fn copy_eligible_below(
     copy_eligible_delayed(
         tier,
         tp,
-        (broker_id, leader_epoch),
+        CopyIdentity {
+            broker_id,
+            leader_epoch,
+        },
         exports,
-        (last_stable_offset, CopyDelay::IMMEDIATE),
+        CopyBound {
+            last_stable_offset,
+            delay: CopyDelay::IMMEDIATE,
+        },
     )
     .await
+}
+
+/// The broker and leader epoch a copy pass uploads under.
+#[derive(Clone, Copy)]
+pub(crate) struct CopyIdentity {
+    pub(crate) broker_id: i32,
+    pub(crate) leader_epoch: krabka_ids::LeaderEpoch,
+}
+
+/// What holds a copy pass back: the last stable offset that bounds what it
+/// uploads and the copy lag that delays it.
+#[derive(Clone, Copy)]
+pub(crate) struct CopyBound {
+    pub(crate) last_stable_offset: krabka_log::Offset,
+    pub(crate) delay: CopyDelay,
 }
 
 /// The copy pass for a partition whose last stable offset is
@@ -236,9 +257,15 @@ pub(crate) async fn copy_eligible_below(
 pub(crate) async fn copy_eligible_delayed(
     tier: &RemoteTier<'_>,
     tp: &TopicIdPartition,
-    (broker_id, leader_epoch): (i32, krabka_ids::LeaderEpoch),
+    CopyIdentity {
+        broker_id,
+        leader_epoch,
+    }: CopyIdentity,
     exports: Vec<SegmentExport>,
-    (last_stable_offset, delay): (krabka_log::Offset, CopyDelay),
+    CopyBound {
+        last_stable_offset,
+        delay,
+    }: CopyBound,
 ) -> usize {
     let listed = match tier.rlmm.list_remote_log_segments(tp) {
         Ok(list) => list,
@@ -259,11 +286,11 @@ pub(crate) async fn copy_eligible_delayed(
     // `Delete*` segment does not cover its offsets either: its bytes are on
     // the way out, so a still-local segment over the same range is copyable
     // again.
-    let mut finished: Vec<(i64, i64)> = Vec::new();
+    let mut finished: Vec<OffsetRange> = Vec::new();
     for md in &listed {
         match md.state() {
             RemoteLogSegmentState::CopySegmentFinished => {
-                finished.push((md.start_offset(), md.end_offset()));
+                finished.push(OffsetRange::new(md.start_offset(), md.end_offset()));
             }
             // This listing is taken once per tick, so anything already in
             // `CopySegmentStarted` was left there by an earlier tick.
@@ -377,7 +404,7 @@ mod tests {
                 ArchiveMode,
                 local_retention::finished_segment_ranges,
                 test_support::{
-                    self as fixtures, FakeWormArchive, archived_backends, copy_exports,
+                    self as fixtures, Backends, FakeWormArchive, archived_backends, copy_exports,
                     local_backends, missing_remote_reads, stuck_started_segment, synth_export,
                     three_exports, tier, tp,
                 },
@@ -416,7 +443,10 @@ mod tests {
     /// visible only as consumer lag and a filling disk.
     macro_rules! accepting_copy_fixture {
         ($rsm:ident, $rlmm:ident, $metrics:ident, $tier:ident, $unstable:expr) => {
-            let ($rsm, $rlmm) = accepting_backends(None);
+            let Backends {
+                rsm: $rsm,
+                rlmm: $rlmm,
+            } = accepting_backends(None);
             let $metrics = BrokerMetrics::new();
             let $tier = fixtures::configured_tier()
                 .rsm(&$rsm)
@@ -560,9 +590,15 @@ mod tests {
             let copied = copy_eligible_delayed(
                 &tier,
                 &tp(),
-                (1, LeaderEpoch(0)),
+                CopyIdentity {
+                    broker_id: 1,
+                    leader_epoch: LeaderEpoch(0),
+                },
                 exports,
-                (krabka_log::Offset(i64::MAX), delay),
+                CopyBound {
+                    last_stable_offset: krabka_log::Offset(i64::MAX),
+                    delay,
+                },
             )
             .await;
 
@@ -689,16 +725,11 @@ mod tests {
     }
 
     /// Fresh metadata and a backend that returns the chosen successful-copy receipt.
-    fn accepting_backends(
-        receipt: Option<CustomMetadata>,
-    ) -> (
-        Arc<dyn RemoteStorageManager>,
-        Arc<dyn RemoteLogMetadataManager>,
-    ) {
-        (
-            Arc::new(AcceptingRsm { receipt }),
-            Arc::new(InmemoryRemoteLogMetadataManager::new()),
-        )
+    fn accepting_backends(receipt: Option<CustomMetadata>) -> Backends {
+        Backends {
+            rsm: Arc::new(AcceptingRsm { receipt }),
+            rlmm: Arc::new(InmemoryRemoteLogMetadataManager::new()),
+        }
     }
 
     /// Every WORM receipt the metadata manager holds for `tp()`, oldest
@@ -723,7 +754,7 @@ mod tests {
         fixtures::rolled_log_fixture!(log_dir, remote_dir, log, exports);
         assert!(exports.len() >= 2, "test needs multiple sealed segments");
 
-        let (rsm, rlmm) = archived_backends(remote_dir.path(), &exports).await;
+        let Backends { rsm, rlmm } = archived_backends(remote_dir.path(), &exports).await;
 
         let listed = rlmm.list_remote_log_segments(&tp()).unwrap();
         assert!(listed.len() == exports.len());
@@ -898,7 +929,7 @@ mod tests {
     async fn copy_eligible_starts_a_new_epoch_when_the_rlmm_is_empty() {
         let mut genesis = Vec::new();
         for _ in 0..2 {
-            let (rsm, rlmm) = fixtures::write_once_backends();
+            let Backends { rsm, rlmm } = fixtures::write_once_backends();
             let copied = copy_exports(&tier(ArchiveMode::WriteOnce, &rsm, &rlmm), vec![
                 synth_export().call(),
             ])
@@ -979,8 +1010,8 @@ mod tests {
     }
 
     /// Every finished range the metadata manager holds for `tp()`, ascending.
-    fn finished_ranges(rlmm: &Arc<dyn RemoteLogMetadataManager>) -> Vec<(i64, i64)> {
-        let mut ranges: Vec<(i64, i64)> =
+    fn finished_ranges(rlmm: &Arc<dyn RemoteLogMetadataManager>) -> Vec<OffsetRange> {
+        let mut ranges: Vec<OffsetRange> =
             finished_segment_ranges(&rlmm.list_remote_log_segments(&tp()).unwrap());
         ranges.sort_unstable();
         ranges
@@ -990,9 +1021,9 @@ mod tests {
     /// starts, and the resume point and containment answers that follow.
     struct CoverageCase {
         label: &'static str,
-        finished: &'static [(i64, i64)],
+        finished: &'static [OffsetRange],
         local_start: i64,
-        merged: &'static [(i64, i64)],
+        merged: &'static [OffsetRange],
         copy_start: i64,
     }
 
@@ -1001,16 +1032,22 @@ mod tests {
         let cases = [
             CoverageCase {
                 label: "obsolete ranges cannot move copy resumption below the local start",
-                finished: &[(0, 9)],
+                finished: &[OffsetRange { start: 0, end: 9 }],
                 local_start: 20,
-                merged: &[(0, 9)],
+                merged: &[OffsetRange { start: 0, end: 9 }],
                 copy_start: 20,
             },
             CoverageCase {
                 label: "obsolete disconnected prefix cannot suppress later anchored coverage",
-                finished: &[(0, 9), (20, 29)],
+                finished: &[OffsetRange { start: 0, end: 9 }, OffsetRange {
+                    start: 20,
+                    end: 29,
+                }],
                 local_start: 20,
-                merged: &[(0, 9), (20, 29)],
+                merged: &[OffsetRange { start: 0, end: 9 }, OffsetRange {
+                    start: 20,
+                    end: 29,
+                }],
                 copy_start: 30,
             },
             CoverageCase {
@@ -1022,30 +1059,51 @@ mod tests {
             },
             CoverageCase {
                 label: "abutting copies are one interval, in any listed order",
-                finished: &[(100, 199), (0, 99)],
+                finished: &[
+                    OffsetRange {
+                        start: 100,
+                        end: 199,
+                    },
+                    OffsetRange { start: 0, end: 99 },
+                ],
                 local_start: 0,
-                merged: &[(0, 199)],
+                merged: &[OffsetRange { start: 0, end: 199 }],
                 copy_start: 200,
             },
             CoverageCase {
                 label: "overlapping copies merge rather than double-count",
-                finished: &[(0, 99), (50, 149)],
+                finished: &[OffsetRange { start: 0, end: 99 }, OffsetRange {
+                    start: 50,
+                    end: 149,
+                }],
                 local_start: 0,
-                merged: &[(0, 149)],
+                merged: &[OffsetRange { start: 0, end: 149 }],
                 copy_start: 150,
             },
             CoverageCase {
                 label: "a hole puts the resume point on its near side",
-                finished: &[(0, 99), (200, 299)],
+                finished: &[OffsetRange { start: 0, end: 99 }, OffsetRange {
+                    start: 200,
+                    end: 299,
+                }],
                 local_start: 0,
-                merged: &[(0, 99), (200, 299)],
+                merged: &[OffsetRange { start: 0, end: 99 }, OffsetRange {
+                    start: 200,
+                    end: 299,
+                }],
                 copy_start: 100,
             },
             CoverageCase {
                 label: "a tier that does not reach the local log resumes at the local start",
-                finished: &[(200, 299)],
+                finished: &[OffsetRange {
+                    start: 200,
+                    end: 299,
+                }],
                 local_start: 0,
-                merged: &[(200, 299)],
+                merged: &[OffsetRange {
+                    start: 200,
+                    end: 299,
+                }],
                 copy_start: 0,
             },
         ];
@@ -1065,7 +1123,7 @@ mod tests {
 
     #[test]
     fn tier_holds_whole_needs_one_interval_around_the_segment() {
-        let merged = merged_coverage(&[(0, 99), (200, 299)]);
+        let merged = merged_coverage(&[OffsetRange::new(0, 99), OffsetRange::new(200, 299)]);
         check!(tier_holds_whole(&merged, 0, 99));
         check!(tier_holds_whole(&merged, 20, 40));
         check!(tier_holds_whole(&merged, 200, 299));
@@ -1118,7 +1176,7 @@ mod tests {
     /// the tier a hole.
     #[tokio::test]
     async fn a_new_leaders_misaligned_segments_below_the_watermark_are_not_re_copied() {
-        let (rsm, rlmm) = accepting_backends(None);
+        let Backends { rsm, rlmm } = accepting_backends(None);
         finished_segment()
             .rlmm(&rlmm)
             .id(Uuid::from_u128(0xa1))
@@ -1142,14 +1200,23 @@ mod tests {
         // Only the segment holding offsets the tier lacks is copied, and it is
         // copied whole: skipping it because it starts under the watermark
         // would leave 200..=249 in no remote segment at all.
-        check_copy_coverage(copied, &rlmm, &[(0, 99), (100, 199), (150, 249)], 249);
+        check_copy_coverage(
+            copied,
+            &rlmm,
+            &[
+                OffsetRange::new(0, 99),
+                OffsetRange::new(100, 199),
+                OffsetRange::new(150, 249),
+            ],
+            249,
+        );
     }
 
     /// Check the completed copy against the caller's independent range and coverage oracle.
     fn check_copy_coverage(
         copied: usize,
         rlmm: &Arc<dyn RemoteLogMetadataManager>,
-        expected_ranges: &[(i64, i64)],
+        expected_ranges: &[OffsetRange],
         expected_end: i64,
     ) {
         check!(copied == 1);
@@ -1163,7 +1230,7 @@ mod tests {
     /// from being uploaded a second time on the way.
     #[tokio::test]
     async fn a_hole_is_filled_without_re_copying_the_segments_above_it() {
-        let (rsm, rlmm) = accepting_backends(None);
+        let Backends { rsm, rlmm } = accepting_backends(None);
         finished_segment()
             .rlmm(&rlmm)
             .id(Uuid::from_u128(0xb1))
@@ -1188,7 +1255,16 @@ mod tests {
         ])
         .await;
 
-        check_copy_coverage(copied, &rlmm, &[(0, 99), (100, 199), (200, 299)], 299);
+        check_copy_coverage(
+            copied,
+            &rlmm,
+            &[
+                OffsetRange::new(0, 99),
+                OffsetRange::new(100, 199),
+                OffsetRange::new(200, 299),
+            ],
+            299,
+        );
     }
 
     /// The copy-lag gauges read off the same coverage. Before this, a segment
@@ -1228,19 +1304,26 @@ mod tests {
 
     #[tokio::test]
     async fn copy_eligible_retries_a_segment_stuck_in_copy_segment_started() {
-        let cases: [(&str, ArchiveMode, Arc<dyn RemoteStorageManager>); 2] = [
-            (
-                "mutable tier",
-                ArchiveMode::Mutable,
-                Arc::new(AcceptingRsm { receipt: None }),
-            ),
-            (
-                "write-once archive",
-                ArchiveMode::WriteOnce,
-                Arc::new(FakeWormArchive::new()),
-            ),
+        /// A case name, the archive mode of its tier and the backend under it.
+        struct ArchiveCase {
+            name: &'static str,
+            archive: ArchiveMode,
+            rsm: Arc<dyn RemoteStorageManager>,
+        }
+
+        let cases: [ArchiveCase; 2] = [
+            ArchiveCase {
+                name: "mutable tier",
+                archive: ArchiveMode::Mutable,
+                rsm: Arc::new(AcceptingRsm { receipt: None }),
+            },
+            ArchiveCase {
+                name: "write-once archive",
+                archive: ArchiveMode::WriteOnce,
+                rsm: Arc::new(FakeWormArchive::new()),
+            },
         ];
-        for (name, archive, rsm) in cases {
+        for ArchiveCase { name, archive, rsm } in cases {
             let rlmm = fixtures::in_memory_metadata();
             let abandoned = stuck_started_segment(&rlmm, 0x57c, 0);
 

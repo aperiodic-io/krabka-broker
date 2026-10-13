@@ -33,7 +33,13 @@ struct MetricArgs {
 struct Metric {
     ident: Ident,
     constructor: TokenStream,
-    registration: Option<(LitStr, TokenStream)>,
+    registration: Option<Registration>,
+}
+
+/// The name and help text a metric registers under.
+struct Registration {
+    name: LitStr,
+    help: TokenStream,
 }
 
 /// The name a metric field registers under when it names none itself.
@@ -89,7 +95,10 @@ fn metric(field: &Field) -> Result<Metric, ParseError> {
         let name = args
             .name
             .unwrap_or_else(|| default_name(ident.text()).to_owned());
-        Some((LitStr::new(&name, ident.span()), help.0))
+        Some(Registration {
+            name: LitStr::new(&name, ident.span()),
+            help: help.0,
+        })
     };
 
     Ok(Metric {
@@ -117,10 +126,10 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
 
         fn register(&self, registry: &mut ::prometheus_client::registry::Registry) {
             @for metric in &metrics {
-                @if let Some((name, help)) = &metric.registration {
+                @if let Some(registration) = &metric.registration {
                     registry.register(
-                        {{ name }},
-                        {{ help }},
+                        {{ registration.name }},
+                        {{ registration.help }},
                         ::core::clone::Clone::clone(&self.{{ metric.ident }}),
                     );
                 }

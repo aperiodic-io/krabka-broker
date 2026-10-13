@@ -32,6 +32,15 @@ use {
 const DEV_CERT: &str = include_str!("../fixtures/security/dev_cert.pem");
 const DEV_KEY: &str = include_str!("../fixtures/security/dev_key.pem");
 
+/// A running broker, its log and certificate directories, and its listen
+/// address.
+struct StartedBroker {
+    handle: BrokerHandle,
+    log_dir: TempDir,
+    pem_dir: TempDir,
+    addr: SocketAddr,
+}
+
 /// Boots a single-broker cluster whose only listener speaks `protocol`, with
 /// the delegation-token master key set — so the handler reaches the admission
 /// check instead of answering `DELEGATION_TOKEN_AUTH_DISABLED` — and with
@@ -40,10 +49,7 @@ const DEV_KEY: &str = include_str!("../fixtures/security/dev_key.pem");
 /// The TLS listener sets `client_auth: Disabled`, so a client that presents
 /// no certificate completes the handshake and reaches the broker as
 /// `ANONYMOUS`: the one-way-SSL case Kafka refuses.
-async fn start_broker(
-    protocol: ListenerProtocol,
-    super_users: &[&str],
-) -> (BrokerHandle, TempDir, TempDir, SocketAddr) {
+async fn start_broker(protocol: ListenerProtocol, super_users: &[&str]) -> StartedBroker {
     let log_dir = tempfile::tempdir().unwrap();
     let pem_dir = tempfile::tempdir().unwrap();
     let cert_path = pem_dir.path().join("cert.pem");
@@ -78,7 +84,12 @@ async fn start_broker(
 
     let handle = Broker::start(cfg).await.expect("broker must start");
     let addr = handle.listen_addr();
-    (handle, log_dir, pem_dir, addr)
+    StartedBroker {
+        handle,
+        log_dir,
+        pem_dir,
+        addr,
+    }
 }
 
 /// Opens a one-way TLS session — no client certificate — to `addr`.
@@ -117,7 +128,12 @@ async fn unauthenticated_create_delegation_token_is_refused() {
 
     for protocol in [ListenerProtocol::Plaintext, ListenerProtocol::Ssl] {
         for super_users in [&[][..], &["operator"][..]] {
-            let (handle, _log_dir, _pem_dir, addr) = start_broker(protocol, super_users).await;
+            let StartedBroker {
+                handle,
+                log_dir: _log_dir,
+                pem_dir: _pem_dir,
+                addr,
+            } = start_broker(protocol, super_users).await;
             let req = CreateDelegationTokenRequest {
                 max_lifetime_ms: -1,
                 ..Default::default()

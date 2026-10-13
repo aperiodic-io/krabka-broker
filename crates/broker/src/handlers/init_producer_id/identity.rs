@@ -20,21 +20,30 @@ use crate::{
     },
 };
 
+/// A producer id with the epoch that the coordinator pairs with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ProducerIdentity {
+    pub(super) id: krabka_log::ProducerId,
+    pub(super) epoch: i16,
+}
+
 pub(super) async fn next_init_producer_identity(
     entry: &TxnEntry,
     producer_ids: &ProducerIdManager,
-) -> Result<(krabka_log::ProducerId, i16), BrokerError> {
+) -> Result<ProducerIdentity, BrokerError> {
     let (pid, epoch) = client_producer_identity(entry);
     // `TransactionCoordinator.handleInitProducerId` rotates whenever
     // `isEpochExhausted` holds, whatever the transaction version, so the
     // rotation rule here is the verified one at every level.
-    next_producer_identity(TxnVersion::Verified, pid, epoch, producer_ids).await
+    let (id, epoch) =
+        next_producer_identity(TxnVersion::Verified, pid, epoch, producer_ids).await?;
+    Ok(ProducerIdentity { id, epoch })
 }
 
 pub(super) async fn stage_recovery_identity(
     entry: &mut TxnEntry,
     producer_ids: &ProducerIdManager,
-) -> Result<(krabka_log::ProducerId, i16), BrokerError> {
+) -> Result<ProducerIdentity, BrokerError> {
     let already_staged = entry.has_staged_producer_identity();
     let (client_pid, client_epoch) = client_producer_identity(entry);
     let (next_pid, next_epoch) = if already_staged {
@@ -44,7 +53,10 @@ pub(super) async fn stage_recovery_identity(
     };
     entry.next_producer_id = next_pid;
     entry.next_producer_epoch = next_epoch;
-    Ok((next_pid, next_epoch))
+    Ok(ProducerIdentity {
+        id: next_pid,
+        epoch: next_epoch,
+    })
 }
 
 #[cfg(test)]
@@ -69,7 +81,8 @@ mod tests {
             let mut entry =
                 TxnEntry::new_empty("tid-init".into(), ProducerId(11), entry_epoch, i32::MAX, 0);
             entry.state = TxnState::CompleteCommit;
-            let (pid, epoch) = next_init_producer_identity(&entry, &ids).await.unwrap();
+            let ProducerIdentity { id: pid, epoch } =
+                next_init_producer_identity(&entry, &ids).await.unwrap();
             assert!(epoch == expected_epoch, "epoch at {entry_epoch}");
             assert!(
                 (pid != ProducerId(11)) == rotates,
@@ -84,17 +97,36 @@ mod tests {
         let mut entry = TxnEntry::new_empty("tid-recover".into(), ProducerId(7), 3, i32::MAX, 0);
         entry.state = TxnState::Ongoing;
 
-        assert!(stage_recovery_identity(&mut entry, &ids).await.unwrap() == (ProducerId(7), 4));
-        assert!(stage_recovery_identity(&mut entry, &ids).await.unwrap() == (ProducerId(7), 5));
+        assert!(
+            stage_recovery_identity(&mut entry, &ids).await.unwrap()
+                == ProducerIdentity {
+                    id: ProducerId(7),
+                    epoch: 4
+                }
+        );
+        assert!(
+            stage_recovery_identity(&mut entry, &ids).await.unwrap()
+                == ProducerIdentity {
+                    id: ProducerId(7),
+                    epoch: 5
+                }
+        );
         assert!(entry.producer_id == 7);
         assert!(entry.producer_epoch == 3);
 
         entry.next_producer_id = ProducerId(7);
         entry.next_producer_epoch = i16::MAX - 1;
         assert!(
-            stage_recovery_identity(&mut entry, &ids).await.unwrap() == (ProducerId(7), i16::MAX)
+            stage_recovery_identity(&mut entry, &ids).await.unwrap()
+                == ProducerIdentity {
+                    id: ProducerId(7),
+                    epoch: i16::MAX
+                }
         );
-        let (rotated_pid, rotated_epoch) = stage_recovery_identity(&mut entry, &ids).await.unwrap();
+        let ProducerIdentity {
+            id: rotated_pid,
+            epoch: rotated_epoch,
+        } = stage_recovery_identity(&mut entry, &ids).await.unwrap();
         assert!(rotated_pid != 7);
         assert!(rotated_epoch == 0);
         assert!(entry.producer_id == 7);
@@ -103,8 +135,10 @@ mod tests {
         entry.next_producer_id = ProducerId(-1);
         entry.next_producer_epoch = -1;
         entry.producer_epoch = i16::MAX - 1;
-        let (initial_rotated_pid, initial_rotated_epoch) =
-            stage_recovery_identity(&mut entry, &ids).await.unwrap();
+        let ProducerIdentity {
+            id: initial_rotated_pid,
+            epoch: initial_rotated_epoch,
+        } = stage_recovery_identity(&mut entry, &ids).await.unwrap();
         assert!(initial_rotated_pid != 7);
         assert!(initial_rotated_epoch == 0);
     }

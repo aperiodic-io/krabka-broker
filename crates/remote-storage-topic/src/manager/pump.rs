@@ -7,7 +7,7 @@
 //! is the ordering the snapshot capture relies on.
 
 use {
-    super::mutations::MutationWaiters,
+    super::mutations::{MutationKey, MutationWaiters},
     crate::{log::MetadataEventStream, serde::MetadataEvent},
     futures_util::StreamExt,
     krabka_remote_storage::{
@@ -65,7 +65,10 @@ pub async fn pump_loop(
                 a[idx] = record.offset;
             }
         }
-        if let Some(reply) = waiters.remove(&(record.partition, record.offset)) {
+        if let Some(reply) = waiters.remove(&MutationKey {
+            partition: record.partition,
+            offset: record.offset,
+        }) {
             let _ = reply.send(outcome);
         }
     }
@@ -78,7 +81,7 @@ mod tests {
         crate::{
             log::{InProcessMetadataEventLog, MetadataEventLog},
             manager::test_support::{
-                finish, on_blocking, seed_finished, start_manager_all, started, tp,
+                finish, on_blocking, seed, seed_finished, start_manager_all, started, tp,
             },
         },
         assert2::assert,
@@ -127,7 +130,12 @@ mod tests {
         let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
         {
             let m = start_manager_all(log.clone()).await;
-            seed_finished(&m, &[(10, 0, 99), (11, 100, 199), (12, 200, 299)]).await;
+            seed_finished(&m, &[
+                seed(10, 0, 99),
+                seed(11, 100, 199),
+                seed(12, 200, 299),
+            ])
+            .await;
             m.shutdown();
         }
 
@@ -135,7 +143,7 @@ mod tests {
         // replays the full history before the read below.
         let fresh = start_manager_all(log).await;
         let listed = fresh.list_remote_log_segments(&tp()).unwrap();
-        let ranges: Vec<(i64, i64)> = listed
+        let ranges: Vec<_> = listed
             .iter()
             .map(|s| (s.start_offset(), s.end_offset()))
             .collect();

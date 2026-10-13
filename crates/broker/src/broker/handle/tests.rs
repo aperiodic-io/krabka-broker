@@ -254,12 +254,23 @@ async fn single_broker_handle_helpers_observe_real_state_and_errors() {
     handle.shutdown().await;
 }
 
-async fn start_default_broker(dir: &std::path::Path) -> (BrokerHandle, Arc<Broker>, SocketAddr) {
+/// A started broker with default test config.
+struct DefaultBroker {
+    handle: BrokerHandle,
+    broker: Arc<Broker>,
+    addr: SocketAddr,
+}
+
+async fn start_default_broker(dir: &std::path::Path) -> DefaultBroker {
     let config = BrokerConfig::for_tests(dir.to_path_buf());
     let handle = Broker::start(config).await.unwrap();
     let broker = handle.broker_arc_for_test();
     let addr = handle.listen_addr();
-    (handle, broker, addr)
+    DefaultBroker {
+        handle,
+        broker,
+        addr,
+    }
 }
 
 struct ShutdownFixture {
@@ -273,7 +284,11 @@ async fn shutdown_fixture(
     root: &std::path::Path,
     setup: LocalPartitionSetup<'_>,
 ) -> ShutdownFixture {
-    let (handle, broker, addr) = start_default_broker(root).await;
+    let DefaultBroker {
+        handle,
+        broker,
+        addr,
+    } = start_default_broker(root).await;
     let (topic, index) = (setup.topic, setup.partition);
     let partition = local_partition_with_records()
         .log_dir(root)

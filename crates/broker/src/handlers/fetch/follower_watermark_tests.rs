@@ -17,14 +17,14 @@
 //! watermark. Each case appends two one-record batches, at offsets 0 and 1.
 
 use {
-    super::{encode_fetch_response, handle},
+    super::{encode_fetch_response, handle, test_support::start_with_idle_follower},
     crate::{
         broker::BrokerHandle,
         codes,
         fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
-        handlers::test_support::seed_partition_replicas,
+        handlers::test_support::{StartedBroker, seed_partition_replicas},
         partition::Partition,
-        test_support::{encode_request, peer, principal, start_broker_no_audit_with},
+        test_support::{encode_request, peer, principal},
     },
     assert2::assert,
     bytes::Bytes,
@@ -84,15 +84,6 @@ struct Outcome {
     case: String,
     response: FetchResponse,
     high_watermark: Offset,
-}
-
-async fn start() -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| {
-        // Node 2 never fetches on its own. Keep it in the ISR for the whole
-        // test, so only the fetches of a case move the high watermark.
-        cfg.replica_lag_time_max = krabka_units::secs(600);
-    })
-    .await
 }
 
 /// A batch of one record with `value`.
@@ -266,7 +257,7 @@ async fn a_follower_learns_the_high_watermark_it_moved_one_fetch_later() {
         },
     ];
 
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start_with_idle_follower().await;
     topic_case_outcomes!(
         (actual, want),
         (index, case, label, name),

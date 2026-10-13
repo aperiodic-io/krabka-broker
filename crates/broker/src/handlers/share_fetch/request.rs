@@ -96,9 +96,14 @@ macro_rules! share_request_identity {
 }
 pub(crate) use share_request_identity;
 
-/// One piggybacked acknowledgement batch, that is
-/// `(first_offset, last_offset, per-offset acknowledge_types)`.
-pub(super) type AckBatch = (i64, i64, Vec<i8>);
+/// One piggybacked acknowledgement batch: its offset range and the
+/// per-offset acknowledge types.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct AckBatch {
+    pub(super) first_offset: i64,
+    pub(super) last_offset: i64,
+    pub(super) acknowledge_types: Vec<i8>,
+}
 
 /// Whether any request partition carries acknowledgement batches: Kafka's
 /// `isAcknowledgeDataPresentInFetchRequest`.
@@ -110,11 +115,15 @@ pub(super) fn has_acknowledgements(req: &ShareFetchRequest) -> bool {
 }
 
 /// Collects the piggybacked acknowledgement batches from a request partition
-/// into `(first, last, acknowledge_types)` triples.
+/// into [`AckBatch`]es.
 pub(super) fn collect_ack_batches(fp: &FetchPartition) -> Vec<AckBatch> {
     fp.acknowledgement_batches
         .iter()
-        .map(|b| (b.first_offset, b.last_offset, b.acknowledge_types.clone()))
+        .map(|b| AckBatch {
+            first_offset: b.first_offset,
+            last_offset: b.last_offset,
+            acknowledge_types: b.acknowledge_types.clone(),
+        })
         .collect()
 }
 
@@ -149,7 +158,21 @@ mod tests {
 
         let batches = collect_ack_batches(&partition);
 
-        assert!(batches == vec![(10, 12, vec![0, 1, 1]), (30, 30, Vec::new())]);
+        assert!(
+            batches
+                == vec![
+                    AckBatch {
+                        first_offset: 10,
+                        last_offset: 12,
+                        acknowledge_types: vec![0, 1, 1]
+                    },
+                    AckBatch {
+                        first_offset: 30,
+                        last_offset: 30,
+                        acknowledge_types: Vec::new()
+                    }
+                ]
+        );
     }
 
     #[test]

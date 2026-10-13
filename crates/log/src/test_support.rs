@@ -7,7 +7,11 @@ use {
     },
     bytes::Bytes,
     krabka_protocol::records::{Record, RecordBatch},
-    std::{collections::BTreeMap, ops::RangeInclusive, path::Path},
+    std::{
+        collections::BTreeMap,
+        ops::RangeInclusive,
+        path::{Path, PathBuf},
+    },
 };
 
 pub(crate) fn open_log(dir: &Path) -> Log { Log::open(dir, LogConfig::default()).unwrap() }
@@ -113,18 +117,62 @@ pub(crate) fn numbered_record(offset_delta: i32, timestamp_delta: i64) -> Record
     }
 }
 
+/// A temporary directory and the path of a file inside it. Dropping the value
+/// deletes the directory.
+#[derive(Debug)]
+pub(crate) struct TempPath {
+    pub(crate) dir: tempfile::TempDir,
+    pub(crate) path: PathBuf,
+}
+
+/// The base offset and last offset delta of a batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BatchSpan {
+    pub(crate) base_offset: i64,
+    pub(crate) last_offset_delta: i32,
+}
+
+/// The [`BatchSpan`] with the given fields.
+pub(crate) const fn span(base_offset: i64, last_offset_delta: i32) -> BatchSpan {
+    BatchSpan {
+        base_offset,
+        last_offset_delta,
+    }
+}
+
+/// A producer's id and epoch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProducerIdAndEpoch {
+    pub(crate) id: i64,
+    pub(crate) epoch: i16,
+}
+
+/// One readahead hint: the byte range of a file the kernel was asked to read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AdviceCall {
+    pub(crate) offset: u64,
+    pub(crate) len: u64,
+}
+
 /// A [`crate::io::LogIo`] that records every readahead hint a read gives,
-/// as `(offset, len)`, and does real I/O for everything else.
+/// and does real I/O for everything else.
 #[derive(Debug, Default)]
-pub(crate) struct RecordedAdvice(std::sync::Mutex<Vec<(u64, u64)>>);
+pub(crate) struct RecordedAdvice(std::sync::Mutex<Vec<AdviceCall>>);
 
 impl RecordedAdvice {
     /// The hints given since the last call, oldest first.
-    pub(crate) fn take(&self) -> Vec<(u64, u64)> { std::mem::take(&mut *self.0.lock().unwrap()) }
+    pub(crate) fn take(&self) -> Vec<AdviceCall> { std::mem::take(&mut *self.0.lock().unwrap()) }
 }
 
 impl LogIo for RecordedAdvice {
     fn advise_will_need(&self, _file: &std::fs::File, offset: u64, len: u64) {
-        self.0.lock().unwrap().push((offset, len));
+        self.0.lock().unwrap().push(AdviceCall { offset, len });
     }
+}
+
+/// A record key and the value stored under it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct KeyValue<'a> {
+    pub(crate) key: &'a [u8],
+    pub(crate) value: &'a [u8],
 }

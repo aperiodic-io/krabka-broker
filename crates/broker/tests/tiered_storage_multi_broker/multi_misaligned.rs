@@ -148,10 +148,18 @@ async fn await_remote_segments(remote_dir: &Path, wanted: usize, what: &str) -> 
     }
 }
 
+/// How well a set of remote segments covers the log.
+struct TierCoverage {
+    /// The offset through which the coverage runs unbroken from offset 0.
+    covered_through: i64,
+    /// The segments whose every offset another segment holds as well.
+    redundant: Vec<RemoteSegment>,
+}
+
 /// The offset through which the tier's coverage runs unbroken from offset 0,
 /// and the segments that are redundant: every offset they hold is held by some
 /// other segment, so the object is a second copy of data the tier already had.
-fn coverage_and_redundancy(segments: &[RemoteSegment]) -> (i64, Vec<RemoteSegment>) {
+fn coverage_and_redundancy(segments: &[RemoteSegment]) -> TierCoverage {
     let mut covered_through: i64 = -1;
     for segment in segments {
         if segment.first_offset <= covered_through + 1 {
@@ -172,7 +180,10 @@ fn coverage_and_redundancy(segments: &[RemoteSegment]) -> (i64, Vec<RemoteSegmen
             redundant.push(*segment);
         }
     }
-    (covered_through, redundant)
+    TierCoverage {
+        covered_through,
+        redundant,
+    }
 }
 
 /// The tier a new leader inherits is a set of offset ranges, not a set of
@@ -359,7 +370,10 @@ async fn a_new_leader_resumes_the_copy_from_the_tiers_coverage() {
     }
 
     let segments = remote_segments(remote_dir.path());
-    let (covered_through, redundant) = coverage_and_redundancy(&segments);
+    let TierCoverage {
+        covered_through,
+        redundant,
+    } = coverage_and_redundancy(&segments);
     let highest = segments
         .iter()
         .map(|segment| segment.last_offset)

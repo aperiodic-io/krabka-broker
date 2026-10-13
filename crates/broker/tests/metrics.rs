@@ -69,12 +69,23 @@ async fn create_topic_named(addr: std::net::SocketAddr, topic: &str) {
 }
 
 async fn produce_one(addr: std::net::SocketAddr) -> u64 {
-    let (bytes, error_code) = produce_to(addr, TOPIC, 0).await;
+    let ProduceOutcome {
+        response_bytes,
+        error_code,
+    } = produce_to(addr, TOPIC, 0).await;
     assert!(error_code == 0, "produce error code: {error_code}");
-    bytes
+    response_bytes
 }
 
-async fn produce_to(addr: std::net::SocketAddr, topic: &str, partition: i32) -> (u64, i16) {
+/// What a produce to one partition answered with.
+struct ProduceOutcome {
+    /// The length of the response body.
+    response_bytes: u64,
+    /// The partition's error code.
+    error_code: i16,
+}
+
+async fn produce_to(addr: std::net::SocketAddr, topic: &str, partition: i32) -> ProduceOutcome {
     let batch = batch_from_records(vec![value_record(
         0,
         Some(bytes::Bytes::from_static(b"hello")),
@@ -94,15 +105,24 @@ async fn produce_to(addr: std::net::SocketAddr, topic: &str, partition: i32) -> 
         }],
         ..Default::default()
     };
-    let (body_len, r): (usize, ProduceResponse) =
-        kafka_wire::request_once(addr, &req, (0, PRODUCE_VERSION), CLIENT_ID, (1, true)).await;
+    let (body_len, r) = kafka_wire::request_once::<_, ProduceResponse>(
+        addr,
+        &req,
+        (0, PRODUCE_VERSION),
+        CLIENT_ID,
+        (1, true),
+    )
+    .await;
     let topic = r.responses.into_iter().next().expect("one topic in resp");
     let part = topic
         .partition_responses
         .into_iter()
         .next()
         .expect("one partition in resp");
-    (body_len as u64, part.error_code)
+    ProduceOutcome {
+        response_bytes: body_len as u64,
+        error_code: part.error_code,
+    }
 }
 
 async fn fetch_one(addr: std::net::SocketAddr) {
@@ -141,15 +161,15 @@ async fn rejected_client_labels_leave_the_metrics_body() {
     let kafka_addr = handle.listen_addr();
     let metrics_addr = handle.metrics_addr().expect("metrics listener");
 
-    let (_, unknown_error) = produce_to(kafka_addr, "invented-topic", 0).await;
-    check!(unknown_error != 0);
+    let unknown = produce_to(kafka_addr, "invented-topic", 0).await;
+    check!(unknown.error_code != 0);
     create_topic_named(kafka_addr, TOPIC).await;
     handle.wait_until_partition_present(TOPIC, 0).await;
     let body = wait_until_absent(metrics_addr, "invented-topic").await;
     check!(!body.contains("invented-topic"));
 
-    let (_, partition_error) = produce_to(kafka_addr, TOPIC, 99).await;
-    check!(partition_error != 0);
+    let out_of_range = produce_to(kafka_addr, TOPIC, 99).await;
+    check!(out_of_range.error_code != 0);
     create_topic_named(kafka_addr, "eviction-trigger").await;
     handle
         .wait_until_partition_present("eviction-trigger", 0)

@@ -121,7 +121,14 @@ pub(crate) struct ElrPublisher<'a> {
     unclean_shutdown: BTreeSet<i32>,
     /// The partitions the batch leaves without a leader, each with the ISR
     /// Kafka would write for it. No partition record carries them.
-    leaderless: BTreeMap<(String, i32), Vec<krabka_metadata::NodeId>>,
+    leaderless: BTreeMap<PartitionKey, Vec<krabka_metadata::NodeId>>,
+}
+
+/// A partition, named by its topic and index.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PartitionKey {
+    topic: String,
+    partition: i32,
 }
 
 impl<'a> ElrPublisher<'a> {
@@ -150,8 +157,13 @@ impl<'a> ElrPublisher<'a> {
         partition: &PartitionRecord,
         isr: Vec<krabka_metadata::NodeId>,
     ) {
-        self.leaderless
-            .insert((partition.topic.clone(), partition.partition), isr);
+        self.leaderless.insert(
+            PartitionKey {
+                topic: partition.topic.clone(),
+                partition: partition.partition,
+            },
+            isr,
+        );
     }
 
     /// Read ELR state against `image` for a batch that is reacting to `node`
@@ -263,7 +275,7 @@ impl<'a> ElrPublisher<'a> {
     fn leaderless_records(&self) -> Vec<MetadataRecord> {
         self.leaderless
             .iter()
-            .filter_map(|((topic, partition), isr)| {
+            .filter_map(|(PartitionKey { topic, partition }, isr)| {
                 let previous = self.image.partition(topic, *partition)?;
                 let before = TopicElr::of_topic(self.image, topic).partition(*partition);
                 let after = leaderless_partition_elr(
@@ -317,11 +329,14 @@ struct PendingState {
 /// would be lost. That is the election of the last known leader, or of the
 /// last leader from the ELR, when a partition that lost its leader gets it back.
 fn coalesce_partition_state(image: &MetadataImage, changes: &mut Vec<MetadataRecord>) {
-    let mut pending = BTreeMap::<(String, i32), PendingState>::new();
+    let mut pending = BTreeMap::<PartitionKey, PendingState>::new();
     changes.retain(|record| match record {
         MetadataRecord::V1PartitionElr(record) => {
             let state = pending
-                .entry((record.topic.clone(), record.partition))
+                .entry(PartitionKey {
+                    topic: record.topic.clone(),
+                    partition: record.partition,
+                })
                 .or_default();
             state.eligible = Some(record.eligible_leader_replicas.clone());
             state.last_known = Some(record.last_known_elr.clone());
@@ -329,7 +344,10 @@ fn coalesce_partition_state(image: &MetadataImage, changes: &mut Vec<MetadataRec
         }
         MetadataRecord::V1PartitionRecovery(record) => {
             pending
-                .entry((record.topic.clone(), record.partition))
+                .entry(PartitionKey {
+                    topic: record.topic.clone(),
+                    partition: record.partition,
+                })
                 .or_default()
                 .recovery = Some(record.state);
             false
@@ -347,7 +365,10 @@ fn coalesce_partition_state(image: &MetadataImage, changes: &mut Vec<MetadataRec
             }
             _ => continue,
         };
-        let Some(state) = pending.remove(&(topic.clone(), partition)) else {
+        let Some(state) = pending.remove(&PartitionKey {
+            topic: topic.clone(),
+            partition,
+        }) else {
             continue;
         };
         match record {
@@ -370,7 +391,7 @@ fn coalesce_partition_state(image: &MetadataImage, changes: &mut Vec<MetadataRec
         }
     }
 
-    for ((topic, partition), state) in pending {
+    for (PartitionKey { topic, partition }, state) in pending {
         if let (Some(eligible), Some(last_known)) = (state.eligible, state.last_known) {
             changes.push(MetadataRecord::V1PartitionElr(PartitionElrRecord {
                 topic: topic.clone(),

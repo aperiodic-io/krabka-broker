@@ -9,8 +9,9 @@ use {
             bootstrap::TOPIC as SHARE_STATE_TOPIC,
             config::ShareCoordinatorConfig,
             coordinator::test_support::{
-                Logged, NOW_MS, batch, configured_coordinator, coordinator, image_with_topic,
-                initialize_led_group, lead_all, logged_records, share_write,
+                ConfiguredCoordinator, CoordinatorWithRegistry, Logged, NOW_MS, batch,
+                configured_coordinator, coordinator, image_with_topic, initialize_led_group,
+                lead_all, logged_records, share_write,
             },
         },
     },
@@ -23,20 +24,35 @@ const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([5; 16]);
 type WriteOutcome = Result<(), ShareStateError>;
 
 /// What a write leaves behind: its answer and the stored summary.
-type WriteResult = (WriteOutcome, Option<ShareStateSummary>);
+#[derive(Clone, Copy)]
+struct WriteResult {
+    outcome: WriteOutcome,
+    summary: Option<ShareStateSummary>,
+}
 
-/// One write row: `(partition, (state_epoch, leader_epoch), (start_offset,
-/// dcc), drop the state partition log)`, and what Kafka 4.3.1 and Kafka trunk
-/// leave behind.
+/// A write of one partition.
+#[derive(Clone, Copy)]
+struct WriteRequest {
+    partition: i32,
+    state_epoch: i32,
+    leader_epoch: i32,
+    start_offset: i64,
+    delivery_complete_count: i32,
+    /// Drop the state partition log before the write.
+    drop_log: bool,
+}
+
+/// One write row: the request, and what Kafka 4.3.1 and Kafka trunk leave
+/// behind.
 struct WriteRow {
-    request: (i32, (i32, i32), (i64, i32), bool),
+    request: WriteRequest,
     kafka_4_3_1: WriteResult,
     trunk: WriteResult,
 }
 
 impl WriteRow {
     /// A row that both rule sets answer alike.
-    fn same(request: (i32, (i32, i32), (i64, i32), bool), result: WriteResult) -> Self {
+    fn same(request: WriteRequest, result: WriteResult) -> Self {
         Self {
             request,
             kafka_4_3_1: result,
@@ -45,24 +61,41 @@ impl WriteRow {
     }
 }
 
-/// What a read leaves behind: `(expected read as (state_epoch, start),
-/// expected write with leader epoch 3, stored leader epoch after reload)`.
-type ReadResult = (
-    Result<(i32, i64), ShareStateError>,
-    Option<WriteOutcome>,
-    i32,
-);
+/// The state epoch and start offset that a read returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReadSummary {
+    state_epoch: i32,
+    start_offset: i64,
+}
 
-/// One read row: `(partition, leader_epoch)`, and what Kafka 4.3.1 and Kafka
-/// trunk leave behind.
+/// What a read leaves behind.
+#[derive(Clone, Copy)]
+struct ReadResult {
+    /// The expected read.
+    read: Result<ReadSummary, ShareStateError>,
+    /// The expected write with leader epoch 3.
+    write: Option<WriteOutcome>,
+    /// The stored leader epoch after a reload.
+    reloaded_leader_epoch: i32,
+}
+
+/// A read of one partition at a leader epoch.
+#[derive(Clone, Copy)]
+struct ReadRequest {
+    partition: i32,
+    leader_epoch: i32,
+}
+
+/// One read row: the request, and what Kafka 4.3.1 and Kafka trunk leave
+/// behind.
 struct ReadRow {
-    request: (i32, i32),
+    request: ReadRequest,
     kafka_4_3_1: ReadResult,
     trunk: ReadResult,
 }
 
 impl ReadRow {
-    fn same(request: (i32, i32), result: ReadResult) -> Self {
+    fn same(request: ReadRequest, result: ReadResult) -> Self {
         Self {
             request,
             kafka_4_3_1: result,
@@ -86,7 +119,10 @@ fn refused(code: ShareErrorCode, message: &'static str) -> ShareStateError {
 #[tokio::test]
 async fn initialize_then_summary() {
     let dir = tempdir().unwrap();
-    let (coord, _reg) = coordinator(dir.path());
+    let CoordinatorWithRegistry {
+        coord,
+        registry: _reg,
+    } = coordinator(dir.path());
     lead_all(&coord).await;
 
     coord
@@ -106,11 +142,14 @@ async fn concurrent_first_initializes_preserve_epoch_fencing_and_replay() {
     for trunk in [false, true] {
         for next_epoch in [1, 3] {
             let dir = tempdir().unwrap();
-            let (coord, registry, _clock) =
-                configured_coordinator(dir.path(), ShareCoordinatorConfig {
-                    state_topic_num_partitions: 1,
-                    ..rules(trunk)
-                });
+            let ConfiguredCoordinator {
+                coord,
+                registry,
+                clock: _clock,
+            } = configured_coordinator(dir.path(), ShareCoordinatorConfig {
+                state_topic_num_partitions: 1,
+                ..rules(trunk)
+            });
             lead_all(&coord).await;
             let image = image_with_topic(TOPIC, 1);
             let partition = registry
@@ -153,7 +192,7 @@ async fn concurrent_first_initializes_preserve_epoch_fencing_and_replay() {
             let snapshots: Vec<_> =
                 logged_records(&coord, coord.state_partition_for("g", &TOPIC, 0))
                     .into_iter()
-                    .filter_map(|(_, record)| match record {
+                    .filter_map(|record| match record.logged {
                         Logged::Snapshot(snapshot) => {
                             Some((snapshot.snapshot_epoch, snapshot.state_epoch))
                         }
@@ -181,7 +220,10 @@ async fn concurrent_first_initializes_preserve_epoch_fencing_and_replay() {
 #[tokio::test]
 async fn a_group_id_over_32767_bytes_is_not_initialized() {
     let dir = tempdir().unwrap();
-    let (coord, _reg) = coordinator(dir.path());
+    let CoordinatorWithRegistry {
+        coord,
+        registry: _reg,
+    } = coordinator(dir.path());
     lead_all(&coord).await;
     let image = image_with_topic(TOPIC, 1);
     let limit = MAX_STRING_BYTES;
@@ -212,7 +254,37 @@ async fn a_group_id_over_32767_bytes_is_not_initialized() {
 
 /// What a second initialize leaves behind, for one Kafka release: its
 /// answer, the snapshots logged, and the stored summary.
-type InitializeResult = (WriteOutcome, usize, Option<ShareStateSummary>);
+#[derive(Clone, Copy)]
+struct InitializeResult {
+    outcome: WriteOutcome,
+    snapshots: usize,
+    summary: Option<ShareStateSummary>,
+}
+
+/// A second initialize request.
+struct InitializeRequest {
+    state_epoch: i32,
+    start_offset: i64,
+}
+
+struct InitializeRow {
+    name: &'static str,
+    request: InitializeRequest,
+    kafka_4_3_1: InitializeResult,
+    trunk_rules: InitializeResult,
+}
+
+fn initialized(
+    outcome: WriteOutcome,
+    snapshots: usize,
+    summary: Option<ShareStateSummary>,
+) -> InitializeResult {
+    InitializeResult {
+        outcome,
+        snapshots,
+        summary,
+    }
+}
 
 /// `InitializeShareGroupState` as Kafka's `ShareCoordinatorShard.initializeState`
 /// answers a second request on a key that state epoch 5 and start offset 100
@@ -226,37 +298,67 @@ async fn initialize_follows_the_rules_of_each_kafka_release() {
     let fenced = || refused(codes::FENCED_STATE_EPOCH, message::FENCED_STATE_EPOCH);
     let negative = || refused(codes::INVALID_REQUEST, message::NEGATIVE_STATE_EPOCH);
     let first = Some((5, 0, Offset(100), 0));
-    let rows: Vec<(&str, (i32, i64), InitializeResult, InitializeResult)> = vec![
-        (
-            "a repeat of the stored epoch and start offset",
-            (5, 100),
-            (Ok(()), 2, first),
-            (Ok(()), 1, first),
-        ),
-        (
-            "a state epoch of -1",
-            (-1, 100),
-            (Ok(()), 2, Some((-1, 0, Offset(100), 0))),
-            (Err(negative()), 1, first),
-        ),
-        (
-            "a lower state epoch",
-            (4, 100),
-            (Err(fenced()), 1, first),
-            (Err(fenced()), 1, first),
-        ),
-        (
-            "a higher state epoch and a new start offset",
-            (6, 50),
-            (Ok(()), 2, Some((6, 0, Offset(50), 0))),
-            (Ok(()), 2, Some((6, 0, Offset(50), 0))),
-        ),
+    let rows: Vec<InitializeRow> = vec![
+        InitializeRow {
+            name: "a repeat of the stored epoch and start offset",
+            request: InitializeRequest {
+                state_epoch: 5,
+                start_offset: 100,
+            },
+            kafka_4_3_1: initialized(Ok(()), 2, first),
+            trunk_rules: initialized(Ok(()), 1, first),
+        },
+        InitializeRow {
+            name: "a state epoch of -1",
+            request: InitializeRequest {
+                state_epoch: -1,
+                start_offset: 100,
+            },
+            kafka_4_3_1: initialized(Ok(()), 2, Some((-1, 0, Offset(100), 0))),
+            trunk_rules: initialized(Err(negative()), 1, first),
+        },
+        InitializeRow {
+            name: "a lower state epoch",
+            request: InitializeRequest {
+                state_epoch: 4,
+                start_offset: 100,
+            },
+            kafka_4_3_1: initialized(Err(fenced()), 1, first),
+            trunk_rules: initialized(Err(fenced()), 1, first),
+        },
+        InitializeRow {
+            name: "a higher state epoch and a new start offset",
+            request: InitializeRequest {
+                state_epoch: 6,
+                start_offset: 50,
+            },
+            kafka_4_3_1: initialized(Ok(()), 2, Some((6, 0, Offset(50), 0))),
+            trunk_rules: initialized(Ok(()), 2, Some((6, 0, Offset(50), 0))),
+        },
     ];
     for trunk in [false, true] {
-        for (name, (state_epoch, start), kafka_4_3_1, trunk_rules) in &rows {
-            let (expected, snapshots, summary) = if trunk { *trunk_rules } else { *kafka_4_3_1 };
+        for InitializeRow {
+            name,
+            request:
+                InitializeRequest {
+                    state_epoch,
+                    start_offset: start,
+                },
+            kafka_4_3_1,
+            trunk_rules,
+        } in &rows
+        {
+            let InitializeResult {
+                outcome: expected,
+                snapshots,
+                summary,
+            } = if trunk { *trunk_rules } else { *kafka_4_3_1 };
             let dir = tempdir().unwrap();
-            let (coord, _reg, _clock) = configured_coordinator(dir.path(), rules(trunk));
+            let ConfiguredCoordinator {
+                coord,
+                registry: _reg,
+                clock: _clock,
+            } = configured_coordinator(dir.path(), rules(trunk));
             lead_all(&coord).await;
             let image = image_with_topic(TOPIC, 1);
             coord
@@ -271,7 +373,7 @@ async fn initialize_follows_the_rules_of_each_kafka_release() {
             let state_partition = coord.state_partition_for("g", &TOPIC, 0);
             let logged = logged_records(&coord, state_partition)
                 .into_iter()
-                .filter(|(_, logged)| matches!(logged, Logged::Snapshot(_)))
+                .filter(|record| matches!(record.logged, Logged::Snapshot(_)))
                 .count();
             check!(second == expected, "{name}, trunk {trunk}");
             check!(logged == snapshots, "{name}, trunk {trunk}");
@@ -283,12 +385,22 @@ async fn initialize_follows_the_rules_of_each_kafka_release() {
     }
 }
 
+/// A coordinator with stored state, and the image it runs over.
+struct Seeded {
+    coord: ShareCoordinator,
+    image: MetadataImage,
+}
+
 /// Stored state for the read and write tables, on topic `TOPIC` with two
 /// partitions: partition 0 at state epoch 2, leader epoch 3, start offset
 /// 10 and delivery complete count 4, and partition 2 (not in the image of
 /// two partitions) at state epoch 2.
-async fn seeded(dir: &std::path::Path, trunk: bool) -> (ShareCoordinator, MetadataImage) {
-    let (coord, _reg, _clock) = configured_coordinator(dir, rules(trunk));
+async fn seeded(dir: &std::path::Path, trunk: bool) -> Seeded {
+    let ConfiguredCoordinator {
+        coord,
+        registry: _reg,
+        clock: _clock,
+    } = configured_coordinator(dir, rules(trunk));
     lead_all(&coord).await;
     let image = image_with_topic(TOPIC, 2);
     let wide = image_with_topic(TOPIC, 3);
@@ -306,10 +418,119 @@ async fn seeded(dir: &std::path::Path, trunk: bool) -> (ShareCoordinator, Metada
         .await
         .unwrap();
     assert!(coord.read_summary("g", TOPIC, 0).await == Ok(Some((2, 3, Offset(10), 4))));
-    (coord, image)
+    Seeded { coord, image }
 }
 
 fn write_rows() -> Vec<WriteRow> {
+    let unchanged = Some((2, 3, Offset(10), 4));
+    let mut rows = vec![
+        // The same start offset with a lower count: 4.3.1 stores the count as
+        // sent, trunk keeps the greater one.
+        WriteRow {
+            request: WriteRequest {
+                partition: 0,
+                state_epoch: 2,
+                leader_epoch: 3,
+                start_offset: 10,
+                delivery_complete_count: 2,
+                drop_log: false,
+            },
+            kafka_4_3_1: WriteResult {
+                outcome: Ok(()),
+                summary: Some((2, 3, Offset(10), 2)),
+            },
+            trunk: WriteResult {
+                outcome: Ok(()),
+                summary: unchanged,
+            },
+        },
+        // A lower start offset: 4.3.1 lowers the stored one and stores the
+        // count as sent, trunk never lets the start offset go back.
+        WriteRow {
+            request: WriteRequest {
+                partition: 0,
+                state_epoch: 2,
+                leader_epoch: 3,
+                start_offset: 5,
+                delivery_complete_count: 9,
+                drop_log: false,
+            },
+            kafka_4_3_1: WriteResult {
+                outcome: Ok(()),
+                summary: Some((2, 3, Offset(5), 9)),
+            },
+            trunk: WriteResult {
+                outcome: Ok(()),
+                summary: unchanged,
+            },
+        },
+        WriteRow::same(
+            WriteRequest {
+                partition: 0,
+                state_epoch: 2,
+                leader_epoch: 3,
+                start_offset: 20,
+                delivery_complete_count: 1,
+                drop_log: false,
+            },
+            WriteResult {
+                outcome: Ok(()),
+                summary: Some((2, 3, Offset(20), 1)),
+            },
+        ),
+        WriteRow::same(
+            WriteRequest {
+                partition: 0,
+                state_epoch: 7,
+                leader_epoch: 3,
+                start_offset: 10,
+                delivery_complete_count: 4,
+                drop_log: false,
+            },
+            WriteResult {
+                outcome: Ok(()),
+                summary: unchanged,
+            },
+        ),
+        WriteRow::same(
+            WriteRequest {
+                partition: 0,
+                state_epoch: 2,
+                leader_epoch: 9,
+                start_offset: 10,
+                delivery_complete_count: 4,
+                drop_log: false,
+            },
+            WriteResult {
+                outcome: Ok(()),
+                summary: unchanged,
+            },
+        ),
+        // A version 0 write has no count: `-1`.
+        WriteRow {
+            request: WriteRequest {
+                partition: 0,
+                state_epoch: 2,
+                leader_epoch: 3,
+                start_offset: 10,
+                delivery_complete_count: -1,
+                drop_log: false,
+            },
+            kafka_4_3_1: WriteResult {
+                outcome: Ok(()),
+                summary: Some((2, 3, Offset(10), -1)),
+            },
+            trunk: WriteResult {
+                outcome: Ok(()),
+                summary: unchanged,
+            },
+        },
+    ];
+    rows.extend(refused_write_rows());
+    rows
+}
+
+fn refused_write_rows() -> Vec<WriteRow> {
     let unchanged = Some((2, 3, Offset(10), 4));
     let negative_leader_epoch = || {
         Err(refused(
@@ -324,103 +545,145 @@ fn write_rows() -> Vec<WriteRow> {
         ))
     };
     vec![
-        // The same start offset with a lower count: 4.3.1 stores the count as
-        // sent, trunk keeps the greater one.
-        WriteRow {
-            request: (0, (2, 3), (10, 2), false),
-            kafka_4_3_1: (Ok(()), Some((2, 3, Offset(10), 2))),
-            trunk: (Ok(()), unchanged),
-        },
-        // A lower start offset: 4.3.1 lowers the stored one and stores the
-        // count as sent, trunk never lets the start offset go back.
-        WriteRow {
-            request: (0, (2, 3), (5, 9), false),
-            kafka_4_3_1: (Ok(()), Some((2, 3, Offset(5), 9))),
-            trunk: (Ok(()), unchanged),
-        },
         WriteRow::same(
-            (0, (2, 3), (20, 1), false),
-            (Ok(()), Some((2, 3, Offset(20), 1))),
-        ),
-        WriteRow::same((0, (7, 3), (10, 4), false), (Ok(()), unchanged)),
-        WriteRow::same((0, (2, 9), (10, 4), false), (Ok(()), unchanged)),
-        // A version 0 write has no count: `-1`.
-        WriteRow {
-            request: (0, (2, 3), (10, -1), false),
-            kafka_4_3_1: (Ok(()), Some((2, 3, Offset(10), -1))),
-            trunk: (Ok(()), unchanged),
-        },
-        WriteRow::same(
-            (0, (1, 3), (10, 4), false),
-            (
-                Err(refused(
+            WriteRequest {
+                partition: 0,
+                state_epoch: 1,
+                leader_epoch: 3,
+                start_offset: 10,
+                delivery_complete_count: 4,
+                drop_log: false,
+            },
+            WriteResult {
+                outcome: Err(refused(
                     codes::FENCED_STATE_EPOCH,
                     message::FENCED_STATE_EPOCH,
                 )),
-                unchanged,
-            ),
+                summary: unchanged,
+            },
         ),
         WriteRow::same(
-            (0, (2, 2), (10, 4), false),
-            (
-                Err(refused(
+            WriteRequest {
+                partition: 0,
+                state_epoch: 2,
+                leader_epoch: 2,
+                start_offset: 10,
+                delivery_complete_count: 4,
+                drop_log: false,
+            },
+            WriteResult {
+                outcome: Err(refused(
                     codes::FENCED_LEADER_EPOCH,
                     message::FENCED_LEADER_EPOCH,
                 )),
-                unchanged,
-            ),
+                summary: unchanged,
+            },
         ),
         WriteRow::same(
-            (1, (0, 0), (0, 0), false),
-            (
-                Err(refused(
+            WriteRequest {
+                partition: 1,
+                state_epoch: 0,
+                leader_epoch: 0,
+                start_offset: 0,
+                delivery_complete_count: 0,
+                drop_log: false,
+            },
+            WriteResult {
+                outcome: Err(refused(
                     codes::INVALID_REQUEST,
                     message::WRITE_UNINITIALIZED_SHARE_PARTITION,
                 )),
-                None,
-            ),
+                summary: None,
+            },
         ),
         WriteRow::same(
-            (-1, (2, 3), (10, 4), false),
-            (
-                Err(refused(
+            WriteRequest {
+                partition: -1,
+                state_epoch: 2,
+                leader_epoch: 3,
+                start_offset: 10,
+                delivery_complete_count: 4,
+                drop_log: false,
+            },
+            WriteResult {
+                outcome: Err(refused(
                     codes::INVALID_REQUEST,
                     message::NEGATIVE_PARTITION_ID,
                 )),
-                None,
-            ),
+                summary: None,
+            },
         ),
         // `-1` is "not supplied" in 4.3.1, and skips the fence. Trunk refuses
         // a negative epoch.
         WriteRow {
-            request: (0, (2, -1), (10, 4), false),
-            kafka_4_3_1: (Ok(()), unchanged),
-            trunk: (negative_leader_epoch(), unchanged),
+            request: WriteRequest {
+                partition: 0,
+                state_epoch: 2,
+                leader_epoch: -1,
+                start_offset: 10,
+                delivery_complete_count: 4,
+                drop_log: false,
+            },
+            kafka_4_3_1: WriteResult {
+                outcome: Ok(()),
+                summary: unchanged,
+            },
+            trunk: WriteResult {
+                outcome: negative_leader_epoch(),
+                summary: unchanged,
+            },
         },
         WriteRow {
-            request: (0, (-1, 3), (10, 4), false),
-            kafka_4_3_1: (Ok(()), unchanged),
-            trunk: (negative_state_epoch(), unchanged),
+            request: WriteRequest {
+                partition: 0,
+                state_epoch: -1,
+                leader_epoch: 3,
+                start_offset: 10,
+                delivery_complete_count: 4,
+                drop_log: false,
+            },
+            kafka_4_3_1: WriteResult {
+                outcome: Ok(()),
+                summary: unchanged,
+            },
+            trunk: WriteResult {
+                outcome: negative_state_epoch(),
+                summary: unchanged,
+            },
         },
         WriteRow::same(
-            (2, (2, 3), (10, 4), false),
-            (
-                Err(refused(
+            WriteRequest {
+                partition: 2,
+                state_epoch: 2,
+                leader_epoch: 3,
+                start_offset: 10,
+                delivery_complete_count: 4,
+                drop_log: false,
+            },
+            WriteResult {
+                outcome: Err(refused(
                     codes::UNKNOWN_TOPIC_OR_PARTITION,
                     message::UNKNOWN_TOPIC_OR_PARTITION,
                 )),
-                Some((2, 0, Offset(10), 0)),
-            ),
+                summary: Some((2, 0, Offset(10), 0)),
+            },
         ),
         WriteRow::same(
-            (0, (2, 3), (30, 0), true),
-            (
-                Err(ShareStateError::Operation {
+            WriteRequest {
+                partition: 0,
+                state_epoch: 2,
+                leader_epoch: 3,
+                start_offset: 30,
+                delivery_complete_count: 0,
+                drop_log: true,
+            },
+            WriteResult {
+                outcome: Err(ShareStateError::Operation {
                     code: codes::COORDINATOR_NOT_AVAILABLE,
                     message: message::UNKNOWN_TOPIC_OR_PARTITION,
                 }),
-                unchanged,
-            ),
+                summary: unchanged,
+            },
         ),
     ]
 }
@@ -432,10 +695,20 @@ fn write_rows() -> Vec<WriteRow> {
 async fn write_matches_kafka_checks_and_record_rules() {
     for trunk in [false, true] {
         for (index, row) in write_rows().into_iter().enumerate() {
-            let (partition, epochs, progress, drop_log) = row.request;
-            let (expected, summary) = if trunk { row.trunk } else { row.kafka_4_3_1 };
+            let WriteRequest {
+                partition,
+                state_epoch,
+                leader_epoch,
+                start_offset,
+                delivery_complete_count,
+                drop_log,
+            } = row.request;
+            let WriteResult {
+                outcome: expected,
+                summary,
+            } = if trunk { row.trunk } else { row.kafka_4_3_1 };
             let dir = tempdir().unwrap();
-            let (coord, image) = seeded(dir.path(), trunk).await;
+            let Seeded { coord, image } = seeded(dir.path(), trunk).await;
             if drop_log {
                 let state_partition = coord.state_partition_for("g", &TOPIC, partition);
                 coord.partitions.remove(SHARE_STATE_TOPIC, state_partition);
@@ -446,9 +719,11 @@ async fn write_matches_kafka_checks_and_record_rules() {
                     "g",
                     TOPIC,
                     partition,
-                    share_write(epochs, progress, vec![batch(
-                        Offset(progress.0)..=Offset(progress.0 + 9),
-                    )]),
+                    share_write(
+                        (state_epoch, leader_epoch),
+                        (start_offset, delivery_complete_count),
+                        vec![batch(Offset(start_offset)..=Offset(start_offset + 9))],
+                    ),
                 )
                 .await;
             check!(result == expected, "row {index}, trunk {trunk}");
@@ -467,69 +742,133 @@ async fn write_matches_kafka_checks_and_record_rules() {
 async fn read_fences_and_persists_the_leader_epoch() {
     let fenced = || refused(codes::FENCED_LEADER_EPOCH, message::FENCED_LEADER_EPOCH);
     let rows = [
-        ReadRow::same((0, 3), (Ok((2, 10)), Some(Ok(())), 3)),
-        ReadRow::same((0, 4), (Ok((2, 10)), Some(Err(fenced())), 4)),
-        ReadRow::same((0, 2), (Err(fenced()), Some(Ok(())), 3)),
         ReadRow::same(
-            (1, 0),
-            (
-                Err(refused(
+            ReadRequest {
+                partition: 0,
+                leader_epoch: 3,
+            },
+            ReadResult {
+                read: Ok(ReadSummary {
+                    state_epoch: 2,
+                    start_offset: 10,
+                }),
+                write: Some(Ok(())),
+                reloaded_leader_epoch: 3,
+            },
+        ),
+        ReadRow::same(
+            ReadRequest {
+                partition: 0,
+                leader_epoch: 4,
+            },
+            ReadResult {
+                read: Ok(ReadSummary {
+                    state_epoch: 2,
+                    start_offset: 10,
+                }),
+                write: Some(Err(fenced())),
+                reloaded_leader_epoch: 4,
+            },
+        ),
+        ReadRow::same(
+            ReadRequest {
+                partition: 0,
+                leader_epoch: 2,
+            },
+            ReadResult {
+                read: Err(fenced()),
+                write: Some(Ok(())),
+                reloaded_leader_epoch: 3,
+            },
+        ),
+        ReadRow::same(
+            ReadRequest {
+                partition: 1,
+                leader_epoch: 0,
+            },
+            ReadResult {
+                read: Err(refused(
                     codes::INVALID_REQUEST,
                     message::READ_UNINITIALIZED_SHARE_PARTITION,
                 )),
-                None,
-                3,
-            ),
+                write: None,
+                reloaded_leader_epoch: 3,
+            },
         ),
         ReadRow::same(
-            (-1, 0),
-            (
-                Err(refused(
+            ReadRequest {
+                partition: -1,
+                leader_epoch: 0,
+            },
+            ReadResult {
+                read: Err(refused(
                     codes::INVALID_REQUEST,
                     message::NEGATIVE_PARTITION_ID,
                 )),
-                None,
-                3,
-            ),
+                write: None,
+                reloaded_leader_epoch: 3,
+            },
         ),
         // `-1` is "not supplied" in 4.3.1: a plain read that skips the fence
         // and updates no leader epoch. Trunk refuses a negative epoch.
         ReadRow {
-            request: (0, -1),
-            kafka_4_3_1: (Ok((2, 10)), Some(Ok(())), 3),
-            trunk: (
-                Err(refused(
+            request: ReadRequest {
+                partition: 0,
+                leader_epoch: -1,
+            },
+            kafka_4_3_1: ReadResult {
+                read: Ok(ReadSummary {
+                    state_epoch: 2,
+                    start_offset: 10,
+                }),
+                write: Some(Ok(())),
+                reloaded_leader_epoch: 3,
+            },
+            trunk: ReadResult {
+                read: Err(refused(
                     codes::INVALID_REQUEST,
                     message::NEGATIVE_LEADER_EPOCH,
                 )),
-                None,
-                3,
-            ),
+                write: None,
+                reloaded_leader_epoch: 3,
+            },
         },
         ReadRow::same(
-            (2, 0),
-            (
-                Err(refused(
+            ReadRequest {
+                partition: 2,
+                leader_epoch: 0,
+            },
+            ReadResult {
+                read: Err(refused(
                     codes::UNKNOWN_TOPIC_OR_PARTITION,
                     message::UNKNOWN_TOPIC_OR_PARTITION,
                 )),
-                None,
-                3,
-            ),
+                write: None,
+                reloaded_leader_epoch: 3,
+            },
         ),
     ];
 
     for trunk in [false, true] {
         for (index, row) in rows.iter().enumerate() {
-            let (partition, leader_epoch) = row.request;
-            let (expected, write, reloaded_leader_epoch) =
-                if trunk { row.trunk } else { row.kafka_4_3_1 };
+            let ReadRequest {
+                partition,
+                leader_epoch,
+            } = row.request;
+            let ReadResult {
+                read: expected,
+                write,
+                reloaded_leader_epoch,
+            } = if trunk { row.trunk } else { row.kafka_4_3_1 };
             let dir = tempdir().unwrap();
-            let (coord, image) = seeded(dir.path(), trunk).await;
+            let Seeded { coord, image } = seeded(dir.path(), trunk).await;
             let read = coord
                 .read(&image, "g", TOPIC, partition, leader_epoch)
                 .await
-                .map(|st| (st.state_epoch, st.start_offset.0));
+                .map(|st| ReadSummary {
+                    state_epoch: st.state_epoch,
+                    start_offset: st.start_offset.0,
+                });
             check!(read == expected, "row {index}, trunk {trunk}");
             if let Some(expected_write) = write {
                 let written = coord
@@ -557,7 +896,7 @@ async fn read_fences_and_persists_the_leader_epoch() {
 #[tokio::test]
 async fn failed_read_append_changes_no_state() {
     let dir = tempdir().unwrap();
-    let (coord, image) = seeded(dir.path(), false).await;
+    let Seeded { coord, image } = seeded(dir.path(), false).await;
     let state_partition = coord.state_partition_for("g", &TOPIC, 0);
     coord.partitions.remove(SHARE_STATE_TOPIC, state_partition);
 
@@ -577,7 +916,7 @@ async fn failed_read_append_changes_no_state() {
 #[tokio::test]
 async fn reinitialize_keeps_the_recorded_leader_epoch() {
     let dir = tempdir().unwrap();
-    let (coord, image) = seeded(dir.path(), false).await;
+    let Seeded { coord, image } = seeded(dir.path(), false).await;
     coord
         .initialize(&image, "g", TOPIC, 0, 3, Offset(40))
         .await
@@ -628,7 +967,11 @@ async fn writes_append_updates_then_one_snapshot_at_the_threshold() {
         snapshot_update_records_per_snapshot: 2,
         ..ShareCoordinatorConfig::default()
     };
-    let (coord, _reg, _clock) = configured_coordinator(dir.path(), config);
+    let ConfiguredCoordinator {
+        coord,
+        registry: _reg,
+        clock: _clock,
+    } = configured_coordinator(dir.path(), config);
     let image = initialize_led_group().coordinator(&coord).call().await;
     let writes = [
         (0, 1, vec![
@@ -655,7 +998,7 @@ async fn writes_append_updates_then_one_snapshot_at_the_threshold() {
     let state_partition = coord.state_partition_for("g", &TOPIC, 0);
     let logged: Vec<Logged> = logged_records(&coord, state_partition)
         .into_iter()
-        .map(|(_, logged)| logged)
+        .map(|record| record.logged)
         .collect();
     let expected = vec![
         Logged::Snapshot(ShareSnapshotValue {
@@ -750,7 +1093,11 @@ async fn an_operation_answers_only_when_its_record_commits_in_the_term() {
                 write_timeout: timeout,
                 ..ShareCoordinatorConfig::default()
             };
-            let (coord, reg, _clock) = configured_coordinator(dir.path(), config);
+            let ConfiguredCoordinator {
+                coord,
+                registry: reg,
+                clock: _clock,
+            } = configured_coordinator(dir.path(), config);
             let image = initialize_led_group().coordinator(&coord).call().await;
             let state_partition = coord.state_partition_for("g", &TOPIC, 0);
             let part = reg

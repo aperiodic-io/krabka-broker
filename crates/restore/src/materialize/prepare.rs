@@ -11,7 +11,10 @@
 use {
     crate::{
         args::PartitionRef,
-        bound::{BatchDecision, Predicates, RecordDecision, record_coordinates, timestamp_type},
+        bound::{
+            BatchDecision, Predicates, RecordCoordinates, RecordDecision, record_coordinates,
+            timestamp_type,
+        },
         error::RestoreError,
     },
     bytes::{Bytes, BytesMut},
@@ -86,19 +89,30 @@ pub(crate) fn prepare_batch(
             prepare_owned_batch(bare_header_batch(header))?,
             BatchTally::Emptied,
         )),
-        BatchDecision::Filter => prepare_filtered_batch(setup),
+        BatchDecision::Filter => {
+            prepare_filtered_batch(setup).map(|filtered| (filtered.prepared, filtered.tally))
+        }
     }
+}
+
+/// What the [`BatchDecision::Filter`] arm of [`prepare_batch`] produced.
+struct FilteredOutcome {
+    prepared: PreparedBatch,
+    tally: BatchTally,
 }
 
 /// The [`BatchDecision::Filter`] arm of [`prepare_batch`], split out because it is the one path that has to decide record by record before it can decide the whole batch.
 fn prepare_filtered_batch(
     setup: PrepareBatchSetup<'_, '_>,
-) -> Result<(PreparedBatch, BatchTally), RestoreError> {
+) -> Result<FilteredOutcome, RestoreError> {
     let header = setup.batch.header();
     let mut keep_flags = Vec::with_capacity(usize::try_from(setup.records_in_batch).unwrap_or(0));
     for record in setup.batch {
         let record = record?;
-        let (record_offset, timestamp_ms) = record_coordinates(header, &record)?;
+        let RecordCoordinates {
+            offset: record_offset,
+            timestamp_ms,
+        } = record_coordinates(header, &record)?;
         let producer_id = ProducerId(header.producer_id.get());
         let decision = setup.predicates.decide_record(
             setup.partition_ref,
@@ -122,7 +136,10 @@ fn prepare_filtered_batch(
     Ok(match filtered {
         FilteredBatch::Unchanged => {
             let verbatim = VerbatimBatch::from_header(header, setup.batch_bytes);
-            (PreparedBatch::Verbatim(verbatim), BatchTally::Kept)
+            FilteredOutcome {
+                prepared: PreparedBatch::Verbatim(verbatim),
+                tally: BatchTally::Kept,
+            }
         }
         FilteredBatch::Filtered(rewritten) => {
             let kept = u64::try_from(rewritten.records.len()).unwrap_or(0);
@@ -137,17 +154,20 @@ fn prepare_filtered_batch(
                 last_offset_delta: owned.last_offset_delta,
                 ..rewritten
             };
-            (prepare_owned_batch(rewritten)?, BatchTally::Rewritten {
-                kept,
-                dropped,
-            })
+            FilteredOutcome {
+                prepared: prepare_owned_batch(rewritten)?,
+                tally: BatchTally::Rewritten { kept, dropped },
+            }
         }
         FilteredBatch::Empty => {
             let bare = RecordBatch {
                 records: Vec::new(),
                 ..owned
             };
-            (prepare_owned_batch(bare)?, BatchTally::Emptied)
+            FilteredOutcome {
+                prepared: prepare_owned_batch(bare)?,
+                tally: BatchTally::Emptied,
+            }
         }
     })
 }

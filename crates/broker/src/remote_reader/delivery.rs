@@ -152,7 +152,9 @@ pub(crate) fn segment_activation_frontier(
 mod tests {
     use {
         super::*,
-        crate::remote_reader::test_support::{empty_reader, sparse_remote_segment_reader, tp},
+        crate::remote_reader::test_support::{
+            ReaderWithDir, empty_reader, sparse_remote_segment_reader, tp,
+        },
         assert2::assert,
         krabka_ids::LeaderEpoch,
         krabka_remote_storage::{
@@ -228,7 +230,10 @@ mod tests {
 
     #[tokio::test]
     async fn scheduled_archive_requires_coverage_from_the_established_floor() {
-        let (reader, _remote) = sparse_remote_segment_reader();
+        let ReaderWithDir {
+            reader,
+            dir: _remote,
+        } = sparse_remote_segment_reader();
         assert!(
             reader
                 .delivery_watermark(&tp(), Offset(0), Offset(17), millis(100), 3_000)
@@ -310,11 +315,17 @@ mod tests {
         }
     }
 
+    /// Holds a fetch until the test releases it.
+    struct ReleaseGate {
+        released: std::sync::Mutex<bool>,
+        wake: std::sync::Condvar,
+    }
+
     struct PausingRsm {
         inner: Arc<dyn RemoteStorageManager>,
         entered: Arc<tokio::sync::Notify>,
         finished: Arc<tokio::sync::Notify>,
-        release: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+        release: Arc<ReleaseGate>,
         fetches: Arc<std::sync::atomic::AtomicUsize>,
     }
 
@@ -340,10 +351,9 @@ mod tests {
             self.fetches
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.entered.notify_one();
-            let (lock, wake) = self.release.as_ref();
-            let mut released = lock.lock().unwrap();
+            let mut released = self.release.released.lock().unwrap();
             while !*released {
-                released = wake.wait(released).unwrap();
+                released = self.release.wake.wait(released).unwrap();
             }
             self.inner.fetch_log_segment(metadata, start, end)
         }
@@ -366,10 +376,16 @@ mod tests {
 
     #[tokio::test]
     async fn scheduled_archive_timeout_stops_after_the_header_fetch_already_in_flight() {
-        let (source, _remote) = sparse_remote_segment_reader();
+        let ReaderWithDir {
+            reader: source,
+            dir: _remote,
+        } = sparse_remote_segment_reader();
         let entered = Arc::new(tokio::sync::Notify::new());
         let finished = Arc::new(tokio::sync::Notify::new());
-        let release = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let release = Arc::new(ReleaseGate {
+            released: std::sync::Mutex::new(false),
+            wake: std::sync::Condvar::new(),
+        });
         let fetches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let rsm = Arc::new(PausingRsm {
             inner: Arc::clone(&source.rsm),
@@ -392,9 +408,8 @@ mod tests {
                 .is_err()
         );
         drop(reader);
-        let (lock, wake) = release.as_ref();
-        *lock.lock().unwrap() = true;
-        wake.notify_all();
+        *release.released.lock().unwrap() = true;
+        release.wake.notify_all();
         // The wrapper drops only after the detached blocking scan releases its
         // last RSM reference, so the count is observed after that scan stops.
         tokio::time::timeout(std::time::Duration::from_secs(3), finished.notified())

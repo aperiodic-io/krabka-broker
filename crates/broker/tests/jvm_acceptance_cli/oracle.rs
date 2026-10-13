@@ -287,6 +287,12 @@ impl Side<'_> {
     }
 }
 
+/// A tool file staged on the host, and the path the container reads it at.
+struct StagedFile<'a> {
+    tmp: tempfile::NamedTempFile,
+    at: &'a str,
+}
+
 /// Run a 4.3.1 tool from a throwaway container against a broker on the host.
 ///
 /// Each `files` entry is written to a host tempfile and bind-mounted at the
@@ -301,13 +307,16 @@ fn run_against_host(
 ) -> CliRun {
     // The tempfiles must outlive the container, so they are held in this
     // vector until the run has finished.
-    let staged: Vec<(tempfile::NamedTempFile, &str)> = files
+    let staged: Vec<StagedFile<'_>> = files
         .iter()
-        .map(|file| (host_tempfile(&file.contents), file.container_path.as_str()))
+        .map(|file| StagedFile {
+            tmp: host_tempfile(&file.contents),
+            at: file.container_path.as_str(),
+        })
         .collect();
     let mounts: Vec<String> = staged
         .iter()
-        .map(|(tmp, at)| format!("{}:{at}:ro", tmp.path().display()))
+        .map(|StagedFile { tmp, at }| format!("{}:{at}:ro", tmp.path().display()))
         .collect();
 
     let name = support::unique_container_name("krabka-oracle-client");
@@ -563,11 +572,26 @@ impl OracleComparison {
     }
 }
 
+/// A CLI side and its optional client properties.
+pub(crate) struct SecuredSide<'a, 'b> {
+    pub(crate) side: &'a Side<'b>,
+    pub(crate) props: Option<&'a str>,
+}
+
 /// The two independent CLI sides and their respective optional client properties.
 pub(crate) fn secured_sides<'a, 'b>(
     oracle: &'a Side<'b>,
     krabka: &'a Side<'b>,
     props: &'a str,
-) -> [(&'a Side<'b>, Option<&'a str>); 2] {
-    [(oracle, None), (krabka, Some(props))]
+) -> [SecuredSide<'a, 'b>; 2] {
+    [
+        SecuredSide {
+            side: oracle,
+            props: None,
+        },
+        SecuredSide {
+            side: krabka,
+            props: Some(props),
+        },
+    ]
 }

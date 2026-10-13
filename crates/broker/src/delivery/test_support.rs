@@ -240,6 +240,14 @@ pub(crate) enum MetricEvent {
     Wakeup,
 }
 
+/// A watermark advance the scheduler reported.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ReportedWatermark {
+    pub(crate) topic: String,
+    pub(crate) partition: PartitionIndex,
+    pub(crate) delivery: PartitionDelivery,
+}
+
 /// A [`DeliveryMetrics`] that keeps every call, so a test asserts on what the
 /// scheduler reported instead of on a live registry.
 #[derive(Default)]
@@ -255,13 +263,15 @@ impl RecordingMetrics {
             .clone()
     }
 
-    pub(crate) fn watermarks(&self) -> Vec<(String, PartitionIndex, PartitionDelivery)> {
+    pub(crate) fn watermarks(&self) -> Vec<ReportedWatermark> {
         self.events()
             .into_iter()
             .filter_map(|event| match event {
-                MetricEvent::Watermark(topic, partition, delivery) => {
-                    Some((topic, partition, delivery))
-                }
+                MetricEvent::Watermark(topic, partition, delivery) => Some(ReportedWatermark {
+                    topic,
+                    partition,
+                    delivery,
+                }),
                 _ => None,
             })
             .collect()

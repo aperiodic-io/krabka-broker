@@ -46,7 +46,13 @@ fn join_setup() -> ClassicJoinSetup {
     }
 }
 
-async fn bootstrap_member(p: &support::InProcess) -> (String, i32) {
+/// A joined group member: its id and the generation of the group.
+struct BootstrappedMember {
+    member_id: String,
+    generation: i32,
+}
+
+async fn bootstrap_member(p: &support::InProcess) -> BootstrappedMember {
     // Step 1: empty member_id → broker returns MEMBER_ID_REQUIRED with a
     // generated id. KIP-559 doesn't require fields here (the group state
     // hasn't recorded a protocol yet).
@@ -88,20 +94,29 @@ async fn bootstrap_member(p: &support::InProcess) -> (String, i32) {
         "JoinGroup must echo protocol_name: {r2:?}"
     );
 
-    (member_id, r2.generation_id)
+    BootstrappedMember {
+        member_id,
+        generation: r2.generation_id,
+    }
 }
 
 #[tokio::test]
 async fn join_group_response_carries_protocol_type_and_name_on_success() {
     let p = start().await;
-    let (_mid, _generation) = bootstrap_member(&p).await;
+    let BootstrappedMember {
+        member_id: _mid,
+        generation: _generation,
+    } = bootstrap_member(&p).await;
     p.broker.shutdown().await;
 }
 
 #[tokio::test]
 async fn sync_group_response_carries_protocol_type_and_name_on_success() {
     let p = start().await;
-    let (mid, generation) = bootstrap_member(&p).await;
+    let BootstrappedMember {
+        member_id: mid,
+        generation,
+    } = bootstrap_member(&p).await;
 
     let r3 = p
         .client
@@ -139,7 +154,10 @@ async fn sync_group_response_carries_protocol_type_and_name_on_success() {
 async fn join_group_inconsistent_protocol_error_carries_no_protocol_fields() {
     let p = start().await;
     // Bootstrap the group as `consumer/range`.
-    let (_mid, _gen) = bootstrap_member(&p).await;
+    let BootstrappedMember {
+        member_id: _mid,
+        generation: _gen,
+    } = bootstrap_member(&p).await;
 
     // A second member with a different protocol_type is turned away with
     // INCONSISTENT_GROUP_PROTOCOL (23). Kafka's `classicGroupJoinNewMember`
@@ -176,7 +194,10 @@ async fn join_group_inconsistent_protocol_error_carries_no_protocol_fields() {
 #[tokio::test]
 async fn sync_group_error_carries_no_protocol_fields() {
     let p = start().await;
-    let (_mid, generation) = bootstrap_member(&p).await;
+    let BootstrappedMember {
+        member_id: _mid,
+        generation,
+    } = bootstrap_member(&p).await;
 
     let r = p
         .client

@@ -178,7 +178,14 @@ fn directory_id(dir: &Path) -> uuid::Uuid {
 /// directory can be removed.
 #[cfg(unix)]
 struct ReadOnlyTree {
-    paths: Vec<(PathBuf, u32)>,
+    paths: Vec<PathMode>,
+}
+
+/// A path under a [`ReadOnlyTree`] and the permission mode it had before.
+#[cfg(unix)]
+struct PathMode {
+    path: PathBuf,
+    mode: u32,
 }
 
 #[cfg(unix)]
@@ -195,9 +202,9 @@ impl ReadOnlyTree {
                         .map(|entry| entry.unwrap().path()),
                 );
             }
-            paths.push((path, mode));
+            paths.push(PathMode { path, mode });
         }
-        for (path, mode) in &paths {
+        for PathMode { path, mode } in &paths {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode & !0o222)).unwrap();
         }
         Self { paths }
@@ -206,7 +213,7 @@ impl ReadOnlyTree {
     /// False when this process can create a file under the tree anyway, as
     /// root can, and the test cannot make the directory fail.
     fn refuses_writes(&self) -> bool {
-        let probe = self.paths[0].0.join(".write-probe");
+        let probe = self.paths[0].path.join(".write-probe");
         let created = std::fs::write(&probe, b"probe").is_ok();
         if created {
             let _ = std::fs::remove_file(probe);
@@ -218,7 +225,7 @@ impl ReadOnlyTree {
 #[cfg(unix)]
 impl Drop for ReadOnlyTree {
     fn drop(&mut self) {
-        for (path, mode) in &self.paths {
+        for PathMode { path, mode } in &self.paths {
             let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(*mode));
         }
     }

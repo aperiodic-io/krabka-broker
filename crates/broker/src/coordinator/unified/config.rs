@@ -546,93 +546,152 @@ mod tests {
     /// that does not parse, leave it.
     #[test]
     fn for_group_applies_each_consumer_override() {
-        // (overrides, session timeout, heartbeat interval, assignment interval)
-        type Row<'a> = (&'a [(&'a str, &'a str)], Duration, Duration, Duration);
+        /// A `consumer.*` or other coordinator's override key and its value.
+        #[derive(Debug)]
+        struct ConfigOverride {
+            key: &'static str,
+            value: &'static str,
+        }
+
+        /// The overrides, and the session timeout, heartbeat interval and
+        /// assignment interval they give.
+        struct Row {
+            overrides: &'static [ConfigOverride],
+            session: Duration,
+            heartbeat: Duration,
+            assignment: Duration,
+        }
+
         let broker = NextGenConfig::default();
-        let rows: [Row<'_>; 12] = [
-            (
-                &[("consumer.session.timeout.ms", "1000")],
-                DEFAULT_MIN_SESSION_TIMEOUT,
-                DEFAULT_HEARTBEAT_INTERVAL,
-                DEFAULT_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[("consumer.session.timeout.ms", "3600000")],
-                DEFAULT_MAX_SESSION_TIMEOUT,
-                DEFAULT_HEARTBEAT_INTERVAL,
-                DEFAULT_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[("consumer.heartbeat.interval.ms", "0")],
-                DEFAULT_SESSION_TIMEOUT,
-                DEFAULT_MIN_HEARTBEAT_INTERVAL,
-                DEFAULT_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[("consumer.heartbeat.interval.ms", "60000")],
-                DEFAULT_SESSION_TIMEOUT,
-                DEFAULT_MAX_HEARTBEAT_INTERVAL,
-                DEFAULT_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[("consumer.assignment.interval.ms", "3600000")],
-                DEFAULT_SESSION_TIMEOUT,
-                DEFAULT_HEARTBEAT_INTERVAL,
-                MAX_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[("consumer.assignment.interval.ms", "-5")],
-                DEFAULT_SESSION_TIMEOUT,
-                DEFAULT_HEARTBEAT_INTERVAL,
-                MIN_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[],
-                DEFAULT_SESSION_TIMEOUT,
-                DEFAULT_HEARTBEAT_INTERVAL,
-                DEFAULT_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[("consumer.session.timeout.ms", "50000")],
-                Duration::from_secs(50),
-                DEFAULT_HEARTBEAT_INTERVAL,
-                DEFAULT_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[("consumer.heartbeat.interval.ms", "7000")],
-                DEFAULT_SESSION_TIMEOUT,
-                Duration::from_secs(7),
-                DEFAULT_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[("consumer.assignment.interval.ms", "0")],
-                DEFAULT_SESSION_TIMEOUT,
-                DEFAULT_HEARTBEAT_INTERVAL,
-                Duration::ZERO,
-            ),
-            (
-                &[
-                    ("share.session.timeout.ms", "50000"),
-                    ("streams.heartbeat.interval.ms", "7000"),
+        let rows: [Row; 12] = [
+            Row {
+                overrides: &[ConfigOverride {
+                    key: "consumer.session.timeout.ms",
+                    value: "1000",
+                }],
+                session: DEFAULT_MIN_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_HEARTBEAT_INTERVAL,
+                assignment: DEFAULT_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[ConfigOverride {
+                    key: "consumer.session.timeout.ms",
+                    value: "3600000",
+                }],
+                session: DEFAULT_MAX_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_HEARTBEAT_INTERVAL,
+                assignment: DEFAULT_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[ConfigOverride {
+                    key: "consumer.heartbeat.interval.ms",
+                    value: "0",
+                }],
+                session: DEFAULT_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_MIN_HEARTBEAT_INTERVAL,
+                assignment: DEFAULT_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[ConfigOverride {
+                    key: "consumer.heartbeat.interval.ms",
+                    value: "60000",
+                }],
+                session: DEFAULT_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_MAX_HEARTBEAT_INTERVAL,
+                assignment: DEFAULT_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[ConfigOverride {
+                    key: "consumer.assignment.interval.ms",
+                    value: "3600000",
+                }],
+                session: DEFAULT_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_HEARTBEAT_INTERVAL,
+                assignment: MAX_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[ConfigOverride {
+                    key: "consumer.assignment.interval.ms",
+                    value: "-5",
+                }],
+                session: DEFAULT_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_HEARTBEAT_INTERVAL,
+                assignment: MIN_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[],
+                session: DEFAULT_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_HEARTBEAT_INTERVAL,
+                assignment: DEFAULT_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[ConfigOverride {
+                    key: "consumer.session.timeout.ms",
+                    value: "50000",
+                }],
+                session: Duration::from_secs(50),
+                heartbeat: DEFAULT_HEARTBEAT_INTERVAL,
+                assignment: DEFAULT_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[ConfigOverride {
+                    key: "consumer.heartbeat.interval.ms",
+                    value: "7000",
+                }],
+                session: DEFAULT_SESSION_TIMEOUT,
+                heartbeat: Duration::from_secs(7),
+                assignment: DEFAULT_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[ConfigOverride {
+                    key: "consumer.assignment.interval.ms",
+                    value: "0",
+                }],
+                session: DEFAULT_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_HEARTBEAT_INTERVAL,
+                assignment: Duration::ZERO,
+            },
+            Row {
+                overrides: &[
+                    ConfigOverride {
+                        key: "share.session.timeout.ms",
+                        value: "50000",
+                    },
+                    ConfigOverride {
+                        key: "streams.heartbeat.interval.ms",
+                        value: "7000",
+                    },
                 ],
-                DEFAULT_SESSION_TIMEOUT,
-                DEFAULT_HEARTBEAT_INTERVAL,
-                DEFAULT_ASSIGNMENT_INTERVAL,
-            ),
-            (
-                &[
-                    ("consumer.session.timeout.ms", "soon"),
-                    ("consumer.heartbeat.interval.ms", "-1"),
+                session: DEFAULT_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_HEARTBEAT_INTERVAL,
+                assignment: DEFAULT_ASSIGNMENT_INTERVAL,
+            },
+            Row {
+                overrides: &[
+                    ConfigOverride {
+                        key: "consumer.session.timeout.ms",
+                        value: "soon",
+                    },
+                    ConfigOverride {
+                        key: "consumer.heartbeat.interval.ms",
+                        value: "-1",
+                    },
                 ],
-                DEFAULT_SESSION_TIMEOUT,
-                DEFAULT_HEARTBEAT_INTERVAL,
-                DEFAULT_ASSIGNMENT_INTERVAL,
-            ),
+                session: DEFAULT_SESSION_TIMEOUT,
+                heartbeat: DEFAULT_HEARTBEAT_INTERVAL,
+                assignment: DEFAULT_ASSIGNMENT_INTERVAL,
+            },
         ];
-        for (entries, session, heartbeat, assignment) in rows {
+        for Row {
+            overrides: entries,
+            session,
+            heartbeat,
+            assignment,
+        } in rows
+        {
             let overrides: BTreeMap<String, String> = entries
                 .iter()
-                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .map(|entry| (entry.key.to_owned(), entry.value.to_owned()))
                 .collect();
             let group = broker.for_group(Some(&overrides));
             assert!(

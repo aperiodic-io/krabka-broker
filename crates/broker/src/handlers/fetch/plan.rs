@@ -73,7 +73,7 @@ impl PendingRead {
         topic_name: &str,
         topic_id: WireUuid,
         partition: &EffectivePartition,
-        mode: (bool, bool),
+        mode: FetchMode,
         resolved: Option<Arc<Partition>>,
         out: PartitionData,
     ) -> Self {
@@ -85,9 +85,9 @@ impl PendingRead {
             last_fetched_epoch: partition.last_fetched_epoch,
             fetch_offset: partition.fetch_offset,
             max_bytes: partition.partition_max_bytes,
-            read_committed: mode.0,
-            is_follower_fetch: mode.1,
-            fetch_only_leader: mode.1,
+            read_committed: mode.read_committed,
+            is_follower_fetch: mode.is_follower_fetch,
+            fetch_only_leader: mode.is_follower_fetch,
             follower_position: None,
             partition: resolved,
             out,
@@ -233,6 +233,13 @@ async fn preferred_read_replica(
     )
 }
 
+/// The live bounds of a partition's offsets.
+struct OffsetSnapshot {
+    high_watermark: i64,
+    last_stable_offset: i64,
+    log_start_offset: i64,
+}
+
 /// The response Kafka's `ReplicaManager.readFromLog` gives a fetch it never
 /// reads: empty records at the offset snapshot's live bounds.
 ///
@@ -242,12 +249,16 @@ async fn preferred_read_replica(
 /// snapshot rather than parking in the fetch purgatory -- a consumer told to
 /// go elsewhere should not also wait out `fetch.max.wait.ms` on this broker
 /// first.
-async fn preferred_replica_snapshot(partition: &Partition) -> (i64, i64, i64) {
+async fn preferred_replica_snapshot(partition: &Partition) -> OffsetSnapshot {
     let hw = partition.high_watermark().await;
     let mut log = partition.log.lock().expect("log mutex poisoned");
     let log_start = log.log_start_offset();
     let last_stable_offset = log.last_stable_offset(hw);
-    (hw.0, last_stable_offset.0, log_start.0)
+    OffsetSnapshot {
+        high_watermark: hw.0,
+        last_stable_offset: last_stable_offset.0,
+        log_start_offset: log_start.0,
+    }
 }
 
 /// The node that must lead a partition before a fetch may read it, or `None`
@@ -298,6 +309,13 @@ fn image_leader(
         })
 }
 
+/// A partition named by topic and index.
+#[derive(Clone, Copy)]
+pub(super) struct TopicPartitionRef<'a> {
+    pub(super) topic: &'a str,
+    pub(super) partition_index: i32,
+}
+
 /// The refused row when `required_leader` names this node and this node does
 /// not lead the partition, or `None` when the read may go on.
 ///
@@ -309,7 +327,10 @@ fn image_leader(
 /// so it checks both.
 pub(super) fn leader_refusal(
     image: &krabka_metadata::MetadataImage,
-    (topic, partition_index): (&str, i32),
+    TopicPartitionRef {
+        topic,
+        partition_index,
+    }: TopicPartitionRef<'_>,
     partition: &Partition,
     required_leader: Option<krabka_metadata::NodeId>,
 ) -> Option<PartitionData> {
@@ -388,9 +409,15 @@ pub(super) async fn apply_epoch_checks(
         };
         return true;
     }
-    if let Some(refused) =
-        leader_refusal(image, (topic, partition_index), partition, required_leader)
-    {
+    if let Some(refused) = leader_refusal(
+        image,
+        TopicPartitionRef {
+            topic,
+            partition_index,
+        },
+        partition,
+        required_leader,
+    ) {
         *output = refused;
         return true;
     }
@@ -515,6 +542,14 @@ pub(super) fn refused_partition(partition_index: i32, error_code: i16) -> Partit
     }
 }
 
+/// How a fetch reads: with the read-committed isolation level, and as a
+/// follower fetch.
+#[derive(Clone, Copy)]
+pub(super) struct FetchMode {
+    pub(super) read_committed: bool,
+    pub(super) is_follower_fetch: bool,
+}
+
 pub(super) struct PendingPlanContext<'a> {
     pub(super) broker: &'a Broker,
     pub(super) image: &'a krabka_metadata::MetadataImage,
@@ -523,7 +558,7 @@ pub(super) struct PendingPlanContext<'a> {
     /// The negotiated `Fetch` version. It decides whether a topic row names
     /// its topic by name or by id.
     pub(super) version: i16,
-    pub(super) mode: (bool, bool),
+    pub(super) mode: FetchMode,
     pub(super) follower_id: i32,
     /// The broker epoch the follower's Fetch carried in
     /// `ReplicaState.ReplicaEpoch` (-1 when absent), Kafka's
@@ -560,25 +595,29 @@ impl ResponseSlot {
     }
 }
 
+/// A planned row and the slot of the response it goes in.
+pub(super) struct PlannedRead {
+    pub(super) slot: ResponseSlot,
+    pub(super) read: PendingRead,
+}
+
 pub(super) async fn plan_partition_read(
     context: &PendingPlanContext<'_>,
     topic_name: &str,
     topic_id: WireUuid,
     topic_error: Option<i16>,
     request: &EffectivePartition,
-) -> (ResponseSlot, PendingRead) {
-    let refused = |error_code| {
-        (
-            ResponseSlot::refused(context.mode.1, error_code),
-            PendingRead::planned(
-                topic_name,
-                topic_id,
-                request,
-                context.mode,
-                None,
-                refused_partition(request.partition, error_code),
-            ),
-        )
+) -> PlannedRead {
+    let refused = |error_code| PlannedRead {
+        slot: ResponseSlot::refused(context.mode.is_follower_fetch, error_code),
+        read: PendingRead::planned(
+            topic_name,
+            topic_id,
+            request,
+            context.mode,
+            None,
+            refused_partition(request.partition, error_code),
+        ),
     };
     // Kafka's `KafkaApis.handleFetchRequest` refuses every row of a follower
     // fetch without `ClusterAction` before it resolves any topic. So that
@@ -612,7 +651,7 @@ pub(super) async fn plan_partition_read(
     // authorization failure still wins, and it sits above the partition
     // lookup, so a witness answers a consumer the same way whether or not it
     // hosts the partition.
-    if !context.mode.1 && context.broker.config.is_witness() {
+    if !context.mode.is_follower_fetch && context.broker.config.is_witness() {
         // This row never touches the log, so it carries the -1 sentinels of
         // a refused read, like `leader_refusal` below it.
         output = refused_read(request.partition, codes::NOT_LEADER_OR_FOLLOWER);
@@ -629,10 +668,10 @@ pub(super) async fn plan_partition_read(
                 ..Default::default()
             };
         }
-        return (
-            ResponseSlot::Read,
-            PendingRead::planned(topic_name, topic_id, request, context.mode, None, output),
-        );
+        return PlannedRead {
+            slot: ResponseSlot::Read,
+            read: PendingRead::planned(topic_name, topic_id, request, context.mode, None, output),
+        };
     }
     let partition = context
         .broker
@@ -640,7 +679,8 @@ pub(super) async fn plan_partition_read(
         .get(topic_name, krabka_ids::PartitionIndex(request.partition));
     // Kafka's `FetchParams.fetchOnlyLeader`: a follower fetch, or a consumer
     // fetch below v11, which has no client metadata.
-    let fetch_only_leader = context.mode.1 || context.version < FIRST_CLIENT_METADATA_VERSION;
+    let fetch_only_leader =
+        context.mode.is_follower_fetch || context.version < FIRST_CLIENT_METADATA_VERSION;
     let node_id = context.broker.config.node_id;
     // A follower fetch holds the partition's replication-target read guard
     // through the leader checks, as Kafka's `Partition.fetchRecords` holds
@@ -649,7 +689,9 @@ pub(super) async fn plan_partition_read(
     // after the read, and only while the target that the checks saw is still
     // installed.
     let transition = match partition.as_ref() {
-        Some(partition) if context.mode.1 => Some(partition.lock_produce_transition().await),
+        Some(partition) if context.mode.is_follower_fetch => {
+            Some(partition.lock_produce_transition().await)
+        }
         _ => None,
     };
     let follower_position = transition.as_deref().map(|target| FollowerPosition {
@@ -667,7 +709,7 @@ pub(super) async fn plan_partition_read(
             ReadRole {
                 partition,
                 required_leader: required_leader(fetch_only_leader, node_id, partition),
-                assigned_follower: !context.mode.1
+                assigned_follower: !context.mode.is_follower_fetch
                     || partition.diskless
                     || is_assigned_follower(
                         context.image,
@@ -685,10 +727,10 @@ pub(super) async fn plan_partition_read(
         )
         .await
     {
-        return (
-            ResponseSlot::Read,
-            PendingRead::planned(topic_name, topic_id, request, context.mode, None, output),
-        );
+        return PlannedRead {
+            slot: ResponseSlot::Read,
+            read: PendingRead::planned(topic_name, topic_id, request, context.mode, None, output),
+        };
     }
     if let Some(partition) = partition.as_ref()
         && context
@@ -707,10 +749,10 @@ pub(super) async fn plan_partition_read(
             codes::KAFKA_STORAGE_ERROR
         };
         let output = refused_read(request.partition, error_code);
-        return (
-            ResponseSlot::Read,
-            PendingRead::planned(topic_name, topic_id, request, context.mode, None, output),
-        );
+        return PlannedRead {
+            slot: ResponseSlot::Read,
+            read: PendingRead::planned(topic_name, topic_id, request, context.mode, None, output),
+        };
     }
     if partition.is_none() || topic_name.is_empty() {
         // Kafka refuses a partition its metadata does not hold before the
@@ -735,10 +777,10 @@ pub(super) async fn plan_partition_read(
             current_leader: image_leader(context.image, topic_name, request.partition),
             ..refused_read(request.partition, codes::NOT_LEADER_OR_FOLLOWER)
         };
-        return (
-            ResponseSlot::Read,
-            PendingRead::planned(topic_name, topic_id, request, context.mode, None, output),
-        );
+        return PlannedRead {
+            slot: ResponseSlot::Read,
+            read: PendingRead::planned(topic_name, topic_id, request, context.mode, None, output),
+        };
     }
     // Kafka's `ReplicaManager.findPreferredReadReplica` names a read replica
     // only on the leader.
@@ -748,7 +790,7 @@ pub(super) async fn plan_partition_read(
             .load(std::sync::atomic::Ordering::Acquire)
             == node_id.0
     });
-    if !context.mode.1 && leads {
+    if !context.mode.is_follower_fetch && leads {
         let leader_partition = partition
             .as_ref()
             .expect("`leads` implies a local partition");
@@ -767,42 +809,47 @@ pub(super) async fn plan_partition_read(
             // answers at once from the offset snapshot instead of also
             // parking this broker's copy of the request in the fetch
             // purgatory.
-            let (high_watermark, last_stable_offset, log_start_offset) =
-                preferred_replica_snapshot(leader_partition).await;
+            let snapshot = preferred_replica_snapshot(leader_partition).await;
             output.error_code = codes::NONE;
-            output.high_watermark = high_watermark;
-            output.last_stable_offset = last_stable_offset;
-            output.log_start_offset = log_start_offset;
+            output.high_watermark = snapshot.high_watermark;
+            output.last_stable_offset = snapshot.last_stable_offset;
+            output.log_start_offset = snapshot.log_start_offset;
             output.records = Some(krabka_protocol::records::RecordsPayload::Raw(
                 bytes::Bytes::new(),
             ));
-            return (ResponseSlot::Read, PendingRead {
-                fetch_only_leader,
-                ..PendingRead::planned(
-                    topic_name,
-                    topic_id,
-                    request,
-                    context.mode,
-                    // No `partition`: the read loop skips both the read and
-                    // the long-poll arm for an entry with none.
-                    None,
-                    output,
-                )
-            });
+            return PlannedRead {
+                slot: ResponseSlot::Read,
+                read: PendingRead {
+                    fetch_only_leader,
+                    ..PendingRead::planned(
+                        topic_name,
+                        topic_id,
+                        request,
+                        context.mode,
+                        // No `partition`: the read loop skips both the read and
+                        // the long-poll arm for an entry with none.
+                        None,
+                        output,
+                    )
+                },
+            };
         }
     }
-    (ResponseSlot::Read, PendingRead {
-        fetch_only_leader,
-        follower_position,
-        ..PendingRead::planned(
-            topic_name,
-            topic_id,
-            request,
-            context.mode,
-            partition,
-            output,
-        )
-    })
+    PlannedRead {
+        slot: ResponseSlot::Read,
+        read: PendingRead {
+            fetch_only_leader,
+            follower_position,
+            ..PendingRead::planned(
+                topic_name,
+                topic_id,
+                request,
+                context.mode,
+                partition,
+                output,
+            )
+        },
+    }
 }
 
 /// The first `Fetch` version that carries client metadata, from which Kafka
@@ -842,7 +889,7 @@ pub(super) async fn build_pending_reads(
     context: &PendingPlanContext<'_>,
     topics: &[EffectiveTopic],
 ) -> Vec<PendingRead> {
-    let mut pending: Vec<(ResponseSlot, PendingRead)> = Vec::new();
+    let mut pending: Vec<PlannedRead> = Vec::new();
     for topic in topics {
         // Versions 12 and earlier name the topic. A name that does not resolve
         // goes on to the `Read` gate and then to the partition gate, which
@@ -875,8 +922,8 @@ pub(super) async fn build_pending_reads(
             pending.push(plan_partition_read(context, &name, id, error, partition).await);
         }
     }
-    pending.sort_by_key(|(slot, _)| *slot);
-    pending.into_iter().map(|(_, read)| read).collect()
+    pending.sort_by_key(|planned| planned.slot);
+    pending.into_iter().map(|planned| planned.read).collect()
 }
 
 #[cfg(test)]
@@ -1007,11 +1054,14 @@ mod tests {
                 },
                 rack_id: "",
                 version: super::super::FIRST_TOPIC_ID_VERSION,
-                mode: (false, is_follower_fetch),
+                mode: super::FetchMode {
+                    read_committed: false,
+                    is_follower_fetch,
+                },
                 follower_id,
                 follower_broker_epoch: -1,
             };
-            let (_, read) =
+            let super::PlannedRead { read, .. } =
                 super::plan_partition_read(&context, TOPIC, super::WireUuid::ZERO, None, &request)
                     .await;
             assert!(read.out == want, "{name}: got {:?}", read.out);
@@ -1121,7 +1171,10 @@ mod tests {
             authorization: &consumer,
             rack_id: "dc-b",
             version: super::super::FIRST_TOPIC_ID_VERSION,
-            mode: (false, false),
+            mode: super::FetchMode {
+                read_committed: false,
+                is_follower_fetch: false,
+            },
             follower_id: -1,
             follower_broker_epoch: -1,
         };
@@ -1134,7 +1187,7 @@ mod tests {
             partition_max_bytes: 1024,
         };
 
-        let (_, read) =
+        let super::PlannedRead { read, .. } =
             super::plan_partition_read(&context, "orders", super::WireUuid::ZERO, None, &request)
                 .await;
 
@@ -1183,13 +1236,26 @@ mod tests {
                 .await;
             let got = super::leader_refusal(
                 &image,
-                ("orders", 0),
+                super::TopicPartitionRef {
+                    topic: "orders",
+                    partition_index: 0,
+                },
                 &partition,
                 Some(krabka_metadata::NodeId(node)),
             );
             assert!(got == want, "{name}");
         }
-        assert!(super::leader_refusal(&image, ("orders", 0), &partition, None) == None);
+        assert!(
+            super::leader_refusal(
+                &image,
+                super::TopicPartitionRef {
+                    topic: "orders",
+                    partition_index: 0
+                },
+                &partition,
+                None
+            ) == None
+        );
     }
 
     fn epoch_checks_partition(dir: &std::path::Path) -> Arc<Partition> {
@@ -1476,7 +1542,9 @@ mod tests {
                 .expect("move log start");
         }
 
-        let (final_, _) = epoch_check(&partition, 0, 0, true).await;
+        let EpochCheck {
+            is_final: final_, ..
+        } = epoch_check(&partition, 0, 0, true).await;
         assert!(!final_, "defers to the caller's own offline check");
     }
 
@@ -1546,13 +1614,19 @@ mod tests {
             assert!(recorded == want, "{name}");
         }
     }
+    /// Whether the epoch gate decided the row, and the row it left.
+    struct EpochCheck {
+        is_final: bool,
+        output: super::PartitionData,
+    }
+
     /// Exercise the epoch gate with the same wire row and caller-selected offline status.
     async fn epoch_check(
         partition: &Partition,
         last_fetched_epoch: i32,
         fetch_offset: i64,
         log_dir_offline: bool,
-    ) -> (bool, super::PartitionData) {
+    ) -> EpochCheck {
         let request = effective_partition(last_fetched_epoch, fetch_offset);
         let mut output = super::PartitionData {
             partition_index: 0,
@@ -1571,7 +1645,10 @@ mod tests {
             &mut output,
         )
         .await;
-        (final_, output)
+        EpochCheck {
+            is_final: final_,
+            output,
+        }
     }
 
     async fn check_epoch_placement(
@@ -1582,8 +1659,10 @@ mod tests {
         want_final: bool,
         want_out: super::PartitionData,
     ) {
-        let (final_, output) =
-            epoch_check(partition, last_fetched_epoch, fetch_offset, false).await;
+        let EpochCheck {
+            is_final: final_,
+            output,
+        } = epoch_check(partition, last_fetched_epoch, fetch_offset, false).await;
         assert!(final_ == want_final, "{name}: final");
         assert!(output == want_out, "{name}: got {output:?}");
     }

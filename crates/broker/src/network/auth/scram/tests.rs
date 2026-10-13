@@ -8,7 +8,7 @@
 //! authorization id included.
 
 use {
-    super::{ClientFirst, decode_sasl_name},
+    super::{ClientFirst, ScramExtension, decode_sasl_name},
     crate::{
         network::auth::{
             ConnectionAuth, handle_authenticate_scram, state::SaslExchange,
@@ -43,6 +43,12 @@ const TOKEN_OWNER: &str = "owner";
 
 fn token_secret() -> SecretBytes { SecretBytes::new(TOKEN_SECRET_KEY.to_vec()) }
 
+/// A client and the client-first message it wrote.
+struct FirstMessage {
+    client: KafkaScramClient,
+    message: Vec<u8>,
+}
+
 /// A SCRAM client that writes the messages Kafka's `ScramSaslClient` writes.
 struct KafkaScramClient {
     mechanism: SaslMechanism,
@@ -59,7 +65,7 @@ impl KafkaScramClient {
         sasl_name: &str,
         extensions: &str,
         password: &[u8],
-    ) -> (Self, Vec<u8>) {
+    ) -> FirstMessage {
         let gs2_header = format!(
             "n,{},",
             authorization_id.map_or(String::new(), |a| format!("a={a}"))
@@ -72,7 +78,7 @@ impl KafkaScramClient {
             gs2_header,
             client_first_bare,
         };
-        (client, message)
+        FirstMessage { client, message }
     }
 
     /// The client-final message for `server_first`.
@@ -211,8 +217,10 @@ fn exchange(
         exchange: SaslExchange::ScramPending,
         pending_token_expiry_ms: None,
     };
-    let (client, first) =
-        KafkaScramClient::first(mechanism, authorization_id, sasl_name, extensions, password);
+    let FirstMessage {
+        client,
+        message: first,
+    } = KafkaScramClient::first(mechanism, authorization_id, sasl_name, extensions, password);
     let round1 = authenticate(source, secret_key, &mut auth, first);
     if round1.error_code != 0 {
         assert_failed_authenticate_response(&round1, round1.error_message.as_deref());
@@ -255,14 +263,14 @@ fn principal(name: &str, mechanism: SaslMechanism) -> Principal {
 
 /// One exchange row: case name, GS2 authorization id, SASL name, extensions,
 /// password and the expected outcome.
-type ExchangeCase<'a> = (
-    &'a str,
-    Option<&'a str>,
-    &'a str,
-    &'a str,
-    &'a [u8],
-    Outcome,
-);
+struct ExchangeCase<'a> {
+    case: &'a str,
+    authorization_id: Option<&'a str>,
+    sasl_name: &'a str,
+    extensions: &'a str,
+    password: &'a [u8],
+    expected: Outcome,
+}
 
 /// Kafka's `ScramSaslServer` reads the token store if and only if the
 /// client-first message carries `tokenauth=true`, for both mechanisms.
@@ -295,161 +303,169 @@ fn tokenauth_extension_selects_the_credential_store() {
         let generic_failure = Outcome::FirstRoundFailed(None);
         // (case, authzid, sasl name, extensions, password, expected)
         let cases: [ExchangeCase<'_>; 15] = [
-            (
-                "SCRAM user without extension",
-                None,
-                "alice",
-                "",
-                user,
-                Outcome::Authenticated {
+            ExchangeCase {
+                case: "SCRAM user without extension",
+                authorization_id: None,
+                sasl_name: "alice",
+                extensions: "",
+                password: user,
+                expected: Outcome::Authenticated {
                     principal: principal("alice", mechanism),
                     via_token: false,
                 },
-            ),
-            (
-                "token with tokenauth",
-                None,
-                "tok",
-                TOKEN_AUTH,
-                &token_pw,
-                owner,
-            ),
-            (
-                "tokenauth parsed as Java parseBoolean",
-                None,
-                "tok",
-                ",tokenauth=TRUE",
-                &token_pw,
-                Outcome::Authenticated {
+            },
+            ExchangeCase {
+                case: "token with tokenauth",
+                authorization_id: None,
+                sasl_name: "tok",
+                extensions: TOKEN_AUTH,
+                password: &token_pw,
+                expected: owner,
+            },
+            ExchangeCase {
+                case: "tokenauth parsed as Java parseBoolean",
+                authorization_id: None,
+                sasl_name: "tok",
+                extensions: ",tokenauth=TRUE",
+                password: &token_pw,
+                expected: Outcome::Authenticated {
                     principal: principal(TOKEN_OWNER, mechanism),
                     via_token: true,
                 },
-            ),
-            (
-                "token id without tokenauth",
-                None,
-                "tok",
-                "",
-                &token_pw,
-                generic_failure,
-            ),
-            (
-                "tokenauth=false reads the user store",
-                None,
-                "tok",
-                ",tokenauth=false",
-                &token_pw,
-                Outcome::FirstRoundFailed(None),
-            ),
-            (
-                "SCRAM user with tokenauth",
-                None,
-                "alice",
-                TOKEN_AUTH,
-                user,
-                Outcome::FirstRoundFailed(None),
-            ),
-            (
-                "shared name with tokenauth uses the token",
-                None,
-                "shared",
-                TOKEN_AUTH,
-                &shared_pw,
-                Outcome::Authenticated {
+            },
+            ExchangeCase {
+                case: "token id without tokenauth",
+                authorization_id: None,
+                sasl_name: "tok",
+                extensions: "",
+                password: &token_pw,
+                expected: generic_failure,
+            },
+            ExchangeCase {
+                case: "tokenauth=false reads the user store",
+                authorization_id: None,
+                sasl_name: "tok",
+                extensions: ",tokenauth=false",
+                password: &token_pw,
+                expected: Outcome::FirstRoundFailed(None),
+            },
+            ExchangeCase {
+                case: "SCRAM user with tokenauth",
+                authorization_id: None,
+                sasl_name: "alice",
+                extensions: TOKEN_AUTH,
+                password: user,
+                expected: Outcome::FirstRoundFailed(None),
+            },
+            ExchangeCase {
+                case: "shared name with tokenauth uses the token",
+                authorization_id: None,
+                sasl_name: "shared",
+                extensions: TOKEN_AUTH,
+                password: &shared_pw,
+                expected: Outcome::Authenticated {
                     principal: principal(TOKEN_OWNER, mechanism),
                     via_token: true,
                 },
-            ),
-            (
-                "shared name with tokenauth refuses the user password",
-                None,
-                "shared",
-                TOKEN_AUTH,
-                user,
-                Outcome::ProofRefused,
-            ),
-            (
-                "shared name without tokenauth uses the user",
-                None,
-                "shared",
-                "",
-                user,
-                Outcome::Authenticated {
+            },
+            ExchangeCase {
+                case: "shared name with tokenauth refuses the user password",
+                authorization_id: None,
+                sasl_name: "shared",
+                extensions: TOKEN_AUTH,
+                password: user,
+                expected: Outcome::ProofRefused,
+            },
+            ExchangeCase {
+                case: "shared name without tokenauth uses the user",
+                authorization_id: None,
+                sasl_name: "shared",
+                extensions: "",
+                password: user,
+                expected: Outcome::Authenticated {
                     principal: principal("shared", mechanism),
                     via_token: false,
                 },
-            ),
-            (
-                "expired token",
-                None,
-                "expired",
-                TOKEN_AUTH,
-                &expired_pw,
-                Outcome::FirstRoundFailed(None),
-            ),
-            (
-                "escaped SASL name",
-                None,
-                "a=2Cb=3Dc",
-                "",
-                user,
-                Outcome::Authenticated {
+            },
+            ExchangeCase {
+                case: "expired token",
+                authorization_id: None,
+                sasl_name: "expired",
+                extensions: TOKEN_AUTH,
+                password: &expired_pw,
+                expected: Outcome::FirstRoundFailed(None),
+            },
+            ExchangeCase {
+                case: "escaped SASL name",
+                authorization_id: None,
+                sasl_name: "a=2Cb=3Dc",
+                extensions: "",
+                password: user,
+                expected: Outcome::Authenticated {
                     principal: principal("a,b=c", mechanism),
                     via_token: false,
                 },
-            ),
-            (
-                "authorization id equal to the user",
-                Some("alice"),
-                "alice",
-                "",
-                user,
-                Outcome::Authenticated {
+            },
+            ExchangeCase {
+                case: "authorization id equal to the user",
+                authorization_id: Some("alice"),
+                sasl_name: "alice",
+                extensions: "",
+                password: user,
+                expected: Outcome::Authenticated {
                     principal: principal("alice", mechanism),
                     via_token: false,
                 },
-            ),
+            },
             // `ScramSaslServer` compares the authzid against the token id,
             // the SCRAM user name, not against the token's owner.
-            (
-                "authorization id equal to the token id",
-                Some("tok"),
-                "tok",
-                TOKEN_AUTH,
-                &token_pw,
-                Outcome::Authenticated {
+            ExchangeCase {
+                case: "authorization id equal to the token id",
+                authorization_id: Some("tok"),
+                sasl_name: "tok",
+                extensions: TOKEN_AUTH,
+                password: &token_pw,
+                expected: Outcome::Authenticated {
                     principal: principal(TOKEN_OWNER, mechanism),
                     via_token: true,
                 },
-            ),
+            },
             // Kafka compares the authzid as sent, still `=2C`/`=3D` encoded,
             // with the decoded user name, so an escaped name never matches.
-            (
-                "escaped authorization id against the decoded user",
-                Some("a=2Cb=3Dc"),
-                "a=2Cb=3Dc",
-                "",
-                user,
-                Outcome::FirstRoundFailed(Some(
+            ExchangeCase {
+                case: "escaped authorization id against the decoded user",
+                authorization_id: Some("a=2Cb=3Dc"),
+                sasl_name: "a=2Cb=3Dc",
+                extensions: "",
+                password: user,
+                expected: Outcome::FirstRoundFailed(Some(
                     "Authentication failed: Client requested an authorization id that is \
                      different from username"
                         .into(),
                 )),
-            ),
-            (
-                "authorization id other than the user",
-                Some("mallory"),
-                "alice",
-                "",
-                user,
-                Outcome::FirstRoundFailed(Some(
+            },
+            ExchangeCase {
+                case: "authorization id other than the user",
+                authorization_id: Some("mallory"),
+                sasl_name: "alice",
+                extensions: "",
+                password: user,
+                expected: Outcome::FirstRoundFailed(Some(
                     "Authentication failed: Client requested an authorization id that is \
                      different from username"
                         .into(),
                 )),
-            ),
+            },
         ];
-        for (case, authorization_id, sasl_name, extensions, password, expected) in cases {
+        for ExchangeCase {
+            case,
+            authorization_id,
+            sasl_name,
+            extensions,
+            password,
+            expected,
+        } in cases
+        {
             check!(
                 exchange(
                     &source,
@@ -469,13 +485,16 @@ fn tokenauth_extension_selects_the_credential_store() {
 /// A token session carries the token expiry from round 1 to round 2.
 #[test]
 fn token_round_one_threads_the_token_expiry() {
-    let (expiry, source) = active_token_source();
+    let ActiveTokenSource { expiry, source } = active_token_source();
     let mut auth = ConnectionAuth::Negotiating {
         mechanism: SaslMechanism::ScramSha512,
         exchange: SaslExchange::ScramPending,
         pending_token_expiry_ms: None,
     };
-    let (client, first) = KafkaScramClient::first(
+    let FirstMessage {
+        client,
+        message: first,
+    } = KafkaScramClient::first(
         SaslMechanism::ScramSha512,
         None,
         "tok",
@@ -523,7 +542,7 @@ fn token_round_one_threads_the_token_expiry() {
 /// key fails the proof.
 #[test]
 fn token_password_is_recomputed_from_the_secret_key() {
-    let (_expiry, source) = active_token_source();
+    let ActiveTokenSource { source, .. } = active_token_source();
     let secret = token_secret();
     for mechanism in [SaslMechanism::ScramSha256, SaslMechanism::ScramSha512] {
         // (case, broker secret key, key the client's HMAC came from, expected)
@@ -570,6 +589,11 @@ fn token_password_is_recomputed_from_the_secret_key() {
 /// `ClientFirst::parse` follows Kafka's `ClientFirstMessage` pattern.
 #[test]
 fn client_first_parses_as_kafka_does() {
+    /// A client-first message and what parsing it gives.
+    struct ParseCase<'a> {
+        message: &'a str,
+        expected: Option<ClientFirst<'a>>,
+    }
     let parsed = |authorization_id, sasl_name, extensions| {
         Some(ClientFirst {
             authorization_id,
@@ -577,28 +601,64 @@ fn client_first_parses_as_kafka_does() {
             extensions,
         })
     };
-    let cases: [(&str, Option<ClientFirst<'_>>); 11] = [
-        ("n,,n=alice,r=abc", parsed(None, "alice", vec![])),
-        (
-            "n,a=alice,n=alice,r=abc",
-            parsed(Some("alice"), "alice", vec![]),
-        ),
-        ("n,,m=ext,n=alice,r=abc", parsed(None, "alice", vec![])),
-        (
-            "n,,n=tok,r=abc,tokenauth=true,other=x",
-            parsed(None, "tok", vec![("tokenauth", "true"), ("other", "x")]),
-        ),
-        ("n,,n=a=2Cb=3Dc,r=abc", parsed(None, "a=2Cb=3Dc", vec![])),
+    let cases: [ParseCase<'_>; 11] = [
+        ParseCase {
+            message: "n,,n=alice,r=abc",
+            expected: parsed(None, "alice", vec![]),
+        },
+        ParseCase {
+            message: "n,a=alice,n=alice,r=abc",
+            expected: parsed(Some("alice"), "alice", vec![]),
+        },
+        ParseCase {
+            message: "n,,m=ext,n=alice,r=abc",
+            expected: parsed(None, "alice", vec![]),
+        },
+        ParseCase {
+            message: "n,,n=tok,r=abc,tokenauth=true,other=x",
+            expected: parsed(None, "tok", vec![
+                ScramExtension {
+                    key: "tokenauth",
+                    value: "true",
+                },
+                ScramExtension {
+                    key: "other",
+                    value: "x",
+                },
+            ]),
+        },
+        ParseCase {
+            message: "n,,n=a=2Cb=3Dc,r=abc",
+            expected: parsed(None, "a=2Cb=3Dc", vec![]),
+        },
         // Only the `n` GS2 flag, a non-empty name and nonce, and alphabetic
         // extension keys match.
-        ("y,,n=alice,r=abc", None),
-        ("n,,n=,r=abc", None),
-        ("n,,n=alice,r=", None),
-        ("n,,n=a=41,r=abc", None),
-        ("n,,n=alice,r=abc,token_auth=true", None),
-        ("n,,r=abc,n=alice", None),
+        ParseCase {
+            message: "y,,n=alice,r=abc",
+            expected: None,
+        },
+        ParseCase {
+            message: "n,,n=,r=abc",
+            expected: None,
+        },
+        ParseCase {
+            message: "n,,n=alice,r=",
+            expected: None,
+        },
+        ParseCase {
+            message: "n,,n=a=41,r=abc",
+            expected: None,
+        },
+        ParseCase {
+            message: "n,,n=alice,r=abc,token_auth=true",
+            expected: None,
+        },
+        ParseCase {
+            message: "n,,r=abc,n=alice",
+            expected: None,
+        },
     ];
-    for (message, expected) in cases {
+    for ParseCase { message, expected } in cases {
         check!(
             ClientFirst::parse(message.as_bytes()) == expected,
             "{message}"
@@ -623,10 +683,16 @@ fn sasl_name_decoding_matches_scram_formatter() {
     }
 }
 
-fn active_token_source() -> (i64, FakeMetadataSource) {
+/// A metadata source holding one active token, and the token's expiry.
+struct ActiveTokenSource {
+    expiry: i64,
+    source: FakeMetadataSource,
+}
+
+fn active_token_source() -> ActiveTokenSource {
     let expiry = now_ms() + 60_000;
     let source = FakeMetadataSource::builder()
         .records(&[token("tok", expiry)])
         .build();
-    (expiry, source)
+    ActiveTokenSource { expiry, source }
 }

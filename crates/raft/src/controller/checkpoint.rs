@@ -11,6 +11,7 @@ use {
         error::RaftError,
         kraft::{
             controller::checkpoint::{latest_checkpoint_id, load_checkpoint_by_id},
+            snapshot_fetch::SnapshotId,
             transport::Inbound,
         },
         snapshot::SnapshotReader,
@@ -111,7 +112,7 @@ impl ControllerHandle {
 /// The highest `(end_offset, epoch)` `.checkpoint` in `dir` plus its raw
 /// bytes. Matches the bare-checkpoint format the engine writes (no `.meta`
 /// sidecar).
-pub(super) fn load_latest_checkpoint(dir: &std::path::Path) -> Option<((i64, i32), Vec<u8>)> {
+pub(super) fn load_latest_checkpoint(dir: &std::path::Path) -> Option<(SnapshotId, Vec<u8>)> {
     let id = latest_checkpoint_id(dir)?;
     let bytes = load_checkpoint_by_id(dir, id.0, id.1)?;
     Some((id, bytes))

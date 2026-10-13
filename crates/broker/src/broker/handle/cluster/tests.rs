@@ -20,7 +20,14 @@ struct StaticVoterSetup<'a> {
     #[default(SocketAddr::from(([127, 0, 0, 1], 0)))]
     controller_addr: SocketAddr,
     // An empty list retains the automatic quorum used by ordinary single-broker fixtures.
-    voters: &'a [(NodeId, SocketAddr)],
+    voters: &'a [StaticVoter],
+}
+
+/// A voter of the static quorum, and the address its controller listens on.
+#[derive(Clone, Copy)]
+struct StaticVoter {
+    node_id: NodeId,
+    controller_addr: SocketAddr,
 }
 
 #[bon::builder]
@@ -29,7 +36,7 @@ fn static_voter_test_config(
     #[builder(into, default = NodeId (1))] node_id: NodeId,
     #[builder(default = SocketAddr :: from (([127 , 0 , 0 , 1] , 0)))] listen_addr: SocketAddr,
     #[builder(default = SocketAddr :: from (([127 , 0 , 0 , 1] , 0)))] controller_addr: SocketAddr,
-    #[builder(default)] voters: &'_ [(NodeId, SocketAddr)],
+    #[builder(default)] voters: &'_ [StaticVoter],
 ) -> BrokerConfig {
     let setup = StaticVoterSetup {
         node_id,
@@ -52,7 +59,7 @@ fn static_voter_test_config(
     config.directory_id = uuid::Uuid::from_u128(u128::from(node_id.0));
     config.controller_quorum_voters = voters
         .iter()
-        .map(|(id, addr)| (*id, addr.to_string()))
+        .map(|voter| (voter.node_id, voter.controller_addr.to_string()))
         .collect();
     config
 }
@@ -69,7 +76,16 @@ async fn broker_handle_reports_non_default_node_and_voter_state() {
     let listen8 = data_listener8.local_addr().unwrap();
     let controller7 = controller_listener7.local_addr().unwrap();
     let controller8 = controller_listener8.local_addr().unwrap();
-    let voters = [(NodeId(7), controller7), (NodeId(8), controller8)];
+    let voters = [
+        StaticVoter {
+            node_id: NodeId(7),
+            controller_addr: controller7,
+        },
+        StaticVoter {
+            node_id: NodeId(8),
+            controller_addr: controller8,
+        },
+    ];
 
     let config7 = static_voter_test_config()
         .log_dir(dir7.path())
@@ -153,11 +169,20 @@ async fn broker_handle_reports_non_default_node_and_voter_state() {
 
 #[tokio::test]
 async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
-    type PendingWait<'a> = (
-        &'a str,
-        std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>,
-    );
-    type LeaderChangedCase<'a> = (&'a str, u128, u64, &'a [u64], i32, u64);
+    struct PendingWait<'a> {
+        name: &'a str,
+        wait: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>,
+    }
+    struct LeaderChangedCase<'a> {
+        topic: &'a str,
+        topic_id: u128,
+        leader: u64,
+        /// The replicas, which are also the ISR.
+        replicas: &'a [u64],
+        leader_epoch: i32,
+        /// The node the wait excludes as the old leader.
+        excluded: u64,
+    }
 
     let (handle, _dir) = start_broker_with(|_| {}).await;
     let timeout = std::time::Duration::from_millis(75);
@@ -167,63 +192,63 @@ async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
     // condition is unmet. The futures are lazy async fns, so building the
     // table up front does no work; each is awaited sequentially below.
     let pending_waits: [PendingWait<'_>; 9] = [
-        (
-            "wait_for_share_state_summary",
-            Box::pin(async {
+        PendingWait {
+            name: "wait_for_share_state_summary",
+            wait: Box::pin(async {
                 let () = handle
                     .wait_for_share_state_summary("missing-mutant-group", topic_id, 0)
                     .await;
             }),
-        ),
-        (
-            "wait_until_share_spso",
-            Box::pin(async {
+        },
+        PendingWait {
+            name: "wait_until_share_spso",
+            wait: Box::pin(async {
                 handle
                     .wait_until_share_spso("missing-mutant-group", topic_id, 0, 1)
                     .await;
             }),
-        ),
-        (
-            "wait_until_share_delivery_complete",
-            Box::pin(async {
+        },
+        PendingWait {
+            name: "wait_until_share_delivery_complete",
+            wait: Box::pin(async {
                 handle
                     .wait_until_share_delivery_complete("missing-mutant-group", topic_id, 0, 1)
                     .await;
             }),
-        ),
-        (
-            "wait_until_group_member_count",
-            Box::pin(async {
+        },
+        PendingWait {
+            name: "wait_until_group_member_count",
+            wait: Box::pin(async {
                 handle
                     .wait_until_group_member_count("missing-mutant-group", 1)
                     .await;
             }),
-        ),
-        (
-            "wait_until_streams_group_member_count",
-            Box::pin(async {
+        },
+        PendingWait {
+            name: "wait_until_streams_group_member_count",
+            wait: Box::pin(async {
                 handle
                     .wait_until_streams_group_member_count("missing-mutant-streams", 1)
                     .await;
             }),
-        ),
-        (
-            "wait_until_brokers_registered",
-            Box::pin(async {
+        },
+        PendingWait {
+            name: "wait_until_brokers_registered",
+            wait: Box::pin(async {
                 handle.wait_until_brokers_registered(2).await;
             }),
-        ),
-        (
-            "wait_until_partition_present",
-            Box::pin(async {
+        },
+        PendingWait {
+            name: "wait_until_partition_present",
+            wait: Box::pin(async {
                 handle
                     .wait_until_partition_present("missing-mutant-topic", 0)
                     .await;
             }),
-        ),
-        (
-            "wait_until_partition_leader_changed",
-            Box::pin(async {
+        },
+        PendingWait {
+            name: "wait_until_partition_leader_changed",
+            wait: Box::pin(async {
                 handle
                     .wait_until_partition_leader_changed(
                         "missing-mutant-topic",
@@ -232,17 +257,17 @@ async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
                     )
                     .await;
             }),
-        ),
-        (
-            "wait_until_isr_len",
-            Box::pin(async {
+        },
+        PendingWait {
+            name: "wait_until_isr_len",
+            wait: Box::pin(async {
                 handle
                     .wait_until_isr_len("missing-mutant-topic", 0, 1)
                     .await;
             }),
-        ),
+        },
     ];
-    for (name, wait) in pending_waits {
+    for PendingWait { name, wait } in pending_waits {
         assert!(
             tokio::time::timeout(timeout, wait).await.is_err(),
             "{name} resolved while its condition was unmet"
@@ -251,35 +276,63 @@ async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
 
     // wait_until_partition_leader_changed must stay pending for each of
     // these submitted partitions:
-    // (topic, topic_id, leader, replicas/isr, leader_epoch, excluded leader)
     let leader_changed_cases: [LeaderChangedCase<'_>; 4] = [
         // leader 0 means "no leader" — never counts as a change.
-        ("leader-zero-mutant-topic", 0xF001, 0, &[1], 3, 1),
+        LeaderChangedCase {
+            topic: "leader-zero-mutant-topic",
+            topic_id: 0xF001,
+            leader: 0,
+            replicas: &[1],
+            leader_epoch: 3,
+            excluded: 1,
+        },
         // the current leader is exactly the excluded node.
-        ("leader-excluded-mutant-topic", 0xF002, 2, &[1, 2], 3, 2),
+        LeaderChangedCase {
+            topic: "leader-excluded-mutant-topic",
+            topic_id: 0xF002,
+            leader: 2,
+            replicas: &[1, 2],
+            leader_epoch: 3,
+            excluded: 2,
+        },
         // leader epoch 0 is not a completed election.
-        ("leader-epoch-zero-mutant-topic", 0xF003, 2, &[1, 2], 0, 1),
+        LeaderChangedCase {
+            topic: "leader-epoch-zero-mutant-topic",
+            topic_id: 0xF003,
+            leader: 2,
+            replicas: &[1, 2],
+            leader_epoch: 0,
+            excluded: 1,
+        },
         // negative leader epoch likewise.
-        (
-            "leader-epoch-negative-mutant-topic",
-            0xF004,
-            2,
-            &[1, 2],
-            -1,
-            1,
-        ),
+        LeaderChangedCase {
+            topic: "leader-epoch-negative-mutant-topic",
+            topic_id: 0xF004,
+            leader: 2,
+            replicas: &[1, 2],
+            leader_epoch: -1,
+            excluded: 1,
+        },
     ];
-    for (topic, topic_id, leader, replicas, leader_epoch, excluded) in leader_changed_cases {
+    for LeaderChangedCase {
+        topic,
+        topic_id,
+        leader,
+        replicas,
+        leader_epoch,
+        excluded,
+    } in leader_changed_cases
+    {
         submit_metadata_topic_partition()
             .handle(&handle)
             .topic_id(uuid::Uuid::from_u128(topic_id))
             .partition_record(
                 metadata_partition_record()
                     .topic(topic)
-                    .leader(leader)
+                    .leader(krabka_ids::NodeId(leader))
                     .replicas((replicas).iter().copied().map(krabka_ids::NodeId).collect())
                     .isr((replicas).iter().copied().map(krabka_ids::NodeId).collect())
-                    .leader_epoch(leader_epoch)
+                    .leader_epoch(krabka_ids::LeaderEpoch(leader_epoch))
                     .call(),
             )
             .call()

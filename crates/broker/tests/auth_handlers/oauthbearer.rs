@@ -194,7 +194,10 @@ pub async fn drive_sasl_oauthbearer_session_open(
     addr: SocketAddr,
     bearer_token: &str,
 ) -> Result<(TcpStream, i64), io::Error> {
-    let (mut stream, mut corr) = oauthbearer_session_start(addr).await?;
+    let OauthbearerSession {
+        mut stream,
+        mut corr,
+    } = oauthbearer_session_start(addr).await?;
     let auth =
         oauthbearer_authenticate(&mut stream, &mut corr, oauthbearer_initial(bearer_token)).await?;
     if auth.error_code != 0 {
@@ -285,10 +288,17 @@ pub async fn oauthbearer_fixture(
     (dir, broker, addr)
 }
 
+/// A connection that finished the pre-authentication rounds, and the next
+/// correlation id to use on it.
+pub struct OauthbearerSession {
+    pub stream: TcpStream,
+    pub corr: i32,
+}
+
 /// Open the pre-authentication rounds without consuming a bearer token.
-pub async fn oauthbearer_session_start(addr: SocketAddr) -> Result<(TcpStream, i32), io::Error> {
+pub async fn oauthbearer_session_start(addr: SocketAddr) -> Result<OauthbearerSession, io::Error> {
     let mut stream = TcpStream::connect(addr).await?;
     let mut corr = 1;
     oauthbearer_handshake(&mut stream, &mut corr).await?;
-    Ok((stream, corr))
+    Ok(OauthbearerSession { stream, corr })
 }

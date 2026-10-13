@@ -24,15 +24,30 @@ use {
 
 const TOPIC_ID_BYTES: [u8; 16] = [7; 16];
 
-pub(super) const THREE_REGISTERED_BROKERS: &[(krabka_metadata::NodeId, BrokerEpoch)] = &[
-    (krabka_metadata::NodeId(1), BrokerEpoch(10)),
-    (krabka_metadata::NodeId(2), BrokerEpoch(20)),
-    (krabka_metadata::NodeId(3), BrokerEpoch(30)),
+/// A broker registered in a test image, with the epoch of its registration.
+#[derive(Clone, Copy)]
+pub(super) struct RegisteredBroker {
+    pub(super) node_id: krabka_metadata::NodeId,
+    pub(super) epoch: BrokerEpoch,
+}
+
+pub(super) const THREE_REGISTERED_BROKERS: &[RegisteredBroker] = &[
+    RegisteredBroker {
+        node_id: krabka_metadata::NodeId(1),
+        epoch: BrokerEpoch(10),
+    },
+    RegisteredBroker {
+        node_id: krabka_metadata::NodeId(2),
+        epoch: BrokerEpoch(20),
+    },
+    RegisteredBroker {
+        node_id: krabka_metadata::NodeId(3),
+        epoch: BrokerEpoch(30),
+    },
 ];
-pub(super) const TWO_REGISTERED_BROKERS: &[(krabka_metadata::NodeId, BrokerEpoch)] =
+pub(super) const TWO_REGISTERED_BROKERS: &[RegisteredBroker] =
     &[THREE_REGISTERED_BROKERS[0], THREE_REGISTERED_BROKERS[1]];
-pub(super) const ONE_REGISTERED_BROKER: &[(krabka_metadata::NodeId, BrokerEpoch)] =
-    &[THREE_REGISTERED_BROKERS[0]];
+pub(super) const ONE_REGISTERED_BROKER: &[RegisteredBroker] = &[THREE_REGISTERED_BROKERS[0]];
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub(super) struct ThreeBrokerEpochsSetup {
@@ -88,7 +103,7 @@ pub(super) struct PartitionFixture<'a> {
 /// registered brokers.
 pub(super) fn image_with_partition(
     fixture: &PartitionFixture<'_>,
-    epochs: &[(krabka_metadata::NodeId, BrokerEpoch)],
+    epochs: &[RegisteredBroker],
 ) -> MetadataImage {
     let mut image = MetadataImage::new(uuid::Uuid::nil());
     image.apply(&MetadataRecord::V1Topic(TopicRecord {
@@ -109,15 +124,15 @@ pub(super) fn image_with_partition(
         directories: vec![],
         partition_epoch: fixture.partition_epoch.0,
     }));
-    for &(id, ep) in epochs {
-        image.apply(&reg(id, ep));
+    for &RegisteredBroker { node_id, epoch } in epochs {
+        image.apply(&reg(node_id, epoch));
     }
     image
 }
 
 /// An image with topic "t" partition 0, replicas [1,2,3], isr [1,2], and
 /// leader 1 at `leader_epoch` 5. `epochs` gives the registered brokers.
-pub(super) fn image_with(epochs: &[(krabka_metadata::NodeId, BrokerEpoch)]) -> MetadataImage {
+pub(super) fn image_with(epochs: &[RegisteredBroker]) -> MetadataImage {
     image_with_partition(&PartitionFixture::default(), epochs)
 }
 

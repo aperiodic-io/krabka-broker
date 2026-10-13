@@ -10,9 +10,13 @@ use {
         broker::{
             Broker, BrokerHandle, DisklessRuntime,
             diskless_index::{DisklessFlusherStartup, bootstrap_diskless_index_log},
-            listeners::{ListenerStartup, bind_listeners_and_recover_moves, spawn_listener_tasks},
+            listeners::{
+                ListenerStartup, ListenerTasks, bind_listeners_and_recover_moves,
+                spawn_listener_tasks,
+            },
             rlmm::{KafkaSwapKickoff, bootstrap_topic_rlmm},
             runtime::BrokerRuntimeStartup,
+            transport::StartupTransport,
         },
         config::BrokerConfig,
         controller_admin::BrokerControllerAdminRouter,
@@ -22,7 +26,7 @@ use {
         handlers::registry::build_registry,
         log_dir_status::LogDirRegistry,
         metadata_source::MetadataSource,
-        network::{client::InterBrokerClient, dispatch::RequestByteBudget},
+        network::dispatch::RequestByteBudget,
         partition_registry::PartitionRegistry,
         producer_id_manager::ProducerIdManager,
         producer_state::ProducerState,
@@ -39,16 +43,31 @@ use {
     tokio_util::sync::CancellationToken,
 };
 
-pub(super) type BrokerCoordinatorSet = (
-    Arc<GroupCoordinator>,
-    Arc<ProducerIdManager>,
-    Arc<ProducerState>,
-    Arc<TxnCoordinator>,
-    Arc<ShareCoordinator>,
-    Arc<SharePartitionLeaderManager>,
-    Arc<BarrierCoordinator>,
-    Arc<AutoTopicCreation>,
-);
+/// The coordinators and managers that startup built before the final assembly.
+pub(super) struct BrokerCoordinatorSet {
+    pub(super) group_coordinator: Arc<GroupCoordinator>,
+    pub(super) producer_ids: Arc<ProducerIdManager>,
+    pub(super) producer_state: Arc<ProducerState>,
+    pub(super) txn_coordinator: Arc<TxnCoordinator>,
+    pub(super) share_coordinator: Arc<ShareCoordinator>,
+    pub(super) share_partition_leaders: Arc<SharePartitionLeaderManager>,
+    pub(super) barrier_coordinator: Arc<BarrierCoordinator>,
+    pub(super) auto_topic_creation: Arc<AutoTopicCreation>,
+}
+
+/// The metadata plane the broker is built on.
+pub(super) struct BrokerMetadataHandles {
+    pub(super) controller: Arc<dyn MetadataSource>,
+    pub(super) partitions: Arc<PartitionRegistry>,
+    pub(super) admin_router: Option<Arc<BrokerControllerAdminRouter>>,
+}
+
+/// What the diskless bootstrap task hands back.
+struct DisklessBootstrap {
+    task: JoinHandle<()>,
+    /// Set once the diskless flusher is ready.
+    flusher_ready: Arc<AtomicBool>,
+}
 
 pub(super) struct BrokerStorageStartup {
     pub(super) log_dir_status: LogDirRegistry,
@@ -58,21 +77,17 @@ pub(super) struct BrokerStorageStartup {
 pub(super) async fn finish_broker_startup(
     mut config: BrokerConfig,
     data_listeners: Vec<TcpListener>,
-    metadata: (
-        Arc<dyn MetadataSource>,
-        Arc<PartitionRegistry>,
-        Option<Arc<BrokerControllerAdminRouter>>,
-    ),
+    metadata: BrokerMetadataHandles,
     coordinators: BrokerCoordinatorSet,
-    transport: (
-        Option<Arc<krabka_security::DynamicServerConfig>>,
-        bool,
-        Arc<InterBrokerClient>,
-    ),
+    transport: StartupTransport,
     runtime: BrokerRuntimeStartup,
     storage: BrokerStorageStartup,
 ) -> Result<BrokerHandle, BrokerError> {
-    let (controller, partitions, admin_router) = metadata;
+    let BrokerMetadataHandles {
+        controller,
+        partitions,
+        admin_router,
+    } = metadata;
     let ListenerStartup {
         bound,
         listen_addr,
@@ -94,21 +109,21 @@ pub(super) async fn finish_broker_startup(
         controller,
         partitions,
         future_logs,
-        group_coordinator: coordinators.0,
-        producer_ids: coordinators.1,
-        producer_state: coordinators.2,
-        txn_coordinator: coordinators.3,
-        share_coordinator: coordinators.4,
-        share_partition_leaders: coordinators.5,
-        barrier_coordinator: coordinators.6,
-        auto_topic_creation: coordinators.7,
+        group_coordinator: coordinators.group_coordinator,
+        producer_ids: coordinators.producer_ids,
+        producer_state: coordinators.producer_state,
+        txn_coordinator: coordinators.txn_coordinator,
+        share_coordinator: coordinators.share_coordinator,
+        share_partition_leaders: coordinators.share_partition_leaders,
+        barrier_coordinator: coordinators.barrier_coordinator,
+        auto_topic_creation: coordinators.auto_topic_creation,
         supervisor_shutdown: runtime.supervisor_shutdown,
         supervisor_handle: tokio::sync::Mutex::new(Some(runtime.supervisor_handle)),
         disk_scanner_handle: tokio::sync::Mutex::new(runtime.disk_scanner_handle),
         liveness: runtime.liveness_services.liveness,
-        tls_dynamic: transport.0,
-        ktls_enabled: transport.1,
-        inter_broker_client: transport.2,
+        tls_dynamic: transport.tls_dynamic,
+        ktls_enabled: transport.ktls_enabled,
+        inter_broker_client: transport.inter_broker_client,
         unclean_recovery: runtime.liveness_services.unclean_recovery,
         metrics: runtime.metrics,
         metrics_bound_addr: runtime.metrics_bound_addr,
@@ -160,7 +175,10 @@ pub(super) async fn finish_broker_startup(
             ));
         }
     };
-    let (shutdown, listener_tasks) = spawn_listener_tasks(&broker, bound);
+    let ListenerTasks {
+        shutdown,
+        tasks: listener_tasks,
+    } = spawn_listener_tasks(&broker, bound);
     emit_broker_started(&broker, runtime.audit_led_partition).await;
     let topic_rlmm_task = spawn_rlmm_bootstrap(
         &broker,
@@ -170,8 +188,11 @@ pub(super) async fn finish_broker_startup(
     );
     let (diskless_task, diskless_flusher_ready) =
         diskless_bootstrap.map_or((None, None), |(handle, kickoff)| {
-            let (task, ready) = spawn_diskless_bootstrap(&broker, handle, kickoff, &shutdown);
-            (Some(task), Some(ready))
+            let DisklessBootstrap {
+                task,
+                flusher_ready,
+            } = spawn_diskless_bootstrap(&broker, handle, kickoff, &shutdown);
+            (Some(task), Some(flusher_ready))
         });
     Ok(BrokerHandle {
         listen_addr,
@@ -238,7 +259,7 @@ fn spawn_diskless_bootstrap(
     handle: &Arc<DisklessReadHandle>,
     kickoff: &KafkaSwapKickoff,
     shutdown: &CancellationToken,
-) -> (JoinHandle<()>, Arc<AtomicBool>) {
+) -> DisklessBootstrap {
     let cache = Arc::clone(&handle.index);
     let ready = Arc::new(AtomicBool::new(false));
     let flusher = DisklessFlusherStartup {
@@ -257,5 +278,8 @@ fn spawn_diskless_bootstrap(
     let task = tokio::spawn(async move {
         bootstrap_diskless_index_log(cache, kickoff, flusher, shutdown).await;
     });
-    (task, ready)
+    DisklessBootstrap {
+        task,
+        flusher_ready: ready,
+    }
 }

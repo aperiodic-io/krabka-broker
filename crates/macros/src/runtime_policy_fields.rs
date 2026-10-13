@@ -310,20 +310,26 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
         } else {
             fields
         };
-        prepared.push((before, fields));
+        prepared.push(FieldGroup { before, fields });
     }
     insert_fields(item, prepared)
 }
 
+/// Fields to insert into the struct, ahead of the field named `before`.
+struct FieldGroup {
+    before: &'static str,
+    fields: TokenStream,
+}
+
 fn insert_fields(
     item: TokenStream,
-    fields: impl IntoIterator<Item = (&'static str, TokenStream)>,
+    fields: impl IntoIterator<Item = FieldGroup>,
 ) -> Result<TokenStream, ParseError> {
     let (mut tokens, body) = named_body(item, "runtime_policy_fields")?;
     let TokenTree::Group(group) = &mut tokens[body] else {
         unreachable!()
     };
-    for (before, fields) in fields {
+    for FieldGroup { before, fields } in fields {
         let mut start = group
             .tokens
             .windows(2)
@@ -406,5 +412,8 @@ fn controller_fields(
         #[doc = {{ controller_fetch_miss_limit_doc }}]
         pub controller_fetch_miss_limit: Option<u32>,
     };
-    insert_fields(item, [("metadata_raft_command_queue_capacity", fields)])
+    insert_fields(item, [FieldGroup {
+        before: "metadata_raft_command_queue_capacity",
+        fields,
+    }])
 }

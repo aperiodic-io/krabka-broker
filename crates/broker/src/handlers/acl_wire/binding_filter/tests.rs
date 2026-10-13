@@ -37,6 +37,39 @@ fn topic_acl(name: &str, pattern_type: PatternType) -> AclEntry {
 /// Edits one axis of a filter in a test table row.
 type FilterEdit = fn(&mut AclBindingFilter);
 
+/// A wire-filter corruption that must make [`AclBindingFilter::from_wire`] refuse.
+struct CorruptCase {
+    axis: &'static str,
+    corrupt: fn(&mut WireAclBindingFilter<'_>),
+}
+
+/// A filter edit with the name that labels a failed case.
+struct EditCase {
+    name: &'static str,
+    edit: FilterEdit,
+}
+
+/// A filter edit and whether the edited filter still matches the entry.
+struct EntryMatchCase {
+    name: &'static str,
+    edit: FilterEdit,
+    want: bool,
+}
+
+/// A filter edit and the refusal message it must produce, if any.
+struct UnknownMessageCase {
+    name: &'static str,
+    edit: FilterEdit,
+    want: Option<&'static str>,
+}
+
+/// A wire pattern type and resource name, with the seeded names the filter must match.
+struct PatternMatchCase {
+    wire_pattern_type: i8,
+    name: Option<&'static str>,
+    want: &'static [&'static str],
+}
+
 fn any_filter() -> AclBindingFilter {
     AclBindingFilter {
         resource_type: AxisFilter::Any,
@@ -144,14 +177,25 @@ fn from_wire_decodes_every_axis() {
 
 #[test]
 fn from_wire_refuses_unknown_on_any_axis() {
-    type Corrupt = fn(&mut WireAclBindingFilter<'_>);
-    let cases: [(&str, Corrupt); 4] = [
-        ("resource_type", |w| w.resource_type = WIRE_UNKNOWN),
-        ("pattern_type", |w| w.pattern_type = WIRE_UNKNOWN),
-        ("operation", |w| w.operation = WIRE_UNKNOWN),
-        ("permission_type", |w| w.permission_type = WIRE_UNKNOWN),
+    let cases: [CorruptCase; 4] = [
+        CorruptCase {
+            axis: "resource_type",
+            corrupt: |w| w.resource_type = WIRE_UNKNOWN,
+        },
+        CorruptCase {
+            axis: "pattern_type",
+            corrupt: |w| w.pattern_type = WIRE_UNKNOWN,
+        },
+        CorruptCase {
+            axis: "operation",
+            corrupt: |w| w.operation = WIRE_UNKNOWN,
+        },
+        CorruptCase {
+            axis: "permission_type",
+            corrupt: |w| w.permission_type = WIRE_UNKNOWN,
+        },
     ];
-    for (axis, corrupt) in cases {
+    for CorruptCase { axis, corrupt } in cases {
         let mut w = wire(Some("orders"), LITERAL);
         corrupt(&mut w);
         check!(
@@ -167,28 +211,85 @@ fn from_wire_refuses_unknown_on_any_axis() {
 fn resource_pattern_matching_follows_kafka() {
     let seeded = PATTERN_MATCHING_FIXTURE;
     let all: &[&str] = &["foo", "*", "f", "fo", "bar", "food"];
-    let cases: [(i8, Option<&str>, &[&str]); 13] = [
-        (WIRE_ANY, None, all),
-        (WIRE_ANY, Some(""), &[]),
-        (WIRE_ANY, Some("foo"), &["foo"]),
-        (WIRE_ANY, Some("*"), &["*"]),
-        (WIRE_PATTERN_MATCH, None, all),
+    let cases: [PatternMatchCase; 13] = [
+        PatternMatchCase {
+            wire_pattern_type: WIRE_ANY,
+            name: None,
+            want: all,
+        },
+        PatternMatchCase {
+            wire_pattern_type: WIRE_ANY,
+            name: Some(""),
+            want: &[],
+        },
+        PatternMatchCase {
+            wire_pattern_type: WIRE_ANY,
+            name: Some("foo"),
+            want: &["foo"],
+        },
+        PatternMatchCase {
+            wire_pattern_type: WIRE_ANY,
+            name: Some("*"),
+            want: &["*"],
+        },
+        PatternMatchCase {
+            wire_pattern_type: WIRE_PATTERN_MATCH,
+            name: None,
+            want: all,
+        },
         // An empty name still applies to the literal wildcard.
-        (WIRE_PATTERN_MATCH, Some(""), &["*"]),
-        (WIRE_PATTERN_MATCH, Some("foo"), &["foo", "*", "f", "fo"]),
-        (WIRE_PATTERN_MATCH, Some("food"), &["*", "f", "fo", "food"]),
-        (LITERAL, None, &["foo", "*", "food"]),
-        (LITERAL, Some(""), &[]),
-        (LITERAL, Some("foo"), &["foo"]),
-        (PREFIXED, None, &["f", "fo", "bar"]),
-        (PREFIXED, Some("foo"), &[]),
+        PatternMatchCase {
+            wire_pattern_type: WIRE_PATTERN_MATCH,
+            name: Some(""),
+            want: &["*"],
+        },
+        PatternMatchCase {
+            wire_pattern_type: WIRE_PATTERN_MATCH,
+            name: Some("foo"),
+            want: &["foo", "*", "f", "fo"],
+        },
+        PatternMatchCase {
+            wire_pattern_type: WIRE_PATTERN_MATCH,
+            name: Some("food"),
+            want: &["*", "f", "fo", "food"],
+        },
+        PatternMatchCase {
+            wire_pattern_type: LITERAL,
+            name: None,
+            want: &["foo", "*", "food"],
+        },
+        PatternMatchCase {
+            wire_pattern_type: LITERAL,
+            name: Some(""),
+            want: &[],
+        },
+        PatternMatchCase {
+            wire_pattern_type: LITERAL,
+            name: Some("foo"),
+            want: &["foo"],
+        },
+        PatternMatchCase {
+            wire_pattern_type: PREFIXED,
+            name: None,
+            want: &["f", "fo", "bar"],
+        },
+        PatternMatchCase {
+            wire_pattern_type: PREFIXED,
+            name: Some("foo"),
+            want: &[],
+        },
     ];
-    for (pattern_type, name, want) in cases {
+    for PatternMatchCase {
+        wire_pattern_type: pattern_type,
+        name,
+        want,
+    } in cases
+    {
         let filter = AclBindingFilter::from_wire(wire(name, pattern_type)).expect("filter");
         let got: Vec<&str> = seeded
             .iter()
-            .filter(|(n, pt)| filter.matches(&topic_acl(n, *pt)))
-            .map(|(n, _)| *n)
+            .filter(|seed| filter.matches(&topic_acl(seed.name, seed.pattern_type)))
+            .map(|seed| seed.name)
             .collect();
         check!(got == want, "pattern {pattern_type} name {name:?}");
     }
@@ -197,42 +298,54 @@ fn resource_pattern_matching_follows_kafka() {
 #[test]
 fn entry_matching_takes_only_null_as_any() {
     let entry = topic_acl("orders", PatternType::Literal);
-    let cases: [(&str, FilterEdit, bool); 9] = [
-        ("everything null", |_| {}, true),
-        (
-            "empty principal",
-            |f| f.principal = Some(String::new()),
-            false,
-        ),
-        ("empty host", |f| f.host = Some(String::new()), false),
-        (
-            "principal",
-            |f| f.principal = Some("User:alice".into()),
-            true,
-        ),
-        (
-            "other principal",
-            |f| f.principal = Some("User:bob".into()),
-            false,
-        ),
-        ("host", |f| f.host = Some("*".into()), true),
-        (
-            "operation",
-            |f| f.operation = AxisFilter::Exact(AclOperation::Write),
-            false,
-        ),
-        (
-            "permission",
-            |f| f.permission_type = AxisFilter::Exact(PermissionType::Deny),
-            false,
-        ),
-        (
-            "resource type",
-            |f| f.resource_type = AxisFilter::Exact(ResourceType::Group),
-            false,
-        ),
+    let cases: [EntryMatchCase; 9] = [
+        EntryMatchCase {
+            name: "everything null",
+            edit: |_| {},
+            want: true,
+        },
+        EntryMatchCase {
+            name: "empty principal",
+            edit: |f| f.principal = Some(String::new()),
+            want: false,
+        },
+        EntryMatchCase {
+            name: "empty host",
+            edit: |f| f.host = Some(String::new()),
+            want: false,
+        },
+        EntryMatchCase {
+            name: "principal",
+            edit: |f| f.principal = Some("User:alice".into()),
+            want: true,
+        },
+        EntryMatchCase {
+            name: "other principal",
+            edit: |f| f.principal = Some("User:bob".into()),
+            want: false,
+        },
+        EntryMatchCase {
+            name: "host",
+            edit: |f| f.host = Some("*".into()),
+            want: true,
+        },
+        EntryMatchCase {
+            name: "operation",
+            edit: |f| f.operation = AxisFilter::Exact(AclOperation::Write),
+            want: false,
+        },
+        EntryMatchCase {
+            name: "permission",
+            edit: |f| f.permission_type = AxisFilter::Exact(PermissionType::Deny),
+            want: false,
+        },
+        EntryMatchCase {
+            name: "resource type",
+            edit: |f| f.resource_type = AxisFilter::Exact(ResourceType::Group),
+            want: false,
+        },
     ];
-    for (name, edit, want) in cases {
+    for EntryMatchCase { name, edit, want } in cases {
         let mut filter = any_filter();
         edit(&mut filter);
         check!(filter.matches(&entry) == want, "{name}");
@@ -286,18 +399,27 @@ fn exact_user_token_filter_matches_the_stored_binding() {
 #[test]
 fn unknown_axes_match_nothing() {
     let entry = topic_acl("orders", PatternType::Literal);
-    let cases: [(&str, FilterEdit); 3] = [
-        ("unknown resource type", |f| {
-            f.resource_type = AxisFilter::Unknown;
-        }),
-        ("unknown pattern type", |f| {
-            f.pattern_type = PatternTypeFilter::Unknown;
-        }),
-        ("unknown permission", |f| {
-            f.permission_type = AxisFilter::Unknown;
-        }),
+    let cases: [EditCase; 3] = [
+        EditCase {
+            name: "unknown resource type",
+            edit: |f| {
+                f.resource_type = AxisFilter::Unknown;
+            },
+        },
+        EditCase {
+            name: "unknown pattern type",
+            edit: |f| {
+                f.pattern_type = PatternTypeFilter::Unknown;
+            },
+        },
+        EditCase {
+            name: "unknown permission",
+            edit: |f| {
+                f.permission_type = AxisFilter::Unknown;
+            },
+        },
     ];
-    for (name, edit) in cases {
+    for EditCase { name, edit } in cases {
         let mut filter = any_filter();
         edit(&mut filter);
         check!(!filter.matches(&entry), "{name}");
@@ -306,38 +428,42 @@ fn unknown_axes_match_nothing() {
 
 #[test]
 fn unknown_message_names_the_failing_half_of_the_filter() {
-    let cases: [(&str, FilterEdit, Option<&str>); 6] = [
-        ("valid", |_| {}, None),
-        (
-            "resource type",
-            |f| f.resource_type = AxisFilter::Unknown,
-            Some(UNKNOWN_PATTERN_FILTER_MESSAGE),
-        ),
-        (
-            "pattern type",
-            |f| f.pattern_type = PatternTypeFilter::Unknown,
-            Some(UNKNOWN_PATTERN_FILTER_MESSAGE),
-        ),
-        (
-            "operation",
-            |f| f.operation = AxisFilter::Unknown,
-            Some(UNKNOWN_ENTRY_FILTER_MESSAGE),
-        ),
-        (
-            "permission",
-            |f| f.permission_type = AxisFilter::Unknown,
-            Some(UNKNOWN_ENTRY_FILTER_MESSAGE),
-        ),
-        (
-            "pattern half wins",
-            |f| {
+    let cases: [UnknownMessageCase; 6] = [
+        UnknownMessageCase {
+            name: "valid",
+            edit: |_| {},
+            want: None,
+        },
+        UnknownMessageCase {
+            name: "resource type",
+            edit: |f| f.resource_type = AxisFilter::Unknown,
+            want: Some(UNKNOWN_PATTERN_FILTER_MESSAGE),
+        },
+        UnknownMessageCase {
+            name: "pattern type",
+            edit: |f| f.pattern_type = PatternTypeFilter::Unknown,
+            want: Some(UNKNOWN_PATTERN_FILTER_MESSAGE),
+        },
+        UnknownMessageCase {
+            name: "operation",
+            edit: |f| f.operation = AxisFilter::Unknown,
+            want: Some(UNKNOWN_ENTRY_FILTER_MESSAGE),
+        },
+        UnknownMessageCase {
+            name: "permission",
+            edit: |f| f.permission_type = AxisFilter::Unknown,
+            want: Some(UNKNOWN_ENTRY_FILTER_MESSAGE),
+        },
+        UnknownMessageCase {
+            name: "pattern half wins",
+            edit: |f| {
                 f.pattern_type = PatternTypeFilter::Unknown;
                 f.operation = AxisFilter::Unknown;
             },
-            Some(UNKNOWN_PATTERN_FILTER_MESSAGE),
-        ),
+            want: Some(UNKNOWN_PATTERN_FILTER_MESSAGE),
+        },
     ];
-    for (name, edit, want) in cases {
+    for UnknownMessageCase { name, edit, want } in cases {
         let mut filter = any_filter();
         edit(&mut filter);
         check!(filter.unknown_message() == want, "{name}");

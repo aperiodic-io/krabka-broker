@@ -11,8 +11,8 @@ use {
     super::{
         replay::finalize,
         test_support::{
-            bare_coordinator, classic_group_record, consumer_group_records, replay_classic_residue,
-            replay_values,
+            LogRecord, ReplayedCoordinator, bare_coordinator, classic_group_record,
+            consumer_group_records, replay_classic_residue, replay_stream,
         },
     },
     crate::coordinator::{
@@ -34,61 +34,59 @@ async fn downgraded_group_replays_as_classic() {
 
     let coord = bare_coordinator();
 
-    let [(group_key, group_value), (member_key, member_value)] = consumer_group_records(1, None);
+    let [group, member] = consumer_group_records(1, None);
+    let group_key = group.key.clone();
+    let member_key = member.key.clone();
 
     // Record stream in log order.
     let (k2_key, k2_val) = classic_group_record("g", "m1");
     let (k2_key2, k2_val2) = classic_group_record("g", "m1");
-    let stream: Vec<(bytes::Bytes, Option<bytes::Bytes>)> = vec![
+    let stream: Vec<LogRecord> = vec![
         // 1. initial classic group
-        (k2_key, Some(k2_val)),
+        LogRecord::put(k2_key, k2_val),
         // 2. upgrade drops k2 (tombstone)
-        (GroupMetadataValue::encode_key("g").unwrap(), None),
+        LogRecord::tombstone(GroupMetadataValue::encode_key("g").unwrap()),
         // 3. upgrade: next-gen group metadata
-        (group_key.clone(), Some(group_value)),
+        group,
         // 4. upgrade: next-gen member metadata
-        (member_key.clone(), Some(member_value)),
+        member,
         // 5. the downgrade tombstones the consumer group in the order of
         // Kafka's `ConsumerGroup.createGroupTombstoneRecords`: the member's
         // current assignment (k8), its target (k7), the target metadata
         // (k6), the member (k5), the deprecated k4 record, and the group (k3)
-        (
+        LogRecord::tombstone(
             ng::encode_key(&ng::NextGenKey::CurrentMemberAssignment {
                 group_id: "g".into(),
                 member_id: "m1".into(),
             })
             .unwrap(),
-            None,
         ),
-        (
+        LogRecord::tombstone(
             ng::encode_key(&ng::NextGenKey::TargetAssignmentMember {
                 group_id: "g".into(),
                 member_id: "m1".into(),
             })
             .unwrap(),
-            None,
         ),
-        (
+        LogRecord::tombstone(
             ng::encode_key(&ng::NextGenKey::TargetAssignmentMetadata {
                 group_id: "g".into(),
             })
             .unwrap(),
-            None,
         ),
-        (member_key, None),
-        (
+        LogRecord::tombstone(member_key),
+        LogRecord::tombstone(
             ng::encode_key(&ng::NextGenKey::PartitionMetadata {
                 group_id: "g".into(),
             })
             .unwrap(),
-            None,
         ),
-        (group_key, None),
+        LogRecord::tombstone(group_key),
         // 6. downgrade writes a fresh k2 classic group
-        (k2_key2, Some(k2_val2)),
+        LogRecord::put(k2_key2, k2_val2),
     ];
 
-    let acc = super::test_support::replay_stream(&coord, stream);
+    let acc = replay_stream(&coord, stream);
     finalize(&coord, acc).await;
 
     // The group must NOT be next-gen, and the classic describe path must
@@ -121,7 +119,10 @@ async fn compacted_downgrade_residue_replays_as_classic() {
     // per key, and the k3 + its tombstone both GC away (both gone), leaving
     // the k6 TOMBSTONE the fix emits and the authoritative classic k2.
     // Replaying this surviving group-level tombstone must not create a seed.
-    let (coord, acc) = replay_classic_residue(None);
+    let ReplayedCoordinator {
+        coordinator: coord,
+        replayed: acc,
+    } = replay_classic_residue(None);
     finalize(&coord, acc).await;
 
     // The group must replay CLASSIC, not resurrect as next-gen.
@@ -138,7 +139,10 @@ async fn surviving_k6_write_cannot_resurrect_next_gen_ownership() {
 
     // A surviving k6 WRITE is what compaction retains if the downgrade
     // omitted k6's tombstone. It precedes the authoritative classic k2.
-    let (coord, acc) = replay_classic_residue(Some(
+    let ReplayedCoordinator {
+        coordinator: coord,
+        replayed: acc,
+    } = replay_classic_residue(Some(
         ng::TargetAssignmentMetadataValue {
             assignment_epoch: 1,
             assignment_timestamp_ms: 0,
@@ -168,7 +172,7 @@ async fn upgraded_group_without_tombstone_replays_as_consumer() {
 
     let coord = bare_coordinator();
     let stream = consumer_group_records(1, None);
-    let acc = replay_values(&coord, stream);
+    let acc = replay_stream(&coord, stream);
     finalize(&coord, acc).await;
 
     assert!(coord.group_type("g") != Some(GroupType::Classic));
@@ -194,7 +198,7 @@ async fn member_with_classic_block_replays_facade() {
             supported_protocols: vec![("range".into(), bytes::Bytes::from_static(b"meta"))],
         }),
     );
-    let acc = replay_values(&coord, stream);
+    let acc = replay_stream(&coord, stream);
     finalize(&coord, acc).await;
 
     let handle = coord.find("g").expect("consumer actor present");

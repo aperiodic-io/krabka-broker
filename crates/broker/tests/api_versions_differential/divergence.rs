@@ -84,7 +84,7 @@ pub(crate) struct ApiRow {
 /// v6, the streams v1 pair, api keys 93 and 94) and the pre-4.0 versions it
 /// still decodes (`Fetch` v0-v3, `ListOffsets` v0) are opt-ins, recorded in
 /// `api_catalog`'s notes and `docs/KIP_MATRIX.md` instead.
-const RANGE_DIVERGENCE_INTENTS: &[(i16, &str)] = &[];
+const RANGE_DIVERGENCE_INTENTS: &[RecordedIntent<'static>] = &[];
 
 /// Keys whose advertised ranges match the oracle's while the versions krabka
 /// serves do not, one entry each, with why krabka means it.
@@ -99,13 +99,19 @@ const RANGE_DIVERGENCE_INTENTS: &[(i16, &str)] = &[];
 ///
 /// It is empty (#784): `Produce` v0-v2, advertised by both brokers, is refused
 /// by krabka too unless `legacy_request_versions_enable` is set.
-const SERVED_RANGE_DIVERGENCES: &[(i16, &str)] = &[];
+const SERVED_RANGE_DIVERGENCES: &[RecordedIntent<'static>] = &[];
+
+/// Why krabka means one API key to diverge from the oracle.
+struct RecordedIntent<'a> {
+    api_key: i16,
+    intent: &'a str,
+}
 
 /// The two recorded-intent tables one join reads.
 #[derive(Clone, Copy)]
 struct Intents<'a> {
-    range: &'a [(i16, &'a str)],
-    served: &'a [(i16, &'a str)],
+    range: &'a [RecordedIntent<'a>],
+    served: &'a [RecordedIntent<'a>],
 }
 
 /// The tables this repository records.
@@ -129,11 +135,11 @@ fn range_divergence_intent(intents: Intents<'_>, api_key: i16, verdict: Verdict)
     if verdict != Verdict::RangeDiffers {
         return None;
     }
-    let Some((_, intent)) = intents
+    let Some(RecordedIntent { intent, .. }) = intents
         .range
         .iter()
         .chain(intents.served)
-        .find(|(key, _)| *key == api_key)
+        .find(|recorded| recorded.api_key == api_key)
     else {
         panic!(
             "api_key {api_key} now advertises a different range from the \
@@ -210,7 +216,10 @@ impl DivergenceReport {
             .map(|api_key| {
                 let krabka = find(krabka, api_key);
                 let kafka = find(kafka, api_key);
-                let served_divergence = intents.served.iter().any(|(key, _)| *key == api_key);
+                let served_divergence = intents
+                    .served
+                    .iter()
+                    .any(|recorded| recorded.api_key == api_key);
                 let verdict = match (krabka, kafka) {
                     (Some(ours), Some(theirs)) if ours == theirs && served_divergence => {
                         Verdict::RangeDiffers
@@ -295,8 +304,14 @@ mod tests {
     /// Intent tables of the shape the recorded ones once had, so the join's
     /// labelling is exercised whatever the recorded tables hold.
     const SAMPLE: Intents<'static> = Intents {
-        range: &[(1, "Fetch serves older versions.")],
-        served: &[(0, "Produce serves older versions.")],
+        range: &[RecordedIntent {
+            api_key: 1,
+            intent: "Fetch serves older versions.",
+        }],
+        served: &[RecordedIntent {
+            api_key: 0,
+            intent: "Produce serves older versions.",
+        }],
     };
 
     /// The sample intent for `api_key`, as `build_with` writes it.
@@ -363,13 +378,17 @@ mod tests {
     /// recorded sentence says something.
     #[test]
     fn every_recorded_intent_is_non_empty_and_keyed_once() {
-        let all: Vec<&(i16, &str)> = RANGE_DIVERGENCE_INTENTS
+        let all: Vec<&RecordedIntent<'_>> = RANGE_DIVERGENCE_INTENTS
             .iter()
             .chain(SERVED_RANGE_DIVERGENCES)
             .collect();
-        let unique: std::collections::BTreeSet<i16> = all.iter().map(|(key, _)| *key).collect();
+        let unique: std::collections::BTreeSet<i16> =
+            all.iter().map(|recorded| recorded.api_key).collect();
         assert!(unique.len() == all.len());
-        assert!(all.iter().all(|(_, intent)| !intent.trim().is_empty()));
+        assert!(
+            all.iter()
+                .all(|recorded| !recorded.intent.trim().is_empty())
+        );
     }
 
     /// #863: a key that advertises the oracle's own range, recorded as served

@@ -70,7 +70,14 @@ impl LogView for CellLog {
         single_epoch_end(self.end.get(), self.last_epoch, epoch)
     }
 }
-/// A log described by its epoch runs: `(epoch, record count)` in log order.
+/// One run of consecutive records that all carry the same epoch.
+#[derive(Clone, Copy, Debug)]
+pub struct EpochRun {
+    pub epoch: Epoch,
+    pub count: usize,
+}
+
+/// A log described by its epoch runs, in log order.
 ///
 /// Its divergence lookup is the real rule over the records it holds, so a
 /// test can put an epoch gap in the log, which neither [`FakeLog`] nor
@@ -79,16 +86,29 @@ pub struct RunsLog {
     epochs: Vec<Epoch>,
 }
 impl RunsLog {
-    pub fn new(runs: &[(Epoch, usize)]) -> Self {
+    pub fn new(runs: &[EpochRun]) -> Self {
         Self {
             epochs: runs
                 .iter()
-                .flat_map(|&(epoch, count)| std::iter::repeat_n(epoch, count))
+                .flat_map(|&EpochRun { epoch, count }| std::iter::repeat_n(epoch, count))
                 .collect(),
         }
     }
 }
 krabka_macros::epoch_log_view!(RunsLog, crate, "test log length fits in i64");
+
+/// A state machine together with the log it runs over.
+pub struct MachineAndLog {
+    pub machine: QuorumStateMachine,
+    pub log: FakeLog,
+}
+
+/// A [`MachineAndLog`] with the actions its setup events produced.
+pub struct MachineLogAndActions {
+    pub machine: QuorumStateMachine,
+    pub log: FakeLog,
+    pub actions: Vec<Action>,
+}
 
 pub use crate::simulation_support::voter_set as voters;
 /// Voter 1 in the standard three-voter quorum, fresh for each case.

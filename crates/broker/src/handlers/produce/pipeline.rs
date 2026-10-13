@@ -14,8 +14,9 @@ use {
         },
         prepare::{DecodeEnv, PreparedBatch, prepare_batch},
         producer_checks::{
-            DedupOutcome, TransactionRequest, Verification, handle_duplicate,
-            produce_verification_code, verify_transactional_produce, verify_with_coordinator,
+            DedupOutcome, PartitionName, ProducerIdAndEpoch, RowError, TransactionRequest,
+            Verification, handle_duplicate, produce_verification_code,
+            verify_transactional_produce, verify_with_coordinator,
         },
         record_limit::exceeds_decompressed_limit,
         schema::{SCHEMA_REJECTION_MESSAGE, validate_batch_schemas},
@@ -174,25 +175,40 @@ pub(super) struct AdmittedBatch {
 impl AdmittedBatch {
     /// The producer and partition this batch asks the coordinator about, or
     /// `None` when it needs no coordinator call.
-    fn coordinator_check(&self) -> Option<((krabka_log::ProducerId, i16), TopicPartition)> {
+    fn coordinator_check(&self) -> Option<CoordinatorCheck> {
         let Verification::Coordinator(check) = self.verification else {
             return None;
         };
-        Some((
-            (check.batch.producer_id, check.batch.producer_epoch),
-            TopicPartition {
+        Some(CoordinatorCheck {
+            producer: ProducerIdAndEpoch {
+                producer_id: check.batch.producer_id,
+                producer_epoch: check.batch.producer_epoch,
+            },
+            partition: TopicPartition {
                 topic: self.shared_topic.to_string(),
                 partition: krabka_ids::PartitionIndex(self.out.index),
             },
-        ))
+        })
     }
+}
+
+/// The producer and partition a batch asks the coordinator about.
+struct CoordinatorCheck {
+    producer: ProducerIdAndEpoch,
+    partition: TopicPartition,
 }
 
 /// The partitions one producer's coordinator call covers, each with the
 /// index of its batch.
 struct ProducerChecks {
-    producer: (krabka_log::ProducerId, i16),
-    partitions: Vec<(usize, TopicPartition)>,
+    producer: ProducerIdAndEpoch,
+    partitions: Vec<IndexedPartition>,
+}
+
+/// A partition of a coordinator call, and the index of its batch.
+struct IndexedPartition {
+    index: usize,
+    partition: TopicPartition,
 }
 
 /// The transaction coordinator's answer for each admitted batch that needs
@@ -210,17 +226,21 @@ pub(super) async fn verify_admitted(
     let mut answers = vec![None; batches.len()];
     let mut producers: Vec<ProducerChecks> = Vec::new();
     for (index, batch) in batches.iter().enumerate() {
-        let Some((producer, partition)) = batch.coordinator_check() else {
+        let Some(CoordinatorCheck {
+            producer,
+            partition,
+        }) = batch.coordinator_check()
+        else {
             continue;
         };
         match producers
             .iter_mut()
             .find(|known| known.producer == producer)
         {
-            Some(known) => known.partitions.push((index, partition)),
+            Some(known) => known.partitions.push(IndexedPartition { index, partition }),
             None => producers.push(ProducerChecks {
                 producer,
-                partitions: vec![(index, partition)],
+                partitions: vec![IndexedPartition { index, partition }],
             }),
         }
     }
@@ -236,12 +256,12 @@ pub(super) async fn verify_admitted(
             producer,
             partitions
                 .iter()
-                .map(|(_, partition)| partition.clone())
+                .map(|checked| checked.partition.clone())
                 .collect(),
         )
         .await;
-        for ((index, _), (_, code)) in partitions.into_iter().zip(answered) {
-            answers[index] = Some(code);
+        for (checked, code) in partitions.into_iter().zip(answered) {
+            answers[checked.index] = Some(code);
         }
     }
     answers
@@ -289,14 +309,18 @@ async fn ready_transition(
 async fn verify_before_append(
     prepared: &super::prepare::PreparedBatch,
     part: &Partition,
-    (transaction, mut refused): (TransactionRequest<'_>, PartitionProduceResponse),
+    transaction: TransactionRequest<'_>,
+    mut refused: PartitionProduceResponse,
 ) -> Result<Verification, Box<PartitionProduceResponse>> {
     let verified = if prepared.attributes.is_transactional() && part.diskless {
-        Err((codes::INVALID_TXN_STATE, None))
+        Err(RowError {
+            code: codes::INVALID_TXN_STATE,
+            message: None,
+        })
     } else {
         verify_transactional_produce(prepared, part, transaction).await
     };
-    verified.map_err(|(code, message)| {
+    verified.map_err(|RowError { code, message }| {
         refused.error_code = code;
         refused.error_message = message;
         Box::new(refused)
@@ -490,7 +514,9 @@ pub(super) async fn admit_partition(
     // lookup.
     if exceeds_decompressed_limit(
         &prepared,
-        (image, broker_policy.node_id, topic_name),
+        image,
+        broker_policy.node_id,
+        topic_name,
         unstable_api_versions,
         record_decompression_policy,
     ) {
@@ -616,11 +642,11 @@ pub(super) async fn admit_partition(
 
     // KIP-890: verify before the duplicate lookup, outside the barrier (a
     // coordinator call); the log checks the guard under the append lock.
-    let verification =
-        match verify_before_append(&prepared, &part, (transaction, out.clone())).await {
-            Ok(verification) => verification,
-            Err(refused) => return Ok(Admission::Done(*refused)),
-        };
+    let verification = match verify_before_append(&prepared, &part, transaction, out.clone()).await
+    {
+        Ok(verification) => verification,
+        Err(refused) => return Ok(Admission::Done(*refused)),
+    };
     Ok(Admission::Admitted(Box::new(AdmittedBatch {
         prepared,
         part,
@@ -683,8 +709,10 @@ pub(super) async fn complete_partition(
             coordinator_answer.unwrap_or(codes::UNKNOWN_SERVER_ERROR),
             version,
         ) {
-            (codes::NONE, _) => Some(check),
-            (code, message) => {
+            RowError {
+                code: codes::NONE, ..
+            } => Some(check),
+            RowError { code, message } => {
                 out.error_code = code;
                 out.error_message = message;
                 return Ok(PartitionOutcome::Done(out));
@@ -725,7 +753,10 @@ pub(super) async fn complete_partition(
         &prepared,
         producer_state,
         &part,
-        (topic_name, idx),
+        PartitionName {
+            topic_name,
+            partition_index: idx,
+        },
         acks,
         unstable_api_versions,
     )

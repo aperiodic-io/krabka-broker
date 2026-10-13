@@ -171,6 +171,13 @@ pub async fn topic_config(
         .unwrap_or_else(|| panic!("no {name} entry for {topic}"))
 }
 
+/// The error code and message that one config mutation answers with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigMutationOutcome {
+    pub error_code: i16,
+    pub error_message: Option<String>,
+}
+
 /// Return one incremental topic-config mutation's code and message.
 ///
 /// # Panics
@@ -182,7 +189,7 @@ pub async fn alter_topic_config(
     #[builder(default = "cleanup.policy")] name: &'_ str,
     #[builder(default)] operation: ConfigOperation,
     value: Option<&'_ str>,
-) -> (i16, Option<String>) {
+) -> ConfigMutationOutcome {
     let setup = TopicConfigMutationSetup {
         topic,
         name,
@@ -206,7 +213,10 @@ pub async fn alter_topic_config(
         .await
         .expect("IncrementalAlterConfigs");
     let row = &response.responses[0];
-    (row.error_code, row.error_message.clone())
+    ConfigMutationOutcome {
+        error_code: row.error_code,
+        error_message: row.error_message.clone(),
+    }
 }
 
 /// One legacy `AlterConfigs` key, including deletions expressed as a nullable value.

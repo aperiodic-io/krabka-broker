@@ -18,16 +18,11 @@ use {
     uuid::Uuid,
 };
 
-#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
-struct RetentionSegmentSetup<'a> {
-    #[default(Uuid::from_u128(1))]
-    id: Uuid,
-    #[default(Offset(0))]
-    start: Offset,
-    #[default(Offset(9))]
-    end: Offset,
-    #[default(&[(LeaderEpoch(0), Offset(0))])]
-    epochs: &'a [(LeaderEpoch, Offset)],
+/// A leader epoch and the first offset it wrote.
+#[derive(Clone, Copy)]
+struct EpochStart {
+    epoch: LeaderEpoch,
+    first: Offset,
 }
 
 /// A finished segment, optionally installed in the metadata manager.
@@ -37,20 +32,9 @@ fn finished_segment(
     #[builder(default = Uuid :: from_u128 (1))] id: Uuid,
     #[builder(into, default = Offset (0))] start: Offset,
     #[builder(into, default = Offset (9))] end: Offset,
-    #[builder(default = & [(LeaderEpoch (0) , Offset (0))])] epochs: &'_ [(LeaderEpoch, Offset)],
+    #[builder(default = &[EpochStart { epoch: LeaderEpoch(0), first: Offset(0) }])]
+    epochs: &'_ [EpochStart],
 ) -> RemoteLogSegmentMetadata {
-    let setup = RetentionSegmentSetup {
-        id,
-        start,
-        end,
-        epochs,
-    };
-    let RetentionSegmentSetup {
-        id,
-        start,
-        end,
-        epochs,
-    } = setup;
     let segment_id = RemoteLogSegmentId::new(tp(), id);
     let started = RemoteLogSegmentMetadata::new(
         segment_id.clone(),
@@ -64,7 +48,7 @@ fn finished_segment(
             RemoteLogSegmentState::CopySegmentStarted,
             epochs
                 .iter()
-                .map(|&(epoch, first)| (epoch, first.0))
+                .map(|&EpochStart { epoch, first }| (epoch, first.0))
                 .collect(),
         ),
     )
@@ -92,21 +76,42 @@ fn finished_segment(
 fn the_epoch_cache_eviction_set_holds_the_segments_below_the_earliest_epoch() {
     let below = finished_segment()
         .maybe_rlmm(None)
-        .epochs(&[(LeaderEpoch(0), Offset(0)), (LeaderEpoch(1), Offset(5))])
+        .epochs(&[
+            EpochStart {
+                epoch: LeaderEpoch(0),
+                first: Offset(0),
+            },
+            EpochStart {
+                epoch: LeaderEpoch(1),
+                first: Offset(5),
+            },
+        ])
         .call();
     let reaches = finished_segment()
         .maybe_rlmm(None)
         .id(Uuid::from_u128(2))
         .start(10)
         .end(19)
-        .epochs(&[(LeaderEpoch(1), Offset(10)), (LeaderEpoch(2), Offset(15))])
+        .epochs(&[
+            EpochStart {
+                epoch: LeaderEpoch(1),
+                first: Offset(10),
+            },
+            EpochStart {
+                epoch: LeaderEpoch(2),
+                first: Offset(15),
+            },
+        ])
         .call();
     let above = finished_segment()
         .maybe_rlmm(None)
         .id(Uuid::from_u128(3))
         .start(20)
         .end(29)
-        .epochs(&[(LeaderEpoch(3), Offset(20))])
+        .epochs(&[EpochStart {
+            epoch: LeaderEpoch(3),
+            first: Offset(20),
+        }])
         .call();
     let segments = [below.clone(), reaches.clone(), above];
 
@@ -137,14 +142,26 @@ async fn remote_retention_pass_deletes_segments_below_the_earliest_epoch() {
         .maybe_rlmm(Some(&rlmm))
         .start(10)
         .end(19)
-        .epochs(&[(LeaderEpoch(1), Offset(10))])
+        .epochs(&[EpochStart {
+            epoch: LeaderEpoch(1),
+            first: Offset(10),
+        }])
         .call();
     let current = finished_segment()
         .maybe_rlmm(Some(&rlmm))
         .id(Uuid::from_u128(2))
         .start(20)
         .end(29)
-        .epochs(&[(LeaderEpoch(2), Offset(20)), (LeaderEpoch(3), Offset(25))])
+        .epochs(&[
+            EpochStart {
+                epoch: LeaderEpoch(2),
+                first: Offset(20),
+            },
+            EpochStart {
+                epoch: LeaderEpoch(3),
+                first: Offset(25),
+            },
+        ])
         .call();
     // No retention setting: only the epoch axis is in play.
     let cfg = LogConfig {

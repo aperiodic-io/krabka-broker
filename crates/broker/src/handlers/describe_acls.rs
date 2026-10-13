@@ -111,22 +111,28 @@ pub(crate) fn handle(
     )))
 }
 
+/// The resource pattern that `DescribeAcls` groups its bindings under.
+#[derive(PartialEq, Eq, Hash)]
+struct ResourcePatternKey {
+    resource_type: ResourceTypeCode,
+    resource_name: String,
+    pattern_type: PatternTypeCode,
+}
+
 /// Groups the ACLs `filter` matches by resource pattern, the nested shape
 /// Kafka's `DescribeAclsResponse.aclsResources` builds.
 fn matching_resources<'a>(
     acls: impl Iterator<Item = &'a AclEntry>,
     filter: &AclBindingFilter,
 ) -> Vec<DescribeAclsResource> {
-    let mut by_resource: std::collections::HashMap<
-        (ResourceTypeCode, String, PatternTypeCode),
-        Vec<AclDescription>,
-    > = std::collections::HashMap::new();
+    let mut by_resource: std::collections::HashMap<ResourcePatternKey, Vec<AclDescription>> =
+        std::collections::HashMap::new();
     for entry in acls.filter(|entry| filter.matches(entry)) {
-        let key = (
-            resource_type_to_wire(entry.resource_type),
-            entry.resource_name.clone(),
-            pattern_type_to_wire(entry.pattern_type),
-        );
+        let key = ResourcePatternKey {
+            resource_type: resource_type_to_wire(entry.resource_type),
+            resource_name: entry.resource_name.clone(),
+            pattern_type: pattern_type_to_wire(entry.pattern_type),
+        };
         by_resource
             .entry(key)
             .or_default()
@@ -134,7 +140,9 @@ fn matching_resources<'a>(
     }
     by_resource
         .into_iter()
-        .map(|((rt, rn, pt), acls)| describe_acls_resource(rt, rn, pt, acls))
+        .map(|(key, acls)| {
+            describe_acls_resource(key.resource_type, key.resource_name, key.pattern_type, acls)
+        })
         .collect()
 }
 
@@ -174,9 +182,38 @@ mod tests {
     };
     const VERSION: i16 = 3;
 
+    /// A listed resource pattern: its name and wire pattern type.
+    struct ListedPattern {
+        resource_name: &'static str,
+        pattern_type: i8,
+    }
+
     /// A describe-table row: the filter pattern type and name, and the
-    /// (resource name, pattern type) pairs the listing must hold.
-    type PatternRow<'a> = (i8, Option<&'a str>, &'a [(&'a str, i8)]);
+    /// resource patterns the listing must hold.
+    struct PatternRow {
+        pattern_type: i8,
+        name: Option<&'static str>,
+        want: &'static [ListedPattern],
+    }
+
+    /// A request corruption applied to one axis of the filter, labelled by that axis.
+    struct CorruptRequestCase {
+        axis: &'static str,
+        corrupt: fn(&mut DescribeAclsRequest, i8),
+    }
+
+    /// A request edit labelled by what it sets.
+    struct EditCase {
+        name: &'static str,
+        edit: fn(&mut DescribeAclsRequest),
+    }
+
+    /// A principal and host filter, with the number of resources it must list.
+    struct NullableFilterCase {
+        principal_filter: Option<&'static str>,
+        host_filter: Option<&'static str>,
+        want: usize,
+    }
 
     use crate::test_support::allow_acl as acl;
 
@@ -219,14 +256,25 @@ mod tests {
     /// `UNKNOWN` and matches nothing.
     #[test]
     fn build_filter_refuses_only_the_unknown_byte() {
-        type CorruptRequest = fn(&mut DescribeAclsRequest, i8);
-        let cases: [(&str, CorruptRequest); 4] = [
-            ("resource_type_filter", |r, b| r.resource_type_filter = b),
-            ("pattern_type_filter", |r, b| r.pattern_type_filter = b),
-            ("operation", |r, b| r.operation = b),
-            ("permission_type", |r, b| r.permission_type = b),
+        let cases: [CorruptRequestCase; 4] = [
+            CorruptRequestCase {
+                axis: "resource_type_filter",
+                corrupt: |r, b| r.resource_type_filter = b,
+            },
+            CorruptRequestCase {
+                axis: "pattern_type_filter",
+                corrupt: |r, b| r.pattern_type_filter = b,
+            },
+            CorruptRequestCase {
+                axis: "operation",
+                corrupt: |r, b| r.operation = b,
+            },
+            CorruptRequestCase {
+                axis: "permission_type",
+                corrupt: |r, b| r.permission_type = b,
+            },
         ];
-        for (axis, corrupt) in cases {
+        for CorruptRequestCase { axis, corrupt } in cases {
             let mut unknown = request(Some("orders"), Some("User:alice"), OPERATION_READ);
             corrupt(&mut unknown, 0);
             check!(build_filter(&unknown) == Err(UnknownElement), "axis {axis}");
@@ -355,8 +403,6 @@ mod tests {
     /// operations are valid, and no stored binding carries them.
     #[tokio::test]
     async fn handle_answers_an_empty_listing_for_values_no_binding_carries() {
-        type Edit = fn(&mut DescribeAclsRequest);
-
         seeded_acl_fixture!(
             (broker_handle, _dir, broker, ctx),
             start_broker(configured_authorizer()),
@@ -373,21 +419,42 @@ mod tests {
             permission_type: PERMISSION_ANY,
             ..Default::default()
         };
-        let cases: [(&str, Edit); 7] = [
-            ("undefined resource type", |r| r.resource_type_filter = 99),
-            ("undefined pattern type", |r| r.pattern_type_filter = 99),
-            ("undefined operation", |r| r.operation = 99),
-            ("undefined permission", |r| r.permission_type = 99),
-            ("USER resource type", |r| r.resource_type_filter = 7),
-            ("CREATE_TOKENS operation", |r| r.operation = 13),
-            ("DESCRIBE_TOKENS operation", |r| r.operation = 14),
+        let cases: [EditCase; 7] = [
+            EditCase {
+                name: "undefined resource type",
+                edit: |r| r.resource_type_filter = 99,
+            },
+            EditCase {
+                name: "undefined pattern type",
+                edit: |r| r.pattern_type_filter = 99,
+            },
+            EditCase {
+                name: "undefined operation",
+                edit: |r| r.operation = 99,
+            },
+            EditCase {
+                name: "undefined permission",
+                edit: |r| r.permission_type = 99,
+            },
+            EditCase {
+                name: "USER resource type",
+                edit: |r| r.resource_type_filter = 7,
+            },
+            EditCase {
+                name: "CREATE_TOKENS operation",
+                edit: |r| r.operation = 13,
+            },
+            EditCase {
+                name: "DESCRIBE_TOKENS operation",
+                edit: |r| r.operation = 14,
+            },
         ];
         let expected = unthrottled_wire!(DescribeAclsResponse {
             error_code: codes::NONE,
             error_message: Some(String::new()),
             resources: Vec::new(),
         });
-        for (name, edit) in cases {
+        for EditCase { name, edit } in cases {
             let mut req = any.clone();
             edit(&mut req);
             let resp = handle(&broker, &req, VERSION, &ctx).expect("handle");
@@ -406,9 +473,9 @@ mod tests {
             &broker_handle,
             seeded
                 .iter()
-                .map(|(name, pattern_type)| AclEntry {
-                    pattern_type: *pattern_type,
-                    ..acl().resource_name(name).call()
+                .map(|seed| AclEntry {
+                    pattern_type: seed.pattern_type,
+                    ..acl().resource_name(seed.name).call()
                 })
                 .collect(),
         )
@@ -416,48 +483,152 @@ mod tests {
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "admin");
 
-        let all: &[(&str, i8)] = &[
-            ("*", PATTERN_TYPE_LITERAL),
-            ("bar", PATTERN_TYPE_PREFIXED),
-            ("f", PATTERN_TYPE_PREFIXED),
-            ("fo", PATTERN_TYPE_PREFIXED),
-            ("foo", PATTERN_TYPE_LITERAL),
-            ("food", PATTERN_TYPE_LITERAL),
+        let all: &[ListedPattern] = &[
+            ListedPattern {
+                resource_name: "*",
+                pattern_type: PATTERN_TYPE_LITERAL,
+            },
+            ListedPattern {
+                resource_name: "bar",
+                pattern_type: PATTERN_TYPE_PREFIXED,
+            },
+            ListedPattern {
+                resource_name: "f",
+                pattern_type: PATTERN_TYPE_PREFIXED,
+            },
+            ListedPattern {
+                resource_name: "fo",
+                pattern_type: PATTERN_TYPE_PREFIXED,
+            },
+            ListedPattern {
+                resource_name: "foo",
+                pattern_type: PATTERN_TYPE_LITERAL,
+            },
+            ListedPattern {
+                resource_name: "food",
+                pattern_type: PATTERN_TYPE_LITERAL,
+            },
         ];
-        let cases: [PatternRow<'_>; 12] = [
-            (PATTERN_TYPE_ANY, None, all),
-            (PATTERN_TYPE_ANY, Some(""), &[]),
-            (PATTERN_TYPE_ANY, Some("foo"), &[(
-                "foo",
-                PATTERN_TYPE_LITERAL,
-            )]),
-            (PATTERN_TYPE_MATCH, None, all),
-            (PATTERN_TYPE_MATCH, Some(""), &[("*", PATTERN_TYPE_LITERAL)]),
-            (PATTERN_TYPE_MATCH, Some("foo"), &[
-                ("*", PATTERN_TYPE_LITERAL),
-                ("f", PATTERN_TYPE_PREFIXED),
-                ("fo", PATTERN_TYPE_PREFIXED),
-                ("foo", PATTERN_TYPE_LITERAL),
-            ]),
-            (PATTERN_TYPE_LITERAL, None, &[
-                ("*", PATTERN_TYPE_LITERAL),
-                ("foo", PATTERN_TYPE_LITERAL),
-                ("food", PATTERN_TYPE_LITERAL),
-            ]),
-            (PATTERN_TYPE_LITERAL, Some(""), &[]),
-            (PATTERN_TYPE_LITERAL, Some("foo"), &[(
-                "foo",
-                PATTERN_TYPE_LITERAL,
-            )]),
-            (PATTERN_TYPE_PREFIXED, None, &[
-                ("bar", PATTERN_TYPE_PREFIXED),
-                ("f", PATTERN_TYPE_PREFIXED),
-                ("fo", PATTERN_TYPE_PREFIXED),
-            ]),
-            (PATTERN_TYPE_PREFIXED, Some(""), &[]),
-            (PATTERN_TYPE_PREFIXED, Some("foo"), &[]),
+        let cases: [PatternRow; 12] = [
+            PatternRow {
+                pattern_type: PATTERN_TYPE_ANY,
+                name: None,
+                want: all,
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_ANY,
+                name: Some(""),
+                want: &[],
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_ANY,
+                name: Some("foo"),
+                want: &[ListedPattern {
+                    resource_name: "foo",
+                    pattern_type: PATTERN_TYPE_LITERAL,
+                }],
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_MATCH,
+                name: None,
+                want: all,
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_MATCH,
+                name: Some(""),
+                want: &[ListedPattern {
+                    resource_name: "*",
+                    pattern_type: PATTERN_TYPE_LITERAL,
+                }],
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_MATCH,
+                name: Some("foo"),
+                want: &[
+                    ListedPattern {
+                        resource_name: "*",
+                        pattern_type: PATTERN_TYPE_LITERAL,
+                    },
+                    ListedPattern {
+                        resource_name: "f",
+                        pattern_type: PATTERN_TYPE_PREFIXED,
+                    },
+                    ListedPattern {
+                        resource_name: "fo",
+                        pattern_type: PATTERN_TYPE_PREFIXED,
+                    },
+                    ListedPattern {
+                        resource_name: "foo",
+                        pattern_type: PATTERN_TYPE_LITERAL,
+                    },
+                ],
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_LITERAL,
+                name: None,
+                want: &[
+                    ListedPattern {
+                        resource_name: "*",
+                        pattern_type: PATTERN_TYPE_LITERAL,
+                    },
+                    ListedPattern {
+                        resource_name: "foo",
+                        pattern_type: PATTERN_TYPE_LITERAL,
+                    },
+                    ListedPattern {
+                        resource_name: "food",
+                        pattern_type: PATTERN_TYPE_LITERAL,
+                    },
+                ],
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_LITERAL,
+                name: Some(""),
+                want: &[],
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_LITERAL,
+                name: Some("foo"),
+                want: &[ListedPattern {
+                    resource_name: "foo",
+                    pattern_type: PATTERN_TYPE_LITERAL,
+                }],
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_PREFIXED,
+                name: None,
+                want: &[
+                    ListedPattern {
+                        resource_name: "bar",
+                        pattern_type: PATTERN_TYPE_PREFIXED,
+                    },
+                    ListedPattern {
+                        resource_name: "f",
+                        pattern_type: PATTERN_TYPE_PREFIXED,
+                    },
+                    ListedPattern {
+                        resource_name: "fo",
+                        pattern_type: PATTERN_TYPE_PREFIXED,
+                    },
+                ],
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_PREFIXED,
+                name: Some(""),
+                want: &[],
+            },
+            PatternRow {
+                pattern_type: PATTERN_TYPE_PREFIXED,
+                name: Some("foo"),
+                want: &[],
+            },
         ];
-        for (pattern_type, name, want) in cases {
+        for PatternRow {
+            pattern_type,
+            name,
+            want,
+        } in cases
+        {
             let req = DescribeAclsRequest {
                 resource_type_filter: RESOURCE_TYPE_TOPIC,
                 resource_name_filter: name.map(Into::into),
@@ -477,19 +648,17 @@ mod tests {
                 error_message: Some(String::new()),
                 resources: want
                     .iter()
-                    .map(
-                        |(resource_name, pattern_type)| tagged_wire!(DescribeAclsResource {
-                            resource_type: RESOURCE_TYPE_TOPIC,
-                            resource_name: (*resource_name).into(),
-                            pattern_type: *pattern_type,
-                            acls: vec![tagged_wire!(AclDescription {
-                                principal: "User:alice".into(),
-                                host: "*".into(),
-                                operation: OPERATION_READ,
-                                permission_type: PERMISSION_ALLOW,
-                            })],
-                        })
-                    )
+                    .map(|listed| tagged_wire!(DescribeAclsResource {
+                        resource_type: RESOURCE_TYPE_TOPIC,
+                        resource_name: listed.resource_name.into(),
+                        pattern_type: listed.pattern_type,
+                        acls: vec![tagged_wire!(AclDescription {
+                            principal: "User:alice".into(),
+                            host: "*".into(),
+                            operation: OPERATION_READ,
+                            permission_type: PERMISSION_ALLOW,
+                        })],
+                    }))
                     .collect(),
             });
             check!(resp == expected, "pattern {pattern_type} name {name:?}");
@@ -508,13 +677,34 @@ mod tests {
             "admin"
         );
 
-        let cases: [(Option<&str>, Option<&str>, usize); 4] = [
-            (None, None, 1),
-            (Some(""), None, 0),
-            (None, Some(""), 0),
-            (Some("User:alice"), Some("*"), 1),
+        let cases: [NullableFilterCase; 4] = [
+            NullableFilterCase {
+                principal_filter: None,
+                host_filter: None,
+                want: 1,
+            },
+            NullableFilterCase {
+                principal_filter: Some(""),
+                host_filter: None,
+                want: 0,
+            },
+            NullableFilterCase {
+                principal_filter: None,
+                host_filter: Some(""),
+                want: 0,
+            },
+            NullableFilterCase {
+                principal_filter: Some("User:alice"),
+                host_filter: Some("*"),
+                want: 1,
+            },
         ];
-        for (principal_filter, host_filter, want) in cases {
+        for NullableFilterCase {
+            principal_filter,
+            host_filter,
+            want,
+        } in cases
+        {
             let req = DescribeAclsRequest {
                 resource_type_filter: RESOURCE_TYPE_TOPIC,
                 resource_name_filter: None,

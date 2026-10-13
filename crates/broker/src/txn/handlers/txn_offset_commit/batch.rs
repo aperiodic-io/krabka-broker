@@ -22,12 +22,15 @@ use {
         metadata_source::MetadataSource,
         partition::ProducerAppendCheck,
         partition_registry::PartitionRegistry,
+        txn::state::TopicPartition,
     },
+    krabka_ids::PartitionIndex,
     krabka_metadata::NodeId,
     krabka_protocol::{
         owned::txn_offset_commit_request::TxnOffsetCommitRequest,
         records::{Attributes, Record, RecordBatch},
     },
+    std::collections::HashSet,
 };
 
 /// What one `TxnOffsetCommit` wrote to the log: the offsets-log position of
@@ -36,7 +39,39 @@ use {
 pub(super) struct AppendedTxnOffsets {
     /// Base offset the batch was assigned in `__consumer_offsets`.
     pub(super) written_at: i64,
-    pub(super) keys: Vec<(String, i32)>,
+    pub(super) keys: Vec<TopicPartition>,
+}
+
+/// An appended `TxnOffsetCommit`: what it covers, and the write whose commit
+/// the caller still waits for.
+#[derive(Debug)]
+pub(super) struct TxnBatchWrite {
+    pub(super) offsets: AppendedTxnOffsets,
+    pub(super) write: LeaderAppend,
+}
+
+/// This broker's partitions, the metadata that names the offsets partition's
+/// leader, and this broker's id.
+#[derive(Clone, Copy)]
+pub(super) struct LocalOffsets<'a> {
+    pub(super) registry: &'a PartitionRegistry,
+    pub(super) metadata: &'a dyn MetadataSource,
+    pub(super) node_id: NodeId,
+}
+
+/// The rows the topic sweep already answered: the topics the principal may
+/// not read, and the rows the existence check flagged.
+#[derive(Clone, Copy)]
+pub(super) struct RowSweep<'a> {
+    pub(super) denied_topics: &'a HashSet<String>,
+    pub(super) unknown_rows: &'a HashSet<TopicPartition>,
+}
+
+/// The producer check the log runs under its append lock, and whether the
+/// offset records carry the topic ids the handler resolved.
+pub(super) struct AppendChecks {
+    pub(super) producer_check: ProducerAppendCheck,
+    pub(super) record_topic_ids: bool,
 }
 
 /// Append the transactional offset records to `__consumer_offsets`, and
@@ -56,22 +91,28 @@ pub(super) struct AppendedTxnOffsets {
 /// because it is what orders the mark against that marker.
 ///
 /// `local` is this broker's partitions, the metadata that names the offsets
-/// partition's leader, and this broker's id. `producer_check` is the KIP-890
-/// check the log runs under its append lock, with the guard the producer's
-/// verification started, and a refusal is answered as Kafka's append throws
-/// it. `record_topic_ids` says whether the offset records carry the topic ids
-/// the handler resolved, which Kafka 4.3.1 does not record.
+/// partition's leader, and this broker's id. `checks.producer_check` is the
+/// KIP-890 check the log runs under its append lock, with the guard the
+/// producer's verification started, and a refusal is answered as Kafka's
+/// append throws it. `checks.record_topic_ids` says whether the offset records
+/// carry the topic ids the handler resolved, which Kafka 4.3.1 does not
+/// record.
 pub(super) async fn append_txn_batch(
     req: &TxnOffsetCommitRequest,
-    local: (&PartitionRegistry, &dyn MetadataSource, NodeId),
+    local: LocalOffsets<'_>,
     offsets_partition: i32,
     now_ms: i64,
-    (denied_topics, unknown_rows): (
-        &std::collections::HashSet<String>,
-        &std::collections::HashSet<(String, i32)>,
-    ),
-    (producer_check, record_topic_ids): (ProducerAppendCheck, bool),
-) -> Result<Option<(AppendedTxnOffsets, LeaderAppend)>, i16> {
+    sweep: RowSweep<'_>,
+    checks: AppendChecks,
+) -> Result<Option<TxnBatchWrite>, i16> {
+    let RowSweep {
+        denied_topics,
+        unknown_rows,
+    } = sweep;
+    let AppendChecks {
+        producer_check,
+        record_topic_ids,
+    } = checks;
     let mut batch = RecordBatch {
         attributes: Attributes::default().with_transactional(true),
         base_timestamp: now_ms,
@@ -85,13 +126,17 @@ pub(super) async fn append_txn_batch(
         ..RecordBatch::default()
     };
     let mut delta: i32 = 0;
-    let mut keys: Vec<(String, i32)> = Vec::new();
+    let mut keys: Vec<TopicPartition> = Vec::new();
     for topic in &req.topics {
         if denied_topics.contains(&topic.name) {
             continue;
         }
         for part in &topic.partitions {
-            if unknown_rows.contains(&(topic.name.clone(), part.partition_index)) {
+            let key = TopicPartition {
+                topic: topic.name.clone(),
+                partition: PartitionIndex(part.partition_index),
+            };
+            if unknown_rows.contains(&key) {
                 continue;
             }
             let value = OffsetCommitValue {
@@ -126,7 +171,7 @@ pub(super) async fn append_txn_batch(
                 value: Some(value.encode_value()),
                 ..Default::default()
             });
-            keys.push((topic.name.clone(), part.partition_index));
+            keys.push(key);
             delta += 1;
         }
     }
@@ -139,14 +184,15 @@ pub(super) async fn append_txn_batch(
 
     batch.last_offset_delta = (delta - 1).max(0);
 
+    let local = (local.registry, local.metadata, local.node_id);
     match append_as_leader(local, offsets_partition, batch, Some(producer_check)).await {
-        Ok(write) => Ok(Some((
-            AppendedTxnOffsets {
+        Ok(write) => Ok(Some(TxnBatchWrite {
+            offsets: AppendedTxnOffsets {
                 written_at: write.base_offset.get(),
                 keys,
             },
             write,
-        ))),
+        })),
         Err(error) => {
             tracing::error!(
                 group = %req.group_id,
@@ -194,11 +240,29 @@ mod tests {
         krabka_ids::PartitionIndex,
         krabka_log::{Log, Offset, ReadOutput},
         krabka_metadata::MetadataImage,
-        std::{collections::HashSet, sync::Arc},
+        std::sync::Arc,
     };
 
     /// This broker.
     const NODE: NodeId = NodeId(1);
+
+    /// The key of a row of topic `orders`.
+    fn orders(partition: i32) -> TopicPartition {
+        TopicPartition {
+            topic: "orders".to_string(),
+            partition: PartitionIndex(partition),
+        }
+    }
+
+    fn sweep_of<'a>(
+        denied_topics: &'a HashSet<String>,
+        unknown_rows: &'a HashSet<TopicPartition>,
+    ) -> RowSweep<'a> {
+        RowSweep {
+            denied_topics,
+            unknown_rows,
+        }
+    }
 
     /// Metadata in which `leader` leads the offsets partition at `epoch`.
     fn offsets_led_by(leader: NodeId, epoch: i32) -> FakeMetadataSource {
@@ -215,7 +279,14 @@ mod tests {
     /// Metadata in which this broker leads the offsets partition.
     fn led_here() -> FakeMetadataSource { offsets_led_by(NODE, 0) }
 
-    fn offsets_registry() -> (tempfile::TempDir, Arc<PartitionRegistry>) {
+    /// A registry holding the offsets partition, and the directory that must
+    /// outlive it.
+    struct OffsetsRegistry {
+        _dir: tempfile::TempDir,
+        registry: Arc<PartitionRegistry>,
+    }
+
+    fn offsets_registry() -> OffsetsRegistry {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let registry = Arc::new(PartitionRegistry::new());
         registry.insert(
@@ -227,7 +298,10 @@ mod tests {
                 .partition(OFFSETS_PARTITION)
                 .call(),
         );
-        (dir, registry)
+        OffsetsRegistry {
+            _dir: dir,
+            registry,
+        }
     }
 
     fn offsets_partition(registry: &PartitionRegistry) -> Arc<Partition> {
@@ -255,11 +329,18 @@ mod tests {
         ($req:expr, $registry:expr, $filters:expr, $check:expr, $topic_ids:expr) => {
             append_txn_batch(
                 $req,
-                ($registry, &led_here(), NODE),
+                LocalOffsets {
+                    registry: $registry,
+                    metadata: &led_here(),
+                    node_id: NODE,
+                },
                 OFFSETS_PARTITION,
                 12_345,
                 $filters,
-                ($check, $topic_ids),
+                AppendChecks {
+                    producer_check: $check,
+                    record_topic_ids: $topic_ids,
+                },
             )
         };
     }
@@ -282,9 +363,9 @@ mod tests {
     async fn append_here(
         req: &TxnOffsetCommitRequest,
         registry: &PartitionRegistry,
-        filters: (&HashSet<String>, &HashSet<(String, i32)>),
+        filters: RowSweep<'_>,
         record_topic_ids: bool,
-    ) -> Result<Option<(AppendedTxnOffsets, LeaderAppend)>, i16> {
+    ) -> Result<Option<TxnBatchWrite>, i16> {
         append_as_test_leader!(
             req,
             registry,
@@ -297,16 +378,23 @@ mod tests {
 
     #[tokio::test]
     async fn append_txn_batch_writes_transactional_offset_records() {
-        let (_dir, registry) = offsets_registry();
+        let OffsetsRegistry { _dir, registry } = offsets_registry();
         let req = request();
 
-        let (appended, _write) =
-            append_here(&req, &registry, (&HashSet::new(), &HashSet::new()), false)
-                .await
-                .expect("append batch")
-                .expect("records appended");
+        let TxnBatchWrite {
+            offsets: appended,
+            write: _write,
+        } = append_here(
+            &req,
+            &registry,
+            sweep_of(&HashSet::new(), &HashSet::new()),
+            false,
+        )
+        .await
+        .expect("append batch")
+        .expect("records appended");
         check!(appended.written_at == 0);
-        check!(appended.keys == vec![("orders".to_string(), 2), ("orders".to_string(), 3)]);
+        check!(appended.keys == vec![orders(2), orders(3)]);
 
         read_registered_offsets!(&registry; part, log, read);
         assert!(read.batches.len() == 1);
@@ -336,11 +424,11 @@ mod tests {
 
     #[tokio::test]
     async fn append_txn_batch_skips_denied_topics_without_appending() {
-        let (_dir, registry) = offsets_registry();
+        let OffsetsRegistry { _dir, registry } = offsets_registry();
         let req = request();
         let denied = maplit::hashset! {"orders".to_string()};
 
-        let appended = append_here(&req, &registry, (&denied, &HashSet::new()), false)
+        let appended = append_here(&req, &registry, sweep_of(&denied, &HashSet::new()), false)
             .await
             .expect("all denied succeeds");
         check!(appended.is_none());
@@ -359,7 +447,7 @@ mod tests {
         let err = append_as_test_leader!(
             &req,
             &registry,
-            (&HashSet::new(), &HashSet::new()),
+            sweep_of(&HashSet::new(), &HashSet::new()),
             unverified,
             false
         )
@@ -376,12 +464,18 @@ mod tests {
     /// next leader never gets, and the transaction then commits without them.
     #[tokio::test]
     async fn the_append_is_a_leader_write_that_commits_under_its_term() {
+        /// A leader of the offsets partition and its leader epoch.
+        #[derive(Clone, Copy)]
+        struct Leadership {
+            leader: NodeId,
+            epoch: i32,
+        }
         struct Case {
             what: &'static str,
             /// The leader and leader epoch of the offsets partition.
-            led_by: (NodeId, i32),
+            led_by: Leadership,
             /// The leader and epoch the partition moves to after the append.
-            moves_to: Option<(NodeId, i32)>,
+            moves_to: Option<Leadership>,
             /// The append's answer, then the commit's.
             expected: Result<Result<(), i16>, i16>,
             /// The leader epoch of every batch in the log afterwards.
@@ -390,45 +484,64 @@ mod tests {
         let cases = [
             Case {
                 what: "this broker leads",
-                led_by: (NODE, 7),
+                led_by: Leadership {
+                    leader: NODE,
+                    epoch: 7,
+                },
                 moves_to: None,
                 expected: Ok(Ok(())),
                 logged_epochs: vec![7],
             },
             Case {
                 what: "another broker leads",
-                led_by: (NodeId(2), 7),
+                led_by: Leadership {
+                    leader: NodeId(2),
+                    epoch: 7,
+                },
                 moves_to: None,
                 expected: Err(codes::NOT_COORDINATOR),
                 logged_epochs: vec![],
             },
             Case {
                 what: "the partition moves before the commit is confirmed",
-                led_by: (NODE, 7),
-                moves_to: Some((NodeId(2), 8)),
+                led_by: Leadership {
+                    leader: NODE,
+                    epoch: 7,
+                },
+                moves_to: Some(Leadership {
+                    leader: NodeId(2),
+                    epoch: 8,
+                }),
                 expected: Ok(Err(codes::NOT_COORDINATOR)),
                 logged_epochs: vec![7],
             },
         ];
         for case in cases {
-            let (_dir, registry) = offsets_registry();
-            let metadata = offsets_led_by(case.led_by.0, case.led_by.1);
+            let OffsetsRegistry { _dir, registry } = offsets_registry();
+            let metadata = offsets_led_by(case.led_by.leader, case.led_by.epoch);
             let req = request();
 
             let appended = append_txn_batch(
                 &req,
-                (&registry, &metadata, NODE),
+                LocalOffsets {
+                    registry: &registry,
+                    metadata: &metadata,
+                    node_id: NODE,
+                },
                 OFFSETS_PARTITION,
                 12_345,
-                (&HashSet::new(), &HashSet::new()),
-                (verified(&registry, &req).await, false),
+                sweep_of(&HashSet::new(), &HashSet::new()),
+                AppendChecks {
+                    producer_check: verified(&registry, &req).await,
+                    record_topic_ids: false,
+                },
             )
             .await;
-            if let Some((leader, epoch)) = case.moves_to {
+            if let Some(Leadership { leader, epoch }) = case.moves_to {
                 metadata.set_image(offsets_image(leader, epoch));
             }
             let outcome = match appended {
-                Ok(Some((_, write))) => Ok(write
+                Ok(Some(TxnBatchWrite { write, .. })) => Ok(write
                     .committed()
                     .await
                     .map_err(|error| codes::from_broker_error(&error))),
@@ -449,16 +562,19 @@ mod tests {
 
     #[tokio::test]
     async fn append_txn_batch_skips_unknown_rows_without_appending_them() {
-        let (_dir, registry) = offsets_registry();
+        let OffsetsRegistry { _dir, registry } = offsets_registry();
         let req = request();
-        let unknown = maplit::hashset! {("orders".to_string(), 3)};
+        let unknown = maplit::hashset! {orders(3)};
 
-        let appended = append_here(&req, &registry, (&HashSet::new(), &unknown), false)
+        let appended = append_here(&req, &registry, sweep_of(&HashSet::new(), &unknown), false)
             .await
             .expect("append batch")
             .expect("one row still appended");
-        let (appended, _write) = appended;
-        check!(appended.keys == vec![("orders".to_string(), 2)]);
+        let TxnBatchWrite {
+            offsets: appended,
+            write: _write,
+        } = appended;
+        check!(appended.keys == vec![orders(2)]);
 
         read_registered_offsets!(&registry; part, log, read);
         assert!(read.batches.len() == 1);
@@ -475,14 +591,14 @@ mod tests {
         for (mode, record_topic_ids, recorded) in
             [("4.3.1", false, None), ("trunk", true, Some(topic_id))]
         {
-            let (_dir, registry) = offsets_registry();
+            let OffsetsRegistry { _dir, registry } = offsets_registry();
             let mut req = request();
             req.topics[0].topic_id = krabka_protocol::primitives::uuid::Uuid(topic_id.into_bytes());
 
             append_here(
                 &req,
                 &registry,
-                (&HashSet::new(), &HashSet::new()),
+                sweep_of(&HashSet::new(), &HashSet::new()),
                 record_topic_ids,
             )
             .await
@@ -509,11 +625,16 @@ mod tests {
     /// `INVALID_TXN_STATE`.
     #[tokio::test]
     async fn the_append_refuses_a_producer_the_log_check_does_not_admit() {
-        let (_dir, registry) = offsets_registry();
+        let OffsetsRegistry { _dir, registry } = offsets_registry();
         let req = request();
-        append_here(&req, &registry, (&HashSet::new(), &HashSet::new()), false)
-            .await
-            .expect("the verified producer appends");
+        append_here(
+            &req,
+            &registry,
+            sweep_of(&HashSet::new(), &HashSet::new()),
+            false,
+        )
+        .await
+        .expect("the verified producer appends");
 
         let mut stale = request();
         stale.producer_epoch = req.producer_epoch - 1;
@@ -532,7 +653,7 @@ mod tests {
             let refused = append_as_test_leader!(
                 &req,
                 &registry,
-                (&HashSet::new(), &HashSet::new()),
+                sweep_of(&HashSet::new(), &HashSet::new()),
                 unverified,
                 false
             )

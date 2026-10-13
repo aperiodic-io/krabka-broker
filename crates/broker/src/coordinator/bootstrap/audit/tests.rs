@@ -200,18 +200,21 @@ async fn a_node_submits_nothing_when_the_audit_topic_exists_or_audit_is_off() {
 
 #[tokio::test(start_paused = true)]
 async fn only_an_existing_topic_excuses_a_refused_audit_batch() {
-    type Case = (fn() -> RaftError, Result<(), String>);
+    struct Case {
+        refusal: fn() -> RaftError,
+        expected: Result<(), String>,
+    }
     let cases: [Case; 2] = [
-        (
-            || RaftError::Metadata(MetadataError::TopicExists(String::new())),
-            Ok(()),
-        ),
-        (
-            || RaftError::ChangeRejected("refused".into()),
-            Err("startup failed: change rejected: refused".into()),
-        ),
+        Case {
+            refusal: || RaftError::Metadata(MetadataError::TopicExists(String::new())),
+            expected: Ok(()),
+        },
+        Case {
+            refusal: || RaftError::ChangeRejected("refused".into()),
+            expected: Err("startup failed: change rejected: refused".into()),
+        },
     ];
-    for (refusal, expected) in cases {
+    for Case { refusal, expected } in cases {
         let source: Arc<dyn MetadataSource> = Arc::new(
             FakeMetadataSource::builder()
                 .records(&registrations(&[1]))

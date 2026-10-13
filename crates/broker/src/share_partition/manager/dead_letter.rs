@@ -213,20 +213,28 @@ mod tests {
         cell
     }
 
+    /// A sink, a manager, and the acquired cell of one topic.
+    struct AcquiredManager<D> {
+        dlq: Arc<D>,
+        mgr: Arc<super::SharePartitionLeaderManager>,
+        tid: uuid::Uuid,
+        cell: Arc<tokio::sync::Mutex<AcquisitionState>>,
+    }
+
     /// A sink, manager and acquired cell with no additional retained ownership.
     async fn acquired_manager<D: DlqSink + Default + 'static>(
         records: RecordCount,
-    ) -> (
-        Arc<D>,
-        Arc<super::SharePartitionLeaderManager>,
-        uuid::Uuid,
-        Arc<tokio::sync::Mutex<AcquisitionState>>,
-    ) {
+    ) -> AcquiredManager<D> {
         let dlq = Arc::new(D::default());
         let mgr = manager_with_dlq(dlq.clone());
         let tid = uuid::Uuid::from_bytes([61; 16]);
         let cell = acquired_cell(&mgr, tid, records).await;
-        (dlq, mgr, tid, cell)
+        AcquiredManager {
+            dlq,
+            mgr,
+            tid,
+            cell,
+        }
     }
 
     /// Dispatches the durable ranges, then waits for `done` or fails the test.
@@ -294,7 +302,12 @@ mod tests {
     /// and a failed write of `Archiving` rolls the reject back.
     #[tokio::test(start_paused = true)]
     async fn the_write_starts_only_once_archiving_is_durable() {
-        let (dlq, mgr, tid, cell) = acquired_manager::<RecordingDlq>(RecordCount(2)).await;
+        let AcquiredManager {
+            dlq,
+            mgr,
+            tid,
+            cell,
+        } = acquired_manager::<RecordingDlq>(RecordCount(2)).await;
 
         // The test manager's persister cannot write, so the reject rolls back.
         let mut state = cell.lock().await;
@@ -323,7 +336,12 @@ mod tests {
     /// its cause and delivery count, then archived and the SPSO moves on.
     #[tokio::test(start_paused = true)]
     async fn a_dispatched_run_is_written_then_archived() {
-        let (dlq, mgr, tid, cell) = acquired_manager::<RecordingDlq>(RecordCount(3)).await;
+        let AcquiredManager {
+            dlq,
+            mgr,
+            tid,
+            cell,
+        } = acquired_manager::<RecordingDlq>(RecordCount(3)).await;
         let key = ("g1".to_owned(), tid, 0);
         let ranges = {
             let mut state = cell.lock().await;
@@ -448,7 +466,12 @@ mod tests {
     /// write, and one dead-letter record for each offset still comes out.
     #[tokio::test(start_paused = true)]
     async fn neighbouring_rejects_are_written_together_and_archived() {
-        let (dlq, mgr, tid, cell) = acquired_manager::<RecordingDlq>(RecordCount(4)).await;
+        let AcquiredManager {
+            dlq,
+            mgr,
+            tid,
+            cell,
+        } = acquired_manager::<RecordingDlq>(RecordCount(4)).await;
         let key = ("g1".to_owned(), tid, 0);
         let ranges = {
             let mut state = cell.lock().await;
@@ -475,7 +498,12 @@ mod tests {
     /// rate cannot open a write for each run while the queue is slow.
     #[tokio::test(start_paused = true)]
     async fn writes_run_side_by_side_up_to_the_broker_limit() {
-        let (dlq, mgr, tid, cell) = acquired_manager::<GaugeDlq>(RecordCount(40)).await;
+        let AcquiredManager {
+            dlq,
+            mgr,
+            tid,
+            cell,
+        } = acquired_manager::<GaugeDlq>(RecordCount(40)).await;
         let key = ("g1".to_owned(), tid, 0);
         // Every other record, so no two runs are neighbours.
         let ranges = {

@@ -15,7 +15,12 @@ use {
 fn config_type_wire_bytes_match_kafka() {
     // `DescribeConfigsResponse.ConfigType`, verified against
     // `apache/kafka:4.3.1` over the wire.
-    let observed: Vec<(&str, i8)> = [
+    #[derive(Debug, PartialEq, Eq)]
+    struct ConfigTypeBytes {
+        label: &'static str,
+        wire: i8,
+    }
+    let observed: Vec<ConfigTypeBytes> = [
         ConfigType::Boolean,
         ConfigType::String,
         ConfigType::Int,
@@ -24,12 +29,15 @@ fn config_type_wire_bytes_match_kafka() {
         ConfigType::List,
     ]
     .into_iter()
-    .map(|config_type| (config_type.label(), config_type.wire()))
+    .map(|config_type| ConfigTypeBytes {
+        label: config_type.label(),
+        wire: config_type.wire(),
+    })
     .collect();
 
     assert!(
         observed
-            == vec![
+            == [
                 ("boolean", 1),
                 ("string", 2),
                 ("int", 3),
@@ -37,6 +45,7 @@ fn config_type_wire_bytes_match_kafka() {
                 ("double", 6),
                 ("list", 7),
             ]
+            .map(|(label, wire)| ConfigTypeBytes { label, wire })
     );
 }
 

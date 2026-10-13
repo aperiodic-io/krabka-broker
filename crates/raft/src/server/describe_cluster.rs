@@ -194,23 +194,26 @@ mod tests {
         uuid::Uuid,
     };
 
-    /// The controller registrations of a case: each node id and its
-    /// listener names.
-    type Registrations<'a> = &'a [(u64, &'a [&'a str])];
+    /// A controller registration of a case: its node id and its listener
+    /// names.
+    struct Registered<'a> {
+        node_id: u64,
+        listeners: &'a [&'a str],
+    }
 
     /// One case: its name, the request version, endpoint type and include
     /// flag, the registrations, the connection listener, the leader id and
     /// the expected response.
-    type Case<'a> = (
-        &'a str,
-        i16,
-        i8,
-        bool,
-        Registrations<'a>,
-        &'a str,
-        i32,
-        DescribeClusterResponse,
-    );
+    struct Case<'a> {
+        name: &'a str,
+        version: i16,
+        endpoint_type: i8,
+        include_ops: bool,
+        registrations: &'a [Registered<'a>],
+        listener: &'a str,
+        leader: i32,
+        expected: DescribeClusterResponse,
+    }
 
     fn registration(id: u64, listeners: &[&str]) -> MetadataRecord {
         MetadataRecord::V1ControllerRegistration(ControllerRegistrationRecord {
@@ -268,112 +271,142 @@ mod tests {
                 ..Default::default()
             }
         };
-        let all_controller: &[(u64, &[&str])] = &[(1, &["CONTROLLER"]), (2, &["CONTROLLER"])];
-        let cases: Vec<Case<'_>> = vec![
-            (
-                "every registration on the listener",
-                1,
-                2,
-                false,
-                all_controller,
-                "CONTROLLER",
-                1,
-                ok(
+        let all_controller: &[Registered<'_>] = &[
+            Registered {
+                node_id: 1,
+                listeners: &["CONTROLLER"],
+            },
+            Registered {
+                node_id: 2,
+                listeners: &["CONTROLLER"],
+            },
+        ];
+        let cases = vec![
+            Case {
+                name: "every registration on the listener",
+                version: 1,
+                endpoint_type: 2,
+                include_ops: false,
+                registrations: all_controller,
+                listener: "CONTROLLER",
+                leader: 1,
+                expected: ok(
                     vec![node(1, "CONTROLLER"), node(2, "CONTROLLER")],
                     1,
                     i32::MIN,
                 ),
-            ),
-            (
-                "only registrations with the connection's listener",
-                1,
-                2,
-                false,
-                &[(1, &["CTRL_SSL"]), (2, &["CONTROLLER"])],
-                "CTRL_SSL",
-                2,
-                ok(vec![node(1, "CTRL_SSL")], -1, i32::MIN),
-            ),
-            (
-                "a registered non-voter is listed",
-                1,
-                2,
-                false,
-                &[(1, &["CONTROLLER"]), (3, &["CONTROLLER"])],
-                "CONTROLLER",
-                3,
-                ok(
+            },
+            Case {
+                name: "only registrations with the connection's listener",
+                version: 1,
+                endpoint_type: 2,
+                include_ops: false,
+                registrations: &[
+                    Registered {
+                        node_id: 1,
+                        listeners: &["CTRL_SSL"],
+                    },
+                    Registered {
+                        node_id: 2,
+                        listeners: &["CONTROLLER"],
+                    },
+                ],
+                listener: "CTRL_SSL",
+                leader: 2,
+                expected: ok(vec![node(1, "CTRL_SSL")], -1, i32::MIN),
+            },
+            Case {
+                name: "a registered non-voter is listed",
+                version: 1,
+                endpoint_type: 2,
+                include_ops: false,
+                registrations: &[
+                    Registered {
+                        node_id: 1,
+                        listeners: &["CONTROLLER"],
+                    },
+                    Registered {
+                        node_id: 3,
+                        listeners: &["CONTROLLER"],
+                    },
+                ],
+                listener: "CONTROLLER",
+                leader: 3,
+                expected: ok(
                     vec![node(1, "CONTROLLER"), node(3, "CONTROLLER")],
                     3,
                     i32::MIN,
                 ),
-            ),
-            (
-                "no leader",
-                1,
-                2,
-                false,
-                all_controller,
-                "CONTROLLER",
-                -1,
-                ok(
+            },
+            Case {
+                name: "no leader",
+                version: 1,
+                endpoint_type: 2,
+                include_ops: false,
+                registrations: all_controller,
+                listener: "CONTROLLER",
+                leader: -1,
+                expected: ok(
                     vec![node(1, "CONTROLLER"), node(2, "CONTROLLER")],
                     -1,
                     i32::MIN,
                 ),
-            ),
-            (
-                "authorized operations requested",
-                2,
-                2,
-                true,
-                &[(1, &["CONTROLLER"])],
-                "CONTROLLER",
-                1,
-                ok(vec![node(1, "CONTROLLER")], 1, OPS),
-            ),
-            (
-                "broker endpoint type",
-                1,
-                1,
-                false,
-                all_controller,
-                "CONTROLLER",
-                1,
-                refused(114, MISMATCHED),
-            ),
-            (
-                "unknown endpoint type",
-                2,
-                7,
-                false,
-                all_controller,
-                "CONTROLLER",
-                1,
-                refused(115, "Unsupported endpoint type 7"),
-            ),
-            (
-                "unknown endpoint type zero",
-                1,
-                0,
-                false,
-                all_controller,
-                "CONTROLLER",
-                1,
-                refused(115, "Unsupported endpoint type 0"),
-            ),
-            (
-                "v0 defaults to the broker endpoint type",
-                0,
-                1,
-                false,
-                all_controller,
-                "CONTROLLER",
-                1,
-                refused(42, MISMATCHED),
-            ),
+            },
+            Case {
+                name: "authorized operations requested",
+                version: 2,
+                endpoint_type: 2,
+                include_ops: true,
+                registrations: &[Registered {
+                    node_id: 1,
+                    listeners: &["CONTROLLER"],
+                }],
+                listener: "CONTROLLER",
+                leader: 1,
+                expected: ok(vec![node(1, "CONTROLLER")], 1, OPS),
+            },
+            Case {
+                name: "broker endpoint type",
+                version: 1,
+                endpoint_type: 1,
+                include_ops: false,
+                registrations: all_controller,
+                listener: "CONTROLLER",
+                leader: 1,
+                expected: refused(114, MISMATCHED),
+            },
+            Case {
+                name: "unknown endpoint type",
+                version: 2,
+                endpoint_type: 7,
+                include_ops: false,
+                registrations: all_controller,
+                listener: "CONTROLLER",
+                leader: 1,
+                expected: refused(115, "Unsupported endpoint type 7"),
+            },
+            Case {
+                name: "unknown endpoint type zero",
+                version: 1,
+                endpoint_type: 0,
+                include_ops: false,
+                registrations: all_controller,
+                listener: "CONTROLLER",
+                leader: 1,
+                expected: refused(115, "Unsupported endpoint type 0"),
+            },
+            Case {
+                name: "v0 defaults to the broker endpoint type",
+                version: 0,
+                endpoint_type: 1,
+                include_ops: false,
+                registrations: all_controller,
+                listener: "CONTROLLER",
+                leader: 1,
+                expected: refused(42, MISMATCHED),
+            },
         ];
-        for (
+        for Case {
             name,
             version,
             endpoint_type,
@@ -382,11 +415,11 @@ mod tests {
             listener,
             leader,
             expected,
-        ) in cases
+        } in cases
         {
             let mut image = MetadataImage::new(Uuid::nil());
-            for (id, listeners) in registrations {
-                image.apply(&registration(*id, listeners));
+            for Registered { node_id, listeners } in registrations {
+                image.apply(&registration(*node_id, listeners));
             }
             let req = DescribeClusterRequest {
                 endpoint_type,

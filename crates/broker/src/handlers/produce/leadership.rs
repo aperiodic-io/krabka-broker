@@ -15,6 +15,7 @@ use {
     std::sync::Arc,
 };
 
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct PartitionGateError {
     pub(super) code: i16,
     pub(super) current_leader: Option<LeaderIdAndEpoch>,
@@ -90,7 +91,10 @@ pub(super) fn validate_partition_gate(
     }
     let effective_min_isr = effective_min_isr_of(
         image,
-        (this_node_id, default_min_insync_replicas),
+        MinIsrLayers {
+            node: this_node_id,
+            default: default_min_insync_replicas,
+        },
         topic_name,
         record,
     );
@@ -103,13 +107,21 @@ pub(super) fn validate_partition_gate(
     Ok(partition)
 }
 
+/// The broker-side inputs of a `min.insync.replicas` resolution: this
+/// broker's id and its command-line default, the last layer.
+#[derive(Clone, Copy)]
+struct MinIsrLayers {
+    node: krabka_metadata::NodeId,
+    default: i32,
+}
+
 /// Kafka's `Partition.effectiveMinIsr`: the `min.insync.replicas` that
 /// `image` resolves for `topic` on `node`, capped at the size of `record`'s
 /// replica assignment. `node` is this broker's id and `default` its
 /// command-line `default_min_insync_replicas`, the last layer.
 fn effective_min_isr_of(
     image: &krabka_metadata::MetadataImage,
-    (node, default): (krabka_metadata::NodeId, i32),
+    MinIsrLayers { node, default }: MinIsrLayers,
     topic: &str,
     record: &krabka_metadata::PartitionRecord,
 ) -> usize {
@@ -148,7 +160,13 @@ pub(super) fn current_effective_min_isr(
     if image.topic(topic).map(|topic| topic.topic_id) != admitted_topic_id {
         return Err(codes::NOT_LEADER_OR_FOLLOWER);
     }
-    Ok(effective_min_isr_of(image, min_isr_layers, topic, record))
+    let (node, default) = min_isr_layers;
+    Ok(effective_min_isr_of(
+        image,
+        MinIsrLayers { node, default },
+        topic,
+        record,
+    ))
 }
 
 pub(super) fn diskless_role_ready(
@@ -392,7 +410,7 @@ mod tests {
         node_id: krabka_audit::NodeId,
         is_witness: bool,
         diskless: bool,
-    ) -> Option<(i16, Option<LeaderIdAndEpoch>)> {
+    ) -> Option<PartitionGateError> {
         gate_with_acks(image, node_id, is_witness, diskless, 1, 1)
     }
 
@@ -406,7 +424,7 @@ mod tests {
         diskless: bool,
         acks: i16,
         default_min_insync_replicas: i32,
-    ) -> Option<(i16, Option<LeaderIdAndEpoch>)> {
+    ) -> Option<PartitionGateError> {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = krabka_log::Log::open(
             partition_dir(dir.path(), "orders", 0),
@@ -437,7 +455,6 @@ mod tests {
             },
         )
         .err()
-        .map(|error| (error.code, error.current_leader))
     }
 
     /// The cluster-wide dynamic `min.insync.replicas` default gates
@@ -475,7 +492,11 @@ mod tests {
         let refused = gate_with_acks(&image, krabka_audit::NodeId(1), false, false, -1, 1);
 
         assert!(
-            refused == Some((crate::codes::NOT_ENOUGH_REPLICAS, None)),
+            refused
+                == Some(PartitionGateError {
+                    code: crate::codes::NOT_ENOUGH_REPLICAS,
+                    current_leader: None
+                }),
             "got {refused:?}"
         );
         // The same partition still takes an acks=1 write: the rule is the
@@ -548,7 +569,7 @@ mod tests {
         let got = gate_with_acks(image, krabka_audit::NodeId(1), false, false, -1, 1);
         let refused = got
             .as_ref()
-            .is_some_and(|(code, _)| *code == NOT_ENOUGH_REPLICAS);
+            .is_some_and(|error| error.code == NOT_ENOUGH_REPLICAS);
         assert!(refused == want_refused, "{label}: got {got:?}");
     }
 
@@ -601,14 +622,14 @@ mod tests {
         // carries the real leader, so a Kafka client re-targets without a full
         // Metadata round-trip.
         let image = image_with_topic("orders", &[1, 2]);
-        let refused = Some((
-            NOT_LEADER_OR_FOLLOWER,
-            Some(LeaderIdAndEpoch {
+        let refused = Some(PartitionGateError {
+            code: NOT_LEADER_OR_FOLLOWER,
+            current_leader: Some(LeaderIdAndEpoch {
                 leader_id: 1,
                 leader_epoch: 0,
                 ..Default::default()
             }),
-        ));
+        });
         for (name, node_id, is_witness, diskless, want) in [
             (
                 "witness leads a classic partition",

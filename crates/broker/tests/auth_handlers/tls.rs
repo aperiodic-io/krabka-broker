@@ -25,17 +25,28 @@ use {
     },
 };
 
-fn write_dev_pem(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+/// The certificate and private key files a fixture writes.
+struct PemPaths {
+    cert: std::path::PathBuf,
+    key: std::path::PathBuf,
+}
+
+fn write_dev_pem(dir: &std::path::Path) -> PemPaths {
     let cp = dir.join("cert.pem");
     let kp = dir.join("key.pem");
     std::fs::write(&cp, DEV_CERT).unwrap();
     std::fs::write(&kp, DEV_KEY).unwrap();
-    (cp, kp)
+    PemPaths { cert: cp, key: kp }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tls_listener_accepts_tls_handshake_only() {
-    let (log_dir, _pem_dir, cert_path, key_path) = tls_fixture();
+    let TlsFixture {
+        log_dir,
+        pem_dir: _pem_dir,
+        cert_path,
+        key_path,
+    } = tls_fixture();
 
     let cfg = ssl_config(log_dir.path().to_path_buf(), TlsConfig {
         cert_chain_path: cert_path.clone(),
@@ -97,7 +108,12 @@ async fn tls_listener_accepts_tls_handshake_only() {
 /// not TLS termination. `tls_listener_accepts_*` covers TLS termination.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn metadata_response_carries_listener_endpoints() {
-    let (log_dir, _pem_dir, cert_path, key_path) = tls_fixture();
+    let TlsFixture {
+        log_dir,
+        pem_dir: _pem_dir,
+        cert_path,
+        key_path,
+    } = tls_fixture();
 
     // Distinct wildcard and loopback binds satisfy listener validation while
     // leaving port allocation atomic with Broker startup.
@@ -183,16 +199,27 @@ async fn metadata_response_carries_listener_endpoints() {
     handle.shutdown().await;
 }
 
-fn tls_fixture() -> (
-    tempfile::TempDir,
-    tempfile::TempDir,
-    std::path::PathBuf,
-    std::path::PathBuf,
-) {
+/// A log directory, the directory holding the dev PEM files, and their paths.
+struct TlsFixture {
+    log_dir: tempfile::TempDir,
+    pem_dir: tempfile::TempDir,
+    cert_path: std::path::PathBuf,
+    key_path: std::path::PathBuf,
+}
+
+fn tls_fixture() -> TlsFixture {
     // Installing before broker startup also permits the first client-side TLS build.
     let _ = rustls::crypto::ring::default_provider().install_default();
     let log_dir = tempfile::tempdir().unwrap();
     let pem_dir = tempfile::tempdir().unwrap();
-    let (cert_path, key_path) = write_dev_pem(pem_dir.path());
-    (log_dir, pem_dir, cert_path, key_path)
+    let PemPaths {
+        cert: cert_path,
+        key: key_path,
+    } = write_dev_pem(pem_dir.path());
+    TlsFixture {
+        log_dir,
+        pem_dir,
+        cert_path,
+        key_path,
+    }
 }

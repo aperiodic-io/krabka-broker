@@ -246,6 +246,16 @@ pub fn reachable_leader(
         .then_some(leader)
 }
 
+/// What one node contributes to the cluster fingerprint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeFingerprint {
+    pub node: NodeId,
+    pub role: &'static str,
+    pub epoch: Epoch,
+    pub records: usize,
+    pub high_watermark: i64,
+}
+
 /// A node fingerprint uses the core's leader watermark when it leads.
 #[must_use]
 pub fn fingerprint(
@@ -253,18 +263,18 @@ pub fn fingerprint(
     machine: &QuorumStateMachine,
     records: usize,
     hwm: i64,
-) -> (NodeId, &'static str, Epoch, usize, i64) {
+) -> NodeFingerprint {
     let hwm = match machine.role() {
         Role::Leader { high_watermark, .. } => *high_watermark,
         _ => hwm,
     };
-    (
-        id,
-        machine.role().name(),
-        machine.quorum_state().leader_epoch,
+    NodeFingerprint {
+        node: id,
+        role: machine.role().name(),
+        epoch: machine.quorum_state().leader_epoch,
         records,
-        hwm,
-    )
+        high_watermark: hwm,
+    }
 }
 
 /// Append one leader epoch per simulated record.

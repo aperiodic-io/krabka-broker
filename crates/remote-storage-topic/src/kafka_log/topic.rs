@@ -19,8 +19,13 @@ use {
     tracing::{debug, instrument, warn},
 };
 
-/// Provision the topic if it is missing and return `(partition_count,
-/// topic_id)`.
+/// The partition count and id of the metadata topic.
+pub(super) struct TopicInfo {
+    pub partition_count: i32,
+    pub topic_id: WireUuid,
+}
+
+/// Provision the topic if it is missing and return its [`TopicInfo`].
 ///
 /// An existing topic's count and id win. This function re-reads a
 /// freshly-created topic's id with a second metadata round-trip, because the
@@ -28,7 +33,7 @@ use {
 #[instrument(skip_all, fields(topic = %cfg.topic), err)]
 pub(super) async fn ensure_topic(
     cfg: &KafkaMetadataLogConfig,
-) -> Result<(i32, WireUuid), MetadataLogError> {
+) -> Result<TopicInfo, MetadataLogError> {
     let mut admin = AdminClient::connect_with_options(
         std::slice::from_ref(&cfg.bootstrap),
         ConnectionOptions {
@@ -62,7 +67,10 @@ pub(super) async fn ensure_topic(
         );
         let topic_id = entry.topic_id.map_or(WireUuid::ZERO, to_wire_uuid);
         warn_if_zero_topic_id(&cfg.topic, topic_id);
-        return Ok((entry.partition_count, topic_id));
+        return Ok(TopicInfo {
+            partition_count: entry.partition_count,
+            topic_id,
+        });
     }
 
     if !cfg.provision_topic {
@@ -117,7 +125,10 @@ pub(super) async fn ensure_topic(
             .map_or(WireUuid::ZERO, to_wire_uuid)
     };
     warn_if_zero_topic_id(&cfg.topic, topic_id);
-    Ok((cfg.num_partitions, topic_id))
+    Ok(TopicInfo {
+        partition_count: cfg.num_partitions,
+        topic_id,
+    })
 }
 
 /// Topic configs a freshly created metadata topic carries. Kafka's

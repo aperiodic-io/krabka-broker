@@ -3,8 +3,11 @@
 
 use {
     super::*,
-    crate::server::test_support::{
-        activate_dynamic_membership, decoded, single_voter_engine, wait_for_leader,
+    crate::{
+        server::test_support::{
+            activate_dynamic_membership, decoded, single_voter_engine, wait_for_leader,
+        },
+        voter_requests::ListenerAddress,
     },
     assert2::check,
     krabka_protocol::{
@@ -80,64 +83,80 @@ async fn add_response_for(
 /// and on a real port, no name repeats, and there is at least one.
 #[test]
 fn wire_listeners_must_be_usable_and_uniquely_named() {
-    type Row<'a> = (
-        &'a str,
-        Vec<(&'a str, &'a str, ListenerPort)>,
-        ListenerUsability,
-    );
-    let cases: Vec<Row<'_>> = vec![
-        (
-            "one usable listener",
-            vec![("CONTROLLER", "host", ListenerPort(9093))],
-            ListenerUsability::Usable,
-        ),
-        (
-            "two, differently named",
-            vec![
-                ("CONTROLLER", "host", ListenerPort(9093)),
-                ("PLAINTEXT", "host", ListenerPort(9092)),
+    struct Row<'a> {
+        what: &'a str,
+        listeners: Vec<Listener<'a>>,
+        usable: ListenerUsability,
+    }
+
+    struct Listener<'a> {
+        name: &'a str,
+        host: &'a str,
+        port: ListenerPort,
+    }
+    let listener = |name, host, port| Listener { name, host, port };
+    let cases = vec![
+        Row {
+            what: "one usable listener",
+            listeners: vec![listener("CONTROLLER", "host", ListenerPort(9093))],
+            usable: ListenerUsability::Usable,
+        },
+        Row {
+            what: "two, differently named",
+            listeners: vec![
+                listener("CONTROLLER", "host", ListenerPort(9093)),
+                listener("PLAINTEXT", "host", ListenerPort(9092)),
             ],
-            ListenerUsability::Usable,
-        ),
-        ("none at all", vec![], ListenerUsability::Unusable),
-        (
-            "a nameless listener",
-            vec![("", "host", ListenerPort(9093))],
-            ListenerUsability::Unusable,
-        ),
-        (
-            "a hostless listener",
-            vec![("CONTROLLER", "", ListenerPort(9093))],
-            ListenerUsability::Unusable,
-        ),
-        (
-            "port zero",
-            vec![("CONTROLLER", "host", ListenerPort(0))],
-            ListenerUsability::Unusable,
-        ),
-        (
-            "a repeated name",
-            vec![
-                ("CONTROLLER", "host", ListenerPort(9093)),
-                ("CONTROLLER", "other", ListenerPort(9094)),
+            usable: ListenerUsability::Usable,
+        },
+        Row {
+            what: "none at all",
+            listeners: vec![],
+            usable: ListenerUsability::Unusable,
+        },
+        Row {
+            what: "a nameless listener",
+            listeners: vec![listener("", "host", ListenerPort(9093))],
+            usable: ListenerUsability::Unusable,
+        },
+        Row {
+            what: "a hostless listener",
+            listeners: vec![listener("CONTROLLER", "", ListenerPort(9093))],
+            usable: ListenerUsability::Unusable,
+        },
+        Row {
+            what: "port zero",
+            listeners: vec![listener("CONTROLLER", "host", ListenerPort(0))],
+            usable: ListenerUsability::Unusable,
+        },
+        Row {
+            what: "a repeated name",
+            listeners: vec![
+                listener("CONTROLLER", "host", ListenerPort(9093)),
+                listener("CONTROLLER", "other", ListenerPort(9094)),
             ],
-            ListenerUsability::Unusable,
-        ),
-        (
-            "one good listener followed by a bad one",
-            vec![
-                ("CONTROLLER", "host", ListenerPort(9093)),
-                ("", "host", ListenerPort(9094)),
+            usable: ListenerUsability::Unusable,
+        },
+        Row {
+            what: "one good listener followed by a bad one",
+            listeners: vec![
+                listener("CONTROLLER", "host", ListenerPort(9093)),
+                listener("", "host", ListenerPort(9094)),
             ],
-            ListenerUsability::Unusable,
-        ),
+            usable: ListenerUsability::Unusable,
+        },
     ];
-    for (what, listeners, usable) in cases {
-        let actual = if valid_wire_listeners(
-            listeners
-                .iter()
-                .map(|&(name, host, port)| (name, host, port.0)),
-        ) {
+    for Row {
+        what,
+        listeners,
+        usable,
+    } in cases
+    {
+        let actual = if valid_wire_listeners(listeners.iter().map(|listener| ListenerAddress {
+            name: listener.name,
+            host: listener.host,
+            port: listener.port.0,
+        })) {
             ListenerUsability::Usable
         } else {
             ListenerUsability::Unusable
@@ -188,6 +207,14 @@ async fn remove_response(
 /// zero directory id in particular names no real incarnation.
 #[tokio::test]
 async fn a_malformed_reconfiguration_is_refused_before_the_quorum_sees_it() {
+    struct Case {
+        what: &'static str,
+        request_cluster_id: Option<String>,
+        voter_id: i32,
+        voter_directory_id: krabka_protocol::primitives::uuid::Uuid,
+        expected: RemoveRaftVoterResponse,
+    }
+
     const INVALID_REQUEST: i16 = 42;
     let version = remove_raft_voter_request::MAX_VERSION;
     let response_setup = voter_response_setup().version(version.into()).call();
@@ -207,20 +234,13 @@ async fn a_malformed_reconfiguration_is_refused_before_the_quorum_sees_it() {
         error_message: Some("Remove voter request didn't include a valid voter".into()),
         ..Default::default()
     };
-    // (what it is, cluster id sent, voter id, directory id, response)
-    let cases: Vec<(
-        &str,
-        Option<String>,
-        i32,
-        krabka_protocol::primitives::uuid::Uuid,
-        RemoveRaftVoterResponse,
-    )> = vec![
-        (
-            "another cluster's id",
-            Some("00000000-0000-0000-0000-0000000000ff".to_owned()),
-            2,
-            real_directory,
-            RemoveRaftVoterResponse {
+    let cases = vec![
+        Case {
+            what: "another cluster's id",
+            request_cluster_id: Some("00000000-0000-0000-0000-0000000000ff".to_owned()),
+            voter_id: 2,
+            voter_directory_id: real_directory,
+            expected: RemoveRaftVoterResponse {
                 error_code: 104,
                 error_message: Some(format!(
                     "The given id \"00000000-0000-0000-0000-0000000000ff\" doesn't match the \
@@ -228,24 +248,31 @@ async fn a_malformed_reconfiguration_is_refused_before_the_quorum_sees_it() {
                 )),
                 ..Default::default()
             },
-        ),
-        (
-            "a negative voter id",
-            Some(cluster_id.clone()),
-            -1,
-            real_directory,
-            invalid_voter.clone(),
-        ),
-        (
-            "a zero directory id",
-            Some(cluster_id.clone()),
-            2,
-            krabka_protocol::primitives::uuid::Uuid::ZERO,
-            invalid_voter,
-        ),
+        },
+        Case {
+            what: "a negative voter id",
+            request_cluster_id: Some(cluster_id.clone()),
+            voter_id: -1,
+            voter_directory_id: real_directory,
+            expected: invalid_voter.clone(),
+        },
+        Case {
+            what: "a zero directory id",
+            request_cluster_id: Some(cluster_id.clone()),
+            voter_id: 2,
+            voter_directory_id: krabka_protocol::primitives::uuid::Uuid::ZERO,
+            expected: invalid_voter,
+        },
     ];
 
-    for (what, request_cluster_id, voter_id, voter_directory_id, expected) in cases {
+    for Case {
+        what,
+        request_cluster_id,
+        voter_id,
+        voter_directory_id,
+        expected,
+    } in cases
+    {
         let request = remove_request(request_cluster_id, voter_id, voter_directory_id);
         let response = remove_response()
             .request(&request)
@@ -422,6 +449,14 @@ async fn adding_a_voter_needs_an_id_and_a_reachable_listener() {
 /// malformed request lands on one of the generic ones.
 #[tokio::test]
 async fn updating_a_voter_needs_the_cluster_the_epoch_and_a_coherent_range() {
+    struct Case {
+        what: &'static str,
+        request_cluster_id: Option<String>,
+        current_leader_epoch: i32,
+        k_raft_version_feature: KRaftVersionFeature,
+        want: i16,
+    }
+
     use krabka_protocol::{
         Encode as _,
         owned::{
@@ -473,39 +508,45 @@ async fn updating_a_voter_needs_the_cluster_the_epoch_and_a_coherent_range() {
         decoded::<UpdateRaftVoterResponse>(&bytes, version).error_code
     };
 
-    // (what it is, cluster id, epoch offered, version range, code expected)
-    let cases: Vec<(&str, Option<String>, i32, KRaftVersionFeature, i16)> = vec![
-        (
-            "another cluster's id",
-            Some("00000000-0000-0000-0000-0000000000ff".to_owned()),
-            epoch,
-            range(0, 1),
-            INCONSISTENT_CLUSTER_ID,
-        ),
-        (
-            "an epoch ahead of the quorum's",
-            Some(cluster_id.clone()),
-            epoch + 1,
-            range(0, 1),
-            UNKNOWN_LEADER_EPOCH,
-        ),
-        (
-            "an epoch the quorum has left behind",
-            Some(cluster_id.clone()),
-            epoch - 1,
-            range(0, 1),
-            FENCED_LEADER_EPOCH,
-        ),
-        (
-            "an inverted kraft.version range",
-            Some(cluster_id.clone()),
-            epoch,
-            range(2, 1),
-            INVALID_REQUEST,
-        ),
+    let cases = vec![
+        Case {
+            what: "another cluster's id",
+            request_cluster_id: Some("00000000-0000-0000-0000-0000000000ff".to_owned()),
+            current_leader_epoch: epoch,
+            k_raft_version_feature: range(0, 1),
+            want: INCONSISTENT_CLUSTER_ID,
+        },
+        Case {
+            what: "an epoch ahead of the quorum's",
+            request_cluster_id: Some(cluster_id.clone()),
+            current_leader_epoch: epoch + 1,
+            k_raft_version_feature: range(0, 1),
+            want: UNKNOWN_LEADER_EPOCH,
+        },
+        Case {
+            what: "an epoch the quorum has left behind",
+            request_cluster_id: Some(cluster_id.clone()),
+            current_leader_epoch: epoch - 1,
+            k_raft_version_feature: range(0, 1),
+            want: FENCED_LEADER_EPOCH,
+        },
+        Case {
+            what: "an inverted kraft.version range",
+            request_cluster_id: Some(cluster_id.clone()),
+            current_leader_epoch: epoch,
+            k_raft_version_feature: range(2, 1),
+            want: INVALID_REQUEST,
+        },
     ];
 
-    for (what, request_cluster_id, current_leader_epoch, k_raft_version_feature, want) in cases {
+    for Case {
+        what,
+        request_cluster_id,
+        current_leader_epoch,
+        k_raft_version_feature,
+        want,
+    } in cases
+    {
         let request = update(
             request_cluster_id,
             current_leader_epoch,

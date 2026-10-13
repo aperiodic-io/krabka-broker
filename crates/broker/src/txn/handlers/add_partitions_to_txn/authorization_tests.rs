@@ -18,7 +18,10 @@
 use {
     super::{
         handle,
-        test_support::{enlisted, seed_transaction, start_coordinator, topic, topic_result},
+        test_support::{
+            CoordinatorBroker, PartitionCode, PartitionSpec, enlisted, partition_set,
+            seed_transaction, start_coordinator, topic, topic_result,
+        },
     },
     crate::{
         authorizer::AuthorizationResult,
@@ -32,7 +35,7 @@ use {
         add_partitions_to_txn_request::{AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction},
         add_partitions_to_txn_response::{AddPartitionsToTxnResponse, AddPartitionsToTxnResult},
     },
-    std::{collections::BTreeSet, sync::Arc},
+    std::sync::Arc,
 };
 
 /// A broker principal: `ClusterAction` on the cluster and nothing else.
@@ -42,6 +45,17 @@ const BROKER: &str = "broker";
 const CLIENT: &str = "client";
 /// The topics [`CLIENT`] may write, an internal topic included.
 const CLIENT_TOPICS: [&str; 3] = ["a", "missing", OFFSETS_TOPIC];
+/// Partition 0 of topic `a` and of topic `b`.
+const A_AND_B: &[PartitionSpec] = &[
+    PartitionSpec {
+        topic: "a",
+        partition: 0,
+    },
+    PartitionSpec {
+        topic: "b",
+        partition: 0,
+    },
+];
 
 #[derive(Debug)]
 struct Grants;
@@ -71,32 +85,59 @@ krabka_macros::test_authorizer! { Grants, request; {
 enum Expect {
     /// The top-level error code, and no rows.
     TopLevel(i16),
-    /// These `(topic, partition, code)` rows.
-    Rows(&'static [(&'static str, i32, i16)]),
+    /// These rows.
+    Rows(&'static [RowSpec]),
+}
+
+/// One expected response row: the topic and partition it answers, and its code.
+#[derive(Debug, Clone, Copy)]
+struct RowSpec {
+    topic: &'static str,
+    partition: i32,
+    code: i16,
 }
 
 struct Case {
     name: &'static str,
     version: i16,
     caller: &'static str,
-    partitions: &'static [(&'static str, i32)],
+    partitions: &'static [PartitionSpec],
     verify_only: bool,
     expect: Expect,
     /// The partitions in the transaction after the request.
-    enlisted: &'static [(&'static str, i32)],
+    enlisted: &'static [PartitionSpec],
+}
+
+/// The partitions of one topic that a request names.
+struct TopicGroup<'a> {
+    name: &'a str,
+    partitions: Vec<i32>,
+}
+
+/// The rows a response answers for one topic.
+struct RowGroup<'a> {
+    name: &'a str,
+    rows: Vec<PartitionCode>,
 }
 
 fn request(case: &Case, tid: &str, producer_id: i64) -> AddPartitionsToTxnRequest {
-    let mut topics: Vec<(&str, Vec<i32>)> = Vec::new();
-    for &(name, partition) in case.partitions {
-        match topics.iter_mut().find(|(topic, _)| *topic == name) {
-            Some((_, partitions)) => partitions.push(partition),
-            None => topics.push((name, vec![partition])),
+    let mut topics: Vec<TopicGroup<'_>> = Vec::new();
+    for &PartitionSpec {
+        topic: name,
+        partition,
+    } in case.partitions
+    {
+        match topics.iter_mut().find(|group| group.name == name) {
+            Some(group) => group.partitions.push(partition),
+            None => topics.push(TopicGroup {
+                name,
+                partitions: vec![partition],
+            }),
         }
     }
     let topics = topics
         .iter()
-        .map(|(name, partitions)| topic(name, partitions))
+        .map(|TopicGroup { name, partitions }| topic(name, partitions))
         .collect();
     if case.version >= 4 {
         AddPartitionsToTxnRequest {
@@ -131,16 +172,25 @@ fn expected(case: &Case, tid: &str) -> AddPartitionsToTxnResponse {
         }
         Expect::Rows(rows) => rows,
     };
-    let mut topics: Vec<(&str, Vec<(i32, i16)>)> = Vec::new();
-    for &(name, partition, code) in rows {
-        match topics.iter_mut().find(|(topic, _)| *topic == name) {
-            Some((_, partitions)) => partitions.push((partition, code)),
-            None => topics.push((name, vec![(partition, code)])),
+    let mut topics: Vec<RowGroup<'_>> = Vec::new();
+    for &RowSpec {
+        topic: name,
+        partition,
+        code,
+    } in rows
+    {
+        let row = PartitionCode { partition, code };
+        match topics.iter_mut().find(|group| group.name == name) {
+            Some(group) => group.rows.push(row),
+            None => topics.push(RowGroup {
+                name,
+                rows: vec![row],
+            }),
         }
     }
     let topic_results = topics
         .iter()
-        .map(|(name, rows)| topic_result(name, rows))
+        .map(|RowGroup { name, rows }| topic_result(name, rows))
         .collect();
     if case.version >= 4 {
         AddPartitionsToTxnResponse {
@@ -159,8 +209,9 @@ fn expected(case: &Case, tid: &str) -> AddPartitionsToTxnResponse {
     }
 }
 
-#[tokio::test]
-async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transaction() {
+/// The table of cases: which principal sends which version, what it expects
+/// back, and which partitions the transaction holds afterwards.
+fn cases() -> [Case; 9] {
     use codes::{
         CLUSTER_AUTHORIZATION_FAILED as CLUSTER_DENIED, NONE,
         OPERATION_NOT_ATTEMPTED as NOT_ATTEMPTED, TOPIC_AUTHORIZATION_FAILED as TOPIC_DENIED,
@@ -171,17 +222,40 @@ async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transac
         name,
         version,
         caller,
-        partitions: &[("a", 0), ("missing", 0)],
+        partitions: &[
+            PartitionSpec {
+                topic: "a",
+                partition: 0,
+            },
+            PartitionSpec {
+                topic: "missing",
+                partition: 0,
+            },
+        ],
         verify_only: false,
-        expect: Expect::Rows(&[("a", 0, NOT_ATTEMPTED), ("missing", 0, UNKNOWN)]),
+        expect: Expect::Rows(&[
+            RowSpec {
+                topic: "a",
+                partition: 0,
+                code: NOT_ATTEMPTED,
+            },
+            RowSpec {
+                topic: "missing",
+                partition: 0,
+                code: UNKNOWN,
+            },
+        ]),
         enlisted: &[],
     };
-    let cases = [
+    [
         Case {
             name: "v4, client grants, no ClusterAction",
             version: 4,
             caller: CLIENT,
-            partitions: &[("a", 0)],
+            partitions: &[PartitionSpec {
+                topic: "a",
+                partition: 0,
+            }],
             verify_only: false,
             expect: Expect::TopLevel(CLUSTER_DENIED),
             enlisted: &[],
@@ -190,19 +264,55 @@ async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transac
             name: "v4, ClusterAction only",
             version: 4,
             caller: BROKER,
-            partitions: &[("a", 0), ("b", 0)],
+            partitions: A_AND_B,
             verify_only: false,
-            expect: Expect::Rows(&[("a", 0, NONE), ("b", 0, NONE)]),
-            enlisted: &[("a", 0), ("b", 0)],
+            expect: Expect::Rows(&[
+                RowSpec {
+                    topic: "a",
+                    partition: 0,
+                    code: NONE,
+                },
+                RowSpec {
+                    topic: "b",
+                    partition: 0,
+                    code: NONE,
+                },
+            ]),
+            enlisted: &[
+                PartitionSpec {
+                    topic: "a",
+                    partition: 0,
+                },
+                PartitionSpec {
+                    topic: "b",
+                    partition: 0,
+                },
+            ],
         },
         Case {
             name: "v5 verify-only, ClusterAction only, the partition is enlisted",
             version: 5,
             caller: BROKER,
-            partitions: &[("a", 0)],
+            partitions: &[PartitionSpec {
+                topic: "a",
+                partition: 0,
+            }],
             verify_only: true,
-            expect: Expect::Rows(&[("a", 0, NONE)]),
-            enlisted: &[("a", 0), ("b", 0)],
+            expect: Expect::Rows(&[RowSpec {
+                topic: "a",
+                partition: 0,
+                code: NONE,
+            }]),
+            enlisted: &[
+                PartitionSpec {
+                    topic: "a",
+                    partition: 0,
+                },
+                PartitionSpec {
+                    topic: "b",
+                    partition: 0,
+                },
+            ],
         },
         missing_partition(
             "v4, ClusterAction only, a partition that does not exist",
@@ -213,18 +323,36 @@ async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transac
             name: "v3, ClusterAction only",
             version: 3,
             caller: BROKER,
-            partitions: &[("a", 0)],
+            partitions: &[PartitionSpec {
+                topic: "a",
+                partition: 0,
+            }],
             verify_only: false,
-            expect: Expect::Rows(&[("a", 0, TID_DENIED)]),
+            expect: Expect::Rows(&[RowSpec {
+                topic: "a",
+                partition: 0,
+                code: TID_DENIED,
+            }]),
             enlisted: &[],
         },
         Case {
             name: "v3, Write on a and not on b",
             version: 3,
             caller: CLIENT,
-            partitions: &[("a", 0), ("b", 0)],
+            partitions: A_AND_B,
             verify_only: false,
-            expect: Expect::Rows(&[("a", 0, NOT_ATTEMPTED), ("b", 0, TOPIC_DENIED)]),
+            expect: Expect::Rows(&[
+                RowSpec {
+                    topic: "a",
+                    partition: 0,
+                    code: NOT_ATTEMPTED,
+                },
+                RowSpec {
+                    topic: "b",
+                    partition: 0,
+                    code: TOPIC_DENIED,
+                },
+            ]),
             enlisted: &[],
         },
         missing_partition("v3, a partition that does not exist", 3, CLIENT),
@@ -232,23 +360,48 @@ async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transac
             name: "v3, an internal topic with Write on it",
             version: 3,
             caller: CLIENT,
-            partitions: &[(OFFSETS_TOPIC, 0)],
+            partitions: &[PartitionSpec {
+                topic: OFFSETS_TOPIC,
+                partition: 0,
+            }],
             verify_only: false,
-            expect: Expect::Rows(&[(OFFSETS_TOPIC, 0, TOPIC_DENIED)]),
+            expect: Expect::Rows(&[RowSpec {
+                topic: OFFSETS_TOPIC,
+                partition: 0,
+                code: TOPIC_DENIED,
+            }]),
             enlisted: &[],
         },
         Case {
             name: "v3, Write on the transactional id and the topic",
             version: 3,
             caller: CLIENT,
-            partitions: &[("a", 0)],
+            partitions: &[PartitionSpec {
+                topic: "a",
+                partition: 0,
+            }],
             verify_only: false,
-            expect: Expect::Rows(&[("a", 0, NONE)]),
-            enlisted: &[("a", 0)],
+            expect: Expect::Rows(&[RowSpec {
+                topic: "a",
+                partition: 0,
+                code: NONE,
+            }]),
+            enlisted: &[PartitionSpec {
+                topic: "a",
+                partition: 0,
+            }],
         },
-    ];
+    ]
+}
 
-    let (handle_, _dir) = start_coordinator(Arc::new(ControllerPeerAllowed(Grants))).await;
+#[tokio::test]
+async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transaction() {
+    let cases = cases();
+
+    let CoordinatorBroker {
+        handle: handle_,
+        dir: _dir,
+    } = start_coordinator(Arc::new(ControllerPeerAllowed(Grants))).await;
     let broker = handle_.broker_arc_for_test();
 
     let address = peer();
@@ -274,12 +427,7 @@ async fn add_partitions_to_txn_authorizes_by_version_and_fails_the_whole_transac
         .expect("handle");
         check!(resp == expected(case, &tid), "{}", case.name);
         let enlisted = enlisted(&broker, &tid).await;
-        let want: BTreeSet<(String, i32)> = case
-            .enlisted
-            .iter()
-            .map(|&(topic, partition)| (topic.to_owned(), partition))
-            .collect();
-        check!(enlisted == want, "{}", case.name);
+        check!(enlisted == partition_set(case.enlisted), "{}", case.name);
     }
     handle_.shutdown().await;
 }

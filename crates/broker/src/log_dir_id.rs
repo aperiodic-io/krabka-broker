@@ -22,6 +22,22 @@ use {
     uuid::Uuid,
 };
 
+/// One `log.dir` and the directory id it carries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogDirEntry {
+    /// The `log.dir` path.
+    pub path: PathBuf,
+    /// The dir's `directory.id`.
+    pub id: Uuid,
+}
+
+/// The cluster and node a new `meta.properties` is written for.
+#[derive(Clone, Copy)]
+struct BrokerIdentity {
+    cluster_id: ClusterId,
+    node_id: NodeId,
+}
+
 /// Immutable per-dir UUID table built once at startup.
 #[derive(Clone, Debug, Default)]
 pub struct LogDirIds {
@@ -46,10 +62,16 @@ impl LogDirIds {
     /// therefore stays usable, and only the reporting of the dir degrades.
     #[must_use]
     pub fn provision(log_dirs: &[PathBuf], cluster_id: Uuid, node_id: NodeId) -> Self {
-        Self::build(log_dirs, Some((ClusterId(cluster_id), node_id)))
+        Self::build(
+            log_dirs,
+            Some(BrokerIdentity {
+                cluster_id: ClusterId(cluster_id),
+                node_id,
+            }),
+        )
     }
 
-    fn build(log_dirs: &[PathBuf], identity: Option<(ClusterId, NodeId)>) -> Self {
+    fn build(log_dirs: &[PathBuf], identity: Option<BrokerIdentity>) -> Self {
         let mut by_path = HashMap::new();
         for dir in log_dirs {
             let used: Vec<DirectoryId> = by_path.values().copied().map(DirectoryId).collect();
@@ -62,11 +84,18 @@ impl LogDirIds {
     #[must_use]
     pub fn id_for(&self, dir: &Path) -> Option<Uuid> { self.by_path.get(dir).copied() }
 
-    /// All `(path, uuid)` pairs, sorted by path for deterministic output.
+    /// All path and uuid pairs, sorted by path for deterministic output.
     #[must_use]
-    pub fn entries(&self) -> Vec<(PathBuf, Uuid)> {
-        let mut v: Vec<_> = self.by_path.iter().map(|(p, u)| (p.clone(), *u)).collect();
-        v.sort_by(|a, b| a.0.cmp(&b.0));
+    pub fn entries(&self) -> Vec<LogDirEntry> {
+        let mut v: Vec<_> = self
+            .by_path
+            .iter()
+            .map(|(path, id)| LogDirEntry {
+                path: path.clone(),
+                id: *id,
+            })
+            .collect();
+        v.sort_by(|a, b| a.path.cmp(&b.path));
         v
     }
 
@@ -80,7 +109,7 @@ impl LogDirIds {
 
 /// Reads the `directory.id` from `<dir>/meta.properties`, or makes a new id
 /// that is not in `used`. With an `identity`, a new id is written to the dir.
-fn read_or_mint(dir: &Path, used: &[DirectoryId], identity: Option<(ClusterId, NodeId)>) -> Uuid {
+fn read_or_mint(dir: &Path, used: &[DirectoryId], identity: Option<BrokerIdentity>) -> Uuid {
     let read = MetaProperties::read(dir);
     if let Ok(Some(MetaProperties {
         directory_id: Some(id),
@@ -92,13 +121,17 @@ fn read_or_mint(dir: &Path, used: &[DirectoryId], identity: Option<(ClusterId, N
     let id = DirectoryId::random_unused(used);
     let file = match (read, identity) {
         (Ok(Some(meta)), Some(_)) => Some(meta),
-        (Ok(None), Some((cluster_id, node_id))) => {
-            i32::try_from(node_id.0).ok().map(|node_id| MetaProperties {
+        (
+            Ok(None),
+            Some(BrokerIdentity {
                 cluster_id,
                 node_id,
-                directory_id: None,
-            })
-        }
+            }),
+        ) => i32::try_from(node_id.0).ok().map(|node_id| MetaProperties {
+            cluster_id,
+            node_id,
+            directory_id: None,
+        }),
         _ => None,
     };
     if let Some(meta) = file {

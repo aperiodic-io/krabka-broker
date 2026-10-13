@@ -45,13 +45,24 @@ fn partition(replicas: &[NodeId], directories: &[Uuid]) -> PartitionRecord {
         .call()
 }
 
+/// A broker registered with the log directories it reports online.
+struct Registered {
+    node_id: NodeId,
+    online_dirs: Vec<Uuid>,
+}
+
+impl Registered {
+    fn new(node_id: NodeId, online_dirs: Vec<Uuid>) -> Self {
+        Self {
+            node_id,
+            online_dirs,
+        }
+    }
+}
+
 /// Image with `t-0` on `replicas`/`directories` and a registration for every
-/// `(node_id, online_dirs)` pair in `registrations`.
-fn image(
-    registrations: &[(NodeId, Vec<Uuid>)],
-    replicas: &[NodeId],
-    directories: &[Uuid],
-) -> MetadataImage {
+/// broker in `registrations`.
+fn image(registrations: &[Registered], replicas: &[NodeId], directories: &[Uuid]) -> MetadataImage {
     let mut img = MetadataImage::new(Uuid::nil());
     img.apply(&MetadataRecord::V1Topic(TopicRecord {
         name: "t".into(),
@@ -59,8 +70,12 @@ fn image(
         partitions: 1,
         replication_factor: i16::try_from(replicas.len()).unwrap(),
     }));
-    for (node_id, online) in registrations {
-        img.apply(&registration(*node_id, online.clone()));
+    for Registered {
+        node_id,
+        online_dirs,
+    } in registrations
+    {
+        img.apply(&registration(*node_id, online_dirs.clone()));
     }
     img.apply(&MetadataRecord::V1Partition(partition(
         replicas,
@@ -73,8 +88,8 @@ fn image(
 struct ReplicaCaseSetup {
     #[default("healthy replicas")]
     name: &'static str,
-    #[default(vec![(NodeId(1), vec![dir(0x600d)]), (NodeId(2), vec![dir(0x600d)])])]
-    registrations: Vec<(NodeId, Vec<Uuid>)>,
+    #[default(vec![Registered { node_id: NodeId(1), online_dirs: vec![dir(0x600d)] }, Registered { node_id: NodeId(2), online_dirs: vec![dir(0x600d)] }])]
+    registrations: Vec<Registered>,
     #[default(vec![NodeId(1), NodeId(2)])]
     replicas: Vec<NodeId>,
     #[default(vec![dir(0x600d), dir(0x600d)])]
@@ -91,8 +106,8 @@ struct Case<E> {
 fn replica_case<E>(
     expected: E,
     #[builder(default = "healthy replicas")] name: &'static str,
-    #[builder(default = vec ! [(NodeId (1) , vec ! [dir (0x600d)]) , (NodeId (2) , vec ! [dir (0x600d)])])]
-    registrations: Vec<(NodeId, Vec<Uuid>)>,
+    #[builder(default = vec ! [Registered :: new (NodeId (1) , vec ! [dir (0x600d)]) , Registered :: new (NodeId (2) , vec ! [dir (0x600d)])])]
+    registrations: Vec<Registered>,
     #[builder(default = vec ! [NodeId (1) , NodeId (2)])] replicas: Vec<NodeId>,
     #[builder(default = vec ! [dir (0x600d) , dir (0x600d)])] directories: Vec<Uuid>,
     #[builder(default)] unavailable: Vec<NodeId>,
@@ -136,11 +151,20 @@ fn check_replica_cases<E: std::fmt::Debug + PartialEq>(
 #[test]
 fn offline_replicas_matches_kafka_replica_state_rules() {
     let (good, bad) = (dir(0x600d), dir(0xbad));
+    let first_broker_without_dirs = || {
+        vec![
+            Registered::new(NodeId(1), vec![]),
+            Registered::new(NodeId(2), vec![good]),
+        ]
+    };
     let cases = vec![
         replica_case()
             .expected(vec![])
             .name("every replica registered, online dir, unfenced")
-            .registrations(vec![(NodeId(1), vec![good, bad]), (NodeId(2), vec![good])])
+            .registrations(vec![
+                Registered::new(NodeId(1), vec![good, bad]),
+                Registered::new(NodeId(2), vec![good]),
+            ])
             .call(),
         replica_case()
             .expected(vec![1])
@@ -155,7 +179,7 @@ fn offline_replicas_matches_kafka_replica_state_rules() {
         replica_case()
             .expected(vec![2])
             .name("unregistered broker")
-            .registrations(vec![(NodeId(1), vec![good])])
+            .registrations(vec![Registered::new(NodeId(1), vec![good])])
             .call(),
         replica_case()
             .expected(vec![])
@@ -165,13 +189,13 @@ fn offline_replicas_matches_kafka_replica_state_rules() {
         replica_case()
             .expected(vec![1])
             .name("registration whose last online dir was retired offlines its replicas")
-            .registrations(vec![(NodeId(1), vec![]), (NodeId(2), vec![good])])
+            .registrations(first_broker_without_dirs())
             .directories(vec![bad, good])
             .call(),
         replica_case()
             .expected(vec![])
             .name("registration with no online dir keeps an unassigned replica online")
-            .registrations(vec![(NodeId(1), vec![]), (NodeId(2), vec![good])])
+            .registrations(first_broker_without_dirs())
             .directories(vec![Uuid::nil(), good])
             .call(),
         replica_case()
@@ -211,7 +235,7 @@ fn a_replica_on_a_dead_log_dir_neither_leads_nor_stays_in_the_isr() {
         replica_case()
             .expected(availability(NO_LEADER_ID, vec![], vec![1]))
             .name("sole replica on a failed log dir")
-            .registrations(vec![(NodeId(1), vec![good])])
+            .registrations(vec![Registered::new(NodeId(1), vec![good])])
             .replicas(vec![NodeId(1)])
             .directories(vec![bad])
             .call(),
@@ -223,7 +247,7 @@ fn a_replica_on_a_dead_log_dir_neither_leads_nor_stays_in_the_isr() {
         replica_case()
             .expected(availability(1, vec![1], vec![]))
             .name("sole replica on a directory nobody has assigned yet")
-            .registrations(vec![(NodeId(1), vec![good])])
+            .registrations(vec![Registered::new(NodeId(1), vec![good])])
             .replicas(vec![NodeId(1)])
             .directories(vec![Uuid::nil()])
             .call(),
@@ -235,7 +259,7 @@ fn a_replica_on_a_dead_log_dir_neither_leads_nor_stays_in_the_isr() {
         replica_case()
             .expected(availability(1, vec![1, 2], vec![2]))
             .name("unregistered follower keeps its ISR seat")
-            .registrations(vec![(NodeId(1), vec![good])])
+            .registrations(vec![Registered::new(NodeId(1), vec![good])])
             .call(),
         replica_case()
             .expected(availability(1, vec![1, 2], vec![]))
@@ -257,7 +281,10 @@ fn a_broker_without_the_request_listener_is_offline_and_cannot_be_the_leader() {
     // Node 1 lists `PLAINTEXT`, node 2 lists only `EXTERNAL`, and node 3 has
     // no registration.
     let mut img = image(
-        &[(NodeId(1), vec![good]), (NodeId(2), vec![good])],
+        &[
+            Registered::new(NodeId(1), vec![good]),
+            Registered::new(NodeId(2), vec![good]),
+        ],
         &[NodeId(1), NodeId(2)],
         &[good, good],
     );
@@ -300,6 +327,13 @@ fn a_broker_without_the_request_listener_is_offline_and_cannot_be_the_leader() {
     );
 }
 
+/// One election case: the nodes reported unavailable and the nodes electable.
+struct ElectableCase<'a> {
+    name: &'a str,
+    unavailable: Vec<u64>,
+    expected: Vec<u64>,
+}
+
 /// The set an operator election may elect from, which every node computes the
 /// same way so that a rotating `controllerId` cannot change the answer.
 ///
@@ -311,26 +345,43 @@ fn electable_is_the_registered_brokers_the_unavailable_set_does_not_name() {
     let good = dir(0x600d);
     let img = image(
         &[
-            (NodeId(1), vec![good]),
-            (NodeId(2), vec![good]),
-            (NodeId(3), vec![good]),
+            Registered::new(NodeId(1), vec![good]),
+            Registered::new(NodeId(2), vec![good]),
+            Registered::new(NodeId(3), vec![good]),
         ],
         &[NodeId(1), NodeId(2)],
         &[good, good],
     );
 
-    let cases: [(&str, Vec<u64>, Vec<u64>); 4] = [
-        ("nothing unavailable", vec![], vec![1, 2, 3]),
-        ("one fenced broker", vec![2], vec![1, 3]),
-        ("every broker unavailable", vec![1, 2, 3], vec![]),
-        (
-            "an unavailable broker that never registered",
-            vec![9],
-            vec![1, 2, 3],
-        ),
+    let cases: [ElectableCase<'_>; 4] = [
+        ElectableCase {
+            name: "nothing unavailable",
+            unavailable: vec![],
+            expected: vec![1, 2, 3],
+        },
+        ElectableCase {
+            name: "one fenced broker",
+            unavailable: vec![2],
+            expected: vec![1, 3],
+        },
+        ElectableCase {
+            name: "every broker unavailable",
+            unavailable: vec![1, 2, 3],
+            expected: vec![],
+        },
+        ElectableCase {
+            name: "an unavailable broker that never registered",
+            unavailable: vec![9],
+            expected: vec![1, 2, 3],
+        },
     ];
 
-    for (name, unavailable, expected) in cases {
+    for ElectableCase {
+        name,
+        unavailable,
+        expected,
+    } in cases
+    {
         let actual = electable(&img, &unavailable.into_iter().collect());
 
         assert!(actual == expected.into_iter().collect(), "case {name}");
@@ -342,11 +393,22 @@ fn electable_is_the_registered_brokers_the_unavailable_set_does_not_name() {
 #[test]
 fn an_unregistered_broker_is_never_electable() {
     let good = dir(0x600d);
-    let img = image(&[(NodeId(1), vec![good])], &[NodeId(1), NodeId(2)], &[
-        good, good,
-    ]);
+    let img = image(
+        &[Registered::new(NodeId(1), vec![good])],
+        &[NodeId(1), NodeId(2)],
+        &[good, good],
+    );
 
     assert!(electable(&img, &HashSet::new()) == HashSet::from([1]));
+}
+
+/// One leaderless case: the replicas, the last-known ELR and the availability
+/// that both APIs project.
+struct LeaderlessCase<'a> {
+    name: &'a str,
+    replicas: Vec<u64>,
+    last_known: Vec<u64>,
+    expected: PartitionAvailability,
 }
 
 /// A partition the controller left without a leader keeps its last leader in
@@ -358,41 +420,50 @@ fn an_unregistered_broker_is_never_electable() {
 #[test]
 fn a_leaderless_partition_projects_no_leader_and_an_isr_without_its_last_leader() {
     let good = dir(0x600d);
-    let cases: [(&str, Vec<u64>, Vec<u64>, PartitionAvailability); 5] = [
-        (
-            "sole replica, last-known ELR names it",
-            vec![1],
-            vec![1],
-            availability(NO_LEADER_ID, vec![], vec![]),
-        ),
-        (
-            "an ISR member other than the last leader stays",
-            vec![1, 2],
-            vec![1],
-            availability(NO_LEADER_ID, vec![2], vec![]),
-        ),
-        (
-            "no last-known ELR",
-            vec![1, 2],
-            vec![],
-            availability(1, vec![1, 2], vec![]),
-        ),
-        (
-            "a last-known ELR that names another replica is no marker",
-            vec![1, 2],
-            vec![2],
-            availability(1, vec![1, 2], vec![]),
-        ),
-        (
-            "a multi-member last-known ELR is no marker",
-            vec![1, 2],
-            vec![1, 2],
-            availability(1, vec![1, 2], vec![]),
-        ),
+    let cases: [LeaderlessCase<'_>; 5] = [
+        LeaderlessCase {
+            name: "sole replica, last-known ELR names it",
+            replicas: vec![1],
+            last_known: vec![1],
+            expected: availability(NO_LEADER_ID, vec![], vec![]),
+        },
+        LeaderlessCase {
+            name: "an ISR member other than the last leader stays",
+            replicas: vec![1, 2],
+            last_known: vec![1],
+            expected: availability(NO_LEADER_ID, vec![2], vec![]),
+        },
+        LeaderlessCase {
+            name: "no last-known ELR",
+            replicas: vec![1, 2],
+            last_known: vec![],
+            expected: availability(1, vec![1, 2], vec![]),
+        },
+        LeaderlessCase {
+            name: "a last-known ELR that names another replica is no marker",
+            replicas: vec![1, 2],
+            last_known: vec![2],
+            expected: availability(1, vec![1, 2], vec![]),
+        },
+        LeaderlessCase {
+            name: "a multi-member last-known ELR is no marker",
+            replicas: vec![1, 2],
+            last_known: vec![1, 2],
+            expected: availability(1, vec![1, 2], vec![]),
+        },
     ];
-    for (name, replicas, last_known, expected) in cases {
+    for LeaderlessCase {
+        name,
+        replicas,
+        last_known,
+        expected,
+    } in cases
+    {
         let mut img = image(
-            &[(NodeId(1), vec![good]), (NodeId(2), vec![good])],
+            &[
+                Registered::new(NodeId(1), vec![good]),
+                Registered::new(NodeId(2), vec![good]),
+            ],
             &replicas.iter().copied().map(NodeId).collect::<Vec<_>>(),
             &vec![good; replicas.len()],
         );

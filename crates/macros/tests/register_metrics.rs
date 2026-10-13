@@ -6,13 +6,16 @@ use {
     assert2::assert,
     krabka_macros::RegisterMetrics,
     prometheus_client::{
-        encoding::text::encode,
+        encoding::{EncodeLabelSet, text::encode},
         metrics::{counter::Counter, family::Family, gauge::Gauge, histogram::Histogram},
         registry::Registry,
     },
 };
 
-type Labels = Vec<(String, String)>;
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct Labels {
+    api: String,
+}
 
 #[derive(RegisterMetrics)]
 struct Metrics {
@@ -50,7 +53,9 @@ fn registers_every_field_in_order_under_its_name_help_and_buckets() {
     metrics.latency_seconds.observe(0.75);
     metrics
         .api_latency_seconds
-        .get_or_create(&vec![("api".to_owned(), "Fetch".to_owned())])
+        .get_or_create(&Labels {
+            api: "Fetch".to_owned(),
+        })
         .observe(1.0);
     metrics.unregistered_gauge.set(9);
 

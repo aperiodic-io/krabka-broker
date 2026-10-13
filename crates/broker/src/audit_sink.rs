@@ -116,17 +116,29 @@ mod tests {
         std::sync::Arc,
     };
 
-    fn audit_partition(path: &std::path::Path) -> (Arc<Partition>, Arc<PartitionRegistry>) {
+    /// The `__audit` partition and the registry that holds it.
+    struct AuditPartition {
+        partition: Arc<Partition>,
+        partitions: Arc<PartitionRegistry>,
+    }
+
+    fn audit_partition(path: &std::path::Path) -> AuditPartition {
         let partitions = Arc::new(PartitionRegistry::new());
         let partition = fixture_partition().log_dir(path).topic("__audit").call();
         partitions.insert("__audit".into(), PartitionIndex(0), Arc::clone(&partition));
-        (partition, partitions)
+        AuditPartition {
+            partition,
+            partitions,
+        }
     }
 
     #[tokio::test]
     async fn write_appends_record_value_and_headers_to_local_partition() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (partition, partitions) = audit_partition(dir.path());
+        let AuditPartition {
+            partition,
+            partitions,
+        } = audit_partition(dir.path());
         let sink = KafkaTopicAuditSink::new(
             partitions,
             "__audit".to_string(),
@@ -171,7 +183,10 @@ mod tests {
     #[tokio::test]
     async fn write_refuses_a_partition_after_leadership_moves_away() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (partition, partitions) = audit_partition(dir.path());
+        let AuditPartition {
+            partition,
+            partitions,
+        } = audit_partition(dir.path());
         partition.install_leader_change(1, 1).await;
         let sink = KafkaTopicAuditSink::new(
             partitions,

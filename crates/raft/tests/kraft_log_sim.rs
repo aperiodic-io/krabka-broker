@@ -172,12 +172,18 @@ fn new_with_kraft_log(voter_ids: &[NodeId]) -> Sim<KraftBackedLog> {
     Sim::new_with(voter_ids, |_id| KraftBackedLog::new())
 }
 
-fn stable_three_voter_sim(appends: usize) -> (Sim<KraftBackedLog>, NodeId) {
+/// A settled three-voter simulation and its single leader.
+struct StableSim {
+    sim: Sim<KraftBackedLog>,
+    leader: NodeId,
+}
+
+fn stable_three_voter_sim(appends: usize) -> StableSim {
     let mut sim = new_with_kraft_log(&[NodeId(1), NodeId(2), NodeId(3)]);
     let leader = sim.stabilize_one_leader(10_000);
     sim.leader_append(leader, appends);
     sim.run_until_stable(10_000);
-    (sim, leader)
+    StableSim { sim, leader }
 }
 
 /// The committed bytes of the log of `node`: the verbatim `.log` bytes for
@@ -209,7 +215,7 @@ use assert2::check;
 
 #[test]
 fn voters_logs_byte_identical_up_to_hwm_over_real_log() {
-    let (sim, leader) = stable_three_voter_sim(5);
+    let StableSim { sim, leader } = stable_three_voter_sim(5);
 
     let hwm = sim.leader_high_watermark(leader);
     assert2::assert!(hwm >= 5);
@@ -233,7 +239,7 @@ fn voters_logs_byte_identical_up_to_hwm_over_real_log() {
 
 #[test]
 fn follower_truncates_real_log_on_divergence_then_reconverges() {
-    let (mut sim, leader) = stable_three_voter_sim(3);
+    let StableSim { mut sim, leader } = stable_three_voter_sim(3);
     let leader_end = sim.log_end_offset(leader);
 
     // Give a follower a conflicting-epoch tail the leader does not have: two
@@ -290,7 +296,7 @@ fn follower_truncates_real_log_on_divergence_then_reconverges() {
 
 #[test]
 fn hwm_agrees_and_never_exceeds_any_voter_log_end() {
-    let (sim, leader) = stable_three_voter_sim(3);
+    let StableSim { sim, leader } = stable_three_voter_sim(3);
 
     let hwm = sim.leader_high_watermark(leader);
     assert2::assert!(hwm >= 3);

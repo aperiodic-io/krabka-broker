@@ -35,28 +35,68 @@ use crate::{
 
 krabka_macros::timestamped_batch!(timestamped_batch_at);
 
-fn offset_index_bytes(entries: &[(u32, u32)]) -> Vec<u8> {
+/// One entry of an offset index: a batch's last offset, relative to the
+/// segment's base, and where the batch starts in the segment.
+struct OffsetIndexEntry {
+    relative_offset: u32,
+    position: u32,
+}
+
+/// One entry of a time index: a running maximum timestamp and the relative
+/// offset of the batch that set it.
+struct TimeIndexEntry {
+    timestamp: i64,
+    relative_offset: u32,
+}
+
+fn offset_index_bytes(entries: &[OffsetIndexEntry]) -> Vec<u8> {
     let mut buf = Vec::new();
-    for (relative_offset, position) in entries {
+    for OffsetIndexEntry {
+        relative_offset,
+        position,
+    } in entries
+    {
         buf.extend_from_slice(&relative_offset.to_be_bytes());
         buf.extend_from_slice(&position.to_be_bytes());
     }
     buf
 }
 
-fn time_index_bytes(entries: &[(i64, u32)]) -> Vec<u8> {
+fn time_index_bytes(entries: &[TimeIndexEntry]) -> Vec<u8> {
     let mut buf = Vec::new();
-    for (timestamp, relative_offset) in entries {
+    for TimeIndexEntry {
+        timestamp,
+        relative_offset,
+    } in entries
+    {
         buf.extend_from_slice(&timestamp.to_be_bytes());
         buf.extend_from_slice(&relative_offset.to_be_bytes());
     }
     buf
 }
 
+/// A reader and the directory that holds the tier it reads.
+pub struct ReaderWithDir {
+    pub reader: RemoteReader,
+    pub dir: tempfile::TempDir,
+}
+
+/// The reader built on a populated log, and that log.
+pub struct PopulatedReader {
+    pub reader: RemoteReader,
+    pub log: Log,
+}
+
 fn write_test_file(dir: &std::path::Path, name: &str, bytes: &[u8]) -> std::path::PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, bytes).unwrap();
     path
+}
+
+/// A [`CountingRsm`] and the counter of the index objects it downloaded.
+pub struct CountedRsm {
+    pub rsm: Arc<CountingRsm>,
+    pub index_fetches: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// A [`RemoteStorageManager`] that counts the index objects it downloads and
@@ -71,17 +111,15 @@ pub struct CountingRsm {
 }
 
 impl CountingRsm {
-    pub fn new(
-        inner: Arc<dyn RemoteStorageManager>,
-    ) -> (Arc<Self>, Arc<std::sync::atomic::AtomicUsize>) {
+    pub fn counting(inner: Arc<dyn RemoteStorageManager>) -> CountedRsm {
         let index_fetches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        (
-            Arc::new(Self {
+        CountedRsm {
+            rsm: Arc::new(Self {
                 inner,
                 index_fetches: Arc::clone(&index_fetches),
             }),
             index_fetches,
-        )
+        }
     }
 }
 
@@ -129,15 +167,25 @@ pub struct ReaderDirs {
     pub _log: tempfile::TempDir,
 }
 
+/// A reader with the production index cache, the directories it reads from
+/// and the counter of the index objects that reached the tier.
+pub struct CachingReader {
+    pub reader: RemoteReader,
+    pub dirs: ReaderDirs,
+    pub index_fetches: Arc<std::sync::atomic::AtomicUsize>,
+}
+
 /// The `sparse_remote_segment_reader` fixture, with the production index cache
 /// turned on and a counting RSM underneath.
-pub fn caching_sparse_remote_segment_reader() -> (
-    RemoteReader,
-    ReaderDirs,
-    Arc<std::sync::atomic::AtomicUsize>,
-) {
-    let (reader, remote_dir) = sparse_remote_segment_reader();
-    let (counting, index_fetches) = CountingRsm::new(Arc::clone(&reader.rsm));
+pub fn caching_sparse_remote_segment_reader() -> CachingReader {
+    let ReaderWithDir {
+        reader,
+        dir: remote_dir,
+    } = sparse_remote_segment_reader();
+    let CountedRsm {
+        rsm: counting,
+        index_fetches,
+    } = CountingRsm::counting(Arc::clone(&reader.rsm));
     let log_dir = tempfile::tempdir().unwrap();
     let cache = krabka_remote_storage::RemoteIndexCache::new(
         log_dir.path(),
@@ -149,19 +197,24 @@ pub fn caching_sparse_remote_segment_reader() -> (
             index_cache: Arc::new(cache),
             pool: ReaderPool::new(10, 100),
         });
-    (
-        cached,
-        ReaderDirs {
+    CachingReader {
+        reader: cached,
+        dirs: ReaderDirs {
             _remote: remote_dir,
             _log: log_dir,
         },
         index_fetches,
-    )
+    }
 }
 
 pub fn sparse_remote_segment_reader_with_max_timestamp(
     max_timestamp_ms: i64,
 ) -> (RemoteReader, tempfile::TempDir) {
+    let ReaderWithDir { reader, dir } = sparse_reader_with_max_timestamp(max_timestamp_ms);
+    (reader, dir)
+}
+
+fn sparse_reader_with_max_timestamp(max_timestamp_ms: i64) -> ReaderWithDir {
     remote_segment_reader(
         &timestamped_batch_at(10, &[1_000, 1_100, 1_600, 1_700], b'a'),
         &timestamped_batch_at(14, &[2_000, 2_200, 2_400], b'b'),
@@ -171,7 +224,7 @@ pub fn sparse_remote_segment_reader_with_max_timestamp(
 
 /// The sparse fixture as stored on a `LogAppendTime` topic: producer time
 /// remains in record deltas, while the batch maximum is the reader's time.
-pub fn append_time_remote_segment_reader() -> (RemoteReader, tempfile::TempDir) {
+pub fn append_time_remote_segment_reader() -> ReaderWithDir {
     let stamped = |mut batch: krabka_protocol::records::RecordBatch| {
         batch.attributes = batch
             .attributes
@@ -213,7 +266,7 @@ pub fn sparse_fixture_batch_bytes() -> [bytes::Bytes; 2] {
 
 /// A remote segment whose second batch carries its newest record first, so the
 /// record the time index's entry points at is not the last one of the batch.
-pub fn unordered_timestamps_remote_segment_reader() -> (RemoteReader, tempfile::TempDir) {
+pub fn unordered_timestamps_remote_segment_reader() -> ReaderWithDir {
     remote_segment_reader(
         &timestamped_batch_at(10, &[1_000, 1_100, 1_600, 1_700], b'a'),
         &timestamped_batch_at(14, &[2_400, 2_000, 2_200], b'b'),
@@ -224,9 +277,7 @@ pub fn unordered_timestamps_remote_segment_reader() -> (RemoteReader, tempfile::
 /// The sparse fixture with both batches gzip-compressed and every record of the
 /// second one carrying a `second_value_len`-byte value, so a limit between the
 /// two record sizes tells the batches apart.
-pub fn compressed_remote_segment_reader(
-    second_value_len: usize,
-) -> (RemoteReader, tempfile::TempDir) {
+pub fn compressed_remote_segment_reader(second_value_len: usize) -> ReaderWithDir {
     use krabka_compression::CompressionType;
 
     let compressed = |mut batch: krabka_protocol::records::RecordBatch| {
@@ -256,7 +307,7 @@ fn remote_segment_reader(
     first: &krabka_protocol::records::RecordBatch,
     second: &krabka_protocol::records::RecordBatch,
     max_timestamp_ms: i64,
-) -> (RemoteReader, tempfile::TempDir) {
+) -> ReaderWithDir {
     let source_dir = tempfile::tempdir().unwrap();
     let remote_dir = tempfile::tempdir().unwrap();
 
@@ -270,12 +321,30 @@ fn remote_segment_reader(
     let offset_index_path = write_test_file(
         source_dir.path(),
         "00000000000000000010.index",
-        &offset_index_bytes(&[(3, 0), (6, second_position)]),
+        &offset_index_bytes(&[
+            OffsetIndexEntry {
+                relative_offset: 3,
+                position: 0,
+            },
+            OffsetIndexEntry {
+                relative_offset: 6,
+                position: second_position,
+            },
+        ]),
     );
     let time_index_path = write_test_file(
         source_dir.path(),
         "00000000000000000010.timeindex",
-        &time_index_bytes(&[(1_700, 3), (2_400, 6)]),
+        &time_index_bytes(&[
+            TimeIndexEntry {
+                timestamp: 1_700,
+                relative_offset: 3,
+            },
+            TimeIndexEntry {
+                timestamp: 2_400,
+                relative_offset: 6,
+            },
+        ]),
     );
 
     let rsm: Arc<dyn RemoteStorageManager> = Arc::new(LocalTieredStorage::new(remote_dir.path()));
@@ -317,12 +386,13 @@ fn remote_segment_reader(
     )
     .unwrap();
 
-    (RemoteReader::new(rsm, rlmm), remote_dir)
+    ReaderWithDir {
+        reader: RemoteReader::new(rsm, rlmm),
+        dir: remote_dir,
+    }
 }
 
-pub fn sparse_remote_segment_reader() -> (RemoteReader, tempfile::TempDir) {
-    sparse_remote_segment_reader_with_max_timestamp(2_400)
-}
+pub fn sparse_remote_segment_reader() -> ReaderWithDir { sparse_reader_with_max_timestamp(2_400) }
 
 /// Builds a log rolled into several sealed segments under `dir`, then
 /// copies every sealed segment into a fresh `LocalTieredStorage` and
@@ -332,9 +402,12 @@ pub fn sparse_remote_segment_reader() -> (RemoteReader, tempfile::TempDir) {
 pub fn populated_reader(
     log_dir: &std::path::Path,
     remote_dir: &std::path::Path,
-) -> (RemoteReader, Log) {
+) -> PopulatedReader {
     let log = populated_log(log_dir);
-    (copy_log_to_reader(&log, remote_dir), log)
+    PopulatedReader {
+        reader: copy_log_to_reader(&log, remote_dir),
+        log,
+    }
 }
 
 fn populated_log(log_dir: &std::path::Path) -> Log {
@@ -512,7 +585,10 @@ macro_rules! populated_reader_fixture {
     ($local:ident, $remote:ident, $reader:ident, $log:ident $(, $exports:ident)?) => {
         let $local = tempfile::tempdir().unwrap();
         let $remote = tempfile::tempdir().unwrap();
-        let ($reader, $log) = crate::remote_reader::test_support::populated_reader($local.path(), $remote.path());
+        let crate::remote_reader::test_support::PopulatedReader {
+            reader: $reader,
+            log: $log,
+        } = crate::remote_reader::test_support::populated_reader($local.path(), $remote.path());
         $(let $exports = $log.tierable_segments();)?
     };
 }
@@ -520,18 +596,21 @@ pub(crate) use populated_reader_fixture;
 
 pub fn reader_with_metadata(
     make_metadata: impl FnOnce() -> Arc<dyn RemoteLogMetadataManager>,
-) -> (tempfile::TempDir, RemoteReader) {
+) -> ReaderWithDir {
     let remote_dir = tempfile::tempdir().unwrap();
     let rsm: Arc<dyn RemoteStorageManager> = Arc::new(LocalTieredStorage::new(remote_dir.path()));
     let rlmm = make_metadata();
     let reader = RemoteReader::new(rsm, rlmm);
-    (remote_dir, reader)
+    ReaderWithDir {
+        reader,
+        dir: remote_dir,
+    }
 }
 
 pub fn empty_reader() -> (tempfile::TempDir, RemoteReader) {
-    reader_with_metadata(|| Arc::new(InmemoryRemoteLogMetadataManager::new()))
+    let ReaderWithDir { reader, dir } =
+        reader_with_metadata(|| Arc::new(InmemoryRemoteLogMetadataManager::new()));
+    (dir, reader)
 }
 
-pub fn not_ready_reader() -> (tempfile::TempDir, RemoteReader) {
-    reader_with_metadata(|| Arc::new(NotReadyRlmm))
-}
+pub fn not_ready_reader() -> ReaderWithDir { reader_with_metadata(|| Arc::new(NotReadyRlmm)) }

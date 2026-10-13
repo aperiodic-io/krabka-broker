@@ -123,20 +123,21 @@ async fn admin_client(bootstrap: &str) -> krabka_client_core::Client {
     connect_client(bootstrap, None).await
 }
 
+/// A broker holding one `Ongoing` transaction, with the handles that keep it
+/// alive.
+struct OngoingTxn {
+    broker: BrokerHandle,
+    bootstrap: String,
+    dir: TempDir,
+    producer: Arc<Producer>,
+    transaction: OwnedTransaction,
+}
+
 /// Boot a broker, init a transactional producer with the given tid,
 /// begin a txn, and produce one record to `topic`. It leaves the txn
 /// in `Ongoing` so the admin APIs can see it. It returns the broker and the
 /// producer, and the caller closes both.
-async fn boot_with_ongoing_txn(
-    tid: &str,
-    topic: &str,
-) -> (
-    BrokerHandle,
-    String,
-    TempDir,
-    Arc<Producer>,
-    OwnedTransaction,
-) {
+async fn boot_with_ongoing_txn(tid: &str, topic: &str) -> OngoingTxn {
     let (broker, bootstrap, dir) = boot_single().await;
     create_topic(&bootstrap, topic).await;
     // The producer does not retry COORDINATOR_NOT_AVAILABLE from
@@ -207,13 +208,24 @@ async fn boot_with_ongoing_txn(
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    (broker, bootstrap, dir, producer, transaction)
+    OngoingTxn {
+        broker,
+        bootstrap,
+        dir,
+        producer,
+        transaction,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_transactions_returns_ongoing_txn() {
-    let (broker, bootstrap, _dir, producer, transaction) =
-        boot_with_ongoing_txn("my-tid", "t-list").await;
+    let OngoingTxn {
+        broker,
+        bootstrap,
+        dir: _dir,
+        producer,
+        transaction,
+    } = boot_with_ongoing_txn("my-tid", "t-list").await;
 
     let client = admin_client(&bootstrap).await;
     let resp = list_transactions(&client, &ListTransactionsRequest::default()).await;
@@ -237,8 +249,13 @@ async fn list_transactions_returns_ongoing_txn() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_transactions_state_filter_excludes_non_matching() {
-    let (broker, bootstrap, _dir, producer, transaction) =
-        boot_with_ongoing_txn("my-tid", "t-state-filter").await;
+    let OngoingTxn {
+        broker,
+        bootstrap,
+        dir: _dir,
+        producer,
+        transaction,
+    } = boot_with_ongoing_txn("my-tid", "t-state-filter").await;
 
     let client = admin_client(&bootstrap).await;
     // Filter to "Empty" only — our txn is Ongoing, so the row should
@@ -278,8 +295,13 @@ async fn list_transactions_reports_unknown_state_filters() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn describe_transactions_returns_full_state_for_known_tid() {
-    let (broker, bootstrap, _dir, producer, transaction) =
-        boot_with_ongoing_txn("describe-tid", "t-describe").await;
+    let OngoingTxn {
+        broker,
+        bootstrap,
+        dir: _dir,
+        producer,
+        transaction,
+    } = boot_with_ongoing_txn("describe-tid", "t-describe").await;
 
     let client = admin_client(&bootstrap).await;
     let r = client

@@ -161,41 +161,65 @@ async fn sample_replica_lag(partitions: &PartitionRegistry, metrics: &BrokerMetr
     metrics.publish_replica_lag(&replica_lag_samples(partitions, LEADER, &replica_image()).await);
 }
 
-fn replica_fixture() -> (tempfile::TempDir, PartitionRegistry, Arc<Partition>) {
+/// A registry that leads one partition, with the directory that backs it.
+struct ReplicaFixture {
+    _directory: tempfile::TempDir,
+    partitions: PartitionRegistry,
+    partition: Arc<Partition>,
+}
+
+fn replica_fixture() -> ReplicaFixture {
     let directory = tempfile::tempdir().expect("tempdir");
     let partitions = PartitionRegistry::new();
     let partition = led_partition(directory.path(), TOPIC, 0);
-    (directory, partitions, partition)
+    ReplicaFixture {
+        _directory: directory,
+        partitions,
+        partition,
+    }
 }
 
-async fn sampled_two_followers() -> (tempfile::TempDir, PartitionRegistry, BrokerMetrics) {
+/// A registry whose two followers' lag has been sampled into `metrics`.
+struct SampledFollowers {
+    _directory: tempfile::TempDir,
+    _partitions: PartitionRegistry,
+    metrics: BrokerMetrics,
+}
+
+async fn sampled_two_followers() -> SampledFollowers {
     let directory = tempfile::tempdir().expect("tempdir");
     let partitions = two_follower_lags(directory.path()).await;
     let metrics = BrokerMetrics::new();
     sample_replica_lag(&partitions, &metrics).await;
-    (directory, partitions, metrics)
+    SampledFollowers {
+        _directory: directory,
+        _partitions: partitions,
+        metrics,
+    }
+}
+
+/// A poller together with the metrics it publishes into.
+struct PollerFixture {
+    poller: LagPoller,
+    metrics: BrokerMetrics,
 }
 
 async fn committed_classic_poller(
     metadata: Arc<dyn MetadataSource>,
     partitions: Arc<PartitionRegistry>,
     committed: i64,
-) -> (LagPoller, BrokerMetrics) {
+) -> PollerFixture {
     let coordinator = coordinator(Arc::clone(&metadata));
     let handle = coordinator.get_or_create_classic("billing");
     commit_offset(&handle, committed).await;
     let metrics = BrokerMetrics::new();
-    (
-        poller(coordinator, metadata, partitions, metrics.clone()),
+    PollerFixture {
+        poller: poller(coordinator, metadata, partitions, metrics.clone()),
         metrics,
-    )
+    }
 }
 
-async fn classic_group_poller(
-    dir: &Path,
-    high_watermark: i64,
-    committed: i64,
-) -> (LagPoller, BrokerMetrics) {
+async fn classic_group_poller(dir: &Path, high_watermark: i64, committed: i64) -> PollerFixture {
     let metadata: Arc<dyn MetadataSource> = lag_metadata(coordinator_image());
     let partitions = partition_at_high_watermark(dir, high_watermark).await;
     committed_classic_poller(metadata, partitions, committed).await
@@ -219,7 +243,11 @@ fn published_replica_lag(metrics: &BrokerMetrics, partition: i32) -> Option<i64>
 /// the records it added.
 #[tokio::test]
 async fn a_paused_follower_fetch_makes_the_replica_lag_gauge_climb() {
-    let (_dir, partitions, partition) = replica_fixture();
+    let ReplicaFixture {
+        partitions,
+        partition,
+        ..
+    } = replica_fixture();
     install_isr(&partition).await;
     partitions.insert(TOPIC.into(), PartitionIndex(0), Arc::clone(&partition));
     let metrics = BrokerMetrics::new();
@@ -262,7 +290,7 @@ async fn two_follower_lags(dir: &Path) -> PartitionRegistry {
 /// sampled.
 #[tokio::test]
 async fn the_max_rollup_reports_the_worst_follower_on_the_broker() {
-    let (_dir, _partitions, metrics) = sampled_two_followers().await;
+    let SampledFollowers { metrics, .. } = sampled_two_followers().await;
 
     check!(published_replica_lag(&metrics, 0) == Some(3));
     check!(published_replica_lag(&metrics, 1) == Some(40));
@@ -278,7 +306,11 @@ fn append_and_register(partitions: &PartitionRegistry, partition: &Arc<Partition
 /// sees another broker leading the partition takes the series away.
 #[tokio::test]
 async fn losing_leadership_releases_the_partitions_replica_lag_series() {
-    let (_dir, partitions, partition) = replica_fixture();
+    let ReplicaFixture {
+        partitions,
+        partition,
+        ..
+    } = replica_fixture();
     install_isr(&partition).await;
     append_and_register(&partitions, &partition, 12);
     let broker_metrics = BrokerMetrics::new();
@@ -300,7 +332,11 @@ async fn losing_leadership_releases_the_partitions_replica_lag_series() {
 /// reports the whole log rather than no series at all.
 #[tokio::test]
 async fn an_assigned_follower_that_has_never_fetched_reports_the_whole_log() {
-    let (_dir, partitions, partition) = replica_fixture();
+    let ReplicaFixture {
+        partitions,
+        partition,
+        ..
+    } = replica_fixture();
     // The ISR holds the leader alone, which is what a replica added by a
     // reassignment looks like until its first fetch lands.
     partition.replica_state.lock().await.install_isr(
@@ -329,7 +365,7 @@ async fn an_assigned_follower_that_has_never_fetched_reports_the_whole_log() {
 /// and a scrape in between would report a maximum no series carries.
 #[tokio::test]
 async fn evicting_the_worst_follower_lowers_the_max_rollup() {
-    let (_dir, _partitions, metrics) = sampled_two_followers().await;
+    let SampledFollowers { metrics, .. } = sampled_two_followers().await;
     assert!(metrics.replica_lag_max.get() == 40);
 
     metrics.evict_partition_series(&PartitionLabel {
@@ -514,7 +550,7 @@ async fn a_group_this_broker_does_not_coordinate_gets_no_series() {
     let image = image_with_remote_leader(OFFSETS_TOPIC);
     let metadata: Arc<dyn MetadataSource> = lag_metadata(image);
     let partitions = partition_at_high_watermark(dir.path(), 40).await;
-    let (poller, metrics) = committed_classic_poller(metadata, partitions, 7).await;
+    let PollerFixture { poller, metrics } = committed_classic_poller(metadata, partitions, 7).await;
 
     poller.sample().await;
 
@@ -555,7 +591,16 @@ fn a_probe_reply_is_read_by_topic_id_and_drops_only_the_failed_rows() {
 
     let watermarks = probed_high_watermarks(&response, &HashMap::from([(topic_id, TOPIC)]));
 
-    check!(watermarks == HashMap::from([((TOPIC.to_string(), 0), 40)]));
+    check!(
+        watermarks
+            == HashMap::from([(
+                TopicPartition {
+                    topic: TOPIC.to_string(),
+                    partition: 0,
+                },
+                40
+            )])
+    );
 }
 
 /// A group that has committed nothing has no backlog to report, so an
@@ -564,7 +609,7 @@ fn a_probe_reply_is_read_by_topic_id_and_drops_only_the_failed_rows() {
 #[tokio::test]
 async fn an_uncommitted_partition_gets_no_series() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (poller, metrics) = classic_group_poller(dir.path(), 40, -1).await;
+    let PollerFixture { poller, metrics } = classic_group_poller(dir.path(), 40, -1).await;
 
     poller.sample().await;
 
@@ -576,7 +621,10 @@ async fn an_uncommitted_partition_gets_no_series() {
 #[test]
 fn the_probe_asks_for_watermarks_and_no_records() {
     let topic_id = WireUuid(*uuid::Uuid::from_u128(1).as_bytes());
-    let wanted = [(TOPIC.to_string(), 0)];
+    let wanted = [TopicPartition {
+        topic: TOPIC.to_string(),
+        partition: 0,
+    }];
     let expected = FetchRequest {
         replica_id: -1,
         max_wait_ms: 0,
@@ -599,7 +647,7 @@ fn the_probe_asks_for_watermarks_and_no_records() {
     };
 
     let offsets = probe_offset_rows(vec![probe_offset_row(0, codes::NONE, 7)]);
-    let (request, names) = probe_request(&coordinator_image(), &wanted, &offsets)
+    let WatermarkProbe { request, names } = probe_request(&coordinator_image(), &wanted, &offsets)
         .expect("the image and offset reply name the partition");
 
     check!(request == expected);
@@ -630,7 +678,16 @@ fn probe_offset_rows(partitions: Vec<ListOffsetsPartitionResponse>) -> ListOffse
 
 #[test]
 fn the_probe_batches_read_committed_latest_offsets_before_fetching() {
-    let wanted = [(TOPIC.to_string(), 0), ("ghost".to_string(), 0)];
+    let wanted = [
+        TopicPartition {
+            topic: TOPIC.to_string(),
+            partition: 0,
+        },
+        TopicPartition {
+            topic: "ghost".to_string(),
+            partition: 0,
+        },
+    ];
     let expected = ListOffsetsRequest {
         replica_id: -1,
         isolation_level: 1,
@@ -665,7 +722,10 @@ fn the_probe_skips_unavailable_offset_rows_and_preserves_partition_order() {
     }
     let wanted: Vec<_> = [3, 0, 2, 1, 4]
         .into_iter()
-        .map(|index| (TOPIC.into(), index))
+        .map(|partition| TopicPartition {
+            topic: TOPIC.into(),
+            partition,
+        })
         .collect();
     let offsets = probe_offset_rows(vec![
         probe_offset_row(2, codes::NONE, -1),
@@ -673,7 +733,8 @@ fn the_probe_skips_unavailable_offset_rows_and_preserves_partition_order() {
         probe_offset_row(0, codes::NOT_LEADER_OR_FOLLOWER, -1),
         probe_offset_row(3, codes::NONE, 11),
     ]);
-    let (request, _) = probe_request(&image, &wanted, &offsets).expect("two healthy partitions");
+    let WatermarkProbe { request, .. } =
+        probe_request(&image, &wanted, &offsets).expect("two healthy partitions");
     let expected = FetchRequest {
         replica_id: -1,
         max_wait_ms: 0,
@@ -736,13 +797,24 @@ async fn remote_watermark_probe_resolves_a_valid_fetch_boundary() {
         BrokerMetrics::new(),
     );
     let watermarks = probe
-        .probe_high_watermarks(&broker.controller.current_image(), LEADER, &[(
-            TOPIC.into(),
-            0,
-        )])
+        .probe_high_watermarks(&broker.controller.current_image(), LEADER, &[
+            TopicPartition {
+                topic: TOPIC.into(),
+                partition: 0,
+            },
+        ])
         .await
         .expect("real leader probe");
-    assert!(watermarks == HashMap::from([((TOPIC.to_string(), 0), 5)]));
+    assert!(
+        watermarks
+            == HashMap::from([(
+                TopicPartition {
+                    topic: TOPIC.to_string(),
+                    partition: 0,
+                },
+                5
+            )])
+    );
     handle.shutdown().await;
 }
 
@@ -750,7 +822,10 @@ async fn remote_watermark_probe_resolves_a_valid_fetch_boundary() {
 /// so no connection is opened for it at all.
 #[test]
 fn a_probe_for_a_partition_the_image_dropped_has_nothing_to_ask() {
-    let wanted = [("ghost".to_string(), 0)];
+    let wanted = [TopicPartition {
+        topic: "ghost".to_string(),
+        partition: 0,
+    }];
 
     check!(probe_offsets_request(&coordinator_image(), &wanted).is_none());
     check!(
@@ -772,7 +847,7 @@ async fn a_watermark_this_broker_cannot_read_yields_no_series() {
     // so the probe cannot even be addressed.
     let image = image_with_remote_leader(TOPIC);
     let metadata: Arc<dyn MetadataSource> = lag_metadata(image);
-    let (poller, metrics) =
+    let PollerFixture { poller, metrics } =
         committed_classic_poller(metadata, Arc::new(PartitionRegistry::new()), 7).await;
 
     poller.sample().await;
@@ -798,7 +873,10 @@ async fn a_group_actor_that_never_answers_yields_no_offsets() {
 #[tokio::test(start_paused = true)]
 async fn the_poller_publishes_on_a_tick_and_releases_everything_on_shutdown() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (mut poller, metrics) = classic_group_poller(dir.path(), 40, 7).await;
+    let PollerFixture {
+        mut poller,
+        metrics,
+    } = classic_group_poller(dir.path(), 40, 7).await;
     let shutdown = CancellationToken::new();
     poller.shutdown = shutdown.clone();
 

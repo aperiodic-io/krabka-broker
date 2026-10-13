@@ -20,6 +20,14 @@ use {
     krabka_protocol::owned::describe_configs_response::DescribeConfigsResult,
 };
 
+/// The ACL resource a described config resource is authorized on, and the
+/// code that stamps a denial.
+struct DescribeTarget<'a> {
+    resource_type: ResourceType,
+    name: &'a str,
+    failure_code: i16,
+}
+
 /// Per-resource `DescribeConfigs` ACL check.
 ///
 /// A Topic resource needs `DescribeConfigs` on `Topic(name)`, and a Group
@@ -40,22 +48,28 @@ pub(super) fn resource_authz_failure(
     resource_type: i8,
     resource_name: &str,
 ) -> Option<i16> {
-    let (rt, name, failure_code): (ResourceType, &str, i16) = match resource_type {
-        RESOURCE_TYPE_TOPIC => (
-            ResourceType::Topic,
-            resource_name,
-            codes::TOPIC_AUTHORIZATION_FAILED,
-        ),
-        RESOURCE_TYPE_BROKER | RESOURCE_TYPE_BROKER_LOGGER | RESOURCE_TYPE_CLIENT_METRICS => (
-            ResourceType::Cluster,
-            CLUSTER_RESOURCE_NAME,
-            codes::CLUSTER_AUTHORIZATION_FAILED,
-        ),
-        RESOURCE_TYPE_GROUP => (
-            ResourceType::Group,
-            resource_name,
-            codes::GROUP_AUTHORIZATION_FAILED,
-        ),
+    let DescribeTarget {
+        resource_type: rt,
+        name,
+        failure_code,
+    } = match resource_type {
+        RESOURCE_TYPE_TOPIC => DescribeTarget {
+            resource_type: ResourceType::Topic,
+            name: resource_name,
+            failure_code: codes::TOPIC_AUTHORIZATION_FAILED,
+        },
+        RESOURCE_TYPE_BROKER | RESOURCE_TYPE_BROKER_LOGGER | RESOURCE_TYPE_CLIENT_METRICS => {
+            DescribeTarget {
+                resource_type: ResourceType::Cluster,
+                name: CLUSTER_RESOURCE_NAME,
+                failure_code: codes::CLUSTER_AUTHORIZATION_FAILED,
+            }
+        }
+        RESOURCE_TYPE_GROUP => DescribeTarget {
+            resource_type: ResourceType::Group,
+            name: resource_name,
+            failure_code: codes::GROUP_AUTHORIZATION_FAILED,
+        },
         _ => return None,
     };
     let allow = authorizer.authorize(image, &AuthorizationRequest {

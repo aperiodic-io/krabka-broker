@@ -4,7 +4,8 @@ use {
     crate::{
         aggregate::CellKey,
         graph::{
-            render_html as render_graph_html, render_web_fragment as render_graph_web_fragment,
+            TaggedRun, render_html as render_graph_html,
+            render_web_fragment as render_graph_web_fragment,
         },
         ids::{MessageCount, TimeOffsetMs},
         numeric::{mebibytes_f64, millis_f64, to_f64},
@@ -89,8 +90,8 @@ pub fn render_markdown(input_dir: &Path, strict: bool) -> Result<String> {
     // so a rerun after a topology change cannot be averaged into the old
     // numbers.
     let mut by_group: BTreeMap<CellKey, Vec<RunOutput>> = BTreeMap::new();
-    for (_p, r) in collect_runs(input_dir, strict)? {
-        by_group.entry(CellKey::of(&r)).or_default().push(r);
+    for RunFile { run, .. } in collect_runs(input_dir, strict)? {
+        by_group.entry(CellKey::of(&run)).or_default().push(run);
     }
 
     let mut out = String::new();
@@ -117,6 +118,11 @@ fn render_group(out: &mut String, key: &CellKey, runs: &[RunOutput]) {
         .iter()
         .filter(|r| matches!(r.stack, Stack::Kafka))
         .collect();
+
+    let stacks = StackRuns {
+        krabka: &krabka,
+        kafka: &kafka,
+    };
 
     push_fmt(out, format_args!("## {}\n\n", key.label()));
 
@@ -156,96 +162,15 @@ fn render_group(out: &mut String, key: &CellKey, runs: &[RunOutput]) {
         );
     }
 
-    // ── Topline table ───────────────────────────────────────────────────
-    out.push_str("| metric | krabka | kafka | ratio |\n");
-    out.push_str("|---|---|---|---|\n");
-    row_metric(
-        out,
-        "producer msgs/s (higher better)",
-        (&krabka, &kafka),
-        (|t| t.throughput.producer_rate.per_sec_f64(), Render::Rate),
-        true,
-    );
-    row_metric(
-        out,
-        "consumer msgs/s (higher better)",
-        (&krabka, &kafka),
-        (|t| t.throughput.consumer_rate.per_sec_f64(), Render::Rate),
-        true,
-    );
-    row_metric(
-        out,
-        "producer byte rate (higher better)",
-        (&krabka, &kafka),
-        (
-            |t| producer_byte_rate(t).bytes_per_sec_f64(),
-            Render::Throughput,
-        ),
-        true,
-    );
-    row_metric(
-        out,
-        "p99 producer ack (lower better)",
-        (&krabka, &kafka),
-        (|t| t.producer_latency.p99.secs_f64(), Render::Extent),
-        false,
-    );
-    row_metric(
-        out,
-        "p99 consumer e2e (lower better)",
-        (&krabka, &kafka),
-        (|t| t.consumer_e2e_latency.p99.secs_f64(), Render::Extent),
-        false,
-    );
-    row_metric(
-        out,
-        "msgs/s per CPU-core (higher better)",
-        (&krabka, &kafka),
-        (
-            |t| t.resource.msgs_per_cpu_second.per_sec_f64(),
-            Render::Rate,
-        ),
-        true,
-    );
-    row_metric(
-        out,
-        "cgroup working set (lower better)",
-        (&krabka, &kafka),
-        (
-            |t| t.resource.mem_cgroup_working_set.bytes_f64(),
-            Render::Size,
-        ),
-        false,
-    );
-    row_metric(
-        out,
-        "startup (CR-apply → Ready) (lower better)",
-        (&krabka, &kafka),
-        (
-            |t| t.startup.unwrap_or(Time::ZERO).secs_f64(),
-            Render::Extent,
-        ),
-        false,
-    );
-    row_metric(
-        out,
-        "first ack (Ready → first ack) (lower better)",
-        (&krabka, &kafka),
-        (|t| t.first_ack.secs_f64(), Render::Extent),
-        false,
-    );
-    out.push('\n');
+    render_topline_table(out, stacks);
 
     // ── Latency percentiles (mean across runs) ──────────────────────────
-    render_latency_table(out, "**Producer ack latency:**", (&krabka, &kafka), |r| {
+    render_latency_table(out, "**Producer ack latency:**", stacks, |r| {
         &r.producer_latency
     });
-    render_latency_table(
-        out,
-        "**Consumer end-to-end latency:**",
-        (&krabka, &kafka),
-        |r| &r.consumer_e2e_latency,
-    );
+    render_latency_table(out, "**Consumer end-to-end latency:**", stacks, |r| {
+        &r.consumer_e2e_latency
+    });
 
     // ── Kafka-only memory split (mean across kafka runs that report it) ──
     let heap: Vec<f64> = kafka
@@ -316,6 +241,104 @@ fn render_group(out: &mut String, key: &CellKey, runs: &[RunOutput]) {
     out.push('\n');
 }
 
+/// The topline table: one row per headline metric, krabka against kafka.
+fn render_topline_table(out: &mut String, stacks: StackRuns<'_>) {
+    // ── Topline table ───────────────────────────────────────────────────
+    out.push_str("| metric | krabka | kafka | ratio |\n");
+    out.push_str("|---|---|---|---|\n");
+    row_metric(
+        out,
+        "producer msgs/s (higher better)",
+        stacks,
+        RunMetric {
+            value: |t| t.throughput.producer_rate.per_sec_f64(),
+            render: Render::Rate,
+        },
+        true,
+    );
+    row_metric(
+        out,
+        "consumer msgs/s (higher better)",
+        stacks,
+        RunMetric {
+            value: |t| t.throughput.consumer_rate.per_sec_f64(),
+            render: Render::Rate,
+        },
+        true,
+    );
+    row_metric(
+        out,
+        "producer byte rate (higher better)",
+        stacks,
+        RunMetric {
+            value: |t| producer_byte_rate(t).bytes_per_sec_f64(),
+            render: Render::Throughput,
+        },
+        true,
+    );
+    row_metric(
+        out,
+        "p99 producer ack (lower better)",
+        stacks,
+        RunMetric {
+            value: |t| t.producer_latency.p99.secs_f64(),
+            render: Render::Extent,
+        },
+        false,
+    );
+    row_metric(
+        out,
+        "p99 consumer e2e (lower better)",
+        stacks,
+        RunMetric {
+            value: |t| t.consumer_e2e_latency.p99.secs_f64(),
+            render: Render::Extent,
+        },
+        false,
+    );
+    row_metric(
+        out,
+        "msgs/s per CPU-core (higher better)",
+        stacks,
+        RunMetric {
+            value: |t| t.resource.msgs_per_cpu_second.per_sec_f64(),
+            render: Render::Rate,
+        },
+        true,
+    );
+    row_metric(
+        out,
+        "cgroup working set (lower better)",
+        stacks,
+        RunMetric {
+            value: |t| t.resource.mem_cgroup_working_set.bytes_f64(),
+            render: Render::Size,
+        },
+        false,
+    );
+    row_metric(
+        out,
+        "startup (CR-apply → Ready) (lower better)",
+        stacks,
+        RunMetric {
+            value: |t| t.startup.unwrap_or(Time::ZERO).secs_f64(),
+            render: Render::Extent,
+        },
+        false,
+    );
+    row_metric(
+        out,
+        "first ack (Ready → first ack) (lower better)",
+        stacks,
+        RunMetric {
+            value: |t| t.first_ack.secs_f64(),
+            render: Render::Extent,
+        },
+        false,
+    );
+    out.push('\n');
+}
+
 fn render_notes_and_errors(out: &mut String, krabka: &[&RunOutput], kafka: &[&RunOutput]) {
     for (label, stack_runs) in [("krabka", krabka), ("kafka", kafka)] {
         let mut notes: Vec<String> = Vec::new();
@@ -356,7 +379,7 @@ fn render_notes_and_errors(out: &mut String, krabka: &[&RunOutput], kafka: &[&Ru
 pub fn failover_gate_violations(input_dir: &Path, strict: bool) -> Result<Vec<String>> {
     let runs: Vec<RunOutput> = collect_runs(input_dir, strict)?
         .into_iter()
-        .map(|(_, r)| r)
+        .map(|file| file.run)
         .collect();
     Ok(failover_gate_violations_for_runs(&runs))
 }
@@ -373,18 +396,54 @@ fn truncate_list(items: &[String], n: usize) -> String {
 
 type LatencySelector = fn(&LatencyPercentiles) -> f64;
 
+/// One percentile row of a latency table.
+struct LatencyRow {
+    label: &'static str,
+    value: LatencySelector,
+    render: Render,
+}
+
+/// The runs of the two stacks in one cell.
+#[derive(Clone, Copy)]
+struct StackRuns<'a> {
+    krabka: &'a [&'a RunOutput],
+    kafka: &'a [&'a RunOutput],
+}
+
+/// How to read one metric out of a run and how to write its mean.
+#[derive(Clone, Copy)]
+struct RunMetric {
+    value: fn(&RunOutput) -> f64,
+    render: Render,
+}
+
+/// A result file that parsed into a run.
+struct RunFile {
+    path: PathBuf,
+    run: RunOutput,
+}
+
 /// The percentile rows of a latency table. Each row holds a label, a way to read
 /// the value out in the unit the statistics run over, and a way to write the
 /// mean back.
-fn latency_percentiles_pairs() -> [(&'static str, LatencySelector, Render); 7] {
+fn latency_rows() -> [LatencyRow; 7] {
+    let extent = |label, value: LatencySelector| LatencyRow {
+        label,
+        value,
+        render: Render::Extent,
+    };
     [
-        ("p50", |p| p.p50.secs_f64(), Render::Extent),
-        ("p95", |p| p.p95.secs_f64(), Render::Extent),
-        ("p99", |p| p.p99.secs_f64(), Render::Extent),
-        ("p99.9", |p| p.p999.secs_f64(), Render::Extent),
-        ("max", |p| p.max.secs_f64(), Render::Extent),
-        ("mean", |p| p.mean.secs_f64(), Render::Extent),
-        ("count", |p| to_f64(p.count), Render::Number),
+        extent("p50", |p| p.p50.secs_f64()),
+        extent("p95", |p| p.p95.secs_f64()),
+        extent("p99", |p| p.p99.secs_f64()),
+        extent("p99.9", |p| p.p999.secs_f64()),
+        extent("max", |p| p.max.secs_f64()),
+        extent("mean", |p| p.mean.secs_f64()),
+        LatencyRow {
+            label: "count",
+            value: |p| to_f64(p.count),
+            render: Render::Number,
+        },
     ]
 }
 
@@ -392,12 +451,17 @@ fn latency_percentiles_pairs() -> [(&'static str, LatencySelector, Render); 7] {
 fn render_latency_table(
     out: &mut String,
     heading: &str,
-    (krabka, kafka): (&[&RunOutput], &[&RunOutput]),
+    StackRuns { krabka, kafka }: StackRuns<'_>,
     select: fn(&RunOutput) -> &LatencyPercentiles,
 ) {
     push_fmt(out, format_args!("{heading}\n\n"));
     out.push_str("| percentile | krabka | kafka |\n|---|---|---|\n");
-    for (label, value, render) in latency_percentiles_pairs() {
+    for LatencyRow {
+        label,
+        value,
+        render,
+    } in latency_rows()
+    {
         let c: Vec<f64> = krabka.iter().map(|r| value(select(r))).collect();
         let k: Vec<f64> = kafka.iter().map(|r| value(select(r))).collect();
         push_fmt(
@@ -834,8 +898,8 @@ fn render_rate_recovery_row(
 fn row_metric(
     out: &mut String,
     label: &str,
-    (krabka, kafka): (&[&RunOutput], &[&RunOutput]),
-    (value, render): (impl Fn(&RunOutput) -> f64, Render),
+    StackRuns { krabka, kafka }: StackRuns<'_>,
+    RunMetric { value, render }: RunMetric,
     higher_is_better: bool,
 ) {
     let cvals: Vec<f64> = krabka.iter().map(|&r| value(r)).collect();
@@ -867,8 +931,8 @@ fn row_metric(
 
 /// Reads and parses every `*.json` in `input_dir` into `RunOutput`s, and keeps
 /// the source path. The per-run `-runNN` tag lives in the filename.
-fn collect_runs(input_dir: &Path, strict: bool) -> Result<Vec<(PathBuf, RunOutput)>> {
-    let mut runs: Vec<(PathBuf, RunOutput)> = Vec::new();
+fn collect_runs(input_dir: &Path, strict: bool) -> Result<Vec<RunFile>> {
+    let mut runs: Vec<RunFile> = Vec::new();
     let entries = std::fs::read_dir(input_dir)
         .with_context(|| format!("read_dir {}", input_dir.display()))?;
     for e in entries {
@@ -880,7 +944,7 @@ fn collect_runs(input_dir: &Path, strict: bool) -> Result<Vec<(PathBuf, RunOutpu
         let body =
             std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         match serde_json::from_str::<RunOutput>(&body) {
-            Ok(r) => runs.push((path, r)),
+            Ok(run) => runs.push(RunFile { path, run }),
             Err(e) => {
                 if strict {
                     return Err(anyhow::anyhow!("failed to parse {}: {e}", path.display()));
@@ -916,20 +980,20 @@ fn csv_field(s: &str) -> String {
 }
 
 /// Both CSV exports use the same stable ordering of runs.
-fn collect_csv_runs(input_dir: &Path, strict: bool) -> Result<Vec<(PathBuf, RunOutput)>> {
+fn collect_csv_runs(input_dir: &Path, strict: bool) -> Result<Vec<RunFile>> {
     let mut runs = collect_runs(input_dir, strict)?;
-    runs.sort_by(|(pa, a), (pb, b)| {
+    runs.sort_by(|a, b| {
         (
-            a.scenario.name.as_str(),
-            a.topology.broker_count,
-            a.stack.as_str(),
-            run_tag_from_path(pa),
+            a.run.scenario.name.as_str(),
+            a.run.topology.broker_count,
+            a.run.stack.as_str(),
+            run_tag_from_path(&a.path),
         )
             .cmp(&(
-                b.scenario.name.as_str(),
-                b.topology.broker_count,
-                b.stack.as_str(),
-                run_tag_from_path(pb),
+                b.run.scenario.name.as_str(),
+                b.run.topology.broker_count,
+                b.run.stack.as_str(),
+                run_tag_from_path(&b.path),
             ))
     });
 
@@ -957,7 +1021,7 @@ jvm_heap_used_bytes,jvm_nonheap_used_bytes,kafka_page_cache_approx_bytes,\
 startup_ms,first_ack_ms,failover_recovery_ms,failover_dropped,failover_latency_spike_max_ms,\
 notes,errors_count\n",
     );
-    for (path, r) in &runs {
+    for RunFile { path, run: r } in &runs {
         let acks = format!("{:?}", r.scenario.acks).to_lowercase();
         let mode_tag = format!("{:?}", r.scenario.mode_tag).to_lowercase();
         let (rec, drop, spike) = match &r.disturbance {
@@ -1036,7 +1100,7 @@ pub fn render_timeseries_csv(input_dir: &Path, strict: bool) -> Result<String> {
     let runs = collect_csv_runs(input_dir, strict)?;
     let mut out = String::new();
     out.push_str("scenario,stack,broker_count,partitions,replication_factor,run_tag,t_offset_ms,metric,value\n");
-    for (path, r) in &runs {
+    for RunFile { path, run: r } in &runs {
         let prefix = format!(
             "{},{},{},{},{},{}",
             csv_field(&r.scenario.name),
@@ -1090,7 +1154,7 @@ pub fn render_timeseries_csv(input_dir: &Path, strict: bool) -> Result<String> {
 pub fn render_html(input_dir: &Path, strict: bool, title: &str) -> Result<String> {
     let outputs: Vec<RunOutput> = collect_runs(input_dir, strict)?
         .into_iter()
-        .map(|(_, r)| r)
+        .map(|file| file.run)
         .collect();
     Ok(render_graph_html(&outputs, title))
 }
@@ -1102,9 +1166,12 @@ pub fn render_html(input_dir: &Path, strict: bool, title: &str) -> Result<String
 /// # Errors
 /// Returns an error when input data is invalid, required I/O fails, or the destination rejects the generated report or audit event.
 pub fn render_web_fragment(input_dir: &Path, strict: bool) -> Result<String> {
-    let tagged: Vec<(String, RunOutput)> = collect_runs(input_dir, strict)?
+    let tagged: Vec<TaggedRun> = collect_runs(input_dir, strict)?
         .into_iter()
-        .map(|(p, r)| (run_tag_from_path(&p), r))
+        .map(|file| TaggedRun {
+            tag: run_tag_from_path(&file.path),
+            run: file.run,
+        })
         .collect();
     Ok(render_graph_web_fragment(&tagged))
 }

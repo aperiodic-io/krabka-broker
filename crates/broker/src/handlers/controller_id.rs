@@ -97,15 +97,46 @@ mod tests {
 
     #[test]
     fn rotate_walks_the_alive_brokers_and_answers_no_controller_when_empty() {
-        let cases: [(&[i32], usize, i32); 6] = [
-            (&[], 0, NO_CONTROLLER_ID),
-            (&[], 7, NO_CONTROLLER_ID),
-            (&[4], 0, 4),
-            (&[4], 3, 4),
-            (&[2, 3], 0, 2),
-            (&[2, 3], 3, 3),
+        /// The alive broker ids, the rotation index, and the controller id it picks.
+        struct RotateCase {
+            alive: &'static [i32],
+            nth: usize,
+            want: i32,
+        }
+
+        let cases: [RotateCase; 6] = [
+            RotateCase {
+                alive: &[],
+                nth: 0,
+                want: NO_CONTROLLER_ID,
+            },
+            RotateCase {
+                alive: &[],
+                nth: 7,
+                want: NO_CONTROLLER_ID,
+            },
+            RotateCase {
+                alive: &[4],
+                nth: 0,
+                want: 4,
+            },
+            RotateCase {
+                alive: &[4],
+                nth: 3,
+                want: 4,
+            },
+            RotateCase {
+                alive: &[2, 3],
+                nth: 0,
+                want: 2,
+            },
+            RotateCase {
+                alive: &[2, 3],
+                nth: 3,
+                want: 3,
+            },
         ];
-        for (alive, nth, want) in cases {
+        for RotateCase { alive, nth, want } in cases {
             assert!(rotate(alive, nth) == want, "{alive:?} at {nth}");
         }
     }

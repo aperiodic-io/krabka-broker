@@ -73,7 +73,7 @@ pub(crate) async fn verify(
     };
 
     for topic in &cut.topics {
-        let (topic_id, leaders) = resolve_topic(client, &topic.topic).await?;
+        let ResolvedTopic { topic_id, leaders } = resolve_topic(client, &topic.topic).await?;
         for partition in &topic.partitions {
             let Some(&leader) = leaders.get(&partition.partition) else {
                 outcome.mismatches.push(Mismatch {
@@ -142,19 +142,20 @@ async fn fetch_cut(
 }
 
 /// The id of one topic, and the current leader of each of its partitions.
+struct ResolvedTopic {
+    topic_id: krabka_protocol::primitives::uuid::Uuid,
+    /// The leader's broker id, by partition.
+    leaders: std::collections::BTreeMap<i32, i32>,
+}
+
+/// Look up one topic's [`ResolvedTopic`].
 ///
 /// The id is what a modern `Fetch` names the topic by, and the leaders are
 /// where each fetch has to go.
 async fn resolve_topic(
     client: &krabka_client_core::Client,
     topic: &str,
-) -> Result<
-    (
-        krabka_protocol::primitives::uuid::Uuid,
-        std::collections::BTreeMap<i32, i32>,
-    ),
-    String,
-> {
+) -> Result<ResolvedTopic, String> {
     let response = client
         .send(MetadataRequest {
             topics: Some(vec![MetadataRequestTopic {
@@ -176,14 +177,14 @@ async fn resolve_topic(
             found.error_code
         ));
     }
-    Ok((
-        found.topic_id,
-        found
+    Ok(ResolvedTopic {
+        topic_id: found.topic_id,
+        leaders: found
             .partitions
             .iter()
             .map(|p| (p.partition_index, p.leader_id))
             .collect(),
-    ))
+    })
 }
 
 /// Fetch the batch that starts at `offset`, if the leader serves one.
@@ -334,6 +335,11 @@ mod tests {
     /// reported rather than passed over.
     #[test]
     fn a_cut_that_the_log_does_not_back_is_reported() {
+        struct RejectedCase<'a> {
+            case: &'a str,
+            batch: Option<&'a RecordBatch>,
+            expected: &'a str,
+        }
         let good = marker_batch("orders-cut", 7, 42);
         let other_group = marker_batch("payments-cut", 7, 42);
         let other_epoch = marker_batch("orders-cut", 8, 42);
@@ -348,27 +354,40 @@ mod tests {
             ..RecordBatch::default()
         };
 
-        let cases: &[(&str, Option<&RecordBatch>, &str)] = &[
-            ("no batch at the offset", None, "holds no batch"),
-            ("a data batch", Some(&data), "not a control batch"),
-            (
-                "a control batch with no record",
-                Some(&empty_control),
-                "holds no record",
-            ),
-            (
-                "another group's marker",
-                Some(&other_group),
-                "belongs to group",
-            ),
-            (
-                "another epoch's marker",
-                Some(&other_epoch),
-                "carries epoch",
-            ),
+        let cases = [
+            RejectedCase {
+                case: "no batch at the offset",
+                batch: None,
+                expected: "holds no batch",
+            },
+            RejectedCase {
+                case: "a data batch",
+                batch: Some(&data),
+                expected: "not a control batch",
+            },
+            RejectedCase {
+                case: "a control batch with no record",
+                batch: Some(&empty_control),
+                expected: "holds no record",
+            },
+            RejectedCase {
+                case: "another group's marker",
+                batch: Some(&other_group),
+                expected: "belongs to group",
+            },
+            RejectedCase {
+                case: "another epoch's marker",
+                batch: Some(&other_epoch),
+                expected: "carries epoch",
+            },
         ];
-        for (case, batch, expected) in cases {
-            let reason = check_batch(*batch, "orders-cut", 7, 42).expect_err(case);
+        for RejectedCase {
+            case,
+            batch,
+            expected,
+        } in cases
+        {
+            let reason = check_batch(batch, "orders-cut", 7, 42).expect_err(case);
             check!(reason.contains(expected), "{case}: got {reason}");
         }
 

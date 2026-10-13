@@ -23,6 +23,7 @@ use {
     crate::{
         coordinator::unified::{
             actor::{MetadataProvider, reconciliation_model_support::model_properties},
+            assignor::TopicIdPartition,
             reconciler::ReconcileInput,
             share::state::{ShareGroupState, ShareMemberState},
         },
@@ -87,18 +88,42 @@ struct State {
     witnesses: u8,
 }
 
-type MemberProjection = (String, i32, i32, Vec<String>, Vec<i32>, Instant);
-type DurableMemberProjection = (String, i32, i32, Vec<String>, Vec<i32>);
-type GroupProjection = (
-    i32,
-    i64,
-    i32,
-    u8,
-    i32,
-    Vec<MemberProjection>,
-    Vec<(String, Vec<i32>)>,
-    u8,
-);
+/// What a member persists: its identity, epochs, subscriptions and assigned
+/// partitions.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct DurableMemberProjection {
+    member_id: String,
+    member_epoch: i32,
+    previous_member_epoch: i32,
+    subscriptions: Vec<String>,
+    assigned: Vec<i32>,
+}
+
+/// A member, with the time the group last saw it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct MemberProjection {
+    durable: DurableMemberProjection,
+    last_seen: Instant,
+}
+
+/// The partitions of the topic that the target assigns to a member.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct MemberTarget {
+    member_id: String,
+    partitions: Vec<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GroupProjection {
+    group_epoch: i32,
+    metadata_hash: i64,
+    target_epoch: i32,
+    clock: u8,
+    partitions: i32,
+    members: Vec<MemberProjection>,
+    target: Vec<MemberTarget>,
+    witnesses: u8,
+}
 
 impl State {
     fn projection(&self) -> GroupProjection {
@@ -106,20 +131,13 @@ impl State {
             .group
             .members
             .values()
-            .map(|member| {
-                let (id, epoch, previous, subscriptions, assigned) = durable_member(member);
-                (
-                    id,
-                    epoch,
-                    previous,
-                    subscriptions,
-                    assigned,
-                    member.last_seen,
-                )
+            .map(|member| MemberProjection {
+                durable: durable_member(member),
+                last_seen: member.last_seen,
             })
             .collect();
         members.sort();
-        let mut target: Vec<(String, Vec<i32>)> = self
+        let mut target: Vec<MemberTarget> = self
             .group
             .target
             .per_member
@@ -127,20 +145,23 @@ impl State {
             .map(|(member_id, assignment)| {
                 let mut partitions = assignment.get(&TOPIC).cloned().unwrap_or_default();
                 partitions.sort_unstable();
-                (member_id.clone(), partitions)
+                MemberTarget {
+                    member_id: member_id.clone(),
+                    partitions,
+                }
             })
             .collect();
         target.sort();
-        (
-            self.group.group_epoch,
-            self.group.metadata_hash,
-            self.group.target.epoch,
-            self.clock,
-            self.partitions,
+        GroupProjection {
+            group_epoch: self.group.group_epoch,
+            metadata_hash: self.group.metadata_hash,
+            target_epoch: self.group.target.epoch,
+            clock: self.clock,
+            partitions: self.partitions,
             members,
             target,
-            self.witnesses,
-        )
+            witnesses: self.witnesses,
+        }
     }
 }
 
@@ -168,7 +189,12 @@ impl MetadataProvider for ModelMetadata {
 /// the lifecycle hook leaves it once the persister answers. The model's
 /// assignor only hands out initialized partitions.
 fn initialize(group: &mut ShareGroupState, partitions: i32) {
-    group.initialized = (0..partitions).map(|p| (TOPIC, p)).collect();
+    group.initialized = (0..partitions)
+        .map(|partition| TopicIdPartition {
+            topic_id: TOPIC,
+            partition,
+        })
+        .collect();
     group.topic_names.insert(TOPIC, TOPIC_NAME.to_owned());
 }
 
@@ -221,13 +247,14 @@ fn assignments_in_metadata(state: &State) -> bool {
     }) && state.group.target.per_member.values().all(valid)
 }
 
-type DurableProjection = (
-    i32,
-    i64,
-    i32,
-    Vec<DurableMemberProjection>,
-    Vec<(String, Vec<i32>)>,
-);
+#[derive(Debug, PartialEq, Eq)]
+struct DurableProjection {
+    group_epoch: i32,
+    metadata_hash: i64,
+    target_epoch: i32,
+    members: Vec<DurableMemberProjection>,
+    target: Vec<MemberTarget>,
+}
 
 fn durable_member(member: &ShareMemberState) -> DurableMemberProjection {
     let mut subscriptions: Vec<String> = member.subscribed_topic_names.iter().cloned().collect();
@@ -238,38 +265,41 @@ fn durable_member(member: &ShareMemberState) -> DurableMemberProjection {
         .cloned()
         .unwrap_or_default();
     assigned.sort_unstable();
-    (
-        member.member_id.clone(),
-        member.member_epoch,
-        member.previous_member_epoch,
+    DurableMemberProjection {
+        member_id: member.member_id.clone(),
+        member_epoch: member.member_epoch,
+        previous_member_epoch: member.previous_member_epoch,
         subscriptions,
         assigned,
-    )
+    }
 }
 
 fn durable_projection(group: &ShareGroupState) -> DurableProjection {
     let mut members: Vec<DurableMemberProjection> =
         group.members.values().map(durable_member).collect();
     members.sort();
-    let mut target: Vec<(String, Vec<i32>)> = group
+    let mut target: Vec<MemberTarget> = group
         .members
         .keys()
         .filter_map(|member_id| {
             group.target.per_member.get(member_id).map(|assignment| {
                 let mut partitions = assignment.get(&TOPIC).cloned().unwrap_or_default();
                 partitions.sort_unstable();
-                (member_id.clone(), partitions)
+                MemberTarget {
+                    member_id: member_id.clone(),
+                    partitions,
+                }
             })
         })
         .collect();
     target.sort();
-    (
-        group.group_epoch,
-        group.metadata_hash,
-        group.target.epoch,
+    DurableProjection {
+        group_epoch: group.group_epoch,
+        metadata_hash: group.metadata_hash,
+        target_epoch: group.target.epoch,
         members,
         target,
-    )
+    }
 }
 
 /// Reconciles the group and then the member against its target, as a share

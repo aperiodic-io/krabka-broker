@@ -39,12 +39,19 @@ crate::test_support::context_helper!(pub(super) client_id = "admin-client");
 
 pub(super) use crate::handlers::acl_test_support::configured_authorizer;
 
+/// A filter on a resource name and a principal.
+#[derive(Clone, Copy)]
+pub(super) struct NamedFilter<'a> {
+    pub(super) name: &'a str,
+    pub(super) principal: &'a str,
+}
+
 /// Build ordered name/principal filters without sharing any expected response facts.
-pub(super) fn named_filters(filters: &[(&str, &str)]) -> DeleteAclsRequest {
+pub(super) fn named_filters(filters: &[NamedFilter<'_>]) -> DeleteAclsRequest {
     request(
         filters
             .iter()
-            .map(|&(name, principal)| filter(Some(name), Some(principal)))
+            .map(|&NamedFilter { name, principal }| filter(Some(name), Some(principal)))
             .collect(),
     )
 }

@@ -72,9 +72,11 @@ pub use self::config::{
 };
 use {
     self::{
-        consumer::{ConsumerState, KafkaAssignmentHandle, metadata_event_channel},
+        consumer::{
+            ConsumerState, KafkaAssignmentHandle, MetadataEventChannel, metadata_event_channel,
+        },
         range::{RangeFetcher, RangeReadFailure, RangeTopic, visit_range_pages},
-        topic::ensure_topic,
+        topic::{TopicInfo, ensure_topic},
     },
     crate::{
         error::MetadataLogError,
@@ -161,7 +163,10 @@ impl KafkaMetadataEventLog {
         // 1. Provision the topic, learn its partition count and id. The
         //    manual Fetch path needs the topic Uuid (Fetch v≥13 carries
         //    topic_id, not the name).
-        let (partition_count, topic_id) = ensure_topic(&cfg).await?;
+        let TopicInfo {
+            partition_count,
+            topic_id,
+        } = ensure_topic(&cfg).await?;
 
         // 2. Producer with acks=All and idempotence on. Read-your-writes
         //    depends on the broker durably acking the publish.
@@ -408,7 +413,10 @@ impl MetadataEventLog for KafkaMetadataEventLog {
         &self,
         assignment: Vec<PartitionStart>,
     ) -> (MetadataEventStream, Arc<dyn AssignmentHandle>) {
-        let (tx, rx) = metadata_event_channel(self.event_queue_capacity);
+        let MetadataEventChannel {
+            sender: tx,
+            receiver: rx,
+        } = metadata_event_channel(self.event_queue_capacity);
         let state = Arc::new(ConsumerState {
             bootstrap: self.bootstrap.clone(),
             client_id: format!("{}-consumer", self.client_id),

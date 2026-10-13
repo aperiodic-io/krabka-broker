@@ -61,7 +61,14 @@ pub(super) struct GatedWal {
     release_sync: tokio::sync::Mutex<Option<oneshot::Receiver<()>>>,
     pub(super) trimmed_to: AtomicI64,
     trim_failures: AtomicUsize,
-    hot_tail: Option<(Arc<HotTailCache>, uuid::Uuid, PartitionIndex)>,
+    hot_tail: Option<HotTailTarget>,
+}
+
+/// The hot-tail cache entry a diskless trim invalidates.
+struct HotTailTarget {
+    cache: Arc<HotTailCache>,
+    topic_id: uuid::Uuid,
+    partition: PartitionIndex,
 }
 
 impl GatedWal {
@@ -101,7 +108,11 @@ impl GatedWal {
         topic_id: uuid::Uuid,
         partition: PartitionIndex,
     ) -> Self {
-        self.hot_tail = Some((cache, topic_id, partition));
+        self.hot_tail = Some(HotTailTarget {
+            cache,
+            topic_id,
+            partition,
+        });
         self
     }
 }
@@ -137,7 +148,12 @@ impl WalStore for GatedWal {
     }
 
     fn invalidate_hot_tail(&self) {
-        if let Some((cache, topic_id, partition)) = &self.hot_tail {
+        if let Some(HotTailTarget {
+            cache,
+            topic_id,
+            partition,
+        }) = &self.hot_tail
+        {
             cache.remove_partition(*topic_id, *partition);
         }
     }
@@ -167,15 +183,6 @@ pub(super) struct WriterOptions {
     pub(super) wal: Option<SharedWal>,
     pub(super) max_produce_group: usize,
     pub(super) sequencer: Option<Arc<dyn OffsetSequencer>>,
-}
-
-impl WriterOptions {
-    pub(super) fn replica_handles(&self) -> (Arc<tokio::sync::Mutex<ReplicaState>>, Arc<Notify>) {
-        (
-            Arc::clone(&self.replica_state),
-            Arc::clone(&self.hw_advance_notify),
-        )
-    }
 }
 
 impl Default for WriterOptions {
@@ -302,7 +309,8 @@ pub(super) fn observed_writer(
     rx: mpsc::Receiver<WriterMessage>,
     options: WriterOptions,
 ) -> ObservedWriter {
-    let (replica_state, hw_advance_notify) = options.replica_handles();
+    let replica_state = Arc::clone(&options.replica_state);
+    let hw_advance_notify = Arc::clone(&options.hw_advance_notify);
     let writer = spawn_writer(dir, log, rx, options);
     ObservedWriter {
         writer,

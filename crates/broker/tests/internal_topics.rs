@@ -66,18 +66,51 @@ const TOPIC_FULL_MASK: i32 = (1 << 3)  // Read
     | (1 << 10) // DescribeConfigs
     | (1 << 11); // AlterConfigs
 
+/// A topic name, and whether the broker reports it as internal.
+struct TopicName {
+    name: &'static str,
+    is_internal: bool,
+}
+
 /// Every topic the broker owns, plus the three names that prove the flag reads
 /// a set of names rather than the `__` prefix.
-const TOPICS: [(&str, bool); 9] = [
-    ("__consumer_offsets", true),
-    ("__transaction_state", true),
-    ("__share_group_state", true),
-    ("__krabka_audit", true),
-    ("__barrier_state", true),
-    ("__diskless_wal_index", true),
-    ("__remote_log_metadata", false),
-    ("__user_topic", false),
-    ("orders", false),
+const TOPICS: [TopicName; 9] = [
+    TopicName {
+        name: "__consumer_offsets",
+        is_internal: true,
+    },
+    TopicName {
+        name: "__transaction_state",
+        is_internal: true,
+    },
+    TopicName {
+        name: "__share_group_state",
+        is_internal: true,
+    },
+    TopicName {
+        name: "__krabka_audit",
+        is_internal: true,
+    },
+    TopicName {
+        name: "__barrier_state",
+        is_internal: true,
+    },
+    TopicName {
+        name: "__diskless_wal_index",
+        is_internal: true,
+    },
+    TopicName {
+        name: "__remote_log_metadata",
+        is_internal: false,
+    },
+    TopicName {
+        name: "__user_topic",
+        is_internal: false,
+    },
+    TopicName {
+        name: "orders",
+        is_internal: false,
+    },
 ];
 
 /// Create every name in [`TOPICS`], so one metadata sweep sees them all.
@@ -92,7 +125,7 @@ async fn create_every_topic(p: &support::InProcess) {
         .send(CreateTopicsRequest {
             topics: TOPICS
                 .iter()
-                .map(|(name, _)| creatable_topic().name((*name).into()).call())
+                .map(|topic| creatable_topic().name(topic.name.into()).call())
                 .collect(),
             timeout_ms: 10_000,
             ..Default::default()
@@ -134,7 +167,7 @@ async fn metadata_marks_every_broker_owned_topic_internal() {
         .await
         .expect("Metadata");
 
-    for (name, is_internal) in TOPICS {
+    for TopicName { name, is_internal } in TOPICS {
         assert!(
             let Some(row) = resp.topics.iter().find(|t| t.name.as_deref() == Some(name)),
             "no metadata row for {name}"
@@ -186,7 +219,7 @@ async fn describe_topic_partitions_agrees_with_metadata() {
         .await
         .expect("DescribeTopicPartitions");
 
-    for (name, is_internal) in TOPICS {
+    for TopicName { name, is_internal } in TOPICS {
         assert!(
             let Some(row) = described
                 .topics

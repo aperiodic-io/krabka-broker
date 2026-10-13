@@ -92,18 +92,25 @@ impl ScanElr {
     }
 }
 
+/// What a scan reads once before it walks the image.
+struct ScanInputs {
+    /// The nodes the liveness registry holds alive.
+    alive: std::collections::HashSet<NodeId>,
+    /// The nodes that carry the witness role, which leader selection skips.
+    witnesses: std::collections::HashSet<NodeId>,
+    /// The per-topic ELR cache the scan fills as it goes.
+    elr: ScanElr,
+}
+
 /// Snapshot liveness once and prepare per-topic ELR caching for a scan.
-async fn scan_inputs(
-    image: &MetadataImage,
-    liveness: &ControllerLivenessState,
-) -> (
-    std::collections::HashSet<NodeId>,
-    std::collections::HashSet<NodeId>,
-    ScanElr,
-) {
+async fn scan_inputs(image: &MetadataImage, liveness: &ControllerLivenessState) -> ScanInputs {
     let alive = liveness.alive_node_ids().await;
     let witnesses = witness_node_ids(image);
-    (alive, witnesses, ScanElr::default())
+    ScanInputs {
+        alive,
+        witnesses,
+        elr: ScanElr::default(),
+    }
 }
 
 /// Tell `publisher` that the scan leaves `pr` without a leader once `gone`
@@ -224,7 +231,11 @@ pub(crate) async fn compute_failover_changes(
         mut recoveries,
         mut unavailable,
     } = FailoverPlan::default();
-    let (alive, witnesses, mut elr) = scan_inputs(image, liveness).await;
+    let ScanInputs {
+        alive,
+        witnesses,
+        mut elr,
+    } = scan_inputs(image, liveness).await;
     // A partition with nothing to elect has no leader, which its ELR says.
     let mut publisher = ElrPublisher::new(image);
     // Single O(P) walk over every partition in the image.
@@ -337,7 +348,11 @@ pub(crate) async fn compute_offline_dir_failover_changes(
 ) -> FailoverPlan {
     let mut changes: Vec<MetadataRecord> = Vec::new();
     let mut recoveries: Vec<(String, i32, RecoveryStrategy)> = Vec::new();
-    let (alive, witnesses, mut elr) = scan_inputs(image, liveness).await;
+    let ScanInputs {
+        alive,
+        witnesses,
+        mut elr,
+    } = scan_inputs(image, liveness).await;
     let mut publisher = ElrPublisher::new(image);
     for pr in image.all_partitions() {
         let Some(slot) = pr.replicas.iter().position(|n| *n == broker) else {
@@ -455,7 +470,11 @@ pub(crate) async fn compute_unclean_restart_changes(
         changes: withdraw_elr_membership(image, returning),
         ..Default::default()
     };
-    let (alive, witnesses, mut elr) = scan_inputs(image, liveness).await;
+    let ScanInputs {
+        alive,
+        witnesses,
+        mut elr,
+    } = scan_inputs(image, liveness).await;
     // The ISR removals below are the candidate set the next eligibility is
     // derived from, so the broker they remove has to be excluded from that
     // derivation too.

@@ -213,6 +213,13 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
+    /// A malformation, and the code that Kafka answers it with.
+    struct RejectedField {
+        what: &'static str,
+        mutate: Mutate,
+        want: i16,
+    }
+
     /// Each rejected field carries the code that
     /// `KafkaRaftClient.handleUpdateVoterRequest` carries for it. None of
     /// them is voter-specific: KIP-853 adds no "invalid voter update" code.
@@ -234,46 +241,46 @@ mod tests {
             req
         };
 
-        let cases: [(&str, Mutate, i16); 7] = [
-            (
-                "another cluster's id",
-                |req| req.cluster_id = Some("not-this-cluster".into()),
-                codes::INCONSISTENT_CLUSTER_ID,
-            ),
-            (
-                "an epoch the quorum has left behind",
-                |req| req.current_leader_epoch -= 1,
-                codes::FENCED_LEADER_EPOCH,
-            ),
-            (
-                "an epoch ahead of the quorum's",
-                |req| req.current_leader_epoch += 1,
-                codes::UNKNOWN_LEADER_EPOCH,
-            ),
-            (
-                "a zero voter directory id",
-                |req| req.voter_directory_id = ProtoUuid([0; 16]),
-                codes::INVALID_REQUEST,
-            ),
-            (
-                "no listeners at all",
-                |req| req.listeners.clear(),
-                codes::INVALID_REQUEST,
-            ),
-            (
-                "an inverted kraft.version range",
-                |req| req.k_raft_version_feature.min_supported_version = 2,
-                codes::INVALID_REQUEST,
-            ),
-            (
-                "listeners without the leader's controller listener",
-                |req| req.listeners[0].name = "PLAINTEXT".into(),
-                codes::INVALID_REQUEST,
-            ),
+        let cases: [RejectedField; 7] = [
+            RejectedField {
+                what: "another cluster's id",
+                mutate: |req| req.cluster_id = Some("not-this-cluster".into()),
+                want: codes::INCONSISTENT_CLUSTER_ID,
+            },
+            RejectedField {
+                what: "an epoch the quorum has left behind",
+                mutate: |req| req.current_leader_epoch -= 1,
+                want: codes::FENCED_LEADER_EPOCH,
+            },
+            RejectedField {
+                what: "an epoch ahead of the quorum's",
+                mutate: |req| req.current_leader_epoch += 1,
+                want: codes::UNKNOWN_LEADER_EPOCH,
+            },
+            RejectedField {
+                what: "a zero voter directory id",
+                mutate: |req| req.voter_directory_id = ProtoUuid([0; 16]),
+                want: codes::INVALID_REQUEST,
+            },
+            RejectedField {
+                what: "no listeners at all",
+                mutate: |req| req.listeners.clear(),
+                want: codes::INVALID_REQUEST,
+            },
+            RejectedField {
+                what: "an inverted kraft.version range",
+                mutate: |req| req.k_raft_version_feature.min_supported_version = 2,
+                want: codes::INVALID_REQUEST,
+            },
+            RejectedField {
+                what: "listeners without the leader's controller listener",
+                mutate: |req| req.listeners[0].name = "PLAINTEXT".into(),
+                want: codes::INVALID_REQUEST,
+            },
         ];
         let leader_id = i32::try_from(broker.config.node_id.0).expect("node id fits an i32");
 
-        for (what, mutate, want) in cases {
+        for RejectedField { what, mutate, want } in cases {
             let mut req = well_formed();
             mutate(&mut req);
             let resp = answer(&broker, version, &req, &ctx).await;
@@ -363,21 +370,56 @@ mod tests {
             Remove,
         }
 
+        /// One api, the only operation granted, and whether the call is
+        /// refused with `CLUSTER_AUTHORIZATION_FAILED`.
+        struct GrantCase {
+            api_name: &'static str,
+            api: Api,
+            grant: AclOperation,
+            want_cluster_authorization_failed: bool,
+        }
+
         let version = 0;
-        let cases: [(&str, Api, AclOperation, bool); 5] = [
-            (
-                "UpdateRaftVoter",
-                Api::Update,
-                AclOperation::ClusterAction,
-                false,
-            ),
-            ("UpdateRaftVoter", Api::Update, AclOperation::Alter, true),
-            ("AddRaftVoter", Api::Add, AclOperation::Alter, false),
-            ("AddRaftVoter", Api::Add, AclOperation::ClusterAction, true),
-            ("RemoveRaftVoter", Api::Remove, AclOperation::Alter, false),
+        let cases: [GrantCase; 5] = [
+            GrantCase {
+                api_name: "UpdateRaftVoter",
+                api: Api::Update,
+                grant: AclOperation::ClusterAction,
+                want_cluster_authorization_failed: false,
+            },
+            GrantCase {
+                api_name: "UpdateRaftVoter",
+                api: Api::Update,
+                grant: AclOperation::Alter,
+                want_cluster_authorization_failed: true,
+            },
+            GrantCase {
+                api_name: "AddRaftVoter",
+                api: Api::Add,
+                grant: AclOperation::Alter,
+                want_cluster_authorization_failed: false,
+            },
+            GrantCase {
+                api_name: "AddRaftVoter",
+                api: Api::Add,
+                grant: AclOperation::ClusterAction,
+                want_cluster_authorization_failed: true,
+            },
+            GrantCase {
+                api_name: "RemoveRaftVoter",
+                api: Api::Remove,
+                grant: AclOperation::Alter,
+                want_cluster_authorization_failed: false,
+            },
         ];
 
-        for (api_name, api, grant, want_cluster_authorization_failed) in cases {
+        for GrantCase {
+            api_name,
+            api,
+            grant,
+            want_cluster_authorization_failed,
+        } in cases
+        {
             broker_fixture!(
                 (broker_handle, _dir, broker),
                 start_broker(Arc::new(GrantOnly(grant)))

@@ -226,7 +226,7 @@ impl FakeGcs {
     /// a backend read has to agree with the engine's own key layout to find
     /// anything.
     async fn seed_segment(&self, bucket: &str, metadata: &RemoteLogSegmentMetadata) {
-        for (suffix, body) in segment_artifacts() {
+        for SeededArtifact { suffix, body } in segment_artifacts() {
             self.put_object(bucket, &object_key(metadata, suffix), body)
                 .await;
         }
@@ -282,14 +282,21 @@ fn gcs_config(server: &FakeGcs, bucket: String) -> GcsConfig {
 /// Every artifact a copy of the fixture segment would have written, by key
 /// suffix and body. The transaction index is absent, as it is for a segment
 /// with no aborted transactions.
-fn segment_artifacts() -> [(&'static str, &'static [u8]); 5] {
+fn segment_artifacts() -> [SeededArtifact; 5] {
+    let artifact = |suffix, body| SeededArtifact { suffix, body };
     [
-        (LOG_FILE_SUFFIX, LOG_BODY),
-        (IndexType::Offset.suffix(), OFFSET_INDEX_BODY),
-        (IndexType::Timestamp.suffix(), TIME_INDEX_BODY),
-        (IndexType::ProducerSnapshot.suffix(), SNAPSHOT_BODY),
-        (IndexType::LeaderEpoch.suffix(), EPOCH_BODY),
+        artifact(LOG_FILE_SUFFIX, LOG_BODY),
+        artifact(IndexType::Offset.suffix(), OFFSET_INDEX_BODY),
+        artifact(IndexType::Timestamp.suffix(), TIME_INDEX_BODY),
+        artifact(IndexType::ProducerSnapshot.suffix(), SNAPSHOT_BODY),
+        artifact(IndexType::LeaderEpoch.suffix(), EPOCH_BODY),
     ]
+}
+
+/// One artifact of the fixture segment: its key suffix and its body.
+struct SeededArtifact {
+    suffix: &'static str,
+    body: &'static [u8],
 }
 
 /// The object key one artifact of `metadata` lives at, prefix included.
@@ -321,16 +328,27 @@ fn sample_metadata(topic_id: Uuid, partition: i32) -> RemoteLogSegmentMetadata {
     .expect("valid remote metadata")
 }
 
-async fn seeded_segment(
-    index: i32,
-) -> (FakeGcs, String, S3RemoteStorage, RemoteLogSegmentMetadata) {
+/// A fake GCS server with one segment seeded into a bucket, and a backend over it.
+struct SeededSegment {
+    server: FakeGcs,
+    bucket: String,
+    storage: S3RemoteStorage,
+    metadata: RemoteLogSegmentMetadata,
+}
+
+async fn seeded_segment(index: i32) -> SeededSegment {
     let server = FakeGcs::start().await;
     let bucket = server.create_bucket(false).await;
     let config = gcs_config(&server, bucket.clone());
     let storage = S3RemoteStorage::from_gcs_config(&config).expect("open the emulator bucket");
     let metadata = sample_metadata(Uuid::new_v4(), index);
     server.seed_segment(&bucket, &metadata).await;
-    (server, bucket, storage, metadata)
+    SeededSegment {
+        server,
+        bucket,
+        storage,
+        metadata,
+    }
 }
 
 /// Every artifact of a segment in a real bucket reads back byte for byte
@@ -343,7 +361,12 @@ async fn seeded_segment(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn a_segment_seeded_in_the_emulator_fetches_back_byte_for_byte() {
-    let (_server, _bucket, storage, metadata) = seeded_segment(0).await;
+    let SeededSegment {
+        server: _server,
+        bucket: _bucket,
+        storage,
+        metadata,
+    } = seeded_segment(0).await;
 
     tokio::task::spawn_blocking(move || {
         check!(
@@ -383,7 +406,12 @@ async fn a_segment_seeded_in_the_emulator_fetches_back_byte_for_byte() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker"]
 async fn a_deleted_segment_is_gone_from_the_bucket() {
-    let (server, bucket, storage, metadata) = seeded_segment(3).await;
+    let SeededSegment {
+        server,
+        bucket,
+        storage,
+        metadata,
+    } = seeded_segment(3).await;
     let seeded = server.object_names(&bucket).await;
     check!(seeded.len() == segment_artifacts().len());
 

@@ -40,7 +40,10 @@ use {
 const LIMIT: usize = 32_767;
 
 /// A request field set from a string, with the name the case reports.
-type Field<R> = (&'static str, fn(&mut R, String));
+struct Field<R> {
+    name: &'static str,
+    set: fn(&mut R, String),
+}
 
 /// Encode `request` at `version` and decode it as a handler does.
 fn decoded<R>(request: &R, version: i16) -> Result<R, BrokerError>
@@ -60,7 +63,7 @@ fn check_request<R>(version: i16, base: &R, fields: &[Field<R>])
 where
     R: Clone + Encode + for<'de> Decode<'de> + RecordStrings,
 {
-    for (name, set) in fields {
+    for Field { name, set } in fields {
         for (length, accepted) in [(LIMIT, true), (LIMIT + 1, false)] {
             let mut request = base.clone();
             set(&mut request, "a".repeat(length));
@@ -83,7 +86,7 @@ where
 /// The independent field table names every record string exercised by a case.
 macro_rules! string_mutations {
     ($($label:literal => $kind:ident[$($path:tt)+]),* $(,)?) => {
-        &[$(($label, |request, value| string_mutations!(@$kind request, value; $($path)+)),)*]
+        &[$(Field { name: $label, set: |request, value| string_mutations!(@$kind request, value; $($path)+) },)*]
     };
     (@required $request:ident, $value:ident; $($path:tt)+) => { $request.$($path)+ = $value };
     (@optional $request:ident, $value:ident; $($path:tt)+) => { $request.$($path)+ = Some($value) };
@@ -123,11 +126,11 @@ fn a_request_with_a_record_string_over_32767_bytes_is_refused() {
     macro_rules! offset_commit_mutations {
         ($($extra:expr),* $(,)?) => {
             &[$($extra,)*
-                ("group id", |r, s| r.group_id = s),
-                ("member id", |r, s| r.member_id = s),
-                ("instance id", |r, s| r.group_instance_id = Some(s)),
-                ("topic name", |r, s| r.topics[0].name = s),
-                ("metadata", |r, s| r.topics[0].partitions[0].committed_metadata = Some(s)),
+                Field { name: "group id", set: |r, s| r.group_id = s },
+                Field { name: "member id", set: |r, s| r.member_id = s },
+                Field { name: "instance id", set: |r, s| r.group_instance_id = Some(s) },
+                Field { name: "topic name", set: |r, s| r.topics[0].name = s },
+                Field { name: "metadata", set: |r, s| r.topics[0].partitions[0].committed_metadata = Some(s) },
             ]
         };
     }
@@ -153,7 +156,10 @@ fn a_request_with_a_record_string_over_32767_bytes_is_refused() {
             }],
             ..Default::default()
         },
-        offset_commit_mutations!(("transactional id", |r, s| r.transactional_id = s)),
+        offset_commit_mutations!(Field {
+            name: "transactional id",
+            set: |r, s| r.transactional_id = s
+        }),
     );
 }
 

@@ -33,25 +33,37 @@ impl AsyncRead for CountingRead {
     }
 }
 
-fn stream(body: &[u8]) -> (CountingRead, Arc<AtomicUsize>) {
+/// A reader over one request frame, and the count of bytes it has served.
+struct CountedStream {
+    reader: CountingRead,
+    consumed: Arc<AtomicUsize>,
+}
+
+fn stream(body: &[u8]) -> CountedStream {
     let mut bytes = i32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
     bytes.extend_from_slice(body);
     let consumed = Arc::new(AtomicUsize::new(0));
-    (
-        CountingRead {
+    CountedStream {
+        reader: CountingRead {
             remaining: Bytes::from(bytes),
             consumed: consumed.clone(),
         },
         consumed,
-    )
+    }
 }
 
 #[tokio::test]
 async fn waiting_connections_read_only_the_prefix_before_capacity_is_available() {
     let budget = RequestByteBudget::of(8);
     let held = budget.acquire(8).await.unwrap();
-    let (mut first, first_read) = stream(b"12345678");
-    let (mut second, second_read) = stream(b"abcdefgh");
+    let CountedStream {
+        reader: mut first,
+        consumed: first_read,
+    } = stream(b"12345678");
+    let CountedStream {
+        reader: mut second,
+        consumed: second_read,
+    } = stream(b"abcdefgh");
     let mut first_request = Box::pin(receive_request(&mut first, 8, Some(&budget), None));
     let mut second_request = Box::pin(receive_request(&mut second, 8, Some(&budget), None));
     assert!(futures_util::poll!(&mut first_request).is_pending());
@@ -60,7 +72,10 @@ async fn waiting_connections_read_only_the_prefix_before_capacity_is_available()
     assert!(second_read.load(Ordering::SeqCst) == 4);
     // Disconnecting a budget waiter must remove its place in the semaphore
     // queue without reading a body or blocking either surviving connection.
-    let (mut cancelled, cancelled_read) = stream(b"cancel!!");
+    let CountedStream {
+        reader: mut cancelled,
+        consumed: cancelled_read,
+    } = stream(b"cancel!!");
     let mut cancelled_request = Box::pin(receive_request(&mut cancelled, 8, Some(&budget), None));
     assert!(futures_util::poll!(&mut cancelled_request).is_pending());
     drop(cancelled_request);
@@ -99,7 +114,7 @@ async fn invalid_sizes_are_rejected_before_reading_the_body() {
 
 #[tokio::test]
 async fn a_truncated_body_returns_its_reserved_capacity() {
-    let (mut reader, _) = stream(b"abcd");
+    let mut reader = stream(b"abcd").reader;
     reader.remaining.truncate(6);
     let budget = RequestByteBudget::of(8);
     assert!(
@@ -121,7 +136,10 @@ async fn idle_connections_reserve_no_request_bytes() {
 async fn broker_budget_waits_do_not_expire_the_client_idle_window() {
     let budget = RequestByteBudget::of(8);
     let held = budget.acquire(8).await.unwrap();
-    let (mut reader, consumed) = stream(b"abcdefgh");
+    let CountedStream {
+        mut reader,
+        consumed,
+    } = stream(b"abcdefgh");
     let mut request = Box::pin(receive_request(
         &mut reader,
         8,
@@ -157,7 +175,7 @@ async fn an_idle_body_releases_its_byte_permit() {
 
 #[tokio::test]
 async fn pipelined_frames_are_read_one_body_at_a_time() {
-    let (mut reader, _) = stream(b"first");
+    let mut reader = stream(b"first").reader;
     let mut remaining = reader.remaining.to_vec();
     remaining.extend_from_slice(&6_i32.to_be_bytes());
     remaining.extend_from_slice(b"second");

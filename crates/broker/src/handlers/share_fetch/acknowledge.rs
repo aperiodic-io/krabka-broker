@@ -258,12 +258,20 @@ mod tests {
         AtTheLimit,
     }
 
+    /// One acknowledgement batch of a row.
+    #[derive(Clone, Copy)]
+    struct TestBatch {
+        first: i64,
+        last: i64,
+        types: &'static [i8],
+    }
+
     /// One row: the setup, the batches, and what Kafka's
     /// `SharePartition.acknowledge` leaves behind.
     struct Row {
         name: &'static str,
         setup: Setup,
-        batches: &'static [(i64, i64, &'static [i8])],
+        batches: &'static [TestBatch],
         error: i16,
         spso: i64,
         states: Vec<(i64, RecordState)>,
@@ -310,7 +318,18 @@ mod tests {
             Row {
                 name: "a failed second batch rolls the first back",
                 setup: Setup::Split,
-                batches: &[(0, 4, &[ACCEPT]), (5, 9, &[ACCEPT])],
+                batches: &[
+                    TestBatch {
+                        first: 0,
+                        last: 4,
+                        types: &[ACCEPT],
+                    },
+                    TestBatch {
+                        first: 5,
+                        last: 9,
+                        types: &[ACCEPT],
+                    },
+                ],
                 error: codes::INVALID_RECORD_STATE,
                 spso: 0,
                 states: states(0, 9, Acquired),
@@ -318,7 +337,11 @@ mod tests {
             Row {
                 name: "a batch below the SPSO is skipped",
                 setup: Setup::HalfAccepted,
-                batches: &[(0, 2, &[ACCEPT])],
+                batches: &[TestBatch {
+                    first: 0,
+                    last: 2,
+                    types: &[ACCEPT],
+                }],
                 error: codes::NONE,
                 spso: 5,
                 states: states(5, 9, Acquired),
@@ -326,7 +349,11 @@ mod tests {
             Row {
                 name: "a batch across the SPSO acknowledges the part above it",
                 setup: Setup::HalfAccepted,
-                batches: &[(3, 7, &[ACCEPT])],
+                batches: &[TestBatch {
+                    first: 3,
+                    last: 7,
+                    types: &[ACCEPT],
+                }],
                 error: codes::NONE,
                 spso: 8,
                 states: states(8, 9, Acquired),
@@ -334,7 +361,11 @@ mod tests {
             Row {
                 name: "per-offset types across the SPSO",
                 setup: Setup::HalfAccepted,
-                batches: &[(4, 6, &[RELEASE, ACCEPT, ACCEPT])],
+                batches: &[TestBatch {
+                    first: 4,
+                    last: 6,
+                    types: &[RELEASE, ACCEPT, ACCEPT],
+                }],
                 error: codes::NONE,
                 spso: 7,
                 states: states(7, 9, Acquired),
@@ -342,7 +373,18 @@ mod tests {
             Row {
                 name: "a batch past the records handed out",
                 setup: Setup::Acquired,
-                batches: &[(0, 4, &[ACCEPT]), (8, 12, &[ACCEPT])],
+                batches: &[
+                    TestBatch {
+                        first: 0,
+                        last: 4,
+                        types: &[ACCEPT],
+                    },
+                    TestBatch {
+                        first: 8,
+                        last: 12,
+                        types: &[ACCEPT],
+                    },
+                ],
                 error: codes::INVALID_REQUEST,
                 spso: 0,
                 states: states(0, 9, Acquired),
@@ -350,7 +392,11 @@ mod tests {
             Row {
                 name: "a release at the delivery limit archives",
                 setup: Setup::AtTheLimit,
-                batches: &[(0, 9, &[RELEASE])],
+                batches: &[TestBatch {
+                    first: 0,
+                    last: 9,
+                    types: &[RELEASE],
+                }],
                 error: codes::NONE,
                 spso: 10,
                 states: Vec::new(),
@@ -358,7 +404,11 @@ mod tests {
             Row {
                 name: "a release under the limit offers the records again",
                 setup: Setup::Acquired,
-                batches: &[(0, 9, &[RELEASE])],
+                batches: &[TestBatch {
+                    first: 0,
+                    last: 9,
+                    types: &[RELEASE],
+                }],
                 error: codes::NONE,
                 spso: 0,
                 states: states(0, 9, RecordState::Available),
@@ -366,7 +416,11 @@ mod tests {
             Row {
                 name: "a release of part of the records at the limit",
                 setup: Setup::AtTheLimit,
-                batches: &[(0, 4, &[RELEASE])],
+                batches: &[TestBatch {
+                    first: 0,
+                    last: 4,
+                    types: &[RELEASE],
+                }],
                 error: codes::NONE,
                 spso: 5,
                 states: states(5, 9, Acquired),
@@ -376,7 +430,18 @@ mod tests {
                 // them, so the second batch is below the SPSO.
                 name: "an archived run is below the SPSO for a later batch",
                 setup: Setup::AtTheLimit,
-                batches: &[(0, 9, &[RELEASE]), (0, 9, &[ACCEPT])],
+                batches: &[
+                    TestBatch {
+                        first: 0,
+                        last: 9,
+                        types: &[RELEASE],
+                    },
+                    TestBatch {
+                        first: 0,
+                        last: 9,
+                        types: &[ACCEPT],
+                    },
+                ],
                 error: codes::NONE,
                 spso: 10,
                 states: Vec::new(),
@@ -405,12 +470,26 @@ mod tests {
                 &application,
                 row.batches
                     .iter()
-                    .map(|&(first, last, types)| (first, last, types)),
+                    .map(|batch| (batch.first, batch.last, batch.types)),
             );
             actual.push((row.name, error, state.start_offset.0, state.record_states()));
             expected.push((row.name, row.error, row.spso, row.states));
         }
         assert!(actual == expected);
+    }
+
+    /// One row of the lock-deadline table: the setup, the seconds after the
+    /// acquisition, whether the request renews, the acknowledge type, and the
+    /// error, SPSO and states expected.
+    struct LockCase {
+        name: &'static str,
+        setup: Setup,
+        after: u64,
+        requested: bool,
+        ack_type: i8,
+        error: i16,
+        spso: i64,
+        want: Vec<(i64, RecordState)>,
     }
 
     /// Kafka's lock timer fires at the deadline, so an acknowledgement or a
@@ -420,63 +499,61 @@ mod tests {
     fn an_acknowledgement_after_the_lock_deadline_is_refused() {
         use RecordState::Available;
         const RENEW: i8 = 4;
-        // (name, setup, seconds after the acquisition, renew request,
-        // acknowledge type, error, SPSO, states)
-        type Case = (
-            &'static str,
-            Setup,
-            u64,
-            bool,
-            i8,
-            i16,
-            i64,
-            Vec<(i64, RecordState)>,
-        );
-        let rows: Vec<Case> = vec![
-            (
-                "an acknowledgement inside the lock",
-                Setup::Acquired,
-                29,
-                false,
-                ACCEPT,
-                codes::NONE,
-                10,
-                Vec::new(),
-            ),
-            (
-                "an acknowledgement past the lock",
-                Setup::Acquired,
-                31,
-                false,
-                ACCEPT,
-                codes::INVALID_RECORD_STATE,
-                0,
-                states(0, 9, Available),
-            ),
-            (
-                "a renewal past the lock",
-                Setup::Acquired,
-                31,
-                true,
-                RENEW,
-                codes::INVALID_RECORD_STATE,
-                0,
-                states(0, 9, Available),
-            ),
-            (
-                "an acknowledgement past a lock at the delivery limit",
-                Setup::AtTheLimit,
-                31,
-                false,
-                ACCEPT,
-                codes::NONE,
-                10,
-                Vec::new(),
-            ),
+        let rows: Vec<LockCase> = vec![
+            LockCase {
+                name: "an acknowledgement inside the lock",
+                setup: Setup::Acquired,
+                after: 29,
+                requested: false,
+                ack_type: ACCEPT,
+                error: codes::NONE,
+                spso: 10,
+                want: Vec::new(),
+            },
+            LockCase {
+                name: "an acknowledgement past the lock",
+                setup: Setup::Acquired,
+                after: 31,
+                requested: false,
+                ack_type: ACCEPT,
+                error: codes::INVALID_RECORD_STATE,
+                spso: 0,
+                want: states(0, 9, Available),
+            },
+            LockCase {
+                name: "a renewal past the lock",
+                setup: Setup::Acquired,
+                after: 31,
+                requested: true,
+                ack_type: RENEW,
+                error: codes::INVALID_RECORD_STATE,
+                spso: 0,
+                want: states(0, 9, Available),
+            },
+            LockCase {
+                name: "an acknowledgement past a lock at the delivery limit",
+                setup: Setup::AtTheLimit,
+                after: 31,
+                requested: false,
+                ack_type: ACCEPT,
+                error: codes::NONE,
+                spso: 10,
+                want: Vec::new(),
+            },
         ];
         let mut actual = Vec::new();
         let mut expected = Vec::new();
-        for (name, setup, after, requested, ack_type, error, spso, want) in rows {
+        for LockCase {
+            name,
+            setup,
+            after,
+            requested,
+            ack_type,
+            error,
+            spso,
+            want,
+        } in rows
+        {
             let mut state = start(setup);
             let application = AckApplication {
                 member: "member",

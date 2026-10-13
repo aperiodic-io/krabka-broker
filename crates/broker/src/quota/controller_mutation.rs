@@ -362,33 +362,43 @@ mod tests {
         const OK: Outcome = Ok(());
         const REFUSED: Outcome = Err(ThrottlingQuotaExceeded);
         /// A label, the per-topic charges of each request, and their outcomes.
-        type Case = (
-            &'static str,
-            &'static [&'static [u64]],
-            &'static [&'static [Outcome]],
-        );
+        struct Case {
+            label: &'static str,
+            requests: &'static [&'static [u64]],
+            outcomes: &'static [&'static [Outcome]],
+        }
         let cases: [Case; 4] = [
-            ("50 partitions, then two topics of 5", &[&[50], &[5, 5]], &[
-                &[OK],
-                &[OK, OK],
-            ]),
-            ("60, 60 and 1 in one request", &[&[60, 60, 1]], &[&[
-                OK, OK, REFUSED,
-            ]]),
-            (
-                "a request that ends below zero refuses the next one",
-                &[&[120], &[1]],
-                &[&[OK], &[REFUSED]],
-            ),
-            ("a refused topic records nothing", &[&[111, 5, 5]], &[&[
-                OK, REFUSED, REFUSED,
-            ]]),
+            Case {
+                label: "50 partitions, then two topics of 5",
+                requests: &[&[50], &[5, 5]],
+                outcomes: &[&[OK], &[OK, OK]],
+            },
+            Case {
+                label: "60, 60 and 1 in one request",
+                requests: &[&[60, 60, 1]],
+                outcomes: &[&[OK, OK, REFUSED]],
+            },
+            Case {
+                label: "a request that ends below zero refuses the next one",
+                requests: &[&[120], &[1]],
+                outcomes: &[&[OK], &[REFUSED]],
+            },
+            Case {
+                label: "a refused topic records nothing",
+                requests: &[&[111, 5, 5]],
+                outcomes: &[&[OK, REFUSED, REFUSED]],
+            },
         ];
 
         let img = img_with_quota(vec![("user", Some("alice"))], 10.0);
         let mut actual = Vec::new();
         let mut expected = Vec::new();
-        for (label, requests, outcomes) in cases {
+        for Case {
+            label,
+            requests,
+            outcomes,
+        } in cases
+        {
             let buckets = QuotaBuckets::new();
             let got: Vec<Vec<Outcome>> = requests
                 .iter()

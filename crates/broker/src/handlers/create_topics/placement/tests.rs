@@ -26,29 +26,59 @@ use {
 /// The seeds that a test runs the placement with.
 const SEEDS: std::ops::Range<u64> = 0..32;
 
+/// A broker id and the rack it registers with.
+struct BrokerRack {
+    node_id: u64,
+    rack: Option<&'static str>,
+}
+
+/// A broker with a rack.
+const fn racked(node_id: u64, rack: &'static str) -> BrokerRack {
+    BrokerRack {
+        node_id,
+        rack: Some(rack),
+    }
+}
+
 /// One broker in each of the sites `a`, `b`, and `c`.
-const THREE_SITES: [(u64, Option<&str>); 3] = [(1, Some("a")), (2, Some("b")), (3, Some("c"))];
+const THREE_SITES: [BrokerRack; 3] = [racked(1, "a"), racked(2, "b"), racked(3, "c")];
 
 /// Two brokers in each of the sites `a`, `b`, and `c`.
-const SIX_BROKERS: [(u64, Option<&str>); 6] = [
-    (1, Some("a")),
-    (2, Some("b")),
-    (3, Some("c")),
-    (4, Some("a")),
-    (5, Some("b")),
-    (6, Some("c")),
+const SIX_BROKERS: [BrokerRack; 6] = [
+    racked(1, "a"),
+    racked(2, "b"),
+    racked(3, "c"),
+    racked(4, "a"),
+    racked(5, "b"),
+    racked(6, "c"),
+];
+
+/// Three brokers that register without a rack.
+const RACKLESS_BROKERS: [BrokerRack; 3] = [
+    BrokerRack {
+        node_id: 1,
+        rack: None,
+    },
+    BrokerRack {
+        node_id: 2,
+        rack: None,
+    },
+    BrokerRack {
+        node_id: 3,
+        rack: None,
+    },
 ];
 
 /// A metadata image that registers `brokers` with their racks, marks
 /// `witnesses` with the witness role, and pins `preferred_site` as the
 /// cluster-wide default.
 fn stretch_image(
-    brokers: &[(u64, Option<&str>)],
+    brokers: &[BrokerRack],
     witnesses: &[u64],
     preferred_site: Option<&str>,
 ) -> krabka_metadata::MetadataImage {
     let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-    for (node_id, rack) in brokers {
+    for BrokerRack { node_id, rack } in brokers {
         image.apply(&MetadataRecord::V1BrokerRegistration(
             krabka_metadata::BrokerRegistrationRecord {
                 incarnation_id: uuid::Uuid::from_u128(u128::from(*node_id)),
@@ -88,26 +118,56 @@ fn auto_topic(partitions: i32, rf: i16) -> CreatableTopic {
     }
 }
 
-/// The `(node id, site, witness)` triple of each view, in list order.
-fn view_rows(views: &[super::SiteBrokerView]) -> Vec<(NodeId, Option<String>, bool)> {
+/// The node id, site and witness flag of a broker view.
+#[derive(Debug, PartialEq, Eq)]
+struct ViewRow {
+    node_id: NodeId,
+    site: Option<String>,
+    is_witness: bool,
+}
+
+/// The node id, site and witness flag of each view, in list order.
+fn view_rows(views: &[super::SiteBrokerView]) -> Vec<ViewRow> {
     views
         .iter()
-        .map(|view| (view.node_id, view.site.clone(), view.is_witness))
+        .map(|view| ViewRow {
+            node_id: view.node_id,
+            site: view.site.clone(),
+            is_witness: view.is_witness,
+        })
         .collect()
 }
 
-fn site_of(brokers: &[(u64, Option<&str>)], node_id: NodeId) -> String {
+/// The node id and fence flag of a broker view.
+#[derive(Debug, PartialEq, Eq)]
+struct ViewFence {
+    node_id: NodeId,
+    fenced: bool,
+}
+
+/// The node id and fence flag of each view, in list order.
+fn view_fences(views: &[super::SiteBrokerView]) -> Vec<ViewFence> {
+    views
+        .iter()
+        .map(|view| ViewFence {
+            node_id: view.node_id,
+            fenced: view.fenced,
+        })
+        .collect()
+}
+
+fn site_of(brokers: &[BrokerRack], node_id: NodeId) -> String {
     brokers
         .iter()
-        .find(|(id, _)| NodeId(*id) == node_id)
-        .and_then(|(_, rack)| *rack)
+        .find(|broker| NodeId(broker.node_id) == node_id)
+        .and_then(|broker| broker.rack)
         .expect("the placement returns a broker that declared a site")
         .to_string()
 }
 
 /// The sites of one replica list, sorted, so the caller can compare the
 /// spread without depending on the replica order.
-fn sites_of(brokers: &[(u64, Option<&str>)], replicas: &[NodeId]) -> Vec<String> {
+fn sites_of(brokers: &[BrokerRack], replicas: &[NodeId]) -> Vec<String> {
     sorted_replica_sites(replicas, |node| site_of(brokers, node))
 }
 
@@ -187,19 +247,25 @@ fn manual_assignments_preserve_partition_order_and_validate_brokers() {
 /// manual assignment with these codes and messages, on brokers 1 and 2.
 #[test]
 fn invalid_manual_assignments_answer_kafkas_codes_and_messages() {
+    /// The replica list of one partition of a manual assignment.
+    struct ReplicaList {
+        partition_index: i32,
+        broker_ids: &'static [i32],
+    }
+
     fn topic(
         num_partitions: i32,
         replication_factor: i16,
-        lists: &[(i32, &[i32])],
+        lists: &[ReplicaList],
     ) -> CreatableTopic {
         CreatableTopic {
             num_partitions,
             replication_factor,
             assignments: lists
                 .iter()
-                .map(|(partition_index, broker_ids)| CreatableReplicaAssignment {
-                    partition_index: *partition_index,
-                    broker_ids: broker_ids.to_vec(),
+                .map(|list| CreatableReplicaAssignment {
+                    partition_index: list.partition_index,
+                    broker_ids: list.broker_ids.to_vec(),
                     ..Default::default()
                 })
                 .collect(),
@@ -208,73 +274,140 @@ fn invalid_manual_assignments_answer_kafkas_codes_and_messages() {
     }
     let cases = [
         (
-            topic(-1, 2, &[(0, &[1, 2])]),
+            topic(-1, 2, &[ReplicaList {
+                partition_index: 0,
+                broker_ids: &[1, 2],
+            }]),
             codes::INVALID_REQUEST,
             "A manual partition assignment was specified, but replication factor was not set to \
              -1.",
         ),
         (
-            topic(1, -1, &[(0, &[1, 2])]),
+            topic(1, -1, &[ReplicaList {
+                partition_index: 0,
+                broker_ids: &[1, 2],
+            }]),
             codes::INVALID_REQUEST,
             "A manual partition assignment was specified, but numPartitions was not set to -1.",
         ),
         (
-            topic(-1, -1, &[(0, &[1, 2]), (0, &[2, 1])]),
+            topic(-1, -1, &[
+                ReplicaList {
+                    partition_index: 0,
+                    broker_ids: &[1, 2],
+                },
+                ReplicaList {
+                    partition_index: 0,
+                    broker_ids: &[2, 1],
+                },
+            ]),
             codes::INVALID_REPLICA_ASSIGNMENT,
             "Found multiple manual partition assignments for partition 0",
         ),
         (
-            topic(-1, -1, &[(0, &[])]),
+            topic(-1, -1, &[ReplicaList {
+                partition_index: 0,
+                broker_ids: &[],
+            }]),
             codes::INVALID_REPLICA_ASSIGNMENT,
             "The manual partition assignment includes an empty replica list.",
         ),
         (
-            topic(-1, -1, &[(0, &[9, 1, 7])]),
+            topic(-1, -1, &[ReplicaList {
+                partition_index: 0,
+                broker_ids: &[9, 1, 7],
+            }]),
             codes::INVALID_REPLICA_ASSIGNMENT,
             "The manual partition assignment includes broker 7, but no such broker is registered.",
         ),
         (
-            topic(-1, -1, &[(0, &[2, 1, 2])]),
+            topic(-1, -1, &[ReplicaList {
+                partition_index: 0,
+                broker_ids: &[2, 1, 2],
+            }]),
             codes::INVALID_REPLICA_ASSIGNMENT,
             "The manual partition assignment includes the broker 2 more than once.",
         ),
         (
-            topic(-1, -1, &[(0, &[1, 2]), (1, &[1])]),
+            topic(-1, -1, &[
+                ReplicaList {
+                    partition_index: 0,
+                    broker_ids: &[1, 2],
+                },
+                ReplicaList {
+                    partition_index: 1,
+                    broker_ids: &[1],
+                },
+            ]),
             codes::INVALID_REPLICA_ASSIGNMENT,
             "The manual partition assignment includes a partition with 1 replica(s), but this is \
              not consistent with previous partitions, which have 2 replica(s).",
         ),
         (
-            topic(-1, -1, &[(0, &[1]), (2, &[2])]),
+            topic(-1, -1, &[
+                ReplicaList {
+                    partition_index: 0,
+                    broker_ids: &[1],
+                },
+                ReplicaList {
+                    partition_index: 2,
+                    broker_ids: &[2],
+                },
+            ]),
             codes::INVALID_REPLICA_ASSIGNMENT,
             "partitions should be a consecutive 0-based integer sequence",
         ),
     ];
 
-    let (actual, expected): (Vec<_>, Vec<_>) = cases
-        .into_iter()
-        .map(|(topic, code, message)| {
-            (
-                manual_replicas(&topic, &[NodeId(1), NodeId(2)]),
-                Err((code, message.to_owned())),
-            )
-        })
-        .unzip();
-    assert!(actual == expected);
+    for (topic, code, message) in cases {
+        assert!(
+            manual_replicas(&topic, &[NodeId(1), NodeId(2)]) == Err((code, message.to_owned())),
+            "{message}"
+        );
+    }
 }
 
 #[test]
 fn site_broker_views_read_the_rack_and_the_witness_role() {
-    let image = stretch_image(&[(3, Some("c")), (1, Some("a")), (2, None)], &[3], None);
+    let image = stretch_image(
+        &[
+            BrokerRack {
+                node_id: 3,
+                rack: Some("c"),
+            },
+            BrokerRack {
+                node_id: 1,
+                rack: Some("a"),
+            },
+            BrokerRack {
+                node_id: 2,
+                rack: None,
+            },
+        ],
+        &[3],
+        None,
+    );
 
     let views = broker_views(&image, Some(NodeId(9)));
 
     // The views come back in node-id order, whatever order the image
     // holds them in.
     let expected = vec![
-        (NodeId(1), Some("a".to_string()), false),
-        (NodeId(2), None, false),
-        (NodeId(3), Some("c".to_string()), true),
+        ViewRow {
+            node_id: NodeId(1),
+            site: Some("a".to_string()),
+            is_witness: false,
+        },
+        ViewRow {
+            node_id: NodeId(2),
+            site: None,
+            is_witness: false,
+        },
+        ViewRow {
+            node_id: NodeId(3),
+            site: Some("c".to_string()),
+            is_witness: true,
+        },
     ];
     assert!(view_rows(&views) == expected);
 }
@@ -284,16 +417,26 @@ fn site_broker_views_read_the_rack_and_the_witness_role() {
 /// broker thus stays a candidate, unlike one in controlled shutdown.
 #[test]
 fn a_fenced_broker_is_a_tagged_last_resort_candidate() {
-    let mut image = stretch_image(&[(1, None), (2, None), (3, None)], &[], None);
+    let mut image = stretch_image(&RACKLESS_BROKERS, &[], None);
     let fenced = std::collections::HashSet::from([2]);
     let views = views_with_fenced_brokers(&image, &fenced);
 
     assert!(
-        views
-            .iter()
-            .map(|view| (view.node_id, view.fenced))
-            .collect::<Vec<_>>()
-            == vec![(NodeId(1), false), (NodeId(2), true), (NodeId(3), false)]
+        view_fences(&views)
+            == vec![
+                ViewFence {
+                    node_id: NodeId(1),
+                    fenced: false
+                },
+                ViewFence {
+                    node_id: NodeId(2),
+                    fenced: true
+                },
+                ViewFence {
+                    node_id: NodeId(3),
+                    fenced: false
+                },
+            ]
     );
     for seed in SEEDS {
         // The replication factor is the broker count, fenced included, so
@@ -336,6 +479,13 @@ fn a_fenced_broker_is_a_tagged_last_resort_candidate() {
 /// two brokers left, and the share group never initialized its partitions.
 #[test]
 fn a_fenced_broker_is_out_of_controlled_shutdown() {
+    /// The sorted replicas and ISR of an automatic partition.
+    #[derive(Debug, PartialEq, Eq)]
+    struct CreatedPlacement {
+        replicas: Vec<NodeId>,
+        isr: Vec<NodeId>,
+    }
+
     struct Case {
         what: &'static str,
         /// The fence on the registration of broker 3, which is in controlled
@@ -343,11 +493,11 @@ fn a_fenced_broker_is_out_of_controlled_shutdown() {
         registration_fenced: bool,
         /// What the controller's heartbeat registry holds unavailable.
         registry_unavailable: &'static [u64],
-        /// `(node id, fenced)` of each view.
-        views: Vec<(NodeId, bool)>,
+        /// The node id and fence flag of each view.
+        views: Vec<ViewFence>,
         /// The sorted replicas and ISR of an automatic partition at
         /// replication factor 3, or the `CreateTopics` refusal.
-        created: Result<(Vec<NodeId>, Vec<NodeId>), String>,
+        created: Result<CreatedPlacement, String>,
     }
     impl Case {
         fn fenced_last_resort(
@@ -359,11 +509,24 @@ fn a_fenced_broker_is_out_of_controlled_shutdown() {
                 what,
                 registration_fenced,
                 registry_unavailable,
-                views: vec![(NodeId(1), false), (NodeId(2), false), (NodeId(3), true)],
-                created: Ok((vec![NodeId(1), NodeId(2), NodeId(3)], vec![
-                    NodeId(1),
-                    NodeId(2),
-                ])),
+                views: vec![
+                    ViewFence {
+                        node_id: NodeId(1),
+                        fenced: false,
+                    },
+                    ViewFence {
+                        node_id: NodeId(2),
+                        fenced: false,
+                    },
+                    ViewFence {
+                        node_id: NodeId(3),
+                        fenced: true,
+                    },
+                ],
+                created: Ok(CreatedPlacement {
+                    replicas: vec![NodeId(1), NodeId(2), NodeId(3)],
+                    isr: vec![NodeId(1), NodeId(2)],
+                }),
             }
         }
     }
@@ -372,7 +535,16 @@ fn a_fenced_broker_is_out_of_controlled_shutdown() {
             what: "still in controlled shutdown",
             registration_fenced: false,
             registry_unavailable: &[],
-            views: vec![(NodeId(1), false), (NodeId(2), false)],
+            views: vec![
+                ViewFence {
+                    node_id: NodeId(1),
+                    fenced: false,
+                },
+                ViewFence {
+                    node_id: NodeId(2),
+                    fenced: false,
+                },
+            ],
             created: Err(
                 "Unable to replicate the partition 3 time(s): The target replication \
                           factor of 3 cannot be reached because only 2 broker(s) are \
@@ -388,7 +560,7 @@ fn a_fenced_broker_is_out_of_controlled_shutdown() {
         ),
     ];
     for case in cases {
-        let mut image = stretch_image(&[(1, None), (2, None), (3, None)], &[], None);
+        let mut image = stretch_image(&RACKLESS_BROKERS, &[], None);
         let mut registration = image.broker(NodeId(3)).expect("registered").clone();
         registration.in_controlled_shutdown = true;
         registration.fenced = case.registration_fenced;
@@ -413,20 +585,12 @@ fn a_fenced_broker_is_out_of_controlled_shutdown() {
                 replicas.sort_unstable();
                 let mut isr = leaderships[0].isr.clone();
                 isr.sort_unstable();
-                Ok((replicas, isr))
+                Ok(CreatedPlacement { replicas, isr })
             }
             Err((code, message)) => panic!("{}: refused with {code}: {message}", case.what),
         };
 
-        assert!(
-            views
-                .iter()
-                .map(|view| (view.node_id, view.fenced))
-                .collect::<Vec<_>>()
-                == case.views,
-            "{}",
-            case.what
-        );
+        assert!(view_fences(&views) == case.views, "{}", case.what);
         assert!(created == case.created, "{}", case.what);
     }
 }
@@ -436,7 +600,7 @@ fn a_fenced_broker_is_out_of_controlled_shutdown() {
 /// in the replica list and out of the ISR.
 #[test]
 fn the_isr_leaves_out_fenced_and_shutting_down_brokers() {
-    let mut image = stretch_image(&[(1, None), (2, None), (3, None)], &[], None);
+    let mut image = stretch_image(&RACKLESS_BROKERS, &[], None);
     enter_controlled_shutdown(&mut image, 3);
     let fenced = std::collections::HashSet::from([2]);
     let inactive = inactive_brokers(&image, &fenced);
@@ -480,7 +644,14 @@ fn an_image_without_a_registration_places_on_this_broker_alone() {
 
     let views = broker_views(&image, Some(NodeId(7)));
 
-    assert!(view_rows(&views) == vec![(NodeId(7), None, false)]);
+    assert!(
+        view_rows(&views)
+            == vec![ViewRow {
+                node_id: NodeId(7),
+                site: None,
+                is_witness: false
+            }]
+    );
 }
 
 /// A node whose `process.roles` exclude `broker` hosts no replica, and it
@@ -560,7 +731,20 @@ fn the_preferred_site_leads_every_partition() {
 
 #[test]
 fn a_witness_replicates_but_leads_no_partition() {
-    let brokers = [(1, Some("a")), (2, Some("b")), (3, Some("w"))];
+    let brokers = [
+        BrokerRack {
+            node_id: 1,
+            rack: Some("a"),
+        },
+        BrokerRack {
+            node_id: 2,
+            rack: Some("b"),
+        },
+        BrokerRack {
+            node_id: 3,
+            rack: Some("w"),
+        },
+    ];
     let image = stretch_image(&brokers, &[3], None);
     let views = broker_views(&image, Some(NodeId(1)));
 
@@ -595,7 +779,7 @@ fn a_witness_replicates_but_leads_no_partition() {
 /// id.
 #[test]
 fn a_cluster_without_racks_starts_each_topic_at_a_random_broker() {
-    let image = stretch_image(&[(1, None), (2, None), (3, None)], &[], None);
+    let image = stretch_image(&RACKLESS_BROKERS, &[], None);
     let views = broker_views(&image, Some(NodeId(1)));
 
     let leaders = (0..64)
@@ -624,7 +808,24 @@ fn a_cluster_without_racks_starts_each_topic_at_a_random_broker() {
 
 #[test]
 fn a_mixed_rack_cluster_keeps_the_unracked_broker_placeable() {
-    let image = stretch_image(&[(1, Some("a")), (2, Some("b")), (3, None)], &[], None);
+    let image = stretch_image(
+        &[
+            BrokerRack {
+                node_id: 1,
+                rack: Some("a"),
+            },
+            BrokerRack {
+                node_id: 2,
+                rack: Some("b"),
+            },
+            BrokerRack {
+                node_id: 3,
+                rack: None,
+            },
+        ],
+        &[],
+        None,
+    );
     let views = broker_views(&image, Some(NodeId(1)));
 
     let assignments =
@@ -701,7 +902,28 @@ fn an_impossible_request_gives_no_assignment() {
 #[test]
 fn fully_cordoned_brokers_are_not_automatic_placement_candidates() {
     let dir = |n: u128| uuid::Uuid::from_u128(n);
-    let mut image = stretch_image(&[(1, None), (2, None), (3, None), (4, None)], &[], None);
+    let mut image = stretch_image(
+        &[
+            BrokerRack {
+                node_id: 1,
+                rack: None,
+            },
+            BrokerRack {
+                node_id: 2,
+                rack: None,
+            },
+            BrokerRack {
+                node_id: 3,
+                rack: None,
+            },
+            BrokerRack {
+                node_id: 4,
+                rack: None,
+            },
+        ],
+        &[],
+        None,
+    );
     for (node, cordoned) in [
         (1, Some(vec![dir(10), dir(11)])),
         (2, Some(vec![dir(20)])),
@@ -742,7 +964,14 @@ fn fully_cordoned_brokers_are_not_automatic_placement_candidates() {
         );
     }
 
-    let mut all_cordoned = stretch_image(&[(1, None)], &[], None);
+    let mut all_cordoned = stretch_image(
+        &[BrokerRack {
+            node_id: 1,
+            rack: None,
+        }],
+        &[],
+        None,
+    );
     let mut registration = all_cordoned.broker(NodeId(1)).expect("registered").clone();
     registration.log_dirs = vec![dir(10)];
     registration.cordoned_log_dirs = Some(vec![dir(10)]);

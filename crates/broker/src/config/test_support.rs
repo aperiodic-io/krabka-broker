@@ -10,7 +10,13 @@ use {
     krabka_security::{ListenerProtocol, SaslMechanism},
 };
 
-pub type RuntimeInvalidator = (&'static str, fn(&mut BrokerConfig));
+/// A rejection of a runtime config: the message `validate` reports, and the
+/// change to a default config that provokes it.
+#[derive(Clone, Copy)]
+pub struct RuntimeInvalidator {
+    pub expected: &'static str,
+    pub invalidate: fn(&mut BrokerConfig),
+}
 
 pub fn assert_invalid_runtime(config: &BrokerConfig, expected: &str) {
     let Err(BrokerError::InvalidRuntimeConfig(actual)) = config.validate() else {
@@ -21,7 +27,11 @@ pub fn assert_invalid_runtime(config: &BrokerConfig, expected: &str) {
 
 /// Exercise each scalar rejection from an independently initialized default config.
 pub fn assert_invalid_runtime_cases(cases: impl IntoIterator<Item = RuntimeInvalidator>) {
-    for (expected, invalidate) in cases {
+    for RuntimeInvalidator {
+        expected,
+        invalidate,
+    } in cases
+    {
         let mut config = BrokerConfig::default();
         invalidate(&mut config);
         assert_invalid_runtime(&config, expected);

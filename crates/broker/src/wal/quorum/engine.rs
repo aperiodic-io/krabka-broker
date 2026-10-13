@@ -92,7 +92,14 @@ pub(crate) struct WalShardEngine {
     distributed_required: AtomicBool,
     distributed: Mutex<Option<DistributedQuorum>>,
     durable_advanced: Notify,
-    observability: OnceLock<(ShardId, BrokerMetrics)>,
+    observability: OnceLock<ShardObservability>,
+}
+
+/// The shard and metrics that an engine reports its offsets to.
+#[derive(Debug)]
+struct ShardObservability {
+    shard: ShardId,
+    metrics: BrokerMetrics,
 }
 
 #[derive(Debug)]
@@ -222,7 +229,9 @@ impl WalShardEngine {
     }
 
     pub(crate) fn attach_observability(&self, shard: ShardId, metrics: BrokerMetrics) {
-        let _ = self.observability.set((shard, metrics));
+        let _ = self
+            .observability
+            .set(ShardObservability { shard, metrics });
         self.record_observability();
     }
 
@@ -238,7 +247,7 @@ impl WalShardEngine {
     }
 
     fn record_observability_at(&self, log_start: Offset, leader_end: Offset) {
-        let Some((shard, metrics)) = self.observability.get() else {
+        let Some(ShardObservability { shard, metrics }) = self.observability.get() else {
             return;
         };
         let distributed = self
@@ -274,7 +283,7 @@ impl WalShardEngine {
     }
 
     fn remove_voter_observability(&self, voters: &[NodeId]) {
-        if let Some((shard, metrics)) = self.observability.get() {
+        if let Some(ShardObservability { shard, metrics }) = self.observability.get() {
             metrics.remove_diskless_wal_voters(shard.topic_id, shard.partition, voters);
         }
     }
@@ -286,13 +295,13 @@ impl WalShardEngine {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .map_or_else(Vec::new, |quorum| quorum.voters.clone());
-        if let Some((shard, metrics)) = self.observability.get() {
+        if let Some(ShardObservability { shard, metrics }) = self.observability.get() {
             metrics.remove_diskless_wal_shard(shard.topic_id, shard.partition, &voters);
         }
     }
 
     fn record_quorum_loss(&self, target: Offset, error: &BrokerError) {
-        let Some((shard, metrics)) = self.observability.get() else {
+        let Some(ShardObservability { shard, metrics }) = self.observability.get() else {
             return;
         };
         metrics.diskless_wal_quorum_loss_events_total.inc();
@@ -786,23 +795,39 @@ mod tests {
     #[tokio::test]
     async fn acknowledgement_rejects_a_divergent_replica() {
         type Values = &'static [&'static [u8]];
-        let cases: [(&str, Values, Values, Values, i64); 2] = [
-            (
-                "equal-length divergence past the committed offset",
-                &[b"leader"],
-                &[b"stale"],
-                &[],
-                0,
-            ),
-            (
-                "divergence below the committed offset",
-                &[b"committed", b"next"],
-                &[b"stale"],
-                &[b"committed"],
-                1,
-            ),
+        /// A case name, the values each of three replicas holds, and the
+        /// committed offset.
+        struct DivergenceCase {
+            name: &'static str,
+            leader_values: Values,
+            divergent_values: Values,
+            unavailable_values: Values,
+            committed: i64,
+        }
+        let cases: [DivergenceCase; 2] = [
+            DivergenceCase {
+                name: "equal-length divergence past the committed offset",
+                leader_values: &[b"leader"],
+                divergent_values: &[b"stale"],
+                unavailable_values: &[],
+                committed: 0,
+            },
+            DivergenceCase {
+                name: "divergence below the committed offset",
+                leader_values: &[b"committed", b"next"],
+                divergent_values: &[b"stale"],
+                unavailable_values: &[b"committed"],
+                committed: 1,
+            },
         ];
-        for (name, leader_values, divergent_values, unavailable_values, committed) in cases {
+        for DivergenceCase {
+            name,
+            leader_values,
+            divergent_values,
+            unavailable_values,
+            committed,
+        } in cases
+        {
             let dir = tempfile::tempdir().unwrap();
             let leader = log_with_values(&dir.path().join("leader"), leader_values);
             let divergent = log_with_values(&dir.path().join("divergent"), divergent_values);
@@ -869,9 +894,19 @@ mod tests {
 
     #[test]
     fn exact_batch_range_rejects_internal_gaps_overlaps_and_reordering() {
-        fn exact(ranges: &[(i64, i32)], start: i64, target: i64) -> bool {
+        /// A batch of `records` records written at `base_offset`.
+        struct BatchRange {
+            base_offset: i64,
+            records: i32,
+        }
+
+        fn exact(ranges: &[BatchRange], start: i64, target: i64) -> bool {
             let mut wire = BytesMut::new();
-            for &(base_offset, records) in ranges {
+            for &BatchRange {
+                base_offset,
+                records,
+            } in ranges
+            {
                 let mut record_batch = batch(records);
                 record_batch.base_offset = base_offset;
                 record_batch.encode(&mut wire).expect("encode test batch");
@@ -880,12 +915,16 @@ mod tests {
             batches::exact_batches(decoded, Offset(start), Offset(target)).is_ok()
         }
 
+        let range = |base_offset, records| BatchRange {
+            base_offset,
+            records,
+        };
         assert!(exact(&[], 4, 4));
-        assert!(exact(&[(4, 2), (6, 3)], 4, 9));
-        assert!(!exact(&[(4, 2), (7, 2)], 4, 9));
-        assert!(!exact(&[(4, 2), (5, 4)], 4, 9));
-        assert!(!exact(&[(6, 3), (4, 2)], 4, 9));
-        assert!(!exact(&[(i64::MAX, 1)], i64::MAX, i64::MAX));
-        assert!(exact(&[(i64::MAX - 1, 1)], i64::MAX - 1, i64::MAX));
+        assert!(exact(&[range(4, 2), range(6, 3)], 4, 9));
+        assert!(!exact(&[range(4, 2), range(7, 2)], 4, 9));
+        assert!(!exact(&[range(4, 2), range(5, 4)], 4, 9));
+        assert!(!exact(&[range(6, 3), range(4, 2)], 4, 9));
+        assert!(!exact(&[range(i64::MAX, 1)], i64::MAX, i64::MAX));
+        assert!(exact(&[range(i64::MAX - 1, 1)], i64::MAX - 1, i64::MAX));
     }
 }

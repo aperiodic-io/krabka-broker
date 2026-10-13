@@ -29,23 +29,29 @@ use {
     std::{sync::Arc, time::Duration},
 };
 
+/// A coordinator, and the id of the topic `t` it runs over.
+struct TopicCoordinator {
+    coordinator: Arc<GroupCoordinator>,
+    topic_id: krabka_protocol::primitives::uuid::Uuid,
+}
+
 /// A coordinator over topic `t` with four partitions, whose metadata image
 /// holds each group config in `overrides`: a group id and its `share.*`
 /// entries. It returns the id of `t`.
 fn coordinator(
     config: ShareGroupConfig,
     overrides: &[(&str, &[(&str, &str)])],
-) -> (
-    Arc<GroupCoordinator>,
-    krabka_protocol::primitives::uuid::Uuid,
-) {
+) -> TopicCoordinator {
     let (coordinator, topic_id) = super::test_support::topic_coordinator()
         .name(TopicMetadataSetup::four_partitions().name)
         .partitions(TopicMetadataSetup::four_partitions().partitions)
         .share(config)
         .call();
     coordinator.set_metadata_source(fixed_source(group_image(overrides)));
-    (coordinator, topic_id)
+    TopicCoordinator {
+        coordinator,
+        topic_id,
+    }
 }
 
 /// A heartbeat is handled with the settings of the group config when it
@@ -97,10 +103,10 @@ async fn join(
 /// `share.heartbeat.interval.ms`, or the broker's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_group_reports_its_own_heartbeat_interval() {
-    let (coordinator, _) = coordinator(ShareGroupConfig::assigning_at_once(), &[("tuned", &[(
-        "share.heartbeat.interval.ms",
-        "7000",
-    )])]);
+    let TopicCoordinator { coordinator, .. } = coordinator(
+        ShareGroupConfig::assigning_at_once(),
+        &[("tuned", &[("share.heartbeat.interval.ms", "7000")])],
+    );
     let mut reported = Vec::new();
     for group_id in ["tuned", "plain"] {
         let handle = coordinator.get_or_create_share(group_id);
@@ -117,7 +123,7 @@ async fn a_group_reports_its_own_heartbeat_interval() {
 async fn a_group_expires_a_member_by_its_own_session_timeout() {
     // The broker's bounds admit the 1 ms and the 10 ms that the group asks for,
     // which the group's own overrides are capped to.
-    let (coordinator, _) = coordinator(
+    let TopicCoordinator { coordinator, .. } = coordinator(
         ShareGroupConfig {
             min_session_timeout: Duration::from_millis(1),
             min_heartbeat_interval: Duration::from_millis(10),
@@ -138,7 +144,10 @@ async fn a_group_expires_a_member_by_its_own_session_timeout() {
 /// once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_group_assigns_no_sooner_than_its_own_assignment_interval() {
-    let (coordinator, topic_id) = coordinator(
+    let TopicCoordinator {
+        coordinator,
+        topic_id,
+    } = coordinator(
         ShareGroupConfig {
             assignment_interval: Duration::from_mins(1),
             ..ShareGroupConfig::default()

@@ -9,6 +9,7 @@ use {
     },
     crate::coordinator::unified::{
         ShareGroupSeed,
+        assignor::TopicIdPartition,
         share::{
             persistence::TopicPartitionsInfo,
             state::{ShareGroupState, ShareMemberState},
@@ -76,13 +77,16 @@ pub(super) fn apply_seed(state: &mut ShareGroupState, seed: ShareGroupSeed) {
 fn restore_named_partitions(
     state: &mut ShareGroupState,
     topics: &[TopicPartitionsInfo],
-    mut restore: impl FnMut(&mut ShareGroupState, (Uuid, i32)),
+    mut restore: impl FnMut(&mut ShareGroupState, TopicIdPartition),
 ) {
     for topic in topics {
         let tid = Uuid(*topic.topic_id.as_bytes());
         state.topic_names.insert(tid, topic.topic_name.clone());
         for p in &topic.partitions {
-            restore(state, (tid, *p));
+            restore(state, TopicIdPartition {
+                topic_id: tid,
+                partition: *p,
+            });
         }
     }
 }
@@ -117,8 +121,9 @@ pub(super) fn snapshot_seed(state: &ShareGroupState) -> ShareGroupSeed {
 mod tests {
     use {
         super::*,
-        crate::coordinator::unified::share::persistence::{
-            ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
+        crate::coordinator::unified::share::{
+            persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
+            state::share_partition,
         },
         assert2::{assert, check},
     };
@@ -164,9 +169,9 @@ mod tests {
         // metadata image no longer resolves the id.
         let id = Uuid([7; 16]);
         let mut state = ShareGroupState::new("g");
-        state.initialized.insert((id, 0));
-        state.initialized.insert((id, 1));
-        state.initializing.insert((id, 2), 0);
+        state.initialized.insert(share_partition(id, 0));
+        state.initialized.insert(share_partition(id, 1));
+        state.initializing.insert(share_partition(id, 2), 0);
         state.topic_names.insert(id, "orders".to_owned());
         state.deleting.insert(Uuid([8; 16]), "carts".to_owned());
 
@@ -177,7 +182,7 @@ mod tests {
         check!(restored.topic_names == state.topic_names);
         check!(restored.initialized == state.initialized);
         check!(restored.deleting == state.deleting);
-        check!(restored.initializing.keys().collect::<Vec<_>>() == vec![&(id, 2)]);
+        check!(restored.initializing.keys().collect::<Vec<_>>() == vec![&share_partition(id, 2)]);
         assert!(snapshot_seed(&restored).state_partition_metadata == seed.state_partition_metadata);
     }
 
@@ -201,6 +206,6 @@ mod tests {
         });
 
         check!(restored.topic_names.is_empty());
-        check!(!restored.initialized.iter().any(|(tid, _)| *tid == id));
+        check!(!restored.initialized.iter().any(|tp| tp.topic_id == id));
     }
 }

@@ -7,7 +7,7 @@ use {
         CleanedTransactionMetadata, CleaningRound, ProducerLastRecord, RewriteOutput,
         RewriteRetention, build_offset_map, rewrite_segments,
     },
-    crate::{io::FileIo, segment::Segment},
+    crate::{io::FileIo, segment::Segment, test_support::KeyValue},
     bytes::Bytes,
     krabka_ids::{Offset, ProducerId},
     krabka_protocol::records::{Attributes, Record, RecordBatch},
@@ -115,8 +115,8 @@ pub(super) struct TransactionalRecordSetup<'a> {
     pub offset: Offset,
     #[default(ProducerId(1000))]
     pub producer: ProducerId,
-    #[default((b"k", b"v"))]
-    pub payload: (&'a [u8], &'a [u8]),
+    #[default(KeyValue { key: b"k", value: b"v" })]
+    pub payload: KeyValue<'a>,
 }
 
 /// One transactional keyed record, retaining the protocol's epoch/sequence defaults.
@@ -124,7 +124,7 @@ pub(super) struct TransactionalRecordSetup<'a> {
 pub(super) fn transactional_record(
     #[builder(into, default)] offset: Offset,
     #[builder(into, default = ProducerId (1000))] producer: ProducerId,
-    #[builder(default = (b"k" , b"v"))] payload: (&'_ [u8], &'_ [u8]),
+    #[builder(default = KeyValue { key: b"k", value: b"v" })] payload: KeyValue<'_>,
 ) -> RecordBatch {
     let setup = TransactionalRecordSetup {
         offset,
@@ -134,7 +134,7 @@ pub(super) fn transactional_record(
     let TransactionalRecordSetup {
         offset,
         producer,
-        payload: (key, value),
+        payload: KeyValue { key, value },
     } = setup;
     RecordBatch {
         base_offset: offset.0,

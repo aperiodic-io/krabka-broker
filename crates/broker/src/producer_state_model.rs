@@ -25,7 +25,7 @@ use {
     super::{
         Decision, ProducerEntry, RetainedBatch,
         decision::{Checked, SequenceContext, check_retained},
-        entry::{EarlierBatches, NUM_BATCHES_TO_RETAIN},
+        entry::{Completion, NUM_BATCHES_TO_RETAIN},
     },
     crate::{model_check::check_model, partition::LogOffset},
     krabka_verified::increment_sequence,
@@ -109,7 +109,7 @@ impl HostEntry {
     /// The entry after the host accepts `batch` at `epoch`: exactly what
     /// `ProducerState::commit` stores.
     fn after_append(existing: Option<&Self>, epoch: i16, batch: Range) -> Self {
-        let (_, earlier): (bool, EarlierBatches) = super::entry::earlier_after_completion(
+        let Completion { earlier, .. } = super::entry::earlier_after_completion(
             existing.map(HostEntry::entry),
             epoch,
             batch.batch(),
@@ -206,6 +206,15 @@ enum Witness {
     RetryBelowWindowRefused,
 }
 
+/// A submit on which the host and Kafka gave different answers.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct Violation {
+    epoch: i16,
+    range: Range,
+    host: Answer,
+    kafka: Answer,
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct ProdState {
     host: Option<HostEntry>,
@@ -213,7 +222,7 @@ struct ProdState {
     witness: Option<Witness>,
     /// The first submit on which the host and Kafka disagreed. It is only ever
     /// set by a defect, so it costs no states on a correct host.
-    violation: Option<(i16, Range, Answer, Answer)>,
+    violation: Option<Violation>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -264,7 +273,12 @@ impl Model for ProducerModel {
             ..last.clone()
         };
         if host != kafka {
-            s.violation.get_or_insert((epoch, batch, host, kafka));
+            s.violation.get_or_insert(Violation {
+                epoch,
+                range: batch,
+                host,
+                kafka,
+            });
             return Some(s);
         }
         match host {

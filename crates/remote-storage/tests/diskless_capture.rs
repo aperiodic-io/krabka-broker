@@ -261,16 +261,22 @@ fn signable_capture() -> DisklessWalCapture {
     }
 }
 
-fn signer() -> (FileEd25519Signer, Vec<u8>) {
+/// A generated signer and the public key that verifies it.
+struct CaptureSigner {
+    signer: FileEd25519Signer,
+    public: Vec<u8>,
+}
+
+fn signer() -> CaptureSigner {
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
     let signer = FileEd25519Signer::from_pkcs8_bytes(pkcs8.as_ref(), "capture-key".into()).unwrap();
     let public = signer.public_key();
-    (signer, public)
+    CaptureSigner { signer, public }
 }
 
 #[test]
 fn signed_capture_binds_state_objects_trust_and_external_head() {
-    let (signer, public) = signer();
+    let CaptureSigner { signer, public } = signer();
     let mut capture = signable_capture();
     capture.rlmm_snapshot_sha256 = Some(Sha256Digest::of(b"rlmm snapshot"));
     let wal = b"exact wal bytes";

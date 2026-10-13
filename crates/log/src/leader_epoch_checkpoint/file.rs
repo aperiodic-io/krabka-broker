@@ -142,7 +142,10 @@ fn parse_column<T: std::str::FromStr>(
 mod tests {
     use {
         super::*,
-        crate::leader_epoch_checkpoint::test_support::{checkpoint, fresh},
+        crate::{
+            leader_epoch_checkpoint::test_support::{TempCheckpoint, checkpoint, entry, fresh},
+            test_support::TempPath,
+        },
     };
 
     /// The golden file: Kafka's text layout, version line `0` first.
@@ -160,14 +163,17 @@ mod tests {
 
     #[test]
     fn round_trip_byte_compat_format() {
-        let (_d, c) = checkpoint(&[(0, 0), (1, 50), (2, 100)]);
+        let TempCheckpoint {
+            dir: _d,
+            checkpoint: c,
+        } = checkpoint(&[entry(0, 0), entry(1, 50), entry(2, 100)]);
         let s = std::fs::read_to_string(&c.path).unwrap();
         assert2::assert!(s == GOLDEN);
     }
 
     #[test]
     fn the_golden_file_decodes_to_its_entries() {
-        let (_d, path) = fresh();
+        let TempPath { dir: _d, path } = fresh();
         std::fs::write(&path, GOLDEN).unwrap();
         assert2::assert!(LeaderEpochCheckpoint::open(path).unwrap().entries() == golden_entries());
     }
@@ -177,7 +183,7 @@ mod tests {
     #[test]
     fn a_file_that_ends_early_has_no_entries() {
         for contents in ["", "0\n"] {
-            let (_d, path) = fresh();
+            let TempPath { dir: _d, path } = fresh();
             std::fs::write(&path, contents).unwrap();
             let c = LeaderEpochCheckpoint::open(path).unwrap();
             assert2::assert!(c.entries() == &[][..], "{contents:?}");
@@ -198,7 +204,7 @@ mod tests {
             (" 0\n0\n", None),
             ("v0\n0\n", None),
         ] {
-            let (_d, path) = fresh();
+            let TempPath { dir: _d, path } = fresh();
             std::fs::write(&path, contents).unwrap();
             let error = LeaderEpochCheckpoint::open(path.clone()).unwrap_err();
             let got = match error {
@@ -219,7 +225,7 @@ mod tests {
 
     #[test]
     fn missing_file_yields_empty() {
-        let (_d, path) = fresh();
+        let TempPath { dir: _d, path } = fresh();
         let c = LeaderEpochCheckpoint::open(path).unwrap();
         assert2::assert!(c.entries() == &[][..]);
         assert2::assert!(c.latest_epoch() == None);
@@ -227,7 +233,7 @@ mod tests {
 
     #[test]
     fn open_rejects_out_of_order_checkpoint_rows() {
-        let (_d, path) = fresh();
+        let TempPath { dir: _d, path } = fresh();
         std::fs::write(&path, "0\n4\n0 0\n5 100\n2 50\n4 80\n").unwrap();
 
         let error = LeaderEpochCheckpoint::open(path).unwrap_err();

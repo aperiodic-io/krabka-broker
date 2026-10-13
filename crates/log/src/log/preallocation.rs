@@ -11,13 +11,15 @@ use {
     super::{
         Log,
         test_support::{
-            NO_LIMIT, append_samples, assert_log_end_offset, configured_test_log, sample_batch,
+            NO_LIMIT, TempLog, append_samples, assert_log_end_offset, configured_test_log,
+            sample_batch,
         },
     },
     crate::{
         config::{LogConfig, SegmentAllocation},
         io::{DirectFile, LogIo},
         name,
+        test_support::{BatchSpan, span},
     },
     krabka_ids::Offset,
     krabka_units::prelude::{ByteSize, ByteSizeExt as _, mebibytes},
@@ -85,36 +87,46 @@ fn log_len(dir: &Path, base: i64) -> u64 {
 /// A log opened without `preallocate` that turns it on afterwards, under
 /// `io`, as the broker opens a partition with its own config and only then
 /// applies the topic's.
-fn switched_on(allocation: SegmentAllocation, io: &Arc<Recorder>) -> (tempfile::TempDir, Log) {
-    let (dir, mut log) = configured_test_log(LogConfig::default());
+fn switched_on(allocation: SegmentAllocation, io: &Arc<Recorder>) -> TempLog {
+    let TempLog { dir, mut log } = configured_test_log(LogConfig::default());
     log.test_set_io(io.clone());
     log.set_config(LogConfig {
         segment_allocation: allocation,
         ..preallocating()
     });
-    (dir, log)
+    TempLog { dir, log }
+}
+
+/// What [`roll_twice`] observed: the requests the disk saw and the lengths of
+/// the two segments.
+struct RollTwice {
+    requests: Vec<Request>,
+    lengths: [u64; 2],
 }
 
 /// Append two batches and roll, twice: into the segment at 0, which was
 /// created before the config changed, and into the one at 6.
 ///
 /// Returns the requests `io` saw and the lengths of the two segments.
-fn roll_twice(allocation: SegmentAllocation, io: &Arc<Recorder>) -> (Vec<Request>, [u64; 2]) {
-    let (dir, mut log) = switched_on(allocation, io);
+fn roll_twice(allocation: SegmentAllocation, io: &Arc<Recorder>) -> RollTwice {
+    let TempLog { dir, mut log } = switched_on(allocation, io);
     for _ in 0..2 {
         append_samples(&mut log, 2, 3);
         assert2::assert!(log.roll().unwrap());
     }
     // Whatever the disk said, the log holds what was written.
     let read = log.read(Offset(0), NO_LIMIT).unwrap();
-    let batches: Vec<(i64, i32)> = read
+    let batches: Vec<BatchSpan> = read
         .batches
         .iter()
-        .map(|batch| (batch.base_offset, batch.last_offset_delta))
+        .map(|batch| span(batch.base_offset, batch.last_offset_delta))
         .collect();
-    assert2::assert!(batches == [(0, 2), (3, 2), (6, 2), (9, 2)]);
+    assert2::assert!(batches == [span(0, 2), span(3, 2), span(6, 2), span(9, 2)]);
     let requests = io.requests.lock().unwrap().clone();
-    (requests, [log_len(dir.path(), 0), log_len(dir.path(), 6)])
+    RollTwice {
+        requests,
+        lengths: [log_len(dir.path(), 0), log_len(dir.path(), 6)],
+    }
 }
 
 /// A reservation of a whole segment from its start.
@@ -132,7 +144,10 @@ fn whole() -> Request {
 #[test]
 fn every_segment_reserves_before_its_first_append_and_releases_at_the_seal() {
     let io = Arc::new(Recorder::default());
-    let (requests, [first, second]) = roll_twice(SegmentAllocation::Preallocate, &io);
+    let RollTwice {
+        requests,
+        lengths: [first, second],
+    } = roll_twice(SegmentAllocation::Preallocate, &io);
 
     assert2::assert!(
         requests
@@ -154,7 +169,7 @@ fn a_refused_reservation_is_asked_once_and_leaves_a_working_log() {
         refuse: true,
         ..Recorder::default()
     });
-    let (requests, _) = roll_twice(SegmentAllocation::Preallocate, &io);
+    let RollTwice { requests, .. } = roll_twice(SegmentAllocation::Preallocate, &io);
 
     assert2::assert!(requests == [whole(), whole()]);
 }
@@ -163,7 +178,7 @@ fn a_refused_reservation_is_asked_once_and_leaves_a_working_log() {
 #[test]
 fn allocating_on_write_never_reserves_or_releases() {
     let io = Arc::new(Recorder::default());
-    let (requests, _) = roll_twice(SegmentAllocation::OnWrite, &io);
+    let RollTwice { requests, .. } = roll_twice(SegmentAllocation::OnWrite, &io);
 
     assert2::assert!(requests.is_empty());
 }
@@ -175,7 +190,7 @@ fn allocating_on_write_never_reserves_or_releases() {
 #[test]
 fn a_truncated_segment_takes_its_reservation_again() {
     let io = Arc::new(Recorder::default());
-    let (dir, mut log) = switched_on(SegmentAllocation::Preallocate, &io);
+    let TempLog { dir, mut log } = switched_on(SegmentAllocation::Preallocate, &io);
     append_samples(&mut log, 2, 3);
 
     log.truncate_to(Offset(3)).unwrap();
@@ -208,7 +223,7 @@ fn allocated(dir: &Path, base: i64) -> u64 {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_real_reservation_holds_blocks_past_the_end_until_the_seal() {
-    let (dir, mut log) = configured_test_log(preallocating());
+    let TempLog { dir, mut log } = configured_test_log(preallocating());
 
     log.append(&mut sample_batch(3)).unwrap();
     let written = log.size().bytes_u64();
@@ -232,7 +247,7 @@ fn a_real_reservation_holds_blocks_past_the_end_until_the_seal() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_reopened_segment_gives_back_a_crashed_runs_reservation() {
-    let (dir, mut log) = configured_test_log(LogConfig::default());
+    let TempLog { dir, mut log } = configured_test_log(LogConfig::default());
     append_samples(&mut log, 1, 3);
     drop(log);
     let file = File::options()

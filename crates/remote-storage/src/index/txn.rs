@@ -163,6 +163,14 @@ mod tests {
 
     #[test]
     fn parse_txn_index_round_trips_known_entries() {
+        /// The decoded fields of one aborted-transaction entry.
+        #[derive(Debug, PartialEq, Eq)]
+        struct DecodedTxn {
+            start_offset: i64,
+            last_offset: i64,
+            producer_id: i64,
+            last_stable_offset: i64,
+        }
         // Mirror TxnIndex::append: 2B version, 8B producer_id, 8B
         // start_offset, 8B last_offset, 8B last_stable_offset, all BE.
         let mut buf = Vec::new();
@@ -177,18 +185,32 @@ mod tests {
             );
         }
         let entries = parse_txn_index(&buf).expect("valid txn index");
-        let decoded: Vec<(i64, i64, i64, i64)> = entries
+        let decoded: Vec<DecodedTxn> = entries
             .iter()
-            .map(|e| {
-                (
-                    e.start_offset.get(),
-                    e.last_offset.get(),
-                    e.producer_id.get(),
-                    e.last_stable_offset.get(),
-                )
+            .map(|e| DecodedTxn {
+                start_offset: e.start_offset.get(),
+                last_offset: e.last_offset.get(),
+                producer_id: e.producer_id.get(),
+                last_stable_offset: e.last_stable_offset.get(),
             })
             .collect();
-        assert!(decoded == vec![(0, 4, 1000, 5), (10, 14, 2000, 15)]);
+        assert!(
+            decoded
+                == vec![
+                    DecodedTxn {
+                        start_offset: 0,
+                        last_offset: 4,
+                        producer_id: 1000,
+                        last_stable_offset: 5,
+                    },
+                    DecodedTxn {
+                        start_offset: 10,
+                        last_offset: 14,
+                        producer_id: 2000,
+                        last_stable_offset: 15,
+                    },
+                ]
+        );
     }
 
     #[test]

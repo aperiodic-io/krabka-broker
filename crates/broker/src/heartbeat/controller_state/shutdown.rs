@@ -207,33 +207,44 @@ mod tests {
     /// `BrokerHeartbeatManager.calculateNextBrokerState`, one row per branch.
     #[test]
     fn the_next_state_follows_kafka() {
-        let cases: &[(&str, BrokerControlState, HeartbeatFacts, BrokerControlState)] = &[
-            ("fenced, caught up", Fenced, facts(), Unfenced),
-            (
-                "fenced, behind its registration",
-                Fenced,
-                HeartbeatFacts {
+        struct Case {
+            what: &'static str,
+            current: BrokerControlState,
+            facts: HeartbeatFacts,
+            expected: BrokerControlState,
+        }
+        let cases: &[Case] = &[
+            Case {
+                what: "fenced, caught up",
+                current: Fenced,
+                facts: facts(),
+                expected: Unfenced,
+            },
+            Case {
+                what: "fenced, behind its registration",
+                current: Fenced,
+                facts: HeartbeatFacts {
                     caught_up: false,
                     ..facts()
                 },
-                Fenced,
-            ),
-            (
-                "fenced, asking to stay fenced",
-                Fenced,
-                HeartbeatFacts {
+                expected: Fenced,
+            },
+            Case {
+                what: "fenced, asking to stay fenced",
+                current: Fenced,
+                facts: HeartbeatFacts {
                     wants: HeartbeatWants {
                         fence: true,
                         shut_down: false,
                     },
                     ..facts()
                 },
-                Fenced,
-            ),
-            (
-                "fenced, asking to shut down",
-                Fenced,
-                HeartbeatFacts {
+                expected: Fenced,
+            },
+            Case {
+                what: "fenced, asking to shut down",
+                current: Fenced,
+                facts: HeartbeatFacts {
                     wants: HeartbeatWants {
                         fence: false,
                         shut_down: true,
@@ -241,25 +252,30 @@ mod tests {
                     has_leaderships: true,
                     ..facts()
                 },
-                ShutdownNow,
-            ),
-            ("unfenced", Unfenced, facts(), Unfenced),
-            (
-                "unfenced, asking to be fenced",
-                Unfenced,
-                HeartbeatFacts {
+                expected: ShutdownNow,
+            },
+            Case {
+                what: "unfenced",
+                current: Unfenced,
+                facts: facts(),
+                expected: Unfenced,
+            },
+            Case {
+                what: "unfenced, asking to be fenced",
+                current: Unfenced,
+                facts: HeartbeatFacts {
                     wants: HeartbeatWants {
                         fence: true,
                         shut_down: false,
                     },
                     ..facts()
                 },
-                Fenced,
-            ),
-            (
-                "unfenced, asking to be fenced and to shut down",
-                Unfenced,
-                HeartbeatFacts {
+                expected: Fenced,
+            },
+            Case {
+                what: "unfenced, asking to be fenced and to shut down",
+                current: Unfenced,
+                facts: HeartbeatFacts {
                     wants: HeartbeatWants {
                         fence: true,
                         shut_down: true,
@@ -267,12 +283,12 @@ mod tests {
                     has_leaderships: true,
                     ..facts()
                 },
-                ShutdownNow,
-            ),
-            (
-                "unfenced, asking to shut down with leaderships",
-                Unfenced,
-                HeartbeatFacts {
+                expected: ShutdownNow,
+            },
+            Case {
+                what: "unfenced, asking to shut down with leaderships",
+                current: Unfenced,
+                facts: HeartbeatFacts {
                     wants: HeartbeatWants {
                         fence: false,
                         shut_down: true,
@@ -280,12 +296,12 @@ mod tests {
                     has_leaderships: true,
                     ..facts()
                 },
-                ControlledShutdown,
-            ),
-            (
-                "unfenced, asking to shut down with no leadership",
-                Unfenced,
-                HeartbeatFacts {
+                expected: ControlledShutdown,
+            },
+            Case {
+                what: "unfenced, asking to shut down with no leadership",
+                current: Unfenced,
+                facts: HeartbeatFacts {
                     wants: HeartbeatWants {
                         fence: false,
                         shut_down: true,
@@ -293,49 +309,55 @@ mod tests {
                     lowest_active_offset: 0,
                     ..facts()
                 },
-                ShutdownNow,
-            ),
-            (
-                "in controlled shutdown with leaderships",
-                ControlledShutdown,
-                HeartbeatFacts {
+                expected: ShutdownNow,
+            },
+            Case {
+                what: "in controlled shutdown with leaderships",
+                current: ControlledShutdown,
+                facts: HeartbeatFacts {
                     has_leaderships: true,
                     controlled_shutdown_offset: Some(10),
                     ..facts()
                 },
-                ControlledShutdown,
-            ),
-            (
-                "in controlled shutdown, an active broker behind",
-                ControlledShutdown,
-                HeartbeatFacts {
+                expected: ControlledShutdown,
+            },
+            Case {
+                what: "in controlled shutdown, an active broker behind",
+                current: ControlledShutdown,
+                facts: HeartbeatFacts {
                     controlled_shutdown_offset: Some(10),
                     lowest_active_offset: 9,
                     ..facts()
                 },
-                ControlledShutdown,
-            ),
-            (
-                "in controlled shutdown, every active broker at the offset",
-                ControlledShutdown,
-                HeartbeatFacts {
+                expected: ControlledShutdown,
+            },
+            Case {
+                what: "in controlled shutdown, every active broker at the offset",
+                current: ControlledShutdown,
+                facts: HeartbeatFacts {
                     controlled_shutdown_offset: Some(10),
                     lowest_active_offset: 10,
                     ..facts()
                 },
-                ShutdownNow,
-            ),
-            (
-                "in controlled shutdown, no active broker",
-                ControlledShutdown,
-                HeartbeatFacts {
+                expected: ShutdownNow,
+            },
+            Case {
+                what: "in controlled shutdown, no active broker",
+                current: ControlledShutdown,
+                facts: HeartbeatFacts {
                     controlled_shutdown_offset: Some(10),
                     ..facts()
                 },
-                ShutdownNow,
-            ),
+                expected: ShutdownNow,
+            },
         ];
-        for (what, current, facts, expected) in cases {
+        for Case {
+            what,
+            current,
+            facts,
+            expected,
+        } in cases
+        {
             check!(next_broker_state(*current, *facts) == *expected, "{what}");
         }
     }

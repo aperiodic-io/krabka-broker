@@ -16,14 +16,14 @@
 //! replicas 1 and 2, led by node 1 or by node 2.
 
 use {
-    super::test_support::FetchReplicaId,
+    super::test_support::{FetchReplicaId, start_with_idle_follower},
     crate::{
         broker::BrokerHandle,
         codes,
         fetch_session::INVALID_SESSION_ID,
-        handlers::test_support::{default_records_batch, seed_partition_replicas},
+        handlers::test_support::{StartedBroker, default_records_batch, seed_partition_replicas},
         partition::Partition,
-        test_support::{KafkaErrorCode, append_partition_batch, start_broker_no_audit_with},
+        test_support::{KafkaErrorCode, append_partition_batch},
     },
     assert2::assert,
     bytes::Bytes,
@@ -90,14 +90,6 @@ struct Outcome {
     response: FetchResponse,
     high_watermark: Offset,
     tracked_followers: Vec<u64>,
-}
-
-async fn start() -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| {
-        // Node 2 never fetches. Keep it in the ISR for the whole test.
-        cfg.replica_lag_time_max = krabka_units::secs(600);
-    })
-    .await
 }
 
 /// Create `topic` with replicas 1 and 2, led by `leader`, wait until this
@@ -349,7 +341,7 @@ async fn a_read_needs_the_leader_and_an_assigned_follower() {
         },
     ];
 
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start_with_idle_follower().await;
     topic_case_outcomes!(
         (actual, want),
         (index, case, label, name),

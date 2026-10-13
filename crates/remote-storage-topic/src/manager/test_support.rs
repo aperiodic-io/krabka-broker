@@ -99,12 +99,19 @@ pub async fn wait_ready(m: &Arc<TopicBasedRemoteLogMetadataManager>, tp: &TopicI
     }
 }
 
-pub async fn seeded_manager(
-    log: Arc<dyn MetadataEventLog>,
-) -> (Arc<TopicBasedRemoteLogMetadataManager>, i32) {
+/// A manager over a seeded log and the metadata partition the seed landed in.
+pub struct SeededManager {
+    pub manager: Arc<TopicBasedRemoteLogMetadataManager>,
+    pub partition: i32,
+}
+
+pub async fn seeded_manager(log: Arc<dyn MetadataEventLog>) -> SeededManager {
     seed_log(log.clone()).await;
     let partition = metadata_partition_for(&tp(), log.partition_count());
-    (start_manager(log), partition)
+    SeededManager {
+        manager: start_manager(log),
+        partition,
+    }
 }
 
 pub async fn wait_finished_metadata(
@@ -148,11 +155,21 @@ pub fn start_manager_in(
     )
 }
 
+/// A completed segment to publish: its id and the offsets it covers.
+#[derive(Clone, Copy)]
+pub struct SegmentSeed {
+    pub id: u128,
+    pub start: i64,
+    pub end: i64,
+}
+
+pub const fn seed(id: u128, start: i64, end: i64) -> SegmentSeed { SegmentSeed { id, start, end } }
+
 /// Assign every partition and publish the caller's completed-segment fixture in this directory.
 pub async fn start_seeded_manager_in(
     log: Arc<dyn MetadataEventLog>,
     dir: std::path::PathBuf,
-    segments: &[(u128, i64, i64)],
+    segments: &[SegmentSeed],
 ) -> Arc<TopicBasedRemoteLogMetadataManager> {
     let manager = start_manager_in(log.clone(), dir).unwrap();
     manager
@@ -197,9 +214,9 @@ pub async fn start_manager_all(
 
 pub async fn seed_finished(
     manager: &Arc<TopicBasedRemoteLogMetadataManager>,
-    segments: &[(u128, i64, i64)],
+    segments: &[SegmentSeed],
 ) {
-    for &(id, start, end) in segments {
+    for &SegmentSeed { id, start, end } in segments {
         let m = manager.clone();
         on_blocking(move || {
             m.add_remote_log_segment_metadata(started(id, start, end))
@@ -213,6 +230,6 @@ pub async fn seed_finished(
 
 pub async fn seed_log(log: Arc<dyn MetadataEventLog>) {
     let manager = start_manager_all(log).await;
-    seed_finished(&manager, &[(10, 0, 99)]).await;
+    seed_finished(&manager, &[seed(10, 0, 99)]).await;
     manager.shutdown();
 }

@@ -220,19 +220,32 @@ mod tests {
 
     #[test]
     fn a_malformed_topic_list_names_its_own_fault() {
-        let cases: &[(&[&str], Option<&str>)] = &[
-            (&["orders", "payments"], None),
-            (&[], Some("a barrier group needs at least one topic")),
-            (&["orders", ""], Some("a barrier group topic name is empty")),
-            (
-                &["orders", "payments", "orders"],
-                Some("a barrier group names topic orders twice"),
-            ),
+        struct Case<'a> {
+            topics: &'a [&'a str],
+            fault: Option<&'a str>,
+        }
+        let cases = &[
+            Case {
+                topics: &["orders", "payments"],
+                fault: None,
+            },
+            Case {
+                topics: &[],
+                fault: Some("a barrier group needs at least one topic"),
+            },
+            Case {
+                topics: &["orders", ""],
+                fault: Some("a barrier group topic name is empty"),
+            },
+            Case {
+                topics: &["orders", "payments", "orders"],
+                fault: Some("a barrier group names topic orders twice"),
+            },
         ];
-        for (topics, expected) in cases {
+        for Case { topics, fault } in cases {
             let list: Vec<String> = topics.iter().map(|t| (*t).to_owned()).collect();
             check!(
-                topic_list_fault(&list) == expected.map(ToOwned::to_owned),
+                topic_list_fault(&list) == fault.map(ToOwned::to_owned),
                 "{topics:?}"
             );
         }

@@ -14,7 +14,7 @@ use {
         broker::BrokerHandle,
         codes,
         handlers::test_support::{
-            configured_topic_request, replicated_partition, share_fetch_wire,
+            StartedBroker, configured_topic_request, replicated_partition, share_fetch_wire,
         },
         share_partition::session::FetchPartitions,
         test_support::{
@@ -58,8 +58,10 @@ const UNREGISTERED_NODE: i32 = 7;
 const REMOTE: WireUuid = WireUuid([0x22; 16]);
 const ORPHAN: WireUuid = WireUuid([0x77; 16]);
 
-async fn start() -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await
+async fn start() -> StartedBroker {
+    let (broker, dir) =
+        start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
+    StartedBroker { broker, dir }
 }
 
 async fn create_local_topic(broker: &BrokerHandle) -> WireUuid {
@@ -142,18 +144,37 @@ async fn seed_remote_leaders(broker: &BrokerHandle) {
         .expect("seed the remote leaders");
 }
 
-/// The rows of the request: `(topic, partition)`.
-fn rows(local: WireUuid) -> Vec<(WireUuid, i32)> {
-    vec![(local, 0), (REMOTE, 0), (REMOTE, 1), (ORPHAN, 0)]
+/// One row of the request: a topic and one of its partitions.
+struct RequestRow {
+    topic_id: WireUuid,
+    partition_index: i32,
 }
 
-fn fetch_row(partition_index: i32, error_code: i16, leader: (i32, i32)) -> PartitionData {
+/// The rows of the request.
+fn rows(local: WireUuid) -> Vec<RequestRow> {
+    [(local, 0), (REMOTE, 0), (REMOTE, 1), (ORPHAN, 0)]
+        .into_iter()
+        .map(|(topic_id, partition_index)| RequestRow {
+            topic_id,
+            partition_index,
+        })
+        .collect()
+}
+
+/// A leader id and the epoch of its leadership.
+#[derive(Clone, Copy)]
+struct Leader {
+    id: i32,
+    epoch: i32,
+}
+
+fn fetch_row(partition_index: i32, error_code: i16, leader: Leader) -> PartitionData {
     PartitionData {
         partition_index,
         error_code,
         current_leader: LeaderIdAndEpoch {
-            leader_id: leader.0,
-            leader_epoch: leader.1,
+            leader_id: leader.id,
+            leader_epoch: leader.epoch,
             ..Default::default()
         },
         records: Some(RecordsPayload::Legacy(Bytes::new())),
@@ -163,7 +184,7 @@ fn fetch_row(partition_index: i32, error_code: i16, leader: (i32, i32)) -> Parti
 
 #[tokio::test]
 async fn share_fetch_sends_the_endpoint_of_each_remote_leader_once() {
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
     let local = create_local_topic(&broker).await;
     initialize_share_state(&broker, GROUP, uuid::Uuid::from_bytes(local.0), 0).await;
     seed_remote_leaders(&broker).await;
@@ -180,9 +201,9 @@ async fn share_fetch_sends_the_endpoint_of_each_remote_leader_once() {
                 topic_id,
                 partitions: rows(local)
                     .into_iter()
-                    .filter(|(row_topic, _)| *row_topic == topic_id)
-                    .map(|(_, partition_index)| FetchPartition {
-                        partition_index,
+                    .filter(|row| row.topic_id == topic_id)
+                    .map(|row| FetchPartition {
+                        partition_index: row.partition_index,
                         ..Default::default()
                     })
                     .collect(),
@@ -204,24 +225,29 @@ async fn share_fetch_sends_the_endpoint_of_each_remote_leader_once() {
         responses: vec![
             ShareFetchableTopicResponse {
                 topic_id: local,
-                partitions: vec![fetch_row(0, codes::NONE, (0, 0))],
+                partitions: vec![fetch_row(0, codes::NONE, Leader { id: 0, epoch: 0 })],
                 ..Default::default()
             },
             ShareFetchableTopicResponse {
                 topic_id: REMOTE,
                 partitions: vec![
-                    fetch_row(0, codes::NOT_LEADER_OR_FOLLOWER, (REMOTE_NODE, 4)),
-                    fetch_row(1, codes::NOT_LEADER_OR_FOLLOWER, (REMOTE_NODE, 4)),
+                    fetch_row(0, codes::NOT_LEADER_OR_FOLLOWER, Leader {
+                        id: REMOTE_NODE,
+                        epoch: 4,
+                    }),
+                    fetch_row(1, codes::NOT_LEADER_OR_FOLLOWER, Leader {
+                        id: REMOTE_NODE,
+                        epoch: 4,
+                    }),
                 ],
                 ..Default::default()
             },
             ShareFetchableTopicResponse {
                 topic_id: ORPHAN,
-                partitions: vec![fetch_row(
-                    0,
-                    codes::NOT_LEADER_OR_FOLLOWER,
-                    (UNREGISTERED_NODE, 1),
-                )],
+                partitions: vec![fetch_row(0, codes::NOT_LEADER_OR_FOLLOWER, Leader {
+                    id: UNREGISTERED_NODE,
+                    epoch: 1,
+                })],
                 ..Default::default()
             },
         ],
@@ -240,7 +266,7 @@ async fn share_fetch_sends_the_endpoint_of_each_remote_leader_once() {
 
 #[tokio::test]
 async fn share_acknowledge_on_a_remote_leader_answers_unknown_partition_without_a_hint() {
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
     let local = create_local_topic(&broker).await;
     seed_remote_leaders(&broker).await;
     let shared = broker.broker_arc_for_test();
@@ -272,9 +298,9 @@ async fn share_acknowledge_on_a_remote_leader_answers_unknown_partition_without_
                 topic_id,
                 partitions: rows(local)
                     .into_iter()
-                    .filter(|(row_topic, _)| *row_topic == topic_id)
-                    .map(|(_, partition_index)| AcknowledgePartition {
-                        partition_index,
+                    .filter(|row| row.topic_id == topic_id)
+                    .map(|row| AcknowledgePartition {
+                        partition_index: row.partition_index,
                         acknowledgement_batches: vec![AcknowledgeBatch {
                             first_offset: 0,
                             last_offset: 0,

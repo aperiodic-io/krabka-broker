@@ -321,6 +321,12 @@ pub struct BrokerClientSetup<'a> {
     pub client_context: &'a str,
 }
 
+/// A running broker and a client connected to it.
+pub struct BrokerWithClient {
+    pub broker: BrokerHandle,
+    pub client: Client,
+}
+
 /// Start a configured broker and connect the fixture's explicitly named client.
 /// The caller retains its original directory guard and readiness policy.
 ///
@@ -332,7 +338,7 @@ pub async fn start_broker_client(
     #[builder(default = "krabka-broker-test")] client_id: &'_ str,
     #[builder(default = "broker start")] broker_context: &'_ str,
     #[builder(default = "client build")] client_context: &'_ str,
-) -> (BrokerHandle, Client) {
+) -> BrokerWithClient {
     let setup = BrokerClientSetup {
         client_id,
         broker_context,
@@ -345,7 +351,7 @@ pub async fn start_broker_client(
         setup.client_context,
     )
     .await;
-    (broker, client)
+    BrokerWithClient { broker, client }
 }
 
 /// Start a configured broker and connect a default or explicitly named client.

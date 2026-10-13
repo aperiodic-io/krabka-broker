@@ -96,9 +96,18 @@ mod tests {
 
     fn install_provider() { let _ = rustls::crypto::ring::default_provider().install_default(); }
 
-    fn generated_pair() -> (String, String) {
+    /// A certificate and a key, both PEM encoded.
+    struct PemPair {
+        cert: String,
+        key: String,
+    }
+
+    fn generated_pair() -> PemPair {
         let (cert, key) = localhost_ecdsa_pair();
-        (cert.pem(), key.serialize_pem())
+        PemPair {
+            cert: cert.pem(),
+            key: key.serialize_pem(),
+        }
     }
 
     fn write_file(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -107,11 +116,17 @@ mod tests {
         path
     }
 
-    fn write_pair(dir: &Path, cert: &str, key: &str) -> (PathBuf, PathBuf) {
-        (
-            write_file(dir, "cert.pem", cert),
-            write_file(dir, "key.pem", key),
-        )
+    /// The paths of a certificate file and a key file.
+    struct PairPaths {
+        cert: PathBuf,
+        key: PathBuf,
+    }
+
+    fn write_pair(dir: &Path, cert: &str, key: &str) -> PairPaths {
+        PairPaths {
+            cert: write_file(dir, "cert.pem", cert),
+            key: write_file(dir, "key.pem", key),
+        }
     }
 
     fn tls_config(cert_chain_path: PathBuf, private_key_path: PathBuf) -> TlsConfig {
@@ -167,8 +182,11 @@ mod tests {
     async fn run_reloads_after_mtime_change_and_skips_unchanged_ticks() {
         install_provider();
         let dir = tempfile::tempdir().unwrap();
-        let (cert_a, key_a) = generated_pair();
-        let (cert, key) = write_pair(dir.path(), &cert_a, &key_a);
+        let PemPair {
+            cert: cert_a,
+            key: key_a,
+        } = generated_pair();
+        let PairPaths { cert, key } = write_pair(dir.path(), &cert_a, &key_a);
         let cfg = tls_config(cert.clone(), key.clone());
         let dynamic = DynamicServerConfig::from_tls_config(&cfg).unwrap();
         let before = dynamic.current();
@@ -185,7 +203,10 @@ mod tests {
             "unchanged mtimes must not reload"
         );
 
-        let (cert_b, key_b) = generated_pair();
+        let PemPair {
+            cert: cert_b,
+            key: key_b,
+        } = generated_pair();
         fs::write(&cert, cert_b).unwrap();
         fs::write(&key, key_b).unwrap();
         bump_mtime(&cert, Duration::from_mins(1));

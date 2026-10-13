@@ -60,13 +60,49 @@ enum Step {
     },
 }
 
-/// One probe batch: `(epoch, base_sequence, last_offset_delta)`.
-type Probe = (i16, i32, i32);
+/// One probe batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Probe {
+    epoch: i16,
+    base_sequence: i32,
+    last_offset_delta: i32,
+}
+
+/// The decision the tracker must give for one probe batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Expectation {
+    probe: Probe,
+    decision: Decision,
+}
+
+/// The expectation that the tracker answers `decision` to the probe made of
+/// `epoch`, `base_sequence` and `last_offset_delta`.
+const fn expect(
+    epoch: i16,
+    base_sequence: i32,
+    last_offset_delta: i32,
+    decision: Decision,
+) -> Expectation {
+    Expectation {
+        probe: Probe {
+            epoch,
+            base_sequence,
+            last_offset_delta,
+        },
+        decision,
+    }
+}
+
+/// The decisions a live tracker and a tracker rebuilt from the log gave.
+struct Answers {
+    live: Vec<Expectation>,
+    recovered: Vec<Expectation>,
+}
 
 struct Case {
     name: &'static str,
     steps: &'static [Step],
-    expected: &'static [(Probe, Decision)],
+    expected: &'static [Expectation],
 }
 
 #[bon::builder]
@@ -163,10 +199,14 @@ async fn run_steps(partition: &Partition, state: &ProducerState, steps: &[Step])
     }
 }
 
-async fn decisions(state: &ProducerState, probes: &[(Probe, Decision)]) -> Vec<(Probe, Decision)> {
+async fn decisions(state: &ProducerState, probes: &[Expectation]) -> Vec<Expectation> {
     let mut answers = Vec::with_capacity(probes.len());
-    for &(probe, _) in probes {
-        let (epoch, base_sequence, last_offset_delta) = probe;
+    for &Expectation { probe, .. } in probes {
+        let Probe {
+            epoch,
+            base_sequence,
+            last_offset_delta,
+        } = probe;
         let decision = state
             .check(
                 TOPIC,
@@ -177,14 +217,14 @@ async fn decisions(state: &ProducerState, probes: &[(Probe, Decision)]) -> Vec<(
                 last_offset_delta,
             )
             .await;
-        answers.push((probe, decision));
+        answers.push(Expectation { probe, decision });
     }
     answers
 }
 
 /// Decisions from the live tracker, then from a tracker rebuilt from the
 /// reopened log.
-async fn live_and_recovered(case: &Case) -> (Vec<(Probe, Decision)>, Vec<(Probe, Decision)>) {
+async fn live_and_recovered(case: &Case) -> Answers {
     let (directory, state, partition) = producer_partition();
     run_steps(&partition, &state, case.steps).await;
     let live = decisions(&state, case.expected).await;
@@ -206,7 +246,7 @@ async fn live_and_recovered(case: &Case) -> (Vec<(Probe, Decision)>, Vec<(Probe,
         .await
         .expect("rebuild producer state");
     let recovered = decisions(&recovered_state, case.expected).await;
-    (live, recovered)
+    Answers { live, recovered }
 }
 
 const FIRST_TRANSACTION_BATCH: Step = Step::Data(DataBatchSetup {
@@ -264,10 +304,10 @@ const IDEMPOTENT_EPOCH_BUMP: &[Step] = &[
     }),
 ];
 
-const TV2_MARKER_EPOCH_EXPECTATIONS: [(Probe, Decision); 3] = [
-    ((4, 0, 0), Decision::Append),
-    ((4, 3, 0), Decision::OutOfOrder),
-    ((3, 0, 2), Decision::Fenced),
+const TV2_MARKER_EPOCH_EXPECTATIONS: [Expectation; 3] = [
+    expect(4, 0, 0, Decision::Append),
+    expect(4, 3, 0, Decision::OutOfOrder),
+    expect(3, 0, 2, Decision::Fenced),
 ];
 
 const CASES: &[Case] = &[
@@ -278,9 +318,9 @@ const CASES: &[Case] = &[
             TV2_MARKER_EPOCH_EXPECTATIONS[0],
             TV2_MARKER_EPOCH_EXPECTATIONS[1],
             TV2_MARKER_EPOCH_EXPECTATIONS[2],
-            ((3, 3, 0), Decision::Fenced),
-            ((5, 0, 0), Decision::Append),
-            ((5, 3, 0), Decision::OutOfOrder),
+            expect(3, 3, 0, Decision::Fenced),
+            expect(5, 0, 0, Decision::Append),
+            expect(5, 3, 0, Decision::OutOfOrder),
         ],
     },
     Case {
@@ -292,34 +332,34 @@ const CASES: &[Case] = &[
         name: "transaction version 2 second transaction restarts at 0",
         steps: TV2_TWO_TRANSACTIONS,
         expected: &[
-            ((5, 0, 0), Decision::Append),
-            ((5, 2, 0), Decision::OutOfOrder),
-            ((5, 5, 0), Decision::OutOfOrder),
-            ((4, 0, 1), Decision::Fenced),
+            expect(5, 0, 0, Decision::Append),
+            expect(5, 2, 0, Decision::OutOfOrder),
+            expect(5, 5, 0, Decision::OutOfOrder),
+            expect(4, 0, 1, Decision::Fenced),
         ],
     },
     Case {
         name: "transaction version 1 commit keeps the epoch and the sequence",
         steps: TV1_COMMIT,
         expected: &[
-            ((3, 3, 0), Decision::Append),
-            ((3, 0, 2), Decision::Duplicate { base_offset: 0 }),
-            ((3, 0, 0), Decision::OutOfOrder),
-            ((4, 0, 0), Decision::Append),
-            ((4, 3, 0), Decision::OutOfOrder),
-            ((2, 3, 0), Decision::Fenced),
+            expect(3, 3, 0, Decision::Append),
+            expect(3, 0, 2, Decision::Duplicate { base_offset: 0 }),
+            expect(3, 0, 0, Decision::OutOfOrder),
+            expect(4, 0, 0, Decision::Append),
+            expect(4, 3, 0, Decision::OutOfOrder),
+            expect(2, 3, 0, Decision::Fenced),
         ],
     },
     Case {
         name: "idempotent producer epoch bump restarts at 0",
         steps: IDEMPOTENT_EPOCH_BUMP,
         expected: &[
-            ((1, 2, 0), Decision::Append),
-            ((1, 0, 1), Decision::Duplicate { base_offset: 3 }),
-            ((1, 5, 0), Decision::OutOfOrder),
-            ((2, 0, 0), Decision::Append),
-            ((2, 2, 0), Decision::OutOfOrder),
-            ((0, 3, 0), Decision::Fenced),
+            expect(1, 2, 0, Decision::Append),
+            expect(1, 0, 1, Decision::Duplicate { base_offset: 3 }),
+            expect(1, 5, 0, Decision::OutOfOrder),
+            expect(2, 0, 0, Decision::Append),
+            expect(2, 2, 0, Decision::OutOfOrder),
+            expect(0, 3, 0, Decision::Fenced),
         ],
     },
 ];
@@ -327,7 +367,7 @@ const CASES: &[Case] = &[
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn live_and_recovered_sequence_decisions_agree() {
     for case in CASES {
-        let (live, recovered) = live_and_recovered(case).await;
+        let Answers { live, recovered } = live_and_recovered(case).await;
         assert!(live == case.expected, "live decisions: {}", case.name);
         assert!(
             recovered == case.expected,

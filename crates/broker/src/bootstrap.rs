@@ -70,6 +70,12 @@ pub fn read_directory_id(log_dir: &Path) -> Result<uuid::Uuid, BrokerError> {
         })
 }
 
+/// A log directory and the `meta.properties` that it holds.
+struct DirMeta {
+    dir: PathBuf,
+    meta: MetaProperties,
+}
+
 /// Kafka's `KafkaRaftServer.initializeLogDirs`: reads the `meta.properties`
 /// of the metadata log directory and of every data directory, checks that
 /// they belong to this node, and gives each directory an id that it keeps.
@@ -120,10 +126,10 @@ pub fn initialize_log_dirs(
 
     let mut empty = Vec::new();
     let mut errors = Vec::new();
-    let mut formatted: Vec<(PathBuf, MetaProperties)> = Vec::new();
+    let mut formatted: Vec<DirMeta> = Vec::new();
     for dir in dirs {
         match MetaProperties::read(&dir) {
-            Ok(Some(meta)) => formatted.push((dir, meta)),
+            Ok(Some(meta)) => formatted.push(DirMeta { dir, meta }),
             Ok(None) => empty.push(dir),
             Err(error) => {
                 tracing::error!(
@@ -142,7 +148,9 @@ pub fn initialize_log_dirs(
     }
     // A set with a readable file has the cluster id of that file.
     let Some(cluster_id) = krabka_format::verify_ensemble(
-        formatted.iter().map(|(dir, meta)| (dir.as_path(), meta)),
+        formatted
+            .iter()
+            .map(|entry| (entry.dir.as_path(), &entry.meta)),
         None,
         Some(node_id),
     )
@@ -184,7 +192,7 @@ pub fn initialize_log_dirs(
 
     let mut used: Vec<DirectoryId> = formatted
         .iter()
-        .filter_map(|(_, meta)| meta.directory_id)
+        .filter_map(|entry| entry.meta.directory_id)
         .collect();
     let mut local_directory_id = None;
     let added = empty.into_iter().map(|dir| {
@@ -193,9 +201,9 @@ pub fn initialize_log_dirs(
             node_id,
             directory_id: None,
         };
-        (dir, meta)
+        DirMeta { dir, meta }
     });
-    for (dir, mut meta) in formatted.into_iter().chain(added) {
+    for DirMeta { dir, mut meta } in formatted.into_iter().chain(added) {
         if meta.directory_id.is_none() {
             let directory_id = DirectoryId::random_unused(&used);
             used.push(directory_id);
@@ -395,23 +403,47 @@ mod tests {
     #[test]
     fn the_metadata_partition_is_only_in_the_metadata_log_directory() {
         // (what, data dirs holding `__cluster_metadata-0`, metadata dir, refused dir)
-        let cases: [(&str, &[&str], &str, Option<&str>); 4] = [
-            ("none", &[], "meta", None),
-            (
-                "the metadata dir is a data dir",
-                &["data-a"],
-                "data-a",
-                None,
-            ),
-            ("a separate metadata dir", &[], "meta", None),
-            (
-                "a stale copy in a data dir",
-                &["data-b"],
-                "meta",
-                Some("data-b"),
-            ),
+        struct Case {
+            what: &'static str,
+            /// The data directories that hold `__cluster_metadata-0`.
+            holding: &'static [&'static str],
+            metadata: &'static str,
+            /// The data directory the check refuses, if any.
+            refused: Option<&'static str>,
+        }
+        let cases: [Case; 4] = [
+            Case {
+                what: "none",
+                holding: &[],
+                metadata: "meta",
+                refused: None,
+            },
+            Case {
+                what: "the metadata dir is a data dir",
+                holding: &["data-a"],
+                metadata: "data-a",
+                refused: None,
+            },
+            Case {
+                what: "a separate metadata dir",
+                holding: &[],
+                metadata: "meta",
+                refused: None,
+            },
+            Case {
+                what: "a stale copy in a data dir",
+                holding: &["data-b"],
+                metadata: "meta",
+                refused: Some("data-b"),
+            },
         ];
-        for (what, holding, metadata, refused) in cases {
+        for Case {
+            what,
+            holding,
+            metadata,
+            refused,
+        } in cases
+        {
             let root = tempfile::tempdir().unwrap();
             let log_dirs = vec![root.path().join("data-a"), root.path().join("data-b")];
             for dir in holding {
@@ -586,16 +618,18 @@ mod tests {
         FileAndMetadataLog(&'static str),
     }
 
-    /// One `initialize_log_dirs` case: what it is, the metadata log directory
-    /// and the data directories with what each holds, the configured cluster
-    /// id, and the error, or `None` for a start.
-    type InitCase = (
-        &'static str,
-        Holds,
-        [Holds; 2],
-        Option<uuid::Uuid>,
-        Option<&'static str>,
-    );
+    /// One `initialize_log_dirs` case.
+    struct InitCase {
+        what: &'static str,
+        /// What the metadata log directory holds.
+        metadata: Holds,
+        /// What each of the two data directories holds.
+        data: [Holds; 2],
+        /// The configured cluster id.
+        configured: Option<uuid::Uuid>,
+        /// The error, or `None` for a start.
+        refusal: Option<&'static str>,
+    }
 
     /// Kafka's `initializeLogDirs` checks, with krabka's two additions: a
     /// configured cluster id, and a data directory added after the format.
@@ -610,92 +644,99 @@ mod tests {
         const NO_DIRECTORY_ID: &str = "version=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\nnode.id=2\n";
         const UNREADABLE: &str = "version=one\n";
         let cases: [InitCase; 9] = [
-            (
-                "a formatted node",
-                Holds::File(NODE_2),
-                [Holds::File(NODE_2_DATA), Holds::Nothing],
-                Some(uuid::Uuid::from_u128(
+            InitCase {
+                what: "a formatted node",
+                metadata: Holds::File(NODE_2),
+                data: [Holds::File(NODE_2_DATA), Holds::Nothing],
+                configured: Some(uuid::Uuid::from_u128(
                     0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10,
                 )),
-                None,
-            ),
-            (
-                "a data directory added after the format",
-                Holds::File(NODE_2),
-                [Holds::Nothing, Holds::Nothing],
-                None,
-                None,
-            ),
-            (
-                "a file without a directory id",
-                Holds::File(NO_DIRECTORY_ID),
-                [Holds::File(NODE_2_DATA), Holds::Nothing],
-                None,
-                None,
-            ),
-            (
-                "the directory of another node",
-                Holds::File(NODE_2),
-                [Holds::File(NODE_3), Holds::Nothing],
-                None,
-                Some(
+                refusal: None,
+            },
+            InitCase {
+                what: "a data directory added after the format",
+                metadata: Holds::File(NODE_2),
+                data: [Holds::Nothing, Holds::Nothing],
+                configured: None,
+                refusal: None,
+            },
+            InitCase {
+                what: "a file without a directory id",
+                metadata: Holds::File(NO_DIRECTORY_ID),
+                data: [Holds::File(NODE_2_DATA), Holds::Nothing],
+                configured: None,
+                refusal: None,
+            },
+            InitCase {
+                what: "the directory of another node",
+                metadata: Holds::File(NODE_2),
+                data: [Holds::File(NODE_3), Holds::Nothing],
+                configured: None,
+                refusal: Some(
                     "startup failed: Stored node id 3 doesn't match previous node id 2 in \
                      {data-a}/meta.properties. If you moved your data, make sure your \
                      configured node id matches. If you intend to create a new node, you should \
                      remove all data in your data directories.",
                 ),
-            ),
-            (
-                "nothing formatted",
-                Holds::Nothing,
-                [Holds::Nothing, Holds::Nothing],
-                None,
-                Some("startup failed: No readable meta.properties files found."),
-            ),
-            (
-                "an unreadable metadata log directory",
-                Holds::File(UNREADABLE),
-                [Holds::File(NODE_2_DATA), Holds::Nothing],
-                None,
-                Some(
+            },
+            InitCase {
+                what: "nothing formatted",
+                metadata: Holds::Nothing,
+                data: [Holds::Nothing, Holds::Nothing],
+                configured: None,
+                refusal: Some("startup failed: No readable meta.properties files found."),
+            },
+            InitCase {
+                what: "an unreadable metadata log directory",
+                metadata: Holds::File(UNREADABLE),
+                data: [Holds::File(NODE_2_DATA), Holds::Nothing],
+                configured: None,
+                refusal: Some(
                     "startup failed: Encountered I/O error in metadata log directory {meta}. \
                      Cannot continue.",
                 ),
-            ),
-            (
-                "an unformatted metadata log directory",
-                Holds::Nothing,
-                [Holds::File(NODE_2_DATA), Holds::Nothing],
-                None,
-                Some(
+            },
+            InitCase {
+                what: "an unformatted metadata log directory",
+                metadata: Holds::Nothing,
+                data: [Holds::File(NODE_2_DATA), Holds::Nothing],
+                configured: None,
+                refusal: Some(
                     "startup failed: No `meta.properties` found in {meta} (have you run \
                      `krabka-format` to format the directory?)",
                 ),
-            ),
-            (
-                "another configured cluster id",
-                Holds::File(NODE_2),
-                [Holds::Nothing, Holds::Nothing],
-                Some(uuid::Uuid::from_u128(0xc2)),
-                Some(
+            },
+            InitCase {
+                what: "another configured cluster id",
+                metadata: Holds::File(NODE_2),
+                data: [Holds::Nothing, Holds::Nothing],
+                configured: Some(uuid::Uuid::from_u128(0xc2)),
+                refusal: Some(
                     "bootstrap file \"{meta}/meta.properties\": INCONSISTENT_CLUSTER_ID: \
                      configured cluster id AAAAAAAAAAAAAAAAAAAAwg does not match \
                      AQIDBAUGBwgJCgsMDQ4PEA",
                 ),
-            ),
-            (
-                "a stale metadata log in a data directory",
-                Holds::File(NODE_2),
-                [Holds::FileAndMetadataLog(NODE_2_DATA), Holds::Nothing],
-                None,
-                Some(
+            },
+            InitCase {
+                what: "a stale metadata log in a data directory",
+                metadata: Holds::File(NODE_2),
+                data: [Holds::FileAndMetadataLog(NODE_2_DATA), Holds::Nothing],
+                configured: None,
+                refusal: Some(
                     "startup failed: Found unexpected metadata location in data directory \
                      `{data-a}/__cluster_metadata-0` (the configured metadata directory is \
                      {meta}).",
                 ),
-            ),
+            },
         ];
-        for (what, metadata, data, configured, refusal) in cases {
+        for InitCase {
+            what,
+            metadata,
+            data,
+            configured,
+            refusal,
+        } in cases
+        {
             let root = tempfile::tempdir().unwrap();
             let meta_dir = root.path().join("meta");
             let data_dirs = vec![root.path().join("data-a"), root.path().join("data-b")];
@@ -805,15 +846,27 @@ mod tests {
     /// typed source. A file `krabka format` wrote before 1.0 starts with the
     /// first record's `u32` little-endian length, which reads as an unknown
     /// version.
-    fn refused_records(bytes: &[u8]) -> (tempfile::TempDir, BrokerError) {
+    fn refused_records(bytes: &[u8]) -> RefusedRecords {
         let dir = tempfile::tempdir().unwrap();
         write_records_file(dir.path(), bytes);
         let error = load_bootstrap_records(dir.path()).unwrap_err();
-        (dir, error)
+        RefusedRecords { dir, error }
+    }
+
+    /// The directory that holds a refused records file, and the refusal.
+    struct RefusedRecords {
+        dir: tempfile::TempDir,
+        error: BrokerError,
     }
 
     #[test]
     fn a_missing_or_unknown_version_is_refused() {
+        struct Case {
+            what: &'static str,
+            bytes: Vec<u8>,
+            want: BootstrapRecordsVersionError,
+        }
+
         let mut pre_1_0 = Vec::new();
         for record in golden_records() {
             use wincode::Serialize as _;
@@ -824,29 +877,37 @@ mod tests {
         let pre_1_0_version = i16::from_be_bytes([pre_1_0[0], pre_1_0[1]]);
         let mut version_one = GOLDEN_BYTES.to_vec();
         version_one[..2].copy_from_slice(&1_i16.to_be_bytes());
-        let cases: [(&str, Vec<u8>, BootstrapRecordsVersionError); 5] = [
-            ("empty", Vec::new(), BootstrapRecordsVersionError::Missing),
-            ("one byte", vec![0], BootstrapRecordsVersionError::Missing),
-            (
-                "version 1",
-                version_one,
-                BootstrapRecordsVersionError::Unsupported { found: 1 },
-            ),
-            (
-                "version -1",
-                vec![0xff, 0xff],
-                BootstrapRecordsVersionError::Unsupported { found: -1 },
-            ),
-            (
-                "the pre-1.0 layout",
-                pre_1_0,
-                BootstrapRecordsVersionError::Unsupported {
+        let cases: [Case; 5] = [
+            Case {
+                what: "empty",
+                bytes: Vec::new(),
+                want: BootstrapRecordsVersionError::Missing,
+            },
+            Case {
+                what: "one byte",
+                bytes: vec![0],
+                want: BootstrapRecordsVersionError::Missing,
+            },
+            Case {
+                what: "version 1",
+                bytes: version_one,
+                want: BootstrapRecordsVersionError::Unsupported { found: 1 },
+            },
+            Case {
+                what: "version -1",
+                bytes: vec![0xff, 0xff],
+                want: BootstrapRecordsVersionError::Unsupported { found: -1 },
+            },
+            Case {
+                what: "the pre-1.0 layout",
+                bytes: pre_1_0,
+                want: BootstrapRecordsVersionError::Unsupported {
                     found: pre_1_0_version,
                 },
-            ),
+            },
         ];
-        for (what, bytes, want) in cases {
-            let (dir, error) = refused_records(&bytes);
+        for Case { what, bytes, want } in cases {
+            let RefusedRecords { dir, error } = refused_records(&bytes);
             let BrokerError::BootstrapFile { path, source } = error else {
                 panic!("{what}: not a bootstrap file error: {error}");
             };
@@ -863,28 +924,38 @@ mod tests {
     /// body that does not decode are each refused with their own message.
     #[test]
     fn malformed_framing_after_the_header_is_refused() {
+        struct Case {
+            what: &'static str,
+            bytes: Vec<u8>,
+            want: &'static str,
+        }
+
         let header = BOOTSTRAP_RECORDS_VERSION.to_be_bytes();
         let framed = |tail: &[u8]| [&header[..], tail].concat();
-        let cases: [(&str, Vec<u8>, &str); 4] = [
-            (
-                "a truncated length",
-                framed(&[0, 0, 0]),
-                "truncated length prefix",
-            ),
-            (
-                "a truncated body",
-                framed(&[&100u32.to_le_bytes()[..], &[0; 4]].concat()),
-                "truncated record body",
-            ),
-            (
-                "an undecodable body",
-                framed(&[&8u32.to_le_bytes()[..], &[0xff; 8]].concat()),
-                "decode:",
-            ),
-            ("a zero-length body", framed(&0u32.to_le_bytes()), "decode:"),
+        let cases: [Case; 4] = [
+            Case {
+                what: "a truncated length",
+                bytes: framed(&[0, 0, 0]),
+                want: "truncated length prefix",
+            },
+            Case {
+                what: "a truncated body",
+                bytes: framed(&[&100u32.to_le_bytes()[..], &[0; 4]].concat()),
+                want: "truncated record body",
+            },
+            Case {
+                what: "an undecodable body",
+                bytes: framed(&[&8u32.to_le_bytes()[..], &[0xff; 8]].concat()),
+                want: "decode:",
+            },
+            Case {
+                what: "a zero-length body",
+                bytes: framed(&0u32.to_le_bytes()),
+                want: "decode:",
+            },
         ];
-        for (what, bytes, want) in cases {
-            let (_dir, error) = refused_records(&bytes);
+        for Case { what, bytes, want } in cases {
+            let RefusedRecords { dir: _dir, error } = refused_records(&bytes);
             let BrokerError::BootstrapFile { source, .. } = error else {
                 panic!("{what}: not a bootstrap file error: {error}");
             };

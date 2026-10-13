@@ -16,7 +16,7 @@ use {
         handlers::produce::{
             framing::PartitionPayload,
             prepare::{DecodeEnv, prepare_batch},
-            test_support::{encode_batch, image_with_topic},
+            test_support::{ConfigOverride, encode_batch, image_with_topic},
             topic_settings::{
                 TimestampPolicy, kafka_stock_broker_default, resolve_timestamp_policy,
             },
@@ -42,10 +42,10 @@ krabka_macros::unix_millis_fixture!(
 );
 
 /// The policy a topic carrying `overrides` resolves to.
-fn policy(overrides: &[(&str, &str)]) -> TimestampPolicy {
+fn policy(overrides: &[ConfigOverride<'_>]) -> TimestampPolicy {
     let mut img = image_with_topic("t", &[1]);
     let mut map = BTreeMap::new();
-    for (key, value) in overrides {
+    for ConfigOverride { key, value } in overrides {
         map.insert((*key).to_string(), (*value).to_string());
     }
     img.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
@@ -144,8 +144,14 @@ fn the_window_refuses_the_same_batch_on_both_append_paths() {
         ),
     ];
     let bounded = policy(&[
-        (MESSAGE_TIMESTAMP_BEFORE_MAX_MS, &WINDOW_MS.to_string()),
-        (MESSAGE_TIMESTAMP_AFTER_MAX_MS, &WINDOW_MS.to_string()),
+        ConfigOverride {
+            key: MESSAGE_TIMESTAMP_BEFORE_MAX_MS,
+            value: &WINDOW_MS.to_string(),
+        },
+        ConfigOverride {
+            key: MESSAGE_TIMESTAMP_AFTER_MAX_MS,
+            value: &WINDOW_MS.to_string(),
+        },
     ]);
     for (label, [first, second], want) in cases {
         let produced = batch(first, second, CompressionType::None);
@@ -219,7 +225,10 @@ fn a_stock_topic_carries_kafkas_one_hour_future_window() {
 #[test]
 fn a_scheduled_topic_admits_a_delivery_time_days_ahead() {
     let now = now_ms();
-    let scheduled = policy(&[(DELIVERY_MODE, DELIVERY_MODE_SCHEDULED)]);
+    let scheduled = policy(&[ConfigOverride {
+        key: DELIVERY_MODE,
+        value: DELIVERY_MODE_SCHEDULED,
+    }]);
     let due_in_three_days = batch(
         now + 3 * 24 * 3_600_000,
         now + 3 * 24 * 3_600_000,
@@ -239,9 +248,18 @@ fn a_scheduled_topic_admits_a_delivery_time_days_ahead() {
 #[test]
 fn log_append_time_ignores_the_window() {
     let stamping = policy(&[
-        (MESSAGE_TIMESTAMP_TYPE, "LogAppendTime"),
-        (MESSAGE_TIMESTAMP_BEFORE_MAX_MS, &WINDOW_MS.to_string()),
-        (MESSAGE_TIMESTAMP_AFTER_MAX_MS, &WINDOW_MS.to_string()),
+        ConfigOverride {
+            key: MESSAGE_TIMESTAMP_TYPE,
+            value: "LogAppendTime",
+        },
+        ConfigOverride {
+            key: MESSAGE_TIMESTAMP_BEFORE_MAX_MS,
+            value: &WINDOW_MS.to_string(),
+        },
+        ConfigOverride {
+            key: MESSAGE_TIMESTAMP_AFTER_MAX_MS,
+            value: &WINDOW_MS.to_string(),
+        },
     ]);
     let ancient = batch(1_000, 2_000, CompressionType::None);
 
@@ -254,7 +272,10 @@ fn log_append_time_ignores_the_window() {
 #[test]
 fn the_window_reads_a_compressed_body_on_the_verbatim_path() {
     let now = now_ms();
-    let bounded = policy(&[(MESSAGE_TIMESTAMP_BEFORE_MAX_MS, &WINDOW_MS.to_string())]);
+    let bounded = policy(&[ConfigOverride {
+        key: MESSAGE_TIMESTAMP_BEFORE_MAX_MS,
+        value: &WINDOW_MS.to_string(),
+    }]);
     let refused = batch(now, now - 2 * WINDOW_MS, CompressionType::Lz4);
     let admitted = batch(now, now - 1_000, CompressionType::Lz4);
 

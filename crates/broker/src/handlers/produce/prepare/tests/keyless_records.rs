@@ -20,20 +20,31 @@ use {
     std::sync::Arc,
 };
 
-/// A batch with one record per `(key, timestamp_ms)` pair.
-fn batch(records: &[(Option<&'static [u8]>, i64)]) -> RecordBatch {
-    let base_timestamp = records.first().map_or(0, |(_, ts)| *ts);
+/// A record of a test batch: its key, if any, and its timestamp.
+#[derive(Clone, Copy)]
+struct KeyedAt {
+    key: Option<&'static [u8]>,
+    timestamp_ms: i64,
+}
+
+/// A batch with one record per entry of `records`.
+fn batch(records: &[KeyedAt]) -> RecordBatch {
+    let base_timestamp = records.first().map_or(0, |record| record.timestamp_ms);
     RecordBatch {
         last_offset_delta: i32::try_from(records.len()).expect("small batch") - 1,
         base_timestamp,
-        max_timestamp: records.iter().map(|(_, ts)| *ts).max().unwrap_or(0),
+        max_timestamp: records
+            .iter()
+            .map(|record| record.timestamp_ms)
+            .max()
+            .unwrap_or(0),
         records: records
             .iter()
             .zip(0..)
-            .map(|((key, ts), offset_delta)| Record {
+            .map(|(record, offset_delta)| Record {
                 offset_delta,
-                timestamp_delta: ts - base_timestamp,
-                key: key.map(Bytes::from_static),
+                timestamp_delta: record.timestamp_ms - base_timestamp,
+                key: record.key.map(Bytes::from_static),
                 value: Some(Bytes::from_static(b"v")),
                 ..Record::default()
             })
@@ -52,11 +63,42 @@ fn a_compacted_topic_names_every_keyless_record_on_both_paths() {
     );
     let now = now_ms();
     let far_future = now + 7_200_000;
-    let mixed = batch(&[(None, now), (Some(b"k"), now), (None, now)]);
+    let mixed = batch(&[
+        KeyedAt {
+            key: None,
+            timestamp_ms: now,
+        },
+        KeyedAt {
+            key: Some(b"k"),
+            timestamp_ms: now,
+        },
+        KeyedAt {
+            key: None,
+            timestamp_ms: now,
+        },
+    ]);
     // The only record with a bad timestamp has no key, so Kafka reports the
     // key error and never checks that timestamp.
-    let keyless_future = batch(&[(None, far_future), (Some(b"k"), now)]);
-    let keyed_future = batch(&[(None, now), (Some(b"k"), far_future)]);
+    let keyless_future = batch(&[
+        KeyedAt {
+            key: None,
+            timestamp_ms: far_future,
+        },
+        KeyedAt {
+            key: Some(b"k"),
+            timestamp_ms: now,
+        },
+    ]);
+    let keyed_future = batch(&[
+        KeyedAt {
+            key: None,
+            timestamp_ms: now,
+        },
+        KeyedAt {
+            key: Some(b"k"),
+            timestamp_ms: far_future,
+        },
+    ]);
 
     for topic_compression in [None, Some(CompressionType::Zstd)] {
         for (label, input, compacted, expected_keyless, expected_invalid_timestamp) in [

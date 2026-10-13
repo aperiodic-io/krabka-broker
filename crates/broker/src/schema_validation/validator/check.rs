@@ -228,7 +228,15 @@ mod tests {
         wiremock::{Mock, MockServer, ResponseTemplate, matchers::method},
     };
 
-    async fn bound_subject_validator() -> (MockServer, SchemaValidator, Vec<u8>) {
+    /// A registry, a validator against it and a frame it has already
+    /// accepted.
+    struct BoundSubjectValidator {
+        _server: MockServer,
+        validator: SchemaValidator,
+        field: Vec<u8>,
+    }
+
+    async fn bound_subject_validator() -> BoundSubjectValidator {
         let server = registry(1).await;
         let validator = validator(server.uri());
         let field = framed(KNOWN_ID, b"anything");
@@ -237,7 +245,11 @@ mod tests {
                 .await
                 .is_ok()
         );
-        (server, validator, field)
+        BoundSubjectValidator {
+            _server: server,
+            validator,
+            field,
+        }
     }
 
     async fn json_id_endpoint(server: &MockServer, schema: serde_json::Value) {
@@ -260,14 +272,29 @@ mod tests {
 
     #[tokio::test]
     async fn a_field_that_carries_no_frame_is_rejected() {
+        /// A case name and a field that does not carry a frame.
+        struct UnframedField {
+            name: &'static str,
+            field: Vec<u8>,
+        }
+
         let server = registry(0).await;
         let v = validator(server.uri());
-        let cases: Vec<(&str, Vec<u8>)> = vec![
-            ("plain text", b"plain text, no serializer".to_vec()),
-            ("bad magic", vec![0x01, 0, 0, 0, 42, b'x']),
-            ("truncated id", vec![0x00, 0, 0]),
+        let cases: Vec<UnframedField> = vec![
+            UnframedField {
+                name: "plain text",
+                field: b"plain text, no serializer".to_vec(),
+            },
+            UnframedField {
+                name: "bad magic",
+                field: vec![0x01, 0, 0, 0, 42, b'x'],
+            },
+            UnframedField {
+                name: "truncated id",
+                field: vec![0x00, 0, 0],
+            },
         ];
-        for (name, field) in cases {
+        for UnframedField { name, field } in cases {
             let got = value_check(&v, ValidationMode::Id, &field).await;
             assert!(let Err(reason) = got, "case {name}");
             check!(reason.label() == "unframed", "case {name}: {reason}");
@@ -305,7 +332,11 @@ mod tests {
     async fn a_bound_id_is_accepted_and_an_unbound_one_is_not() {
         // `expect(1)`: the cache is keyed by schema id, so the second check
         // decides from the cached subject set without a second registry call.
-        let (_server, v, field) = bound_subject_validator().await;
+        let BoundSubjectValidator {
+            validator: v,
+            field,
+            ..
+        } = bound_subject_validator().await;
 
         // Same id, different topic: the subject is `other-value`, which this
         // id is not registered under.
@@ -326,7 +357,11 @@ mod tests {
     async fn the_role_selects_the_subject() {
         // One call, for the same reason as above: the id is cached, and only
         // the subject the role derives differs between the two checks.
-        let (_server, v, field) = bound_subject_validator().await;
+        let BoundSubjectValidator {
+            validator: v,
+            field,
+            ..
+        } = bound_subject_validator().await;
         let err = v
             .check(
                 "orders",

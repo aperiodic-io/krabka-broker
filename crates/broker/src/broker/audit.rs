@@ -5,10 +5,15 @@
 
 use {
     crate::{
-        audit_authorizer::AuditingAuthorizer, audit_recovery::recover_from_partition_tail,
-        audit_sink::KafkaTopicAuditSink, broker::Broker, config::BrokerConfig,
-        metadata_source::MetadataSource, metrics::BrokerMetrics,
-        partition_registry::PartitionRegistry, time_util::system_timer,
+        audit_authorizer::AuditingAuthorizer,
+        audit_recovery::{ChainResume, recover_from_partition_tail},
+        audit_sink::KafkaTopicAuditSink,
+        broker::Broker,
+        config::BrokerConfig,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        partition_registry::PartitionRegistry,
+        time_util::system_timer,
     },
     krabka_ids::PartitionIndex,
     krabka_units::{
@@ -90,17 +95,22 @@ fn spawn_audit_metrics(
     });
 }
 
+/// What the audit pipeline hands to the rest of startup.
+pub(super) struct AuditPipeline {
+    /// The audit partition this broker leads, if it leads one.
+    pub(super) led_partition: Option<PartitionIndex>,
+    pub(super) log: Arc<krabka_audit::AuditLog>,
+    /// The writer task, absent when no writer runs.
+    pub(super) writer_handle: Option<JoinHandle<()>>,
+}
+
 pub(super) fn start_audit_pipeline(
     config: &mut BrokerConfig,
     controller: &dyn MetadataSource,
     partitions: &Arc<PartitionRegistry>,
     metrics: &BrokerMetrics,
     supervisor_shutdown: &CancellationToken,
-) -> (
-    Option<PartitionIndex>,
-    Arc<krabka_audit::AuditLog>,
-    Option<JoinHandle<()>>,
-) {
+) -> AuditPipeline {
     // The decorator counts every Deny, so it goes on whether or not audit is
     // enabled: with audit off the log below is the disabled one and drops the
     // emit, leaving `authorization_denied_total` as the only denial record.
@@ -115,7 +125,11 @@ pub(super) fn start_audit_pipeline(
     if !config.audit_enabled {
         let log = krabka_audit::AuditLog::disabled();
         install_auditing_authorizer(config, &log);
-        return (None, log, None);
+        return AuditPipeline {
+            led_partition: None,
+            log,
+            writer_handle: None,
+        };
     }
     let image = controller.current_image();
     let led_partition = (0_i32..)
@@ -145,7 +159,7 @@ pub(super) fn start_audit_pipeline(
         None
     } else {
         match spool.as_ref().map(krabka_audit::Spool::resume_point) {
-            Some(Ok(resume)) => resume,
+            Some(Ok(resume)) => resume.map(|(next_seq, head)| ChainResume { next_seq, head }),
             Some(Err(error)) => {
                 tracing::error!(%error, "audit writer disabled pending explicit spool recovery");
                 replay_poisoned = true;
@@ -191,9 +205,10 @@ pub(super) fn start_audit_pipeline(
                     )
                 })
         });
-        let chain = resume.map_or_else(krabka_audit::ChainState::new, |(sequence, head)| {
-            krabka_audit::ChainState::resume(sequence, head)
-        });
+        let chain = resume.map_or_else(
+            krabka_audit::ChainState::new,
+            |ChainResume { next_seq, head }| krabka_audit::ChainState::resume(next_seq, head),
+        );
         let stats = Arc::new(krabka_audit::AuditStats::new());
         let writer = krabka_audit::AuditWriter::new(receiver, krabka_audit::AuditWriterParams {
             sink,
@@ -221,7 +236,11 @@ pub(super) fn start_audit_pipeline(
         None
     };
     install_auditing_authorizer(config, &log);
-    (led_partition, log, writer_handle)
+    AuditPipeline {
+        led_partition,
+        log,
+        writer_handle,
+    }
 }
 
 #[cfg(test)]

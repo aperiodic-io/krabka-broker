@@ -57,7 +57,11 @@ pub struct SiteConfig {
 }
 
 /// One broker of the model cluster: node id, site index, and witness role.
-type BrokerSpec = (u64, usize, bool);
+struct BrokerSpec {
+    node_id: u64,
+    site: usize,
+    is_witness: bool,
+}
 
 /// Bounded config for the stretch-cluster model.
 pub struct StretchModel {
@@ -115,7 +119,23 @@ impl StretchModel {
                     voters: 1,
                 },
             ],
-            &[(1, 0, false), (2, 1, false), (3, 2, true)],
+            &[
+                BrokerSpec {
+                    node_id: 1,
+                    site: 0,
+                    is_witness: false,
+                },
+                BrokerSpec {
+                    node_id: 2,
+                    site: 1,
+                    is_witness: false,
+                },
+                BrokerSpec {
+                    node_id: 3,
+                    site: 2,
+                    is_witness: true,
+                },
+            ],
             3,
             min_insync,
             elect,
@@ -132,16 +152,22 @@ impl StretchModel {
         let preferred_site = 0_u8;
         let views: Vec<SiteBrokerView> = brokers
             .iter()
-            .map(|&(node_id, site, is_witness)| SiteBrokerView {
-                node_id: NodeId(node_id),
-                site: Some(sites[site].name.to_string()),
-                is_witness,
-                fenced: false,
-            })
+            .map(
+                |&BrokerSpec {
+                     node_id,
+                     site,
+                     is_witness,
+                 }| SiteBrokerView {
+                    node_id: NodeId(node_id),
+                    site: Some(sites[site].name.to_string()),
+                    is_witness,
+                    fenced: false,
+                },
+            )
             .collect();
         let site_of: BTreeMap<NodeId, u8> = brokers
             .iter()
-            .map(|&(node_id, site, _)| {
+            .map(|&BrokerSpec { node_id, site, .. }| {
                 (
                     NodeId(node_id),
                     u8::try_from(site).expect("site index fits in u8"),
@@ -150,8 +176,8 @@ impl StretchModel {
             .collect();
         let witnesses: HashSet<NodeId> = brokers
             .iter()
-            .filter(|&&(_, _, is_witness)| is_witness)
-            .map(|&(node_id, _, _)| NodeId(node_id))
+            .filter(|spec| spec.is_witness)
+            .map(|spec| NodeId(spec.node_id))
             .collect();
 
         // The real placement decides the replica list, including which site

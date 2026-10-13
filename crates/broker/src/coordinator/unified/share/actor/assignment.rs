@@ -96,8 +96,11 @@ pub(super) fn reconcile(
     };
     let topics = input.topic_metadata();
     let mut assignable: HashMap<Uuid, HashSet<i32>> = HashMap::new();
-    for (topic_id, partition) in &state.initialized {
-        assignable.entry(*topic_id).or_default().insert(*partition);
+    for tp in &state.initialized {
+        assignable
+            .entry(tp.topic_id)
+            .or_default()
+            .insert(tp.partition);
     }
     let assignment = ShareGroupAssignor.assign(&group, &topics, Some(&assignable));
     Ok(Some(state.install_target(assignment, wall_clock_ms())))
@@ -139,8 +142,11 @@ fn initialized_assignment_pending(state: &ShareGroupState) -> bool {
         }
     }
     let mut initialized: HashMap<Uuid, HashSet<i32>> = HashMap::new();
-    for (topic_id, partition) in &state.initialized {
-        initialized.entry(*topic_id).or_default().insert(*partition);
+    for tp in &state.initialized {
+        initialized
+            .entry(tp.topic_id)
+            .or_default()
+            .insert(tp.partition);
     }
     initialized.iter().any(|(topic_id, partitions)| {
         state
@@ -169,6 +175,7 @@ mod tests {
             EpochExhausted, MetadataProvider, ReconcileInput, ShareGroupState, ShareMemberState,
             Uuid, reconcile,
         },
+        crate::coordinator::unified::share::state::share_partition,
         assert2::{assert, check},
         std::{collections::HashSet, time::Duration},
     };
@@ -189,9 +196,17 @@ mod tests {
         }
     }
 
-    /// (step, partitions in the image, partition initialized before the step,
-    /// expected group epoch, expected target of m)
-    type Step = (&'static str, i32, Option<i32>, i32, Vec<i32>);
+    struct Step {
+        name: &'static str,
+        /// The partitions in the image.
+        partitions: i32,
+        /// The partition initialized before the step.
+        initialized: Option<i32>,
+        /// The expected group epoch.
+        epoch: i32,
+        /// The expected target of `m`.
+        target: Vec<i32>,
+    }
 
     /// Kafka's share heartbeat: the epoch bumps for a join, a metadata change
     /// and newly initialized partitions, only initialized partitions are
@@ -206,20 +221,63 @@ mod tests {
             "host",
             HashSet::from(["t".to_owned()]),
         ));
-        // (step, partitions in the image, partition initialized before the
-        // step, expected group epoch, expected target of m)
         let steps: [Step; 6] = [
-            ("join with nothing initialized", 1, None, 2, vec![]),
-            ("partition 0 initialized", 1, Some(0), 3, vec![0]),
-            ("retry", 1, None, 3, vec![0]),
-            ("topic grows", 2, None, 4, vec![0]),
-            ("partition 1 initialized", 2, Some(1), 5, vec![0, 1]),
-            ("retry after growth", 2, None, 5, vec![0, 1]),
+            Step {
+                name: "join with nothing initialized",
+                partitions: 1,
+                initialized: None,
+                epoch: 2,
+                target: vec![],
+            },
+            Step {
+                name: "partition 0 initialized",
+                partitions: 1,
+                initialized: Some(0),
+                epoch: 3,
+                target: vec![0],
+            },
+            Step {
+                name: "retry",
+                partitions: 1,
+                initialized: None,
+                epoch: 3,
+                target: vec![0],
+            },
+            Step {
+                name: "topic grows",
+                partitions: 2,
+                initialized: None,
+                epoch: 4,
+                target: vec![0],
+            },
+            Step {
+                name: "partition 1 initialized",
+                partitions: 2,
+                initialized: Some(1),
+                epoch: 5,
+                target: vec![0, 1],
+            },
+            Step {
+                name: "retry after growth",
+                partitions: 2,
+                initialized: None,
+                epoch: 5,
+                target: vec![0, 1],
+            },
         ];
-        for (index, (step, partitions, initialized, epoch, target)) in steps.into_iter().enumerate()
+        for (
+            index,
+            Step {
+                name,
+                partitions,
+                initialized,
+                epoch,
+                target,
+            },
+        ) in steps.into_iter().enumerate()
         {
             if let Some(partition) = initialized {
-                state.mark_initialized((topic, partition));
+                state.mark_initialized(share_partition(topic, partition));
                 state.topic_names.insert(topic, "t".to_owned());
             }
             // Only the join changes the member's subscription.
@@ -231,9 +289,9 @@ mod tests {
                     index == 0,
                 )
                 .is_ok(),
-                "{step}"
+                "{name}"
             );
-            check!(state.group_epoch == epoch, "{step}");
+            check!(state.group_epoch == epoch, "{name}");
             let got = state
                 .target
                 .per_member
@@ -241,7 +299,7 @@ mod tests {
                 .and_then(|m| m.get(&topic))
                 .cloned()
                 .unwrap_or_default();
-            check!(got == target, "{step}");
+            check!(got == target, "{name}");
         }
     }
 

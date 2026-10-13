@@ -65,7 +65,10 @@ pub async fn handle_authenticate_oauthbearer_with_jwks_cache(
         req,
         auth,
         validator,
-        Some((cache_generation, last_successful_fetch_ms)),
+        Some(JwksCache {
+            generation: cache_generation,
+            last_successful_fetch_ms,
+        }),
         clock_ms,
         max_session_lifetime,
     )
@@ -76,7 +79,7 @@ async fn handle_authenticate_oauthbearer_inner(
     req: &SaslAuthenticateRequest,
     auth: &mut ConnectionAuth,
     validator: &krabka_security::OAuthBearerValidator,
-    jwks_cache: Option<(&AtomicU64, &AtomicI64)>,
+    jwks_cache: Option<JwksCache<'_>>,
     clock_ms: impl Fn() -> i64,
     max_session_lifetime: Option<Time>,
 ) -> SaslAuthenticateResponse {
@@ -106,11 +109,13 @@ async fn handle_authenticate_oauthbearer_inner(
         }
         _ => return fail_authenticate("not in oauthbearer negotiation"),
     };
-    let (outcome, now_ms) =
-        match validate_bearer(&req.auth_bytes, validator, jwks_cache, &clock_ms).await {
-            Ok(validated) => validated,
-            Err(reason) => return reject_oauthbearer(auth, mechanism, reason),
-        };
+    let ValidatedBearer {
+        outcome,
+        completed_ms: now_ms,
+    } = match validate_bearer(&req.auth_bytes, validator, jwks_cache, &clock_ms).await {
+        Ok(validated) => validated,
+        Err(reason) => return reject_oauthbearer(auth, mechanism, reason),
+    };
     let principal_matches = previous_name
         .as_ref()
         .is_none_or(|name| *name == outcome.principal.name);
@@ -212,22 +217,42 @@ fn oauthbearer_failure() -> SaslAuthenticateResponse {
     fail_authenticate_with(krabka_security::invalid_token_json())
 }
 
+/// The JWKS refresher's state that a signed validation is checked against.
+#[derive(Clone, Copy)]
+struct JwksCache<'a> {
+    /// Bumped by each cache change.
+    generation: &'a AtomicU64,
+    /// When the cache last refreshed successfully.
+    last_successful_fetch_ms: &'a AtomicI64,
+}
+
+/// A client response that validated: the outcome and the clock reading at
+/// which validation completed.
+#[derive(Debug, PartialEq)]
+struct ValidatedBearer {
+    outcome: krabka_security::AuthOutcome,
+    completed_ms: i64,
+}
+
 /// Parses and validates an OAUTHBEARER client initial response. The authzid,
 /// when present, must equal the token principal, as RFC 7628 and Kafka
 /// require.
 async fn validate_bearer(
     auth_bytes: &[u8],
     validator: &krabka_security::OAuthBearerValidator,
-    jwks_cache: Option<(&AtomicU64, &AtomicI64)>,
+    jwks_cache: Option<JwksCache<'_>>,
     clock_ms: impl Fn() -> i64,
-) -> Result<(krabka_security::AuthOutcome, i64), &'static str> {
+) -> Result<ValidatedBearer, &'static str> {
     let now_ms = clock_ms();
     let parsed = krabka_security::parse_client_initial_response(auth_bytes)
         .map_err(|_| "malformed OAUTHBEARER client response")?;
     let cache_guard = match (validator, jwks_cache) {
         (
             krabka_security::OAuthBearerValidator::Signed(signed),
-            Some((generation, last_successful)),
+            Some(JwksCache {
+                generation,
+                last_successful_fetch_ms: last_successful,
+            }),
         ) => {
             let generation_before = generation.load(Ordering::Acquire);
             let last_successful_fetch_ms = last_successful.load(Ordering::Acquire);
@@ -277,7 +302,10 @@ async fn validate_bearer(
     {
         return Err("authzid does not match token principal");
     }
-    Ok((outcome, completed_ms))
+    Ok(ValidatedBearer {
+        outcome,
+        completed_ms,
+    })
 }
 
 #[cfg(test)]

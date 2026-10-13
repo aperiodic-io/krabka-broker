@@ -43,10 +43,17 @@ pub(crate) const OFFSET_OUT_OF_RANGE: i16 = 1;
 /// Kafka's `ListOffsetsRequest.EARLIEST_TIMESTAMP`.
 const EARLIEST_TIMESTAMP: i64 = -2;
 
+/// One record read back over the wire.
+#[derive(Debug, PartialEq)]
+pub(crate) struct FetchedRecord {
+    pub(crate) offset: i64,
+    pub(crate) value: Bytes,
+}
+
 /// A log read back over the wire.
 pub(crate) struct FetchedLog {
-    /// `(offset, value)` for every record, in offset order.
-    pub(crate) records: Vec<(i64, Bytes)>,
+    /// Every record, in offset order.
+    pub(crate) records: Vec<FetchedRecord>,
     /// The re-encoded record batches, concatenated in offset order. Two reads
     /// of the same offsets produce identical bytes here only if the broker
     /// serving them holds the identical batches, which is the byte-exactness
@@ -160,7 +167,7 @@ pub(crate) async fn fetch_log(
 ) -> FetchedLog {
     let client = support::sasl_client(bootstrap, CLIENT_PRINCIPAL, PASSWORD).await;
     let deadline = Instant::now() + timeout;
-    let mut records: Vec<(i64, Bytes)> = Vec::with_capacity(expected);
+    let mut records: Vec<FetchedRecord> = Vec::with_capacity(expected);
     let mut bytes = BytesMut::new();
     let mut next = start_offset;
 
@@ -195,7 +202,10 @@ pub(crate) async fn fetch_log(
                     batch.encode(&mut bytes).expect("re-encode fetched batch");
                     for record in &batch.records {
                         let offset = batch.base_offset + i64::from(record.offset_delta);
-                        records.push((offset, record.value.clone().unwrap_or_default()));
+                        records.push(FetchedRecord {
+                            offset,
+                            value: record.value.clone().unwrap_or_default(),
+                        });
                         next = offset + 1;
                     }
                 }
@@ -263,12 +273,10 @@ pub(crate) async fn produce_until_stopped(
 /// Assert that a read-back log carries exactly the values this suite produced,
 /// at consecutive offsets from `start_offset`.
 pub(crate) fn assert_matches_produced(log: &FetchedLog, start_offset: i64, expected: usize) {
-    let want: Vec<(i64, Bytes)> = (0..expected)
-        .map(|index| {
-            (
-                start_offset + i64::try_from(index).expect("small count"),
-                value_at(index),
-            )
+    let want: Vec<FetchedRecord> = (0..expected)
+        .map(|index| FetchedRecord {
+            offset: start_offset + i64::try_from(index).expect("small count"),
+            value: value_at(index),
         })
         .collect();
     assert!(log.records == want);

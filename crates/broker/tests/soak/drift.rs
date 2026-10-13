@@ -277,11 +277,17 @@ pub(crate) fn judge(series: &Series, bound: Bound) -> Verdict {
     }
 }
 
+/// A series and the bound it is judged against.
+pub(crate) struct BoundedSeries {
+    pub(crate) series: Series,
+    pub(crate) bound: Bound,
+}
+
 /// Judge every series, returning one verdict each in the order given.
-pub(crate) fn judge_all(series: &[(Series, Bound)]) -> Vec<Verdict> {
+pub(crate) fn judge_all(series: &[BoundedSeries]) -> Vec<Verdict> {
     series
         .iter()
-        .map(|(series, bound)| judge(series, *bound))
+        .map(|BoundedSeries { series, bound }| judge(series, *bound))
         .collect()
 }
 
@@ -444,7 +450,16 @@ mod tests {
         rising.name = "rising".into();
         let mut flat = series(&[500.0; 40]);
         flat.name = "flat".into();
-        let verdicts = judge_all(&[(rising, BOUND), (flat, BOUND)]);
+        let verdicts = judge_all(&[
+            BoundedSeries {
+                series: rising,
+                bound: BOUND,
+            },
+            BoundedSeries {
+                series: flat,
+                bound: BOUND,
+            },
+        ]);
         check!(verdicts.len() == 2);
         check!(verdicts[0].is_failure());
         check!(!verdicts[1].is_failure());

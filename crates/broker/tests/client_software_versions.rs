@@ -31,15 +31,19 @@ use {
 
 const INVALID_REQUEST: i16 = 42;
 
+/// The Kafka listener address, the metrics endpoint address, the `BrokerHandle`
+/// and the directory that backs it.
+struct BootedBroker {
+    kafka_addr: SocketAddr,
+    metrics_addr: SocketAddr,
+    handle: krabka_broker::BrokerHandle,
+    tempdir: tempfile::TempDir,
+}
+
 /// Builds a broker with the metrics endpoint enabled. It returns the Kafka
 /// listener address, the metrics endpoint address, and the `BrokerHandle`, so
 /// that the test can shut down cleanly.
-async fn boot() -> (
-    SocketAddr,
-    SocketAddr,
-    krabka_broker::BrokerHandle,
-    tempfile::TempDir,
-) {
+async fn boot() -> BootedBroker {
     let tempdir = tempfile::tempdir().unwrap();
     let cfg = metrics_config(tempdir.path().to_path_buf());
 
@@ -48,7 +52,12 @@ async fn boot() -> (
     let metrics_addr = handle
         .metrics_addr()
         .expect("metrics server should be bound");
-    (kafka_addr, metrics_addr, handle, tempdir)
+    BootedBroker {
+        kafka_addr,
+        metrics_addr,
+        handle,
+        tempdir,
+    }
 }
 
 /// Sends one `ApiVersions` request at the requested version with the given
@@ -93,7 +102,12 @@ async fn scrape(addr: SocketAddr) -> String { scrape_metrics(addr).await }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v3_valid_client_info_accepted() {
-    let (kafka_addr, _metrics_addr, handle, _td) = boot().await;
+    let BootedBroker {
+        kafka_addr,
+        metrics_addr: _metrics_addr,
+        handle,
+        tempdir: _td,
+    } = boot().await;
 
     let resp = send_api_versions(kafka_addr, 3, "krabka-client-core", "0.1.1")
         .await
@@ -109,7 +123,12 @@ async fn v3_valid_client_info_accepted() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v3_empty_software_name_rejected_with_invalid_request() {
-    let (kafka_addr, _metrics_addr, handle, _td) = boot().await;
+    let BootedBroker {
+        kafka_addr,
+        metrics_addr: _metrics_addr,
+        handle,
+        tempdir: _td,
+    } = boot().await;
 
     let resp = send_api_versions(kafka_addr, 3, "", "1.0.0")
         .await
@@ -128,7 +147,12 @@ async fn v3_empty_software_name_rejected_with_invalid_request() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v3_empty_software_version_rejected_with_invalid_request() {
-    let (kafka_addr, _metrics_addr, handle, _td) = boot().await;
+    let BootedBroker {
+        kafka_addr,
+        metrics_addr: _metrics_addr,
+        handle,
+        tempdir: _td,
+    } = boot().await;
 
     let resp = send_api_versions(kafka_addr, 3, "krabka", "")
         .await
@@ -143,7 +167,12 @@ async fn v3_empty_software_version_rejected_with_invalid_request() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v3_invalid_char_in_name_rejected() {
-    let (kafka_addr, _metrics_addr, handle, _td) = boot().await;
+    let BootedBroker {
+        kafka_addr,
+        metrics_addr: _metrics_addr,
+        handle,
+        tempdir: _td,
+    } = boot().await;
 
     let resp = send_api_versions(kafka_addr, 3, "has space", "1.0.0")
         .await
@@ -158,7 +187,12 @@ async fn v3_invalid_char_in_name_rejected() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v3_leading_dash_in_version_rejected() {
-    let (kafka_addr, _metrics_addr, handle, _td) = boot().await;
+    let BootedBroker {
+        kafka_addr,
+        metrics_addr: _metrics_addr,
+        handle,
+        tempdir: _td,
+    } = boot().await;
 
     let resp = send_api_versions(kafka_addr, 3, "krabka", "-1.0.0")
         .await
@@ -177,7 +211,12 @@ async fn pre_v3_does_not_validate_client_info() {
     // empty strings on the wire — KIP-511 says don't validate. Apache
     // Kafka brokers happily accept v0/v1/v2 calls from old clients that
     // don't know about ClientSoftwareName at all.
-    let (kafka_addr, _metrics_addr, handle, _td) = boot().await;
+    let BootedBroker {
+        kafka_addr,
+        metrics_addr: _metrics_addr,
+        handle,
+        tempdir: _td,
+    } = boot().await;
 
     let resp = send_api_versions(kafka_addr, 0, "", "")
         .await
@@ -195,7 +234,12 @@ async fn pre_v3_does_not_validate_client_info() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn accepted_v3_handshake_bumps_client_software_versions_counter() {
-    let (kafka_addr, metrics_addr, handle, _td) = boot().await;
+    let BootedBroker {
+        kafka_addr,
+        metrics_addr,
+        handle,
+        tempdir: _td,
+    } = boot().await;
 
     // Drive two distinct (name, version) tuples + one repeat so the
     // expected sample emits with three series, one of them at count 2.
@@ -233,7 +277,12 @@ async fn accepted_v3_handshake_bumps_client_software_versions_counter() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rejected_v3_handshake_does_not_bump_counter() {
-    let (kafka_addr, metrics_addr, handle, _td) = boot().await;
+    let BootedBroker {
+        kafka_addr,
+        metrics_addr,
+        handle,
+        tempdir: _td,
+    } = boot().await;
 
     // First send a valid one so the family has at least one series and
     // the metric appears in the scrape — otherwise an empty Family of
@@ -263,7 +312,12 @@ async fn rejected_v3_handshake_does_not_bump_counter() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pre_v3_handshake_does_not_bump_counter() {
-    let (kafka_addr, metrics_addr, handle, _td) = boot().await;
+    let BootedBroker {
+        kafka_addr,
+        metrics_addr,
+        handle,
+        tempdir: _td,
+    } = boot().await;
 
     // v0 ApiVersions has no client-info fields, so the counter (which
     // would label series with empty strings) must not increment.

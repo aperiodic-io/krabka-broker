@@ -7,7 +7,11 @@ use {
     },
     crate::{
         codes,
-        coordinator::unified::{GroupCoordinator, share::state::ShareGroupState},
+        coordinator::unified::{
+            GroupCoordinator,
+            assignor::TopicIdPartition,
+            share::state::{IdentifiedTopic, ShareGroupState},
+        },
         error::BrokerError,
         share_coordinator::persister_client::SharePersister,
     },
@@ -76,12 +80,20 @@ async fn write_state_partition_metadata(
     .await
 }
 
+/// A requested topic whose share state `DeleteShareGroupOffsets` deletes: its
+/// name and id, and the partitions to delete.
+struct TopicToDelete {
+    topic_name: String,
+    topic_id: uuid::Uuid,
+    partitions: Vec<i32>,
+}
+
 /// The three sets of the share-state partition metadata, kept to undo an
 /// in-memory change whose record did not reach the log, as Kafka's timeline
 /// snapshot reverts a failed write.
 struct MetadataSnapshot {
-    initialized: std::collections::HashSet<(Uuid, i32)>,
-    initializing: HashMap<(Uuid, i32), i64>,
+    initialized: std::collections::HashSet<TopicIdPartition>,
+    initializing: HashMap<TopicIdPartition, i64>,
     deleting: HashMap<Uuid, String>,
     topic_names: HashMap<Uuid, String>,
 }
@@ -147,9 +159,12 @@ pub(crate) async fn reset_offsets(
         return Ok(Vec::new());
     }
 
-    let partitions: Vec<(Uuid, i32)> = requests
+    let partitions: Vec<TopicIdPartition> = requests
         .iter()
-        .map(|request| (Uuid(*request.topic_id.as_bytes()), request.partition))
+        .map(|request| TopicIdPartition {
+            topic_id: Uuid(*request.topic_id.as_bytes()),
+            partition: request.partition,
+        })
         .collect();
     let names: HashMap<Uuid, String> = requests
         .iter()
@@ -258,14 +273,22 @@ pub(crate) async fn delete_offsets(
     let image = TopicImage::current(coordinator);
     let before = MetadataSnapshot::take(state);
     let mut refused = Vec::new();
-    let mut to_delete: Vec<(String, uuid::Uuid, Vec<i32>)> = Vec::new();
+    let mut to_delete: Vec<TopicToDelete> = Vec::new();
     for topic_name in topic_names {
-        let Some((topic_id, partition_count)) = image.by_name(&topic_name) else {
+        let Some(IdentifiedTopic {
+            topic_id,
+            partition_count,
+        }) = image.by_name(&topic_name)
+        else {
             refused.push((topic_name, DeleteTopicOutcome::UnknownTopic));
             continue;
         };
         match state.mark_topic_deleting(Uuid(*topic_id.as_bytes()), &topic_name, partition_count) {
-            Some(partitions) => to_delete.push((topic_name, topic_id, partitions)),
+            Some(partitions) => to_delete.push(TopicToDelete {
+                topic_name,
+                topic_id,
+                partitions,
+            }),
             None => refused.push((topic_name, DeleteTopicOutcome::NoState)),
         }
     }
@@ -279,7 +302,12 @@ pub(crate) async fn delete_offsets(
 
     let mut deleted = Vec::new();
     let mut failed = Vec::new();
-    for (topic_name, topic_id, partitions) in to_delete {
+    for TopicToDelete {
+        topic_name,
+        topic_id,
+        partitions,
+    } in to_delete
+    {
         let mut error_code = codes::NONE;
         for partition in &partitions {
             if let Err(error) = persister
@@ -352,7 +380,7 @@ mod tests {
                     persistence::{
                         DeletingTopic, ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
                     },
-                    state::{ShareGroupState, ShareMemberState},
+                    state::{ShareGroupState, ShareMemberState, share_partition},
                 },
                 test_support::{
                     AppendedRecords as Appended, appended_offsets_records as appended,
@@ -441,7 +469,10 @@ mod tests {
 
         check!(results == Ok(vec![codes::COORDINATOR_NOT_AVAILABLE]));
         check!(state.group_epoch == 4);
-        check!(state.initializing.keys().copied().collect::<Vec<_>>() == vec![(topic_id, 1)]);
+        check!(
+            state.initializing.keys().copied().collect::<Vec<_>>()
+                == vec![share_partition(topic_id, 1)]
+        );
         // `addInitializingTopicsRecords` takes the topic out of the deleting
         // set too.
         check!(
@@ -486,8 +517,8 @@ mod tests {
         let topic_uuid = uuid::Uuid::from_bytes(topic_id.0);
         let other = krabka_protocol::primitives::uuid::Uuid([8; 16]);
         let mut state = ShareGroupState::new("g");
-        state.initialized.insert((topic_id, 0));
-        state.initializing.insert((other, 0), 1);
+        state.initialized.insert(share_partition(topic_id, 0));
+        state.initializing.insert(share_partition(other, 0), 1);
         state.topic_names.insert(topic_id, "t".to_owned());
         state.topic_names.insert(other, "other".to_owned());
         let request = || vec!["missing".to_owned(), "t".to_owned()];

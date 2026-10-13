@@ -78,32 +78,45 @@ fn orders(id: u128) -> MetadataRecord {
     })
 }
 
+/// One case: what it exercises, the format flags, the records seeded into the
+/// bootstrap records, and the fault on stderr.
+struct FatalFaultCase {
+    what: &'static str,
+    flags: &'static [&'static str],
+    extra: Vec<MetadataRecord>,
+    fault: &'static str,
+}
+
 #[test]
 fn the_broker_exits_non_zero_with_kafkas_message_over_a_fatal_controller_fault() {
-    // (what, format flags, records seeded into the bootstrap records, the
-    // fault on stderr)
-    let cases: [(&str, &[&str], Vec<MetadataRecord>, &str); 2] = [
-        (
-            "an unsupported feature level",
-            &[
+    let cases: [FatalFaultCase; 2] = [
+        FatalFaultCase {
+            what: "an unsupported feature level",
+            flags: &[
                 "--release-version",
                 "4.4-IV2",
                 "--unstable-feature-versions-enable",
             ],
-            vec![],
-            "Encountered fatal fault: Tried to apply FeatureLevelRecord \
+            extra: vec![],
+            fault: "Encountered fatal fault: Tried to apply FeatureLevelRecord \
              FeatureLevelRecord(name='metadata.version', featureLevel=33), \
              but this controller only supports versions 7-30",
-        ),
-        (
-            "a failed controller activation",
-            &[],
-            vec![orders(1), orders(2)],
-            "Encountered fatal fault: exception while completing controller activation: \
+        },
+        FatalFaultCase {
+            what: "a failed controller activation",
+            flags: &[],
+            extra: vec![orders(1), orders(2)],
+            fault: "Encountered fatal fault: exception while completing controller activation: \
              metadata: topic 'orders' already exists",
-        ),
+        },
     ];
-    for (what, flags, extra, fault) in cases {
+    for FatalFaultCase {
+        what,
+        flags,
+        extra,
+        fault,
+    } in cases
+    {
         let tmp = tempfile::tempdir().expect("tempdir");
         let log_dir = tmp.path().join("data");
         let controller_port = free_loopback_port();

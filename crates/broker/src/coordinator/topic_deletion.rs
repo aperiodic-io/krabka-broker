@@ -44,6 +44,20 @@ use {
 #[cfg(test)]
 mod tests;
 
+/// A topic that the metadata image dropped: its name, and the id it had.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DeletedTopic {
+    pub name: String,
+    pub topic_id: uuid::Uuid,
+}
+
+/// The offsets that one group's actor tombstoned for deleted topics.
+#[derive(Debug, PartialEq)]
+pub(crate) struct GroupDeletedOffsets {
+    pub group_id: String,
+    pub offsets: Vec<(String, i32)>,
+}
+
 /// Spawn the watcher. It returns when `shutdown` is cancelled or the image
 /// channel closes.
 pub(crate) fn spawn(
@@ -87,14 +101,14 @@ pub(crate) fn spawn(
 /// topic that was deleted and created again with the same name between two
 /// images the watcher reads is still a deleted topic. The id travels with the
 /// name, so the actors keep the offsets committed to the new topic.
-pub(crate) fn deleted_topics(
-    previous: &MetadataImage,
-    next: &MetadataImage,
-) -> Vec<(String, uuid::Uuid)> {
-    let mut deleted: Vec<(String, uuid::Uuid)> = previous
+pub(crate) fn deleted_topics(previous: &MetadataImage, next: &MetadataImage) -> Vec<DeletedTopic> {
+    let mut deleted: Vec<DeletedTopic> = previous
         .topics()
         .filter(|topic| next.topic_by_id(&topic.topic_id).is_none())
-        .map(|topic| (topic.name.clone(), topic.topic_id))
+        .map(|topic| DeletedTopic {
+            name: topic.name.clone(),
+            topic_id: topic.topic_id,
+        })
         .collect();
     deleted.sort_unstable();
     deleted
@@ -106,12 +120,16 @@ const REMEMBERED_DELETIONS: usize = 1024;
 
 /// Records `deleted` for [`after_partition_load`], keeping the latest
 /// [`REMEMBERED_DELETIONS`].
-fn remember_deletions(coordinator: &GroupCoordinator, deleted: &[(String, uuid::Uuid)]) {
+fn remember_deletions(coordinator: &GroupCoordinator, deleted: &[DeletedTopic]) {
     let mut recent = coordinator
         .recent_topic_deletions
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    recent.extend(deleted.iter().cloned());
+    recent.extend(
+        deleted
+            .iter()
+            .map(|topic| (topic.name.clone(), topic.topic_id)),
+    );
     while recent.len() > REMEMBERED_DELETIONS {
         recent.pop_front();
     }
@@ -131,14 +149,17 @@ pub(crate) async fn after_partition_load(
     coordinator: &GroupCoordinator,
     image: &MetadataImage,
     owned: impl Fn(&str) -> bool,
-) -> Vec<(String, Vec<(String, i32)>)> {
-    let deletions: Vec<(String, uuid::Uuid)> = coordinator
+) -> Vec<GroupDeletedOffsets> {
+    let deletions: Vec<DeletedTopic> = coordinator
         .recent_topic_deletions
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
         .filter(|(name, _)| image.topic(name).is_none())
-        .cloned()
+        .map(|(name, topic_id)| DeletedTopic {
+            name: name.clone(),
+            topic_id: *topic_id,
+        })
         .collect();
     if deletions.is_empty() {
         return Vec::new();
@@ -155,8 +176,8 @@ pub(crate) async fn after_partition_load(
 pub(crate) async fn on_topics_deleted(
     coordinator: &GroupCoordinator,
     owned: impl Fn(&str) -> bool,
-    topics: &[(String, uuid::Uuid)],
-) -> Vec<(String, Vec<(String, i32)>)> {
+    topics: &[DeletedTopic],
+) -> Vec<GroupDeletedOffsets> {
     let group_ids = coordinator.group_ids();
     let mut changed = Vec::new();
     for group_id in group_ids {
@@ -180,9 +201,12 @@ pub(crate) async fn on_topics_deleted(
                 offsets = deleted.len(),
                 "tombstoned the committed offsets of deleted topics",
             );
-            changed.push((group_id, deleted));
+            changed.push(GroupDeletedOffsets {
+                group_id,
+                offsets: deleted,
+            });
         }
     }
-    changed.sort_unstable();
+    changed.sort_unstable_by(|a, b| a.group_id.cmp(&b.group_id));
     changed
 }

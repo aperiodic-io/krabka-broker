@@ -8,7 +8,7 @@
 use {
     super::{
         response::{fail_authenticate, fail_authenticate_with, sasl_ok},
-        state::{ConnectionAuth, SaslExchange, session_expiry},
+        state::{ConnectionAuth, SaslExchange, SessionExpiry, session_expiry},
     },
     crate::{metadata_source::MetadataSource, time_util::now_ms},
     krabka_protocol::owned::{
@@ -216,8 +216,10 @@ pub fn handle_authenticate_scram(
                     {
                         return fail_authenticate("delegation token expired");
                     }
-                    let (expires_at_ms, session_lifetime_ms) =
-                        session_expiry(now, pending_token_expiry_ms, max_reauth);
+                    let SessionExpiry {
+                        expires_at_ms,
+                        session_lifetime_ms,
+                    } = session_expiry(now, pending_token_expiry_ms, max_reauth);
                     *auth = ConnectionAuth::Authenticated {
                         principal,
                         mechanism,
@@ -268,6 +270,13 @@ fn synthesize_token_scram_credential(
     )
 }
 
+/// One `<key>=<value>` extension of a SCRAM client-first message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScramExtension<'a> {
+    key: &'a str,
+    value: &'a str,
+}
+
 /// A SCRAM client-first message, parsed as Kafka's
 /// `ScramMessages.ClientFirstMessage` does:
 /// `n,[a=<authzid>],[m=<reserved>,]n=<saslname>,r=<nonce>[,<key>=<value>]*`.
@@ -278,7 +287,7 @@ struct ClientFirst<'a> {
     /// The `n=` value, still `=2C`/`=3D` encoded.
     sasl_name: &'a str,
     /// The extensions after the nonce, in the order sent.
-    extensions: Vec<(&'a str, &'a str)>,
+    extensions: Vec<ScramExtension<'a>>,
 }
 
 impl<'a> ClientFirst<'a> {
@@ -313,7 +322,7 @@ impl<'a> ClientFirst<'a> {
             .map(|extension| {
                 let (key, value) = extension.split_once('=')?;
                 (!key.is_empty() && key.bytes().all(|b| b.is_ascii_alphabetic()) && is_value(value))
-                    .then_some((key, value))
+                    .then_some(ScramExtension { key, value })
             })
             .collect::<Option<Vec<_>>>()?;
         Some(Self {
@@ -330,8 +339,8 @@ impl<'a> ClientFirst<'a> {
         self.extensions
             .iter()
             .rev()
-            .find(|(key, _)| *key == "tokenauth")
-            .is_some_and(|(_, value)| value.eq_ignore_ascii_case("true"))
+            .find(|extension| extension.key == "tokenauth")
+            .is_some_and(|extension| extension.value.eq_ignore_ascii_case("true"))
     }
 }
 

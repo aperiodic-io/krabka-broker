@@ -9,12 +9,12 @@ use {
         log::{
             RawRead,
             test_support::{
-                NO_LIMIT, append_samples, configured_test_log, sample_batch, test_batch_at,
-                test_log, tiny_segments,
+                NO_LIMIT, TempLog, append_samples, configured_test_log, sample_batch,
+                test_batch_at, test_log, tiny_segments,
             },
         },
         segment::Segment,
-        test_support::{RecordedAdvice, segmented_log},
+        test_support::{AdviceCall, RecordedAdvice, segmented_log},
     },
     assert2::check,
     krabka_units::prelude::{gibibytes, kibibytes, mebibytes},
@@ -42,7 +42,7 @@ fn batch_header_floor_is_the_protocol_header_length() {
 /// limit reads nothing.
 #[test]
 fn a_raw_fetch_outside_the_readable_range_is_refused_or_empty() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     append_samples(&mut log, 4, 2);
     log.set_log_start_offset(Offset(2)).expect("set log start");
 
@@ -106,7 +106,7 @@ fn a_fetch_across_the_seal_joins_its_chunks_in_order() {
 
 #[test]
 fn log_read_raw_spans_and_is_byte_exact() {
-    let (dir, mut log) = test_log();
+    let TempLog { dir, mut log } = test_log();
     let mut wire = bytes::BytesMut::new();
     for off in 0..4i64 {
         let mut b = test_batch_at(off);
@@ -228,6 +228,14 @@ fn a_descriptor_read_never_skips_past_a_segment_its_budget_clipped() {
 }
 } // sendfile_cfg!
 
+/// The log of [`seam_log`], the directory that holds it, and the encoded size of
+/// a one-record batch.
+struct SeamLog {
+    dir: tempfile::TempDir,
+    log: Log,
+    small: usize,
+}
+
 /// A log of three segments whose batches are not all one size, so a budget
 /// can stop a read inside one segment while the first batch of the next would
 /// still fit what is left of it.
@@ -239,7 +247,7 @@ fn a_descriptor_read_never_skips_past_a_segment_its_budget_clipped() {
 /// | active  | (11, 8)                            |
 ///
 /// Returns the log with the encoded size of a one-record batch.
-fn seam_log() -> (tempfile::TempDir, Log, usize) {
+fn seam_log() -> SeamLog {
     let small = sample_batch(1).encoded_len();
     let big = sample_batch(8).encoded_len();
     let dir = tempdir().unwrap();
@@ -260,7 +268,18 @@ fn seam_log() -> (tempfile::TempDir, Log, usize) {
         .map(Segment::base_offset)
         .collect();
     assert2::assert!(bases == vec![Offset(0), Offset(9), Offset(11)]);
-    (dir, log, small)
+    SeamLog { dir, log, small }
+}
+
+/// One row of [`seam_cases`].
+struct SeamCase {
+    label: &'static str,
+    /// The fetch offset.
+    offset: Offset,
+    /// The byte budget.
+    budget: ByteSize,
+    /// The base offsets of the batches the read must serve.
+    bases: Vec<i64>,
 }
 
 /// The rows of [`seam_log`] each read path is asked for: a label, the fetch
@@ -274,45 +293,45 @@ fn seam_log() -> (tempfile::TempDir, Log, usize) {
 /// served the first batch of that segment and skipped every offset between
 /// them. A follower that caught up through a throttled reassignment lost most
 /// of each 64 MiB segment that way.
-fn seam_cases(small: usize) -> Vec<(&'static str, Offset, ByteSize, Vec<i64>)> {
+fn seam_cases(small: usize) -> Vec<SeamCase> {
     let budget = |halves: usize| size_from_len(small * halves / 2);
     vec![
-        (
-            "a read its budget clips inside a sealed segment ends there",
-            Offset(0),
-            budget(4),
-            vec![0],
-        ),
-        (
-            "a read its budget clips inside the last sealed segment never reaches the active one",
-            Offset(9),
-            budget(3),
-            vec![9],
-        ),
-        (
-            "past the first batch, one larger than what is left waits for the next read",
-            Offset(9),
-            budget(6),
-            vec![9, 10],
-        ),
-        (
-            "a read that empties a segment goes on into the next",
-            Offset(9),
-            NO_LIMIT,
-            vec![9, 10, 11],
-        ),
-        (
-            "a read from inside a batch starts at that batch and goes on to the end",
-            Offset(8),
-            NO_LIMIT,
-            vec![1, 9, 10, 11],
-        ),
-        (
-            "a whole-log read serves every batch",
-            Offset(0),
-            NO_LIMIT,
-            vec![0, 1, 9, 10, 11],
-        ),
+        SeamCase {
+            label: "a read its budget clips inside a sealed segment ends there",
+            offset: Offset(0),
+            budget: budget(4),
+            bases: vec![0],
+        },
+        SeamCase {
+            label: "a read its budget clips inside the last sealed segment never reaches the active one",
+            offset: Offset(9),
+            budget: budget(3),
+            bases: vec![9],
+        },
+        SeamCase {
+            label: "past the first batch, one larger than what is left waits for the next read",
+            offset: Offset(9),
+            budget: budget(6),
+            bases: vec![9, 10],
+        },
+        SeamCase {
+            label: "a read that empties a segment goes on into the next",
+            offset: Offset(9),
+            budget: NO_LIMIT,
+            bases: vec![9, 10, 11],
+        },
+        SeamCase {
+            label: "a read from inside a batch starts at that batch and goes on to the end",
+            offset: Offset(8),
+            budget: NO_LIMIT,
+            bases: vec![1, 9, 10, 11],
+        },
+        SeamCase {
+            label: "a whole-log read serves every batch",
+            offset: Offset(0),
+            budget: NO_LIMIT,
+            bases: vec![0, 1, 9, 10, 11],
+        },
     ]
 }
 
@@ -329,11 +348,21 @@ fn check_seam_reads<T: std::fmt::Debug + PartialEq>(
     read: impl Fn(&Log, Offset, Offset, ByteSize) -> T,
     expect: impl Fn(Vec<i64>) -> T,
 ) {
-    let (_dir, log, small) = seam_log();
+    let SeamLog {
+        dir: _dir,
+        log,
+        small,
+    } = seam_log();
     let end = log.log_end_offset();
     let mut actual = Vec::new();
     let mut expected = Vec::new();
-    for (label, offset, budget, bases) in seam_cases(small) {
+    for SeamCase {
+        label,
+        offset,
+        budget,
+        bases,
+    } in seam_cases(small)
+    {
         actual.push((label, read(&log, offset, end, budget)));
         expected.push((label, expect(bases)));
     }
@@ -357,7 +386,7 @@ fn a_read_never_skips_past_a_segment_its_budget_clipped() {
 
 #[test]
 fn append_then_read_back_in_order() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let mut expected = Vec::new();
     for _ in 0..3 {
         let mut b = sample_batch(2);
@@ -371,7 +400,7 @@ fn append_then_read_back_in_order() {
 
 #[test]
 fn read_offset_too_low_errors() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let mut b = sample_batch(2);
     log.append(&mut b).unwrap();
     assert2::assert!(matches!(
@@ -382,7 +411,7 @@ fn read_offset_too_low_errors() {
 
 #[test]
 fn read_at_log_end_returns_empty() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let mut b = sample_batch(2);
     log.append(&mut b).unwrap();
     let log_end = log.log_end_offset();
@@ -475,7 +504,11 @@ crate::sendfile_cfg! {
 #[test]
 fn a_small_budget_preserves_unindexed_descriptor_records_before_a_seam() {
     use std::os::unix::fs::FileExt;
-    let (_dir, log, small) = seam_log();
+    let SeamLog {
+        dir: _dir,
+        log,
+        small,
+    } = seam_log();
     let mut actual = Vec::new();
     let mut expected = Vec::new();
     for budget in [1, HEADER_LEN, small] {
@@ -505,7 +538,7 @@ fn configured_read_ahead_max_reaches_both_verbatim_reads() {
     let mut actual = Vec::new();
     let mut expected = Vec::new();
     for (read_ahead_max, hinted) in [(0, 1_000), (100, 1_100)] {
-        let (_dir, mut log) = configured_test_log(LogConfig {
+        let TempLog { dir: _dir, mut log } = configured_test_log(LogConfig {
             read_ahead_max: ByteSize::from_bytes(read_ahead_max),
             ..LogConfig::default()
         });
@@ -520,7 +553,14 @@ fn configured_read_ahead_max_reaches_both_verbatim_reads() {
         log.read_raw_desc(Offset(0), end, budget).unwrap();
         actual.push((read_ahead_max, "read_raw_desc", advice.take()));
         for path in ["read_raw", "read_raw_desc"] {
-            expected.push((read_ahead_max, path, vec![(0, hinted)]));
+            expected.push((
+                read_ahead_max,
+                path,
+                vec![AdviceCall {
+                    offset: 0,
+                    len: hinted,
+                }],
+            ));
         }
     }
     check!(actual == expected);

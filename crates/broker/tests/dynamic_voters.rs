@@ -24,7 +24,13 @@ use {
     tempfile::TempDir,
 };
 
-async fn start_dynamic_cluster(n: u64) -> Vec<(BrokerHandle, TempDir)> {
+/// A started node, and the directory that backs it.
+struct DynamicNode {
+    handle: BrokerHandle,
+    dir: TempDir,
+}
+
+async fn start_dynamic_cluster(n: u64) -> Vec<DynamicNode> {
     let cluster_id = uuid::Uuid::from_u128(853);
     let mut cluster = Vec::new();
     let mut bootstrap_controller: Option<std::net::SocketAddr> = None;
@@ -77,7 +83,7 @@ async fn start_dynamic_cluster(n: u64) -> Vec<(BrokerHandle, TempDir)> {
             handle.kraft_version_for_test(),
             handle.controller_leader_id()
         );
-        cluster.push((handle, dir));
+        cluster.push(DynamicNode { handle, dir });
     }
     cluster
 }
@@ -99,8 +105,10 @@ async fn auto_join_grows_quorum_to_three() {
 
     // Every node should eventually agree on the 3-voter set, not just the
     // leader.
-    for (h, _) in &cluster {
-        h.wait_for_image(|img| img.voters().len() == 3).await;
+    for node in &cluster {
+        node.handle
+            .wait_for_image(|img| img.voters().len() == 3)
+            .await;
     }
 }
 
@@ -116,16 +124,16 @@ enum Victim {
 }
 
 /// The node that believes that it leads the controller quorum, if one does.
-fn self_reported_leader(cluster: &[(BrokerHandle, TempDir)]) -> Option<&BrokerHandle> {
+fn self_reported_leader(cluster: &[DynamicNode]) -> Option<&BrokerHandle> {
     cluster
         .iter()
-        .map(|(handle, _)| handle)
+        .map(|node| &node.handle)
         .find(|handle| handle.controller_leader_id() == Some(NodeId(handle.node_id())))
 }
 
 /// Wait until a node believes that it leads the controller quorum. An
 /// election can be in progress when the caller looks.
-async fn wait_for_leader(cluster: &[(BrokerHandle, TempDir)]) -> &BrokerHandle {
+async fn wait_for_leader(cluster: &[DynamicNode]) -> &BrokerHandle {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(leader) = self_reported_leader(cluster) {
@@ -139,10 +147,10 @@ async fn wait_for_leader(cluster: &[(BrokerHandle, TempDir)]) -> &BrokerHandle {
     }
 }
 
-fn node(cluster: &[(BrokerHandle, TempDir)], id: NodeId) -> Option<&BrokerHandle> {
+fn node(cluster: &[DynamicNode], id: NodeId) -> Option<&BrokerHandle> {
     cluster
         .iter()
-        .map(|(handle, _)| handle)
+        .map(|node| &node.handle)
         .find(|handle| NodeId(handle.node_id()) == id)
 }
 
@@ -172,13 +180,13 @@ fn node(cluster: &[(BrokerHandle, TempDir)], id: NodeId) -> Option<&BrokerHandle
 ///
 /// Returns the answers, in order, for the test log.
 async fn remove_through_leader(
-    cluster: &[(BrokerHandle, TempDir)],
+    cluster: &[DynamicNode],
     request: &RemoveVoter,
     expected: &BTreeSet<NodeId>,
 ) -> Vec<String> {
     let first = cluster
         .iter()
-        .map(|(handle, _)| handle)
+        .map(|node| &node.handle)
         .find(|handle| handle.controller_leader_id() != Some(NodeId(handle.node_id())))
         .expect("a controller that does not lead");
     let mut target = Some(NodeId(first.node_id()));
@@ -234,8 +242,10 @@ async fn remove_through_leader(
 async fn remove_voter_shrinks_quorum() {
     for victim_kind in [Victim::Follower, Victim::Leader] {
         let cluster = start_dynamic_cluster(3).await;
-        for (handle, _) in &cluster {
-            handle.wait_for_image(|img| img.voters().len() == 3).await;
+        for node in &cluster {
+            node.handle
+                .wait_for_image(|img| img.voters().len() == 3)
+                .await;
         }
 
         let leader = wait_for_leader(&cluster).await;
@@ -266,9 +276,9 @@ async fn remove_voter_shrinks_quorum() {
         // the victim, or that lost the other voter, fails here. The remaining
         // voters come first. The removed node follows: it keeps fetching as an
         // observer, as a removed Kafka voter does.
-        for (handle, _) in &cluster {
-            if NodeId(handle.node_id()) != victim {
-                handle
+        for node in &cluster {
+            if NodeId(node.handle.node_id()) != victim {
+                node.handle
                     .wait_for_image(|img| img.voters().ids() == expected)
                     .await;
             }
@@ -290,7 +300,7 @@ async fn remove_voter_shrinks_quorum() {
         }
 
         // Stop this cluster before the next case starts its own.
-        for (handle, _dir) in cluster {
+        for DynamicNode { handle, dir: _dir } in cluster {
             handle.shutdown().await;
         }
     }

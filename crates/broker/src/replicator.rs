@@ -184,8 +184,18 @@ pub(crate) struct Config {
     pub lag: ReplicaLag,
 }
 
-/// A `(topic, partition)` pair, as the fetcher's partition map keys it.
-pub(crate) type FollowedKey = (Arc<str>, PartitionIndex);
+/// A topic and partition, as the fetcher's partition map keys it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct FollowedKey {
+    pub(crate) topic: Arc<str>,
+    pub(crate) partition: PartitionIndex,
+}
+
+/// A generation of the followed partitions and the entries it holds.
+pub(crate) struct FollowedSnapshot {
+    pub(crate) generation: u64,
+    pub(crate) entries: BTreeMap<FollowedKey, Arc<Config>>,
+}
 
 /// The partitions one fetcher follows, shared with the supervisor.
 ///
@@ -235,19 +245,15 @@ impl FollowedPartitionsState {
             .fetch_add(1, std::sync::atomic::Ordering::Release);
     }
 
-    pub(crate) fn snapshot_if_changed(
-        &self,
-        generation: u64,
-    ) -> Option<(u64, BTreeMap<FollowedKey, Arc<Config>>)> {
+    pub(crate) fn snapshot_if_changed(&self, generation: u64) -> Option<FollowedSnapshot> {
         let current = self.generation.load(std::sync::atomic::Ordering::Acquire);
-        (current != generation).then(|| {
-            (
-                current,
-                self.entries
-                    .lock()
-                    .expect("followed-partitions mutex poisoned")
-                    .clone(),
-            )
+        (current != generation).then(|| FollowedSnapshot {
+            generation: current,
+            entries: self
+                .entries
+                .lock()
+                .expect("followed-partitions mutex poisoned")
+                .clone(),
         })
     }
 

@@ -17,6 +17,19 @@ use {
     krabka_units::prelude::TimeExt as _,
 };
 
+/// Whether a topic schedules delivery, and its clock bound in milliseconds.
+struct DeliverySettings {
+    scheduled: bool,
+    uncertainty_ms: i64,
+}
+
+/// Where an activation walk stopped: the new watermark, and the activation
+/// time of the first batch that is not yet active.
+struct ActivationWalk {
+    watermark: Offset,
+    pending_ms: Option<i64>,
+}
+
 impl Log {
     /// Recompute the deliver-at-time watermark for the clock reading
     /// `now_ms`, and report when the next scheduled batch comes due.
@@ -49,7 +62,10 @@ impl Log {
     ///
     /// Panics when another thread poisoned the log configuration lock.
     pub fn advance_delivery_watermark(&mut self, now_ms: i64) -> DeliveryAdvance {
-        let (scheduled, uncertainty_ms) = self.delivery_settings();
+        let DeliverySettings {
+            scheduled,
+            uncertainty_ms,
+        } = self.delivery_settings();
         if !scheduled {
             return DeliveryAdvance {
                 watermark: self.log_end_offset(),
@@ -95,7 +111,10 @@ impl Log {
             }
         }
 
-        let (candidate, pending_ms) = self.walk_activation(cursor, end, uncertainty_ms, now_ms);
+        let ActivationWalk {
+            watermark: candidate,
+            pending_ms,
+        } = self.walk_activation(cursor, end, uncertainty_ms, now_ms);
         let watermark = Offset(krabka_verified::delivery_watermark_advance(
             start.0,
             cursor.0,
@@ -158,7 +177,10 @@ impl Log {
         end: Offset,
         now_ms: i64,
     ) -> Vec<(Offset, Offset)> {
-        let (scheduled, uncertainty_ms) = self.delivery_settings();
+        let DeliverySettings {
+            scheduled,
+            uncertainty_ms,
+        } = self.delivery_settings();
         if !scheduled {
             return Vec::new();
         }
@@ -199,12 +221,12 @@ impl Log {
 
     /// Whether this topic schedules delivery, and its clock bound in
     /// milliseconds.
-    fn delivery_settings(&self) -> (bool, i64) {
+    fn delivery_settings(&self) -> DeliverySettings {
         let config = self.config.read().unwrap();
-        (
-            config.delivery_policy == DeliveryPolicy::Scheduled,
-            config.delivery_clock_uncertainty.millis_i64_trunc(),
-        )
+        DeliverySettings {
+            scheduled: config.delivery_policy == DeliveryPolicy::Scheduled,
+            uncertainty_ms: config.delivery_clock_uncertainty.millis_i64_trunc(),
+        }
     }
 
     /// The cached watermark held inside the offsets the log still has.
@@ -230,7 +252,7 @@ impl Log {
         end: Offset,
         uncertainty_ms: i64,
         now_ms: i64,
-    ) -> (Offset, Option<i64>) {
+    ) -> ActivationWalk {
         let mut cursor = from;
         for segment in self.segments.iter().chain(self.active.as_ref()) {
             if cursor >= end {
@@ -243,7 +265,10 @@ impl Log {
                 Ok(scan) => {
                     cursor = scan.active_end.max(cursor).min(end);
                     if let Some(activation_ms) = scan.pending_at {
-                        return (cursor, Some(activation_ms));
+                        return ActivationWalk {
+                            watermark: cursor,
+                            pending_ms: Some(activation_ms),
+                        };
                     }
                 }
                 Err(error) => {
@@ -252,11 +277,17 @@ impl Log {
                         base_offset = segment.base_offset().0,
                         "activation scan failed; delivery watermark holds",
                     );
-                    return (cursor, None);
+                    return ActivationWalk {
+                        watermark: cursor,
+                        pending_ms: None,
+                    };
                 }
             }
         }
-        (cursor, None)
+        ActivationWalk {
+            watermark: cursor,
+            pending_ms: None,
+        }
     }
 
     /// Forget what the last activation walk learned at and above
@@ -283,7 +314,10 @@ impl Log {
 mod tests {
     use {
         super::*,
-        crate::{LogConfig, log::test_support::configured_test_log},
+        crate::{
+            LogConfig,
+            log::test_support::{TempLog, configured_test_log},
+        },
         assert2::assert,
         krabka_protocol::records::{Record, RecordBatch},
         krabka_units::millis,
@@ -291,7 +325,7 @@ mod tests {
 
     #[test]
     fn larger_uncertainty_is_prospective_for_the_released_prefix() {
-        let (dir, mut log) = configured_test_log(LogConfig {
+        let TempLog { dir, mut log } = configured_test_log(LogConfig {
             delivery_policy: DeliveryPolicy::Scheduled,
             delivery_clock_uncertainty: millis(0),
             ..LogConfig::default()

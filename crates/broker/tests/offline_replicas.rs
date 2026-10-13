@@ -69,6 +69,14 @@ const CONVERGE_TIMEOUT: Duration = Duration::from_secs(15);
 // Flexible headers and correlation ID 1 for every request in this suite.
 crate::flexible_round_trip_fixture!(round_trip, CLIENT_ID, 1);
 
+/// A running broker, the two log directories behind it, and its address.
+struct TwoDirBroker {
+    handle: BrokerHandle,
+    primary: TempDir,
+    extra: TempDir,
+    addr: SocketAddr,
+}
+
 /// Boots one broker over `primary` + `extra`.
 ///
 /// The address is reserved before the boot and advertised verbatim, because
@@ -77,7 +85,7 @@ crate::flexible_round_trip_fixture!(round_trip, CLIENT_ID, 1);
 /// heartbeat that carries the offline dir both dial the controller leader at
 /// the endpoint its registration advertises. The `for_tests` default
 /// advertises `127.0.0.1:0`, which no one can connect to.
-async fn start_two_dir_broker() -> (BrokerHandle, TempDir, TempDir, SocketAddr) {
+async fn start_two_dir_broker() -> TwoDirBroker {
     let primary = tempfile::tempdir().unwrap();
     let extra = tempfile::tempdir().unwrap();
     // Hold the listeners until `start_with_listeners` adopts them, so a
@@ -94,7 +102,12 @@ async fn start_two_dir_broker() -> (BrokerHandle, TempDir, TempDir, SocketAddr) 
     let handle = Broker::start_with_listeners(cfg, Some(controller), [data_plane])
         .await
         .expect("broker start");
-    (handle, primary, extra, addr)
+    TwoDirBroker {
+        handle,
+        primary,
+        extra,
+        addr,
+    }
 }
 
 async fn create_topic(addr: SocketAddr) { create_topic_named(addr, TOPIC, PARTITIONS, 1).await; }
@@ -225,7 +238,12 @@ fn leader_epoch(handle: &BrokerHandle, partition: i32) -> i32 {
 
 #[tokio::test]
 async fn offline_log_dir_is_reported_as_an_offline_replica() {
-    let (handle, primary, extra, addr) = start_two_dir_broker().await;
+    let TwoDirBroker {
+        handle,
+        primary,
+        extra,
+        addr,
+    } = start_two_dir_broker().await;
     handle.wait_until_controller_leader().await;
     create_topic(addr).await;
     for partition in 0..PARTITIONS {

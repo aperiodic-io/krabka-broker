@@ -1841,6 +1841,31 @@ mod tests {
         ALL,
     ];
 
+    /// The advertised version range of one API key.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct VersionRange {
+        min: i16,
+        max: i16,
+    }
+
+    const fn range(min: i16, max: i16) -> VersionRange { VersionRange { min, max } }
+
+    /// An API key whose advertised range a switch moves.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct MovedRange {
+        api_key: i16,
+        before: Option<VersionRange>,
+        after: Option<VersionRange>,
+    }
+
+    /// A gated request version and whether each gate combination of
+    /// [`EVERY_GATE`] disables it.
+    struct GatedVersion {
+        api_key: i16,
+        version: i16,
+        disabled: [bool; 4],
+    }
+
     /// The client listener's table, which is what a Kafka client reads.
     fn client_apis() -> Vec<ApiVersion> {
         supported_apis(ListenerKind::Client, ClientMetricsReceiver::Absent, STRICT)
@@ -2042,9 +2067,9 @@ mod tests {
     /// the inter-broker listener.
     #[test]
     fn the_default_table_is_kafka_4_3_1s() {
-        let released: std::collections::BTreeMap<i16, (i16, i16)> = krabka_raft::KAFKA_4_3_1_APIS
+        let released: std::collections::BTreeMap<i16, VersionRange> = krabka_raft::KAFKA_4_3_1_APIS
             .iter()
-            .map(|api| (api.api_key, (api.min_version, api.max_version)))
+            .map(|api| (api.api_key, range(api.min_version, api.max_version)))
             .collect();
         let apis = supported_apis(
             ListenerKind::InterBroker,
@@ -2052,10 +2077,12 @@ mod tests {
             STRICT,
         );
         for api in &apis {
-            let range = (api.min_version, api.max_version);
+            let advertised = range(api.min_version, api.max_version);
             match (api.api_key, released.get(&api.api_key)) {
-                (0, Some(&(3, max))) => assert!(range == (0, max), "Produce"),
-                (key, Some(&want)) => assert!(range == want, "api_key {key}"),
+                (0, Some(&VersionRange { min: 3, max })) => {
+                    assert!(advertised == range(0, max), "Produce");
+                }
+                (key, Some(&want)) => assert!(advertised == want, "api_key {key}"),
                 (key, None) => assert!(
                     key >= crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR,
                     "api_key {key} is not in Kafka 4.3.1"
@@ -2069,7 +2096,7 @@ mod tests {
     /// differs from the default table, and how.
     #[test]
     fn each_switch_moves_only_its_own_rows() {
-        type Moved = Vec<(i16, Option<(i16, i16)>, Option<(i16, i16)>)>;
+        type Moved = Vec<MovedRange>;
         let table = |gates| {
             supported_apis(
                 ListenerKind::InterBroker,
@@ -2081,35 +2108,79 @@ mod tests {
         let moved = |gates| -> Moved {
             let other = table(gates);
             let keys: BTreeSet<i16> = keys_of(&strict).union(&keys_of(&other)).copied().collect();
-            let range = |apis: &[ApiVersion], key| {
+            let advertised = |apis: &[ApiVersion], key| {
                 apis.iter()
                     .find(|api| api.api_key == key)
-                    .map(|api| (api.min_version, api.max_version))
+                    .map(|api| range(api.min_version, api.max_version))
             };
             keys.into_iter()
-                .map(|key| (key, range(&strict, key), range(&other, key)))
-                .filter(|(_, before, after)| before != after)
+                .map(|api_key| MovedRange {
+                    api_key,
+                    before: advertised(&strict, api_key),
+                    after: advertised(&other, api_key),
+                })
+                .filter(|row| row.before != row.after)
                 .collect()
         };
         let unstable: Moved = vec![
-            (18, Some((0, 4)), Some((0, 5))),
-            (22, Some((0, 5)), Some((0, 6))),
-            (28, Some((0, 5)), Some((0, 6))),
+            MovedRange {
+                api_key: 18,
+                before: Some(range(0, 4)),
+                after: Some(range(0, 5)),
+            },
+            MovedRange {
+                api_key: 22,
+                before: Some(range(0, 5)),
+                after: Some(range(0, 6)),
+            },
+            MovedRange {
+                api_key: 28,
+                before: Some(range(0, 5)),
+                after: Some(range(0, 6)),
+            },
             // KIP-1331's per-group `ErrorMessage`.
-            (42, Some((0, 2)), Some((0, 3))),
-            (88, Some((0, 0)), Some((0, 1))),
-            (89, Some((0, 0)), Some((0, 1))),
-            (93, None, Some((0, 0))),
-            (94, None, Some((0, 0))),
+            MovedRange {
+                api_key: 42,
+                before: Some(range(0, 2)),
+                after: Some(range(0, 3)),
+            },
+            MovedRange {
+                api_key: 88,
+                before: Some(range(0, 0)),
+                after: Some(range(0, 1)),
+            },
+            MovedRange {
+                api_key: 89,
+                before: Some(range(0, 0)),
+                after: Some(range(0, 1)),
+            },
+            MovedRange {
+                api_key: 93,
+                before: None,
+                after: Some(range(0, 0)),
+            },
+            MovedRange {
+                api_key: 94,
+                before: None,
+                after: Some(range(0, 0)),
+            },
         ];
         let legacy: Moved = vec![
-            (1, Some((4, 18)), Some((0, 18))),
-            (2, Some((1, 11)), Some((0, 11))),
+            MovedRange {
+                api_key: 1,
+                before: Some(range(4, 18)),
+                after: Some(range(0, 18)),
+            },
+            MovedRange {
+                api_key: 2,
+                before: Some(range(1, 11)),
+                after: Some(range(0, 11)),
+            },
         ];
         let both: Moved = {
             let mut rows = legacy.clone();
             rows.extend(unstable.iter().copied());
-            rows.sort_unstable_by_key(|row| row.0);
+            rows.sort_unstable_by_key(|row| row.api_key);
             rows
         };
         for (gates, expected) in [
@@ -2129,29 +2200,98 @@ mod tests {
     #[test]
     fn a_gated_version_is_refused_exactly_when_it_is_not_accepted() {
         let [strict, unstable, legacy, all] = EVERY_GATE;
-        let cases: &[(i16, i16, [bool; 4])] = &[
-            // (api_key, version, disabled under [strict, unstable, legacy, all])
-            (0, 0, [true, true, false, false]),
-            (0, 2, [true, true, false, false]),
-            (0, 3, [false, false, false, false]),
-            (1, 3, [true, true, false, false]),
-            (1, 4, [false, false, false, false]),
-            (2, 0, [true, true, false, false]),
-            (2, 1, [false, false, false, false]),
-            (18, 5, [false, false, false, false]),
-            (22, 6, [true, false, true, false]),
-            (28, 6, [true, false, true, false]),
-            (28, 5, [false, false, false, false]),
-            (88, 1, [true, false, true, false]),
-            (89, 1, [true, false, true, false]),
-            (93, 0, [true, false, true, false]),
-            (94, 0, [true, false, true, false]),
-            (1020, 0, [false, false, false, false]),
+        // `disabled` is under [strict, unstable, legacy, all].
+        let cases: &[GatedVersion] = &[
+            GatedVersion {
+                api_key: 0,
+                version: 0,
+                disabled: [true, true, false, false],
+            },
+            GatedVersion {
+                api_key: 0,
+                version: 2,
+                disabled: [true, true, false, false],
+            },
+            GatedVersion {
+                api_key: 0,
+                version: 3,
+                disabled: [false, false, false, false],
+            },
+            GatedVersion {
+                api_key: 1,
+                version: 3,
+                disabled: [true, true, false, false],
+            },
+            GatedVersion {
+                api_key: 1,
+                version: 4,
+                disabled: [false, false, false, false],
+            },
+            GatedVersion {
+                api_key: 2,
+                version: 0,
+                disabled: [true, true, false, false],
+            },
+            GatedVersion {
+                api_key: 2,
+                version: 1,
+                disabled: [false, false, false, false],
+            },
+            GatedVersion {
+                api_key: 18,
+                version: 5,
+                disabled: [false, false, false, false],
+            },
+            GatedVersion {
+                api_key: 22,
+                version: 6,
+                disabled: [true, false, true, false],
+            },
+            GatedVersion {
+                api_key: 28,
+                version: 6,
+                disabled: [true, false, true, false],
+            },
+            GatedVersion {
+                api_key: 28,
+                version: 5,
+                disabled: [false, false, false, false],
+            },
+            GatedVersion {
+                api_key: 88,
+                version: 1,
+                disabled: [true, false, true, false],
+            },
+            GatedVersion {
+                api_key: 89,
+                version: 1,
+                disabled: [true, false, true, false],
+            },
+            GatedVersion {
+                api_key: 93,
+                version: 0,
+                disabled: [true, false, true, false],
+            },
+            GatedVersion {
+                api_key: 94,
+                version: 0,
+                disabled: [true, false, true, false],
+            },
+            GatedVersion {
+                api_key: 1020,
+                version: 0,
+                disabled: [false, false, false, false],
+            },
         ];
-        for &(api_key, version, want) in cases {
-            for (gates, disabled) in [strict, unstable, legacy, all].into_iter().zip(want) {
+        for GatedVersion {
+            api_key,
+            version,
+            disabled: want,
+        } in cases
+        {
+            for (gates, disabled) in [strict, unstable, legacy, all].into_iter().zip(*want) {
                 assert!(
-                    is_disabled_version(api_key, version, gates) == disabled,
+                    is_disabled_version(*api_key, *version, gates) == disabled,
                     "api_key {api_key} v{version} {gates:?}"
                 );
             }

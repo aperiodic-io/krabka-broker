@@ -117,12 +117,23 @@ pub(crate) fn rewrite_batch_horizon(
     base_timestamp: i64,
     deltas: &[i64],
     horizon: i64,
-) -> (i64, Vec<i64>) {
-    let new = deltas
+) -> RewrittenTimestamps {
+    let deltas = deltas
         .iter()
         .map(|d| base_timestamp.saturating_add(*d).saturating_sub(horizon))
         .collect();
-    (horizon, new)
+    RewrittenTimestamps {
+        base_timestamp: horizon,
+        deltas,
+    }
+}
+
+/// The base timestamp and per-record timestamp deltas that
+/// [`rewrite_batch_horizon`] produces.
+#[cfg(test)]
+pub(crate) struct RewrittenTimestamps {
+    pub(crate) base_timestamp: i64,
+    pub(crate) deltas: Vec<i64>,
 }
 
 #[cfg(test)]
@@ -298,7 +309,10 @@ mod core_tests {
 
     #[test]
     fn rewrite_batch_horizon_preserves_absolute_timestamps() {
-        let (base, deltas) = rewrite_batch_horizon(1000, &[0, 5, 20], 9999);
+        let RewrittenTimestamps {
+            base_timestamp: base,
+            deltas,
+        } = rewrite_batch_horizon(1000, &[0, 5, 20], 9999);
         // Reconstructed absolute timestamps (base + delta) must equal the
         // originals: 1000, 1005, 1020.
         let reconstructed: Vec<i64> = deltas.iter().map(|d| base + d).collect();

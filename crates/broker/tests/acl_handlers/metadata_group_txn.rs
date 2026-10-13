@@ -31,12 +31,15 @@ use {
     assert2::assert,
 };
 
+/// A running broker with its data directory and listen address.
+struct AliceMetadataFixture {
+    handle: krabka_broker::BrokerHandle,
+    dir: tempfile::TempDir,
+    addr: std::net::SocketAddr,
+}
+
 /// Only t1 is visible to Alice, with a real ACL image disabling the compat shim.
-async fn alice_metadata_fixture() -> (
-    krabka_broker::BrokerHandle,
-    tempfile::TempDir,
-    std::net::SocketAddr,
-) {
+async fn alice_metadata_fixture() -> AliceMetadataFixture {
     let (handle, dir, _) = start_admin_alice().await;
     let addr = handle.listen_addr();
     create_topic_as_admin(addr, "t1", 1).await;
@@ -50,12 +53,16 @@ async fn alice_metadata_fixture() -> (
         )
         .await
         .expect("seed Describe-on-t1 ACL for alice");
-    (handle, dir, addr)
+    AliceMetadataFixture { handle, dir, addr }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn metadata_silent_filter_on_fetch_all() {
-    let (handle, _dir, addr) = alice_metadata_fixture().await;
+    let AliceMetadataFixture {
+        handle,
+        dir: _dir,
+        addr,
+    } = alice_metadata_fixture().await;
 
     // Wait for the ACL to propagate before issuing Metadata as alice —
     // until then alice sees no topics at all. Once t1 appears, the image
@@ -82,7 +89,11 @@ async fn metadata_silent_filter_on_fetch_all() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn metadata_explicit_deny_on_named_topic() {
-    let (handle, _dir, addr) = alice_metadata_fixture().await;
+    let AliceMetadataFixture {
+        handle,
+        dir: _dir,
+        addr,
+    } = alice_metadata_fixture().await;
 
     // Ask Metadata for t2 *by name*. The named-topic path returns an
     // error row instead of silently filtering. Use the retry helper so

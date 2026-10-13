@@ -167,10 +167,31 @@ mod tests {
         }
     }
 
+    /// A partition row of a response: its index and error code.
+    #[derive(Clone, Copy)]
+    struct PartitionCode {
+        partition_index: i32,
+        error_code: i16,
+    }
+
+    /// A partition row that answers `NONE`.
+    fn none_at(partition_index: i32) -> PartitionCode {
+        PartitionCode {
+            partition_index,
+            error_code: codes::NONE,
+        }
+    }
+
+    /// A request topic the handler refused, and the code it answers.
+    struct RefusedTopic {
+        topic: OffsetCommitRequestTopic,
+        error_code: i16,
+    }
+
     fn response_topic(
         name: &str,
         topic_id: WireUuid,
-        partitions: &[(i32, i16)],
+        partitions: &[PartitionCode],
     ) -> OffsetCommitResponseTopic {
         OffsetCommitResponseTopic {
             name: name.to_string(),
@@ -178,7 +199,10 @@ mod tests {
             partitions: partitions
                 .iter()
                 .map(
-                    |&(partition_index, error_code)| OffsetCommitResponsePartition {
+                    |&PartitionCode {
+                         partition_index,
+                         error_code,
+                     }| OffsetCommitResponsePartition {
                         partition_index,
                         error_code,
                         ..Default::default()
@@ -194,7 +218,7 @@ mod tests {
     struct Case {
         label: &'static str,
         use_topic_ids: bool,
-        refused: Vec<(OffsetCommitRequestTopic, i16)>,
+        refused: Vec<RefusedTopic>,
         committed: Vec<OffsetCommitResponseTopic>,
         expected: Vec<OffsetCommitResponseTopic>,
     }
@@ -207,55 +231,70 @@ mod tests {
                 use_topic_ids: true,
                 refused: Vec::new(),
                 committed: vec![
-                    response_topic("", ID_A, &[(0, codes::NONE)]),
-                    response_topic("", ID_A, &[(1, codes::NONE)]),
+                    response_topic("", ID_A, &[none_at(0)]),
+                    response_topic("", ID_A, &[none_at(1)]),
                 ],
                 expected: vec![
-                    response_topic("", ID_A, &[(0, codes::NONE)]),
-                    response_topic("", ID_A, &[(1, codes::NONE)]),
+                    response_topic("", ID_A, &[none_at(0)]),
+                    response_topic("", ID_A, &[none_at(1)]),
                 ],
             },
             Case {
                 label: "refused rows come first and two zero ids share one row",
                 use_topic_ids: true,
                 refused: vec![
-                    (
-                        request_topic("", WireUuid::ZERO, &[0]),
-                        codes::UNKNOWN_TOPIC_ID,
-                    ),
-                    (request_topic("", ID_B, &[0]), codes::UNKNOWN_TOPIC_ID),
-                    (
-                        request_topic("", WireUuid::ZERO, &[1]),
-                        codes::UNKNOWN_TOPIC_ID,
-                    ),
+                    RefusedTopic {
+                        topic: request_topic("", WireUuid::ZERO, &[0]),
+                        error_code: codes::UNKNOWN_TOPIC_ID,
+                    },
+                    RefusedTopic {
+                        topic: request_topic("", ID_B, &[0]),
+                        error_code: codes::UNKNOWN_TOPIC_ID,
+                    },
+                    RefusedTopic {
+                        topic: request_topic("", WireUuid::ZERO, &[1]),
+                        error_code: codes::UNKNOWN_TOPIC_ID,
+                    },
                 ],
-                committed: vec![response_topic("a", ID_A, &[(0, codes::NONE)])],
+                committed: vec![response_topic("a", ID_A, &[none_at(0)])],
                 expected: vec![
                     response_topic("", WireUuid::ZERO, &[
-                        (0, codes::UNKNOWN_TOPIC_ID),
-                        (1, codes::UNKNOWN_TOPIC_ID),
+                        PartitionCode {
+                            partition_index: 0,
+                            error_code: codes::UNKNOWN_TOPIC_ID,
+                        },
+                        PartitionCode {
+                            partition_index: 1,
+                            error_code: codes::UNKNOWN_TOPIC_ID,
+                        },
                     ]),
-                    response_topic("", ID_B, &[(0, codes::UNKNOWN_TOPIC_ID)]),
-                    response_topic("a", ID_A, &[(0, codes::NONE)]),
+                    response_topic("", ID_B, &[PartitionCode {
+                        partition_index: 0,
+                        error_code: codes::UNKNOWN_TOPIC_ID,
+                    }]),
+                    response_topic("a", ID_A, &[none_at(0)]),
                 ],
             },
             Case {
                 label: "a coordinator row joins the refused row with the same name",
                 use_topic_ids: false,
-                refused: vec![(
-                    request_topic("a", WireUuid::ZERO, &[0]),
-                    codes::TOPIC_AUTHORIZATION_FAILED,
-                )],
+                refused: vec![RefusedTopic {
+                    topic: request_topic("a", WireUuid::ZERO, &[0]),
+                    error_code: codes::TOPIC_AUTHORIZATION_FAILED,
+                }],
                 committed: vec![
-                    response_topic("b", WireUuid::ZERO, &[(0, codes::NONE)]),
-                    response_topic("a", WireUuid::ZERO, &[(1, codes::NONE)]),
+                    response_topic("b", WireUuid::ZERO, &[none_at(0)]),
+                    response_topic("a", WireUuid::ZERO, &[none_at(1)]),
                 ],
                 expected: vec![
                     response_topic("a", WireUuid::ZERO, &[
-                        (0, codes::TOPIC_AUTHORIZATION_FAILED),
-                        (1, codes::NONE),
+                        PartitionCode {
+                            partition_index: 0,
+                            error_code: codes::TOPIC_AUTHORIZATION_FAILED,
+                        },
+                        none_at(1),
                     ]),
-                    response_topic("b", WireUuid::ZERO, &[(0, codes::NONE)]),
+                    response_topic("b", WireUuid::ZERO, &[none_at(0)]),
                 ],
             },
         ];
@@ -264,7 +303,7 @@ mod tests {
         let mut expected = Vec::new();
         for case in cases {
             let mut builder = ResponseBuilder::new(case.use_topic_ids);
-            for (topic, error_code) in &case.refused {
+            for RefusedTopic { topic, error_code } in &case.refused {
                 builder.add_topic(topic, *error_code);
             }
             builder.merge(case.committed);

@@ -10,7 +10,7 @@
 use krabka_protocol::owned::describe_share_group_offsets_request::DescribeShareGroupOffsetsRequestTopic;
 use {
     super::{
-        end_offsets::NetworkLatestOffsets,
+        end_offsets::{ErrorAnswer, NetworkLatestOffsets},
         rows::{describe_topics, unauthorized_topic},
         topics::initialized_topics,
     },
@@ -135,7 +135,10 @@ pub(super) async fn describe_group(
         }
         // `KafkaApis` answers a failed coordinator call with the group-level
         // error and no topics, the unauthorized ones included.
-        Err((error_code, message)) => DescribeShareGroupOffsetsResponseGroup {
+        Err(ErrorAnswer {
+            code: error_code,
+            message,
+        }) => DescribeShareGroupOffsetsResponseGroup {
             group_id: gid,
             error_code,
             error_message: Some(message.to_owned()),

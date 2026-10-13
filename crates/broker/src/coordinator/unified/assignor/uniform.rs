@@ -74,6 +74,21 @@ fn kafka_uuid_order(a: &Uuid, b: &Uuid) -> Ordering {
     halves(a).cmp(&halves(b))
 }
 
+/// An existing topic and its partition count.
+#[derive(Debug, Clone, Copy)]
+struct TopicSize {
+    topic_id: Uuid,
+    partitions: usize,
+}
+
+/// One partition, named by its topic's number in [`Spec::topics`] and its
+/// index within that topic.
+#[derive(Debug, Clone, Copy)]
+struct PartitionSlot {
+    topic: usize,
+    partition: usize,
+}
+
 /// The assignor's working state. Members and topics are numbered by their
 /// position in `member_ids` and `topics`.
 #[derive(Debug)]
@@ -81,7 +96,7 @@ struct Spec<'a> {
     /// Member IDs in ascending order.
     member_ids: Vec<&'a str>,
     /// Existing topics with their partition counts, in Kafka `Uuid` order.
-    topics: Vec<(Uuid, usize)>,
+    topics: Vec<TopicSize>,
     /// Each member's subscribed topics that exist, as ascending topic numbers.
     subscriptions: Vec<Vec<usize>>,
     /// The owner of each partition of each topic, or `None` while unassigned.
@@ -93,16 +108,21 @@ impl<'a> Spec<'a> {
         let mut members: Vec<_> = group.members.iter().collect();
         members.sort_unstable_by(|a, b| a.member_id.cmp(&b.member_id));
 
-        let mut topics: Vec<(Uuid, usize)> = metadata
+        let mut topics: Vec<TopicSize> = metadata
             .partitions_per_topic
             .iter()
-            .filter_map(|(id, count)| Some((*id, usize::try_from(*count).ok()?)))
+            .filter_map(|(id, count)| {
+                Some(TopicSize {
+                    topic_id: *id,
+                    partitions: usize::try_from(*count).ok()?,
+                })
+            })
             .collect();
-        topics.sort_unstable_by(|a, b| kafka_uuid_order(&a.0, &b.0));
+        topics.sort_unstable_by(|a, b| kafka_uuid_order(&a.topic_id, &b.topic_id));
         let topic_numbers: HashMap<Uuid, usize> = topics
             .iter()
             .enumerate()
-            .map(|(number, (id, _))| (*id, number))
+            .map(|(number, topic)| (topic.topic_id, number))
             .collect();
 
         let subscriptions: Vec<Vec<usize>> = members
@@ -119,8 +139,10 @@ impl<'a> Spec<'a> {
             })
             .collect();
 
-        let mut owners: Vec<Vec<Option<usize>>> =
-            topics.iter().map(|(_, count)| vec![None; *count]).collect();
+        let mut owners: Vec<Vec<Option<usize>>> = topics
+            .iter()
+            .map(|topic| vec![None; topic.partitions])
+            .collect();
         for (member, (subscription, spec)) in subscriptions.iter().zip(&members).enumerate() {
             for (topic_id, partitions) in &spec.assigned_partitions {
                 let Some(&topic) = topic_numbers.get(topic_id) else {
@@ -152,7 +174,7 @@ impl<'a> Spec<'a> {
     }
 
     /// The partitions `member` owns, in topic order and then partition order.
-    fn owned_by(&self, member: usize) -> Vec<(usize, usize)> {
+    fn owned_by(&self, member: usize) -> Vec<PartitionSlot> {
         self.subscriptions[member]
             .iter()
             .flat_map(|&topic| {
@@ -160,7 +182,7 @@ impl<'a> Spec<'a> {
                     .iter()
                     .enumerate()
                     .filter(move |(_, owner)| **owner == Some(member))
-                    .map(move |(partition, _)| (topic, partition))
+                    .map(move |(partition, _)| PartitionSlot { topic, partition })
             })
             .collect()
     }
@@ -171,12 +193,12 @@ impl<'a> Spec<'a> {
             .iter()
             .map(|id| ((*id).to_owned(), HashMap::new()))
             .collect();
-        for ((topic_id, _), owners) in self.topics.iter().zip(&self.owners) {
+        for (topic, owners) in self.topics.iter().zip(&self.owners) {
             for (partition, owner) in owners.iter().enumerate() {
                 if let Some(member) = owner {
                     out.get_mut(self.member_ids[*member])
                         .expect("every member has an entry")
-                        .entry(*topic_id)
+                        .entry(topic.topic_id)
                         .or_default()
                         .push(i32::try_from(partition).expect("partition counts are i32"));
                 }
@@ -198,37 +220,40 @@ fn homogeneous(spec: &mut Spec<'_>) {
     let Some(subscribed) = spec.subscriptions.first().cloned() else {
         return;
     };
-    let total: usize = subscribed.iter().map(|&topic| spec.topics[topic].1).sum();
+    let total: usize = subscribed
+        .iter()
+        .map(|&topic| spec.topics[topic].partitions)
+        .sum();
     let split = uniform_quota_split(total, spec.member_ids.len());
 
-    let mut unassigned: Vec<(usize, usize)> = subscribed
+    let mut unassigned: Vec<PartitionSlot> = subscribed
         .iter()
         .flat_map(|&topic| {
             spec.owners[topic]
                 .iter()
                 .enumerate()
                 .filter(|(_, owner)| owner.is_none())
-                .map(move |(partition, _)| (topic, partition))
+                .map(move |(partition, _)| PartitionSlot { topic, partition })
         })
         .collect();
-    let owned: Vec<Vec<(usize, usize)>> = (0..spec.member_ids.len())
+    let owned: Vec<Vec<PartitionSlot>> = (0..spec.member_ids.len())
         .map(|member| spec.owned_by(member))
         .collect();
     let counts: Vec<usize> = owned.iter().map(Vec::len).collect();
     let quotas = homogeneous_member_quotas(split.minimum_quota, split.extra_quotas, &counts);
 
     for (partitions, quota) in owned.iter().zip(&quotas) {
-        for &(topic, partition) in &partitions[quota.retain..] {
-            spec.owners[topic][partition] = None;
-            unassigned.push((topic, partition));
+        for &slot in &partitions[quota.retain..] {
+            spec.owners[slot.topic][slot.partition] = None;
+            unassigned.push(slot);
         }
     }
     // The proved quotas add up to the partition total, and every partition
     // is either retained or unassigned here, so the fills use up the list.
     let mut next = unassigned.into_iter();
     for (member, quota) in quotas.iter().enumerate() {
-        for (topic, partition) in next.by_ref().take(quota.fill) {
-            spec.owners[topic][partition] = Some(member);
+        for slot in next.by_ref().take(quota.fill) {
+            spec.owners[slot.topic][slot.partition] = Some(member);
         }
     }
 }
@@ -281,7 +306,7 @@ impl<'s, 'a> Heterogeneous<'s, 'a> {
     /// count ascending, then topic ID ascending.
     fn sort_topics(&self, topics: &mut [usize]) {
         let per_subscriber = |topic: usize| {
-            let partitions = u32::try_from(self.spec.topics[topic].1).expect("i32 count");
+            let partitions = u32::try_from(self.spec.topics[topic].partitions).expect("i32 count");
             let subscribers =
                 u32::try_from(self.topic_subscribers[topic].len()).expect("member count fits u32");
             f64::from(partitions) / f64::from(subscribers)
@@ -294,7 +319,9 @@ impl<'s, 'a> Heterogeneous<'s, 'a> {
                         .len()
                         .cmp(&self.topic_subscribers[b].len())
                 })
-                .then_with(|| kafka_uuid_order(&self.spec.topics[a].0, &self.spec.topics[b].0))
+                .then_with(|| {
+                    kafka_uuid_order(&self.spec.topics[a].topic_id, &self.spec.topics[b].topic_id)
+                })
         });
     }
 

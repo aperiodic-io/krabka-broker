@@ -9,15 +9,33 @@ use {
     super::*,
     crate::{remote_log_manager::test_support as fixtures, test_support::topic_freeze_record},
     assert2::check,
-    fixtures::{local_backends, sweep_counts},
+    fixtures::{SweepCounts, TempDirs, local_backends, sweep_counts},
     krabka_metadata::PatternType,
 };
 
+/// A freeze entry's scope and how the scope is matched against topic names.
+#[derive(Clone, Copy)]
+struct FreezeScope<'a> {
+    scope: &'a str,
+    pattern_type: PatternType,
+}
+
+/// A case label and the freeze it runs under, if any.
+#[derive(Clone, Copy)]
+struct FreezeCase {
+    label: &'static str,
+    freeze: Option<FreezeScope<'static>>,
+}
+
 /// The `orders` topic, plus the one live freeze entry `freeze` names.
 /// `None` is the unfrozen control every freeze case runs against.
-fn image_with_orders_freeze(freeze: Option<(&str, PatternType)>) -> MetadataImage {
+fn image_with_orders_freeze(freeze: Option<FreezeScope<'_>>) -> MetadataImage {
     let mut image = image_with_orders_topic();
-    if let Some((scope, pattern_type)) = freeze {
+    if let Some(FreezeScope {
+        scope,
+        pattern_type,
+    }) = freeze
+    {
         image.apply(&MetadataRecord::V1TopicFreeze(
             topic_freeze_record()
                 .scope(scope)
@@ -73,7 +91,10 @@ struct TickOutcome {
 /// Drive exactly one sweep over one locally-led, tiered `orders`
 /// partition against `image`, and report what it did.
 async fn tick_once(image: MetadataImage, config: LogConfig) -> TickOutcome {
-    let (log_dir, remote_dir) = fixtures::temporary_dirs();
+    let TempDirs {
+        local: log_dir,
+        remote: remote_dir,
+    } = fixtures::temporary_dirs();
     let partitions = PartitionRegistry::new();
     let partition = rolled_tiered_partition_with_config(log_dir.path(), config);
     let sealed_before = partition
@@ -89,7 +110,10 @@ async fn tick_once(image: MetadataImage, config: LogConfig) -> TickOutcome {
 
     fixtures::sweep_mutable(&partitions, &controller, &rsm, &rlmm).await;
 
-    let (remote_finished, local_sealed_after) = sweep_counts(&partition, &rlmm);
+    let SweepCounts {
+        remote_finished,
+        local_sealed: local_sealed_after,
+    } = sweep_counts(&partition, &rlmm);
     TickOutcome {
         sealed_before,
         remote_finished,
@@ -99,16 +123,25 @@ async fn tick_once(image: MetadataImage, config: LogConfig) -> TickOutcome {
 
 /// The freeze cases every retention test runs, each beside the unfrozen
 /// control that proves the tick would otherwise have done the work.
-const FREEZE_CASES: [(&str, Option<(&str, PatternType)>); 3] = [
-    ("an unfrozen control", None),
-    (
-        "a literal freeze on the topic",
-        Some(("orders", PatternType::Literal)),
-    ),
-    (
-        "a prefix freeze covering the topic",
-        Some(("ord", PatternType::Prefixed)),
-    ),
+const FREEZE_CASES: [FreezeCase; 3] = [
+    FreezeCase {
+        label: "an unfrozen control",
+        freeze: None,
+    },
+    FreezeCase {
+        label: "a literal freeze on the topic",
+        freeze: Some(FreezeScope {
+            scope: "orders",
+            pattern_type: PatternType::Literal,
+        }),
+    },
+    FreezeCase {
+        label: "a prefix freeze covering the topic",
+        freeze: Some(FreezeScope {
+            scope: "ord",
+            pattern_type: PatternType::Prefixed,
+        }),
+    },
 ];
 
 #[tokio::test]
@@ -116,7 +149,7 @@ async fn tick_all_still_copies_to_remote_storage_for_a_frozen_partition() {
     // The invariant this file most needs held: a copy adds a replica and
     // removes nothing, so a freeze never refuses it. Tiering a frozen
     // topic is exactly what a disaster-recovery migration wants.
-    for (label, freeze) in FREEZE_CASES {
+    for FreezeCase { label, freeze } in FREEZE_CASES {
         let outcome = tick_once(image_with_orders_freeze(freeze), tiered_no_eviction()).await;
 
         check!(
@@ -132,7 +165,7 @@ async fn tick_all_still_copies_to_remote_storage_for_a_frozen_partition() {
 
 #[tokio::test]
 async fn tick_all_evicts_no_local_segment_for_a_frozen_partition() {
-    for (label, freeze) in FREEZE_CASES {
+    for FreezeCase { label, freeze } in FREEZE_CASES {
         let frozen = freeze.is_some();
         let outcome = tick_once(image_with_orders_freeze(freeze), tiered_local_eviction()).await;
 
@@ -158,7 +191,7 @@ async fn tick_all_evicts_no_local_segment_for_a_frozen_partition() {
 
 #[tokio::test]
 async fn tick_all_evicts_no_remote_segment_for_a_frozen_partition() {
-    for (label, freeze) in FREEZE_CASES {
+    for FreezeCase { label, freeze } in FREEZE_CASES {
         let frozen = freeze.is_some();
         let outcome = tick_once(image_with_orders_freeze(freeze), tiered_remote_eviction()).await;
 

@@ -339,7 +339,12 @@ mod tests {
     #[test]
     fn a_transition_writes_only_what_it_changed() {
         type Change = fn(&mut GroupState);
-        type Row<'a> = (&'a str, Change, &'a [&'a str], Option<Vec<String>>);
+        struct Row<'a> {
+            case: &'a str,
+            change: Change,
+            member_ids: &'a [&'a str],
+            target: Option<Vec<String>>,
+        }
         let topic_id = Uuid([9; 16]);
         let base = || {
             let mut state = GroupState::new("g");
@@ -359,56 +364,67 @@ mod tests {
             Some(current_assignment_value(&state.members[member_id]))
         };
         let rows: [Row<'_>; 7] = [
-            ("nothing changes", |_| {}, &["m1"], None),
-            (
-                "a member joins",
-                |state| state.add_or_update_member(joined("m2")),
-                &["m2"],
-                None,
-            ),
-            (
-                "a member's client id changes",
-                |state| state.members.get_mut("m1").unwrap().client_id = "other".into(),
-                &["m1"],
-                None,
-            ),
-            (
-                "a member moves to the target epoch",
-                |state| {
+            Row {
+                case: "nothing changes",
+                change: |_| {},
+                member_ids: &["m1"],
+                target: None,
+            },
+            Row {
+                case: "a member joins",
+                change: |state| state.add_or_update_member(joined("m2")),
+                member_ids: &["m2"],
+                target: None,
+            },
+            Row {
+                case: "a member's client id changes",
+                change: |state| state.members.get_mut("m1").unwrap().client_id = "other".into(),
+                member_ids: &["m1"],
+                target: None,
+            },
+            Row {
+                case: "a member moves to the target epoch",
+                change: |state| {
                     let member = state.members.get_mut("m1").unwrap();
                     member.previous_member_epoch = member.member_epoch;
                     member.member_epoch = 2;
                 },
-                &["m1"],
-                None,
-            ),
-            (
-                "a member leaves",
-                |state| drop(state.remove_member("m1")),
-                &["m1"],
-                None,
-            ),
-            (
-                "the group epoch moves",
-                |state| {
+                member_ids: &["m1"],
+                target: None,
+            },
+            Row {
+                case: "a member leaves",
+                change: |state| drop(state.remove_member("m1")),
+                member_ids: &["m1"],
+                target: None,
+            },
+            Row {
+                case: "the group epoch moves",
+                change: |state| {
                     state.bump_epoch();
                 },
-                &[],
-                None,
-            ),
-            (
-                "a target is computed",
-                |state| {
+                member_ids: &[],
+                target: None,
+            },
+            Row {
+                case: "a target is computed",
+                change: |state| {
                     state.bump_epoch();
                     state.install_target(
                         [("m1".to_string(), [(Uuid([9; 16]), vec![0, 1])].into())].into(),
                     );
                 },
-                &["m1"],
-                Some(vec!["m1".to_string()]),
-            ),
+                member_ids: &["m1"],
+                target: Some(vec!["m1".to_string()]),
+            },
         ];
-        for (case, change, member_ids, target) in rows {
+        for Row {
+            case,
+            change,
+            member_ids,
+            target,
+        } in rows
+        {
             let mut state = base();
             let recorder = Recorder::start(&state, member_ids);
             change(&mut state);

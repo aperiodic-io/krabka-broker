@@ -278,72 +278,142 @@ mod tests {
     /// Kafka's `KerberosNameTest`, plus the rules the audit called out.
     #[test]
     fn rules_map_principals_as_kafka_does() {
+        /// A principal mapped under some rules to a short name, or to none.
+        struct Mapping<'a> {
+            specs: &'a [&'a str],
+            principal: &'a str,
+            expected: Option<&'a str>,
+        }
         let realm = "REALM.COM";
-        // (rules, principal, short name)
-        let cases: [(&[&str], &str, Option<&str>); 22] = [
+        let cases: [Mapping<'_>; 22] = [
             // DEFAULT takes the first component whatever their number.
-            (&["DEFAULT"], "user@REALM.COM", Some("user")),
-            (&["DEFAULT"], "user/host@REALM.COM", Some("user")),
-            (
-                &["DEFAULT"],
-                "kafka/host.example.com@REALM.COM",
-                Some("kafka"),
-            ),
+            Mapping {
+                specs: &["DEFAULT"],
+                principal: "user@REALM.COM",
+                expected: Some("user"),
+            },
+            Mapping {
+                specs: &["DEFAULT"],
+                principal: "user/host@REALM.COM",
+                expected: Some("user"),
+            },
+            Mapping {
+                specs: &["DEFAULT"],
+                principal: "kafka/host.example.com@REALM.COM",
+                expected: Some("kafka"),
+            },
             // ... but only in the default realm.
-            (&["DEFAULT"], "user@OTHER.REALM", None),
-            (&["DEFAULT"], "user/host@OTHER.REALM", None),
+            Mapping {
+                specs: &["DEFAULT"],
+                principal: "user@OTHER.REALM",
+                expected: None,
+            },
+            Mapping {
+                specs: &["DEFAULT"],
+                principal: "user/host@OTHER.REALM",
+                expected: None,
+            },
             // A principal with no realm is already a short name.
-            (&["RULE:[1:$1]s/x/y/"], "user", Some("user")),
-            (&[], "user", Some("user")),
+            Mapping {
+                specs: &["RULE:[1:$1]s/x/y/"],
+                principal: "user",
+                expected: Some("user"),
+            },
+            Mapping {
+                specs: &[],
+                principal: "user",
+                expected: Some("user"),
+            },
             // `(match)` is a whole-string match.
-            (
-                &["RULE:[1:$1](ali)s/^/x/", "DEFAULT"],
-                "alice@REALM.COM",
-                Some("alice"),
-            ),
-            (
-                &["RULE:[1:$1](ali.*)s/^/x/"],
-                "alice@REALM.COM",
-                Some("xalice"),
-            ),
-            (&["RULE:[1:$1](a|al)s/^/x/"], "al@REALM.COM", Some("xal")),
+            Mapping {
+                specs: &["RULE:[1:$1](ali)s/^/x/", "DEFAULT"],
+                principal: "alice@REALM.COM",
+                expected: Some("alice"),
+            },
+            Mapping {
+                specs: &["RULE:[1:$1](ali.*)s/^/x/"],
+                principal: "alice@REALM.COM",
+                expected: Some("xalice"),
+            },
+            Mapping {
+                specs: &["RULE:[1:$1](a|al)s/^/x/"],
+                principal: "al@REALM.COM",
+                expected: Some("xal"),
+            },
             // /L and /U change the case of the result.
-            (&["RULE:[1:$1]/L"], "Alice@REALM.COM", Some("alice")),
-            (&["RULE:[1:$1]/U"], "Alice@REALM.COM", Some("ALICE")),
-            (
-                &["RULE:[1:$1](.*)s/A/a/g/U"],
-                "BANANA@REALM.COM",
-                Some("BANANA"),
-            ),
-            (&["RULE:[1:$1]s/A/a/L"], "Alice@REALM.COM", Some("alice")),
+            Mapping {
+                specs: &["RULE:[1:$1]/L"],
+                principal: "Alice@REALM.COM",
+                expected: Some("alice"),
+            },
+            Mapping {
+                specs: &["RULE:[1:$1]/U"],
+                principal: "Alice@REALM.COM",
+                expected: Some("ALICE"),
+            },
+            Mapping {
+                specs: &["RULE:[1:$1](.*)s/A/a/g/U"],
+                principal: "BANANA@REALM.COM",
+                expected: Some("BANANA"),
+            },
+            Mapping {
+                specs: &["RULE:[1:$1]s/A/a/L"],
+                principal: "Alice@REALM.COM",
+                expected: Some("alice"),
+            },
             // The parameters: `$0` is the realm.
-            (
-                &["RULE:[2:$1@$0](.*@REALM.COM)s/@.*//"],
-                "user/host@REALM.COM",
-                Some("user"),
-            ),
-            (
-                &["RULE:[2:$1.$2@$0]s/^(.*)\\.(.*)@.*$/$2-$1/"],
-                "user/host@REALM.COM",
-                Some("host-user"),
-            ),
+            Mapping {
+                specs: &["RULE:[2:$1@$0](.*@REALM.COM)s/@.*//"],
+                principal: "user/host@REALM.COM",
+                expected: Some("user"),
+            },
+            Mapping {
+                specs: &["RULE:[2:$1.$2@$0]s/^(.*)\\.(.*)@.*$/$2-$1/"],
+                principal: "user/host@REALM.COM",
+                expected: Some("host-user"),
+            },
             // First match wins, and a component count that differs is a skip.
-            (
-                &["RULE:[2:$1]s/^/two-/", "RULE:[1:$1]s/^/one-/"],
-                "alice@REALM.COM",
-                Some("one-alice"),
-            ),
+            Mapping {
+                specs: &["RULE:[2:$1]s/^/two-/", "RULE:[1:$1]s/^/one-/"],
+                principal: "alice@REALM.COM",
+                expected: Some("one-alice"),
+            },
             // A result that keeps a `/` or `@` is an error, not a fall-through.
-            (&["RULE:[2:$1/$2]", "DEFAULT"], "user/host@REALM.COM", None),
-            (&["RULE:[1:$1@$0]", "DEFAULT"], "user@REALM.COM", None),
+            Mapping {
+                specs: &["RULE:[2:$1/$2]", "DEFAULT"],
+                principal: "user/host@REALM.COM",
+                expected: None,
+            },
+            Mapping {
+                specs: &["RULE:[1:$1@$0]", "DEFAULT"],
+                principal: "user@REALM.COM",
+                expected: None,
+            },
             // No rule matches.
-            (&["RULE:[1:$1](nope)s/a/b/"], "alice@REALM.COM", None),
+            Mapping {
+                specs: &["RULE:[1:$1](nope)s/a/b/"],
+                principal: "alice@REALM.COM",
+                expected: None,
+            },
             // A component with a `/` past the second is malformed.
-            (&["DEFAULT"], "a/b/c@REALM.COM", None),
+            Mapping {
+                specs: &["DEFAULT"],
+                principal: "a/b/c@REALM.COM",
+                expected: None,
+            },
             // A `$` with no number in the format is an error.
-            (&["RULE:[1:$x]"], "alice@REALM.COM", None),
+            Mapping {
+                specs: &["RULE:[1:$x]"],
+                principal: "alice@REALM.COM",
+                expected: None,
+            },
         ];
-        for (specs, principal, expected) in cases {
+        for Mapping {
+            specs,
+            principal,
+            expected,
+        } in cases
+        {
             check!(
                 map(specs, principal, realm).as_deref() == expected,
                 "{specs:?} on {principal}"

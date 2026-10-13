@@ -74,10 +74,10 @@ krabka_macros::unix_millis_fixture!(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_log_append_time_topic_reports_the_stamp_it_wrote() {
     let p = support::start().await;
-    let topic_id = ready_topic(&p.broker, &p.client, "audit", &[(
-        "message.timestamp.type",
-        "LogAppendTime",
-    )])
+    let topic_id = ready_topic(&p.broker, &p.client, "audit", &[ConfigOverride {
+        key: "message.timestamp.type",
+        value: "LogAppendTime",
+    }])
     .await;
 
     let before = now_ms();
@@ -97,7 +97,10 @@ async fn a_log_append_time_topic_reports_the_stamp_it_wrote() {
     // nothing.
     check!(
         offset_for_time(&p.client, "audit", PRODUCER_TIMESTAMP_MS).await
-            == Some((0, row.log_append_time_ms))
+            == Some(TimestampedOffset {
+                offset: 0,
+                timestamp: row.log_append_time_ms,
+            })
     );
     check!(offset_for_time(&p.client, "audit", row.log_append_time_ms + 1).await == None);
 
@@ -119,7 +122,10 @@ async fn a_create_time_topic_reports_no_stamp() {
     p.broker.wait_until_high_watermark("orders", 0, 1).await;
     check!(
         offset_for_time(&p.client, "orders", PRODUCER_TIMESTAMP_MS).await
-            == Some((0, PRODUCER_TIMESTAMP_MS)),
+            == Some(TimestampedOffset {
+                offset: 0,
+                timestamp: PRODUCER_TIMESTAMP_MS,
+            }),
         "a CreateTime topic keeps the producer's timestamp"
     );
 
@@ -132,10 +138,10 @@ async fn a_create_time_topic_reports_no_stamp() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_timestamp_older_than_the_window_is_refused() {
     let p = support::start().await;
-    let topic_id = ready_topic(&p.broker, &p.client, "metrics", &[(
-        "message.timestamp.before.max.ms",
-        &WINDOW_MS.to_string(),
-    )])
+    let topic_id = ready_topic(&p.broker, &p.client, "metrics", &[ConfigOverride {
+        key: "message.timestamp.before.max.ms",
+        value: &WINDOW_MS.to_string(),
+    }])
     .await;
 
     let refused = produce(&p.client, "metrics", topic_id, PRODUCER_TIMESTAMP_MS).await;
@@ -157,10 +163,10 @@ async fn a_timestamp_older_than_the_window_is_refused() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_timestamp_newer_than_the_window_is_refused() {
     let p = support::start().await;
-    let topic_id = ready_topic(&p.broker, &p.client, "forecasts", &[(
-        "message.timestamp.after.max.ms",
-        &WINDOW_MS.to_string(),
-    )])
+    let topic_id = ready_topic(&p.broker, &p.client, "forecasts", &[ConfigOverride {
+        key: "message.timestamp.after.max.ms",
+        value: &WINDOW_MS.to_string(),
+    }])
     .await;
 
     let ahead_ms = now_ms() + 2 * WINDOW_MS;
@@ -180,8 +186,14 @@ async fn a_timestamp_newer_than_the_window_is_refused() {
 async fn log_append_time_ignores_the_timestamp_windows() {
     let p = support::start().await;
     let topic_id = ready_topic(&p.broker, &p.client, "traces", &[
-        ("message.timestamp.type", "LogAppendTime"),
-        ("message.timestamp.before.max.ms", &WINDOW_MS.to_string()),
+        ConfigOverride {
+            key: "message.timestamp.type",
+            value: "LogAppendTime",
+        },
+        ConfigOverride {
+            key: "message.timestamp.before.max.ms",
+            value: &WINDOW_MS.to_string(),
+        },
     ])
     .await;
 
@@ -251,6 +263,20 @@ fn refusal(timestamp_ms: i64, actual: &PartitionProduceResponse) -> PartitionPro
     }
 }
 
+/// One topic config override given to `CreateTopics`.
+#[derive(Debug, PartialEq, Eq)]
+struct ConfigOverride<'a> {
+    key: &'a str,
+    value: &'a str,
+}
+
+/// An offset and the timestamp stored for it.
+#[derive(Debug, PartialEq, Eq)]
+struct TimestampedOffset {
+    offset: i64,
+    timestamp: i64,
+}
+
 /// Create a one-partition topic with `overrides`, wait until the overrides have
 /// reached the metadata image the produce path reads and, for a
 /// `LogAppendTime` topic, the partition's own log config, then return its id.
@@ -258,7 +284,7 @@ async fn ready_topic(
     broker: &BrokerHandle,
     client: &Client,
     name: &str,
-    overrides: &[(&str, &str)],
+    overrides: &[ConfigOverride<'_>],
 ) -> WireUuid {
     let response = client
         .send(CreateTopicsRequest {
@@ -268,7 +294,7 @@ async fn ready_topic(
                 replication_factor: 1,
                 configs: overrides
                     .iter()
-                    .map(|(key, value)| CreatableTopicConfig {
+                    .map(|ConfigOverride { key, value }| CreatableTopicConfig {
                         name: (*key).to_owned(),
                         value: Some((*value).to_owned()),
                         ..CreatableTopicConfig::default()
@@ -287,23 +313,22 @@ async fn ready_topic(
         response.topics[0].error_message
     );
     broker.wait_until_partition_present(name, 0).await;
-    let expected: Vec<(String, String)> = overrides
-        .iter()
-        .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-        .collect();
     broker
         .wait_for_image(|image| {
-            expected.iter().all(|(key, value)| {
+            overrides.iter().all(|ConfigOverride { key, value }| {
                 image
                     .topic_config(name)
-                    .and_then(|configs| configs.get(key))
+                    .and_then(|configs| configs.get(*key))
                     .is_some_and(|stored| stored == value)
             })
         })
         .await;
     // The stamp is the log's, so a `LogAppendTime` case must also wait for the
     // override to travel from the image into the partition's own `LogConfig`.
-    if overrides.contains(&("message.timestamp.type", "LogAppendTime")) {
+    if overrides.contains(&ConfigOverride {
+        key: "message.timestamp.type",
+        value: "LogAppendTime",
+    }) {
         broker
             .wait_for_metrics(
                 "message.timestamp.type reaches the partition LogConfig",
@@ -349,7 +374,11 @@ async fn produce(
 /// `ListOffsets` by time: the first offset at or after `timestamp_ms`, with the
 /// timestamp stored for it. `None` is Kafka's "no such offset" answer, the row
 /// whose offset is -1.
-async fn offset_for_time(client: &Client, topic: &str, timestamp_ms: i64) -> Option<(i64, i64)> {
+async fn offset_for_time(
+    client: &Client,
+    topic: &str,
+    timestamp_ms: i64,
+) -> Option<TimestampedOffset> {
     let response = client
         .send(ListOffsetsRequest {
             replica_id: -1,
@@ -362,5 +391,8 @@ async fn offset_for_time(client: &Client, topic: &str, timestamp_ms: i64) -> Opt
         .expect("ListOffsets");
     let row = &response.topics[0].partitions[0];
     assert!(row.error_code == codes::NONE);
-    (row.offset >= 0).then_some((row.offset, row.timestamp))
+    (row.offset >= 0).then_some(TimestampedOffset {
+        offset: row.offset,
+        timestamp: row.timestamp,
+    })
 }

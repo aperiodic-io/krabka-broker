@@ -152,6 +152,22 @@ fn new_registration(node: u64) -> krabka_metadata::MetadataRecord {
     )
 }
 
+/// The leader and ISR of a partition, as broker ids.
+#[derive(Debug, PartialEq, Eq)]
+struct PartitionLeadership {
+    leader: u64,
+    isr: Vec<u64>,
+}
+
+/// The fence and controlled-shutdown flags of a registration, and whether it
+/// still holds the epoch it registered at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RegistrationState {
+    fenced: bool,
+    in_controlled_shutdown: bool,
+    holds_epoch: bool,
+}
+
 /// A controller, node 1, with brokers 2 and 3 registered and one topic `t`:
 /// partition 0 led by 2 with the ISR `[2, 3, 1]`, partition 1 led by 3 with
 /// the ISR `[3, 2]`.
@@ -233,27 +249,27 @@ impl Cluster {
     }
 
     /// The leader and ISR of partition `index` of `t`.
-    fn leader_and_isr(&self, index: i32) -> (u64, Vec<u64>) {
+    fn leader_and_isr(&self, index: i32) -> PartitionLeadership {
         let image = self.broker.controller.current_image();
         let partition = image.partition("t", index).expect("a seeded partition");
-        (
-            partition.leader.0,
-            partition.isr.iter().map(|node| node.0).collect(),
-        )
+        PartitionLeadership {
+            leader: partition.leader.0,
+            isr: partition.isr.iter().map(|node| node.0).collect(),
+        }
     }
 
     fn applied(&self) -> i64 { self.broker.controller.current_metadata_offset() }
 
-    /// The `(fenced, in_controlled_shutdown)` flags of `node`'s registration,
-    /// and whether it still holds the epoch it registered at.
-    fn registration(&self, node: u64, epoch: i64) -> (bool, bool, bool) {
+    /// The fence and controlled-shutdown flags of `node`'s registration, and
+    /// whether it still holds the epoch it registered at.
+    fn registration(&self, node: u64, epoch: i64) -> RegistrationState {
         let image = self.broker.controller.current_image();
         let registration = image.broker(NodeId(node)).expect("a registered broker");
-        (
-            registration.fenced,
-            registration.in_controlled_shutdown,
-            registration.broker_epoch == epoch,
-        )
+        RegistrationState {
+            fenced: registration.fenced,
+            in_controlled_shutdown: registration.in_controlled_shutdown,
+            holds_epoch: registration.broker_epoch == epoch,
+        }
     }
 }
 
@@ -278,7 +294,11 @@ async fn a_controlled_shutdown_drains_the_isrs_and_waits_for_active_brokers() {
     // `BrokerRegistrationChangeRecord`s move its fence and its controlled
     // shutdown, at the epoch it registered at.
     let mut registrations = vec![("registered", cluster.registration(2, epoch_2))];
-    let mut expected_registrations = vec![("registered", (true, false, true))];
+    let mut expected_registrations = vec![("registered", RegistrationState {
+        fenced: true,
+        in_controlled_shutdown: false,
+        holds_epoch: true,
+    })];
 
     let stale = Answer {
         error_code: codes::STALE_BROKER_EPOCH,
@@ -321,7 +341,11 @@ async fn a_controlled_shutdown_drains_the_isrs_and_waits_for_active_brokers() {
             .await,
     ));
     registrations.push(("unfenced", cluster.registration(2, epoch_2)));
-    expected_registrations.push(("unfenced", (false, false, true)));
+    expected_registrations.push(("unfenced", RegistrationState {
+        fenced: false,
+        in_controlled_shutdown: false,
+        holds_epoch: true,
+    }));
 
     expected.push(("broker 2 asks to shut down", answer(false, false)));
     answers.push((
@@ -329,16 +353,26 @@ async fn a_controlled_shutdown_drains_the_isrs_and_waits_for_active_brokers() {
         cluster.heartbeat(2, epoch_2, cluster.applied(), true).await,
     ));
     registrations.push(("in controlled shutdown", cluster.registration(2, epoch_2)));
-    expected_registrations.push(("in controlled shutdown", (false, true, true)));
+    expected_registrations.push(("in controlled shutdown", RegistrationState {
+        fenced: false,
+        in_controlled_shutdown: true,
+        holds_epoch: true,
+    }));
     let drained = cluster.applied();
-    let (leader_0, isr_0) = cluster.leader_and_isr(0);
-    let (leader_1, isr_1) = cluster.leader_and_isr(1);
+    let PartitionLeadership {
+        leader: leader_0,
+        isr: isr_0,
+    } = cluster.leader_and_isr(0);
     check!(
         leader_0 != 2 && !isr_0.contains(&2),
         "partition 0: {leader_0} {isr_0:?}"
     );
     check!(
-        (leader_1, isr_1) == (3, vec![3]),
+        cluster.leader_and_isr(1)
+            == PartitionLeadership {
+                leader: 3,
+                isr: vec![3]
+            },
         "broker 2 left the ISR it only follows"
     );
 
@@ -373,7 +407,11 @@ async fn a_controlled_shutdown_drains_the_isrs_and_waits_for_active_brokers() {
         cluster.heartbeat(2, epoch_2, cluster.applied(), true).await,
     ));
     registrations.push(("shut down", cluster.registration(2, epoch_2)));
-    expected_registrations.push(("shut down", (true, true, true)));
+    expected_registrations.push(("shut down", RegistrationState {
+        fenced: true,
+        in_controlled_shutdown: true,
+        holds_epoch: true,
+    }));
 
     check!(answers == expected);
     check!(registrations == expected_registrations);
@@ -438,7 +476,18 @@ async fn a_restart_from_controlled_shutdown_starts_fenced() {
     check!(restarted > epoch_2);
     check!(
         [registered, cluster.registration(2, restarted)]
-            == [(true, false, true), (false, false, true)]
+            == [
+                RegistrationState {
+                    fenced: true,
+                    in_controlled_shutdown: false,
+                    holds_epoch: true
+                },
+                RegistrationState {
+                    fenced: false,
+                    in_controlled_shutdown: false,
+                    holds_epoch: true
+                }
+            ]
     );
     cluster.handle.shutdown().await;
 }
@@ -515,7 +564,13 @@ async fn an_unfencing_broker_takes_back_a_partition_with_no_leader() {
             == crate::elr::state::PartitionElr::default()
     );
     check!(image.leader_recovery_state("t", 1) == krabka_metadata::LeaderRecoveryState::Recovering);
-    check!(cluster.leader_and_isr(0) == (2, vec![2, 3, 1]));
+    check!(
+        cluster.leader_and_isr(0)
+            == PartitionLeadership {
+                leader: 2,
+                isr: vec![2, 3, 1]
+            }
+    );
     cluster.handle.shutdown().await;
 }
 
@@ -535,6 +590,15 @@ fn success_response_default() -> Answer {
 /// broker sends a set, and only when the set changed.
 #[test]
 fn a_heartbeat_stores_its_cordoned_dirs_from_4_3_iv0() {
+    /// A heartbeat's cordoned set at a `metadata.version` level, and the registration
+    /// change it must produce.
+    struct CordonCase {
+        label: &'static str,
+        level: i16,
+        cordoned: Option<&'static [u128]>,
+        want: Option<krabka_metadata::MetadataRecord>,
+    }
+
     let dir = |n: u128| uuid::Uuid::from_u128(n);
     let registration = krabka_metadata::BrokerRegistrationRecord {
         cordoned_log_dirs: Some(vec![dir(1)]),
@@ -578,19 +642,45 @@ fn a_heartbeat_stores_its_cordoned_dirs_from_4_3_iv0() {
             },
         ))
     };
-    let cases: [(&str, i16, Option<&[u128]>, _); 5] = [
-        (
-            "every directory cordoned",
-            30,
-            Some(&[1, 2]),
-            stored(&[1, 2]),
-        ),
-        ("uncordoned", 30, Some(&[]), stored(&[])),
-        ("unchanged", 30, Some(&[1]), None),
-        ("not caught up yet", 30, None, None),
-        ("below 4.3-IV0", 29, Some(&[1, 2]), None),
+    let cases: [CordonCase; 5] = [
+        CordonCase {
+            label: "every directory cordoned",
+            level: 30,
+            cordoned: Some(&[1, 2]),
+            want: stored(&[1, 2]),
+        },
+        CordonCase {
+            label: "uncordoned",
+            level: 30,
+            cordoned: Some(&[]),
+            want: stored(&[]),
+        },
+        CordonCase {
+            label: "unchanged",
+            level: 30,
+            cordoned: Some(&[1]),
+            want: None,
+        },
+        CordonCase {
+            label: "not caught up yet",
+            level: 30,
+            cordoned: None,
+            want: None,
+        },
+        CordonCase {
+            label: "below 4.3-IV0",
+            level: 29,
+            cordoned: Some(&[1, 2]),
+            want: None,
+        },
     ];
-    for (label, level, cordoned, want) in cases {
+    for CordonCase {
+        label,
+        level,
+        cordoned,
+        want,
+    } in cases
+    {
         check!(
             cordoned_dirs_change(&image_at(level), NodeId(2), &heartbeat(cordoned)) == want,
             "{label}"

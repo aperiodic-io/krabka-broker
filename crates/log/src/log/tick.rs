@@ -194,8 +194,8 @@ mod tests {
         crate::{
             config::LogConfig,
             log::test_support::{
-                append_samples, install_stamps, rolled_log, rolling_test_log, sample_batch,
-                test_log, tiny_segments,
+                TempLog, append_samples, install_stamps, rolled_log, rolling_test_log,
+                sample_batch, test_log, tiny_segments,
             },
         },
         assert2::check,
@@ -250,51 +250,78 @@ mod tests {
 
         /// The policy, the retention byte budget, the log start offset set
         /// before the tick, and the base offsets that survive it.
-        type Case = (CleanupPolicy, Option<ByteSize>, Offset, Vec<Offset>);
+        struct Case {
+            cleanup_policy: CleanupPolicy,
+            retention_size: Option<ByteSize>,
+            log_start: Offset,
+            expected: Vec<Offset>,
+        }
 
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100);
         let all = vec![Offset(0), Offset(1), Offset(2)];
-        let cases: [Case; 8] = [
-            (CleanupPolicy::Delete, None, Offset(0), vec![
-                Offset(1),
-                Offset(2),
-            ]),
-            (CleanupPolicy::Compact, None, Offset(0), all.clone()),
-            (CleanupPolicy::CompactAndDelete, None, Offset(0), vec![
-                Offset(1),
-                Offset(2),
-            ]),
+        let cases = [
+            Case {
+                cleanup_policy: CleanupPolicy::Delete,
+                retention_size: None,
+                log_start: Offset(0),
+                expected: vec![Offset(1), Offset(2)],
+            },
+            Case {
+                cleanup_policy: CleanupPolicy::Compact,
+                retention_size: None,
+                log_start: Offset(0),
+                expected: all.clone(),
+            },
+            Case {
+                cleanup_policy: CleanupPolicy::CompactAndDelete,
+                retention_size: None,
+                log_start: Offset(0),
+                expected: vec![Offset(1), Offset(2)],
+            },
             // Size retention with a budget of nothing deletes every segment,
             // the active one behind a roll, but only under a policy that
             // deletes.
-            (
-                CleanupPolicy::Delete,
-                Some(ByteSize::ZERO),
-                Offset(0),
-                vec![],
-            ),
-            (
-                CleanupPolicy::Compact,
-                Some(ByteSize::ZERO),
-                Offset(0),
-                all.clone(),
-            ),
-            (
-                CleanupPolicy::CompactAndDelete,
-                Some(ByteSize::ZERO),
-                Offset(0),
-                vec![],
-            ),
+            Case {
+                cleanup_policy: CleanupPolicy::Delete,
+                retention_size: Some(ByteSize::ZERO),
+                log_start: Offset(0),
+                expected: vec![],
+            },
+            Case {
+                cleanup_policy: CleanupPolicy::Compact,
+                retention_size: Some(ByteSize::ZERO),
+                log_start: Offset(0),
+                expected: all.clone(),
+            },
+            Case {
+                cleanup_policy: CleanupPolicy::CompactAndDelete,
+                retention_size: Some(ByteSize::ZERO),
+                log_start: Offset(0),
+                expected: vec![],
+            },
             // A segment wholly below the log start offset goes under every
             // policy, and a segment the start offset only reaches stays.
-            (CleanupPolicy::Compact, None, Offset(1), vec![
-                Offset(1),
-                Offset(2),
-            ]),
-            (CleanupPolicy::Compact, None, Offset(2), vec![Offset(2)]),
+            Case {
+                cleanup_policy: CleanupPolicy::Compact,
+                retention_size: None,
+                log_start: Offset(1),
+                expected: vec![Offset(1), Offset(2)],
+            },
+            Case {
+                cleanup_policy: CleanupPolicy::Compact,
+                retention_size: None,
+                log_start: Offset(2),
+                expected: vec![Offset(2)],
+            },
         ];
 
-        for (cleanup_policy, retention_size, log_start, expected) in cases {
+        for Case {
+            cleanup_policy,
+            retention_size,
+            log_start,
+            expected,
+        } in cases
+        {
             let dir = tempdir().unwrap();
             let mut log = Log::open(dir.path(), LogConfig {
                 retention: Some(secs(10)),
@@ -329,7 +356,7 @@ mod tests {
 
     #[test]
     fn tick_with_no_retention_is_noop() {
-        let (_dir, mut log) = test_log();
+        let TempLog { dir: _dir, mut log } = test_log();
         let mut b1 = sample_batch(2);
         let mut b2 = sample_batch(3);
         log.append(&mut b1).unwrap();
@@ -471,21 +498,56 @@ mod tests {
     /// all of one size `s`; the budget is the total minus the debt below.
     #[test]
     fn tick_size_retention_deletes_only_segments_the_debt_covers() {
-        // The size debt in half-segments, and the sealed segments left.
-        let cases: [(&str, Option<u64>, usize); 7] = [
-            ("under budget", None, 4),
-            ("exactly at budget", Some(0), 4),
-            ("half a segment over", Some(1), 4),
-            ("one segment over", Some(2), 3),
-            ("one and a half segments over", Some(3), 3),
-            ("two segments over", Some(4), 2),
-            (
-                "the whole log over, the active segment behind a roll",
-                Some(10),
-                0,
-            ),
+        /// A case name, the size debt in half-segments, and the sealed
+        /// segments left.
+        struct DebtCase {
+            name: &'static str,
+            debt_halves: Option<u64>,
+            expected_sealed: usize,
+        }
+        let cases = [
+            DebtCase {
+                name: "under budget",
+                debt_halves: None,
+                expected_sealed: 4,
+            },
+            DebtCase {
+                name: "exactly at budget",
+                debt_halves: Some(0),
+                expected_sealed: 4,
+            },
+            DebtCase {
+                name: "half a segment over",
+                debt_halves: Some(1),
+                expected_sealed: 4,
+            },
+            DebtCase {
+                name: "one segment over",
+                debt_halves: Some(2),
+                expected_sealed: 3,
+            },
+            DebtCase {
+                name: "one and a half segments over",
+                debt_halves: Some(3),
+                expected_sealed: 3,
+            },
+            DebtCase {
+                name: "two segments over",
+                debt_halves: Some(4),
+                expected_sealed: 2,
+            },
+            DebtCase {
+                name: "the whole log over, the active segment behind a roll",
+                debt_halves: Some(10),
+                expected_sealed: 0,
+            },
         ];
-        for (name, debt_halves, expected_sealed) in cases {
+        for DebtCase {
+            name,
+            debt_halves,
+            expected_sealed,
+        } in cases
+        {
             let dir = tempdir().unwrap();
             let mut log = rolling_test_log(dir.path());
             append_samples(&mut log, 5, 1);

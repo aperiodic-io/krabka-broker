@@ -219,6 +219,11 @@ async fn await_flushed(broker: &BrokerHandle) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn capture_freezes_a_live_diskless_index_without_producing_to_it() {
+    #[derive(Debug)]
+    struct CoveredRange {
+        first_offset: i64,
+        last_offset: i64,
+    }
     let broker = start_diskless_broker().await;
     let topic_id = create_diskless_topic(&broker.bootstrap).await;
     produce(&broker.bootstrap, topic_id).await;
@@ -256,16 +261,21 @@ async fn capture_freezes_a_live_diskless_index_without_producing_to_it() {
     check!(capture.source_cutoffs[0] > 0);
     // Every committed offset is covered once, in order, by the captured
     // ranges. The object keys are the flusher's to choose.
-    let covered: Vec<(i64, i64)> = capture
+    let covered: Vec<CoveredRange> = capture
         .partitions
         .iter()
         .flat_map(|partition| &partition.ranges)
-        .map(|range| (range.entry.first_offset, range.entry.last_offset))
+        .map(|range| CoveredRange {
+            first_offset: range.entry.first_offset,
+            last_offset: range.entry.last_offset,
+        })
         .collect();
-    check!(covered.first().map(|range| range.0) == Some(0));
-    check!(covered.last().map(|range| range.1) == Some(RECORDS - 1));
+    check!(covered.first().map(|range| range.first_offset) == Some(0));
+    check!(covered.last().map(|range| range.last_offset) == Some(RECORDS - 1));
     check!(
-        covered.windows(2).all(|pair| pair[1].0 == pair[0].1 + 1),
+        covered
+            .windows(2)
+            .all(|pair| pair[1].first_offset == pair[0].last_offset + 1),
         "the captured ranges leave a gap: {covered:?}"
     );
     let partitions: Vec<DisklessPartitionCapture> = capture

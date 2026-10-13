@@ -110,8 +110,14 @@ pub(crate) struct TxnCoordinator {
 /// A connection a transaction check keeps open to a remote coordinator, and
 /// the endpoint it was dialed at.
 struct VerificationConnection {
-    address: (String, u16),
+    address: VerificationEndpoint,
     connection: krabka_client_core::Connection,
+}
+
+/// The host and port a verification connection was dialed at.
+struct VerificationEndpoint {
+    host: String,
+    port: u16,
 }
 
 struct MarkerTransport {

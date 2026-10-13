@@ -111,6 +111,14 @@ mod krabka_protocol {
     }
 }
 
+/// Where one API's response puts the throttle at one version.
+#[derive(Debug, PartialEq, Eq)]
+struct Observation {
+    api_key: i16,
+    version: ApiVersion,
+    position: ThrottlePosition,
+}
+
 fn probes() -> BTreeMap<i16, Probe> {
     krabka_macros::throttle_probes! {
         throttled: Metadata;
@@ -124,20 +132,29 @@ fn probes() -> BTreeMap<i16, Probe> {
 #[test]
 fn each_probe_reports_where_its_schema_puts_the_throttle() {
     let probes = probes();
-    let observed: Vec<(i16, ApiVersion, ThrottlePosition)> = probes
+    let observed: Vec<Observation> = probes
         .iter()
-        .flat_map(|(&api_key, probe)| [2, 3].map(|version| (api_key, version, probe(version))))
+        .flat_map(|(&api_key, probe)| {
+            [2, 3].map(|version| Observation {
+                api_key,
+                version,
+                position: probe(version),
+            })
+        })
         .collect();
 
-    assert!(
-        observed
-            == [
-                (0, 2, ThrottlePosition::Buried),
-                (0, 3, ThrottlePosition::Leading),
-                (3, 2, ThrottlePosition::Absent),
-                (3, 3, ThrottlePosition::Leading),
-                (17, 2, ThrottlePosition::Absent),
-                (17, 3, ThrottlePosition::Absent),
-            ]
-    );
+    let expected = [
+        (0, 2, ThrottlePosition::Buried),
+        (0, 3, ThrottlePosition::Leading),
+        (3, 2, ThrottlePosition::Absent),
+        (3, 3, ThrottlePosition::Leading),
+        (17, 2, ThrottlePosition::Absent),
+        (17, 3, ThrottlePosition::Absent),
+    ]
+    .map(|(api_key, version, position)| Observation {
+        api_key,
+        version,
+        position,
+    });
+    assert!(observed == expected);
 }

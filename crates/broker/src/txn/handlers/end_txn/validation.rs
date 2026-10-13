@@ -4,12 +4,15 @@
 //! already-complete answer for an idempotent retry, or a Kafka error code.
 
 use {
-    super::state_table::{EndTxnDecision, end_txn_decision},
+    super::state_table::{EndTxnDecision, TableRules, end_txn_decision},
     crate::{
         authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
         codes,
         handlers::RequestContext,
-        txn::{coordinator::TxnCoordinator, state::TxnEntry, version::TxnVersion},
+        txn::{
+            coordinator::TxnCoordinator, state::TxnEntry, util::ProducerIdentity,
+            version::TxnVersion,
+        },
     },
     krabka_log::ProducerId,
     krabka_metadata::{AclOperation, MetadataImage, ResourceType},
@@ -66,9 +69,15 @@ pub(super) async fn validate_end_txn(
         let state = entry.lock().await;
         end_txn_decision(
             &state,
-            (ProducerId(request.producer_id), request.producer_epoch),
+            ProducerIdentity {
+                producer_id: ProducerId(request.producer_id),
+                producer_epoch: request.producer_epoch,
+            },
             request.committed,
-            (client_version.verified(), trunk_rules),
+            TableRules {
+                verified: client_version.verified(),
+                trunk_rules,
+            },
         )
     };
     match decision {

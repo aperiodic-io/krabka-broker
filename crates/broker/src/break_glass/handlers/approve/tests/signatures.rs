@@ -24,22 +24,27 @@ use {
     tempfile::TempDir,
 };
 
+/// An operator key, and the signer for it.
+struct OperatorKey {
+    pair: Ed25519KeyPair,
+    entry: OperatorKeyEntry,
+}
+
 // An operator key bound to `principal`, plus the signer for it.
-fn operator_key(
-    dir: &TempDir,
-    key_id: &str,
-    principal: &str,
-) -> (Ed25519KeyPair, OperatorKeyEntry) {
+fn operator_key(dir: &TempDir, key_id: &str, principal: &str) -> OperatorKey {
     let (pair, path) = ed25519_public_key_file()
         .dir(dir.path())
         .name(&format!("{key_id}.pub"))
         .context("write key file")
         .call();
-    (pair, OperatorKeyEntry {
-        key_id: key_id.to_owned(),
-        principal: principal.to_owned(),
-        public_key_path: path,
-    })
+    OperatorKey {
+        pair,
+        entry: OperatorKeyEntry {
+            key_id: key_id.to_owned(),
+            principal: principal.to_owned(),
+            public_key_path: path,
+        },
+    }
 }
 
 #[test]
@@ -64,8 +69,13 @@ fn an_action_that_needs_a_signature_refuses_an_unsigned_approval() {
 #[test]
 fn a_signature_verifies_against_the_bound_principal_and_the_signed_bytes() {
     let dir = TempDir::new().expect("tempdir");
-    let (bob, bob_entry) = operator_key(&dir, "bob-yubi", "User:bob");
-    let (_, carol_entry) = operator_key(&dir, "carol-yubi", "User:carol");
+    let OperatorKey {
+        pair: bob,
+        entry: bob_entry,
+    } = operator_key(&dir, "bob-yubi", "User:bob");
+    let OperatorKey {
+        entry: carol_entry, ..
+    } = operator_key(&dir, "carol-yubi", "User:carol");
     let keys = OperatorKeys::load(&[bob_entry, carol_entry]).expect("load the trust set");
     let config = BreakGlassConfig {
         signed_actions: vec!["delete_topic".to_owned()],
@@ -141,7 +151,10 @@ fn a_signature_verifies_against_the_bound_principal_and_the_signed_bytes() {
 #[test]
 fn a_signature_on_an_action_that_needs_none_is_still_verified() {
     let dir = TempDir::new().expect("tempdir");
-    let (bob, bob_entry) = operator_key(&dir, "bob-yubi", "User:bob");
+    let OperatorKey {
+        pair: bob,
+        entry: bob_entry,
+    } = operator_key(&dir, "bob-yubi", "User:bob");
     let keys = OperatorKeys::load(&[bob_entry]).expect("load the trust set");
     let config = config();
     let policy = BreakGlassPolicy::new(&config);

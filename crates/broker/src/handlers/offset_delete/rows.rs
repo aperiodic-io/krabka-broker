@@ -34,6 +34,12 @@ pub(super) struct Rows {
     pub to_remove: Vec<(String, i32)>,
 }
 
+/// A requested topic and the partitions of it that pass the broker's checks.
+struct ValidTopic<'a> {
+    name: &'a str,
+    partitions: Vec<i32>,
+}
+
 /// Builds the response rows in Kafka's two steps.
 ///
 /// `KafkaApis.handleOffsetDeleteRequest` answers first, per topic:
@@ -59,7 +65,7 @@ pub(super) fn build_response_rows(
     topic_partition_counts: &HashMap<&str, i32>,
 ) -> Result<Rows, BrokerError> {
     let mut out: Vec<OffsetDeleteResponseTopic> = Vec::new();
-    let mut valid: Vec<(&str, Vec<i32>)> = Vec::new();
+    let mut valid: Vec<ValidTopic<'_>> = Vec::new();
 
     for topic in topics {
         let denied = topic_decisions
@@ -82,14 +88,17 @@ pub(super) fn build_response_rows(
             push_row(&mut out, &topic.name, index, code);
         }
         if !valid_partitions.is_empty() {
-            valid.push((topic.name.as_str(), valid_partitions));
+            valid.push(ValidTopic {
+                name: topic.name.as_str(),
+                partitions: valid_partitions,
+            });
         }
     }
 
     let mut tombstones: Vec<Record> = Vec::new();
     let mut to_remove: Vec<(String, i32)> = Vec::new();
     let mut delta: i32 = 0;
-    for (name, partitions) in valid {
+    for ValidTopic { name, partitions } in valid {
         let subscribed = subscribed_topics.contains(name);
         for index in partitions {
             let code = if subscribed {
@@ -141,32 +150,54 @@ mod tests {
     use {
         super::*,
         crate::handlers::offset_delete::test_support::{
-            expected_row, expected_topic, req_with_topics,
+            RequestTopic, expected_row, expected_topic, req_with_topics,
         },
         assert2::check,
         std::collections::HashSet,
     };
 
-    type Request<'a> = &'a [(&'a str, &'a [i32])];
-    type TopicRows<'a> = &'a [(&'a str, &'a [(i32, i16)])];
+    type Request<'a> = &'a [RequestTopic<'a>];
+    type TopicRows<'a> = &'a [ExpectedTopicRows<'a>];
+
+    /// An expected partition row: its index and error code.
+    #[derive(Clone, Copy)]
+    struct PartitionCode {
+        partition_index: i32,
+        error_code: i16,
+    }
+
+    /// The expected rows of one topic.
+    #[derive(Clone, Copy)]
+    struct ExpectedTopicRows<'a> {
+        name: &'a str,
+        partitions: &'a [PartitionCode],
+    }
+
+    /// A key that a case deletes from the group's committed offsets.
+    #[derive(Debug, PartialEq, Eq)]
+    struct RemovedKey<'a> {
+        topic: &'a str,
+        partition: i32,
+    }
+
     /// A `build_rows` case: name, request, subscription, expected rows, and
     /// the keys it deletes.
-    type Case<'a> = (
-        &'a str,
-        Request<'a>,
-        SubscribedTopics,
-        TopicRows<'a>,
-        Vec<(&'a str, i32)>,
-    );
+    struct Case<'a> {
+        name: &'a str,
+        request: Request<'a>,
+        subscribed: SubscribedTopics,
+        want: TopicRows<'a>,
+        want_removed: Vec<RemovedKey<'a>>,
+    }
 
     fn expected(rows: TopicRows<'_>) -> Vec<OffsetDeleteResponseTopic> {
         rows.iter()
-            .map(|(name, partitions)| {
+            .map(|ExpectedTopicRows { name, partitions }| {
                 expected_topic(
                     name,
                     partitions
                         .iter()
-                        .map(|(index, code)| expected_row(*index, *code))
+                        .map(|row| expected_row(row.partition_index, row.error_code))
                         .collect(),
                 )
             })
@@ -182,6 +213,249 @@ mod tests {
         )
     }
 
+    /// The `build_rows` case table. Topics: `t1` (4 partitions), `t2` (8
+    /// partitions), `denied` (Read denied, 4 partitions), `ghost` (not in the
+    /// metadata).
+    fn cases() -> Vec<Case<'static>> {
+        let none = named(&[]);
+        [
+            Case {
+                name: "deletes every valid partition",
+                request: &[
+                    RequestTopic {
+                        name: "t1",
+                        partitions: &[0, 2],
+                    },
+                    RequestTopic {
+                        name: "t2",
+                        partitions: &[7],
+                    },
+                ],
+                subscribed: none.clone(),
+                want: &[
+                    ExpectedTopicRows {
+                        name: "t1",
+                        partitions: &[
+                            PartitionCode {
+                                partition_index: 0,
+                                error_code: codes::NONE,
+                            },
+                            PartitionCode {
+                                partition_index: 2,
+                                error_code: codes::NONE,
+                            },
+                        ],
+                    },
+                    ExpectedTopicRows {
+                        name: "t2",
+                        partitions: &[PartitionCode {
+                            partition_index: 7,
+                            error_code: codes::NONE,
+                        }],
+                    },
+                ],
+                want_removed: vec![
+                    RemovedKey {
+                        topic: "t1",
+                        partition: 0,
+                    },
+                    RemovedKey {
+                        topic: "t1",
+                        partition: 2,
+                    },
+                    RemovedKey {
+                        topic: "t2",
+                        partition: 7,
+                    },
+                ],
+            },
+            Case {
+                name: "denied topic",
+                request: &[RequestTopic {
+                    name: "denied",
+                    partitions: &[0, 1],
+                }],
+                subscribed: none.clone(),
+                want: &[ExpectedTopicRows {
+                    name: "denied",
+                    partitions: &[
+                        PartitionCode {
+                            partition_index: 0,
+                            error_code: codes::TOPIC_AUTHORIZATION_FAILED,
+                        },
+                        PartitionCode {
+                            partition_index: 1,
+                            error_code: codes::TOPIC_AUTHORIZATION_FAILED,
+                        },
+                    ],
+                }],
+                want_removed: vec![],
+            },
+            Case {
+                name: "denied wins over subscribed",
+                request: &[RequestTopic {
+                    name: "denied",
+                    partitions: &[0],
+                }],
+                subscribed: named(&["denied"]),
+                want: &[ExpectedTopicRows {
+                    name: "denied",
+                    partitions: &[PartitionCode {
+                        partition_index: 0,
+                        error_code: codes::TOPIC_AUTHORIZATION_FAILED,
+                    }],
+                }],
+                want_removed: vec![],
+            },
+        ]
+        .into_iter()
+        .chain(more_cases())
+        .collect()
+    }
+
+    /// The remaining `build_rows` cases, see [`cases`].
+    fn more_cases() -> [Case<'static>; 5] {
+        let none = named(&[]);
+        [
+            Case {
+                name: "#734: existence is checked before the subscription",
+                request: &[RequestTopic {
+                    name: "ghost",
+                    partitions: &[0],
+                }],
+                subscribed: named(&["ghost"]),
+                want: &[ExpectedTopicRows {
+                    name: "ghost",
+                    partitions: &[PartitionCode {
+                        partition_index: 0,
+                        error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                    }],
+                }],
+                want_removed: vec![],
+            },
+            Case {
+                name: "subscribed topic that exists",
+                request: &[RequestTopic {
+                    name: "t1",
+                    partitions: &[0],
+                }],
+                subscribed: named(&["t1"]),
+                want: &[ExpectedTopicRows {
+                    name: "t1",
+                    partitions: &[PartitionCode {
+                        partition_index: 0,
+                        error_code: codes::GROUP_SUBSCRIBED_TO_TOPIC,
+                    }],
+                }],
+                want_removed: vec![],
+            },
+            Case {
+                name: "subscribed to every topic",
+                request: &[
+                    RequestTopic {
+                        name: "t1",
+                        partitions: &[0],
+                    },
+                    RequestTopic {
+                        name: "t2",
+                        partitions: &[1],
+                    },
+                ],
+                subscribed: SubscribedTopics::All,
+                want: &[
+                    ExpectedTopicRows {
+                        name: "t1",
+                        partitions: &[PartitionCode {
+                            partition_index: 0,
+                            error_code: codes::GROUP_SUBSCRIBED_TO_TOPIC,
+                        }],
+                    },
+                    ExpectedTopicRows {
+                        name: "t2",
+                        partitions: &[PartitionCode {
+                            partition_index: 1,
+                            error_code: codes::GROUP_SUBSCRIBED_TO_TOPIC,
+                        }],
+                    },
+                ],
+                want_removed: vec![],
+            },
+            Case {
+                name: "out-of-range partitions come first, then the coordinator's",
+                request: &[RequestTopic {
+                    name: "t1",
+                    partitions: &[0, 99, -1, 3],
+                }],
+                subscribed: named(&["t2"]),
+                want: &[ExpectedTopicRows {
+                    name: "t1",
+                    partitions: &[
+                        PartitionCode {
+                            partition_index: 99,
+                            error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                        },
+                        PartitionCode {
+                            partition_index: -1,
+                            error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                        },
+                        PartitionCode {
+                            partition_index: 0,
+                            error_code: codes::NONE,
+                        },
+                        PartitionCode {
+                            partition_index: 3,
+                            error_code: codes::NONE,
+                        },
+                    ],
+                }],
+                want_removed: vec![
+                    RemovedKey {
+                        topic: "t1",
+                        partition: 0,
+                    },
+                    RemovedKey {
+                        topic: "t1",
+                        partition: 3,
+                    },
+                ],
+            },
+            Case {
+                name: "the coordinator's topics follow the broker's",
+                request: &[
+                    RequestTopic {
+                        name: "t1",
+                        partitions: &[0],
+                    },
+                    RequestTopic {
+                        name: "denied",
+                        partitions: &[0],
+                    },
+                ],
+                subscribed: none.clone(),
+                want: &[
+                    ExpectedTopicRows {
+                        name: "denied",
+                        partitions: &[PartitionCode {
+                            partition_index: 0,
+                            error_code: codes::TOPIC_AUTHORIZATION_FAILED,
+                        }],
+                    },
+                    ExpectedTopicRows {
+                        name: "t1",
+                        partitions: &[PartitionCode {
+                            partition_index: 0,
+                            error_code: codes::NONE,
+                        }],
+                    },
+                ],
+                want_removed: vec![RemovedKey {
+                    topic: "t1",
+                    partition: 0,
+                }],
+            },
+        ]
+    }
+
     /// Every branch of the two-step decision, with the whole row list and the
     /// keys it deletes. Topics: `t1` (4 partitions), `t2` (8 partitions),
     /// `denied` (Read denied, 4 partitions), `ghost` (not in the metadata).
@@ -194,94 +468,29 @@ mod tests {
             ("denied", AuthorizationResult::Deny),
         ]);
         let counts = HashMap::from([("t1", 4), ("t2", 8), ("denied", 4)]);
-        let none = named(&[]);
-        let rows: [Case<'_>; 8] = [
-            (
-                "deletes every valid partition",
-                &[("t1", &[0, 2]), ("t2", &[7])],
-                none.clone(),
-                &[
-                    ("t1", &[(0, codes::NONE), (2, codes::NONE)]),
-                    ("t2", &[(7, codes::NONE)]),
-                ],
-                vec![("t1", 0), ("t1", 2), ("t2", 7)],
-            ),
-            (
-                "denied topic",
-                &[("denied", &[0, 1])],
-                none.clone(),
-                &[("denied", &[
-                    (0, codes::TOPIC_AUTHORIZATION_FAILED),
-                    (1, codes::TOPIC_AUTHORIZATION_FAILED),
-                ])],
-                vec![],
-            ),
-            (
-                "denied wins over subscribed",
-                &[("denied", &[0])],
-                named(&["denied"]),
-                &[("denied", &[(0, codes::TOPIC_AUTHORIZATION_FAILED)])],
-                vec![],
-            ),
-            (
-                "#734: existence is checked before the subscription",
-                &[("ghost", &[0])],
-                named(&["ghost"]),
-                &[("ghost", &[(0, codes::UNKNOWN_TOPIC_OR_PARTITION)])],
-                vec![],
-            ),
-            (
-                "subscribed topic that exists",
-                &[("t1", &[0])],
-                named(&["t1"]),
-                &[("t1", &[(0, codes::GROUP_SUBSCRIBED_TO_TOPIC)])],
-                vec![],
-            ),
-            (
-                "subscribed to every topic",
-                &[("t1", &[0]), ("t2", &[1])],
-                SubscribedTopics::All,
-                &[
-                    ("t1", &[(0, codes::GROUP_SUBSCRIBED_TO_TOPIC)]),
-                    ("t2", &[(1, codes::GROUP_SUBSCRIBED_TO_TOPIC)]),
-                ],
-                vec![],
-            ),
-            (
-                "out-of-range partitions come first, then the coordinator's",
-                &[("t1", &[0, 99, -1, 3])],
-                named(&["t2"]),
-                &[("t1", &[
-                    (99, codes::UNKNOWN_TOPIC_OR_PARTITION),
-                    (-1, codes::UNKNOWN_TOPIC_OR_PARTITION),
-                    (0, codes::NONE),
-                    (3, codes::NONE),
-                ])],
-                vec![("t1", 0), ("t1", 3)],
-            ),
-            (
-                "the coordinator's topics follow the broker's",
-                &[("t1", &[0]), ("denied", &[0])],
-                none.clone(),
-                &[
-                    ("denied", &[(0, codes::TOPIC_AUTHORIZATION_FAILED)]),
-                    ("t1", &[(0, codes::NONE)]),
-                ],
-                vec![("t1", 0)],
-            ),
-        ];
+        let rows = cases();
 
-        for (name, request, subscribed, want, want_removed) in rows {
+        for Case {
+            name,
+            request,
+            subscribed,
+            want,
+            want_removed,
+        } in rows
+        {
             let req = req_with_topics(request);
 
             let got =
                 build_response_rows("g", &req.topics, &decisions, &subscribed, &counts).unwrap();
 
             check!(got.topics == expected(want), "{name}");
-            let removed: Vec<(&str, i32)> = got
+            let removed: Vec<RemovedKey<'_>> = got
                 .to_remove
                 .iter()
-                .map(|(t, p)| (t.as_str(), *p))
+                .map(|(topic, partition)| RemovedKey {
+                    topic: topic.as_str(),
+                    partition: *partition,
+                })
                 .collect();
             check!(removed == want_removed, "{name}");
             let deltas: Vec<i32> = got.tombstones.iter().map(|t| t.offset_delta).collect();

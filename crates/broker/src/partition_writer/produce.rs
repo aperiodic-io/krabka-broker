@@ -7,50 +7,79 @@
 
 use {
     super::{
+        WriterPartition,
         append::{run_produce_append_batch, run_produce_append_batch_at},
-        storage::{flag_storage_failure, storage_failure_error},
+        storage::{StorageStatus, flag_storage_failure, storage_failure_error},
     },
     crate::{
         error::BrokerError,
-        log_dir_status::LogDirRegistry,
         partition::{ProduceData, ProduceJob, WriterMessage},
         producer_state::ProducerState,
         replica_state::ReplicaState,
         wal::{OffsetSequencer, SharedWal},
     },
-    arc_swap::ArcSwap,
-    krabka_ids::PartitionIndex,
     krabka_log::Log,
     krabka_raft::RaftError,
-    std::{
-        path::PathBuf,
-        sync::{Arc, Mutex},
-    },
+    std::sync::{Arc, Mutex},
     tokio::sync::{Notify, mpsc},
 };
 
+/// The first queued produce job and the most jobs one group may drain.
+pub(super) struct ProduceGroup {
+    pub(super) first: ProduceJob,
+    pub(super) max_size: usize,
+}
+
+/// The log, its storage health, and the producer tracker a produce group touches.
+#[derive(Clone, Copy)]
+pub(super) struct ProduceStorage<'a> {
+    pub(super) log: &'a Arc<Mutex<Log>>,
+    pub(super) status: StorageStatus<'a>,
+    pub(super) producer_state: &'a ProducerState,
+}
+
+/// The notifications and replica state a produce group signals.
+#[derive(Clone, Copy)]
+pub(super) struct ProduceSignals<'a> {
+    pub(super) append_notify: &'a Arc<Notify>,
+    pub(super) replica_state: &'a Arc<tokio::sync::Mutex<ReplicaState>>,
+    pub(super) hw_advance_notify: &'a Arc<Notify>,
+}
+
+/// The shared WAL and offset sequencer of a diskless partition, if it has them.
+#[derive(Clone, Copy)]
+pub(super) struct DisklessParts<'a> {
+    pub(super) wal: Option<&'a SharedWal>,
+    pub(super) sequencer: Option<&'a Arc<dyn OffsetSequencer>>,
+}
+
 pub(super) async fn handle_produce(
-    identity: (&str, PartitionIndex),
-    group: (ProduceJob, usize),
+    identity: WriterPartition<'_>,
+    group: ProduceGroup,
     rx: &mut mpsc::Receiver<WriterMessage>,
     pending: &mut Option<WriterMessage>,
-    storage: (
-        &Arc<Mutex<Log>>,
-        &Arc<ArcSwap<PathBuf>>,
-        &LogDirRegistry,
-        &ProducerState,
-    ),
-    signals: (
-        &Arc<Notify>,
-        &Arc<tokio::sync::Mutex<ReplicaState>>,
-        &Arc<Notify>,
-    ),
-    diskless: (Option<&SharedWal>, Option<&Arc<dyn OffsetSequencer>>),
+    storage: ProduceStorage<'_>,
+    signals: ProduceSignals<'_>,
+    diskless: DisklessParts<'_>,
 ) {
-    let (first, max_produce_group) = group;
-    let (wal, sequencer) = diskless;
-    let (log, log_dir, log_dir_status, producer_state) = storage;
-    let (append_notify, replica_state, hw_advance_notify) = signals;
+    let ProduceGroup {
+        first,
+        max_size: max_produce_group,
+    } = group;
+    let DisklessParts { wal, sequencer } = diskless;
+    let ProduceStorage {
+        log,
+        status: StorageStatus {
+            log_dir,
+            registry: log_dir_status,
+        },
+        producer_state,
+    } = storage;
+    let ProduceSignals {
+        append_notify,
+        replica_state,
+        hw_advance_notify,
+    } = signals;
     let mut jobs = vec![first];
     while jobs.len() < max_produce_group {
         match rx.try_recv() {
@@ -101,7 +130,10 @@ pub(super) async fn handle_produce(
             return;
         };
         let count = datas.iter().map(ProduceData::record_count).sum();
-        match sequencer.assign(identity.0, identity.1, count).await {
+        match sequencer
+            .assign(identity.topic, identity.partition, count)
+            .await
+        {
             Ok(base) => {
                 run_produce_append_batch_at(Arc::clone(log), base, high_watermark, (datas, checks))
                     .await
@@ -141,7 +173,7 @@ pub(super) async fn handle_produce(
     // Mutex` this call already awaits cooperatively.
     if !control_entries.is_empty() {
         producer_state
-            .mirror_log_entries(identity.0, identity.1, control_entries)
+            .mirror_log_entries(identity.topic, identity.partition, control_entries)
             .await;
     }
 

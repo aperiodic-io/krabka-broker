@@ -40,13 +40,10 @@ async fn create_topic(client: &Client, name: &str, partitions: i32) {
     );
 }
 
-async fn boot_topic(
-    log_dir: std::path::PathBuf,
-    topic: &str,
-) -> (krabka_broker::BrokerHandle, Arc<Client>) {
-    let (broker, client) = boot(log_dir).await;
+async fn boot_topic(log_dir: std::path::PathBuf, topic: &str) -> BrokerWithClient {
+    let BrokerWithClient { broker, client } = boot(log_dir).await;
     create_topic(&client, topic, 2).await;
-    (broker, client)
+    BrokerWithClient { broker, client }
 }
 
 fn rejoin_config(log_dir: std::path::PathBuf) -> BrokerConfig {
@@ -63,7 +60,7 @@ async fn replay_preserves_group_epoch_and_members() {
     let member_id;
     let initial_epoch;
     {
-        let (broker, client) = boot_topic(log_dir.clone(), "tp").await;
+        let BrokerWithClient { broker, client } = boot_topic(log_dir.clone(), "tp").await;
         let req = ConsumerGroupHeartbeatRequest {
             subscribed_topic_names: Some(vec!["tp".into()]),
             ..joining_consumer("gp", uuid::Uuid::new_v4().to_string(), 60_000)
@@ -80,7 +77,10 @@ async fn replay_preserves_group_epoch_and_members() {
     }
 
     {
-        let (_broker, client) = restart(log_dir, false).await;
+        let BrokerWithClient {
+            broker: _broker,
+            client,
+        } = restart(log_dir, false).await;
         let req = ConsumerGroupHeartbeatRequest {
             subscribed_topic_names: Some(vec!["tp".into()]),
             rebalance_timeout_ms: 60_000,
@@ -98,7 +98,7 @@ async fn next_gen_state_cleared_after_leave_then_restart() {
 
     let member_id;
     {
-        let (broker, client) = boot(log_dir.clone()).await;
+        let BrokerWithClient { broker, client } = boot(log_dir.clone()).await;
         create_topic(&client, "tp2", 1).await;
         let join = ConsumerGroupHeartbeatRequest {
             subscribed_topic_names: Some(vec!["tp2".into()]),
@@ -127,7 +127,10 @@ async fn next_gen_state_cleared_after_leave_then_restart() {
     }
 
     {
-        let (_broker, client) = restart(log_dir, false).await;
+        let BrokerWithClient {
+            broker: _broker,
+            client,
+        } = restart(log_dir, false).await;
         // After leave + restart, the member should be unknown.
         let req = ConsumerGroupHeartbeatRequest {
             subscribed_topic_names: Some(vec!["tp2".into()]),
@@ -151,7 +154,7 @@ async fn replay_keeps_the_topics_a_regex_resolved_to_and_finds_new_ones() {
 
     let (member_id, initial_epoch);
     {
-        let (broker, client) = boot_topic(log_dir.clone(), "orders-eu").await;
+        let BrokerWithClient { broker, client } = boot_topic(log_dir.clone(), "orders-eu").await;
         let resp = client
             .send(ConsumerGroupHeartbeatRequest {
                 subscribed_topic_regex: Some("orders-.*".into()),
@@ -183,7 +186,7 @@ async fn replay_keeps_the_topics_a_regex_resolved_to_and_finds_new_ones() {
         broker.shutdown().await;
     }
 
-    let (broker, client) = restart(log_dir, true).await;
+    let BrokerWithClient { broker, client } = restart(log_dir, true).await;
     create_topic(&client, "orders-us", 2).await;
 
     // The member heartbeats without its pattern until it holds both topics.
@@ -216,24 +219,27 @@ async fn replay_keeps_the_topics_a_regex_resolved_to_and_finds_new_ones() {
     broker.shutdown().await;
 }
 
-async fn boot(log_dir: std::path::PathBuf) -> (krabka_broker::BrokerHandle, Arc<Client>) {
+/// A running broker and a client connected to it.
+struct BrokerWithClient {
+    broker: krabka_broker::BrokerHandle,
+    client: Arc<Client>,
+}
+
+async fn boot(log_dir: std::path::PathBuf) -> BrokerWithClient {
     let broker = Broker::start(BrokerConfig::for_tests(log_dir))
         .await
         .unwrap();
     broker.wait_until_group_coordinator_ready().await;
     let client = connect(&broker.listen_addr().to_string(), "c").await;
-    (broker, client)
+    BrokerWithClient { broker, client }
 }
 
-async fn restart(
-    log_dir: std::path::PathBuf,
-    wait_for_group: bool,
-) -> (krabka_broker::BrokerHandle, Arc<Client>) {
+async fn restart(log_dir: std::path::PathBuf, wait_for_group: bool) -> BrokerWithClient {
     let broker = Broker::start(rejoin_config(log_dir)).await.unwrap();
     if wait_for_group {
         broker.wait_until_group_coordinator_ready().await;
     }
     let bootstrap = broker.listen_addr().to_string();
     let client = Arc::new(connect_client(bootstrap.as_str(), Some("c")).await);
-    (broker, client)
+    BrokerWithClient { broker, client }
 }

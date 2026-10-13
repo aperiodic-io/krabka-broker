@@ -11,7 +11,8 @@ use {
     crate::{
         codes,
         coordinator::unified::{
-            INITIAL_GROUP_EPOCH, actor::CommitFence, persistence_next_gen::MemberAssignmentState,
+            INITIAL_GROUP_EPOCH, actor::CommitFence, member_helpers,
+            persistence_next_gen::MemberAssignmentState,
         },
     },
     krabka_protocol::primitives::uuid::Uuid,
@@ -77,13 +78,13 @@ enum LogPresence {
 }
 
 impl GroupState {
-    crate::coordinator::unified::member_helpers::shared_group_state_methods!();
+    member_helpers::shared_group_state_methods!();
 
-    crate::coordinator::unified::member_helpers::expired_members_method!();
+    member_helpers::expired_members_method!();
 
-    crate::coordinator::unified::member_helpers::evict_expired!();
+    member_helpers::evict_expired!();
 
-    crate::coordinator::unified::member_helpers::fence_rebalance_timeouts_method! {
+    member_helpers::fence_rebalance_timeouts_method! {
     /// Removes every member whose rebalance timeout fired at `now` while the
     /// member still had partitions to revoke. Returns the removed member ids,
     /// sorted.
@@ -461,13 +462,21 @@ mod tests {
         crate::coordinator::{
             test_support::sorted_epoch_pairs,
             unified::{
-                consumer_state::test_support::{Topics, member, subscribed_member},
+                consumer_state::test_support::{NamedTopic, Topics, member, subscribed_member},
                 test_support::assert_group_epoch_exhaustion,
             },
         },
         assert2::assert,
         std::time::Duration,
     };
+
+    /// Who a member is and the epoch it is at, ordered to compare member lists.
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct MemberIdentity<'a> {
+        member_id: &'a str,
+        instance_id: Option<&'a str>,
+        member_epoch: i32,
+    }
 
     #[test]
     fn state_name_follows_kafka_consumer_group_state() {
@@ -814,7 +823,7 @@ mod tests {
         }
 
         let mut g = GroupState::new("g");
-        let topics = Topics(vec![("t", T)]);
+        let topics = Topics(vec![NamedTopic { name: "t", id: T }]);
         g.add_or_update_member(subscribed_member("m1", &["t"]));
         let epochs = |g: &GroupState| sorted_epoch_pairs(g.members["m1"].assignment_epochs.get(&T));
         let mut steps = Vec::new();
@@ -1037,19 +1046,24 @@ mod tests {
 
         g.replace_static_member("s1", "m1");
 
-        let mut members: Vec<(&str, Option<&str>, i32)> = g
+        let mut members: Vec<MemberIdentity<'_>> = g
             .members
             .values()
-            .map(|m| {
-                (
-                    m.member_id.as_str(),
-                    m.instance_id.as_deref(),
-                    m.member_epoch,
-                )
+            .map(|m| MemberIdentity {
+                member_id: m.member_id.as_str(),
+                instance_id: m.instance_id.as_deref(),
+                member_epoch: m.member_epoch,
             })
             .collect();
         members.sort_unstable();
-        assert!(members == vec![("m1", Some("i1"), 0)]);
+        assert!(
+            members
+                == vec![MemberIdentity {
+                    member_id: "m1",
+                    instance_id: Some("i1"),
+                    member_epoch: 0,
+                }]
+        );
         assert!(g.current_member_for_instance("i1") == Some("m1"));
         assert!(g.current_member_for_instance("i2") == None);
     }

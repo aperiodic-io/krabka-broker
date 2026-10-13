@@ -191,7 +191,11 @@ pub(crate) fn static_settings(
         ("log.dirs", join_paths(config.all_log_dirs())),
         ("process.roles", roles.join(",")),
     ]);
-    settings.extend(listener_settings(config));
+    settings.extend(
+        listener_settings(config)
+            .into_iter()
+            .map(|setting| (setting.key, setting.value)),
+    );
     if let Some(rack) = &config.rack {
         settings.insert("broker.rack", rack.clone());
     }
@@ -258,6 +262,13 @@ pub(crate) fn static_settings(
     settings
 }
 
+/// One static setting of the node: a Kafka config key and the value the node
+/// runs with.
+struct StaticSetting {
+    key: &'static str,
+    value: String,
+}
+
 /// The listener keys of this node, as the `server.properties` of a Kafka node
 /// with the same `process.roles` names them.
 ///
@@ -284,7 +295,7 @@ pub(crate) fn static_settings(
 ///   operator gave no name, Kafka uses the listener of
 ///   `security.inter.broker.protocol` and reports the key as null at
 ///   `DEFAULT_CONFIG`, so the key is not here.
-fn listener_settings(config: &BrokerConfig) -> Vec<(&'static str, String)> {
+fn listener_settings(config: &BrokerConfig) -> Vec<StaticSetting> {
     use crate::controller_endpoint::CONTROLLER_LISTENER_NAME;
 
     let data_plane = if config.is_broker() {
@@ -313,29 +324,38 @@ fn listener_settings(config: &BrokerConfig) -> Vec<(&'static str, String)> {
         .map(|(name, protocol)| format!("{name}:{}", security_protocol_name(protocol)))
         .collect();
     let mut settings = vec![
-        ("listeners", join(opened)),
-        ("listener.security.protocol.map", join(protocols)),
-        (
-            "controller.listener.names",
-            CONTROLLER_LISTENER_NAME.to_owned(),
-        ),
+        StaticSetting {
+            key: "listeners",
+            value: join(opened),
+        },
+        StaticSetting {
+            key: "listener.security.protocol.map",
+            value: join(protocols),
+        },
+        StaticSetting {
+            key: "controller.listener.names",
+            value: CONTROLLER_LISTENER_NAME.to_owned(),
+        },
     ];
     if config.is_broker() {
         let advertised = data_plane
             .iter()
             .map(|listener| format!("{}://{}", listener.name, listener.advertised))
             .collect();
-        settings.push(("advertised.listeners", join(advertised)));
+        settings.push(StaticSetting {
+            key: "advertised.listeners",
+            value: join(advertised),
+        });
     }
     if config
         .static_config_origins
         .supplied_kafka_keys
         .contains(config_keys::INTER_BROKER_LISTENER_NAME)
     {
-        settings.push((
-            config_keys::INTER_BROKER_LISTENER_NAME,
-            config.inter_broker_listener_name.clone(),
-        ));
+        settings.push(StaticSetting {
+            key: config_keys::INTER_BROKER_LISTENER_NAME,
+            value: config.inter_broker_listener_name.clone(),
+        });
     }
     settings
 }

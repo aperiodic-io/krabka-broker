@@ -11,6 +11,13 @@ use {
     std::collections::BTreeSet,
 };
 
+/// A partition named by topic and index.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct TopicPartition {
+    topic: String,
+    partition: i32,
+}
+
 /// Filter that the handler derives from the request `topics` field.
 ///
 /// - `None`  → report every partition. This is the admin-client default
@@ -19,14 +26,17 @@ use {
 ///   over every entry of the request.
 pub(super) enum Filter {
     All,
-    Partitions(BTreeSet<(String, i32)>),
+    Partitions(BTreeSet<TopicPartition>),
 }
 
 impl Filter {
     pub(super) fn allows(&self, topic: &str, partition: i32) -> bool {
         match self {
             Filter::All => true,
-            Filter::Partitions(set) => set.contains(&(topic.to_string(), partition)),
+            Filter::Partitions(set) => set.contains(&TopicPartition {
+                topic: topic.to_string(),
+                partition,
+            }),
         }
     }
 }
@@ -41,7 +51,10 @@ pub(super) fn request_filter(req: DescribeLogDirsRequest) -> Filter {
                     topic
                         .partitions
                         .into_iter()
-                        .map(move |partition| (name.clone(), partition))
+                        .map(move |partition| TopicPartition {
+                            topic: name.clone(),
+                            partition,
+                        })
                 })
                 .collect(),
         )
@@ -57,15 +70,23 @@ mod tests {
 
     #[test]
     fn filter_matches_kafka_partition_set() {
-        let request = |topics: Option<Vec<(&str, Vec<i32>)>>| DescribeLogDirsRequest {
+        /// A requested topic and the partitions of it that the request lists.
+        struct RequestedTopic {
+            topic: &'static str,
+            partitions: Vec<i32>,
+        }
+
+        let request = |topics: Option<Vec<RequestedTopic>>| DescribeLogDirsRequest {
             topics: topics.map(|topics| {
                 topics
                     .into_iter()
-                    .map(|(topic, partitions)| DescribableLogDirTopic {
-                        topic: topic.into(),
-                        partitions,
-                        ..Default::default()
-                    })
+                    .map(
+                        |RequestedTopic { topic, partitions }| DescribableLogDirTopic {
+                            topic: topic.into(),
+                            partitions,
+                            ..Default::default()
+                        },
+                    )
                     .collect()
             }),
             ..Default::default()
@@ -74,31 +95,52 @@ mod tests {
             ("null topics", None, ("any", 9), true),
             (
                 "listed partition",
-                Some(vec![("t", vec![0, 2])]),
+                Some(vec![RequestedTopic {
+                    topic: "t",
+                    partitions: vec![0, 2],
+                }]),
                 ("t", 2),
                 true,
             ),
             (
                 "unlisted partition",
-                Some(vec![("t", vec![0, 2])]),
+                Some(vec![RequestedTopic {
+                    topic: "t",
+                    partitions: vec![0, 2],
+                }]),
                 ("t", 1),
                 false,
             ),
             (
                 "unlisted topic",
-                Some(vec![("t", vec![0])]),
+                Some(vec![RequestedTopic {
+                    topic: "t",
+                    partitions: vec![0],
+                }]),
                 ("u", 0),
                 false,
             ),
             (
                 "empty partition list",
-                Some(vec![("t", vec![])]),
+                Some(vec![RequestedTopic {
+                    topic: "t",
+                    partitions: vec![],
+                }]),
                 ("t", 0),
                 false,
             ),
             (
                 "repeated topic entries union",
-                Some(vec![("t", vec![0]), ("t", vec![1])]),
+                Some(vec![
+                    RequestedTopic {
+                        topic: "t",
+                        partitions: vec![0],
+                    },
+                    RequestedTopic {
+                        topic: "t",
+                        partitions: vec![1],
+                    },
+                ]),
                 ("t", 0),
                 true,
             ),

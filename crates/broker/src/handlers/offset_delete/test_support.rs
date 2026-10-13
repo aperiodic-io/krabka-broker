@@ -31,16 +31,24 @@ pub(super) fn expected_topic(
     })
 }
 
-/// Builds a decoded `OffsetDeleteRequest` for group `g` from `(topic name,
-/// partition indexes)` pairs.
-pub(super) fn req_with_topics(topics: &[(&str, &[i32])]) -> OffsetDeleteRequest {
+/// A requested topic: its name and the partition indexes it names.
+#[derive(Clone, Copy)]
+pub(super) struct RequestTopic<'a> {
+    pub(super) name: &'a str,
+    pub(super) partitions: &'a [i32],
+}
+
+/// Builds a decoded `OffsetDeleteRequest` for group `g` from the requested
+/// topics.
+pub(super) fn req_with_topics(topics: &[RequestTopic<'_>]) -> OffsetDeleteRequest {
     OffsetDeleteRequest {
         group_id: "g".to_string(),
         topics: topics
             .iter()
-            .map(|(n, ps)| OffsetDeleteRequestTopic {
-                name: (*n).to_string(),
-                partitions: ps
+            .map(|topic| OffsetDeleteRequestTopic {
+                name: topic.name.to_string(),
+                partitions: topic
+                    .partitions
                     .iter()
                     .map(|p| OffsetDeleteRequestPartition {
                         partition_index: *p,

@@ -51,6 +51,14 @@ struct EvictableKey {
     id: FetchSessionId,
 }
 
+/// A session's place in the `last_used` index: when it was last used, then its
+/// id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct LastUsedKey {
+    last_used: Duration,
+    id: FetchSessionId,
+}
+
 /// What the index knows about one live session: what the entries it put in the
 /// three sets were built from, so that a touch or a removal finds them again.
 struct Entry {
@@ -79,7 +87,7 @@ impl Entry {
 pub(super) struct SessionOrder {
     entries: HashMap<FetchSessionId, Entry>,
     /// Kafka's `lastUsed`: `(last used, id)`, oldest first.
-    last_used: BTreeSet<(Duration, FetchSessionId)>,
+    last_used: BTreeSet<LastUsedKey>,
     /// Kafka's `evictableByAll`: the sessions created more than
     /// [`MIN_EVICTION`] before their last touch. A consumer newcomer reads
     /// its first entry.
@@ -144,7 +152,10 @@ impl SessionOrder {
         size: usize,
         now: Duration,
     ) -> Option<FetchSessionId> {
-        let &(last_used, oldest) = self.last_used.first()?;
+        let &LastUsedKey {
+            last_used,
+            id: oldest,
+        } = self.last_used.first()?;
         if now.saturating_sub(last_used) > MIN_EVICTION {
             return Some(oldest);
         }
@@ -166,7 +177,10 @@ impl SessionOrder {
 
     fn index(&mut self, id: FetchSessionId, entry: Entry) {
         let key = entry.key(id);
-        self.last_used.insert((entry.last_used, id));
+        self.last_used.insert(LastUsedKey {
+            last_used: entry.last_used,
+            id,
+        });
         let old_enough = entry.last_used.saturating_sub(entry.created) > MIN_EVICTION;
         if !entry.privileged || old_enough {
             self.evictable_by_privileged.insert(key);
@@ -180,7 +194,10 @@ impl SessionOrder {
     fn unindex(&mut self, id: FetchSessionId) -> Option<Entry> {
         let entry = self.entries.remove(&id)?;
         let key = entry.key(id);
-        self.last_used.remove(&(entry.last_used, id));
+        self.last_used.remove(&LastUsedKey {
+            last_used: entry.last_used,
+            id,
+        });
         self.evictable_by_privileged.remove(&key);
         self.evictable_by_all.remove(&key);
         Some(entry)
@@ -225,16 +242,31 @@ mod tests {
 
     /// A newcomer: its privilege, the partitions it caches, and the second it
     /// arrives.
-    type Newcomer = (bool, usize, u32);
+    #[derive(Clone, Copy)]
+    struct Newcomer {
+        privileged: bool,
+        size: usize,
+        seconds: u32,
+    }
 
-    /// One `victim` scenario: a label, the steps that built the index, the
-    /// newcomer, and the session it may displace.
-    type VictimCase = (
-        &'static str,
-        &'static [Step],
-        Newcomer,
-        Option<FetchSessionId>,
-    );
+    /// A newcomer, as the table writes it.
+    const fn newcomer(privileged: bool, size: usize, seconds: u32) -> Newcomer {
+        Newcomer {
+            privileged,
+            size,
+            seconds,
+        }
+    }
+
+    /// One `victim` scenario.
+    struct VictimCase {
+        label: &'static str,
+        /// The steps that built the index.
+        steps: &'static [Step],
+        newcomer: Newcomer,
+        /// The session the newcomer may displace.
+        want: Option<FetchSessionId>,
+    }
 
     #[test]
     fn victim_selection_follows_kafkas_try_evict() {
@@ -242,96 +274,112 @@ mod tests {
         // Every session below that has been touched after `MIN_EVICTION` (120
         // s) of life is "old" by creation; the others are not.
         let cases: [VictimCase; 14] = [
-            ("an empty cache has no victim", &[], (false, 1, 0), None),
-            (
-                "a session unused for more than the minimum is stale, and goes",
-                &[Step::Insert(1, false, 9, 0)],
-                (false, 1, 121),
-                Some(1),
-            ),
-            (
-                "a session unused for exactly the minimum is not stale",
-                &[Step::Insert(1, false, 9, 0)],
-                (false, 1, 120),
-                None,
-            ),
-            (
-                "a stale follower session goes to a consumer newcomer too",
-                &[Step::Insert(3, true, 9, 0)],
-                (false, 1, 121),
-                Some(3),
-            ),
-            (
-                "staleness picks the session unused the longest",
-                &[
+            VictimCase {
+                label: "an empty cache has no victim",
+                steps: &[],
+                newcomer: newcomer(false, 1, 0),
+                want: None,
+            },
+            VictimCase {
+                label: "a session unused for more than the minimum is stale, and goes",
+                steps: &[Step::Insert(1, false, 9, 0)],
+                newcomer: newcomer(false, 1, 121),
+                want: Some(1),
+            },
+            VictimCase {
+                label: "a session unused for exactly the minimum is not stale",
+                steps: &[Step::Insert(1, false, 9, 0)],
+                newcomer: newcomer(false, 1, 120),
+                want: None,
+            },
+            VictimCase {
+                label: "a stale follower session goes to a consumer newcomer too",
+                steps: &[Step::Insert(3, true, 9, 0)],
+                newcomer: newcomer(false, 1, 121),
+                want: Some(3),
+            },
+            VictimCase {
+                label: "staleness picks the session unused the longest",
+                steps: &[
                     Step::Insert(1, false, 1, 0),
                     Step::Insert(2, false, 1, 10),
                     Step::Touch(1, 1, 20),
                 ],
-                (false, 1, 131),
-                Some(2),
-            ),
-            (
-                "a consumer never displaces a recently used session of its own class",
-                &[Step::Insert(1, false, 1, 0), Step::Insert(2, false, 1, 1)],
-                (false, 100, 2),
-                None,
-            ),
-            (
-                "a consumer never displaces a session created within the minimum",
-                &[Step::Insert(1, false, 1, 100), Step::Touch(1, 1, 110)],
-                (false, 100, 115),
-                None,
-            ),
-            (
-                "a larger consumer displaces an older, smaller consumer session",
-                &[Step::Insert(1, false, 2, 0), Step::Touch(1, 2, 121)],
-                (false, 3, 122),
-                Some(1),
-            ),
-            (
-                "an equally large consumer does not",
-                &[Step::Insert(1, false, 2, 0), Step::Touch(1, 2, 121)],
-                (false, 2, 122),
-                None,
-            ),
-            (
-                "a smaller consumer does not",
-                &[Step::Insert(1, false, 2, 0), Step::Touch(1, 2, 121)],
-                (false, 1, 122),
-                None,
-            ),
-            (
-                "a consumer displaces the smallest old consumer session, not the oldest",
-                &[
+                newcomer: newcomer(false, 1, 131),
+                want: Some(2),
+            },
+            VictimCase {
+                label: "a consumer never displaces a recently used session of its own class",
+                steps: &[Step::Insert(1, false, 1, 0), Step::Insert(2, false, 1, 1)],
+                newcomer: newcomer(false, 100, 2),
+                want: None,
+            },
+            VictimCase {
+                label: "a consumer never displaces a session created within the minimum",
+                steps: &[Step::Insert(1, false, 1, 100), Step::Touch(1, 1, 110)],
+                newcomer: newcomer(false, 100, 115),
+                want: None,
+            },
+            VictimCase {
+                label: "a larger consumer displaces an older, smaller consumer session",
+                steps: &[Step::Insert(1, false, 2, 0), Step::Touch(1, 2, 121)],
+                newcomer: newcomer(false, 3, 122),
+                want: Some(1),
+            },
+            VictimCase {
+                label: "an equally large consumer does not",
+                steps: &[Step::Insert(1, false, 2, 0), Step::Touch(1, 2, 121)],
+                newcomer: newcomer(false, 2, 122),
+                want: None,
+            },
+            VictimCase {
+                label: "a smaller consumer does not",
+                steps: &[Step::Insert(1, false, 2, 0), Step::Touch(1, 2, 121)],
+                newcomer: newcomer(false, 1, 122),
+                want: None,
+            },
+            VictimCase {
+                label: "a consumer displaces the smallest old consumer session, not the oldest",
+                steps: &[
                     Step::Insert(1, false, 5, 0),
                     Step::Insert(2, false, 3, 1),
                     Step::Touch(1, 5, 121),
                     Step::Touch(2, 3, 122),
                 ],
-                (false, 9, 123),
-                Some(2),
-            ),
-            (
-                "a consumer never displaces a follower session, however old",
-                &[Step::Insert(3, true, 1, 0), Step::Touch(3, 1, 121)],
-                (false, 1000, 122),
-                None,
-            ),
-            (
-                "a follower displaces any consumer session, however small the follower",
-                &[Step::Insert(1, false, 50, 0), Step::Insert(3, true, 1, 1)],
-                (true, 1, 2),
-                Some(1),
-            ),
-            (
-                "a follower displaces an old follower session only when it is larger",
-                &[Step::Insert(3, true, 2, 0), Step::Touch(3, 2, 121)],
-                (true, 2, 122),
-                None,
-            ),
+                newcomer: newcomer(false, 9, 123),
+                want: Some(2),
+            },
+            VictimCase {
+                label: "a consumer never displaces a follower session, however old",
+                steps: &[Step::Insert(3, true, 1, 0), Step::Touch(3, 1, 121)],
+                newcomer: newcomer(false, 1000, 122),
+                want: None,
+            },
+            VictimCase {
+                label: "a follower displaces any consumer session, however small the follower",
+                steps: &[Step::Insert(1, false, 50, 0), Step::Insert(3, true, 1, 1)],
+                newcomer: newcomer(true, 1, 2),
+                want: Some(1),
+            },
+            VictimCase {
+                label: "a follower displaces an old follower session only when it is larger",
+                steps: &[Step::Insert(3, true, 2, 0), Step::Touch(3, 2, 121)],
+                newcomer: newcomer(true, 2, 122),
+                want: None,
+            },
         ];
-        for (label, steps, (privileged, size, seconds), want) in cases {
+        for VictimCase {
+            label,
+            steps,
+            newcomer:
+                Newcomer {
+                    privileged,
+                    size,
+                    seconds,
+                },
+            want,
+        } in cases
+        {
             let order = seeded(steps);
             check!(
                 order.victim(privileged, size, seconds * SECOND) == want,

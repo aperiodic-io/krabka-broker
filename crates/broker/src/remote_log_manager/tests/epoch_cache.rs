@@ -21,13 +21,40 @@ use {
     uuid::Uuid,
 };
 
-/// The id and the `(first offset, last offset, epoch)` of each archive segment.
+/// The id, first and last offset, and epoch of an archive segment.
+struct ArchiveSegment {
+    id: u128,
+    first: i64,
+    last: i64,
+    epoch: i32,
+}
+
+/// The id, first and last offset, and epoch of each archive segment.
 ///
 /// - 1: epoch 1 over offsets 0 to 3, the current lineage, below a log start of 4.
 /// - 2: epoch 0 over offsets 4 to 7, which the current lineage assigns to epoch
 ///   1: what an unclean election leaves behind.
 /// - 3: epoch 2 over offsets 8 to 15, the current lineage.
-const ARCHIVE: [(u128, i64, i64, i32); 3] = [(1, 0, 3, 1), (2, 4, 7, 0), (3, 8, 15, 2)];
+const ARCHIVE: [ArchiveSegment; 3] = [
+    ArchiveSegment {
+        id: 1,
+        first: 0,
+        last: 3,
+        epoch: 1,
+    },
+    ArchiveSegment {
+        id: 2,
+        first: 4,
+        last: 7,
+        epoch: 0,
+    },
+    ArchiveSegment {
+        id: 3,
+        first: 8,
+        last: 15,
+        epoch: 2,
+    },
+];
 
 fn config() -> LogConfig {
     LogConfig {
@@ -62,7 +89,13 @@ fn epoch_log(partition_dir: &std::path::Path) -> Log {
 async fn survivors_of_a_tick(log_dir: &std::path::Path, log: Log) -> Vec<u128> {
     let remote_dir = tempfile::tempdir().unwrap();
     let (rsm, rlmm) = local_backends(remote_dir.path());
-    for (id, first, last, epoch) in ARCHIVE {
+    for ArchiveSegment {
+        id,
+        first,
+        last,
+        epoch,
+    } in ARCHIVE
+    {
         let segment_id = RemoteLogSegmentId::new(tp(), Uuid::from_u128(id));
         let started = RemoteLogSegmentMetadata::new(
             segment_id.clone(),
@@ -117,39 +150,36 @@ async fn survivors_of_a_tick(log_dir: &std::path::Path, log: Log) -> Vec<u128> {
 
 /// A label, how the log is moved before the restart, and the ids of the archive
 /// segments that survive the tick after it.
-type Case = (&'static str, fn(&mut Log), Vec<u128>);
+struct Case {
+    name: &'static str,
+    mutate: fn(&mut Log),
+    expected: Vec<u128>,
+}
 
 /// The ways a log start and its epoch cache reach a restart.
 #[tokio::test]
 async fn the_epoch_cache_cleanup_follows_an_established_log_start_across_a_restart() {
     let cases: [Case; 3] = [
-        (
-            "nobody moved the log start",
-            |_| {},
-            // Nothing is below an epoch cache that starts at epoch 1 and holds
+        Case { name: "nobody moved the log start", mutate: |_| {}, expected: // Nothing is below an epoch cache that starts at epoch 1 and holds
             // no segment of epoch 0's lineage that it could name.
-            vec![1, 2, 3],
-        ),
-        (
-            "local retention evicted the archived head",
-            |log| {
+            vec![1, 2, 3] },
+        Case { name: "local retention evicted the archived head", mutate: |log| {
                 log.delete_local_segments_through(Offset(8)).unwrap();
-            },
-            // The restart infers a log start of 8 from the segments left. An
+            }, expected: // The restart infers a log start of 8 from the segments left. An
             // epoch cache cut to it would start at epoch 2, and the rule would
             // delete the archive's epoch 1 segments, which the archive alone
             // still serves.
-            vec![1, 2, 3],
-        ),
-        (
-            "a DeleteRecords moved the log start",
-            |log| log.set_log_start_offset(Offset(4)).unwrap(),
-            // The log-start breach takes segment 1, and the epoch cache, cut
+            vec![1, 2, 3] },
+        Case { name: "a DeleteRecords moved the log start", mutate: |log| log.set_log_start_offset(Offset(4)).unwrap(), expected: // The log-start breach takes segment 1, and the epoch cache, cut
             // to epoch 1 at offset 4, takes segment 2.
-            vec![3],
-        ),
+            vec![3] },
     ];
-    for (name, mutate, expected) in cases {
+    for Case {
+        name,
+        mutate,
+        expected,
+    } in cases
+    {
         let log_dir = tempfile::tempdir().unwrap();
         let partition_dir = partition_dir(log_dir.path(), "orders", 0);
         std::fs::create_dir_all(&partition_dir).unwrap();

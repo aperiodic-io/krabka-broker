@@ -20,9 +20,9 @@ use {
 
 /// Compute the dir-assignment reports that changed since last reported.
 ///
-/// Returns `(wire_assignments, tracker_updates)`:
-/// - `wire_assignments`: `(topic_id, partition, dir_uuid)` for `build_request`.
-/// - `tracker_updates`: `(topic_name, partition, dir_uuid)` to write into
+/// Returns the [`ChangedAssignments`]:
+/// - `wire`: `(topic_id, partition, dir_uuid)` for `build_request`.
+/// - `updates`: the topic name, partition and `dir_uuid` to write into
 ///   `reported_dirs` on a successful send.
 ///
 /// This function is pure. It reads each partition's current owning dir exactly
@@ -30,10 +30,23 @@ use {
 /// TOCTOU race and the O(n²) `Vec::contains` scan of a double-iteration
 /// approach.
 type WireDirAssignment = (uuid::Uuid, i32, uuid::Uuid);
-type ReportedDirUpdate = (String, i32, uuid::Uuid);
-type ChangedAssignments = (Vec<WireDirAssignment>, Vec<ReportedDirUpdate>);
 
-pub(crate) fn collect_changed_assignments(
+/// One partition's directory, to record in `reported_dirs` once the report is
+/// sent.
+#[derive(Debug, PartialEq, Eq)]
+struct ReportedDirUpdate {
+    topic: String,
+    partition: i32,
+    dir_uuid: uuid::Uuid,
+}
+
+/// The assignments to send and the updates to record when the send succeeds.
+struct ChangedAssignments {
+    wire: Vec<WireDirAssignment>,
+    updates: Vec<ReportedDirUpdate>,
+}
+
+fn collect_changed_assignments(
     local_set: &HashSet<TopicPartition>,
     partitions: &PartitionRegistry,
     log_dir_ids: &LogDirIds,
@@ -58,9 +71,13 @@ pub(crate) fn collect_changed_assignments(
             continue; // unchanged since last report
         }
         wire.push((topic_rec.topic_id, *partition, dir_uuid));
-        updates.push((topic.clone(), *partition, dir_uuid));
+        updates.push(ReportedDirUpdate {
+            topic: topic.clone(),
+            partition: *partition,
+            dir_uuid,
+        });
     }
-    (wire, updates)
+    ChangedAssignments { wire, updates }
 }
 
 #[async_trait::async_trait]
@@ -101,7 +118,7 @@ impl ReplicatorSupervisor {
         local_set: &HashSet<TopicPartition>,
         image: &MetadataImage,
     ) {
-        let (wire, updates) = collect_changed_assignments(
+        let ChangedAssignments { wire, updates } = collect_changed_assignments(
             local_set,
             &self.partitions,
             &self.log_dir_ids,
@@ -123,7 +140,12 @@ impl ReplicatorSupervisor {
             .await
         {
             Ok(()) => {
-                for (topic, partition, dir_uuid) in updates {
+                for ReportedDirUpdate {
+                    topic,
+                    partition,
+                    dir_uuid,
+                } in updates
+                {
                     self.reported_dirs.insert((topic, partition), dir_uuid);
                 }
             }
@@ -234,10 +256,10 @@ mod tests {
 
         let mut local_set = HashSet::new();
         local_set.insert(("t".to_string(), 0));
-        let reported_dirs: dashmap::DashMap<(String, i32), uuid::Uuid> = dashmap::DashMap::new();
+        let reported_dirs: dashmap::DashMap<TopicPartition, uuid::Uuid> = dashmap::DashMap::new();
 
         // First call: nothing reported yet → one wire entry + one update entry.
-        let (wire, updates) = collect_changed_assignments(
+        let ChangedAssignments { wire, updates } = collect_changed_assignments(
             &local_set,
             &partitions,
             &log_dir_ids,
@@ -245,15 +267,30 @@ mod tests {
             &reported_dirs,
         );
         assert!(wire == vec![(topic_id, 0, dir_uuid)]);
-        assert!(updates == vec![("t".to_string(), 0, dir_uuid)]);
+        assert!(
+            updates
+                == vec![ReportedDirUpdate {
+                    topic: "t".to_string(),
+                    partition: 0,
+                    dir_uuid,
+                }]
+        );
 
         // Simulate a successful send: insert the tracker update.
-        for (topic, partition, uuid) in updates {
-            reported_dirs.insert((topic, partition), uuid);
+        for ReportedDirUpdate {
+            topic,
+            partition,
+            dir_uuid,
+        } in updates
+        {
+            reported_dirs.insert((topic, partition), dir_uuid);
         }
 
         // Second call: already reported → both vecs empty.
-        let (wire2, updates2) = collect_changed_assignments(
+        let ChangedAssignments {
+            wire: wire2,
+            updates: updates2,
+        } = collect_changed_assignments(
             &local_set,
             &partitions,
             &log_dir_ids,

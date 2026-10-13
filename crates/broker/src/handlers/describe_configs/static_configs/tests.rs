@@ -45,13 +45,19 @@ impl IdleCase {
     }
 }
 
+/// The idle window of one named listener.
+struct ListenerWindow<'a> {
+    name: &'a str,
+    window: Time,
+}
+
 /// A broker-wide window of `idle` with the named per-listener overrides.
-fn config_with(idle: Option<Time>, overrides: &[(&str, Time)]) -> IdleCase {
+fn config_with(idle: Option<Time>, overrides: &[ListenerWindow<'_>]) -> IdleCase {
     IdleCase {
         idle,
         overrides: overrides
             .iter()
-            .map(|(name, value)| ((*name).to_string(), *value))
+            .map(|listener| (listener.name.to_string(), listener.window))
             .collect(),
     }
 }
@@ -127,8 +133,14 @@ fn the_idle_windows_source_is_its_provenance_and_not_its_value() {
 fn a_set_idle_window_and_its_listener_overrides_report_as_static() {
     let entries = idle_window_entries(
         config_with(Some(secs(30)), &[
-            ("PLAINTEXT", millis(15_000)),
-            ("EXTERNAL", secs(45)),
+            ListenerWindow {
+                name: "PLAINTEXT",
+                window: millis(15_000),
+            },
+            ListenerWindow {
+                name: "EXTERNAL",
+                window: secs(45),
+            },
         ])
         .statics(),
         &everything,
@@ -199,7 +211,10 @@ fn requested_synonyms_carry_the_chain_the_container_reports() {
     ];
 
     for (case, idle, want) in cases {
-        let config = config_with(idle, &[("PLAINTEXT", millis(15_000))]);
+        let config = config_with(idle, &[ListenerWindow {
+            name: "PLAINTEXT",
+            window: millis(15_000),
+        }]);
         let want: Vec<DescribeConfigsResourceResult> = want
             .into_iter()
             .map(
@@ -219,7 +234,10 @@ fn requested_synonyms_carry_the_chain_the_container_reports() {
 /// A request that does not ask for synonyms gets none, on every entry.
 #[test]
 fn unrequested_synonyms_are_never_synthesised() {
-    let config = config_with(Some(secs(30)), &[("PLAINTEXT", millis(15_000))]);
+    let config = config_with(Some(secs(30)), &[ListenerWindow {
+        name: "PLAINTEXT",
+        window: millis(15_000),
+    }]);
     let entries = idle_window_entries(config.statics(), &everything, VALUES_ONLY);
 
     assert!(entries.len() == 2);
@@ -230,7 +248,10 @@ fn unrequested_synonyms_are_never_synthesised() {
 /// per-listener ones, each of which is a key the client can name.
 #[test]
 fn a_key_filter_selects_among_the_idle_entries() {
-    let config = config_with(Some(secs(30)), &[("PLAINTEXT", millis(15_000))]);
+    let config = config_with(Some(secs(30)), &[ListenerWindow {
+        name: "PLAINTEXT",
+        window: millis(15_000),
+    }]);
     let listener_key = "listener.name.plaintext.connections.max.idle.ms";
 
     let broker_wide_only = idle_window_entries(
@@ -267,7 +288,11 @@ fn a_listener_override_documents_itself_from_the_broker_wide_row() {
     };
 
     let entries = idle_window_entries(
-        config_with(None, &[("PLAINTEXT", millis(15_000))]).statics(),
+        config_with(None, &[ListenerWindow {
+            name: "PLAINTEXT",
+            window: millis(15_000),
+        }])
+        .statics(),
         &everything,
         documented,
     );

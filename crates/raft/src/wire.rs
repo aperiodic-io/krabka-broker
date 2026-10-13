@@ -37,6 +37,7 @@
 //! encode and decode methods here.
 
 use {
+    crate::kraft::snapshot_fetch::SnapshotId,
     bytes::{Buf, BufMut, Bytes},
     krabka_metadata::{
         KrabkaVersion, MetadataImage, PrivateRpc,
@@ -347,7 +348,7 @@ pub struct KrabkaMetadataFetchResponse {
     /// a controller follower (KIP-595). Without it a restarted observer fetches
     /// an offset the leader no longer holds, is served an empty slice, and
     /// never makes progress.
-    pub snapshot_id: Option<(i64, i32)>,
+    pub snapshot_id: Option<SnapshotId>,
     /// Concatenated Kafka `RecordBatch`es, one for each committed log batch.
     /// Empty whenever `snapshot_id` is set: the records the observer asked for
     /// are gone, so there is nothing to serve from the log.
@@ -466,6 +467,12 @@ mod tests {
     /// one of them is a change to the 1.x rolling-upgrade contract.
     #[test]
     fn v0_bodies_match_their_golden_bytes() {
+        struct Scenario {
+            case: &'static str,
+            encoded: Vec<u8>,
+            golden: &'static [u8],
+        }
+
         let mut submit_request_bytes = Vec::new();
         submit_request()
             .encode_v0(&mut submit_request_bytes)
@@ -481,29 +488,34 @@ mod tests {
             .encode_v0(&mut fetch_response_bytes)
             .unwrap();
 
-        let cases: [(&str, Vec<u8>, &[u8]); 4] = [
-            (
-                "SubmitChange request",
-                submit_request_bytes,
-                SUBMIT_REQUEST_V0,
-            ),
-            (
-                "SubmitChange response",
-                submit_response_bytes,
-                SUBMIT_RESPONSE_V0,
-            ),
-            (
-                "MetadataFetch request",
-                fetch_request_bytes,
-                FETCH_REQUEST_V0,
-            ),
-            (
-                "MetadataFetch response",
-                fetch_response_bytes,
-                FETCH_RESPONSE_V0,
-            ),
+        let cases = [
+            Scenario {
+                case: "SubmitChange request",
+                encoded: submit_request_bytes,
+                golden: SUBMIT_REQUEST_V0,
+            },
+            Scenario {
+                case: "SubmitChange response",
+                encoded: submit_response_bytes,
+                golden: SUBMIT_RESPONSE_V0,
+            },
+            Scenario {
+                case: "MetadataFetch request",
+                encoded: fetch_request_bytes,
+                golden: FETCH_REQUEST_V0,
+            },
+            Scenario {
+                case: "MetadataFetch response",
+                encoded: fetch_response_bytes,
+                golden: FETCH_RESPONSE_V0,
+            },
         ];
-        for (case, encoded, golden) in cases {
+        for Scenario {
+            case,
+            encoded,
+            golden,
+        } in cases
+        {
             check!(encoded == golden, "{case}");
         }
     }
@@ -636,6 +648,12 @@ mod tests {
     /// this build's maximum sends this build's highest version.
     #[test]
     fn sender_version_follows_the_finalized_krabka_version() {
+        struct Row {
+            case: &'static str,
+            image: Option<MetadataImage>,
+            want: [i16; 3],
+        }
+
         use krabka_metadata::{
             FeatureLevelRecord, MetadataRecord, krabka_version::KRABKA_VERSION_FEATURE,
         };
@@ -650,27 +668,43 @@ mod tests {
             }
             image
         };
-        let rows: [(&str, Option<MetadataImage>, [i16; 3]); 5] = [
-            ("no image", None, [0, 0, 0]),
-            ("feature absent", Some(image_at(None)), [0, 0, 0]),
-            ("level 0", Some(image_at(Some(0))), [0, 0, 0]),
-            ("level 1", Some(image_at(Some(1))), [0, 0, 0]),
-            (
-                "level above this build's maximum",
-                Some(image_at(Some(KRABKA_VERSION_MAX + 1))),
-                [0, 0, 0],
-            ),
+        let rows = [
+            Row {
+                case: "no image",
+                image: None,
+                want: [0, 0, 0],
+            },
+            Row {
+                case: "feature absent",
+                image: Some(image_at(None)),
+                want: [0, 0, 0],
+            },
+            Row {
+                case: "level 0",
+                image: Some(image_at(Some(0))),
+                want: [0, 0, 0],
+            },
+            Row {
+                case: "level 1",
+                image: Some(image_at(Some(1))),
+                want: [0, 0, 0],
+            },
+            Row {
+                case: "level above this build's maximum",
+                image: Some(image_at(Some(KRABKA_VERSION_MAX + 1))),
+                want: [0, 0, 0],
+            },
         ];
         let actual: Vec<_> = rows
             .iter()
-            .map(|(case, image, _)| {
+            .map(|row| {
                 (
-                    *case,
-                    PrivateRpc::ALL.map(|rpc| private_request_version(rpc, image.as_ref())),
+                    row.case,
+                    PrivateRpc::ALL.map(|rpc| private_request_version(rpc, row.image.as_ref())),
                 )
             })
             .collect();
-        let expected: Vec<_> = rows.iter().map(|(case, _, want)| (*case, *want)).collect();
+        let expected: Vec<_> = rows.iter().map(|row| (row.case, row.want)).collect();
         check!(actual == expected);
         check!(private_request_version(PrivateRpc::SubmitChange, None) == PRIVATE_BASELINE_VERSION);
     }

@@ -63,7 +63,7 @@ pub(crate) fn handle_leave(
             });
             continue;
         }
-        let (resolved_id, code): (Option<String>, i16) =
+        let (resolved_id, code) =
             match (ident.group_instance_id.as_deref(), ident.member_id.as_str()) {
                 (Some(iid), "") => match state.current_member_id_for_instance(iid) {
                     Some(pinned) => (Some(pinned.to_string()), codes::NONE),

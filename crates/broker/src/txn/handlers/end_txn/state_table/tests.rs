@@ -22,12 +22,52 @@ enum Identity {
     OtherProducer,
 }
 
-fn request(identity: Identity) -> (ProducerId, i16) {
+fn named(producer_id: ProducerId, producer_epoch: i16) -> ProducerIdentity {
+    ProducerIdentity {
+        producer_id,
+        producer_epoch,
+    }
+}
+
+fn request(identity: Identity) -> ProducerIdentity {
     match identity {
-        Identity::Current => (PID, EPOCH),
-        Identity::Retry => (PID, EPOCH - 1),
-        Identity::Stale => (PID, EPOCH - 2),
-        Identity::OtherProducer => (ProducerId(PID.get() + 1), EPOCH),
+        Identity::Current => named(PID, EPOCH),
+        Identity::Retry => named(PID, EPOCH - 1),
+        Identity::Stale => named(PID, EPOCH - 2),
+        Identity::OtherProducer => named(ProducerId(PID.get() + 1), EPOCH),
+    }
+}
+
+fn rules(verified: bool, trunk_rules: bool) -> TableRules {
+    TableRules {
+        verified,
+        trunk_rules,
+    }
+}
+
+/// One row of the table: the entry's state, the requested result, the identity
+/// of the request, and the decision of each version's table.
+struct Row {
+    state: TxnState,
+    committed: bool,
+    identity: Identity,
+    classic: EndTxnDecision,
+    verified: EndTxnDecision,
+}
+
+fn row(
+    state: TxnState,
+    committed: bool,
+    identity: Identity,
+    classic: EndTxnDecision,
+    verified: EndTxnDecision,
+) -> Row {
+    Row {
+        state,
+        committed,
+        identity,
+        classic,
+        verified,
     }
 }
 
@@ -42,23 +82,22 @@ fn prepare(state: TxnState, no_partition_added: bool) -> EndTxnDecision {
 /// halves, plus the identity checks that run before it.
 #[test]
 fn the_state_table_follows_the_transaction_version() {
-    // (state, result, identity, version 1 decision, version 2 decision)
-    let cases: [(TxnState, bool, Identity, EndTxnDecision, EndTxnDecision); 20] = [
-        (
+    let cases = [
+        row(
             TxnState::Ongoing,
             true,
             Identity::Current,
             prepare(TxnState::PrepareCommit, false),
             prepare(TxnState::PrepareCommit, false),
         ),
-        (
+        row(
             TxnState::Ongoing,
             false,
             Identity::Current,
             prepare(TxnState::PrepareAbort, false),
             prepare(TxnState::PrepareAbort, false),
         ),
-        (
+        row(
             TxnState::Ongoing,
             true,
             Identity::Retry,
@@ -66,28 +105,28 @@ fn the_state_table_follows_the_transaction_version() {
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
         ),
         // Empty: version 2 accepts an abort and bumps the epoch for it.
-        (
+        row(
             TxnState::Empty,
             false,
             Identity::Current,
             EndTxnDecision::Refuse(codes::INVALID_TXN_STATE),
             prepare(TxnState::PrepareAbort, true),
         ),
-        (
+        row(
             TxnState::Empty,
             false,
             Identity::Retry,
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
         ),
-        (
+        row(
             TxnState::Empty,
             true,
             Identity::Current,
             EndTxnDecision::Refuse(codes::INVALID_TXN_STATE),
             EndTxnDecision::Refuse(codes::INVALID_TXN_STATE),
         ),
-        (
+        row(
             TxnState::Empty,
             true,
             Identity::Retry,
@@ -95,14 +134,14 @@ fn the_state_table_follows_the_transaction_version() {
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
         ),
         // CompleteAbort.
-        (
+        row(
             TxnState::CompleteAbort,
             false,
             Identity::Retry,
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
             EndTxnDecision::AlreadyComplete,
         ),
-        (
+        row(
             TxnState::CompleteAbort,
             false,
             Identity::Current,
@@ -111,14 +150,14 @@ fn the_state_table_follows_the_transaction_version() {
         ),
         // Kafka 4.3.1 answers INVALID_TXN_STATE here, and trunk answers
         // PRODUCER_FENCED (KAFKA-20785), see the switch below the table.
-        (
+        row(
             TxnState::CompleteAbort,
             true,
             Identity::Retry,
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
             EndTxnDecision::Refuse(codes::INVALID_TXN_STATE),
         ),
-        (
+        row(
             TxnState::CompleteAbort,
             true,
             Identity::Current,
@@ -126,28 +165,28 @@ fn the_state_table_follows_the_transaction_version() {
             EndTxnDecision::Refuse(codes::INVALID_TXN_STATE),
         ),
         // CompleteCommit.
-        (
+        row(
             TxnState::CompleteCommit,
             true,
             Identity::Retry,
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
             EndTxnDecision::AlreadyComplete,
         ),
-        (
+        row(
             TxnState::CompleteCommit,
             true,
             Identity::Current,
             EndTxnDecision::AlreadyComplete,
             EndTxnDecision::Refuse(codes::INVALID_TXN_STATE),
         ),
-        (
+        row(
             TxnState::CompleteCommit,
             false,
             Identity::Retry,
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
             EndTxnDecision::Refuse(codes::INVALID_TXN_STATE),
         ),
-        (
+        row(
             TxnState::CompleteCommit,
             false,
             Identity::Current,
@@ -155,21 +194,21 @@ fn the_state_table_follows_the_transaction_version() {
             prepare(TxnState::PrepareAbort, true),
         ),
         // The prepare states.
-        (
+        row(
             TxnState::PrepareCommit,
             true,
             Identity::Retry,
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
             EndTxnDecision::Refuse(codes::CONCURRENT_TRANSACTIONS),
         ),
-        (
+        row(
             TxnState::PrepareCommit,
             false,
             Identity::Retry,
             EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
             EndTxnDecision::Refuse(codes::INVALID_TXN_STATE),
         ),
-        (
+        row(
             TxnState::PrepareAbort,
             false,
             Identity::Retry,
@@ -177,14 +216,14 @@ fn the_state_table_follows_the_transaction_version() {
             EndTxnDecision::Refuse(codes::CONCURRENT_TRANSACTIONS),
         ),
         // The identity checks.
-        (
+        row(
             TxnState::Ongoing,
             true,
             Identity::OtherProducer,
             EndTxnDecision::Refuse(codes::INVALID_PRODUCER_ID_MAPPING),
             EndTxnDecision::Refuse(codes::INVALID_PRODUCER_ID_MAPPING),
         ),
-        (
+        row(
             TxnState::Ongoing,
             true,
             Identity::Stale,
@@ -195,7 +234,14 @@ fn the_state_table_follows_the_transaction_version() {
 
     let mut expected = Vec::new();
     let mut actual = Vec::new();
-    for (state, committed, identity, classic, verified) in cases {
+    for Row {
+        state,
+        committed,
+        identity,
+        classic,
+        verified,
+    } in cases
+    {
         let row = format!(
             "{state:?} {} {identity:?}",
             if committed { "commit" } else { "abort" }
@@ -212,10 +258,30 @@ fn the_state_table_follows_the_transaction_version() {
         expected.push((row.clone(), classic, classic, verified, trunk));
         actual.push((
             row,
-            end_txn_decision(&entry(state), request(identity), committed, (false, false)),
-            end_txn_decision(&entry(state), request(identity), committed, (false, true)),
-            end_txn_decision(&entry(state), request(identity), committed, (true, false)),
-            end_txn_decision(&entry(state), request(identity), committed, (true, true)),
+            end_txn_decision(
+                &entry(state),
+                request(identity),
+                committed,
+                rules(false, false),
+            ),
+            end_txn_decision(
+                &entry(state),
+                request(identity),
+                committed,
+                rules(false, true),
+            ),
+            end_txn_decision(
+                &entry(state),
+                request(identity),
+                committed,
+                rules(true, false),
+            ),
+            end_txn_decision(
+                &entry(state),
+                request(identity),
+                committed,
+                rules(true, true),
+            ),
         ));
     }
     assert!(actual == expected);
@@ -229,7 +295,7 @@ fn a_rotated_producer_id_retries_with_the_exhausted_epoch() {
     rotated.producer_id = ProducerId(11);
     rotated.producer_epoch = 0;
     rotated.prev_producer_id = PID;
-    let overflow = (PID, i16::MAX - 1);
+    let overflow = named(PID, i16::MAX - 1);
 
     // (result, version 2 decision)
     let cases = [
@@ -238,13 +304,13 @@ fn a_rotated_producer_id_retries_with_the_exhausted_epoch() {
     ];
     for (committed, expected) in cases {
         assert!(
-            end_txn_decision(&rotated, overflow, committed, (true, false)) == expected,
+            end_txn_decision(&rotated, overflow, committed, rules(true, false)) == expected,
             "committed={committed}"
         );
         // Below version 2 the same request names neither the entry's producer
         // id nor its epoch.
         assert!(
-            end_txn_decision(&rotated, overflow, committed, (false, false))
+            end_txn_decision(&rotated, overflow, committed, rules(false, false))
                 == EndTxnDecision::Refuse(codes::INVALID_PRODUCER_ID_MAPPING),
             "committed={committed} below version 2"
         );
@@ -275,32 +341,47 @@ fn a_retry_of_a_rotating_prepare_names_the_old_producer_id() {
     let unknown = EndTxnDecision::Refuse(codes::INVALID_PRODUCER_ID_MAPPING);
     // (state, result, request, decision)
     let cases = [
-        (TxnState::PrepareCommit, true, (PID, OLD_EPOCH), concurrent),
-        (TxnState::PrepareAbort, false, (PID, OLD_EPOCH), concurrent),
+        (
+            TxnState::PrepareCommit,
+            true,
+            named(PID, OLD_EPOCH),
+            concurrent,
+        ),
+        (
+            TxnState::PrepareAbort,
+            false,
+            named(PID, OLD_EPOCH),
+            concurrent,
+        ),
         (
             TxnState::PrepareCommit,
             false,
-            (PID, OLD_EPOCH),
+            named(PID, OLD_EPOCH),
             invalid_state,
         ),
         (
             TxnState::PrepareAbort,
             true,
-            (PID, OLD_EPOCH),
+            named(PID, OLD_EPOCH),
             invalid_state,
         ),
-        (TxnState::PrepareCommit, true, (PID, OLD_EPOCH - 1), fenced),
-        (TxnState::PrepareCommit, true, (PID, i16::MAX), fenced),
         (
             TxnState::PrepareCommit,
             true,
-            (ProducerId(PID.get() + 1), OLD_EPOCH),
+            named(PID, OLD_EPOCH - 1),
+            fenced,
+        ),
+        (TxnState::PrepareCommit, true, named(PID, i16::MAX), fenced),
+        (
+            TxnState::PrepareCommit,
+            true,
+            named(ProducerId(PID.get() + 1), OLD_EPOCH),
             unknown,
         ),
     ];
     for (state, committed, request, expected) in cases {
         assert!(
-            end_txn_decision(&rotating(state), request, committed, (true, false)) == expected,
+            end_txn_decision(&rotating(state), request, committed, rules(true, false)) == expected,
             "{state:?} committed={committed} {request:?}"
         );
     }
@@ -309,7 +390,9 @@ fn a_retry_of_a_rotating_prepare_names_the_old_producer_id() {
     // not a rotation: the identity from before the recovery stays fenced.
     let mut recovered = rotating(TxnState::PrepareCommit);
     recovered.next_producer_epoch = 1;
-    assert!(end_txn_decision(&recovered, (PID, OLD_EPOCH), true, (true, false)) == unknown);
+    assert!(
+        end_txn_decision(&recovered, named(PID, OLD_EPOCH), true, rules(true, false)) == unknown
+    );
 }
 
 /// A KIP-939 recovery stages a new identity on the entry. That identity is the
@@ -322,12 +405,12 @@ fn a_staged_recovery_identity_is_the_one_that_ends_the_transaction() {
     staged.next_producer_epoch = EPOCH + 1;
     for verified in [false, true] {
         assert!(
-            end_txn_decision(&staged, (PID, EPOCH + 1), true, (verified, false))
+            end_txn_decision(&staged, named(PID, EPOCH + 1), true, rules(verified, false))
                 == prepare(TxnState::PrepareCommit, false),
             "verified={verified}: the staged identity"
         );
         assert!(
-            end_txn_decision(&staged, (PID, EPOCH), true, (verified, false))
+            end_txn_decision(&staged, named(PID, EPOCH), true, rules(verified, false))
                 == EndTxnDecision::Refuse(codes::PRODUCER_FENCED),
             "verified={verified}: the identity from before the recovery"
         );

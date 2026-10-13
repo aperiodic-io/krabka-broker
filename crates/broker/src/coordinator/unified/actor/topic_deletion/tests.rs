@@ -2,7 +2,10 @@
 
 use {
     crate::coordinator::{
-        test_support::{offset_entry, parsed_offset_records, topic_deletion_tombstones},
+        test_support::{
+            OffsetsRecord, offset_entry, parsed_offset_records, topic_deletion_tombstones,
+        },
+        topic_deletion::DeletedTopic,
         unified::{
             actor::{
                 GroupActorMessage,
@@ -10,11 +13,9 @@ use {
             },
             classic_state::{ClassicGroup, OffsetEntry},
             group::{CoordinatorGroup, GroupKind},
-            persistence::Key,
         },
     },
     assert2::check,
-    bytes::Bytes,
     std::collections::{HashMap, HashSet},
     tokio::sync::oneshot,
 };
@@ -44,7 +45,7 @@ struct Row {
     deleted: Vec<&'static str>,
     append_result: AppendResult,
     expected_reply: Vec<(String, i32)>,
-    expected_records: Vec<(Key, Option<Bytes>)>,
+    expected_records: Vec<OffsetsRecord>,
     expected_committed: HashSet<(String, i32)>,
     expected_pending: HashSet<(String, i32)>,
 }
@@ -123,7 +124,10 @@ async fn deleting_a_topic_tombstones_its_offsets_in_the_group() {
                 topics: row
                     .deleted
                     .iter()
-                    .map(|name| ((*name).to_string(), OLD_ORDERS))
+                    .map(|name| DeletedTopic {
+                        name: (*name).to_string(),
+                        topic_id: OLD_ORDERS,
+                    })
                     .collect(),
                 reply,
             })

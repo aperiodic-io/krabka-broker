@@ -15,13 +15,25 @@ use {
         },
         *,
     },
-    crate::{
-        test_support::config_map,
-        throttle::{FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_REPLICAS_KEY},
-    },
+    crate::throttle::{FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_REPLICAS_KEY},
     assert2::{assert, check},
     krabka_log::CleanupPolicy,
 };
+
+/// A config key and its value.
+#[derive(Debug, Clone, Copy)]
+struct ConfigPair<'a> {
+    key: &'a str,
+    value: &'a str,
+}
+
+/// The owned map of `pairs`.
+fn config_map(pairs: &[ConfigPair<'_>]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|ConfigPair { key, value }| ((*key).to_owned(), (*value).to_owned()))
+        .collect()
+}
 
 /// A name Kafka has no `TopicConfig` entry for, which its own `LogConfig`
 /// refuses with `Unknown topic config name`. The probe every unknown-key test
@@ -450,163 +462,315 @@ fn the_compaction_lag_conflict_carries_kafkas_message() {
     );
 }
 
-/// One row of the tiered-storage table: the broker's tier state, the map, and
-/// Kafka's result.
-type TierCase<'a> = (bool, Vec<(&'a str, &'a str)>, Result<(), String>);
+/// A tiered topic's config map: `remote.storage.enable=true` followed by `rest`.
+fn tiered_pairs<const N: usize>(rest: [ConfigPair<'static>; N]) -> Vec<ConfigPair<'static>> {
+    let mut pairs = vec![ConfigPair {
+        key: REMOTE_STORAGE_ENABLE,
+        value: "true",
+    }];
+    pairs.extend(rest);
+    pairs
+}
+
+/// One row of the tiered-storage table.
+struct TierCase<'a> {
+    /// The broker's tier state.
+    tier_on: bool,
+    /// The topic's config map.
+    pairs: Vec<ConfigPair<'a>>,
+    /// Kafka's result.
+    want: Result<(), String>,
+}
+
+/// The tiered-storage rows: the broker's tier state, the map, and Kafka's result.
+fn tier_cases_a() -> Vec<TierCase<'static>> {
+    vec![
+        TierCase {
+            tier_on: false,
+            pairs: vec![ConfigPair {
+                key: REMOTE_STORAGE_ENABLE,
+                value: "true",
+            }],
+            want: Err(REMOTE_STORAGE_DISABLED_MESSAGE.to_owned()),
+        },
+        TierCase {
+            tier_on: false,
+            pairs: vec![ConfigPair {
+                key: REMOTE_STORAGE_ENABLE,
+                value: "false",
+            }],
+            want: Ok(()),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([
+                ConfigPair {
+                    key: RETENTION_BYTES,
+                    value: "100",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_BYTES,
+                    value: "-1",
+                },
+            ]),
+            want: Err(
+                "Invalid value -1 for configuration local.retention.bytes: Value must not be -1 \
+                 as retention.bytes value is set as 100."
+                    .to_owned(),
+            ),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([
+                ConfigPair {
+                    key: RETENTION_BYTES,
+                    value: "100",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_BYTES,
+                    value: "200",
+                },
+            ]),
+            want: Err(
+                "Invalid value 200 for configuration local.retention.bytes: Value must not be \
+                 more than retention.bytes property value: 100"
+                    .to_owned(),
+            ),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([
+                ConfigPair {
+                    key: RETENTION_BYTES,
+                    value: "-1",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_BYTES,
+                    value: "-1",
+                },
+            ]),
+            want: Ok(()),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([ConfigPair {
+                key: LOCAL_RETENTION_MS,
+                value: "-1",
+            }]),
+            want: Err(
+                "Invalid value -1 for configuration local.retention.ms: Value must not be -1 as \
+                 retention.ms value is set as 604800000."
+                    .to_owned(),
+            ),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([
+                ConfigPair {
+                    key: RETENTION_MS,
+                    value: "-1",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_MS,
+                    value: "5000",
+                },
+            ]),
+            want: Ok(()),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([
+                ConfigPair {
+                    key: REMOTE_LOG_COPY_DISABLE,
+                    value: "true",
+                },
+                ConfigPair {
+                    key: RETENTION_MS,
+                    value: "1000",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_MS,
+                    value: "500",
+                },
+            ]),
+            want: Err(
+                "When `remote.log.copy.disable` is set to true, the `local.retention.ms` and \
+                 `retention.ms` must be set to the identical value because there will be no more \
+                 logs copied to the remote storage."
+                    .to_owned(),
+            ),
+        },
+    ]
+}
+
+/// The tiered-storage rows: the broker's tier state, the map, and Kafka's result.
+fn tier_cases_b() -> Vec<TierCase<'static>> {
+    let policy_message = Err(REMOTE_STORAGE_POLICY_MESSAGE.to_owned());
+    vec![
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([
+                ConfigPair {
+                    key: REMOTE_LOG_COPY_DISABLE,
+                    value: "true",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_MS,
+                    value: "-2",
+                },
+            ]),
+            want: Ok(()),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([ConfigPair {
+                key: CLEANUP_POLICY,
+                value: "compact",
+            }]),
+            want: policy_message.clone(),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([ConfigPair {
+                key: CLEANUP_POLICY,
+                value: "compact,delete",
+            }]),
+            want: policy_message,
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([ConfigPair {
+                key: CLEANUP_POLICY,
+                value: "",
+            }]),
+            want: Ok(()),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: vec![
+                ConfigPair {
+                    key: REMOTE_STORAGE_ENABLE,
+                    value: "false",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_BYTES,
+                    value: "500",
+                },
+                ConfigPair {
+                    key: RETENTION_BYTES,
+                    value: "100",
+                },
+            ],
+            want: Ok(()),
+        },
+        // Kafka trunk's copy-lag rules against the effective local retention.
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([
+                ConfigPair {
+                    key: LOCAL_RETENTION_MS,
+                    value: "1000",
+                },
+                ConfigPair {
+                    key: REMOTE_COPY_LAG_MS,
+                    value: "2000",
+                },
+            ]),
+            want: Err(
+                "Invalid value 2000 for configuration remote.copy.lag.ms: Value must not exceed \
+                 local.retention.ms (effective value: 1000)"
+                    .to_owned(),
+            ),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([
+                ConfigPair {
+                    key: LOCAL_RETENTION_MS,
+                    value: "-1",
+                },
+                ConfigPair {
+                    key: RETENTION_MS,
+                    value: "-1",
+                },
+                ConfigPair {
+                    key: REMOTE_COPY_LAG_MS,
+                    value: "2000",
+                },
+            ]),
+            want: Ok(()),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: tiered_pairs([
+                ConfigPair {
+                    key: RETENTION_BYTES,
+                    value: "100",
+                },
+                ConfigPair {
+                    key: REMOTE_COPY_LAG_BYTES,
+                    value: "200",
+                },
+            ]),
+            want: Err(
+                "Invalid value 200 for configuration remote.copy.lag.bytes: Value must not \
+                 exceed local.retention.bytes (effective value: 100)"
+                    .to_owned(),
+            ),
+        },
+    ]
+}
+
+/// The tiered-storage rows: the broker's tier state, the map, and Kafka's result.
+fn tier_cases_c() -> Vec<TierCase<'static>> {
+    vec![
+        TierCase {
+            tier_on: true,
+            pairs: vec![ConfigPair {
+                key: REMOTE_COPY_LAG_MS,
+                value: "-1",
+            }],
+            want: Ok(()),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: vec![ConfigPair {
+                key: MAX_DECOMPRESSED_MESSAGE_BYTES,
+                value: "2147483639",
+            }],
+            want: Ok(()),
+        },
+        TierCase {
+            tier_on: true,
+            pairs: vec![ConfigPair {
+                key: ERRORS_DEADLETTERQUEUE_GROUP_ENABLE,
+                value: "true",
+            }],
+            want: Ok(()),
+        },
+    ]
+}
+
+/// The tiered-storage rows: the broker's tier state, the map, and Kafka's result.
+fn tier_cases() -> Vec<TierCase<'static>> {
+    let mut cases = tier_cases_a();
+    cases.extend(tier_cases_b());
+    cases.extend(tier_cases_c());
+    cases
+}
 
 /// Kafka's `LogConfig.validateTopicLogConfigValues` tiered-storage rules, run
 /// on the resulting map when `remote.storage.enable` is true. Each row is the
 /// broker's tier state, the map, and Kafka's result.
 #[test]
 fn tiered_storage_rules_follow_kafkas_log_config() {
-    let policy_message = Err(REMOTE_STORAGE_POLICY_MESSAGE.to_owned());
-    let cases: Vec<TierCase<'_>> =
-        vec![
-        (
-            false,
-            vec![(REMOTE_STORAGE_ENABLE, "true")],
-            Err(REMOTE_STORAGE_DISABLED_MESSAGE.to_owned()),
-        ),
-        (false, vec![(REMOTE_STORAGE_ENABLE, "false")], Ok(())),
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (RETENTION_BYTES, "100"),
-                (LOCAL_RETENTION_BYTES, "-1"),
-            ],
-            Err("Invalid value -1 for configuration local.retention.bytes: Value must not be -1 \
-                 as retention.bytes value is set as 100."
-                .to_owned()),
-        ),
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (RETENTION_BYTES, "100"),
-                (LOCAL_RETENTION_BYTES, "200"),
-            ],
-            Err("Invalid value 200 for configuration local.retention.bytes: Value must not be \
-                 more than retention.bytes property value: 100"
-                .to_owned()),
-        ),
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (RETENTION_BYTES, "-1"),
-                (LOCAL_RETENTION_BYTES, "-1"),
-            ],
-            Ok(()),
-        ),
-        (
-            true,
-            vec![(REMOTE_STORAGE_ENABLE, "true"), (LOCAL_RETENTION_MS, "-1")],
-            Err("Invalid value -1 for configuration local.retention.ms: Value must not be -1 as \
-                 retention.ms value is set as 604800000."
-                .to_owned()),
-        ),
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (RETENTION_MS, "-1"),
-                (LOCAL_RETENTION_MS, "5000"),
-            ],
-            Ok(()),
-        ),
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (REMOTE_LOG_COPY_DISABLE, "true"),
-                (RETENTION_MS, "1000"),
-                (LOCAL_RETENTION_MS, "500"),
-            ],
-            Err("When `remote.log.copy.disable` is set to true, the `local.retention.ms` and \
-                 `retention.ms` must be set to the identical value because there will be no more \
-                 logs copied to the remote storage."
-                .to_owned()),
-        ),
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (REMOTE_LOG_COPY_DISABLE, "true"),
-                (LOCAL_RETENTION_MS, "-2"),
-            ],
-            Ok(()),
-        ),
-        (
-            true,
-            vec![(REMOTE_STORAGE_ENABLE, "true"), (CLEANUP_POLICY, "compact")],
-            policy_message.clone(),
-        ),
-        (
-            true,
-            vec![(REMOTE_STORAGE_ENABLE, "true"), (CLEANUP_POLICY, "compact,delete")],
-            policy_message,
-        ),
-        (
-            true,
-            vec![(REMOTE_STORAGE_ENABLE, "true"), (CLEANUP_POLICY, "")],
-            Ok(()),
-        ),
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "false"),
-                (LOCAL_RETENTION_BYTES, "500"),
-                (RETENTION_BYTES, "100"),
-            ],
-            Ok(()),
-        ),
-        // Kafka trunk's copy-lag rules against the effective local retention.
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (LOCAL_RETENTION_MS, "1000"),
-                (REMOTE_COPY_LAG_MS, "2000"),
-            ],
-            Err("Invalid value 2000 for configuration remote.copy.lag.ms: Value must not exceed \
-                 local.retention.ms (effective value: 1000)"
-                .to_owned()),
-        ),
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (LOCAL_RETENTION_MS, "-1"),
-                (RETENTION_MS, "-1"),
-                (REMOTE_COPY_LAG_MS, "2000"),
-            ],
-            Ok(()),
-        ),
-        (
-            true,
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (RETENTION_BYTES, "100"),
-                (REMOTE_COPY_LAG_BYTES, "200"),
-            ],
-            Err("Invalid value 200 for configuration remote.copy.lag.bytes: Value must not \
-                 exceed local.retention.bytes (effective value: 100)"
-                .to_owned()),
-        ),
-        (true, vec![(REMOTE_COPY_LAG_MS, "-1")], Ok(())),
-        (
-            true,
-            vec![(MAX_DECOMPRESSED_MESSAGE_BYTES, "2147483639")],
-            Ok(()),
-        ),
-        (
-            true,
-            vec![(ERRORS_DEADLETTERQUEUE_GROUP_ENABLE, "true")],
-            Ok(()),
-        ),
-    ];
-    for (tier_on, pairs, want) in cases {
+    let cases = tier_cases();
+    for TierCase {
+        tier_on,
+        pairs,
+        want,
+    } in cases
+    {
         let map = config_map(&pairs);
         check!(
             canonical_topic_config_map(
@@ -622,102 +786,208 @@ fn tiered_storage_rules_follow_kafkas_log_config() {
     }
 }
 
-/// Kafka validates a topic's map merged over the broker's effective defaults
-/// (`KafkaConfig.extractLogConfigMap`), so a key the topic leaves unset takes
-/// the cluster-wide broker default, in the topic key's unit, and not the
-/// registry default.
-#[test]
-fn cross_key_rules_read_the_cluster_broker_defaults() {
-    // (cluster-wide broker configs, topic overrides, outcome).
-    type Case = (
-        Vec<(&'static str, &'static str)>,
-        Vec<(&'static str, &'static str)>,
-        Result<(), String>,
-    );
+/// One row of the cross-key table.
+struct CrossKeyCase {
+    /// The cluster-wide broker configs.
+    cluster: Vec<ConfigPair<'static>>,
+    /// The topic's overrides.
+    topic: Vec<ConfigPair<'static>>,
+    want: Result<(), String>,
+}
+
+fn cross_key_cases() -> Vec<CrossKeyCase> {
     let local_ms_over = |value: i64, total: i64| {
         Err(format!(
             "Invalid value {value} for configuration local.retention.ms: Value must not be \
              more than retention.ms property value: {total}"
         ))
     };
-    let cases: Vec<Case> = vec![
-        (
-            vec![("log.cleanup.policy", "compact")],
-            vec![(REMOTE_STORAGE_ENABLE, "true")],
-            Err(REMOTE_STORAGE_POLICY_MESSAGE.to_owned()),
-        ),
-        (
-            vec![("log.cleanup.policy", "compact")],
-            vec![(REMOTE_STORAGE_ENABLE, "true"), (CLEANUP_POLICY, "delete")],
-            Ok(()),
-        ),
-        (
-            vec![("log.cleanup.policy", "compact")],
-            vec![(REMOTE_STORAGE_ENABLE, "false")],
-            Ok(()),
-        ),
-        (
-            vec![("log.retention.ms", "1000")],
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (LOCAL_RETENTION_MS, "2000"),
+    let cases: Vec<CrossKeyCase> = vec![
+        CrossKeyCase {
+            cluster: vec![ConfigPair {
+                key: "log.cleanup.policy",
+                value: "compact",
+            }],
+            topic: vec![ConfigPair {
+                key: REMOTE_STORAGE_ENABLE,
+                value: "true",
+            }],
+            want: Err(REMOTE_STORAGE_POLICY_MESSAGE.to_owned()),
+        },
+        CrossKeyCase {
+            cluster: vec![ConfigPair {
+                key: "log.cleanup.policy",
+                value: "compact",
+            }],
+            topic: vec![
+                ConfigPair {
+                    key: REMOTE_STORAGE_ENABLE,
+                    value: "true",
+                },
+                ConfigPair {
+                    key: CLEANUP_POLICY,
+                    value: "delete",
+                },
             ],
-            local_ms_over(2000, 1000),
-        ),
-        (
-            vec![("log.retention.hours", "1")],
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (LOCAL_RETENTION_MS, "3600001"),
+            want: Ok(()),
+        },
+        CrossKeyCase {
+            cluster: vec![ConfigPair {
+                key: "log.cleanup.policy",
+                value: "compact",
+            }],
+            topic: vec![ConfigPair {
+                key: REMOTE_STORAGE_ENABLE,
+                value: "false",
+            }],
+            want: Ok(()),
+        },
+        CrossKeyCase {
+            cluster: vec![ConfigPair {
+                key: "log.retention.ms",
+                value: "1000",
+            }],
+            topic: vec![
+                ConfigPair {
+                    key: REMOTE_STORAGE_ENABLE,
+                    value: "true",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_MS,
+                    value: "2000",
+                },
             ],
-            local_ms_over(3_600_001, 3_600_000),
-        ),
-        (
-            vec![("log.retention.hours", "1"), ("log.retention.minutes", "1")],
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (LOCAL_RETENTION_MS, "60001"),
+            want: local_ms_over(2000, 1000),
+        },
+        CrossKeyCase {
+            cluster: vec![ConfigPair {
+                key: "log.retention.hours",
+                value: "1",
+            }],
+            topic: vec![
+                ConfigPair {
+                    key: REMOTE_STORAGE_ENABLE,
+                    value: "true",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_MS,
+                    value: "3600001",
+                },
             ],
-            local_ms_over(60_001, 60_000),
-        ),
-        (
-            vec![("log.retention.ms", "-5")],
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (LOCAL_RETENTION_MS, "60001"),
+            want: local_ms_over(3_600_001, 3_600_000),
+        },
+        CrossKeyCase {
+            cluster: vec![
+                ConfigPair {
+                    key: "log.retention.hours",
+                    value: "1",
+                },
+                ConfigPair {
+                    key: "log.retention.minutes",
+                    value: "1",
+                },
             ],
-            Ok(()),
-        ),
-        (
-            vec![("log.local.retention.ms", "5000")],
-            vec![(REMOTE_STORAGE_ENABLE, "true"), (RETENTION_MS, "1000")],
-            local_ms_over(5000, 1000),
-        ),
-        (
-            vec![("log.retention.bytes", "100")],
-            vec![
-                (REMOTE_STORAGE_ENABLE, "true"),
-                (LOCAL_RETENTION_BYTES, "200"),
+            topic: vec![
+                ConfigPair {
+                    key: REMOTE_STORAGE_ENABLE,
+                    value: "true",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_MS,
+                    value: "60001",
+                },
             ],
-            Err(
+            want: local_ms_over(60_001, 60_000),
+        },
+        CrossKeyCase {
+            cluster: vec![ConfigPair {
+                key: "log.retention.ms",
+                value: "-5",
+            }],
+            topic: vec![
+                ConfigPair {
+                    key: REMOTE_STORAGE_ENABLE,
+                    value: "true",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_MS,
+                    value: "60001",
+                },
+            ],
+            want: Ok(()),
+        },
+        CrossKeyCase {
+            cluster: vec![ConfigPair {
+                key: "log.local.retention.ms",
+                value: "5000",
+            }],
+            topic: vec![
+                ConfigPair {
+                    key: REMOTE_STORAGE_ENABLE,
+                    value: "true",
+                },
+                ConfigPair {
+                    key: RETENTION_MS,
+                    value: "1000",
+                },
+            ],
+            want: local_ms_over(5000, 1000),
+        },
+        CrossKeyCase {
+            cluster: vec![ConfigPair {
+                key: "log.retention.bytes",
+                value: "100",
+            }],
+            topic: vec![
+                ConfigPair {
+                    key: REMOTE_STORAGE_ENABLE,
+                    value: "true",
+                },
+                ConfigPair {
+                    key: LOCAL_RETENTION_BYTES,
+                    value: "200",
+                },
+            ],
+            want: Err(
                 "Invalid value 200 for configuration local.retention.bytes: Value must not be \
                  more than retention.bytes property value: 100"
                     .to_owned(),
             ),
-        ),
-        (
-            vec![("log.cleaner.min.compaction.lag.ms", "100")],
-            vec![(MAX_COMPACTION_LAG_MS, "50")],
-            Err(
+        },
+        CrossKeyCase {
+            cluster: vec![ConfigPair {
+                key: "log.cleaner.min.compaction.lag.ms",
+                value: "100",
+            }],
+            topic: vec![ConfigPair {
+                key: MAX_COMPACTION_LAG_MS,
+                value: "50",
+            }],
+            want: Err(
                 "conflict topic config setting min.compaction.lag.ms (100) > \
                  max.compaction.lag.ms (50)"
                     .to_owned(),
             ),
-        ),
+        },
     ];
-    for (cluster, topic, want) in cases {
+    cases
+}
+
+/// Kafka validates a topic's map merged over the broker's effective defaults
+/// (`KafkaConfig.extractLogConfigMap`), so a key the topic leaves unset takes
+/// the cluster-wide broker default, in the topic key's unit, and not the
+/// registry default.
+#[test]
+fn cross_key_rules_read_the_cluster_broker_defaults() {
+    let cases = cross_key_cases();
+    for CrossKeyCase {
+        cluster,
+        topic,
+        want,
+    } in cases
+    {
         let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-        for (name, value) in &cluster {
+        for ConfigPair { key: name, value } in &cluster {
             image.apply(&krabka_metadata::MetadataRecord::V1BrokerConfig(
                 krabka_metadata::BrokerConfigRecord {
                     node_id: krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID,

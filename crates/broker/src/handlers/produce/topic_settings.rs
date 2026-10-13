@@ -65,6 +65,16 @@ pub(super) fn resolve_topic_compression(
         .unwrap_or(broker_default)
 }
 
+/// The inclusive range of record timestamps that a topic accepts around the
+/// broker's clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TimestampWindow {
+    /// The earliest accepted timestamp.
+    pub(super) low: i64,
+    /// The latest accepted timestamp.
+    pub(super) high: i64,
+}
+
 /// A topic's KIP-32 timestamp policy at produce time: whose clock the stored
 /// records carry, and how far a producer's own timestamp may sit from the
 /// broker's clock.
@@ -152,10 +162,10 @@ impl TimestampPolicy {
     /// value Kafka's own `Long.MAX_VALUE` default spells, and the arithmetic
     /// saturates rather than wraps for the same reason [`Self::rejects_record`]
     /// does.
-    pub(super) fn window(self, now_ms: i64) -> (i64, i64) {
+    pub(super) fn window(self, now_ms: i64) -> TimestampWindow {
         let low = now_ms.saturating_sub(self.before_max_ms.unwrap_or(i64::MAX));
         let high = now_ms.saturating_add(self.after_max_ms.unwrap_or(i64::MAX));
-        (low, high)
+        TimestampWindow { low, high }
     }
 }
 
@@ -328,7 +338,7 @@ mod tests {
                 effective_min_insync_replicas,
             },
             handlers::produce::test_support::{
-                image_with_overrides, image_with_topic, set_min_isr,
+                ConfigOverride, image_with_overrides, image_with_topic, set_min_isr,
             },
         },
         assert2::{assert, check},
@@ -679,7 +689,10 @@ mod tests {
             ),
             (
                 "LogAppendTime alone",
-                vec![(MESSAGE_TIMESTAMP_TYPE, "LogAppendTime")],
+                vec![ConfigOverride {
+                    key: MESSAGE_TIMESTAMP_TYPE,
+                    value: "LogAppendTime",
+                }],
                 TimestampPolicy {
                     timestamp_type: TimestampType::LogAppendTime,
                     ..kafka_default()
@@ -688,8 +701,14 @@ mod tests {
             (
                 "both windows",
                 vec![
-                    (MESSAGE_TIMESTAMP_BEFORE_MAX_MS, "1000"),
-                    (MESSAGE_TIMESTAMP_AFTER_MAX_MS, "2000"),
+                    ConfigOverride {
+                        key: MESSAGE_TIMESTAMP_BEFORE_MAX_MS,
+                        value: "1000",
+                    },
+                    ConfigOverride {
+                        key: MESSAGE_TIMESTAMP_AFTER_MAX_MS,
+                        value: "2000",
+                    },
                 ],
                 TimestampPolicy {
                     timestamp_type: TimestampType::CreateTime,
@@ -700,24 +719,39 @@ mod tests {
             (
                 "Kafka's Long.MAX_VALUE spells `no bound` in either direction",
                 vec![
-                    (MESSAGE_TIMESTAMP_BEFORE_MAX_MS, "9223372036854775807"),
-                    (MESSAGE_TIMESTAMP_AFTER_MAX_MS, "9223372036854775807"),
+                    ConfigOverride {
+                        key: MESSAGE_TIMESTAMP_BEFORE_MAX_MS,
+                        value: "9223372036854775807",
+                    },
+                    ConfigOverride {
+                        key: MESSAGE_TIMESTAMP_AFTER_MAX_MS,
+                        value: "9223372036854775807",
+                    },
                 ],
                 TimestampPolicy::default(),
             ),
             (
                 "an explicit Long.MAX_VALUE outranks the one-hour default",
-                vec![(MESSAGE_TIMESTAMP_AFTER_MAX_MS, "9223372036854775807")],
+                vec![ConfigOverride {
+                    key: MESSAGE_TIMESTAMP_AFTER_MAX_MS,
+                    value: "9223372036854775807",
+                }],
                 TimestampPolicy::default(),
             ),
             (
                 "an unparseable window falls back to no bound",
-                vec![(MESSAGE_TIMESTAMP_AFTER_MAX_MS, "soon")],
+                vec![ConfigOverride {
+                    key: MESSAGE_TIMESTAMP_AFTER_MAX_MS,
+                    value: "soon",
+                }],
                 TimestampPolicy::default(),
             ),
             (
                 "an unknown timestamp type is CreateTime, the default",
-                vec![(MESSAGE_TIMESTAMP_TYPE, "WallClock")],
+                vec![ConfigOverride {
+                    key: MESSAGE_TIMESTAMP_TYPE,
+                    value: "WallClock",
+                }],
                 kafka_default(),
             ),
         ];
@@ -744,21 +778,36 @@ mod tests {
         let cases = [
             (
                 "scheduled alone drops Kafka's one-hour future default",
-                vec![(DELIVERY_MODE, DELIVERY_MODE_SCHEDULED)],
+                vec![ConfigOverride {
+                    key: DELIVERY_MODE,
+                    value: DELIVERY_MODE_SCHEDULED,
+                }],
                 TimestampPolicy::default(),
             ),
             (
                 "scheduled drops a window the topic set for itself, too",
                 vec![
-                    (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
-                    (MESSAGE_TIMESTAMP_BEFORE_MAX_MS, "1000"),
-                    (MESSAGE_TIMESTAMP_AFTER_MAX_MS, "2000"),
+                    ConfigOverride {
+                        key: DELIVERY_MODE,
+                        value: DELIVERY_MODE_SCHEDULED,
+                    },
+                    ConfigOverride {
+                        key: MESSAGE_TIMESTAMP_BEFORE_MAX_MS,
+                        value: "1000",
+                    },
+                    ConfigOverride {
+                        key: MESSAGE_TIMESTAMP_AFTER_MAX_MS,
+                        value: "2000",
+                    },
                 ],
                 TimestampPolicy::default(),
             ),
             (
                 "an immediate topic is bounded exactly as a Kafka topic is",
-                vec![(DELIVERY_MODE, DELIVERY_MODE_IMMEDIATE)],
+                vec![ConfigOverride {
+                    key: DELIVERY_MODE,
+                    value: DELIVERY_MODE_IMMEDIATE,
+                }],
                 kafka_default(),
             ),
         ];
@@ -806,7 +855,10 @@ mod tests {
             ),
             (
                 "a topic override on one key wins for that key alone",
-                vec![(MESSAGE_TIMESTAMP_AFTER_MAX_MS, "5000")],
+                vec![ConfigOverride {
+                    key: MESSAGE_TIMESTAMP_AFTER_MAX_MS,
+                    value: "5000",
+                }],
                 TimestampPolicy {
                     after_max_ms: Some(5_000),
                     ..strict_broker_default
@@ -814,7 +866,10 @@ mod tests {
             ),
             (
                 "a topic override on the type wins over the broker default",
-                vec![(MESSAGE_TIMESTAMP_TYPE, "WallClock")],
+                vec![ConfigOverride {
+                    key: MESSAGE_TIMESTAMP_TYPE,
+                    value: "WallClock",
+                }],
                 TimestampPolicy {
                     timestamp_type: TimestampType::CreateTime,
                     ..strict_broker_default

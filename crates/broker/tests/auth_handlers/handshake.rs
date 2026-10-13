@@ -8,7 +8,7 @@
 
 use {
     crate::{
-        harness::{alice_password, alice_plain_socket, round_trip},
+        harness::{BrokerSocket, alice_password, alice_plain_socket, round_trip},
         kafka_wire::exchange,
         support::{
             sasl::sasl_plaintext_mechanisms,
@@ -44,8 +44,12 @@ use {
 /// `SaslAuthenticate`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn api_versions_reachable_pre_auth_on_sasl_listener() {
-    let (_log_dir, handle, _addr, mut stream) =
-        alice_plain_socket("alice-secret".to_string()).await;
+    let BrokerSocket {
+        log_dir: _log_dir,
+        handle,
+        addr: _addr,
+        mut stream,
+    } = alice_plain_socket("alice-secret".to_string()).await;
 
     let av_resp: ApiVersionsResponse = exchange()
         .stream(&mut stream)
@@ -82,8 +86,12 @@ async fn api_versions_reachable_pre_auth_on_sasl_listener() {
 /// `UnexpectedEof` or a connection reset, and not a well-formed response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn metadata_rejected_pre_auth_on_sasl_listener() {
-    let (_log_dir, handle, _addr, mut stream) =
-        alice_plain_socket("alice-secret".to_string()).await;
+    let BrokerSocket {
+        log_dir: _log_dir,
+        handle,
+        addr: _addr,
+        mut stream,
+    } = alice_plain_socket("alice-secret".to_string()).await;
 
     // Send Metadata (api_key=3, v12, flexible) WITHOUT any auth.
     let md_req = MetadataRequest::default();
@@ -123,7 +131,12 @@ async fn metadata_rejected_pre_auth_on_sasl_listener() {
 /// does. A new connection may then negotiate the supported mechanism, PLAIN.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unsupported_mechanism_answers_33_then_closes() {
-    let (_log_dir, handle, addr, mut stream) = alice_plain_socket("alice-secret".to_string()).await;
+    let BrokerSocket {
+        log_dir: _log_dir,
+        handle,
+        addr,
+        mut stream,
+    } = alice_plain_socket("alice-secret".to_string()).await;
 
     // ── 1. SaslHandshake with "GSSAPI" (not in enabled list).
     let mut sh_body = BytesMut::new();
@@ -252,7 +265,11 @@ async fn write_raw_frame(stream: &mut TcpStream, payload: &[u8]) {
 /// size-prefixed token. The connection is then authenticated.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v0_handshake_runs_the_exchange_as_raw_tokens() {
-    let (_log_dir, handle, mut stream) = plain_handshake_fixture().await;
+    let PlainHandshake {
+        log_dir: _log_dir,
+        handle,
+        mut stream,
+    } = plain_handshake_fixture().await;
 
     check!(plain_handshake(&mut stream, 0).await.error_code == 0);
 
@@ -289,7 +306,11 @@ async fn v0_handshake_runs_the_exchange_as_raw_tokens() {
 /// error, so Kafka closes the connection without one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v0_raw_token_with_bad_credentials_closes_without_response() {
-    let (_log_dir, handle, mut stream) = plain_handshake_fixture().await;
+    let PlainHandshake {
+        log_dir: _log_dir,
+        handle,
+        mut stream,
+    } = plain_handshake_fixture().await;
 
     check!(plain_handshake(&mut stream, 0).await.error_code == 0);
     write_raw_frame(&mut stream, b"\0alice\0not-the-password").await;
@@ -303,7 +324,11 @@ async fn v0_raw_token_with_bad_credentials_closes_without_response() {
 /// `ILLEGAL_SASL_STATE` (34), and then the connection closes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn api_versions_after_the_handshake_answers_34_then_closes() {
-    let (_log_dir, handle, mut stream) = plain_handshake_fixture().await;
+    let PlainHandshake {
+        log_dir: _log_dir,
+        handle,
+        mut stream,
+    } = plain_handshake_fixture().await;
 
     check!(plain_handshake(&mut stream, 1).await.error_code == 0);
 
@@ -339,9 +364,20 @@ async fn api_versions_after_the_handshake_answers_34_then_closes() {
     handle.shutdown().await;
 }
 
-async fn plain_handshake_fixture() -> (tempfile::TempDir, krabka_broker::BrokerHandle, TcpStream) {
+/// A PLAIN SASL broker, the log directory that backs it, and an open socket.
+struct PlainHandshake {
+    log_dir: tempfile::TempDir,
+    handle: krabka_broker::BrokerHandle,
+    stream: TcpStream,
+}
+
+async fn plain_handshake_fixture() -> PlainHandshake {
     let log_dir = tempfile::tempdir().unwrap();
     let handle = start_plain_sasl_broker(log_dir.path()).await;
     let stream = TcpStream::connect(handle.listen_addr()).await.unwrap();
-    (log_dir, handle, stream)
+    PlainHandshake {
+        log_dir,
+        handle,
+        stream,
+    }
 }

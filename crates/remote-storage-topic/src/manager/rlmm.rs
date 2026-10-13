@@ -123,7 +123,8 @@ mod tests {
         crate::{
             log::{InProcessMetadataEventLog, MetadataEventLog},
             manager::test_support::{
-                finish, on_blocking, seed_finished, start_manager, start_manager_all, started, tp,
+                finish, on_blocking, seed, seed_finished, start_manager, start_manager_all,
+                started, tp,
             },
         },
         assert2::assert,
@@ -137,7 +138,7 @@ mod tests {
     async fn add_finish_query_round_trip() {
         let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
         let m = start_manager_all(log).await;
-        seed_finished(&m, &[(10, 0, 99)]).await;
+        seed_finished(&m, &[seed(10, 0, 99)]).await;
 
         check_finished_segment(m.as_ref(), &tp());
         m.shutdown();

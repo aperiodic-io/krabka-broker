@@ -284,9 +284,12 @@ impl RestoreReport {
             .expect("String writer is infallible");
         }
 
-        let mut current_topic: Option<(&str, Uuid)> = None;
+        let mut current_topic: Option<TopicHeading<'_>> = None;
         for partition in &self.partitions {
-            let topic_key = (partition.topic.as_str(), partition.topic_id);
+            let topic_key = TopicHeading {
+                topic: partition.topic.as_str(),
+                topic_id: partition.topic_id,
+            };
             if current_topic != Some(topic_key) {
                 writeln!(out).expect("String writer is infallible");
                 writeln!(out, "{} (topic id {})", partition.topic, partition.topic_id)
@@ -317,6 +320,13 @@ impl RestoreReport {
 
         out
     }
+}
+
+/// The topic a text rendering last printed a heading for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TopicHeading<'a> {
+    topic: &'a str,
+    topic_id: Uuid,
 }
 
 /// Write one partition's summary line, aggregating its segments' counters.

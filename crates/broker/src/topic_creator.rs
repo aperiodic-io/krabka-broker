@@ -326,7 +326,9 @@ async fn send_enveloped(
     request: &CreateTopicsRequest,
 ) -> Attempt {
     let version = match create_topics_version(
-        connection.advertised_api_range(create_topics_request::API_KEY),
+        connection
+            .advertised_api_range(create_topics_request::API_KEY)
+            .map(|(min, max)| AdvertisedRange { min, max }),
     ) {
         Ok(version) => version,
         Err(error) => return Attempt::Done(Err(error)),
@@ -386,13 +388,20 @@ fn send_failure(error: ClientError) -> Attempt {
     }
 }
 
+/// The range of versions of an API that a controller advertised.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AdvertisedRange {
+    min: i16,
+    max: i16,
+}
+
 /// The `CreateTopics` version of an embedded request: Kafka's
 /// `controllerApiVersions().latestUsableVersion(CREATE_TOPICS)`, which is the
 /// highest stable version that this codec and the controller both support.
 ///
 /// `controller` is the range the controller advertised, or `None` when it did
 /// not advertise `CreateTopics`.
-fn create_topics_version(controller: Option<(i16, i16)>) -> Result<i16, TopicCreatorError> {
+fn create_topics_version(controller: Option<AdvertisedRange>) -> Result<i16, TopicCreatorError> {
     let unsupported = || {
         TopicCreatorError::Protocol(format!(
             "The controller does not support CREATE_TOPICS at a version in {}..={}",
@@ -400,7 +409,10 @@ fn create_topics_version(controller: Option<(i16, i16)>) -> Result<i16, TopicCre
             create_topics_request::LATEST_STABLE_VERSION
         ))
     };
-    let (controller_min, controller_max) = controller.ok_or_else(unsupported)?;
+    let AdvertisedRange {
+        min: controller_min,
+        max: controller_max,
+    } = controller.ok_or_else(unsupported)?;
     let version = create_topics_request::LATEST_STABLE_VERSION.min(controller_max);
     if version < create_topics_request::MIN_VERSION || version < controller_min {
         return Err(unsupported());

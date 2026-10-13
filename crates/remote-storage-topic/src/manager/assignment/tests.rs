@@ -5,8 +5,8 @@ use {
     crate::{
         log::{InProcessMetadataEventLog, MetadataEventLog},
         manager::test_support::{
-            HwmFlakyLog, on_blocking, seeded_manager, start_manager, start_manager_all, tp,
-            wait_finished_metadata, wait_ready,
+            HwmFlakyLog, SeededManager, on_blocking, seeded_manager, start_manager,
+            start_manager_all, tp, wait_finished_metadata, wait_ready,
         },
         partitioning::metadata_partition_for,
     },
@@ -27,7 +27,7 @@ krabka_macros::remote_metadata_missing!(check_missing_partition, krabka_remote_s
 #[tokio::test(flavor = "multi_thread")]
 async fn epoch_lists_follow_assignment_and_readiness_for_cached_segments() {
     let log = HwmFlakyLog::new(4);
-    let (manager, partition) = seeded_manager(log.clone()).await;
+    let SeededManager { manager, partition } = seeded_manager(log.clone()).await;
     manager.reconcile_assignment(&[partition]).await;
     wait_ready(&manager, &tp()).await;
     let expected = manager
@@ -62,7 +62,10 @@ async fn epoch_lists_follow_assignment_and_readiness_for_cached_segments() {
 #[tokio::test(flavor = "multi_thread")]
 async fn add_then_remove_drives_assignment_and_readiness() {
     let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
-    let (m, mp) = seeded_manager(log).await;
+    let SeededManager {
+        manager: m,
+        partition: mp,
+    } = seeded_manager(log).await;
 
     // Before assignment: the partition is not consumed → genuine miss.
     assert!(matches!(
@@ -205,7 +208,10 @@ async fn two_brokers_split_metadata_partitions() {
 #[tokio::test(flavor = "multi_thread")]
 async fn reassignment_remove_then_readd_applies_no_duplicates() {
     let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
-    let (m, mp) = seeded_manager(log).await;
+    let SeededManager {
+        manager: m,
+        partition: mp,
+    } = seeded_manager(log).await;
 
     // Add → catch up → exactly one segment.
     m.reconcile_assignment(&[mp]).await;
@@ -247,7 +253,10 @@ async fn hwm_fetch_failure_gates_not_ready_then_self_heals() {
     let flaky = HwmFlakyLog::new(4);
     let log: Arc<dyn MetadataEventLog> = flaky.clone();
 
-    let (m, mp) = seeded_manager(log).await;
+    let SeededManager {
+        manager: m,
+        partition: mp,
+    } = seeded_manager(log).await;
 
     // Assign the partition WHILE the HWM RPC is failing. The partition
     // must be added (the broker owns it) but recorded with the sentinel

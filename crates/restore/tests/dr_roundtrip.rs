@@ -167,12 +167,15 @@ fn archive_args(root: &std::path::Path) -> ArchiveArgs {
     }
 }
 
+/// A running broker and a client connected to it.
+struct BootedBroker {
+    broker: BrokerHandle,
+    client: Client,
+}
+
 /// Start a broker on `log_dir`, its controller listening on `controller`, and
 /// connect a client to it.
-async fn boot(
-    controller: &mut ControllerListener,
-    log_dir: std::path::PathBuf,
-) -> (BrokerHandle, Client) {
+async fn boot(controller: &mut ControllerListener, log_dir: std::path::PathBuf) -> BootedBroker {
     let broker = controller.start(BrokerConfig::for_tests(log_dir)).await;
     let client = Client::builder()
         .bootstrap(broker.listen_addr().to_string())
@@ -180,7 +183,7 @@ async fn boot(
         .build()
         .await
         .expect("client");
-    (broker, client)
+    BootedBroker { broker, client }
 }
 
 /// The topic id the cluster gave `orders`. `OffsetCommit` v10 puts the id on
@@ -268,7 +271,10 @@ async fn a_captured_cluster_restores_with_its_configuration_and_its_group_positi
     std::fs::create_dir_all(&node_files).expect("create the node dir");
     write_node_files(&node_files, &fixture);
 
-    let (pre_broker, pre_client) = boot(&mut controller, pre_log_dir.clone()).await;
+    let BootedBroker {
+        broker: pre_broker,
+        client: pre_client,
+    } = boot(&mut controller, pre_log_dir.clone()).await;
     pre_broker
         .wait_until_partition_present(TOPIC, PARTITION)
         .await;
@@ -315,7 +321,10 @@ async fn a_captured_cluster_restores_with_its_configuration_and_its_group_positi
     .expect("restore from the archive");
     check!(report.metadata.topic_configs == 1);
 
-    let (post_broker, post_client) = boot(&mut controller, post_log_dir).await;
+    let BootedBroker {
+        broker: post_broker,
+        client: post_client,
+    } = boot(&mut controller, post_log_dir).await;
     post_broker
         .wait_until_partition_present(TOPIC, PARTITION)
         .await;

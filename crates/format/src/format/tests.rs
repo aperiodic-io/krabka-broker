@@ -14,18 +14,37 @@ use {
     assert2::check,
 };
 
-type DirectoryCase<'a, Expected> = (
-    &'a str,
-    Option<&'a str>,
-    &'a [&'a str],
-    &'a [&'a str],
-    &'a [(&'a str, Expected)],
-);
+/// What a run leaves in one directory.
+#[derive(Debug, PartialEq, Eq)]
+struct DirectoryWant<Dir, Expected> {
+    dir: Dir,
+    expected: Expected,
+}
 
-fn fresh_data_directory() -> (tempfile::TempDir, std::path::PathBuf) {
+/// A run's directory layout, and what each directory should hold: what it is,
+/// `--metadata-log-dir`, the `--log-dir` entries, the quorum flags, and the
+/// directories.
+struct DirectoryCase<'a, Expected> {
+    what: &'a str,
+    metadata: Option<&'a str>,
+    log_dirs: &'a [&'a str],
+    extra: &'a [&'a str],
+    want: &'a [DirectoryWant<&'a str, Expected>],
+}
+
+/// A temporary root and the data directory path inside it.
+struct DataDirectory {
+    root: tempfile::TempDir,
+    path: std::path::PathBuf,
+}
+
+fn fresh_data_directory() -> DataDirectory {
     let directory = tempfile::tempdir().expect("tempdir");
     let data = directory.path().join("data");
-    (directory, data)
+    DataDirectory {
+        root: directory,
+        path: data,
+    }
 }
 
 fn format_argv(log_dir: &std::path::Path, node_id: &str, extra: &[&str]) -> Vec<String> {
@@ -52,73 +71,86 @@ const NODE_ID: &str = "1";
 #[tokio::test]
 async fn exit_code_for_each_argv() {
     const STANDALONE: &[&str] = &["--standalone", "--controller-listener", "controller-1:9093"];
-    // (what it is, extra argv, expected exit), with `--node-id 1`
-    let cases: &[(&str, &[&str], i32)] = &[
-        ("static, no flags at all", &[], EXIT_OK),
-        ("standalone", STANDALONE, EXIT_OK),
-        (
-            "no-initial-controllers",
-            &["--no-initial-controllers"],
-            EXIT_OK,
-        ),
+    /// What it is, the extra argv, and the expected exit, with `--node-id 1`.
+    struct Case<'a> {
+        what: &'a str,
+        extra: &'a [&'a str],
+        want: i32,
+    }
+    let cases: &[Case] = &[
+        Case {
+            what: "static, no flags at all",
+            extra: &[],
+            want: EXIT_OK,
+        },
+        Case {
+            what: "standalone",
+            extra: STANDALONE,
+            want: EXIT_OK,
+        },
+        Case {
+            what: "no-initial-controllers",
+            extra: &["--no-initial-controllers"],
+            want: EXIT_OK,
+        },
         // is_dynamic_format: the kraft.version rules.
-        (
-            "kraft.version=1 with no quorum flag",
-            &["--feature", "kraft.version=1"],
-            EXIT_INVALID_FEATURE,
-        ),
-        (
-            "standalone with kraft.version=0",
-            &[
+        Case {
+            what: "kraft.version=1 with no quorum flag",
+            extra: &["--feature", "kraft.version=1"],
+            want: EXIT_INVALID_FEATURE,
+        },
+        Case {
+            what: "standalone with kraft.version=0",
+            extra: &[
                 "--standalone",
                 "--controller-listener",
                 "c:9093",
                 "--feature",
                 "kraft.version=0",
             ],
-            EXIT_INVALID_FEATURE,
-        ),
-        (
-            "kraft.version given twice",
-            &[
+            want: EXIT_INVALID_FEATURE,
+        },
+        Case {
+            what: "kraft.version given twice",
+            extra: &[
                 "--no-initial-controllers",
                 "--feature",
                 "kraft.version=1",
                 "--feature",
                 "kraft.version=1",
             ],
-            EXIT_INVALID_FEATURE,
-        ),
-        (
-            "kraft.version above its range",
-            &["--feature", "kraft.version=2"],
-            EXIT_INVALID_FEATURE,
-        ),
+            want: EXIT_INVALID_FEATURE,
+        },
+        Case {
+            what: "kraft.version above its range",
+            extra: &["--feature", "kraft.version=2"],
+            want: EXIT_INVALID_FEATURE,
+        },
         // build_initial_voters: every way the standalone voter can be wrong.
-        (
-            "standalone without --controller-listener",
-            &["--standalone"],
-            EXIT_BOOTSTRAP_FAIL,
-        ),
-        (
-            "listener with no port",
-            &["--standalone", "--controller-listener", "hostonly"],
-            EXIT_BOOTSTRAP_FAIL,
-        ),
-        (
-            "listener with an empty host",
-            &["--standalone", "--controller-listener", ":9093"],
-            EXIT_BOOTSTRAP_FAIL,
-        ),
-        (
-            "listener on port zero",
-            &["--standalone", "--controller-listener", "c:0"],
-            EXIT_BOOTSTRAP_FAIL,
-        ),
+        Case {
+            what: "standalone without --controller-listener",
+            extra: &["--standalone"],
+            want: EXIT_BOOTSTRAP_FAIL,
+        },
+        Case {
+            what: "listener with no port",
+            extra: &["--standalone", "--controller-listener", "hostonly"],
+            want: EXIT_BOOTSTRAP_FAIL,
+        },
+        Case {
+            what: "listener with an empty host",
+            extra: &["--standalone", "--controller-listener", ":9093"],
+            want: EXIT_BOOTSTRAP_FAIL,
+        },
+        Case {
+            what: "listener on port zero",
+            extra: &["--standalone", "--controller-listener", "c:0"],
+            want: EXIT_BOOTSTRAP_FAIL,
+        },
     ];
 
-    for (what, extra, want) in cases {
-        let (_tmp, argv) = fresh_argv(extra);
+    for Case { what, extra, want } in cases {
+        let FreshArgv { dir: _tmp, argv } = fresh_argv(extra);
         let got = run_from_args(argv).await;
         check!(got == *want, "{what}: exit {got}, want {want}");
     }
@@ -132,44 +164,49 @@ async fn exit_code_for_each_argv() {
 fn the_first_error_follows_kafkas_order() {
     use clap::Parser as _;
 
-    // (what is wrong, argv, the start of the message it is reported as)
-    let cases: &[(&str, &[&str], &str)] = &[
-        (
-            "an unknown release beats a kraft.version level that does not exist",
-            &[
+    /// What is wrong, the argv, and the start of the message it is reported as.
+    struct Case<'a> {
+        what: &'a str,
+        extra: &'a [&'a str],
+        want: &'a str,
+    }
+    let cases: &[Case] = &[
+        Case {
+            what: "an unknown release beats a kraft.version level that does not exist",
+            extra: &[
                 "--release-version",
                 "9.9-IV0",
                 "--feature",
                 "kraft.version=9",
             ],
-            "krabka format: Unknown metadata.version '9.9-IV0'.",
-        ),
-        (
-            "an unknown feature name beats a kraft.version level that does not exist",
-            &[
+            want: "krabka format: Unknown metadata.version '9.9-IV0'.",
+        },
+        Case {
+            what: "an unknown feature name beats a kraft.version level that does not exist",
+            extra: &[
                 "--feature",
                 "nope.version=1",
                 "--feature",
                 "kraft.version=9",
             ],
-            "krabka format: Unsupported feature: nope.version.",
-        ),
-        (
-            "a kraft.version level above 1 without a quorum flag is a mode conflict",
-            &["--feature", "kraft.version=9"],
-            "krabka format: kraft.version=9 requires --standalone,",
-        ),
-        (
-            "a kraft.version level above 1 with a quorum flag does not exist",
-            &["--no-initial-controllers", "--feature", "kraft.version=9"],
-            "krabka format: No feature:kraft.version with feature level 9",
-        ),
+            want: "krabka format: Unsupported feature: nope.version.",
+        },
+        Case {
+            what: "a kraft.version level above 1 without a quorum flag is a mode conflict",
+            extra: &["--feature", "kraft.version=9"],
+            want: "krabka format: kraft.version=9 requires --standalone,",
+        },
+        Case {
+            what: "a kraft.version level above 1 with a quorum flag does not exist",
+            extra: &["--no-initial-controllers", "--feature", "kraft.version=9"],
+            want: "krabka format: No feature:kraft.version with feature level 9",
+        },
     ];
-    for (what, extra, want) in cases {
-        let (_tmp, argv) = fresh_argv(extra);
+    for Case { what, extra, want } in cases {
+        let FreshArgv { dir: _tmp, argv } = fresh_argv(extra);
         let cli = Cli::try_parse_from(argv).expect("parse");
 
-        let Err((code, message)) = plan(cli.args, Vec::new()) else {
+        let Err(Failure { code, message }) = plan(cli.args, Vec::new()) else {
             panic!("{what}: the plan was accepted");
         };
 
@@ -178,16 +215,21 @@ fn the_first_error_follows_kafkas_order() {
     }
 }
 
+/// The exit code of a run, and the directory it formatted.
+struct FormatRun {
+    code: i32,
+    log_dir: std::path::PathBuf,
+}
+
 /// Formatting into a fresh directory as node `node_id`, returning its path
 /// for inspection.
-async fn format_into(
-    tmp: &std::path::Path,
-    node_id: &str,
-    extra: &[&str],
-) -> (i32, std::path::PathBuf) {
+async fn format_into(tmp: &std::path::Path, node_id: &str, extra: &[&str]) -> FormatRun {
     let log_dir = tmp.join("data");
     let argv = format_argv(&log_dir, node_id, extra);
-    (run_from_args(argv).await, log_dir)
+    FormatRun {
+        code: run_from_args(argv).await,
+        log_dir,
+    }
 }
 
 fn checkpoint_len(log_dir: &std::path::Path) -> u64 {
@@ -204,20 +246,42 @@ async fn each_quorum_flag_on_its_own_selects_a_dynamic_format() {
         "--initial-controllers",
         "1@host:9093:00000000-0000-0000-0000-000000000003",
     ];
-    // (what it is, argv, dynamic?)
-    let cases: &[(&str, &[&str], bool)] = &[
-        ("no quorum flag", &[], false),
-        ("--standalone", STANDALONE, true),
-        ("--initial-controllers", EXPLICIT, true),
-        (
-            "--no-initial-controllers",
-            &["--no-initial-controllers"],
-            true,
-        ),
+    /// What it is, the argv, and whether the format is dynamic.
+    struct Case<'a> {
+        what: &'a str,
+        argv: &'a [&'a str],
+        dynamic: bool,
+    }
+    let cases: &[Case] = &[
+        Case {
+            what: "no quorum flag",
+            argv: &[],
+            dynamic: false,
+        },
+        Case {
+            what: "--standalone",
+            argv: STANDALONE,
+            dynamic: true,
+        },
+        Case {
+            what: "--initial-controllers",
+            argv: EXPLICIT,
+            dynamic: true,
+        },
+        Case {
+            what: "--no-initial-controllers",
+            argv: &["--no-initial-controllers"],
+            dynamic: true,
+        },
     ];
-    for (what, argv, dynamic) in cases {
+    for Case {
+        what,
+        argv,
+        dynamic,
+    } in cases
+    {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (code, log_dir) = format_into(tmp.path(), NODE_ID, argv).await;
+        let FormatRun { code, log_dir } = format_into(tmp.path(), NODE_ID, argv).await;
         check!(code == EXIT_OK, "{what}: exit {code}");
         check!(
             (checkpoint_len(&log_dir) > 0) == *dynamic,
@@ -232,12 +296,17 @@ async fn each_quorum_flag_on_its_own_selects_a_dynamic_format() {
 #[tokio::test]
 async fn the_checkpoint_carries_voters_only_when_the_quorum_has_them() {
     let tmp_with = tempfile::tempdir().expect("tempdir");
-    let (code, with_voters) = format_into(tmp_with.path(), NODE_ID, STANDALONE).await;
+    let FormatRun {
+        code,
+        log_dir: with_voters,
+    } = format_into(tmp_with.path(), NODE_ID, STANDALONE).await;
     check!(code == EXIT_OK);
 
     let tmp_without = tempfile::tempdir().expect("tempdir");
-    let (code, without_voters) =
-        format_into(tmp_without.path(), NODE_ID, &["--no-initial-controllers"]).await;
+    let FormatRun {
+        code,
+        log_dir: without_voters,
+    } = format_into(tmp_without.path(), NODE_ID, &["--no-initial-controllers"]).await;
     check!(code == EXIT_OK);
 
     let (a, b) = (
@@ -261,30 +330,48 @@ async fn an_explicit_quorum_is_checked_for_duplicates_and_for_this_node() {
     const DUP_ID: &str = "1@host-c:9093:00000000-0000-0000-0000-00000000000c";
     const DUP_DIR: &str = "3@host-d:9093:00000000-0000-0000-0000-000000000001";
 
-    let cases: &[(&str, &str, &str, i32)] = &[
-        ("a well-formed pair", "1", &joined(A, B), EXIT_OK),
-        (
-            "a repeated node id",
-            "1",
-            &joined(A, DUP_ID),
-            EXIT_BOOTSTRAP_FAIL,
-        ),
-        (
-            "a repeated directory id",
-            "1",
-            &joined(A, DUP_DIR),
-            EXIT_BOOTSTRAP_FAIL,
-        ),
-        (
-            "a quorum without this node",
-            "9",
-            &joined(A, B),
-            EXIT_BOOTSTRAP_FAIL,
-        ),
+    /// What it is, `--node-id`, `--initial-controllers`, and the expected exit.
+    struct Case<'a> {
+        what: &'a str,
+        node_id: &'a str,
+        controllers: &'a str,
+        want: i32,
+    }
+    let cases: &[Case] = &[
+        Case {
+            what: "a well-formed pair",
+            node_id: "1",
+            controllers: &joined(A, B),
+            want: EXIT_OK,
+        },
+        Case {
+            what: "a repeated node id",
+            node_id: "1",
+            controllers: &joined(A, DUP_ID),
+            want: EXIT_BOOTSTRAP_FAIL,
+        },
+        Case {
+            what: "a repeated directory id",
+            node_id: "1",
+            controllers: &joined(A, DUP_DIR),
+            want: EXIT_BOOTSTRAP_FAIL,
+        },
+        Case {
+            what: "a quorum without this node",
+            node_id: "9",
+            controllers: &joined(A, B),
+            want: EXIT_BOOTSTRAP_FAIL,
+        },
     ];
-    for (what, node_id, controllers, want) in cases {
+    for Case {
+        what,
+        node_id,
+        controllers,
+        want,
+    } in cases
+    {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (code, _) =
+        let FormatRun { code, .. } =
             format_into(tmp.path(), node_id, &["--initial-controllers", controllers]).await;
         check!(code == *want, "{what}: exit {code}, want {want}");
     }
@@ -299,22 +386,32 @@ fn joined(a: &str, b: &str) -> String { format!("{a},{b}") }
 async fn an_explicit_directory_id_must_match_this_node_s_quorum_entry() {
     // Outside the 100 lowest ids, which `--directory-id` refuses.
     const CONTROLLER: &str = "1@host-a:9093:00000000-0000-0001-0000-000000000001";
-    // (what it is, --directory-id, expected exit)
-    let cases: &[(&str, &str, i32)] = &[
-        (
-            "matching the quorum entry",
-            "00000000-0000-0001-0000-000000000001",
-            EXIT_OK,
-        ),
-        (
-            "disagreeing with the quorum entry",
-            "00000000-0000-0000-0000-0000000000ff",
-            EXIT_BOOTSTRAP_FAIL,
-        ),
+    /// What it is, `--directory-id`, and the expected exit.
+    struct Case<'a> {
+        what: &'a str,
+        directory_id: &'a str,
+        want: i32,
+    }
+    let cases: &[Case] = &[
+        Case {
+            what: "matching the quorum entry",
+            directory_id: "00000000-0000-0001-0000-000000000001",
+            want: EXIT_OK,
+        },
+        Case {
+            what: "disagreeing with the quorum entry",
+            directory_id: "00000000-0000-0000-0000-0000000000ff",
+            want: EXIT_BOOTSTRAP_FAIL,
+        },
     ];
-    for (what, directory_id, want) in cases {
+    for Case {
+        what,
+        directory_id,
+        want,
+    } in cases
+    {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (code, _) = format_into(tmp.path(), NODE_ID, &[
+        let FormatRun { code, .. } = format_into(tmp.path(), NODE_ID, &[
             "--initial-controllers",
             CONTROLLER,
             "--directory-id",
@@ -333,7 +430,8 @@ async fn scram_iterations_are_checked_against_an_inclusive_minimum() {
     for (iterations, want) in [(min, EXIT_OK), (min - 1, EXIT_LOW_ITERATIONS)] {
         let tmp = tempfile::tempdir().expect("tempdir");
         let spec = format!("SCRAM-SHA-256=[name=alice,password=hunter2,iterations={iterations}]");
-        let (code, _) = format_into(tmp.path(), NODE_ID, &["--add-scram", &spec]).await;
+        let FormatRun { code, .. } =
+            format_into(tmp.path(), NODE_ID, &["--add-scram", &spec]).await;
         check!(
             code == want,
             "iterations={iterations}: exit {code}, want {want}"
@@ -344,7 +442,10 @@ async fn scram_iterations_are_checked_against_an_inclusive_minimum() {
 /// A directory holding anything at all is refused rather than overwritten.
 #[tokio::test]
 async fn a_non_empty_log_dir_is_refused() {
-    let (_tmp, log_dir) = fresh_data_directory();
+    let DataDirectory {
+        root: _tmp,
+        path: log_dir,
+    } = fresh_data_directory();
     std::fs::create_dir_all(&log_dir).expect("mkdir");
     std::fs::write(log_dir.join("someone-elses.txt"), b"x").expect("write");
 
@@ -364,7 +465,10 @@ async fn a_non_empty_log_dir_is_refused() {
 /// directory. A boot needs all of these.
 #[tokio::test]
 async fn a_standalone_format_writes_what_a_boot_reads() {
-    let (_tmp, log_dir) = fresh_data_directory();
+    let DataDirectory {
+        root: _tmp,
+        path: log_dir,
+    } = fresh_data_directory();
 
     let code = run_from_args(standalone_argv(&log_dir, &[])).await;
     check!(code == EXIT_OK);
@@ -404,7 +508,10 @@ fn standalone_argv(log_dir: &std::path::Path, extra: &[&str]) -> Vec<String> {
 /// the flag is still refused.
 #[tokio::test]
 async fn ignore_formatted_makes_a_second_format_a_no_op() {
-    let (_tmp, log_dir) = fresh_data_directory();
+    let DataDirectory {
+        root: _tmp,
+        path: log_dir,
+    } = fresh_data_directory();
     let argv = |extra: &[&str]| standalone_argv(&log_dir, extra);
 
     check!(crate::run_from_args(argv(&[])).await == EXIT_OK);
@@ -424,7 +531,10 @@ async fn ignore_formatted_makes_a_second_format_a_no_op() {
 /// "ignore an existing format", not "skip formatting".
 #[tokio::test]
 async fn ignore_formatted_still_formats_a_fresh_directory() {
-    let (_tmp, log_dir) = fresh_data_directory();
+    let DataDirectory {
+        root: _tmp,
+        path: log_dir,
+    } = fresh_data_directory();
 
     let code = run_from_args(standalone_argv(&log_dir, &["--ignore-formatted"])).await;
     check!(code == EXIT_OK);
@@ -444,7 +554,10 @@ async fn ignore_formatted_still_formats_a_fresh_directory() {
 /// no offset-zero checkpoint and no voter set.
 #[tokio::test]
 async fn a_failed_format_is_not_mistaken_for_a_finished_one() {
-    let (_tmp, log_dir) = fresh_data_directory();
+    let DataDirectory {
+        root: _tmp,
+        path: log_dir,
+    } = fresh_data_directory();
     let argv = |extra: &[&str]| standalone_argv(&log_dir, extra);
 
     let weak = "SCRAM-SHA-256=[name=alice,password=hunter2,iterations=1]";
@@ -556,51 +669,125 @@ fn the_metadata_log_directory_leads_the_directory_set() {
 
     // (what, --metadata-log-dir, --log-dir entries, quorum flags, the targets)
     let cases: &[DirectoryCase<DirectoryKind>] = &[
-        ("the first --log-dir by default", None, &["a", "b"], &[], &[
-            ("a", StaticMetadata),
-            ("b", Data),
-        ]),
-        (
-            "a separate metadata log directory",
-            Some("m"),
-            &["a", "b"],
-            &[],
-            &[("m", StaticMetadata), ("a", Data), ("b", Data)],
-        ),
-        (
-            "a metadata log directory that is also a log directory",
-            Some("b"),
-            &["a", "b"],
-            &[],
-            &[("b", StaticMetadata), ("a", Data)],
-        ),
-        (
-            "a metadata log directory that is the only log directory",
-            Some("a"),
-            &["a"],
-            &[],
-            &[("a", StaticMetadata)],
-        ),
-        (
-            "a log directory named twice",
-            Some("m"),
-            &["a", "a"],
-            &[],
-            &[("m", StaticMetadata), ("a", Data)],
-        ),
-        ("a voter", Some("m"), &["a"], STANDALONE, &[
-            ("m", DynamicMetadataVoter),
-            ("a", Data),
-        ]),
-        (
-            "a dynamic controller that is not a voter",
-            Some("m"),
-            &["a"],
-            &["--no-initial-controllers"],
-            &[("m", DynamicMetadata), ("a", Data)],
-        ),
+        DirectoryCase {
+            what: "the first --log-dir by default",
+            metadata: None,
+            log_dirs: &["a", "b"],
+            extra: &[],
+            want: &[
+                DirectoryWant {
+                    dir: "a",
+                    expected: StaticMetadata,
+                },
+                DirectoryWant {
+                    dir: "b",
+                    expected: Data,
+                },
+            ],
+        },
+        DirectoryCase {
+            what: "a separate metadata log directory",
+            metadata: Some("m"),
+            log_dirs: &["a", "b"],
+            extra: &[],
+            want: &[
+                DirectoryWant {
+                    dir: "m",
+                    expected: StaticMetadata,
+                },
+                DirectoryWant {
+                    dir: "a",
+                    expected: Data,
+                },
+                DirectoryWant {
+                    dir: "b",
+                    expected: Data,
+                },
+            ],
+        },
+        DirectoryCase {
+            what: "a metadata log directory that is also a log directory",
+            metadata: Some("b"),
+            log_dirs: &["a", "b"],
+            extra: &[],
+            want: &[
+                DirectoryWant {
+                    dir: "b",
+                    expected: StaticMetadata,
+                },
+                DirectoryWant {
+                    dir: "a",
+                    expected: Data,
+                },
+            ],
+        },
+        DirectoryCase {
+            what: "a metadata log directory that is the only log directory",
+            metadata: Some("a"),
+            log_dirs: &["a"],
+            extra: &[],
+            want: &[DirectoryWant {
+                dir: "a",
+                expected: StaticMetadata,
+            }],
+        },
+        DirectoryCase {
+            what: "a log directory named twice",
+            metadata: Some("m"),
+            log_dirs: &["a", "a"],
+            extra: &[],
+            want: &[
+                DirectoryWant {
+                    dir: "m",
+                    expected: StaticMetadata,
+                },
+                DirectoryWant {
+                    dir: "a",
+                    expected: Data,
+                },
+            ],
+        },
+        DirectoryCase {
+            what: "a voter",
+            metadata: Some("m"),
+            log_dirs: &["a"],
+            extra: STANDALONE,
+            want: &[
+                DirectoryWant {
+                    dir: "m",
+                    expected: DynamicMetadataVoter,
+                },
+                DirectoryWant {
+                    dir: "a",
+                    expected: Data,
+                },
+            ],
+        },
+        DirectoryCase {
+            what: "a dynamic controller that is not a voter",
+            metadata: Some("m"),
+            log_dirs: &["a"],
+            extra: &["--no-initial-controllers"],
+            want: &[
+                DirectoryWant {
+                    dir: "m",
+                    expected: DynamicMetadata,
+                },
+                DirectoryWant {
+                    dir: "a",
+                    expected: Data,
+                },
+            ],
+        },
     ];
-    for (what, metadata, log_dirs, extra, want) in cases {
+    for DirectoryCase {
+        what,
+        metadata,
+        log_dirs,
+        extra,
+        want,
+    } in cases
+    {
         let tmp = tempfile::tempdir().expect("tempdir");
         let plan = plan_of(
             argv_under()
@@ -610,16 +797,22 @@ fn the_metadata_log_directory_leads_the_directory_set() {
                 .extra(extra)
                 .call(),
         )
-        .unwrap_or_else(|(code, message)| panic!("{what}: exit {code}: {message}"));
+        .unwrap_or_else(|Failure { code, message }| panic!("{what}: exit {code}: {message}"));
 
-        let got: Vec<(PathBuf, DirectoryKind)> = plan
+        let got: Vec<DirectoryWant<PathBuf, DirectoryKind>> = plan
             .targets
             .iter()
-            .map(|target| (target.dir.clone(), target.kind))
+            .map(|target| DirectoryWant {
+                dir: target.dir.clone(),
+                expected: target.kind,
+            })
             .collect();
-        let want: Vec<(PathBuf, DirectoryKind)> = want
+        let want: Vec<DirectoryWant<PathBuf, DirectoryKind>> = want
             .iter()
-            .map(|(dir, kind)| (tmp.path().join(dir), *kind))
+            .map(|wanted| DirectoryWant {
+                dir: tmp.path().join(wanted.dir),
+                expected: wanted.expected,
+            })
             .collect();
         check!(got == want, "{what}");
         let ids: std::collections::HashSet<DirectoryId> = plan
@@ -636,23 +829,28 @@ fn the_metadata_log_directory_leads_the_directory_set() {
 /// from the log directories. A data directory gets another id.
 #[test]
 fn the_directory_id_belongs_to_the_metadata_log_directory() {
+    /// What it is, the flags that name the id, and the metadata directory's kind.
+    struct Case<'a> {
+        what: &'a str,
+        extra: Vec<&'a str>,
+        kind: DirectoryKind,
+    }
     const ID: &str = "00000000-0000-0000-0000-000000000064";
     let id = DirectoryId(uuid::Uuid::from_u128(0x64));
     let controllers = format!("1@controller-1:9093:{ID}");
-    // (what, the flags that name the id, the metadata directory's kind)
-    let cases: [(&str, Vec<&str>, DirectoryKind); 2] = [
-        (
-            "--directory-id",
-            vec!["--directory-id", ID],
-            DirectoryKind::StaticMetadata,
-        ),
-        (
-            "--initial-controllers",
-            vec!["--initial-controllers", &controllers],
-            DirectoryKind::DynamicMetadataVoter,
-        ),
+    let cases = [
+        Case {
+            what: "--directory-id",
+            extra: vec!["--directory-id", ID],
+            kind: DirectoryKind::StaticMetadata,
+        },
+        Case {
+            what: "--initial-controllers",
+            extra: vec!["--initial-controllers", &controllers],
+            kind: DirectoryKind::DynamicMetadataVoter,
+        },
     ];
-    for (what, extra, kind) in cases {
+    for Case { what, extra, kind } in cases {
         let tmp = tempfile::tempdir().expect("tempdir");
         let plan = plan_of(
             argv_under()
@@ -661,7 +859,7 @@ fn the_directory_id_belongs_to_the_metadata_log_directory() {
                 .extra(&extra)
                 .call(),
         )
-        .unwrap_or_else(|(code, message)| panic!("{what}: exit {code}: {message}"));
+        .unwrap_or_else(|Failure { code, message }| panic!("{what}: exit {code}: {message}"));
 
         let [metadata, data] = plan.targets.as_slice() else {
             panic!("{what}: {:?}", plan.targets);
@@ -676,10 +874,15 @@ fn the_directory_id_belongs_to_the_metadata_log_directory() {
             "{what}"
         );
         check!(
-            (data.dir.clone(), data.kind, data.directory_id == id)
-                == (tmp.path().join("a"), DirectoryKind::Data, false),
+            *data
+                == Target {
+                    dir: tmp.path().join("a"),
+                    kind: DirectoryKind::Data,
+                    directory_id: data.directory_id,
+                },
             "{what}"
         );
+        check!(data.directory_id != id, "{what}");
     }
 }
 
@@ -717,36 +920,87 @@ async fn only_the_metadata_log_directory_gets_the_bootstrap_files() {
     // (what, --metadata-log-dir, --log-dir entries, quorum flags, the files
     // in each directory)
     let cases: &[DirectoryCase<&[&str]>] = &[
-        (
-            "static, a separate metadata log directory",
-            Some("m"),
-            &["a", "b"],
-            &[],
-            &[("m", STATIC), ("a", META), ("b", META)],
-        ),
-        (
-            "standalone, a separate metadata log directory",
-            Some("m"),
-            &["a", "b"],
-            STANDALONE,
-            &[("m", DYNAMIC), ("a", META), ("b", META)],
-        ),
-        (
-            "standalone, the first --log-dir",
-            None,
-            &["a", "b"],
-            STANDALONE,
-            &[("a", DYNAMIC), ("b", META)],
-        ),
-        (
-            "standalone, a metadata log directory that is also a log directory",
-            Some("b"),
-            &["a", "b"],
-            STANDALONE,
-            &[("a", META), ("b", DYNAMIC)],
-        ),
+        DirectoryCase {
+            what: "static, a separate metadata log directory",
+            metadata: Some("m"),
+            log_dirs: &["a", "b"],
+            extra: &[],
+            want: &[
+                DirectoryWant {
+                    dir: "m",
+                    expected: STATIC,
+                },
+                DirectoryWant {
+                    dir: "a",
+                    expected: META,
+                },
+                DirectoryWant {
+                    dir: "b",
+                    expected: META,
+                },
+            ],
+        },
+        DirectoryCase {
+            what: "standalone, a separate metadata log directory",
+            metadata: Some("m"),
+            log_dirs: &["a", "b"],
+            extra: STANDALONE,
+            want: &[
+                DirectoryWant {
+                    dir: "m",
+                    expected: DYNAMIC,
+                },
+                DirectoryWant {
+                    dir: "a",
+                    expected: META,
+                },
+                DirectoryWant {
+                    dir: "b",
+                    expected: META,
+                },
+            ],
+        },
+        DirectoryCase {
+            what: "standalone, the first --log-dir",
+            metadata: None,
+            log_dirs: &["a", "b"],
+            extra: STANDALONE,
+            want: &[
+                DirectoryWant {
+                    dir: "a",
+                    expected: DYNAMIC,
+                },
+                DirectoryWant {
+                    dir: "b",
+                    expected: META,
+                },
+            ],
+        },
+        DirectoryCase {
+            what: "standalone, a metadata log directory that is also a log directory",
+            metadata: Some("b"),
+            log_dirs: &["a", "b"],
+            extra: STANDALONE,
+            want: &[
+                DirectoryWant {
+                    dir: "a",
+                    expected: META,
+                },
+                DirectoryWant {
+                    dir: "b",
+                    expected: DYNAMIC,
+                },
+            ],
+        },
     ];
-    for (what, metadata, log_dirs, extra, want) in cases {
+    for DirectoryCase {
+        what,
+        metadata,
+        log_dirs,
+        extra,
+        want,
+    } in cases
+    {
         let tmp = tempfile::tempdir().expect("tempdir");
         let code = run_from_args(
             argv_under()
@@ -759,22 +1013,30 @@ async fn only_the_metadata_log_directory_gets_the_bootstrap_files() {
         .await;
         check!(code == EXIT_OK, "{what}");
 
-        let got: Vec<(String, Vec<String>)> = want
+        let got: Vec<DirectoryWant<String, Vec<String>>> = want
             .iter()
-            .map(|(dir, _)| ((*dir).to_owned(), files_under(&tmp.path().join(dir))))
+            .map(|wanted| DirectoryWant {
+                dir: wanted.dir.to_owned(),
+                expected: files_under(&tmp.path().join(wanted.dir)),
+            })
             .collect();
-        let want: Vec<(String, Vec<String>)> = want
+        let want: Vec<DirectoryWant<String, Vec<String>>> = want
             .iter()
-            .map(|(dir, files)| {
-                (
-                    (*dir).to_owned(),
-                    files.iter().map(|file| (*file).to_owned()).collect(),
-                )
+            .map(|wanted| DirectoryWant {
+                dir: wanted.dir.to_owned(),
+                expected: wanted
+                    .expected
+                    .iter()
+                    .map(|file| (*file).to_owned())
+                    .collect(),
             })
             .collect();
         check!(got == want, "{what}");
 
-        let dirs: Vec<PathBuf> = got.iter().map(|(dir, _)| tmp.path().join(dir)).collect();
+        let dirs: Vec<PathBuf> = got
+            .iter()
+            .map(|wanted| tmp.path().join(&wanted.dir))
+            .collect();
         let ensemble = Ensemble::load(&dirs).expect("survey");
         check!(ensemble.formatted.len() == dirs.len(), "{what}");
         check!(
@@ -789,42 +1051,67 @@ async fn only_the_metadata_log_directory_gets_the_bootstrap_files() {
 /// it. An unreadable data directory is skipped, and the rest are formatted.
 #[test]
 fn an_unreadable_metadata_log_directory_is_named() {
-    /// The target and the error directories, or the exit code and the
-    /// directory the message names.
-    type Want = Result<(Vec<&'static str>, Vec<&'static str>), (i32, &'static str)>;
+    /// The target and the error directories of a plan.
+    #[derive(Debug, PartialEq, Eq)]
+    struct PlannedDirs<Dir> {
+        targets: Vec<Dir>,
+        errors: Vec<Dir>,
+    }
+    /// The exit code of a refusal and the directory the message names.
+    struct Refusal {
+        code: i32,
+        dir: &'static str,
+    }
+    type Want = Result<PlannedDirs<&'static str>, Refusal>;
     /// What, `--metadata-log-dir`, the `--log-dir` entries, the unreadable
     /// directory, and the outcome.
-    type Case = (
-        &'static str,
-        Option<&'static str>,
-        &'static [&'static str],
-        &'static str,
-        Want,
-    );
-    let cases: [Case; 3] = [
-        (
-            "the first --log-dir",
-            None,
-            &["a", "b"],
-            "a",
-            Err((EXIT_DIRTY_LOG_DIR, "a")),
-        ),
-        (
-            "a separate metadata log directory",
-            Some("m"),
-            &["a"],
-            "m",
-            Err((EXIT_DIRTY_LOG_DIR, "m")),
-        ),
-        (
-            "a data directory",
-            Some("m"),
-            &["a", "b"],
-            "a",
-            Ok((vec!["m", "b"], vec!["a"])),
-        ),
+    struct Case {
+        what: &'static str,
+        metadata: Option<&'static str>,
+        log_dirs: &'static [&'static str],
+        unreadable: &'static str,
+        want: Want,
+    }
+    let cases = [
+        Case {
+            what: "the first --log-dir",
+            metadata: None,
+            log_dirs: &["a", "b"],
+            unreadable: "a",
+            want: Err(Refusal {
+                code: EXIT_DIRTY_LOG_DIR,
+                dir: "a",
+            }),
+        },
+        Case {
+            what: "a separate metadata log directory",
+            metadata: Some("m"),
+            log_dirs: &["a"],
+            unreadable: "m",
+            want: Err(Refusal {
+                code: EXIT_DIRTY_LOG_DIR,
+                dir: "m",
+            }),
+        },
+        Case {
+            what: "a data directory",
+            metadata: Some("m"),
+            log_dirs: &["a", "b"],
+            unreadable: "a",
+            want: Ok(PlannedDirs {
+                targets: vec!["m", "b"],
+                errors: vec!["a"],
+            }),
+        },
     ];
-    for (what, metadata, log_dirs, unreadable, want) in cases {
+    for Case {
+        what,
+        metadata,
+        log_dirs,
+        unreadable,
+        want,
+    } in cases
+    {
         let tmp = tempfile::tempdir().expect("tempdir");
         let broken = tmp.path().join(unreadable);
         std::fs::create_dir_all(&broken).expect("mkdir");
@@ -837,28 +1124,28 @@ fn an_unreadable_metadata_log_directory_is_named() {
                 .log_dirs(log_dirs)
                 .call(),
         )
-        .map(|plan| {
-            (
-                plan.targets
-                    .into_iter()
-                    .map(|target| target.dir)
-                    .collect::<Vec<_>>(),
-                plan.errors,
-            )
+        .map(|plan| PlannedDirs {
+            targets: plan
+                .targets
+                .into_iter()
+                .map(|target| target.dir)
+                .collect::<Vec<_>>(),
+            errors: plan.errors,
         });
         let at = |dirs: Vec<&str>| -> Vec<PathBuf> {
             dirs.into_iter().map(|dir| tmp.path().join(dir)).collect()
         };
         let want = want
-            .map(|(targets, errors)| (at(targets), at(errors)))
-            .map_err(|(code, dir)| {
-                (
-                    code,
-                    format!(
-                        "Encountered I/O error in metadata log directory {}. Cannot continue.",
-                        tmp.path().join(dir).display()
-                    ),
-                )
+            .map(|PlannedDirs { targets, errors }| PlannedDirs {
+                targets: at(targets),
+                errors: at(errors),
+            })
+            .map_err(|Refusal { code, dir }| Failure {
+                code,
+                message: format!(
+                    "Encountered I/O error in metadata log directory {}. Cannot continue.",
+                    tmp.path().join(dir).display()
+                ),
             });
         check!(got == want, "{what}");
     }
@@ -889,17 +1176,30 @@ async fn a_directory_of_another_node_is_refused() {
         ];
         argv.extend(extra.iter().map(|flag| (*flag).to_owned()));
         check!(
-            plan_of(argv).err() == Some((EXIT_DIRTY_LOG_DIR, message.clone())),
+            plan_of(argv).err()
+                == Some(Failure {
+                    code: EXIT_DIRTY_LOG_DIR,
+                    message: message.clone(),
+                }),
             "{extra:?}"
         );
     }
     check!(!b.exists(), "a refused run writes nothing");
 }
 
-fn fresh_argv(extra: &[&str]) -> (tempfile::TempDir, Vec<String>) {
-    let (dir, log_dir) = fresh_data_directory();
+/// A temporary root and the argv that formats a fresh directory under it.
+struct FreshArgv {
+    dir: tempfile::TempDir,
+    argv: Vec<String>,
+}
+
+fn fresh_argv(extra: &[&str]) -> FreshArgv {
+    let DataDirectory {
+        root: dir,
+        path: log_dir,
+    } = fresh_data_directory();
     let argv = format_argv(&log_dir, NODE_ID, extra);
-    (dir, argv)
+    FreshArgv { dir, argv }
 }
 
 krabka_macros::format_directories_fixture!(metadata_and_data_directories);

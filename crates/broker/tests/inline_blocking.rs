@@ -102,11 +102,17 @@ async fn produce_and_fetch(client: &krabka_client_core::Client) -> usize {
     total_records
 }
 
+/// The records a fetch served and the threads the runtime started.
+struct NodeRun {
+    served: usize,
+    started: usize,
+}
+
 /// Boot a node on a current-thread runtime of its own thread, run
 /// [`produce_and_fetch`] against it and shut it down, with the blocking work
 /// inline when `inline` holds. Returns the records the fetch served and the
 /// threads the runtime started.
-fn run_node(inline: bool) -> (usize, usize) {
+fn run_node(inline: bool) -> NodeRun {
     let started = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&started);
     let served = std::thread::spawn(move || {
@@ -129,7 +135,10 @@ fn run_node(inline: bool) -> (usize, usize) {
     })
     .join()
     .expect("the node's thread");
-    (served, started.load(Ordering::SeqCst))
+    NodeRun {
+        served,
+        started: started.load(Ordering::SeqCst),
+    }
 }
 
 #[test]
@@ -137,7 +146,7 @@ fn a_node_with_its_blocking_work_inline_starts_no_thread() {
     // (inline, whether the runtime starts a thread)
     let cases = [(true, false), (false, true)];
     for (inline, starts_a_thread) in cases {
-        let (served, started) = run_node(inline);
+        let NodeRun { served, started } = run_node(inline);
         check!(served == 3, "inline={inline}");
         check!(
             (started > 0) == starts_a_thread,

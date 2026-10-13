@@ -15,7 +15,7 @@
 //! never hands a denied topic to the existence check at all.
 
 use {
-    krabka_metadata::MetadataImage,
+    crate::txn::state::TopicPartition, krabka_ids::PartitionIndex, krabka_metadata::MetadataImage,
     krabka_protocol::owned::txn_offset_commit_request::TxnOffsetCommitRequestTopic,
     std::collections::HashSet,
 };
@@ -30,7 +30,7 @@ pub(super) fn unknown_partitions(
     topics: &[TxnOffsetCommitRequestTopic],
     denied_topics: &HashSet<String>,
     image: &MetadataImage,
-) -> HashSet<(String, i32)> {
+) -> HashSet<TopicPartition> {
     let mut unknown = HashSet::new();
     for topic in topics {
         if denied_topics.contains(&topic.name) {
@@ -39,7 +39,10 @@ pub(super) fn unknown_partitions(
         for part in &topic.partitions {
             let exists = image.partition(&topic.name, part.partition_index).is_some();
             if !exists {
-                unknown.insert((topic.name.clone(), part.partition_index));
+                unknown.insert(TopicPartition {
+                    topic: topic.name.clone(),
+                    partition: PartitionIndex(part.partition_index),
+                });
             }
         }
     }
@@ -102,14 +105,26 @@ mod tests {
     fn partition_out_of_the_topics_range_is_unknown() {
         let image = image_with_topic("a", 1, NodeId(1));
         let unknown = unknown_partitions(&[topic("a", &[5])], &HashSet::new(), &image);
-        check!(unknown == HashSet::from([("a".to_string(), 5)]));
+        check!(
+            unknown
+                == HashSet::from([TopicPartition {
+                    topic: "a".to_string(),
+                    partition: PartitionIndex(5),
+                }])
+        );
     }
 
     #[test]
     fn topic_missing_from_the_image_is_unknown() {
         let image = MetadataImage::new(Uuid::from_u128(1));
         let unknown = unknown_partitions(&[topic("missing", &[0])], &HashSet::new(), &image);
-        check!(unknown == HashSet::from([("missing".to_string(), 0)]));
+        check!(
+            unknown
+                == HashSet::from([TopicPartition {
+                    topic: "missing".to_string(),
+                    partition: PartitionIndex(0),
+                }])
+        );
     }
 
     #[test]

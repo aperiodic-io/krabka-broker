@@ -128,7 +128,7 @@ fn any_v2_batch_transactional(buf: &[u8]) -> bool {
         return false;
     }
     let mut remaining = buf;
-    while let Some((batch, tail)) = complete_v2_batch(remaining) {
+    while let Some(SplitBatch { batch, tail }) = complete_v2_batch(remaining) {
         let attributes =
             i16::from_be_bytes([batch[ATTRIBUTES_OFFSET], batch[ATTRIBUTES_OFFSET + 1]]);
         if Attributes(attributes).is_transactional() {
@@ -196,15 +196,22 @@ pub(super) fn next_batch(buf: &[u8]) -> NextBatch {
 
 /// Splits one complete v2 batch from the tail, stopping at the same
 /// malformed or truncated boundary for both header-only walks.
-fn complete_v2_batch(buf: &[u8]) -> Option<(&[u8], &[u8])> {
+fn complete_v2_batch(buf: &[u8]) -> Option<SplitBatch<'_>> {
     if buf.len() < V2_HEADER_LEN || buf[MAGIC_OFFSET] != 2 {
         return None;
     }
     let length = i32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
     let length = usize::try_from(length).ok()?.checked_add(LOG_OVERHEAD)?;
-    (V2_HEADER_LEN..=buf.len())
-        .contains(&length)
-        .then(|| buf.split_at(length))
+    (V2_HEADER_LEN..=buf.len()).contains(&length).then(|| {
+        let (batch, tail) = buf.split_at(length);
+        SplitBatch { batch, tail }
+    })
+}
+
+/// One complete v2 batch and the bytes that follow it.
+struct SplitBatch<'a> {
+    batch: &'a [u8],
+    tail: &'a [u8],
 }
 
 /// Length of the largest v2 batch in `buf`, header included.
@@ -217,7 +224,7 @@ fn largest_v2_batch_len(buf: &[u8]) -> usize {
     }
     let mut largest = 0usize;
     let mut remaining = buf;
-    while let Some((batch, tail)) = complete_v2_batch(remaining) {
+    while let Some(SplitBatch { batch, tail }) = complete_v2_batch(remaining) {
         largest = largest.max(batch.len());
         remaining = tail;
     }

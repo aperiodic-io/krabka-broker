@@ -93,8 +93,13 @@ fn with_freeze_env(
     check(&env);
 }
 
-// A broker configuration with alice's operator key loaded.
-fn config_with_alice(dir: &TempDir) -> (BrokerConfig, Ed25519KeyPair) {
+// A broker configuration with alice's operator key loaded, and her key pair.
+struct AliceKeys {
+    config: BrokerConfig,
+    pair: Ed25519KeyPair,
+}
+
+fn config_with_alice(dir: &TempDir) -> AliceKeys {
     let (pair, path) = ed25519_public_key_file().dir(dir.path()).call();
     let keys = OperatorKeys::load(&[OperatorKeyEntry {
         key_id: ALICE_KEY.to_owned(),
@@ -106,13 +111,20 @@ fn config_with_alice(dir: &TempDir) -> (BrokerConfig, Ed25519KeyPair) {
         operator_keys: keys,
         ..BrokerConfig::default()
     };
-    (config, pair)
+    AliceKeys { config, pair }
 }
 
-fn alice_key_configuration() -> (TempDir, BrokerConfig, Ed25519KeyPair) {
+// `config_with_alice` together with the directory that holds her public key.
+struct AliceKeyConfiguration {
+    dir: TempDir,
+    config: BrokerConfig,
+    pair: Ed25519KeyPair,
+}
+
+fn alice_key_configuration() -> AliceKeyConfiguration {
     let dir = TempDir::new().expect("tempdir");
-    let (config, pair) = config_with_alice(&dir);
-    (dir, config, pair)
+    let AliceKeys { config, pair } = config_with_alice(&dir);
+    AliceKeyConfiguration { dir, config, pair }
 }
 
 fn freeze_request(scope: &str, pattern_type: i8) -> SetTopicFreezeRequest {
@@ -138,7 +150,7 @@ async fn handle_processes_request_and_encodes_response() {
     use krabka_protocol::Encode;
 
     let dir = tempfile::TempDir::new().unwrap();
-    let (config, _) = config_with_alice(&dir);
+    let AliceKeys { config, .. } = config_with_alice(&dir);
     let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
         cfg.operator_keys = config.operator_keys;
     })

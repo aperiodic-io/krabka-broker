@@ -119,7 +119,10 @@ impl BacklogPoller {
                         .await
                         .map_err(|error| error.to_string())?
                         .map_or(-1, |(_, _, start_offset, _)| start_offset.0);
-                    let (hwm, log_start) = self.offsets(image, &topic, partition).await?;
+                    let PartitionOffsets {
+                        high_watermark: hwm,
+                        log_start,
+                    } = self.offsets(image, &topic, partition).await?;
                     snapshot.insert(
                         ShareGroupLabel {
                             group_id: group_id.clone(),
@@ -139,7 +142,7 @@ impl BacklogPoller {
         image: &krabka_metadata::MetadataImage,
         topic: &str,
         partition: i32,
-    ) -> Result<(i64, i64), String> {
+    ) -> Result<PartitionOffsets, String> {
         let leader = image
             .partition(topic, partition)
             .ok_or_else(|| format!("missing metadata for {topic}-{partition}"))?
@@ -149,7 +152,10 @@ impl BacklogPoller {
                 .partitions
                 .get(topic, PartitionIndex(partition))
                 .ok_or_else(|| format!("leader partition {topic}-{partition} is not local"))?;
-            return Ok((local.high_watermark().await.0, local.log_start_offset().0));
+            return Ok(PartitionOffsets {
+                high_watermark: local.high_watermark().await.0,
+                log_start: local.log_start_offset().0,
+            });
         }
         self.remote_offsets(image, leader, topic, partition).await
     }
@@ -160,7 +166,7 @@ impl BacklogPoller {
         leader: NodeId,
         topic: &str,
         partition: i32,
-    ) -> Result<(i64, i64), String> {
+    ) -> Result<PartitionOffsets, String> {
         let broker = image
             .broker(leader)
             .ok_or_else(|| format!("unknown leader broker {leader}"))?;
@@ -264,12 +270,19 @@ fn owns_group(image: &krabka_metadata::MetadataImage, node_id: NodeId, group_id:
         .is_some_and(|record| record.leader == node_id)
 }
 
+/// A partition's high watermark and log start offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PartitionOffsets {
+    high_watermark: i64,
+    log_start: i64,
+}
+
 fn fetch_offsets(
     response: &FetchResponse,
     topic: &str,
     topic_id: WireUuid,
     partition: i32,
-) -> Result<(i64, i64), String> {
+) -> Result<PartitionOffsets, String> {
     if response.error_code != codes::NONE {
         return Err(format!(
             "Fetch metadata probe {topic}-{partition} returned top-level code {}",
@@ -298,7 +311,10 @@ fn fetch_offsets(
             result.high_watermark, result.log_start_offset
         ));
     }
-    Ok((result.high_watermark, result.log_start_offset))
+    Ok(PartitionOffsets {
+        high_watermark: result.high_watermark,
+        log_start: result.log_start_offset,
+    })
 }
 
 fn prune_stale(
@@ -345,7 +361,8 @@ fn clear(metrics: &BrokerMetrics, last: &mut HashMap<ShareGroupLabel, i64>) {
 mod tests {
     use {
         super::{
-            effective_backlog, fetch_offsets, latest_fetch_offset, owns_group, prune_stale, replace,
+            PartitionOffsets, effective_backlog, fetch_offsets, latest_fetch_offset, owns_group,
+            prune_stale, replace,
         },
         crate::{
             codes,
@@ -439,7 +456,13 @@ mod tests {
             ..Default::default()
         };
 
-        assert2::assert!((fetch_offsets(&response, "work", topic_id, 3)) == (Ok((7, 2))));
+        assert2::assert!(
+            (fetch_offsets(&response, "work", topic_id, 3))
+                == (Ok(PartitionOffsets {
+                    high_watermark: 7,
+                    log_start: 2,
+                }))
+        );
     }
 
     #[test]

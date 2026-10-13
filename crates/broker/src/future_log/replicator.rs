@@ -202,8 +202,9 @@ mod tests {
             future_log::{
                 canonicalize_or_self, resume_move,
                 test_support::{
-                    TestStampSource, append_epoch_batch, append_records, append_value_batch,
-                    fixture_partition, open_future_log, registered_source_fixture, test_policy,
+                    OpenedFutureLog, TestStampSource, append_epoch_batch, append_records,
+                    append_value_batch, fixture_partition, open_future_log,
+                    registered_source_fixture, test_policy,
                 },
             },
             log_dir,
@@ -339,19 +340,34 @@ mod tests {
     fn partition_with_copied_future_log(
         primary: &std::path::Path,
         target: &std::path::Path,
-    ) -> (Arc<Partition>, Arc<Mutex<Log>>, PathBuf) {
+    ) -> CopiedFuture {
         let part = fixture_partition(primary, "t", PartitionIndex(0));
         for _ in 0..5 {
             append_value_batch().part(&part).value_size(10).call();
         }
-        let (future_path, future_log) = open_future_log(target);
+        let OpenedFutureLog {
+            path: future_path,
+            log: future_log,
+        } = open_future_log(target);
         let policy = test_policy();
         while !catch_up(&part, &future_log, mebibytes(1), &policy.throttle)
             .unwrap()
             .caught_up
         {}
         assert!(future_log.lock().unwrap().log_end_offset() == Offset(5));
-        (part, future_log, future_path)
+        CopiedFuture {
+            part,
+            future_log,
+            future_path,
+        }
+    }
+
+    /// A partition, a future log that is a full copy of it, and where that log
+    /// lives.
+    struct CopiedFuture {
+        part: Arc<Partition>,
+        future_log: Arc<Mutex<Log>>,
+        future_path: PathBuf,
     }
 
     struct TruncatedFutureFixture {
@@ -365,8 +381,11 @@ mod tests {
     fn copied_future() -> TruncatedFutureFixture {
         let primary = tempdir().unwrap();
         let target = tempdir().unwrap();
-        let (part, future_log, future_path) =
-            partition_with_copied_future_log(primary.path(), target.path());
+        let CopiedFuture {
+            part,
+            future_log,
+            future_path,
+        } = partition_with_copied_future_log(primary.path(), target.path());
         TruncatedFutureFixture {
             future_path,
             future_log,

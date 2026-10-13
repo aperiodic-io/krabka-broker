@@ -38,6 +38,7 @@ mod truncation_replay;
 
 #[cfg(test)]
 pub(crate) use self::decision::check_pure;
+use self::entry::Completion;
 pub use self::{
     decision::{Checked, Decision, SequenceContext},
     entry::{NO_EARLIER_BATCHES, PartitionProducerState, ProducerEntry, RetainedBatch},
@@ -110,7 +111,7 @@ impl ProducerState {
             last_offset,
             timestamp: last_timestamp,
         };
-        let (accepted, earlier) =
+        let Completion { accepted, earlier } =
             entry::earlier_after_completion(existing, producer_epoch, incoming);
         if !accepted {
             return;

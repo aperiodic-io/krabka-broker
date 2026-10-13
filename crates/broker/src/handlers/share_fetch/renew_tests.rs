@@ -15,9 +15,10 @@ use {
         codes,
         handlers::test_support::{
             AcknowledgementBatchSetup, AcknowledgementMode, AcknowledgementPartitionSetup,
-            AcknowledgementSetup, RecordCount, ShareSessionEpoch, acknowledge_batches_request,
-            acquired_share_records, create_topic as create_topic_from_test_support,
-            produce_records, share_acknowledge_wire, share_fetch_wire,
+            AcknowledgementSetup, OffsetRun, RecordCount, ShareSessionEpoch, WireAckBatch,
+            WirePartitionAcknowledgements, acknowledge_batches_request, acquired_share_records,
+            create_topic as create_topic_from_test_support, produce_records,
+            share_acknowledge_wire, share_fetch_wire,
         },
         share_partition::state::RecordState::{self, Acknowledged, Acquired, Available},
         test_support::{KafkaErrorCode, initialize_share_state},
@@ -44,8 +45,8 @@ const ACCEPT: i8 = 1;
 const RELEASE: i8 = 2;
 const RENEW: i8 = 4;
 
-/// One acknowledgement batch: `(first_offset, last_offset, types)`.
-type Batch = (i64, i64, &'static [i8]);
+/// One acknowledgement batch: its offsets and types.
+type Batch = WireAckBatch<'static>;
 
 use crate::{
     handlers::test_support::start_allow_all_no_audit as start,
@@ -179,7 +180,7 @@ struct RenewCaseSetup {
     name: &'static str,
     call: Call,
     availability: RenewAvailability,
-    #[default(ack_batches(&[(0, 2, &[RENEW])]))]
+    #[default(ack_batches(&[WireAckBatch { first: 0, last: 2, types: &[RENEW] }]))]
     batches: Vec<AcknowledgementBatchSetup>,
     #[default(Outcome::expected(KafkaErrorCode(codes::NONE), Some(KafkaErrorCode(codes::NONE)), [Acquired, Acquired, Acquired]))]
     expected: Outcome,
@@ -187,7 +188,8 @@ struct RenewCaseSetup {
 
 /// Decode the literal acknowledgement wire tables into typed fixture ranges.
 fn ack_batches(batches: &[Batch]) -> Vec<AcknowledgementBatchSetup> {
-    AcknowledgementPartitionSetup::from_wire((0, batches)).batches
+    AcknowledgementPartitionSetup::from_wire(WirePartitionAcknowledgements { index: 0, batches })
+        .batches
 }
 
 /// What a scenario observes: the top-level error, the partition error
@@ -197,7 +199,7 @@ fn ack_batches(batches: &[Batch]) -> Vec<AcknowledgementBatchSetup> {
 struct Outcome {
     error: i16,
     acknowledge_error: Option<i16>,
-    acquired: Vec<(i64, i64)>,
+    acquired: Vec<OffsetRun>,
     states: Vec<(i64, RecordState)>,
 }
 
@@ -217,7 +219,18 @@ impl Outcome {
 }
 
 fn cases() -> Vec<RenewCaseSetup> {
-    const MIXED_BATCHES: &[Batch] = &[(0, 0, &[RENEW]), (1, 2, &[ACCEPT])];
+    const MIXED_BATCHES: &[Batch] = &[
+        WireAckBatch {
+            first: 0,
+            last: 0,
+            types: &[RENEW],
+        },
+        WireAckBatch {
+            first: 1,
+            last: 2,
+            types: &[ACCEPT],
+        },
+    ];
     let mixed_outcome = || {
         Outcome::expected(
             KafkaErrorCode(codes::NONE),
@@ -242,7 +255,11 @@ fn cases() -> Vec<RenewCaseSetup> {
         },
         RenewCaseSetup {
             name: "per-offset-renew-accept-release",
-            batches: ack_batches(&[(0, 2, &[RENEW, ACCEPT, RELEASE])]),
+            batches: ack_batches(&[WireAckBatch {
+                first: 0,
+                last: 2,
+                types: &[RENEW, ACCEPT, RELEASE],
+            }]),
             expected: Outcome::expected(
                 KafkaErrorCode(codes::NONE),
                 Some(KafkaErrorCode(codes::NONE)),
@@ -426,7 +443,11 @@ async fn a_renew_fetch_answers_a_denied_topic_as_an_acknowledge_error() {
             epoch: ShareSessionEpoch(1),
             mode: AcknowledgementMode::Renew,
             limits: NO_FETCH,
-            batches: ack_batches(&[(0, 0, &[RENEW])]),
+            batches: ack_batches(&[WireAckBatch {
+                first: 0,
+                last: 0,
+                types: &[RENEW],
+            }]),
             ..Default::default()
         }),
     )

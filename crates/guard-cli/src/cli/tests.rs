@@ -90,7 +90,7 @@ fn the_signing_flags_travel_together() {
         "--reason",
         "DR cutover",
     ];
-    let cases: [(&'static str, Vec<&'static str>, bool); 5] = [
+    let cases = [
         ("no signature at all", vec![], true),
         (
             "all three flags",
@@ -150,7 +150,7 @@ fn verifying_signatures_needs_a_local_key_file() {
 /// request holds.
 #[test]
 fn every_action_carries_its_own_wire_value_and_name() {
-    let cases: [(&'static str, Action, i8, &'static str); 7] = [
+    let cases = [
         ("thaw", Action::ThawTopicFreeze, 1, "thaw_topic_freeze"),
         (
             "unclean election",

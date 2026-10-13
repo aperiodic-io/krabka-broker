@@ -100,14 +100,29 @@ fn format_with_add_scram_writes_credential_record() {
 /// `--feature krabka.version=N` overrides it.
 #[test]
 fn format_seeds_krabka_version_only_when_overridden() {
-    let cases: [(&[&str], Option<i16>); 3] = [
-        (&[], None),
-        (&["--feature", "krabka.version=1"], Some(1)),
-        (&["--feature", "krabka.version=0"], None),
+    /// The extra flags, and the `krabka.version` the bootstrap seeds.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Case<'a> {
+        flags: &'a [&'a str],
+        seeded: Option<i16>,
+    }
+    let cases = [
+        Case {
+            flags: &[],
+            seeded: None,
+        },
+        Case {
+            flags: &["--feature", "krabka.version=1"],
+            seeded: Some(1),
+        },
+        Case {
+            flags: &["--feature", "krabka.version=0"],
+            seeded: None,
+        },
     ];
     let actual: Vec<_> = cases
         .iter()
-        .map(|(flags, _)| {
+        .map(|Case { flags, .. }| {
             let dir = tempfile::tempdir().unwrap();
             let mut args = vec!["--node-id", "1"];
             args.extend_from_slice(flags);
@@ -121,7 +136,7 @@ fn format_seeds_krabka_version_only_when_overridden() {
                     }
                     _ => None,
                 });
-            (*flags, seeded)
+            Case { flags, seeded }
         })
         .collect();
     let expected: Vec<_> = cases.to_vec();

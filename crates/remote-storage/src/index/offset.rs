@@ -83,12 +83,26 @@ pub fn position_for_relative_offset(
 mod tests {
     use {super::*, assert2::assert};
 
-    fn offset_entries(pairs: &[(u32, u32)]) -> Vec<OffsetIndexEntry> {
-        pairs
+    /// An offset index entry's decoded relative offset and byte position.
+    #[derive(Debug, PartialEq, Eq)]
+    struct OffsetSpec {
+        relative_offset: u32,
+        position: u32,
+    }
+
+    const fn offset_at(relative_offset: u32, position: u32) -> OffsetSpec {
+        OffsetSpec {
+            relative_offset,
+            position,
+        }
+    }
+
+    fn offset_entries(specs: &[OffsetSpec]) -> Vec<OffsetIndexEntry> {
+        specs
             .iter()
-            .map(|&(rel, pos)| OffsetIndexEntry {
-                relative_offset: U32::new(rel),
-                position: U32::new(pos),
+            .map(|spec| OffsetIndexEntry {
+                relative_offset: U32::new(spec.relative_offset),
+                position: U32::new(spec.position),
             })
             .collect()
     }
@@ -102,24 +116,35 @@ mod tests {
             buf.extend_from_slice(&pos.to_be_bytes());
         }
         let entries = parse_offset_index(&buf).expect("valid offset index");
-        let decoded: Vec<(u32, u32)> = entries
+        let decoded: Vec<OffsetSpec> = entries
             .iter()
-            .map(|e| (e.relative_offset.get(), e.position.get()))
+            .map(|e| offset_at(e.relative_offset.get(), e.position.get()))
             .collect();
-        assert!(decoded == vec![(0, 0), (10, 256), (20, 512)]);
+        assert!(decoded == vec![offset_at(0, 0), offset_at(10, 256), offset_at(20, 512)]);
     }
 
     #[test]
     fn position_for_relative_offset_returns_floor() {
-        let entries = offset_entries(&[(0, 0), (10, 256), (20, 512), (30, 1024)]);
-        let cases: [(&[OffsetIndexEntry], u32, u32); 5] = [
-            (&entries, 10, 256),   // exact
-            (&entries, 15, 256),   // between
-            (&entries, 0, 0),      // first entry exact
-            (&entries, 100, 1024), // after last
-            (&[], 50, 0),          // empty
+        struct FloorCase<'a> {
+            entries: &'a [OffsetIndexEntry],
+            rel: u32,
+            want: u32,
+        }
+        let entries = offset_entries(&[
+            offset_at(0, 0),
+            offset_at(10, 256),
+            offset_at(20, 512),
+            offset_at(30, 1024),
+        ]);
+        let floor = |entries, rel, want| FloorCase { entries, rel, want };
+        let cases = [
+            floor(&entries[..], 10, 256),   // exact
+            floor(&entries[..], 15, 256),   // between
+            floor(&entries[..], 0, 0),      // first entry exact
+            floor(&entries[..], 100, 1024), // after last
+            floor(&[], 50, 0),              // empty
         ];
-        for (entries, rel, want) in cases {
+        for FloorCase { entries, rel, want } in cases {
             assert!(
                 position_for_relative_offset(entries, rel) == want,
                 "rel {rel}"
@@ -130,7 +155,7 @@ mod tests {
     #[test]
     fn position_for_relative_offset_below_first() {
         // Synthetic: first entry isn't at rel=0. Floor below it returns 0.
-        let entries = offset_entries(&[(5, 100), (10, 200)]);
+        let entries = offset_entries(&[offset_at(5, 100), offset_at(10, 200)]);
         assert!(position_for_relative_offset(&entries, 3) == 0);
     }
 

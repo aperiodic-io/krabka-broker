@@ -112,11 +112,26 @@ pub async fn find_coordinator(client: &Client, transactional_id: &str) {
         .expect("FindCoordinator");
 }
 
+/// The error code an expected `AddPartitionsToTxn` response carries for one
+/// partition.
+#[derive(Debug, Clone, Copy)]
+pub struct PartitionCode {
+    pub partition_index: i32,
+    pub partition_error_code: i16,
+}
+
+pub fn partition_code(partition_index: i32, partition_error_code: i16) -> PartitionCode {
+    PartitionCode {
+        partition_index,
+        partition_error_code,
+    }
+}
+
 /// A literal expected response table; no field is copied from an actual response.
 pub fn expected_partitions(
     transactional_id: &str,
     topic: &str,
-    partitions: &[(i32, i16)],
+    partitions: &[PartitionCode],
 ) -> krabka_protocol::owned::add_partitions_to_txn_response::AddPartitionsToTxnResponse {
     use krabka_protocol::owned::{
         add_partitions_to_txn_response::{AddPartitionsToTxnResponse, AddPartitionsToTxnResult},
@@ -132,13 +147,18 @@ pub fn expected_partitions(
                 name: topic.into(),
                 results_by_partition: partitions
                     .iter()
-                    .map(|&(partition_index, partition_error_code)| {
-                        AddPartitionsToTxnPartitionResult {
-                            partition_index,
-                            partition_error_code,
-                            ..Default::default()
-                        }
-                    })
+                    .map(
+                        |&PartitionCode {
+                             partition_index,
+                             partition_error_code,
+                         }| {
+                            AddPartitionsToTxnPartitionResult {
+                                partition_index,
+                                partition_error_code,
+                                ..Default::default()
+                            }
+                        },
+                    )
                     .collect(),
                 ..Default::default()
             }],

@@ -20,7 +20,7 @@ use {
             produce::{SinglePartitionProduceSetup, batch_request},
             shutdown_cluster,
             topics::CreateTopicRequestSetup,
-            transactions::{ProducerIdentity, TransactionOutcome},
+            transactions::{ProducerEpoch, ProducerIdentity, TransactionOutcome},
             {self},
         },
     },
@@ -28,6 +28,7 @@ use {
     bytes::BytesMut,
     krabka_broker::{BrokerConfig, BrokerHandle, codes},
     krabka_client_core::{Connection, ConnectionOptions},
+    krabka_ids::ProducerId,
     krabka_protocol::{
         Decode, Encode,
         owned::{
@@ -69,15 +70,44 @@ const PRODUCE_V11: i16 = 11;
 const PRODUCE_API_KEY: i16 = 0;
 
 /// The idempotent producer.
-const IDEMPOTENT: (i64, i16) = (9_001, 0);
+const IDEMPOTENT: ProducerIdentity = producer(9_001, 0);
 /// The transactional producer that commits at its epoch (transaction version
 /// 1).
-const COMMITTED: (i64, i16) = (9_002, 2);
+const COMMITTED: ProducerIdentity = producer(9_002, 2);
 /// The transactional producer that aborts at the next epoch (transaction
 /// version 2).
-const ABORTED: (i64, i16) = (9_003, 4);
+const ABORTED: ProducerIdentity = producer(9_003, 4);
 /// The transactional producer whose transaction stays open.
-const OPEN: (i64, i16) = (9_004, 0);
+const OPEN: ProducerIdentity = producer(9_004, 0);
+
+/// The producer with `id` at `epoch`.
+const fn producer(id: i64, epoch: i16) -> ProducerIdentity {
+    ProducerIdentity {
+        id: ProducerId(id),
+        epoch: ProducerEpoch(epoch),
+    }
+}
+
+/// The batch fixture's view of `identity`.
+const fn batch_producer(identity: ProducerIdentity) -> BatchProducer {
+    BatchProducer {
+        id: identity.id,
+        epoch: BatchProducerEpoch(identity.epoch.0),
+    }
+}
+
+/// The transaction fields of a `DescribeProducers` row.
+#[derive(Clone, Copy)]
+struct TransactionFields {
+    coordinator_epoch: i32,
+    current_txn_start_offset: i64,
+}
+
+/// A row for a producer that has no open transaction and no marker.
+const NO_TRANSACTION: TransactionFields = TransactionFields {
+    coordinator_epoch: -1,
+    current_txn_start_offset: -1,
+};
 
 use crate::support::records::now_ms;
 
@@ -114,7 +144,7 @@ async fn start_cluster() -> Cluster {
     panic!("cluster start failed after 3 attempts: {last_error:?}");
 }
 
-// A batch of `producer` (`(id, epoch)`) with `records` records from
+// A batch of `producer` with `records` records from
 // `base_sequence`.
 krabka_macros::producer_batch_fixture!(
     batch,
@@ -162,11 +192,11 @@ async fn produce_transactional(leader: &Connection, batch: RecordBatch) -> i16 {
     response.responses[0].partition_responses[0].error_code
 }
 
-/// Write the marker that ends the transaction of `producer` (`(id, epoch)`)
-/// on the leader, and return the error code of the partition row.
+/// Write the marker that ends the transaction of `producer` on the leader, and
+/// return the error code of the partition row.
 async fn end_transaction(
     leader: &Connection,
-    (producer_id, producer_epoch): (i64, i16),
+    producer: ProducerIdentity,
     commit: TransactionOutcome,
     transaction_version: i8,
 ) -> i16 {
@@ -174,7 +204,7 @@ async fn end_transaction(
         .send(WriteTxnMarkersRequest {
             markers: vec![
                 crate::support::transactions::transaction_marker()
-                    .producer(ProducerIdentity::from_wire((producer_id, producer_epoch)))
+                    .producer(producer)
                     .outcome(commit)
                     .coordinator_epoch(COORDINATOR_EPOCH)
                     .transaction_version(transaction_version)
@@ -207,14 +237,17 @@ async fn describe_producers(broker: &BrokerHandle) -> DescribeProducersResponse 
 }
 
 fn producer_row(
-    (producer_id, producer_epoch): (i64, i16),
+    producer: ProducerIdentity,
     last_sequence: i32,
     last_timestamp: i64,
-    (coordinator_epoch, current_txn_start_offset): (i32, i64),
+    TransactionFields {
+        coordinator_epoch,
+        current_txn_start_offset,
+    }: TransactionFields,
 ) -> ProducerState {
     ProducerState {
-        producer_id,
-        producer_epoch: i32::from(producer_epoch),
+        producer_id: producer.id.0,
+        producer_epoch: i32::from(producer.epoch.0),
         last_sequence,
         last_timestamp,
         coordinator_epoch,
@@ -272,7 +305,7 @@ async fn every_replica_describes_the_producers_of_its_log() {
             &leader,
             topic_id,
             batch()
-                .producer(BatchProducer::from_wire(IDEMPOTENT))
+                .producer(batch_producer(IDEMPOTENT))
                 .records(3)
                 .max_timestamp(BASE_TIMESTAMP)
                 .call(),
@@ -282,7 +315,7 @@ async fn every_replica_describes_the_producers_of_its_log() {
             &leader,
             topic_id,
             batch()
-                .producer(BatchProducer::from_wire(IDEMPOTENT))
+                .producer(batch_producer(IDEMPOTENT))
                 .base_sequence(3)
                 .records(2)
                 .max_timestamp(BASE_TIMESTAMP + 1)
@@ -295,7 +328,7 @@ async fn every_replica_describes_the_producers_of_its_log() {
     let committed = produce_transactional(
         &leader,
         batch()
-            .producer(BatchProducer::from_wire(COMMITTED))
+            .producer(batch_producer(COMMITTED))
             .records(2)
             .max_timestamp(BASE_TIMESTAMP + 2)
             .transaction(BatchTransactionMode::Transactional)
@@ -307,25 +340,19 @@ async fn every_replica_describes_the_producers_of_its_log() {
     let aborted = produce_transactional(
         &leader,
         batch()
-            .producer(BatchProducer::from_wire(ABORTED))
+            .producer(batch_producer(ABORTED))
             .max_timestamp(BASE_TIMESTAMP + 3)
             .transaction(BatchTransactionMode::Transactional)
             .call(),
     )
     .await;
-    let (aborted_id, aborted_epoch) = ABORTED;
-    let abort = end_transaction(
-        &leader,
-        (aborted_id, aborted_epoch + 1),
-        TransactionOutcome::Abort,
-        2,
-    )
-    .await;
+    let aborted_next_epoch = producer(ABORTED.id.0, ABORTED.epoch.0 + 1);
+    let abort = end_transaction(&leader, aborted_next_epoch, TransactionOutcome::Abort, 2).await;
     let after_markers = now_ms();
     let open = produce_transactional(
         &leader,
         batch()
-            .producer(BatchProducer::from_wire(OPEN))
+            .producer(batch_producer(OPEN))
             .records(2)
             .max_timestamp(BASE_TIMESTAMP + 4)
             .transaction(BatchTransactionMode::Transactional)
@@ -356,8 +383,12 @@ async fn every_replica_describes_the_producers_of_its_log() {
     // the marker in `lastTimestamp`. The leader wrote both markers inside
     // this window, so its answer gives those values.
     let window = before_markers..=after_markers;
-    let committed_at = reported_timestamp(&answers[0], COMMITTED.0);
-    let aborted_at = reported_timestamp(&answers[0], aborted_id);
+    let committed_marker = TransactionFields {
+        coordinator_epoch: COORDINATOR_EPOCH,
+        current_txn_start_offset: -1,
+    };
+    let committed_at = reported_timestamp(&answers[0], COMMITTED.id.0);
+    let aborted_at = reported_timestamp(&answers[0], aborted_next_epoch.id.0);
     let expected = DescribeProducersResponse {
         throttle_time_ms: 0,
         topics: vec![TopicResponse {
@@ -367,15 +398,13 @@ async fn every_replica_describes_the_producers_of_its_log() {
                 error_code: codes::NONE,
                 error_message: None,
                 active_producers: vec![
-                    producer_row(IDEMPOTENT, 4, BASE_TIMESTAMP + 1, (-1, -1)),
-                    producer_row(COMMITTED, 1, committed_at, (COORDINATOR_EPOCH, -1)),
-                    producer_row(
-                        (aborted_id, aborted_epoch + 1),
-                        -1,
-                        aborted_at,
-                        (COORDINATOR_EPOCH, -1),
-                    ),
-                    producer_row(OPEN, 1, BASE_TIMESTAMP + 4, (-1, 10)),
+                    producer_row(IDEMPOTENT, 4, BASE_TIMESTAMP + 1, NO_TRANSACTION),
+                    producer_row(COMMITTED, 1, committed_at, committed_marker),
+                    producer_row(aborted_next_epoch, -1, aborted_at, committed_marker),
+                    producer_row(OPEN, 1, BASE_TIMESTAMP + 4, TransactionFields {
+                        coordinator_epoch: -1,
+                        current_txn_start_offset: 10,
+                    }),
                 ],
                 ..Default::default()
             }],

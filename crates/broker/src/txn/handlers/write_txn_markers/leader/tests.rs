@@ -41,10 +41,16 @@ const MARKER: MarkerAppend = MarkerAppend {
     transaction_version: 0,
 };
 
+/// A led partition and the directory that must outlive it.
+struct LedPartition {
+    partition: Arc<Partition>,
+    _dir: tempfile::TempDir,
+}
+
 /// A partition with a live writer that this broker leads at [`EPOCH`], whose
 /// ISR holds a follower that has not fetched, so the high watermark stays at
 /// zero. It holds a two-record transaction of the producer of [`MARKER`].
-async fn led_partition() -> (Arc<Partition>, tempfile::TempDir) {
+async fn led_partition() -> LedPartition {
     let (partition, dir) = test_partition_with_writer();
     let partition = Arc::new(partition);
     partition.install_leader_change(NODE.0, EPOCH).await;
@@ -69,7 +75,10 @@ async fn led_partition() -> (Arc<Partition>, tempfile::TempDir) {
         })
         .await
         .expect("append the transaction");
-    (partition, dir)
+    LedPartition {
+        partition,
+        _dir: dir,
+    }
 }
 
 /// The Kafka code of a marker write: `NONE`, or the code it was refused with.
@@ -133,7 +142,7 @@ async fn only_the_leader_with_enough_replicas_appends_a_marker() {
     let mut actual = Vec::new();
     let mut expected = Vec::new();
     for (case, setup, admitted, epochs) in cases {
-        let (partition, _dir) = led_partition().await;
+        let LedPartition { partition, _dir } = led_partition().await;
         match setup {
             Setup::Leads => {}
             Setup::LedElsewhere => partition.install_leader_change(FOLLOWER.0, EPOCH + 1).await,
@@ -219,7 +228,7 @@ async fn a_marker_counts_only_once_committed_under_its_leader() {
     let mut actual = Vec::new();
     let mut expected = Vec::new();
     for (case, change, timeout, answer) in cases {
-        let (partition, _dir) = led_partition().await;
+        let LedPartition { partition, _dir } = led_partition().await;
         let pending = append_marker_as_leader(&partition, NODE, None, "t", MARKER)
             .await
             .expect("the leader appends the marker");
@@ -269,7 +278,7 @@ async fn a_marker_counts_only_once_committed_under_its_leader() {
 /// the high watermark covers the marker it found.
 #[tokio::test]
 async fn a_retried_marker_waits_for_the_marker_the_log_holds() {
-    let (partition, _dir) = led_partition().await;
+    let LedPartition { partition, _dir } = led_partition().await;
     let first: PendingMarker = append_marker_as_leader(&partition, NODE, None, "t", MARKER)
         .await
         .expect("the leader appends the marker");

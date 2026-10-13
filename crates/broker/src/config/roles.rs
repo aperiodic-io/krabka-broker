@@ -140,8 +140,13 @@ mod tests {
     /// `controller.listener.names` when `process.roles=controller`.
     #[test]
     fn only_a_node_with_the_broker_role_names_listeners() {
-        // (roles, the [[listeners]] entries, what validation answers)
-        type Case = (Vec<NodeRole>, Vec<ListenerSpec>, Result<(), String>);
+        struct Case {
+            roles: Vec<NodeRole>,
+            /// The `[[listeners]]` entries.
+            listeners: Vec<ListenerSpec>,
+            /// What validation answers.
+            want: Result<(), String>,
+        }
         let listener = |name: &str, port: u16| ListenerSpec {
             name: name.to_owned(),
             bind_addr: std::net::SocketAddr::from(([127, 0, 0, 1], port)),
@@ -160,29 +165,38 @@ mod tests {
             ))
         };
         let cases: [Case; 5] = [
-            (vec![NodeRole::Controller], vec![], Ok(())),
-            (
-                vec![NodeRole::Controller],
-                vec![listener("PLAINTEXT", 9092)],
-                refused("PLAINTEXT"),
-            ),
-            (
-                vec![NodeRole::Controller],
-                vec![listener("PLAINTEXT", 9092), listener("INTERNAL", 9094)],
-                refused("PLAINTEXT, INTERNAL"),
-            ),
-            (
-                vec![NodeRole::Broker],
-                vec![listener("PLAINTEXT", 9092)],
-                Ok(()),
-            ),
-            (
-                vec![NodeRole::Controller, NodeRole::Broker],
-                vec![listener("PLAINTEXT", 9092)],
-                Ok(()),
-            ),
+            Case {
+                roles: vec![NodeRole::Controller],
+                listeners: vec![],
+                want: Ok(()),
+            },
+            Case {
+                roles: vec![NodeRole::Controller],
+                listeners: vec![listener("PLAINTEXT", 9092)],
+                want: refused("PLAINTEXT"),
+            },
+            Case {
+                roles: vec![NodeRole::Controller],
+                listeners: vec![listener("PLAINTEXT", 9092), listener("INTERNAL", 9094)],
+                want: refused("PLAINTEXT, INTERNAL"),
+            },
+            Case {
+                roles: vec![NodeRole::Broker],
+                listeners: vec![listener("PLAINTEXT", 9092)],
+                want: Ok(()),
+            },
+            Case {
+                roles: vec![NodeRole::Controller, NodeRole::Broker],
+                listeners: vec![listener("PLAINTEXT", 9092)],
+                want: Ok(()),
+            },
         ];
-        for (roles, listeners, want) in cases {
+        for Case {
+            roles,
+            listeners,
+            want,
+        } in cases
+        {
             // A broker-only node is not its own voter, so it names another.
             let voter = if roles.contains(&NodeRole::Controller) {
                 NodeId(1)

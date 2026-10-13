@@ -64,7 +64,9 @@ use {
 };
 
 mod support;
-use support::{BoundedResource, LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP, bounded_resource};
+use support::{
+    BatchShape, BoundedResource, LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP, bounded_resource,
+};
 
 fn settings(metrics: &BrokerMetrics) -> HotPathSettings<'_> {
     HotPathSettings {
@@ -205,24 +207,38 @@ fn timed_appends(
     elapsed
 }
 
-/// The three paths a shape is measured on, in report order, each paired with
-/// the path through `prepare_batch` that its case has to actually take.
-fn paths(records: i32, payload: usize) -> [(&'static str, Bytes, PathChoice, ProducePath); 3] {
+/// One path a shape is measured on: its report name, the wire bytes it
+/// appends, how the broker is told to dispatch them, and the path through
+/// `prepare_batch` that this case has to actually take.
+struct MeasuredPath {
+    name: &'static str,
+    wire: Bytes,
+    choice: PathChoice,
+    expected: ProducePath,
+}
+
+/// The three paths a shape is measured on, in report order.
+fn paths(records: i32, payload: usize) -> [MeasuredPath; 3] {
     let v2 = v2_records(records, payload);
     [
-        (
-            "verbatim",
-            v2.clone(),
-            PathChoice::Dispatch,
-            ProducePath::Verbatim,
-        ),
-        ("owned", v2, PathChoice::ForceOwned, ProducePath::Owned),
-        (
-            "legacy_v1",
-            legacy_v1_records(records, payload),
-            PathChoice::Dispatch,
-            ProducePath::Owned,
-        ),
+        MeasuredPath {
+            name: "verbatim",
+            wire: v2.clone(),
+            choice: PathChoice::Dispatch,
+            expected: ProducePath::Verbatim,
+        },
+        MeasuredPath {
+            name: "owned",
+            wire: v2,
+            choice: PathChoice::ForceOwned,
+            expected: ProducePath::Owned,
+        },
+        MeasuredPath {
+            name: "legacy_v1",
+            wire: legacy_v1_records(records, payload),
+            choice: PathChoice::Dispatch,
+            expected: ProducePath::Owned,
+        },
     ]
 }
 
@@ -239,8 +255,19 @@ fn paths(records: i32, payload: usize) -> [(&'static str, Bytes, PathChoice, Pro
 fn bench_produce_hot_path(c: &mut Criterion) {
     let mut group = c.benchmark_group("broker/produce");
 
-    for (shape, records, payload) in SHAPES {
-        for (path, wire, choice, expected) in paths(records, payload) {
+    for BatchShape {
+        label: shape,
+        records,
+        payload,
+    } in SHAPES
+    {
+        for MeasuredPath {
+            name: path,
+            wire,
+            choice,
+            expected,
+        } in paths(records, payload)
+        {
             group.throughput(Throughput::Bytes(wire.len() as u64));
             group.bench_function(format!("{shape}/{path}"), |b| {
                 let metrics = BrokerMetrics::new();
@@ -299,18 +326,30 @@ fn bench_ratio(_c: &mut Criterion) {
         "{:<14} {:>12} {:>12} {:>12} {:>16} {:>16}",
         "shape", "verbatim", "owned", "legacy_v1", "owned/verbatim", "legacy/verbatim"
     );
-    for (shape, records, payload) in SHAPES {
+    for BatchShape {
+        label: shape,
+        records,
+        payload,
+    } in SHAPES
+    {
         let means: Vec<f64> = paths(records, payload)
             .into_iter()
-            .map(|(_, wire, choice, expected)| {
-                (0..RUNS)
-                    .map(|_| {
-                        timed_appends(&wire, choice, expected, u64::from(SAMPLES)).as_secs_f64()
-                            * 1.0e9
-                            / f64::from(SAMPLES)
-                    })
-                    .fold(f64::INFINITY, f64::min)
-            })
+            .map(
+                |MeasuredPath {
+                     wire,
+                     choice,
+                     expected,
+                     ..
+                 }| {
+                    (0..RUNS)
+                        .map(|_| {
+                            timed_appends(&wire, choice, expected, u64::from(SAMPLES)).as_secs_f64()
+                                * 1.0e9
+                                / f64::from(SAMPLES)
+                        })
+                        .fold(f64::INFINITY, f64::min)
+                },
+            )
             .collect();
         let (verbatim, owned, legacy) = (means[0], means[1], means[2]);
         println!(

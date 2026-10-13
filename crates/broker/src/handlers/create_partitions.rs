@@ -46,8 +46,10 @@ mod tests;
 
 use {
     self::{
-        admission::duplicate_names, apply::partition_records,
-        assignment::resolve_new_partition_assignments, response::finish_response,
+        admission::duplicate_names,
+        apply::partition_records,
+        assignment::{PlacementRefusal, resolve_new_partition_assignments},
+        response::finish_response,
     },
     crate::{
         broker::Broker,
@@ -256,7 +258,7 @@ async fn grow_topic(
     let topic_rec = {
         match admit_growth(t, &image, None) {
             Ok(topic) => topic,
-            Err((code, message)) => {
+            Err(GrowthRefusal { code, message }) => {
                 reconcile_growth_charge(growth, 0).await;
                 out.error_code = code;
                 out.error_message = message;
@@ -279,7 +281,7 @@ async fn grow_topic(
         leaderships,
     } = match place_growth(broker, t, &image, &topic_rec).await {
         Ok(placement) => placement,
-        Err((code, message)) => {
+        Err(PlacementRefusal { code, message }) => {
             out.error_code = code;
             out.error_message = Some(message);
             return Ok(out);
@@ -354,6 +356,13 @@ async fn reconcile_growth_charge(growth: &GrowthContext<'_, '_>, current: u64) -
     true
 }
 
+/// A refusal to grow a topic: Kafka's error code and, where Kafka sends one,
+/// its message.
+struct GrowthRefusal {
+    code: i16,
+    message: Option<String>,
+}
+
 struct GrowthPlacement {
     assignments: Vec<Vec<NodeId>>,
     leaderships: Vec<InitialLeadership>,
@@ -365,7 +374,7 @@ async fn place_growth(
     t: &CreatePartitionsTopic,
     image: &MetadataImage,
     topic_rec: &TopicRecord,
-) -> Result<GrowthPlacement, (i16, String)> {
+) -> Result<GrowthPlacement, PlacementRefusal> {
     // The automatic placement leaves out a broker that is in controlled
     // shutdown and not fenced, and one whose log directories are all
     // cordoned (KIP-1066). It takes a fenced broker only as a last resort,
@@ -408,7 +417,10 @@ async fn place_growth(
         ) {
             Ok(leaderships) => leaderships,
             Err(message) => {
-                return Err((codes::INVALID_REPLICA_ASSIGNMENT, message));
+                return Err(PlacementRefusal {
+                    code: codes::INVALID_REPLICA_ASSIGNMENT,
+                    message,
+                });
             }
         }
     } else {
@@ -429,15 +441,20 @@ fn admit_growth(
     topic: &CreatePartitionsTopic,
     image: &MetadataImage,
     quota: Option<&mut ControllerMutationQuota>,
-) -> Result<TopicRecord, (i16, Option<String>)> {
+) -> Result<TopicRecord, GrowthRefusal> {
     // Kafka's `UnknownTopicOrPartitionException()` carries no message.
-    let topic_rec = image
-        .topic(&topic.name)
-        .cloned()
-        .ok_or((codes::UNKNOWN_TOPIC_OR_PARTITION, None))?;
+    let topic_rec = image.topic(&topic.name).cloned().ok_or(GrowthRefusal {
+        code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+        message: None,
+    })?;
     let existing = topic_rec.partitions;
     let count = topic.count;
-    let invalid = |message| Err((codes::INVALID_PARTITIONS, Some(message)));
+    let invalid = |message| {
+        Err(GrowthRefusal {
+            code: codes::INVALID_PARTITIONS,
+            message: Some(message),
+        })
+    };
     match count.cmp(&existing) {
         std::cmp::Ordering::Equal => {
             return invalid(format!("Topic already has {existing} partition(s)."));
@@ -455,14 +472,14 @@ fn admit_growth(
     if let Some(assignments) = &topic.assignments
         && i64::try_from(assignments.len()).ok() != Some(additional)
     {
-        return Err((
-            codes::INVALID_REPLICA_ASSIGNMENT,
-            Some(format!(
+        return Err(GrowthRefusal {
+            code: codes::INVALID_REPLICA_ASSIGNMENT,
+            message: Some(format!(
                 "Attempted to add {additional} additional partition(s), but only {} \
                  assignment(s) were specified.",
                 assignments.len()
             )),
-        ));
+        });
     }
     // KIP-599: charge the partitions this topic adds.
     if let Some(quota) = quota
@@ -470,10 +487,10 @@ fn admit_growth(
             .record(u64::try_from(additional).unwrap_or(0))
             .is_err()
     {
-        return Err((
-            codes::THROTTLING_QUOTA_EXCEEDED,
-            Some("The throttling quota has been exceeded.".into()),
-        ));
+        return Err(GrowthRefusal {
+            code: codes::THROTTLING_QUOTA_EXCEEDED,
+            message: Some("The throttling quota has been exceeded.".into()),
+        });
     }
     Ok(topic_rec)
 }

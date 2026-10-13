@@ -10,7 +10,9 @@ use {
     super::{
         API_KEY_API_VERSIONS, API_KEY_SASL_AUTHENTICATE, API_KEY_SASL_HANDSHAKE,
         BrokerRaftHandshake,
-        frame::{read_kafka_request, write_response, write_response_body},
+        frame::{
+            KafkaRequest, RequestIds, read_kafka_request, write_response, write_response_body,
+        },
     },
     crate::{
         codes::SASL_AUTHENTICATION_FAILED,
@@ -129,7 +131,12 @@ pub(super) async fn run_inbound_sasl(
         if matches!(request, Err(RaftHandshakeError::Sasl(_))) {
             delay_failed_authentication(cfg).await;
         }
-        let (api_key, api_version, corr_id, body) = request?;
+        let KafkaRequest { ids, body } = request?;
+        let RequestIds {
+            api_key,
+            api_version,
+            correlation_id: corr_id,
+        } = ids;
         let repeated_api_versions = api_versions_answered
             && api_key == API_KEY_API_VERSIONS
             && matches!(auth, ConnectionAuth::Anonymous);
@@ -174,14 +181,7 @@ pub(super) async fn run_inbound_sasl(
                 );
                 let resp = outcome.response;
                 let error_code = resp.error_code;
-                write_sasl_response(
-                    stream,
-                    cfg,
-                    (api_key, api_version, corr_id),
-                    error_code,
-                    &resp,
-                )
-                .await?;
+                write_sasl_response(stream, cfg, ids, error_code, &resp).await?;
                 if error_code != 0 {
                     return Err(RaftHandshakeError::Sasl(format!(
                         "handshake error_code={error_code}"
@@ -247,14 +247,7 @@ pub(super) async fn run_inbound_sasl(
                     resp.error_message = Some(generic_failure_message(mech, false));
                 }
                 let error_code = resp.error_code;
-                write_sasl_response(
-                    stream,
-                    cfg,
-                    (api_key, api_version, corr_id),
-                    error_code,
-                    &resp,
-                )
-                .await?;
+                write_sasl_response(stream, cfg, ids, error_code, &resp).await?;
                 if error_code != 0 {
                     emit_authentication(
                         cfg,
@@ -311,14 +304,21 @@ mod oauth_cache_tests;
 async fn write_sasl_response<R: krabka_protocol::Encode>(
     stream: &mut dyn ClientDuplex,
     cfg: &BrokerRaftHandshake,
-    request: (i16, i16, i32),
+    request: RequestIds,
     error_code: i16,
     response: &R,
 ) -> Result<(), RaftHandshakeError> {
     if error_code != 0 {
         delay_failed_authentication(cfg).await;
     }
-    write_response(stream, request.0, request.1, request.2, response).await
+    write_response(
+        stream,
+        request.api_key,
+        request.api_version,
+        request.correlation_id,
+        response,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -342,17 +342,23 @@ mod tests {
 
     type SaslResult = Result<(krabka_security::Principal, bool, Option<i64>), RaftHandshakeError>;
 
+    /// The client end of a duplex pipe and the server task reading the other.
+    struct SaslServer {
+        client: tokio::io::DuplexStream,
+        task: tokio::task::JoinHandle<SaslResult>,
+    }
+
     fn sasl_server(
         capacity: usize,
         configure: impl FnOnce() -> BrokerRaftHandshake + Send + 'static,
         api_versions: impl ControllerApiVersions + 'static,
-    ) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<SaslResult>) {
+    ) -> SaslServer {
         let (client, mut server) = tokio::io::duplex(capacity);
         let task = tokio::spawn(async move {
             let cfg = configure();
             run_inbound_sasl(&mut server, &cfg, &test_peer(), &api_versions).await
         });
-        (client, task)
+        SaslServer { client, task }
     }
 
     async fn plain_handshake(client: &mut tokio::io::DuplexStream, correlation_id: i32) -> Vec<u8> {
@@ -391,11 +397,17 @@ mod tests {
         read_response_frame(client).await
     }
 
-    fn audited_config() -> (BrokerRaftHandshake, krabka_audit::AuditReceiver) {
+    /// A handshake configuration and the receiver of its audit rows.
+    struct AuditedConfig {
+        cfg: BrokerRaftHandshake,
+        rx: krabka_audit::AuditReceiver,
+    }
+
+    fn audited_config() -> AuditedConfig {
         let cfg = sasl_test_config();
         let (log, rx) = krabka_audit::AuditLog::new(8);
         cfg.audit_log.set(log).expect("audit cell unset");
-        (cfg, rx)
+        AuditedConfig { cfg, rx }
     }
 
     /// Echoes the request version and body, so a test sees which request the
@@ -414,27 +426,25 @@ mod tests {
         }
     }
 
-    async fn rejected_plain_login(
-        cfg: BrokerRaftHandshake,
-    ) -> (SaslAuthenticateResponse, SaslResult) {
-        let (response, outcome) = plain_login(cfg, "broker", "wrong").await;
-        assert!(response.error_code != 0);
-        assert!(outcome.is_err());
-        (response, outcome)
+    async fn rejected_plain_login(cfg: BrokerRaftHandshake) -> PlainLogin {
+        let login = plain_login(cfg, "broker", "wrong").await;
+        assert!(login.response.error_code != 0);
+        assert!(login.outcome.is_err());
+        login
+    }
+
+    /// The `SaslAuthenticate` response of a PLAIN exchange and the outcome of
+    /// the loop that served it.
+    struct PlainLogin {
+        response: SaslAuthenticateResponse,
+        outcome: SaslResult,
     }
 
     /// Drives one PLAIN exchange (handshake then authenticate) against
     /// `run_inbound_sasl` and returns the decoded `SaslAuthenticate` response
     /// with the loop's outcome.
-    async fn plain_login(
-        cfg: BrokerRaftHandshake,
-        user: &str,
-        password: &str,
-    ) -> (
-        SaslAuthenticateResponse,
-        Result<(krabka_security::Principal, bool, Option<i64>), RaftHandshakeError>,
-    ) {
-        let (mut client, task) = sasl_server(4096, move || cfg, FixedApiVersions);
+    async fn plain_login(cfg: BrokerRaftHandshake, user: &str, password: &str) -> PlainLogin {
+        let SaslServer { mut client, task } = sasl_server(4096, move || cfg, FixedApiVersions);
         let _handshake = plain_handshake(&mut client, 1).await;
 
         client
@@ -454,14 +464,20 @@ mod tests {
         let mut body = &frame[5..];
         let resp =
             SaslAuthenticateResponse::decode(&mut body, 2).expect("decode authenticate response");
-        (resp, task.await.expect("server task"))
+        PlainLogin {
+            response: resp,
+            outcome: task.await.expect("server task"),
+        }
     }
 
     /// The controller path hands the raw stream to the raft engine, so it must
     /// not promise a re-auth deadline nothing later enforces.
     #[tokio::test]
     async fn run_inbound_sasl_advertises_no_session_lifetime() {
-        let (resp, outcome) = plain_login(sasl_test_config(), "broker", "secret").await;
+        let PlainLogin {
+            response: resp,
+            outcome,
+        } = plain_login(sasl_test_config(), "broker", "secret").await;
         assert!(resp.error_code == 0);
         assert!(resp.session_lifetime_ms == 0);
         assert!(outcome.is_ok());
@@ -469,9 +485,12 @@ mod tests {
 
     #[tokio::test]
     async fn run_inbound_sasl_audits_the_successful_controller_login() {
-        let (cfg, mut rx) = audited_config();
+        let AuditedConfig { cfg, mut rx } = audited_config();
 
-        let (resp, outcome) = plain_login(cfg, "broker", "secret").await;
+        let PlainLogin {
+            response: resp,
+            outcome,
+        } = plain_login(cfg, "broker", "secret").await;
         assert!(resp.error_code == 0);
         assert!(outcome.is_ok());
 
@@ -480,32 +499,47 @@ mod tests {
             &event,
             krabka_audit::AuditOutcome::Success,
             "PLAIN",
-            ("User:broker", "SaslPlain"),
-            ("192.0.2.11", 9093),
+            krabka_audit::AuditPrincipal {
+                name: "User:broker".into(),
+                auth_method: "SaslPlain".into(),
+            },
+            krabka_audit::AuditEndpoint {
+                ip: "192.0.2.11".into(),
+                port: 9093,
+            },
             None,
         );
     }
 
     #[tokio::test]
     async fn run_inbound_sasl_audits_the_failed_controller_login() {
-        let (cfg, mut rx) = audited_config();
+        let AuditedConfig { cfg, mut rx } = audited_config();
 
-        let (resp, _outcome) = rejected_plain_login(cfg).await;
+        let PlainLogin { response: resp, .. } = rejected_plain_login(cfg).await;
 
         let event = rx.try_recv().expect("the controller authentication row");
         assert_authentication_event(
             &event,
             krabka_audit::AuditOutcome::Failure,
             "PLAIN",
-            ("", "SaslPlain"),
-            ("192.0.2.11", 9093),
+            krabka_audit::AuditPrincipal {
+                name: String::new(),
+                auth_method: "SaslPlain".into(),
+            },
+            krabka_audit::AuditEndpoint {
+                ip: "192.0.2.11".into(),
+                port: 9093,
+            },
             resp.error_message.clone(),
         );
     }
 
     #[tokio::test]
     async fn run_inbound_sasl_allows_api_versions_before_plain_authentication() {
-        let (mut client, server) = sasl_server(4096, sasl_test_config, FixedApiVersions);
+        let SaslServer {
+            mut client,
+            task: server,
+        } = sasl_server(4096, sasl_test_config, FixedApiVersions);
 
         // A served version and a version the listener does not serve. The
         // listener's answer goes out verbatim behind a v0 response header, and
@@ -550,7 +584,10 @@ mod tests {
 
     #[tokio::test]
     async fn run_inbound_sasl_rejects_disallowed_request_before_authentication() {
-        let (mut client, server) = sasl_server(128, sasl_test_config, FixedApiVersions);
+        let SaslServer {
+            mut client,
+            task: server,
+        } = sasl_server(128, sasl_test_config, FixedApiVersions);
         client
             .write_all(&request_frame().api_key(1).api_version(0).call())
             .await
@@ -590,7 +627,10 @@ mod tests {
     /// request, `UNSUPPORTED_VERSION` here, is not the first one.
     #[tokio::test]
     async fn a_second_api_versions_before_the_handshake_ends_the_exchange() {
-        let (mut client, server) = sasl_server(4096, sasl_test_config, CodedApiVersions);
+        let SaslServer {
+            mut client,
+            task: server,
+        } = sasl_server(4096, sasl_test_config, CodedApiVersions);
 
         // (version, body, error code of the answer)
         let requests = [
@@ -658,7 +698,7 @@ mod tests {
         cfg.failed_authentication_delay = delay;
 
         let started = tokio::time::Instant::now();
-        let (_resp, _outcome) = rejected_plain_login(cfg).await;
+        let _login = rejected_plain_login(cfg).await;
         assert!(
             started.elapsed() >= delay,
             "the answer came after {:?}",
@@ -666,7 +706,8 @@ mod tests {
         );
 
         let started = tokio::time::Instant::now();
-        let (resp, _) = plain_login(sasl_test_config(), "broker", "secret").await;
+        let PlainLogin { response: resp, .. } =
+            plain_login(sasl_test_config(), "broker", "secret").await;
         assert!(resp.error_code == 0);
         assert!(
             started.elapsed() < delay,

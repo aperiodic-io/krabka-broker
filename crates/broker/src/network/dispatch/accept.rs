@@ -82,8 +82,10 @@ pub async fn serve_connection_on_listener(
             // transition consumes the stream by value. `get_ref()` reaches the
             // rustls `ServerConnection` through the `CorkStream` wrapper
             // exactly as for a plain `TlsStream`.
-            let Some((tls_stream, mtls_principal)) =
-                authenticated_tls(handshake, idle, peer, &broker.metrics, &spec).await
+            let Some(AuthenticatedTls {
+                stream: tls_stream,
+                principal: mtls_principal,
+            }) = authenticated_tls(handshake, idle, peer, &broker.metrics, &spec).await
             else {
                 return;
             };
@@ -118,8 +120,10 @@ pub async fn serve_connection_on_listener(
         let handshake = acceptor.accept(WriteIdle::new(stream, idle));
         // A required certificate was checked by rustls; optional/disabled certificates may be absent.
         // A presented DN with no configured mapping still closes the connection.
-        let Some((tls_stream, mtls_principal)) =
-            authenticated_tls(handshake, idle, peer, &broker.metrics, &spec).await
+        let Some(AuthenticatedTls {
+            stream: tls_stream,
+            principal: mtls_principal,
+        }) = authenticated_tls(handshake, idle, peer, &broker.metrics, &spec).await
         else {
             return;
         };
@@ -175,22 +179,26 @@ where
     }
 }
 
+/// A TLS stream whose handshake finished and the principal its peer
+/// certificate maps to, if it presented one.
+struct AuthenticatedTls<S> {
+    stream: tokio_rustls::server::TlsStream<S>,
+    principal: Option<krabka_security::Principal>,
+}
+
 async fn authenticated_tls<F, S>(
     handshake: F,
     idle: Option<std::time::Duration>,
     peer: SocketAddr,
     metrics: &BrokerMetrics,
     spec: &ListenerSpec,
-) -> Option<(
-    tokio_rustls::server::TlsStream<S>,
-    Option<krabka_security::Principal>,
-)>
+) -> Option<AuthenticatedTls<S>>
 where
     F: Future<Output = std::io::Result<tokio_rustls::server::TlsStream<S>>>,
 {
     let stream = handshake_within_idle_window(handshake, idle, peer, metrics).await?;
     let principal = peer_cert_principal(&stream, spec, peer).ok()?;
-    Some((stream, principal))
+    Some(AuthenticatedTls { stream, principal })
 }
 
 /// Inspects the post-handshake TLS stream for a peer certificate. If one is

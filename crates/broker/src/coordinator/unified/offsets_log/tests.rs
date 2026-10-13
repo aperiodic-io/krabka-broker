@@ -59,12 +59,21 @@ fn group_batch() -> RecordBatch {
     }
 }
 
+/// The partition and code of a write that did not commit.
+#[derive(Debug, PartialEq, Eq)]
+struct Uncommitted {
+    partition: i32,
+    code: i16,
+}
+
 /// The partition and code of an uncommitted write, or `Ok` for a committed
 /// one.
-fn outcome(result: Result<(), BrokerError>) -> Result<(), (i32, i16)> {
+fn outcome(result: Result<(), BrokerError>) -> Result<(), Uncommitted> {
     match result {
         Ok(()) => Ok(()),
-        Err(BrokerError::CoordinatorWriteUncommitted { partition, code }) => Err((partition, code)),
+        Err(BrokerError::CoordinatorWriteUncommitted { partition, code }) => {
+            Err(Uncommitted { partition, code })
+        }
         Err(other) => panic!("not a coordinator write error: {other}"),
     }
 }
@@ -98,12 +107,16 @@ fn led_epoch_is_the_term_this_broker_leads_the_partition_under() {
 async fn a_write_completes_only_when_committed_under_its_term() {
     use crate::coordinator::test_support::commit_wait_cases;
     for case in commit_wait_cases() {
-        let expected = case
-            .expected
-            .kafka_error()
-            .map_or(Ok(()), |code| Err((0, code.0)));
-        let (partition, _dir, hw_notify) =
-            commit_partition().high_watermark(case.hw_now).call().await;
+        let expected = case.expected.kafka_error().map_or(Ok(()), |code| {
+            Err(Uncommitted {
+                partition: 0,
+                code: code.0,
+            })
+        });
+        let (partition, _dir, hw_notify) = commit_partition()
+            .high_watermark(Offset(case.hw_now))
+            .call()
+            .await;
         let metadata = Arc::new(
             FakeMetadataSource::builder()
                 .image(offsets_image(1, 0))
@@ -138,7 +151,7 @@ async fn an_append_writes_only_as_the_partition_leader() {
     struct Case {
         what: &'static str,
         image: MetadataImage,
-        expected: Result<(), (i32, i16)>,
+        expected: Result<(), Uncommitted>,
         /// The leader epochs of the batches in the log afterwards.
         logged_epochs: Vec<i32>,
     }
@@ -152,7 +165,10 @@ async fn an_append_writes_only_as_the_partition_leader() {
         Case {
             what: "another broker leads",
             image: offsets_image(2, 3),
-            expected: Err((0, codes::NOT_COORDINATOR)),
+            expected: Err(Uncommitted {
+                partition: 0,
+                code: codes::NOT_COORDINATOR,
+            }),
             logged_epochs: vec![],
         },
     ];

@@ -134,15 +134,17 @@ pub async fn seeded_empty_group(
 }
 
 /// Owners for a restart fixture whose caller reopens the same data directory.
-pub async fn restart_directory() -> (
-    tokio::sync::OwnedSemaphorePermit,
-    tempfile::TempDir,
-    std::path::PathBuf,
-) {
+pub struct RestartDirectory {
+    pub permit: tokio::sync::OwnedSemaphorePermit,
+    pub dir: tempfile::TempDir,
+    pub path: std::path::PathBuf,
+}
+
+pub async fn restart_directory() -> RestartDirectory {
     let permit = broker_test_permit().await;
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().to_path_buf();
-    (permit, dir, path)
+    RestartDirectory { permit, dir, path }
 }
 
 /// Join g1, seed three records, and acquire its first partition.
@@ -187,7 +189,11 @@ pub struct InitializedRestartFixture {
 pub async fn initialized_restart_fixture(
     #[builder(into, default = ShareRecordCount(3))] count: ShareRecordCount,
 ) -> InitializedRestartFixture {
-    let (permit, dir, log_dir) = restart_directory().await;
+    let RestartDirectory {
+        permit,
+        dir,
+        path: log_dir,
+    } = restart_directory().await;
     let topic = initialized_topic()
         .log_dir(log_dir.clone())
         .count(count.0)

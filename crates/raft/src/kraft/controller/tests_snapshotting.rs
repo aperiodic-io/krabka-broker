@@ -14,8 +14,7 @@ use {
             },
             records::decode_control_record,
             test_support::{
-                ControllerOpenSetup, ControllerSetup, EngineSetup, SnapshotRecordCount,
-                await_leader, build, build_engine_only, elect_single_voter_engine,
+                ControllerInDir, await_leader, build, build_engine_only, elect_single_voter_engine,
                 one_offset_batch, open_test_controller_with, submit_change_with_timeout,
                 topic_record, voter_set,
             },
@@ -124,13 +123,16 @@ fn ordinary_snapshot_does_not_reload_the_live_image() {
 }
 
 /// Elect the single-voter fixture before snapshot submissions.
-async fn single_leader_snapshot_fixture() -> (KraftController, tempfile::TempDir) {
+async fn single_leader_snapshot_fixture() -> ControllerInDir {
     let (ctrl, dir) = build()
         .ids(&[NodeId(1)])
         .snapshot_interval_records(3)
         .call();
     super::test_support::elect_single_voter_controller(&ctrl).await;
-    (ctrl, dir)
+    ControllerInDir {
+        controller: ctrl,
+        dir,
+    }
 }
 
 /// A single-voter leader with `snapshot_interval_records = 3` snapshots each
@@ -140,7 +142,10 @@ async fn single_leader_snapshot_fixture() -> (KraftController, tempfile::TempDir
 /// exists on disk and the log start has risen above 0.
 #[tokio::test]
 async fn leader_snapshots_and_prunes_at_threshold() {
-    let (ctrl, dir) = single_leader_snapshot_fixture().await;
+    let ControllerInDir {
+        controller: ctrl,
+        dir,
+    } = single_leader_snapshot_fixture().await;
 
     // Four distinct topics, each committed immediately (single voter). Each
     // commit advances the HWM well past the 3-record interval, so a snapshot
@@ -428,7 +433,10 @@ async fn a_restart_recovers_the_header_timestamp_from_the_checkpoint() {
 /// over it names that instant rather than the epoch.
 #[tokio::test]
 async fn a_submitted_change_stamps_its_checkpoint_with_the_append_wall_clock() {
-    let (ctrl, dir) = single_leader_snapshot_fixture().await;
+    let ControllerInDir {
+        controller: ctrl,
+        dir,
+    } = single_leader_snapshot_fixture().await;
 
     let before = KraftController::wall_clock_ms();
     for name in ["a", "b", "c", "d"] {

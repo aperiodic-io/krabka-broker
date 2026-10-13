@@ -151,7 +151,11 @@ async fn read_local_log(
         sendfile_min_bytes,
     } = request;
     let hw = part.high_watermark().await;
-    let (log_start, w, plan) = plan_read(
+    let PlannedWindow {
+        log_start,
+        window: w,
+        plan,
+    } = plan_read(
         part,
         fetch_offset,
         hw,
@@ -189,9 +193,15 @@ async fn read_local_log(
         ));
     }
 
-    let (records, aborted_txns): (Option<RecordsPayload>, Vec<AbortedTransaction>) = match plan {
+    let ServedRecords {
+        records,
+        aborted: aborted_txns,
+    } = match plan {
         ReadPlan::OffsetOutOfRange => return Ok(0),
-        ReadPlan::Empty => (None, Vec::new()),
+        ReadPlan::Empty => ServedRecords {
+            records: None,
+            aborted: Vec::new(),
+        },
         ReadPlan::Read {
             limit_offset,
             effective_lso,
@@ -220,6 +230,22 @@ async fn read_local_log(
         aborted_txns,
         records,
     ))
+}
+
+/// What a blocking read served: the records, or none for an empty window, and
+/// the aborted transactions that overlap them.
+#[derive(Debug, PartialEq)]
+struct ServedRecords {
+    records: Option<RecordsPayload>,
+    aborted: Vec<AbortedTransaction>,
+}
+
+/// The records a blocking read copied or described, and the aborted
+/// transactions that overlap them.
+#[derive(Debug, PartialEq)]
+struct RawServed {
+    records: RecordsPayload,
+    aborted: Vec<AbortedTransaction>,
 }
 
 /// Everything the blocking half of one partition's read needs, decided by
@@ -293,15 +319,15 @@ struct BlockingRead {
 async fn run_blocking_read(
     log: &Arc<Mutex<Log>>,
     read: &BlockingRead,
-) -> Result<(Option<RecordsPayload>, Vec<AbortedTransaction>), BrokerError> {
+) -> Result<ServedRecords, BrokerError> {
     let log = Arc::clone(log);
     let read = BlockingRead { ..*read };
     let served = run_blocking_catching(move || read_records(&log, &read))
         .await
         .map_err(|error| read_task_panicked(&error))?;
-    let (records, aborted) = served?;
+    let RawServed { records, aborted } = served?;
     let records = (records.payload_len() > 0).then_some(records);
-    Ok((records, aborted))
+    Ok(ServedRecords { records, aborted })
 }
 
 fn read_task_panicked(cause: &impl std::fmt::Display) -> BrokerError {
@@ -312,10 +338,7 @@ fn read_task_panicked(cause: &impl std::fmt::Display) -> BrokerError {
 
 /// The blocking body of one partition's read: take the log mutex, seek, and
 /// either describe or copy the records run out of it.
-fn read_records(
-    log: &Mutex<Log>,
-    read: &BlockingRead,
-) -> Result<(RecordsPayload, Vec<AbortedTransaction>), BrokerError> {
+fn read_records(log: &Mutex<Log>, read: &BlockingRead) -> Result<RawServed, BrokerError> {
     let &BlockingRead {
         fetch_offset,
         limit_offset,
@@ -453,7 +476,7 @@ fn read_records(
         Vec::new()
     };
 
-    Ok::<_, BrokerError>((records, aborted))
+    Ok::<_, BrokerError>(RawServed { records, aborted })
 }
 
 fn finish_read(
@@ -553,6 +576,14 @@ fn deliverable_offset(
         .min(high_watermark)
 }
 
+/// What `plan_read` decided while it held the log mutex: the log start the
+/// response reports, the visibility window, and the read to run.
+struct PlannedWindow {
+    log_start: Offset,
+    window: VisibilityWindow,
+    plan: ReadPlan,
+}
+
 fn plan_read(
     partition: &Partition,
     fetch_offset: Offset,
@@ -560,7 +591,7 @@ fn plan_read(
     read_committed: bool,
     follower_fetch: bool,
     response: &mut PartitionData,
-) -> (Offset, VisibilityWindow, ReadPlan) {
+) -> PlannedWindow {
     let mut log = partition.log.lock().expect("log mutex poisoned");
     let log_start = log.log_start_offset();
     // KIP-405 keeps two floors, and this one is the floor of the *local* read:
@@ -608,7 +639,11 @@ fn plan_read(
             read_committed_aborts: window.read_committed_aborts,
         }
     };
-    (log_start, window, plan)
+    PlannedWindow {
+        log_start,
+        window,
+        plan,
+    }
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -619,7 +654,7 @@ fn should_use_sendfile(total_bytes: usize, has_regions: bool, minimum_bytes: usi
 #[cfg(test)]
 mod tests {
     use {
-        super::read_task_panicked,
+        super::{RawServed, ServedRecords, read_task_panicked},
         crate::{
             blocking::inline_blocking_on_this_thread,
             codes::{
@@ -663,37 +698,54 @@ mod tests {
         assert!(bytes == 0, "{label}");
     }
 
-    fn empty_log() -> (tempfile::TempDir, Log) {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = Log::open(dir.path(), LogConfig::default()).expect("open log");
-        (dir, log)
+    /// A log and the temporary directory that holds its segments.
+    struct LogInDir {
+        dir: tempfile::TempDir,
+        log: Log,
     }
 
-    fn aborted_transaction_log() -> (tempfile::TempDir, Log) {
-        let (dir, mut log) = empty_log();
+    fn empty_log() -> LogInDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = Log::open(dir.path(), LogConfig::default()).expect("open log");
+        LogInDir { dir, log }
+    }
+
+    fn aborted_transaction_log() -> LogInDir {
+        let LogInDir { dir, mut log } = empty_log();
         log.append(&mut transactional_batch(ProducerId(PID)))
             .expect("append the transaction's one data batch");
         log.append(&mut abort_marker(ProducerId(PID)))
             .expect("append the abort marker that closes it");
-        (dir, log)
+        LogInDir { dir, log }
     }
 
-    fn locked_raw_log(log: Log) -> (Mutex<Log>, Bytes, Offset) {
+    /// A shared log with the raw bytes of its whole range and the end of it.
+    struct RawLog {
+        log: Mutex<Log>,
+        raw: Bytes,
+        limit: Offset,
+    }
+
+    fn locked_raw_log(log: Log) -> RawLog {
         let limit = log.log_end_offset();
         let raw = log
             .read_raw(Offset(0), limit, UNBOUNDED)
             .expect("the test log holds the range it is asked for")
             .bytes;
-        (Mutex::new(log), raw, limit)
+        RawLog {
+            log: Mutex::new(log),
+            raw,
+            limit,
+        }
     }
 
     /// One batch of two records in a fresh log directory. The directory is
     /// returned because dropping it deletes the segments underneath the log.
-    fn two_record_log() -> (tempfile::TempDir, Log) {
-        let (dir, mut log) = empty_log();
+    fn two_record_log() -> LogInDir {
+        let LogInDir { dir, mut log } = empty_log();
         log.append(&mut default_records_batch(&[b"first", b"second"]))
             .expect("append the batch under test");
-        (dir, log)
+        LogInDir { dir, log }
     }
 
     /// The plain read the cases below vary: everything from offset 0 to
@@ -719,20 +771,20 @@ mod tests {
     /// direct read serves.
     #[test]
     fn every_placement_serves_the_same_bytes() {
-        let (_dir, log) = two_record_log();
+        let LogInDir { dir: _dir, log } = two_record_log();
         let limit = log.log_end_offset();
         let log = Arc::new(Mutex::new(log));
         let read = whole_log_read(limit);
-        let expected = (
-            Some(RecordsPayload::Raw(
+        let expected = ServedRecords {
+            records: Some(RecordsPayload::Raw(
                 log.lock()
                     .expect("log mutex poisoned")
                     .read_raw(Offset(0), limit, UNBOUNDED)
                     .expect("the test log holds the range it is asked for")
                     .bytes,
             )),
-            Vec::new(),
-        );
+            aborted: Vec::new(),
+        };
 
         let served = |runtime: tokio::runtime::Runtime| {
             runtime
@@ -778,8 +830,8 @@ mod tests {
     /// falls back to the byte copy, and both answers carry the same bytes.
     #[test]
     fn a_sendfile_capable_read_describes_the_run_only_above_the_threshold() {
-        let (_dir, log) = two_record_log();
-        let (log, raw, limit) = locked_raw_log(log);
+        let LogInDir { dir: _dir, log } = two_record_log();
+        let RawLog { log, raw, limit } = locked_raw_log(log);
 
         let described = super::read_records(
             &log,
@@ -799,10 +851,16 @@ mod tests {
         )
         .expect("the blocking read succeeds");
 
-        assert!(let RecordsPayload::FileRegions(_) = &described.0);
-        assert!(described.0.payload_len() == raw.len());
-        assert!(described.1.is_empty());
-        assert!(copied == (RecordsPayload::Raw(raw), Vec::new()));
+        assert!(let RecordsPayload::FileRegions(_) = &described.records);
+        assert!(described.records.payload_len() == raw.len());
+        assert!(described.aborted.is_empty());
+        assert!(
+            copied
+                == RawServed {
+                    records: RecordsPayload::Raw(raw),
+                    aborted: Vec::new(),
+                }
+        );
     }
     }
 
@@ -812,8 +870,8 @@ mod tests {
     /// read without the flag reports none, and neither answer moves a byte.
     #[test]
     fn read_committed_reports_the_aborted_ranges_beside_the_same_bytes() {
-        let (_dir, log) = aborted_transaction_log();
-        let (log, raw, limit) = locked_raw_log(log);
+        let LogInDir { dir: _dir, log } = aborted_transaction_log();
+        let RawLog { log, raw, limit } = locked_raw_log(log);
 
         let read_committed = super::read_records(&log, &super::BlockingRead {
             read_committed_aborts: true,
@@ -825,13 +883,22 @@ mod tests {
 
         assert!(
             read_committed
-                == (RecordsPayload::Raw(raw.clone()), vec![AbortedTransaction {
-                    producer_id: PID,
-                    first_offset: 0,
-                    ..AbortedTransaction::default()
-                }],)
+                == RawServed {
+                    records: RecordsPayload::Raw(raw.clone()),
+                    aborted: vec![AbortedTransaction {
+                        producer_id: PID,
+                        first_offset: 0,
+                        ..AbortedTransaction::default()
+                    }],
+                }
         );
-        assert!(read_uncommitted == (RecordsPayload::Raw(raw), Vec::new()));
+        assert!(
+            read_uncommitted
+                == RawServed {
+                    records: RecordsPayload::Raw(raw),
+                    aborted: Vec::new(),
+                }
+        );
     }
 
     /// `partition_max_bytes` can clip a read well short of the last stable
@@ -842,7 +909,7 @@ mod tests {
     fn read_committed_aborted_scan_stops_at_the_bytes_actually_served() {
         const OTHER_PID: i64 = PID + 1;
 
-        let (_dir, mut log) = aborted_transaction_log();
+        let LogInDir { dir: _dir, mut log } = aborted_transaction_log();
         let clip_at = log.log_end_offset();
         log.append(&mut transactional_batch(ProducerId(OTHER_PID)))
             .expect("append the second transaction's data");
@@ -858,7 +925,7 @@ mod tests {
             .expect("read the first transaction alone");
 
         let log = Mutex::new(log);
-        let (records, aborted) = super::read_records(&log, &super::BlockingRead {
+        let RawServed { records, aborted } = super::read_records(&log, &super::BlockingRead {
             fetch_offset: Offset(0),
             limit_offset: full_end,
             // Spans both transactions; only the byte budget below clips
@@ -1136,7 +1203,11 @@ mod tests {
     /// value the caller left in it cannot leak out either.
     #[tokio::test]
     async fn do_read_reports_a_fetch_below_the_log_start_out_of_range() {
-        let (partition, _dir, limit) = retained_partition();
+        let RetainedPartition {
+            partition,
+            dir: _dir,
+            limit,
+        } = retained_partition();
         partition.replica_state.lock().await.hw = limit;
 
         let refused = PartitionData {
@@ -1231,7 +1302,7 @@ mod tests {
     }
 
     /// A log holding one batch per entry of `activations`, two records each.
-    fn scheduled_log(policy: DeliveryPolicy, activations: &[i64]) -> (tempfile::TempDir, Log) {
+    fn scheduled_log(policy: DeliveryPolicy, activations: &[i64]) -> LogInDir {
         let dir = tempfile::tempdir().expect("tempdir");
         let config = LogConfig {
             delivery_policy: policy,
@@ -1242,7 +1313,7 @@ mod tests {
             log.append(&mut batch_at(*activation_ms))
                 .expect("append a batch");
         }
-        (dir, log)
+        LogInDir { dir, log }
     }
 
     /// A read that throws answers its own partition's row, the one Kafka's
@@ -1322,7 +1393,11 @@ mod tests {
     /// online, and not an error that fails the whole fetch.
     #[tokio::test]
     async fn a_read_that_loses_the_race_with_retention_is_out_of_range() {
-        let (partition, dir, limit) = retained_partition();
+        let RetainedPartition {
+            partition,
+            dir,
+            limit,
+        } = retained_partition();
         let log_dirs = LogDirRegistry::probe(&[dir.path().to_path_buf()]);
 
         let error = super::read_records(&partition.log, &whole_log_read(limit))
@@ -1337,7 +1412,7 @@ mod tests {
     fn a_consumer_is_capped_at_the_delivery_watermark_and_a_follower_is_not() {
         let now_ms = now_ms();
         // Two batches of two records: [0, 1] is due, [2, 3] is an hour out.
-        let (_dir, mut log) = scheduled_log(DeliveryPolicy::Scheduled, &[
+        let LogInDir { dir: _dir, mut log } = scheduled_log(DeliveryPolicy::Scheduled, &[
             now_ms - 3_600_000,
             now_ms + 3_600_000,
         ]);
@@ -1350,7 +1425,7 @@ mod tests {
     #[test]
     fn an_immediate_topic_is_capped_at_the_high_watermark_alone() {
         let now_ms = now_ms();
-        let (_dir, mut log) = scheduled_log(DeliveryPolicy::Immediate, &[
+        let LogInDir { dir: _dir, mut log } = scheduled_log(DeliveryPolicy::Immediate, &[
             now_ms + 3_600_000,
             now_ms + 7_200_000,
         ]);
@@ -1360,7 +1435,15 @@ mod tests {
         assert!(super::deliverable_offset(&mut log, Offset(3), false, now_ms) == Offset(3));
         assert!(super::deliverable_offset(&mut log, Offset(4), false, now_ms) == Offset(4));
     }
-    fn retained_partition() -> (Partition, tempfile::TempDir, krabka_log::Offset) {
+    /// A partition whose whole log retention trimmed away, with its directory and
+    /// the offset it trimmed to.
+    struct RetainedPartition {
+        partition: Partition,
+        dir: tempfile::TempDir,
+        limit: krabka_log::Offset,
+    }
+
+    fn retained_partition() -> RetainedPartition {
         let (partition, dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
         let limit = {
             let mut log = partition.log.lock().expect("log mutex poisoned");
@@ -1378,6 +1461,10 @@ mod tests {
                 .expect("trim the whole log away from under the fetch");
             limit
         };
-        (partition, dir, limit)
+        RetainedPartition {
+            partition,
+            dir,
+            limit,
+        }
     }
 }

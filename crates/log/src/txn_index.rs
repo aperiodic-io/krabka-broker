@@ -207,16 +207,20 @@ impl TxnIndex {
 #[cfg(test)]
 mod tests {
 
-    use {super::*, crate::test_support::aborted_txn, tempfile::TempDir};
+    use {
+        super::*,
+        crate::{index::IndexFixture, test_support::aborted_txn},
+        tempfile::TempDir,
+    };
 
-    fn populated_index(name: &str, entries: &[AbortedTxn]) -> (TempDir, PathBuf, TxnIndex) {
+    fn populated_index(name: &str, entries: &[AbortedTxn]) -> IndexFixture<TxnIndex> {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join(name);
         let mut index = TxnIndex::open(path.clone()).unwrap();
         for &entry in entries {
             index.append(entry).unwrap();
         }
-        (dir, path, index)
+        IndexFixture { dir, path, index }
     }
 
     /// The same three-offset entry seeds retry, mutation and disk-round-trip cases.
@@ -230,9 +234,7 @@ mod tests {
 
     /// One transaction covers offsets 10 through 20 for fetch-boundary checks.
     #[bon::builder]
-    fn ranged_index(
-        #[builder(default = "00.txnindex")] name: &'_ str,
-    ) -> (TempDir, PathBuf, TxnIndex) {
+    fn ranged_index(#[builder(default = "00.txnindex")] name: &'_ str) -> IndexFixture<TxnIndex> {
         let setup = RangedIndexSetup { name };
         populated_index(setup.name, &[aborted_txn()
             .producer(1)
@@ -241,25 +243,31 @@ mod tests {
             .call()])
     }
 
+    /// A malformed entry and the name of what is wrong with it.
+    struct MalformedEntry {
+        name: &'static str,
+        entry: AbortedTxn,
+    }
+
     /// The two independently specified malformed entries are refused both at append and open.
-    fn malformed_entries() -> [(&'static str, AbortedTxn); 2] {
+    fn malformed_entries() -> [MalformedEntry; 2] {
         [
-            (
-                "inverted",
-                aborted_txn()
+            MalformedEntry {
+                name: "inverted",
+                entry: aborted_txn()
                     .producer(1)
                     .bounds(Offset(8)..=Offset(7))
                     .stable(8)
                     .call(),
-            ),
-            (
-                "negative-producer",
-                aborted_txn()
+            },
+            MalformedEntry {
+                name: "negative-producer",
+                entry: aborted_txn()
                     .producer(-1)
                     .bounds(Offset(7)..=Offset(8))
                     .stable(9)
                     .call(),
-            ),
+            },
         ]
     }
 
@@ -277,7 +285,11 @@ mod tests {
             .bounds(Offset(5)..=Offset(9))
             .stable(10)
             .call();
-        let (_dir, path, _index) = populated_index("00.txnindex", &[entry]);
+        let IndexFixture {
+            dir: _dir,
+            path,
+            index: _index,
+        } = populated_index("00.txnindex", &[entry]);
 
         let bytes = std::fs::read(&path).unwrap();
         let mut expected = Vec::new();
@@ -344,7 +356,11 @@ mod tests {
     /// records it was never sent.
     #[test]
     fn an_aborted_txn_starting_at_the_range_end_is_outside_it() {
-        let (_dir, _path, index) = ranged_index().name("00000000000000000000.txnindex").call();
+        let IndexFixture {
+            dir: _dir,
+            path: _path,
+            index,
+        } = ranged_index().name("00000000000000000000.txnindex").call();
 
         let found =
             |start: i64, end: i64| index.aborted_in_range(Offset(start), Offset(end)).count();
@@ -367,7 +383,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("00.txnindex");
         let mut index = TxnIndex::open(path).unwrap();
-        for (_, entry) in malformed_entries() {
+        for MalformedEntry { entry, .. } in malformed_entries() {
             assert2::assert!(let LogError::InvalidArgument(_) = index.append(entry).unwrap_err());
         }
         assert2::assert!(index.entries().is_empty());
@@ -376,7 +392,7 @@ mod tests {
         std::fs::write(&partial, [0_u8]).unwrap();
         assert2::assert!(let LogError::Corrupt(_) = TxnIndex::open(partial).unwrap_err());
 
-        for (name, entry) in malformed_entries() {
+        for MalformedEntry { name, entry } in malformed_entries() {
             let path = dir.path().join(format!("{name}.txnindex"));
             write_entry(&path, entry);
             assert2::assert!(let LogError::Corrupt(_) = TxnIndex::open(path).unwrap_err());
@@ -386,7 +402,11 @@ mod tests {
     #[test]
     fn exact_aborted_interval_retry_is_idempotent() {
         let entry = retry_entry();
-        let (_dir, path, mut index) = populated_index("00.txnindex", &[entry]);
+        let IndexFixture {
+            dir: _dir,
+            path,
+            mut index,
+        } = populated_index("00.txnindex", &[entry]);
         index.append(entry).unwrap();
         assert2::assert!(index.entries() == [entry]);
 
@@ -400,7 +420,11 @@ mod tests {
     #[test]
     fn mutation_io_failures_leave_the_in_memory_index_unchanged() {
         let original = retry_entry();
-        let (_dir, path, mut index) = populated_index("00.txnindex", &[original]);
+        let IndexFixture {
+            dir: _dir,
+            path,
+            mut index,
+        } = populated_index("00.txnindex", &[original]);
         std::fs::remove_file(&path).unwrap();
         std::fs::create_dir(&path).unwrap();
 
@@ -416,7 +440,11 @@ mod tests {
 
     #[test]
     fn empty_or_inverted_fetch_range_matches_no_aborted_interval() {
-        let (_dir, _path, index) = ranged_index().call();
+        let IndexFixture {
+            dir: _dir,
+            path: _path,
+            index,
+        } = ranged_index().call();
         assert2::assert!(index.aborted_in_range(Offset(10), Offset(10)).count() == 0);
         assert2::assert!(index.aborted_in_range(Offset(20), Offset(10)).count() == 0);
     }

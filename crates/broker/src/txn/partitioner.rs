@@ -33,10 +33,28 @@ mod tests {
     //   Utils.abs(tid.hashCode()) % 50
     #[test]
     fn matches_jvm_for_canonical_tids() {
-        let cases: &[(&str, i32)] = &[("my-tid", 20), ("producer-1", 30), ("tx-orders-prod", 16)];
-        for (tid, expected) in cases {
+        /// A transactional id and the partition the JVM maps it to.
+        struct Vector {
+            tid: &'static str,
+            expected: i32,
+        }
+        let cases = [
+            Vector {
+                tid: "my-tid",
+                expected: 20,
+            },
+            Vector {
+                tid: "producer-1",
+                expected: 30,
+            },
+            Vector {
+                tid: "tx-orders-prod",
+                expected: 16,
+            },
+        ];
+        for Vector { tid, expected } in cases {
             assert!(
-                partition_for_tid(tid, 50) == *expected,
+                partition_for_tid(tid, 50) == expected,
                 "tid `{tid}` should hash to partition {expected}"
             );
         }

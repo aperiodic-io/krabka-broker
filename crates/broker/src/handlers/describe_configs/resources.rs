@@ -212,10 +212,10 @@ pub(super) fn describe_one(
         return ok(group_configs(
             image,
             &r.resource_name,
-            (
-                serving.static_broker.settings,
-                serving.unstable_api_versions,
-            ),
+            GroupServing {
+                statics: serving.static_broker.settings,
+                unstable: serving.unstable_api_versions,
+            },
             &wanted,
             options,
         ));
@@ -267,7 +267,10 @@ pub(crate) fn effective_topic_configs(
 ) -> Vec<DescribeConfigsResourceResult> {
     topic_configs_with_overrides(
         image,
-        (topic, Some(overrides)),
+        TopicOverrides {
+            topic,
+            overrides: Some(overrides),
+        },
         TopicBrokerLayers {
             node,
             statics,
@@ -295,7 +298,10 @@ fn topic_configs(
 ) -> Vec<DescribeConfigsResourceResult> {
     topic_configs_with_overrides(
         image,
-        (topic, image.topic_config(topic)),
+        TopicOverrides {
+            topic,
+            overrides: image.topic_config(topic),
+        },
         broker,
         wanted,
         options,
@@ -316,6 +322,12 @@ struct TopicBrokerLayers<'a> {
     unstable: UnstableApiVersions,
 }
 
+/// A topic and the config overrides stored for it, if any.
+struct TopicOverrides<'a> {
+    topic: &'a str,
+    overrides: Option<&'a std::collections::BTreeMap<String, String>>,
+}
+
 /// [`topic_configs`] against a caller-supplied override map, which is what a
 /// not-yet-committed topic has instead of a stored one.
 ///
@@ -330,7 +342,7 @@ struct TopicBrokerLayers<'a> {
 /// `unstable.api.versions.enable`.
 fn topic_configs_with_overrides(
     image: &krabka_metadata::MetadataImage,
-    (topic, overrides): (&str, Option<&std::collections::BTreeMap<String, String>>),
+    TopicOverrides { topic, overrides }: TopicOverrides<'_>,
     broker: TopicBrokerLayers<'_>,
     wanted: &impl Fn(&str) -> bool,
     options: EntryOptions,
@@ -663,6 +675,13 @@ fn client_metrics_configs(
         .collect()
 }
 
+/// The node's static settings and the API-version stability that decide which
+/// group keys a node serves.
+struct GroupServing<'a> {
+    statics: &'a std::collections::BTreeMap<&'static str, String>,
+    unstable: UnstableApiVersions,
+}
+
 /// A group resource: every key of Kafka's `GroupConfig` the broker serves --
 /// 4.3.1's by default, trunk's under `unstable.api.versions.enable` -- with
 /// the group's override above the value this broker runs the group with.
@@ -683,10 +702,7 @@ fn client_metrics_configs(
 fn group_configs(
     image: &krabka_metadata::MetadataImage,
     group: &str,
-    (statics, unstable): (
-        &std::collections::BTreeMap<&'static str, String>,
-        UnstableApiVersions,
-    ),
+    GroupServing { statics, unstable }: GroupServing<'_>,
     wanted: &impl Fn(&str) -> bool,
     options: EntryOptions,
 ) -> Vec<DescribeConfigsResourceResult> {

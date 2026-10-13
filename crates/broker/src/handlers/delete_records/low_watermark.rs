@@ -29,12 +29,20 @@ use {
 /// would only spend CPU.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+/// The position of a response row: the index of its topic, then the index of
+/// its partition within that topic.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RowPosition {
+    pub(super) topic: usize,
+    pub(super) partition: usize,
+}
+
 /// One response row that waits for the followers.
 #[derive(Debug)]
 pub(super) struct Waiting {
     /// The row's position: the topic index, then the partition index, in the
     /// response.
-    pub(super) row: (usize, usize),
+    pub(super) row: RowPosition,
     pub(super) topic: String,
     pub(super) partition: i32,
     /// The offset the low watermark has to reach.
@@ -85,7 +93,7 @@ pub(super) async fn await_followers(
     while !waiting.is_empty() {
         let mut still_waiting = Vec::with_capacity(waiting.len());
         for row in waiting {
-            let slot = &mut topics[row.row.0].partitions[row.row.1];
+            let slot = &mut topics[row.row.topic].partitions[row.row.partition];
             let Some(part) = broker
                 .partitions
                 .get(&row.topic, krabka_ids::PartitionIndex(row.partition))

@@ -5,7 +5,11 @@
 //! `throttle::refresh`; only the per-image work differs.
 
 use {
-    super::{IpNames, buckets::QuotaBuckets, ip_names::system_lookup},
+    super::{
+        IpNames,
+        buckets::{BucketKey, LiveBucket, QuotaBuckets},
+        ip_names::system_lookup,
+    },
     crate::metadata_source::watch_image_loop,
     krabka_metadata::{EntityKey, MetadataImage},
     krabka_units::convert::ByteRateExt as _,
@@ -108,7 +112,14 @@ fn token_rate(quota_key: &str, rate: f64) -> f64 {
 
 fn refresh_buckets(image: &MetadataImage, buckets: &QuotaBuckets) {
     let window = buckets.quota_window();
-    for ((quota_key, entity_key), entry) in buckets.iter() {
+    for LiveBucket {
+        key: BucketKey {
+            quota_key,
+            entity_key,
+        },
+        entry,
+    } in buckets.iter()
+    {
         let new_rate = configured_rate(image, buckets.ip_names(), &quota_key, &entity_key)
             .map_or(0.0, |rate| token_rate(&quota_key, rate));
 
@@ -163,7 +174,9 @@ mod tests {
     use {
         super::{super::bucket_rate, *},
         crate::{
-            quota::test_support::{alice_app1_producer_quota, alice_bucket, app1_producer_quota},
+            quota::test_support::{
+                AliceBucket, alice_app1_producer_quota, alice_bucket, app1_producer_quota,
+            },
             throttle::TokenBucket,
         },
         assert2::assert,
@@ -209,7 +222,7 @@ mod tests {
 
     #[test]
     fn refresh_updates_existing_bucket_rate() {
-        let (buckets, b) = alice_bucket().call();
+        let AliceBucket { buckets, bucket: b } = alice_bucket().call();
         assert!(b.byte_rate() == bucket_rate(0.0));
 
         let img = img_with_quota().value(2048.0).call();
@@ -219,7 +232,7 @@ mod tests {
 
     #[test]
     fn refresh_zeroes_bucket_when_quota_removed_from_image() {
-        let (buckets, b) = alice_bucket().rate(1024.0).call();
+        let AliceBucket { buckets, bucket: b } = alice_bucket().rate(1024.0).call();
         assert!(b.byte_rate() == bucket_rate(1024.0));
 
         let empty = Arc::new(MetadataImage::new(uuid::Uuid::nil()));
@@ -232,13 +245,47 @@ mod tests {
     /// `ip` entity, as on the accept path.
     #[test]
     fn refresh_keeps_the_ip_connection_creation_rate() {
-        let cases: [(&str, Option<&str>, f64, f64); 4] = [
-            ("the exact ip entity", Some("127.0.0.1"), 3.0, 3.0),
-            ("the default ip entity", None, 3.0, 3.0),
-            ("another ip entity", Some("10.0.0.1"), 3.0, 0.0),
-            ("a rate under one per second", Some("127.0.0.1"), 0.5, 0.5),
+        /// An `ip` entity configured at `rate`, and the rate the exact-address
+        /// bucket must keep.
+        struct IpRateCase<'a> {
+            case: &'a str,
+            entity_name: Option<&'a str>,
+            rate: f64,
+            expected: f64,
+        }
+        let cases: [IpRateCase<'_>; 4] = [
+            IpRateCase {
+                case: "the exact ip entity",
+                entity_name: Some("127.0.0.1"),
+                rate: 3.0,
+                expected: 3.0,
+            },
+            IpRateCase {
+                case: "the default ip entity",
+                entity_name: None,
+                rate: 3.0,
+                expected: 3.0,
+            },
+            IpRateCase {
+                case: "another ip entity",
+                entity_name: Some("10.0.0.1"),
+                rate: 3.0,
+                expected: 0.0,
+            },
+            IpRateCase {
+                case: "a rate under one per second",
+                entity_name: Some("127.0.0.1"),
+                rate: 0.5,
+                expected: 0.5,
+            },
         ];
-        for (case, entity_name, rate, expected) in cases {
+        for IpRateCase {
+            case,
+            entity_name,
+            rate,
+            expected,
+        } in cases
+        {
             let buckets = Arc::new(QuotaBuckets::new());
             let key: EntityKey = vec![("ip".into(), Some("127.0.0.1".into()))];
             let b = buckets.get_or_create("connection_creation_rate", &key, 1.0);
@@ -487,18 +534,54 @@ mod tests {
     /// neither rounds it to a whole byte per second nor to no limit.
     #[test]
     fn refresh_keeps_a_fractional_byte_rate() {
-        let cases: [(&str, f64, f64); 6] = [
-            ("consumer_byte_rate", 2048.0, 2048.0),
-            ("consumer_byte_rate", 1.5, 1.5),
-            ("consumer_byte_rate", 0.5, 0.5),
-            ("producer_byte_rate", 2048.0, 2048.0),
-            ("producer_byte_rate", 1.5, 1.5),
-            ("producer_byte_rate", 0.5, 0.5),
+        /// A quota key configured at `rate`, and the rate its bucket must keep.
+        struct FractionalRateCase {
+            quota_key: &'static str,
+            rate: f64,
+            want: f64,
+        }
+        let cases: [FractionalRateCase; 6] = [
+            FractionalRateCase {
+                quota_key: "consumer_byte_rate",
+                rate: 2048.0,
+                want: 2048.0,
+            },
+            FractionalRateCase {
+                quota_key: "consumer_byte_rate",
+                rate: 1.5,
+                want: 1.5,
+            },
+            FractionalRateCase {
+                quota_key: "consumer_byte_rate",
+                rate: 0.5,
+                want: 0.5,
+            },
+            FractionalRateCase {
+                quota_key: "producer_byte_rate",
+                rate: 2048.0,
+                want: 2048.0,
+            },
+            FractionalRateCase {
+                quota_key: "producer_byte_rate",
+                rate: 1.5,
+                want: 1.5,
+            },
+            FractionalRateCase {
+                quota_key: "producer_byte_rate",
+                rate: 0.5,
+                want: 0.5,
+            },
         ];
         let mut actual = Vec::new();
         let mut expected = Vec::new();
-        for (quota_key, rate, want) in cases {
-            let (buckets, b) = alice_bucket().key(quota_key).rate(1024.0).call();
+        for FractionalRateCase {
+            quota_key,
+            rate,
+            want,
+        } in cases
+        {
+            let AliceBucket { buckets, bucket: b } =
+                alice_bucket().key(quota_key).rate(1024.0).call();
 
             let img = img_with_quota().key(quota_key).value(rate).call();
             refresh_buckets(&img, &buckets);

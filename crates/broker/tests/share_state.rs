@@ -277,7 +277,11 @@ async fn persister_round_trip() {
     let tid = create_topic(&client, "round-trip").await;
 
     // Bootstrap __share_group_state, then initialize (retrying until led).
-    initialize_partition(&client, "g1", tid, 0, (0, 0)).await;
+    initialize_partition(&client, "g1", tid, 0, InitialState {
+        state_epoch: 0,
+        start_offset: 0,
+    })
+    .await;
 
     // Write an in-flight batch above the new SPSO (5).
     let w = write_state(&client, StateWrite {
@@ -417,7 +421,11 @@ async fn state_survives_restart() {
         let client = connect(&broker.listen_addr().to_string()).await;
         let tid = create_topic(&client, "survives-restart").await;
 
-        initialize_partition(&client, "g1", tid, 0, (0, 0)).await;
+        initialize_partition(&client, "g1", tid, 0, InitialState {
+            state_epoch: 0,
+            start_offset: 0,
+        })
+        .await;
         let state = StateWrite {
             group: "g1",
             topic_id: tid,
@@ -453,13 +461,23 @@ async fn state_survives_restart() {
     }
 }
 
+/// The state epoch and start offset a share partition is initialized with.
+#[derive(Clone, Copy)]
+struct InitialState {
+    state_epoch: i32,
+    start_offset: i64,
+}
+
 /// Resolve and initialize a share partition before its first write.
 async fn initialize_partition(
     client: &Client,
     group: &str,
     tid: uuid::Uuid,
     partition: i32,
-    (state_epoch, start_offset): (i32, i64),
+    InitialState {
+        state_epoch,
+        start_offset,
+    }: InitialState,
 ) {
     support::find_coordinator(
         client,

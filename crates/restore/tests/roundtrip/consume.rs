@@ -97,7 +97,7 @@ impl RestoredCluster {
         let (target, log_dir, mut controller, report) =
             restore_for_controller(fixture.archive_root.path(), extra).await;
 
-        let (broker, client) =
+        let BootedBroker { broker, client } =
             boot(&mut controller, BrokerConfig::for_tests(log_dir.clone())).await;
         Self {
             fixture,
@@ -130,7 +130,7 @@ impl RestoredCluster {
         broker.shutdown().await;
         let mut config = BrokerConfig::for_tests(log_dir.clone());
         config.bootstrap_mode = krabka_broker::BootstrapMode::Rejoin;
-        let (broker, client) = boot(&mut controller, config).await;
+        let BootedBroker { broker, client } = boot(&mut controller, config).await;
         Self {
             fixture,
             target,
@@ -148,9 +148,15 @@ impl RestoredCluster {
     }
 }
 
+/// A running broker and a client connected to it.
+struct BootedBroker {
+    broker: BrokerHandle,
+    client: Client,
+}
+
 /// Start a broker under `config`, its controller listening on `controller`,
 /// and connect a client to it.
-async fn boot(controller: &mut ControllerListener, config: BrokerConfig) -> (BrokerHandle, Client) {
+async fn boot(controller: &mut ControllerListener, config: BrokerConfig) -> BootedBroker {
     let broker = controller.start(config).await;
     let client = Client::builder()
         .bootstrap(broker.listen_addr().to_string())
@@ -158,7 +164,7 @@ async fn boot(controller: &mut ControllerListener, config: BrokerConfig) -> (Bro
         .build()
         .await
         .expect("client");
-    (broker, client)
+    BootedBroker { broker, client }
 }
 
 /// Wait until every archived partition is hosted with its restored history

@@ -288,10 +288,16 @@ mod tests {
     /// The function returns the bucket with the [`ManualMonotonicClock`]
     /// handle, so the test can advance logical time with `clock.advance(..)`
     /// instead of sleeping.
-    fn manual_bucket() -> (Arc<TokenBucket>, Arc<ManualMonotonicClock>) {
+    fn manual_bucket() -> ManualBucket {
         let clock = ManualMonotonicClock::new_shared();
         let bucket = Arc::new(TokenBucket::with_clock(clock.clone()));
-        (bucket, clock)
+        ManualBucket { bucket, clock }
+    }
+
+    /// A bucket and the manual clock that drives its refill.
+    struct ManualBucket {
+        bucket: Arc<TokenBucket>,
+        clock: Arc<ManualMonotonicClock>,
     }
 
     fn bucket_state(
@@ -373,7 +379,10 @@ mod tests {
     /// whole burst; a second refund cannot push past it.
     #[test]
     fn refund_returns_granted_tokens_up_to_the_burst() {
-        let (b, _clock) = manual_bucket();
+        let ManualBucket {
+            bucket: b,
+            clock: _clock,
+        } = manual_bucket();
         b.set_byte_rate_with_burst(bytes_per_sec(100), bytes(1000));
         let granted = try_consume_with_timeout(&b, 600);
         b.refund(granted);
@@ -395,7 +404,7 @@ mod tests {
 
     #[test]
     fn bucket_refills_at_rate_after_elapsed_time() {
-        let (b, clock) = manual_bucket();
+        let ManualBucket { bucket: b, clock } = manual_bucket();
         b.set_byte_rate(bytes_per_sec(1024));
         try_consume_with_timeout(&b, 1024);
         // 500ms at 1024 tokens/s refills exactly 512 tokens — deterministic,
@@ -412,7 +421,7 @@ mod tests {
     /// over to the next call instead of being dropped.
     #[test]
     fn frequent_empty_polls_keep_the_partial_refill() {
-        let (b, clock) = manual_bucket();
+        let ManualBucket { bucket: b, clock } = manual_bucket();
         b.set_token_rate_with_burst(1, 1);
         check!(try_consume_with_timeout(&b, 1) == 1);
 
@@ -429,7 +438,7 @@ mod tests {
 
     #[test]
     fn bucket_caps_at_burst_capacity() {
-        let (b, clock) = manual_bucket();
+        let ManualBucket { bucket: b, clock } = manual_bucket();
         b.set_byte_rate_with_burst(bytes_per_sec(1024), bytes(2048));
         try_consume_with_timeout(&b, 2048);
         // 2.5s at 1024 tokens/s would refill 2560 tokens, but the 2048 burst cap
@@ -502,7 +511,7 @@ mod tests {
             ),
         ];
         for (label, (rate, burst), spent, wait_ms, (new_rate, new_burst), want) in cases {
-            let (b, clock) = manual_bucket();
+            let ManualBucket { bucket: b, clock } = manual_bucket();
             b.set_token_rate_with_burst(rate, burst);
             b.try_consume(spent);
             clock
@@ -517,7 +526,10 @@ mod tests {
     /// is still throttled, now by `debt / new rate`.
     #[test]
     fn a_rate_change_keeps_the_debt() {
-        let (b, _clock) = manual_bucket();
+        let ManualBucket {
+            bucket: b,
+            clock: _clock,
+        } = manual_bucket();
         b.set_token_rate_with_burst(1_000, 1_000);
         check!(b.record(3_000) == 2_000 * MICROS_PER_TOKEN);
 
@@ -788,7 +800,7 @@ mod tests {
 
     #[test]
     fn rate_changes_preserve_fractional_credit_and_full_buckets_discard_it() {
-        let (bucket, clock) = manual_bucket();
+        let ManualBucket { bucket, clock } = manual_bucket();
         bucket.set_token_rate_with_burst(1_500, 10);
         check!(bucket.try_consume(10) == 10);
         advance_one_ns_and_poll(&bucket, &clock);
@@ -873,7 +885,7 @@ mod tests {
             ("a zero bound keeps no debt", Some(secs(0)), 0, 1_000),
         ];
         for (label, max_wait, debt, grant) in cases {
-            let (b, clock) = manual_bucket();
+            let ManualBucket { bucket: b, clock } = manual_bucket();
             b.set_token_rate_with_burst(1_000, 1_000);
 
             let reported = b.record_capped(1_000_000, max_wait) / MICROS_PER_TOKEN;
@@ -889,7 +901,7 @@ mod tests {
     #[test]
     fn bounded_fractional_debt_is_repaid_at_the_exact_wait() {
         for (rate, cap) in [(0.000_001, 0), (0.000_003, 1)] {
-            let (bucket, clock) = manual_bucket();
+            let ManualBucket { bucket, clock } = manual_bucket();
             bucket.set_byte_rate_with_burst(ByteRate::from_bytes_per_sec_f64(rate), bytes(1));
             check!(bucket.record_bounded(u64::MAX, Time::from_secs_f64(0.5)) == cap);
             clock
@@ -904,7 +916,10 @@ mod tests {
     /// the new rate's wait.
     #[test]
     fn the_bound_follows_the_current_rate() {
-        let (b, _clock) = manual_bucket();
+        let ManualBucket {
+            bucket: b,
+            clock: _clock,
+        } = manual_bucket();
         b.set_token_rate_with_burst(1_000, 1_000);
         check!(b.record_bounded(10_000, secs(5)) == 5_000 * MICROS_PER_TOKEN);
 
@@ -918,7 +933,7 @@ mod tests {
     /// second, and a charge in between owes the half token it lacks.
     #[test]
     fn a_fractional_rate_is_enforced_at_its_rate() {
-        let (b, clock) = manual_bucket();
+        let ManualBucket { bucket: b, clock } = manual_bucket();
         b.set_byte_rate_with_burst(ByteRate::from_bytes_per_sec_f64(0.5), bytes(1));
         let mut whole = Vec::new();
         for _ in 0..5 {
@@ -939,7 +954,7 @@ mod tests {
     /// the mute paid the overage and the client sent about twice its quota.
     #[test]
     fn charges_above_the_rate_accumulate_as_debt() {
-        let (b, clock) = manual_bucket();
+        let ManualBucket { bucket: b, clock } = manual_bucket();
         b.set_token_rate_with_burst(1_000, 1_000);
         let mut debts = Vec::new();
         for _ in 0..4 {
@@ -959,7 +974,7 @@ mod tests {
     /// the balance.
     #[test]
     fn refill_and_refund_repay_the_debt_before_the_balance() {
-        let (b, clock) = manual_bucket();
+        let ManualBucket { bucket: b, clock } = manual_bucket();
         b.set_token_rate_with_burst(100, 100);
         check!(b.record(160) == 60 * MICROS_PER_TOKEN);
 
@@ -987,7 +1002,10 @@ mod tests {
     /// burst, as a whole-token refund is.
     #[test]
     fn refund_micros_returns_a_part_token() {
-        let (b, _clock) = manual_bucket();
+        let ManualBucket {
+            bucket: b,
+            clock: _clock,
+        } = manual_bucket();
         b.set_byte_rate_with_burst(
             ByteRate::from_bytes_per_sec_f64(0.25),
             ByteSize::from_bytes_f64(0.75),
@@ -1033,7 +1051,7 @@ mod tests {
     /// read before the reset.
     #[test]
     fn try_consume_waits_for_an_in_flight_reset() {
-        let (b, clock) = manual_bucket();
+        let ManualBucket { bucket: b, clock } = manual_bucket();
         b.set_token_rate_with_burst(10, 10);
         clock
             .advance(Duration::from_secs(1))
@@ -1083,7 +1101,7 @@ mod tests {
     fn concurrent_consumers_never_lose_a_claimed_refill() {
         const STEPS: u64 = 2_000;
         const RATE: u64 = 1_000;
-        let (b, clock) = manual_bucket();
+        let ManualBucket { bucket: b, clock } = manual_bucket();
         b.set_token_rate_with_burst(RATE, STEPS + 1);
         check!(try_consume_with_timeout(&b, STEPS + 1) == STEPS + 1);
 
@@ -1125,23 +1143,28 @@ mod tests {
     // runs, so consumes refill between resets, which the straddle needs.
     #[test]
     fn concurrent_set_rate_never_over_grants_past_burst() {
-        // (rate, burst) pairs the resetter cycles through, largest burst first.
-        const CONFIGS: [(u64, u64); 4] = [
-            (1_000_000, 4_096),
-            (1_000_000, 1_024),
-            (3_000_000, 128),
-            (500_000, 3),
+        struct RateBurst {
+            rate: u64,
+            burst: u64,
+        }
+        const fn rate_burst(rate: u64, burst: u64) -> RateBurst { RateBurst { rate, burst } }
+        // Rate and burst pairs the resetter cycles through, largest burst first.
+        const CONFIGS: [RateBurst; 4] = [
+            rate_burst(1_000_000, 4_096),
+            rate_burst(1_000_000, 1_024),
+            rate_burst(3_000_000, 128),
+            rate_burst(500_000, 3),
         ];
-        const MAX_BURST: u64 = CONFIGS[0].1;
+        const MAX_BURST: u64 = CONFIGS[0].burst;
         let b = Arc::new(TokenBucket::new());
-        b.set_token_rate_with_burst(CONFIGS[0].0, CONFIGS[0].1);
+        b.set_token_rate_with_burst(CONFIGS[0].rate, CONFIGS[0].burst);
         let stop = Arc::new(AtomicBool::new(false));
 
         let resetter = {
             let b = Arc::clone(&b);
             let stop = Arc::clone(&stop);
             std::thread::spawn(move || {
-                for (rate, burst) in CONFIGS.iter().cycle() {
+                for RateBurst { rate, burst } in CONFIGS.iter().cycle() {
                     if stop.load(Relaxed) {
                         break;
                     }

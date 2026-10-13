@@ -232,17 +232,30 @@ mod tests {
     /// the delivery-count cause. Under the limit it is available again.
     #[test]
     fn the_delivery_limit_sends_a_record_to_the_queue() {
-        // (name, how the lock ends)
         type End = fn(&mut AcquisitionState);
-        let cases: [(&str, End); 3] = [
-            ("a release", |s| {
-                s.acknowledge("m1", Offset(0), Offset(1), AckType::Release, 1)
-                    .unwrap();
-            }),
-            ("a lock timeout", |s| s.expire_locks(t0() + LOCK * 2, 1)),
-            ("a released member", |s| s.release_member("m1", 1)),
+        struct Case {
+            name: &'static str,
+            /// How the lock ends.
+            end: End,
+        }
+        let cases: [Case; 3] = [
+            Case {
+                name: "a release",
+                end: |s| {
+                    s.acknowledge("m1", Offset(0), Offset(1), AckType::Release, 1)
+                        .unwrap();
+                },
+            },
+            Case {
+                name: "a lock timeout",
+                end: |s| s.expire_locks(t0() + LOCK * 2, 1),
+            },
+            Case {
+                name: "a released member",
+                end: |s| s.release_member("m1", 1),
+            },
         ];
-        for (name, end) in cases {
+        for Case { name, end } in cases {
             let mut s = AcquisitionState::new(Offset(0));
             s.set_dlq_enabled(true);
             s.materialize(Offset(2), 100);

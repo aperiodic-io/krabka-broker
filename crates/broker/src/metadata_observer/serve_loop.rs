@@ -13,7 +13,11 @@
 //! no longer holds.
 
 use {
-    super::{MetadataObserver, ObserverConfig, fetch::fetch_once, store::ObserverStore},
+    super::{
+        MetadataObserver, ObserverConfig,
+        fetch::fetch_once,
+        store::{ObserverStore, Resumed},
+    },
     crate::{controller_endpoint::quorum_targets, time_util},
     krabka_raft::NodeId,
     krabka_units::convert::TimeExt as _,
@@ -149,7 +153,11 @@ impl EmptyImageWatch {
 /// Restore the image this node last checkpointed and report the offset to
 /// fetch from next. A node with no checkpoint starts at the log start.
 fn resume(config: &ObserverConfig, store: &mut ObserverStore, observer: &MetadataObserver) -> u64 {
-    let Some((image, fetch_offset)) = store.resume(config.cluster_id) else {
+    let Some(Resumed {
+        image,
+        fetch_offset,
+    }) = store.resume(config.cluster_id)
+    else {
         return 0;
     };
     let _ = observer.image.send_replace(Arc::new(image));
@@ -407,6 +415,13 @@ mod tests {
             .collect()
     }
 
+    /// The controller a case picks, under the case's label.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Picked<'a> {
+        label: &'a str,
+        node: NodeId,
+    }
+
     /// A controller that does not answer hands over to the next target, and
     /// the last one wraps round to the first. A target that has left the list
     /// since it was picked hands over to the first.
@@ -524,17 +539,23 @@ mod tests {
                 3001,
             ),
         ];
-        let picked: Vec<(&str, NodeId)> = cases
+        let picked: Vec<Picked<'_>> = cases
             .iter()
             .map(|&(label, cursor, target, leader, next_targets, _)| {
                 let mut cursor = cursor;
                 cursor.answered(next_targets, node(target), leader.map(node));
-                (label, cursor.pick(next_targets).0)
+                Picked {
+                    label,
+                    node: cursor.pick(next_targets).0,
+                }
             })
             .collect();
-        let expected: Vec<(&str, NodeId)> = cases
+        let expected: Vec<Picked<'_>> = cases
             .iter()
-            .map(|&(label, .., next)| (label, node(next)))
+            .map(|&(label, .., next)| Picked {
+                label,
+                node: node(next),
+            })
             .collect();
         assert!(picked == expected);
     }
@@ -721,7 +742,7 @@ mod tests {
             api_versions_response_v0,
         )
         .await;
-        let (observer, parks) = observe_with_broken_timer(mock).await;
+        let Parked { observer, parks } = observe_with_broken_timer(mock).await;
 
         assert!(observer.current_metadata_offset() == -1);
         assert!(*observer.watch_leader().borrow() == Some(NodeId(1)));
@@ -753,10 +774,25 @@ mod tests {
         .await
     }
 
+    /// The identity a fetch request names its sender by.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct FetchIdentity {
+        replica_id: i32,
+        replica_directory_id: Uuid,
+    }
+
+    /// What a serve loop left behind once its timer could not be armed.
+    struct Parked<O> {
+        /// The observer that stopped.
+        observer: O,
+        /// The number of parks the loop tried.
+        parks: usize,
+    }
+
     /// Observe one mock controller until registration of the first park fails.
     async fn observe_with_broken_timer(
         mock: krabka_client_core::MockBroker,
-    ) -> (Arc<MetadataObserver>, usize) {
+    ) -> Parked<Arc<MetadataObserver>> {
         let dir = tempfile::tempdir().unwrap();
         let timer = BrokenTimer::dead(TimerFailure::Registration);
         let observer = run_until_it_stops(config_on(
@@ -766,7 +802,10 @@ mod tests {
         ))
         .await;
         mock.stop();
-        (observer, timer.registrations())
+        Parked {
+            observer,
+            parks: timer.registrations(),
+        }
     }
 
     /// The serve loop over a controller whose first answer carries
@@ -774,7 +813,7 @@ mod tests {
     /// cannot be armed, so the loop stops at its first park. Returns the
     /// observer, read through the `ObserverSource` the broker reads it
     /// through, and the number of parks it tried.
-    async fn serve_once(records: Bytes) -> (ObserverSource, usize) {
+    async fn serve_once(records: Bytes) -> Parked<ObserverSource> {
         let served = Arc::new(AtomicUsize::new(0));
         let mock = metadata_broker(
             Arc::clone(&served),
@@ -788,8 +827,11 @@ mod tests {
             10,
         )
         .await;
-        let (observer, parks) = observe_with_broken_timer(mock).await;
-        (ObserverSource::new(observer, Arc::new(NoWrites)), parks)
+        let Parked { observer, parks } = observe_with_broken_timer(mock).await;
+        Parked {
+            observer: ObserverSource::new(observer, Arc::new(NoWrites)),
+            parks,
+        }
     }
 
     /// One row per outcome of a fetched response. A record that does not
@@ -827,7 +869,10 @@ mod tests {
             ),
         ];
         for (case, records, want) in cases {
-            let (source, parks) = serve_once(records).await;
+            let Parked {
+                observer: source,
+                parks,
+            } = serve_once(records).await;
 
             let got = (
                 source.metadata_load_error_count(),
@@ -857,7 +902,7 @@ mod tests {
         let mock = metadata_broker(Arc::clone(&fetches), move |_| corrupt.clone(), 1).await;
         // Failure of the first park stops the observer and exposes a spin
         // as multiple fetches before that park.
-        let (observer, parks) = observe_with_broken_timer(mock).await;
+        let Parked { observer, parks } = observe_with_broken_timer(mock).await;
 
         assert!(
             (
@@ -879,8 +924,8 @@ mod tests {
     async fn the_loop_moves_to_the_leader_a_follower_names_and_names_itself_there() {
         use std::sync::Mutex;
 
-        // The fetches each controller was sent, as (node id, directory id).
-        type Seen = Arc<Mutex<Vec<(i32, Uuid)>>>;
+        // The fetches each controller was sent.
+        type Seen = Arc<Mutex<Vec<FetchIdentity>>>;
         let serve = |seen: Seen| {
             move |api_key: i16, _version: i16, _corr_id: i32, body: &[u8]| {
                 if api_key == api_versions_request::API_KEY {
@@ -892,9 +937,10 @@ mod tests {
                     let request =
                         krabka_raft::KrabkaMetadataFetchRequest::decode_v0(&mut &payload[..])
                             .expect("a metadata fetch request");
-                    seen.lock()
-                        .unwrap()
-                        .push((request.replica_id, request.replica_directory_id));
+                    seen.lock().unwrap().push(FetchIdentity {
+                        replica_id: request.replica_id,
+                        replica_directory_id: request.replica_directory_id,
+                    });
                     // Both controllers name node 2 as the leader.
                     return Some(
                         metadata_fetch_response_body()
@@ -936,13 +982,16 @@ mod tests {
         follower.stop();
         leader.stop();
 
-        let identity = (2, Uuid::from_u128(2));
+        let identity = FetchIdentity {
+            replica_id: 2,
+            replica_directory_id: Uuid::from_u128(2),
+        };
         let (follower_seen, leader_seen) = (
             follower_seen.lock().unwrap().clone(),
             leader_seen.lock().unwrap().clone(),
         );
         assert!(
-            follower_seen == vec![identity],
+            follower_seen == vec![identity.clone()],
             "follower {follower_seen:?}, leader {leader_seen:?}"
         );
         assert!(leader_seen.first() == Some(&identity));

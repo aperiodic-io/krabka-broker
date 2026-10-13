@@ -77,8 +77,11 @@ impl WalIndexKey {
     /// version, or the wrong length.
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let (topic_id, partition, rest) =
-            decode_partition_key_prefix::<{ Self::LEN }>(bytes, Self::KEY_VERSION)?;
+        let PartitionKeyPrefix {
+            topic_id,
+            partition,
+            rest,
+        } = decode_partition_key_prefix::<{ Self::LEN }>(bytes, Self::KEY_VERSION)?;
         Some(Self {
             topic_id,
             partition,
@@ -115,20 +118,31 @@ fn encode_partition_key_prefix<const KEY_LEN: usize>(
     out
 }
 
+/// A partition-scoped key split into its topic id, partition and trailing bytes.
+struct PartitionKeyPrefix<'a> {
+    topic_id: Uuid,
+    partition: i32,
+    rest: &'a [u8],
+}
+
 /// Split a `KEY_LEN`-byte partition-scoped key into its topic id, partition and
 /// the bytes after them, or `None` when `bytes` are the wrong length or carry a
 /// key version other than `version`.
 fn decode_partition_key_prefix<const KEY_LEN: usize>(
     bytes: &[u8],
     version: i16,
-) -> Option<(Uuid, i32, &[u8])> {
+) -> Option<PartitionKeyPrefix<'_>> {
     let bytes: &[u8; KEY_LEN] = bytes.try_into().ok()?;
     if wal_index_key_version(bytes) != Some(version) {
         return None;
     }
     let topic_id = Uuid::from_bytes(bytes.get(2..18)?.try_into().ok()?);
     let partition = i32::from_be_bytes(bytes.get(18..PARTITION_KEY_PREFIX_LEN)?.try_into().ok()?);
-    Some((topic_id, partition, bytes.get(PARTITION_KEY_PREFIX_LEN..)?))
+    Some(PartitionKeyPrefix {
+        topic_id,
+        partition,
+        rest: bytes.get(PARTITION_KEY_PREFIX_LEN..)?,
+    })
 }
 
 impl From<&WalIndexEntry> for WalIndexKey {
@@ -171,8 +185,11 @@ impl WalDeleteFloorKey {
     /// key version, or the wrong length.
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let (topic_id, partition, _) =
-            decode_partition_key_prefix::<{ Self::LEN }>(bytes, Self::KEY_VERSION)?;
+        let PartitionKeyPrefix {
+            topic_id,
+            partition,
+            ..
+        } = decode_partition_key_prefix::<{ Self::LEN }>(bytes, Self::KEY_VERSION)?;
         Some(Self {
             topic_id,
             partition,
@@ -664,11 +681,19 @@ fn valid_topic_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
+/// A partition in a capture, ordered by topic name, then topic id, then partition.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct GroupKey {
+    topic: String,
+    topic_id: Uuid,
+    partition: i32,
+}
+
 /// Reducer for committed keyed index events.
 #[derive(Default)]
 pub struct WalCaptureProjection {
     ranges: HashMap<WalIndexKey, CapturedWalRange>,
-    floors: HashMap<(Uuid, i32), i64>,
+    floors: HashMap<WalDeleteFloorKey, i64>,
 }
 
 impl WalCaptureProjection {
@@ -690,14 +715,10 @@ impl WalCaptureProjection {
                 {
                     return Err("diskless WAL delete-floor key/value mismatch".to_owned());
                 }
-                let floor = self
-                    .floors
-                    .entry((record.topic_id, record.partition))
-                    .or_default();
+                let floor = self.floors.entry(floor_key).or_default();
                 *floor = (*floor).max(record.floor);
             } else {
-                self.floors
-                    .remove(&(floor_key.topic_id, floor_key.partition));
+                self.floors.remove(&floor_key);
             }
             return Ok(());
         }
@@ -748,7 +769,7 @@ impl WalCaptureProjection {
         source_cutoffs: Vec<i64>,
         captured_at_ms: u64,
     ) -> Result<DisklessWalCapture, String> {
-        let mut grouped: BTreeMap<(String, Uuid, i32), Vec<CapturedWalRange>> = BTreeMap::new();
+        let mut grouped: BTreeMap<GroupKey, Vec<CapturedWalRange>> = BTreeMap::new();
         for (topic_id, (topic, partition_count)) in topics {
             if *partition_count < 0 {
                 return Err(format!(
@@ -757,7 +778,11 @@ impl WalCaptureProjection {
             }
             for partition in 0..*partition_count {
                 grouped
-                    .entry((topic.clone(), *topic_id, partition))
+                    .entry(GroupKey {
+                        topic: topic.clone(),
+                        topic_id: *topic_id,
+                        partition,
+                    })
                     .or_default();
             }
         }
@@ -766,20 +791,40 @@ impl WalCaptureProjection {
                 continue;
             };
             grouped
-                .entry((topic.clone(), range.entry.topic_id, range.entry.partition))
+                .entry(GroupKey {
+                    topic: topic.clone(),
+                    topic_id: range.entry.topic_id,
+                    partition: range.entry.partition,
+                })
                 .or_default()
                 .push(range.clone());
         }
-        for (topic_id, partition) in self.floors.keys() {
+        for WalDeleteFloorKey {
+            topic_id,
+            partition,
+        } in self.floors.keys()
+        {
             let Some((topic, _)) = topics.get(topic_id) else {
                 continue;
             };
             grouped
-                .entry((topic.clone(), *topic_id, *partition))
+                .entry(GroupKey {
+                    topic: topic.clone(),
+                    topic_id: *topic_id,
+                    partition: *partition,
+                })
                 .or_default();
         }
         let mut partitions = Vec::with_capacity(grouped.len());
-        for ((topic, topic_id, partition), mut ranges) in grouped {
+        for (
+            GroupKey {
+                topic,
+                topic_id,
+                partition,
+            },
+            mut ranges,
+        ) in grouped
+        {
             ranges.sort_by_key(|range| range.entry.first_offset);
             if ranges
                 .windows(2)
@@ -823,7 +868,10 @@ impl WalCaptureProjection {
             let ranges = runs;
             let delete_floor = self
                 .floors
-                .get(&(topic_id, partition))
+                .get(&WalDeleteFloorKey {
+                    topic_id,
+                    partition,
+                })
                 .copied()
                 .unwrap_or(0);
             let recovery_cutoff = ranges

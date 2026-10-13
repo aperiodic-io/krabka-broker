@@ -79,7 +79,8 @@ pub(super) async fn handle_classic_leave_message(
     let Some(state) = group.as_consumer_mut() else {
         return Err(codes::UNKNOWN_MEMBER_ID);
     };
-    let (responses, removed) = resolve_consumer_classic_leave(state, request, version);
+    let ConsumerLeave { responses, removed } =
+        resolve_consumer_classic_leave(state, request, version);
     if removed.is_empty() {
         return Ok(responses);
     }
@@ -119,6 +120,20 @@ pub(super) async fn handle_classic_leave_message(
     Ok(responses)
 }
 
+/// What a classic `LeaveGroup` request does to a consumer-kind group: the
+/// response of each named member, and the ids of the members to remove.
+struct ConsumerLeave {
+    responses: Vec<MemberResponse>,
+    removed: Vec<String>,
+}
+
+/// A member that a `LeaveGroup` request names: its id, and its static
+/// instance id if the request gives one.
+struct LeaveIdentity<'a> {
+    member_id: &'a str,
+    instance_id: Option<&'a str>,
+}
+
 /// Resolves a classic `LeaveGroup` request against a consumer-kind group.
 /// Resolution happens before any removal, matching Kafka's batch semantics:
 /// duplicate valid identities all succeed but produce one set of tombstones.
@@ -126,51 +141,57 @@ fn resolve_consumer_classic_leave(
     state: &GroupState,
     request: &LeaveGroupRequest,
     version: i16,
-) -> (Vec<MemberResponse>, Vec<String>) {
-    let identities: Vec<(&str, Option<&str>)> = if version >= 3 {
+) -> ConsumerLeave {
+    let identities: Vec<LeaveIdentity<'_>> = if version >= 3 {
         request
             .members
             .iter()
-            .map(|member| {
-                (
-                    member.member_id.as_str(),
-                    member.group_instance_id.as_deref(),
-                )
+            .map(|member| LeaveIdentity {
+                member_id: member.member_id.as_str(),
+                instance_id: member.group_instance_id.as_deref(),
             })
             .collect()
     } else {
-        vec![(request.member_id.as_str(), None)]
+        vec![LeaveIdentity {
+            member_id: request.member_id.as_str(),
+            instance_id: None,
+        }]
     };
     let mut seen = HashSet::new();
     let mut removed = Vec::new();
     let responses = identities
         .into_iter()
-        .map(|(member_id, instance_id)| {
-            let (resolved, error_code) = match instance_id {
-                Some(instance_id) => match state.current_member_for_instance(instance_id) {
-                    Some(current) if member_id.is_empty() || current == member_id => {
-                        (Some(current), codes::NONE)
-                    }
-                    Some(_) => (None, codes::FENCED_INSTANCE_ID),
+        .map(
+            |LeaveIdentity {
+                 member_id,
+                 instance_id,
+             }| {
+                let (resolved, error_code) = match instance_id {
+                    Some(instance_id) => match state.current_member_for_instance(instance_id) {
+                        Some(current) if member_id.is_empty() || current == member_id => {
+                            (Some(current), codes::NONE)
+                        }
+                        Some(_) => (None, codes::FENCED_INSTANCE_ID),
+                        None => (None, codes::UNKNOWN_MEMBER_ID),
+                    },
+                    None if state.members.contains_key(member_id) => (Some(member_id), codes::NONE),
                     None => (None, codes::UNKNOWN_MEMBER_ID),
-                },
-                None if state.members.contains_key(member_id) => (Some(member_id), codes::NONE),
-                None => (None, codes::UNKNOWN_MEMBER_ID),
-            };
-            if let Some(resolved) = resolved
-                && seen.insert(resolved.to_string())
-            {
-                removed.push(resolved.to_string());
-            }
-            MemberResponse {
-                member_id: member_id.to_string(),
-                group_instance_id: instance_id.map(str::to_string),
-                error_code,
-                ..Default::default()
-            }
-        })
+                };
+                if let Some(resolved) = resolved
+                    && seen.insert(resolved.to_string())
+                {
+                    removed.push(resolved.to_string());
+                }
+                MemberResponse {
+                    member_id: member_id.to_string(),
+                    group_instance_id: instance_id.map(str::to_string),
+                    error_code,
+                    ..Default::default()
+                }
+            },
+        )
         .collect();
-    (responses, removed)
+    ConsumerLeave { responses, removed }
 }
 
 /// The `ClassicDelete` mailbox arm: delete an empty group, classic or

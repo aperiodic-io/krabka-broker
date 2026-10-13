@@ -35,12 +35,20 @@ pub(super) const STRAY: &str = "stray.bin";
 pub(super) const SEGMENT_SPAN: i64 = 100;
 
 /// A throwaway Ed25519 signer, and the raw public key that verifies it.
-fn signer(key_id: &str) -> (Arc<FileEd25519Signer>, Vec<u8>) {
+struct TestSigner {
+    signer: Arc<FileEd25519Signer>,
+    public_key: Vec<u8>,
+}
+
+fn signer(key_id: &str) -> TestSigner {
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
     let signer = FileEd25519Signer::from_pkcs8_bytes(pkcs8.as_ref(), key_id.to_string())
         .expect("ring mints a valid PKCS#8 Ed25519 key");
     let public_key = signer.public_key();
-    (Arc::new(signer), public_key)
+    TestSigner {
+        signer: Arc::new(signer),
+        public_key,
+    }
 }
 
 krabka_macros::worm_segment_fixture!(metadata, crate, 0x1000, TOPIC, PARTITION, SEGMENT_SPAN);
@@ -85,7 +93,7 @@ impl Archive {
     /// The same archive, on a store the caller chose.
     pub(super) async fn build_on(store: Arc<dyn ObjectStore>, runs: &[usize]) -> Self {
         let ops = ObjectStoreClient::new(Arc::clone(&store));
-        let (signer, public_key) = signer(KEY_ID);
+        let TestSigner { signer, public_key } = signer(KEY_ID);
         let archiver = WormArchiver::new(Some(Arc::clone(&signer)));
         let dir = format!("{PREFIX}/{}", partition_dir_name(&metadata(0)));
 
@@ -193,6 +201,13 @@ impl Archive {
     }
 }
 
+/// One stored version of an object: its location and the version the put returned.
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct ObjectVersion {
+    location: String,
+    version: String,
+}
+
 /// An in-memory store that actually keeps versions.
 ///
 /// [`InMemory`] reports `version: None` on every put and ignores a version
@@ -208,7 +223,7 @@ impl Archive {
 #[derive(Debug)]
 pub(super) struct VersionedStore {
     inner: InMemory,
-    history: std::sync::Mutex<HashMap<(String, String), Bytes>>,
+    history: std::sync::Mutex<HashMap<ObjectVersion, Bytes>>,
     next: std::sync::atomic::AtomicU64,
 }
 
@@ -252,7 +267,13 @@ impl ObjectStore for VersionedStore {
         self.history
             .lock()
             .expect("no test panics while holding this")
-            .insert((location.to_string(), version.clone()), bytes);
+            .insert(
+                ObjectVersion {
+                    location: location.to_string(),
+                    version: version.clone(),
+                },
+                bytes,
+            );
         result.version = Some(version);
         Ok(result)
     }
@@ -269,7 +290,10 @@ impl ObjectStore for VersionedStore {
             .history
             .lock()
             .expect("no test panics while holding this")
-            .get(&(location.to_string(), version.clone()))
+            .get(&ObjectVersion {
+                location: location.to_string(),
+                version: version.clone(),
+            })
             .cloned();
         let Some(bytes) = bytes else {
             return Err(object_store::Error::NotFound {
@@ -376,11 +400,11 @@ impl Tamper {
                 // Same `key_id`, different key material: the verifier must
                 // check against the key it trusts and not the key the
                 // manifest carries.
-                let (other, _) = signer(KEY_ID);
+                let TestSigner { signer: other, .. } = signer(KEY_ID);
                 archive.reseal(i, Some(other), None, None).await;
             }
             Tamper::SignWithUnknownKeyId(i) => {
-                let (rogue, _) = signer("rogue-key");
+                let TestSigner { signer: rogue, .. } = signer("rogue-key");
                 archive.reseal(i, Some(rogue), None, None).await;
             }
             Tamper::Unsign(i) => archive.reseal(i, None, None, None).await,

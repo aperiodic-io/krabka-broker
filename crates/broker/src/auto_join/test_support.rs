@@ -66,19 +66,25 @@ pub(super) async fn write_response(
     socket.write_all(&frame).await
 }
 
+/// An API key a mock controller advertises, and the highest version it speaks.
+pub(super) struct AdvertisedApi {
+    pub(super) api_key: krabka_ids::ApiKey,
+    pub(super) max_version: krabka_ids::ApiVersion,
+}
+
 pub(super) async fn negotiate_versions(
     socket: &mut TcpStream,
-    apis: &[(krabka_ids::ApiKey, krabka_ids::ApiVersion)],
+    apis: &[AdvertisedApi],
 ) -> std::io::Result<()> {
     let request = read_frame(socket).await?;
     let response = ApiVersionsResponse {
         error_code: 0,
         api_keys: apis
             .iter()
-            .map(|&(api_key, max_version)| ApiVersion {
-                api_key: api_key.0,
+            .map(|api| ApiVersion {
+                api_key: api.api_key.0,
                 min_version: 0,
-                max_version: max_version.0,
+                max_version: api.max_version.0,
                 ..Default::default()
             })
             .collect(),

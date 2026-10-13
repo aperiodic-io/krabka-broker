@@ -64,15 +64,22 @@ mod tests {
         }
     }
 
+    /// The feature names in insertion order, and the order that Kafka iterates
+    /// them in.
+    struct OrderCase {
+        keys: &'static [&'static str],
+        want: &'static [&'static str],
+    }
+
     /// The order observed on a Kafka 4.3.1 broker: an eight-feature
     /// `kafka-features upgrade` in which every row fails names the error of
     /// `group.version`, and a two-row request that lists `share.version` first
     /// still names `group.version`.
     #[test]
     fn feature_names_iterate_in_kafka_order() {
-        let cases: [(&[&str], &[&str]); 3] = [
-            (
-                &[
+        let cases: [OrderCase; 3] = [
+            OrderCase {
+                keys: &[
                     "group.version",
                     "share.version",
                     "transaction.version",
@@ -82,7 +89,7 @@ mod tests {
                     "metadata.version",
                     "no.such.feature",
                 ],
-                &[
+                want: &[
                     "group.version",
                     "no.such.feature",
                     "kraft.version",
@@ -92,18 +99,15 @@ mod tests {
                     "transaction.version",
                     "eligible.leader.replicas.version",
                 ],
-            ),
-            (&["share.version", "group.version"], &[
-                "group.version",
-                "share.version",
-            ]),
-            (
-                // Both land in bucket 7, which keeps first-insertion order.
-                &["metadata.version", "share.version", "metadata.version"],
-                &["metadata.version", "share.version"],
-            ),
+            },
+            OrderCase {
+                keys: &["share.version", "group.version"],
+                want: &["group.version", "share.version"],
+            },
+            OrderCase { keys: // Both land in bucket 7, which keeps first-insertion order.
+                &["metadata.version", "share.version", "metadata.version"], want: &["metadata.version", "share.version"] },
         ];
-        for (keys, want) in cases {
+        for OrderCase { keys, want } in cases {
             assert!(hash_map_order(keys.iter().copied()) == want, "{keys:?}");
         }
     }

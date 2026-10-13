@@ -20,10 +20,23 @@ use {
     super::producer_identity::client_producer_identity,
     crate::{
         codes,
-        txn::state::{TxnEntry, TxnState},
+        txn::{
+            state::{TxnEntry, TxnState},
+            util::ProducerIdentity,
+        },
     },
     krabka_log::ProducerId,
 };
+
+/// Which table `EndTxn` consults: the transaction version of the client, and
+/// the Kafka rules that apply to its one changed answer.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct TableRules {
+    /// Transaction version 2 and above for the client.
+    pub(super) verified: bool,
+    /// The one answer that Kafka trunk changed after 4.3.1.
+    pub(super) trunk_rules: bool,
+}
 
 /// What `EndTxn` does with the entry it found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,11 +64,22 @@ pub(super) enum EndTxnDecision {
 /// answer that Kafka trunk changed after 4.3.1, see [`verified_state_decision`].
 pub(super) fn end_txn_decision(
     entry: &TxnEntry,
-    (request_pid, request_epoch): (ProducerId, i16),
+    request: ProducerIdentity,
     committed: bool,
-    (verified, trunk_rules): (bool, bool),
+    rules: TableRules,
 ) -> EndTxnDecision {
-    let (entry_pid, entry_epoch) = compared_identity(entry, request_pid);
+    let ProducerIdentity {
+        producer_id: request_pid,
+        producer_epoch: request_epoch,
+    } = request;
+    let TableRules {
+        verified,
+        trunk_rules,
+    } = rules;
+    let ProducerIdentity {
+        producer_id: entry_pid,
+        producer_epoch: entry_epoch,
+    } = compared_identity(entry, request_pid);
     let retry_on_epoch_bump =
         entry_pid == request_pid && request_epoch.checked_add(1) == Some(entry_epoch);
     let retry_on_overflow =
@@ -67,8 +91,10 @@ pub(super) fn end_txn_decision(
         }
         if !valid_verified_epoch(
             entry.state,
-            (entry_epoch, request_epoch),
-            (retry_on_epoch_bump, retry_on_overflow),
+            entry_epoch,
+            request_epoch,
+            retry_on_epoch_bump,
+            retry_on_overflow,
         ) {
             return EndTxnDecision::Refuse(codes::PRODUCER_FENCED);
         }
@@ -103,7 +129,7 @@ pub(super) fn end_txn_decision(
 /// of such an entry is compared with the live identity. A recovery identity
 /// that a `Prepare*` entry holds is one epoch past its first, so a new
 /// producer id at epoch 0 marks the rotation.
-fn compared_identity(entry: &TxnEntry, request_pid: ProducerId) -> (ProducerId, i16) {
+fn compared_identity(entry: &TxnEntry, request_pid: ProducerId) -> ProducerIdentity {
     let rotating_prepare = matches!(
         entry.state,
         TxnState::PrepareCommit | TxnState::PrepareAbort
@@ -111,9 +137,16 @@ fn compared_identity(entry: &TxnEntry, request_pid: ProducerId) -> (ProducerId, 
         && entry.next_producer_epoch == 0
         && entry.next_producer_id != entry.producer_id;
     if rotating_prepare && entry.producer_id == request_pid {
-        (entry.producer_id, entry.producer_epoch)
+        ProducerIdentity {
+            producer_id: entry.producer_id,
+            producer_epoch: entry.producer_epoch,
+        }
     } else {
-        client_producer_identity(entry)
+        let (producer_id, producer_epoch) = client_producer_identity(entry);
+        ProducerIdentity {
+            producer_id,
+            producer_epoch,
+        }
     }
 }
 
@@ -121,8 +154,10 @@ fn compared_identity(entry: &TxnEntry, request_pid: ProducerId) -> (ProducerId, 
 /// accepts.
 fn valid_verified_epoch(
     state: TxnState,
-    (entry_epoch, request_epoch): (i16, i16),
-    (retry_on_epoch_bump, retry_on_overflow): (bool, bool),
+    entry_epoch: i16,
+    request_epoch: i16,
+    retry_on_epoch_bump: bool,
+    retry_on_overflow: bool,
 ) -> bool {
     match state {
         TxnState::Ongoing | TxnState::Empty | TxnState::Dead => request_epoch == entry_epoch,

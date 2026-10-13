@@ -11,7 +11,7 @@ use {
         control_plane::freeze_scope,
         support::{
             self,
-            configs::{ConfigOperation, alter_topic_config, topic_config},
+            configs::{ConfigMutationOutcome, ConfigOperation, alter_topic_config, topic_config},
         },
         wire::{CONTROL, accepted, controlled_fixture, create_topic, refused},
     },
@@ -43,11 +43,8 @@ const CONFIG_OP_SET: i8 = 0;
 /// The synthesised read-only topic config that reports the freeze.
 const WRITE_FREEZE: &str = "write.freeze";
 
-/// The one row an alter path answers with, in the two terms an operator reads.
-type AlterOutcome = (i16, Option<String>);
-
 /// Try to write `write.freeze` through `AlterConfigs`.
-async fn alter_configs(client: &Client, topic: &str, value: Option<&str>) -> AlterOutcome {
+async fn alter_configs(client: &Client, topic: &str, value: Option<&str>) -> ConfigMutationOutcome {
     let response = client
         .send(AlterConfigsRequest {
             resources: vec![AlterResource {
@@ -66,7 +63,10 @@ async fn alter_configs(client: &Client, topic: &str, value: Option<&str>) -> Alt
         .await
         .expect("AlterConfigs");
     let row = &response.responses[0];
-    (row.error_code, row.error_message.clone())
+    ConfigMutationOutcome {
+        error_code: row.error_code,
+        error_message: row.error_message.clone(),
+    }
 }
 
 /// Neither config path can set a freeze, and neither can clear one.
@@ -85,14 +85,14 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
     let (p, frozen, control) = Box::pin(controlled_fixture("orders")).await;
     freeze_scope(&p.client, PATTERN_TYPE_LITERAL, "orders", "cutover").await;
 
-    let refusal = (
-        codes::INVALID_CONFIG,
-        Some(
+    let refusal = ConfigMutationOutcome {
+        error_code: codes::INVALID_CONFIG,
+        error_message: Some(
             "topic config write.freeze is controller-managed and read-only; use `krabka-guard \
              freeze set` to set it and `krabka-guard freeze clear` to clear it"
                 .to_owned(),
         ),
-    );
+    };
 
     // Setting a freeze on the topic that has none.
     check!(
@@ -134,7 +134,11 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
     // the key and not about the API.
     let ordinary = client_alter_retention(&p.client, CONTROL).await;
     check!(
-        ordinary == (codes::NONE, None),
+        ordinary
+            == ConfigMutationOutcome {
+                error_code: codes::NONE,
+                error_message: None,
+            },
         "an ordinary topic config still alters"
     );
 
@@ -142,7 +146,7 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
 }
 
 /// Alter an ordinary topic config, as the control for the four refusals.
-async fn client_alter_retention(client: &Client, topic: &str) -> AlterOutcome {
+async fn client_alter_retention(client: &Client, topic: &str) -> ConfigMutationOutcome {
     let response = client
         .send(IncrementalAlterConfigsRequest {
             resources: vec![IncrementalResource {
@@ -162,7 +166,10 @@ async fn client_alter_retention(client: &Client, topic: &str) -> AlterOutcome {
         .await
         .expect("IncrementalAlterConfigs");
     let row = &response.responses[0];
-    (row.error_code, row.error_message.clone())
+    ConfigMutationOutcome {
+        error_code: row.error_code,
+        error_message: row.error_message.clone(),
+    }
 }
 
 /// Read one topic's `write.freeze` entry through `DescribeConfigs`.

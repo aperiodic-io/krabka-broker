@@ -54,12 +54,13 @@ fn voter_set_with_controller(id: NodeId, host: &str, port: u16) -> VoterSet {
     VoterSet::from_voters([voter_with_controller(id, host, port)])
 }
 
-fn recorded_sender(
-    address: std::net::SocketAddr,
-) -> (
-    RealPeerSender,
-    Arc<std::sync::Mutex<Vec<ConnectionOptions>>>,
-) {
+/// A sender and the connection options its dialer recorded.
+struct RecordedSender {
+    sender: RealPeerSender,
+    options: Arc<std::sync::Mutex<Vec<ConnectionOptions>>>,
+}
+
+fn recorded_sender(address: std::net::SocketAddr) -> RecordedSender {
     let options = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sender = RealPeerSender::new(
         voter_set_with_controller(NodeId(2), &address.ip().to_string(), address.port()),
@@ -71,16 +72,22 @@ fn recorded_sender(
         krabka_client_core::ConnectionDispatchQueueCapacity::new(7).unwrap(),
         krabka_client_core::ClientFrameMax::try_from(krabka_units::kibibytes(32)).unwrap(),
     );
-    (sender, options)
+    RecordedSender { sender, options }
 }
 
 async fn answer_fetch_connection(listener: &tokio::net::TcpListener, answer: &[u8]) {
     let (mut stream, _) = listener.accept().await.unwrap();
     let api_versions = read_frame(&mut stream).await;
-    let (_, _, correlation, _, _) = parse_request_header(&api_versions);
+    let RequestHeader {
+        correlation_id: correlation,
+        ..
+    } = parse_request_header(&api_versions);
     write_response_frame(&mut stream, correlation, false, &api_versions_response_v0()).await;
     let request = read_frame(&mut stream).await;
-    let (_, _, correlation, _, _) = parse_request_header(&request);
+    let RequestHeader {
+        correlation_id: correlation,
+        ..
+    } = parse_request_header(&request);
     write_response_frame(&mut stream, correlation, true, answer).await;
 }
 
@@ -157,7 +164,16 @@ async fn write_response_frame(
     stream.flush().await.unwrap();
 }
 
-fn parse_request_header(frame: &[u8]) -> (ApiKey, ApiVersion, i32, String, &[u8]) {
+/// The fields of a request frame's header, and the body after it.
+struct RequestHeader<'a> {
+    api_key: ApiKey,
+    version: ApiVersion,
+    correlation_id: i32,
+    client_id: String,
+    body: &'a [u8],
+}
+
+fn parse_request_header(frame: &[u8]) -> RequestHeader<'_> {
     assert2::assert!(frame.len() >= 10);
     let api_key = ApiKey(i16::from_be_bytes([frame[0], frame[1]]));
     let version = ApiVersion(i16::from_be_bytes([frame[2], frame[3]]));
@@ -174,13 +190,13 @@ fn parse_request_header(frame: &[u8]) -> (ApiKey, ApiVersion, i32, String, &[u8]
     } else {
         client_end
     };
-    (
+    RequestHeader {
         api_key,
         version,
         correlation_id,
         client_id,
-        &frame[body_start..],
-    )
+        body: &frame[body_start..],
+    }
 }
 
 /// The candidate's `kraft.version` support, read off its `ApiVersions`.
@@ -220,30 +236,68 @@ async fn probe_reports_kraft_support_only_within_the_advertised_range() {
     use krabka_protocol::{Decode, owned::api_versions_request::ApiVersionsRequest};
 
     const KRAFT: &str = krabka_metadata::metadata_version::KRAFT_VERSION_FEATURE;
-    // (what it is, feature advertised, range, finalized version, supported?)
-    let cases: [(&str, &str, i16, i16, u16, bool); 5] = [
-        (
-            "the version at the bottom of the range",
-            KRAFT,
-            1,
-            3,
-            1,
-            true,
-        ),
-        ("the version inside the range", KRAFT, 1, 3, 2, true),
-        ("the version at the top of the range", KRAFT, 1, 3, 3, true),
-        ("a version above the range", KRAFT, 1, 3, 4, false),
-        (
-            "some other feature entirely",
-            "metadata.version",
-            1,
-            3,
-            2,
-            false,
-        ),
+    /// What the candidate advertises, the finalized version asked about, and
+    /// whether the candidate supports it.
+    struct Case {
+        what: &'static str,
+        feature: &'static str,
+        min: i16,
+        max: i16,
+        finalized: u16,
+        supported: bool,
+    }
+    let cases = [
+        Case {
+            what: "the version at the bottom of the range",
+            feature: KRAFT,
+            min: 1,
+            max: 3,
+            finalized: 1,
+            supported: true,
+        },
+        Case {
+            what: "the version inside the range",
+            feature: KRAFT,
+            min: 1,
+            max: 3,
+            finalized: 2,
+            supported: true,
+        },
+        Case {
+            what: "the version at the top of the range",
+            feature: KRAFT,
+            min: 1,
+            max: 3,
+            finalized: 3,
+            supported: true,
+        },
+        Case {
+            what: "a version above the range",
+            feature: KRAFT,
+            min: 1,
+            max: 3,
+            finalized: 4,
+            supported: false,
+        },
+        Case {
+            what: "some other feature entirely",
+            feature: "metadata.version",
+            min: 1,
+            max: 3,
+            finalized: 2,
+            supported: false,
+        },
     ];
 
-    for (what, feature, min, max, finalized, supported) in cases {
+    for Case {
+        what,
+        feature,
+        min,
+        max,
+        finalized,
+        supported,
+    } in cases
+    {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let body = response_with_feature(feature, min, max);
@@ -252,11 +306,20 @@ async fn probe_reports_kraft_support_only_within_the_advertised_range() {
             let (mut stream, _) = listener.accept().await.unwrap();
             // The dialer's own handshake first, then the probe's request.
             let handshake = read_frame(&mut stream).await;
-            let (_, _, corr, _, _) = parse_request_header(&handshake);
+            let RequestHeader {
+                correlation_id: corr,
+                ..
+            } = parse_request_header(&handshake);
             write_response_frame(&mut stream, corr, false, &api_versions_response_v0()).await;
 
             let probe = read_frame(&mut stream).await;
-            let (key, version, corr, client_id, probe_body) = parse_request_header(&probe);
+            let RequestHeader {
+                api_key: key,
+                version,
+                correlation_id: corr,
+                client_id,
+                body: probe_body,
+            } = parse_request_header(&probe);
             assert2::assert!(key == ApiKey(18));
             assert2::assert!(client_id == "krabka-voter-probe");
             let mut cur = probe_body;
@@ -266,7 +329,10 @@ async fn probe_reports_kraft_support_only_within_the_advertised_range() {
             write_response_frame(&mut stream, corr, false, &body).await;
         });
 
-        let (sender, recorded_options) = recorded_sender(addr);
+        let RecordedSender {
+            sender,
+            options: recorded_options,
+        } = recorded_sender(addr);
         let got = PeerSender::probe_kraft_version(&sender, &addr.to_string(), finalized)
             .await
             .expect("probe");
@@ -297,12 +363,24 @@ async fn real_peer_sender_sends_expected_api_version_client_id_and_body() {
         let (mut stream, _) = listener.accept().await.unwrap();
 
         let api_versions = read_frame(&mut stream).await;
-        let (key, _version, corr, client_id, _body) = parse_request_header(&api_versions);
+        let RequestHeader {
+            api_key: key,
+            version: _version,
+            correlation_id: corr,
+            client_id,
+            body: _body,
+        } = parse_request_header(&api_versions);
         assert2::assert!((key, client_id.as_str()) == (ApiKey(18), "raft-client"));
         write_response_frame(&mut stream, corr, false, &api_versions_response_v0()).await;
 
         let request = read_frame(&mut stream).await;
-        let (key, version, corr, client_id, body) = parse_request_header(&request);
+        let RequestHeader {
+            api_key: key,
+            version,
+            correlation_id: corr,
+            client_id,
+            body,
+        } = parse_request_header(&request);
         observed_tx
             .send((key, version, client_id, bytes::Bytes::copy_from_slice(body)))
             .await
@@ -310,7 +388,10 @@ async fn real_peer_sender_sends_expected_api_version_client_id_and_body() {
         write_response_frame(&mut stream, corr, true, b"raft-response").await;
     });
 
-    let (sender, recorded_options) = recorded_sender(addr);
+    let RecordedSender {
+        sender,
+        options: recorded_options,
+    } = recorded_sender(addr);
     assert2::assert!(sender.dispatch_queue_capacity.get() == 7);
     assert2::assert!(sender.frame_max.size() == krabka_units::kibibytes(32));
     let response = sender
@@ -348,13 +429,20 @@ async fn real_peer_sender_sends_expected_api_version_client_id_and_body() {
     server.await.unwrap();
 }
 
-async fn fetch_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+/// A fake peer that answers one fetch connection, and the address it listens
+/// on.
+struct FetchServer {
+    addr: std::net::SocketAddr,
+    task: tokio::task::JoinHandle<()>,
+}
+
+async fn fetch_server() -> FetchServer {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         answer_fetch_connection(&listener, b"fetch-response").await;
     });
-    (addr, server)
+    FetchServer { addr, task: server }
 }
 
 /// A controller that leaves the voter set must stay reachable. A leader that
@@ -370,7 +458,7 @@ async fn a_peer_stays_reachable_after_it_leaves_the_voter_set() {
         ("a voter that the new set removes", false),
     ];
     for (what, stays) in cases {
-        let (addr, server) = fetch_server().await;
+        let FetchServer { addr, task: server } = fetch_server().await;
 
         let host = addr.ip().to_string();
         let leader = voter_with_controller(NodeId(1), &host, addr.port());
@@ -426,7 +514,7 @@ async fn a_peer_stays_reachable_after_it_leaves_the_voter_set() {
     assert2::assert!(let Err(RaftError::NotLeader { current_leader: None }) = response);
 
     // Updating voters from an empty set makes the new voter reachable.
-    let (addr, server) = fetch_server().await;
+    let FetchServer { addr, task: server } = fetch_server().await;
     let host = addr.ip().to_string();
     let new_voter = voter_with_controller(NodeId(5), &host, addr.port());
     let sender = empty_sender();

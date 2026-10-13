@@ -307,6 +307,12 @@ fn parse_value(key: &GroupKey, value: &str) -> Result<(), String> {
     }
 }
 
+/// A bound of a group config, with the key whose config states it.
+struct Bound<'a> {
+    value: i32,
+    key: &'a str,
+}
+
 /// `GroupConfig.validateValues`' broker-bound checks, over the override map.
 ///
 /// Kafka 4.3.1 refuses a value outside `[group.<protocol>.min.<key>,
@@ -322,138 +328,141 @@ fn check_bounds(
 ) -> Result<(), String> {
     let trunk = unstable == UnstableApiVersions::Enabled;
     let int = |name: &str| overrides.get(name).and_then(|value| int_value(value));
-    let range = |name: &str, min: (i32, &str), max: (i32, &str)| -> Result<(), String> {
+    let range = |name: &str, min: Bound<'_>, max: Bound<'_>| -> Result<(), String> {
         let Some(value) = int(name) else {
             return Ok(());
         };
-        if trunk && (value < min.0 || value > max.0) {
+        if trunk && (value < min.value || value > max.value) {
             return Err(format!(
                 "{name} must be in the range {} to {} inclusive.",
-                min.0, max.0
+                min.value, max.value
             ));
         }
-        if value < min.0 {
-            return Err(format!("{name} must be greater than or equal to {}", min.1));
+        if value < min.value {
+            return Err(format!(
+                "{name} must be greater than or equal to {}",
+                min.key
+            ));
         }
-        if value > max.0 {
-            return Err(format!("{name} must be less than or equal to {}", max.1));
+        if value > max.value {
+            return Err(format!("{name} must be less than or equal to {}", max.key));
         }
         Ok(())
     };
     let assignment = |name: &str, protocol: &str| {
         range(
             name,
-            (
-                MIN_ASSIGNMENT_INTERVAL_MS,
-                format!("group.{protocol}.min.assignment.interval.ms").as_str(),
-            ),
-            (
-                MAX_ASSIGNMENT_INTERVAL_MS,
-                format!("group.{protocol}.max.assignment.interval.ms").as_str(),
-            ),
+            Bound {
+                value: MIN_ASSIGNMENT_INTERVAL_MS,
+                key: format!("group.{protocol}.min.assignment.interval.ms").as_str(),
+            },
+            Bound {
+                value: MAX_ASSIGNMENT_INTERVAL_MS,
+                key: format!("group.{protocol}.max.assignment.interval.ms").as_str(),
+            },
         )
     };
     let (consumer, share, streams) = (&bounds.consumer, &bounds.share, &bounds.streams);
     range(
         "consumer.heartbeat.interval.ms",
-        (
-            millis(consumer.min_heartbeat_interval),
-            "group.consumer.min.heartbeat.interval.ms",
-        ),
-        (
-            millis(consumer.max_heartbeat_interval),
-            "group.consumer.max.heartbeat.interval.ms",
-        ),
+        Bound {
+            value: millis(consumer.min_heartbeat_interval),
+            key: "group.consumer.min.heartbeat.interval.ms",
+        },
+        Bound {
+            value: millis(consumer.max_heartbeat_interval),
+            key: "group.consumer.max.heartbeat.interval.ms",
+        },
     )?;
     range(
         "consumer.session.timeout.ms",
-        (
-            millis(consumer.min_session_timeout),
-            "group.consumer.min.session.timeout.ms",
-        ),
-        (
-            millis(consumer.max_session_timeout),
-            "group.consumer.max.session.timeout.ms",
-        ),
+        Bound {
+            value: millis(consumer.min_session_timeout),
+            key: "group.consumer.min.session.timeout.ms",
+        },
+        Bound {
+            value: millis(consumer.max_session_timeout),
+            key: "group.consumer.max.session.timeout.ms",
+        },
     )?;
     assignment("consumer.assignment.interval.ms", "consumer")?;
     range(
         "share.heartbeat.interval.ms",
-        (
-            millis(share.min_heartbeat_interval),
-            "group.share.min.heartbeat.interval.ms",
-        ),
-        (
-            millis(share.max_heartbeat_interval),
-            "group.share.max.heartbeat.interval.ms",
-        ),
+        Bound {
+            value: millis(share.min_heartbeat_interval),
+            key: "group.share.min.heartbeat.interval.ms",
+        },
+        Bound {
+            value: millis(share.max_heartbeat_interval),
+            key: "group.share.max.heartbeat.interval.ms",
+        },
     )?;
     range(
         "share.session.timeout.ms",
-        (
-            millis(share.min_session_timeout),
-            "group.share.min.session.timeout.ms",
-        ),
-        (
-            millis(share.max_session_timeout),
-            "group.share.max.session.timeout.ms",
-        ),
+        Bound {
+            value: millis(share.min_session_timeout),
+            key: "group.share.min.session.timeout.ms",
+        },
+        Bound {
+            value: millis(share.max_session_timeout),
+            key: "group.share.max.session.timeout.ms",
+        },
     )?;
     range(
         "share.record.lock.duration.ms",
-        (
-            millis(share.min_record_lock_duration),
-            "group.share.min.record.lock.duration.ms",
-        ),
-        (
-            millis(share.max_record_lock_duration),
-            "group.share.max.record.lock.duration.ms",
-        ),
+        Bound {
+            value: millis(share.min_record_lock_duration),
+            key: "group.share.min.record.lock.duration.ms",
+        },
+        Bound {
+            value: millis(share.max_record_lock_duration),
+            key: "group.share.max.record.lock.duration.ms",
+        },
     )?;
     range(
         "share.delivery.count.limit",
-        (
-            i32::from(share.min_delivery_count_limit),
-            "group.share.min.delivery.count.limit",
-        ),
-        (
-            i32::from(share.max_delivery_count_limit),
-            "group.share.max.delivery.count.limit",
-        ),
+        Bound {
+            value: i32::from(share.min_delivery_count_limit),
+            key: "group.share.min.delivery.count.limit",
+        },
+        Bound {
+            value: i32::from(share.max_delivery_count_limit),
+            key: "group.share.max.delivery.count.limit",
+        },
     )?;
     range(
         "share.partition.max.record.locks",
-        (
-            share.min_partition_max_record_locks,
-            "group.share.min.partition.max.record.locks",
-        ),
-        (
-            share.max_partition_max_record_locks,
-            "group.share.max.partition.max.record.locks",
-        ),
+        Bound {
+            value: share.min_partition_max_record_locks,
+            key: "group.share.min.partition.max.record.locks",
+        },
+        Bound {
+            value: share.max_partition_max_record_locks,
+            key: "group.share.max.partition.max.record.locks",
+        },
     )?;
     assignment("share.assignment.interval.ms", "share")?;
     range(
         KEY_HEARTBEAT_INTERVAL_MS,
-        (
-            millis(streams.min_heartbeat_interval),
-            "group.streams.min.heartbeat.interval.ms",
-        ),
-        (
-            millis(streams.max_heartbeat_interval),
-            "group.streams.max.heartbeat.interval.ms",
-        ),
+        Bound {
+            value: millis(streams.min_heartbeat_interval),
+            key: "group.streams.min.heartbeat.interval.ms",
+        },
+        Bound {
+            value: millis(streams.max_heartbeat_interval),
+            key: "group.streams.max.heartbeat.interval.ms",
+        },
     )?;
     range(
         KEY_SESSION_TIMEOUT_MS,
-        (
-            millis(streams.min_session_timeout),
-            "group.streams.min.session.timeout.ms",
-        ),
-        (
-            millis(streams.max_session_timeout),
-            "group.streams.max.session.timeout.ms",
-        ),
+        Bound {
+            value: millis(streams.min_session_timeout),
+            key: "group.streams.min.session.timeout.ms",
+        },
+        Bound {
+            value: millis(streams.max_session_timeout),
+            key: "group.streams.max.session.timeout.ms",
+        },
     )?;
     if int(KEY_NUM_STANDBY_REPLICAS).is_some_and(|value| value > MAX_STANDBY_REPLICAS) {
         return Err(format!(
@@ -587,7 +596,11 @@ mod tests {
     };
 
     /// One row of a table: a key and value, and the refusal text or `Ok`.
-    type Row = ((&'static str, &'static str), Result<(), &'static str>);
+    struct Row {
+        key: &'static str,
+        value: &'static str,
+        want: Result<(), &'static str>,
+    }
 
     fn validate(pairs: &[(&str, &str)], unstable: UnstableApiVersions) -> Result<(), String> {
         validate_group_configs(&overrides(pairs), &GroupBounds::default(), unstable)
@@ -598,44 +611,61 @@ mod tests {
     #[test]
     fn group_overrides_are_validated_with_trunks_rules_and_messages() {
         let cases: [Row; 9] = [
-            (
-                ("not.a.group.key", "1"),
-                Err("Unknown group config name: not.a.group.key"),
-            ),
-            (
-                (KEY_NUM_STANDBY_REPLICAS, "3"),
-                Err("streams.num.standby.replicas must be less than or equal to 2"),
-            ),
-            (
-                (KEY_NUM_WARMUP_REPLICAS, "21"),
-                Err("streams.num.warmup.replicas must be less than or equal to 20"),
-            ),
-            (
-                (KEY_TASK_OFFSET_INTERVAL_MS, "14999"),
-                Err("streams.task.offset.interval.ms must be greater than or equal to 15000"),
-            ),
-            (
-                (KEY_SESSION_TIMEOUT_MS, "90000"),
-                Err("streams.session.timeout.ms must be in the range 45000 to 60000 inclusive."),
-            ),
-            (
-                (KEY_SESSION_TIMEOUT_MS, "abc"),
-                Err(
+            Row {
+                key: "not.a.group.key",
+                value: "1",
+                want: Err("Unknown group config name: not.a.group.key"),
+            },
+            Row {
+                key: KEY_NUM_STANDBY_REPLICAS,
+                value: "3",
+                want: Err("streams.num.standby.replicas must be less than or equal to 2"),
+            },
+            Row {
+                key: KEY_NUM_WARMUP_REPLICAS,
+                value: "21",
+                want: Err("streams.num.warmup.replicas must be less than or equal to 20"),
+            },
+            Row {
+                key: KEY_TASK_OFFSET_INTERVAL_MS,
+                value: "14999",
+                want: Err("streams.task.offset.interval.ms must be greater than or equal to 15000"),
+            },
+            Row {
+                key: KEY_SESSION_TIMEOUT_MS,
+                value: "90000",
+                want: Err(
+                    "streams.session.timeout.ms must be in the range 45000 to 60000 inclusive.",
+                ),
+            },
+            Row {
+                key: KEY_SESSION_TIMEOUT_MS,
+                value: "abc",
+                want: Err(
                     "Invalid value abc for configuration streams.session.timeout.ms: Not a \
                      number of type INT",
                 ),
-            ),
-            (
-                (KEY_ASSIGNOR_NAME, "range"),
-                Err(
+            },
+            Row {
+                key: KEY_ASSIGNOR_NAME,
+                value: "range",
+                want: Err(
                     "streams.assignor.name 'range' is not a registered task assignor. \
                      Registered assignors are: [auto, sticky, highly_available].",
                 ),
-            ),
-            ((KEY_NUM_STANDBY_REPLICAS, "2"), Ok(())),
-            ((KEY_SESSION_TIMEOUT_MS, "60000"), Ok(())),
+            },
+            Row {
+                key: KEY_NUM_STANDBY_REPLICAS,
+                value: "2",
+                want: Ok(()),
+            },
+            Row {
+                key: KEY_SESSION_TIMEOUT_MS,
+                value: "60000",
+                want: Ok(()),
+            },
         ];
-        for ((key, value), want) in cases {
+        for Row { key, value, want } in cases {
             check!(
                 validate(&[(key, value)], Enabled) == want.map_err(str::to_owned),
                 "{key}={value}"
@@ -649,88 +679,146 @@ mod tests {
     #[test]
     fn group_overrides_are_validated_with_kafka_4_3_1s_rules_and_messages() {
         let cases: [Row; 22] = [
-            (("consumer.session.timeout.ms", "50000"), Ok(())),
-            (("consumer.heartbeat.interval.ms", "6000"), Ok(())),
-            (("consumer.assignment.interval.ms", "500"), Ok(())),
-            (("share.session.timeout.ms", "50000"), Ok(())),
-            (("share.heartbeat.interval.ms", "6000"), Ok(())),
-            (("share.record.lock.duration.ms", "45000"), Ok(())),
-            (("share.delivery.count.limit", "7"), Ok(())),
-            (("share.partition.max.record.locks", "1000"), Ok(())),
-            (("share.isolation.level", "read_committed"), Ok(())),
-            (("share.renew.acknowledge.enable", "false"), Ok(())),
-            (("share.assignment.interval.ms", "0"), Ok(())),
-            (("streams.initial.rebalance.delay.ms", "0"), Ok(())),
-            (
-                ("consumer.session.timeout.ms", "1000"),
-                Err(
+            Row {
+                key: "consumer.session.timeout.ms",
+                value: "50000",
+                want: Ok(()),
+            },
+            Row {
+                key: "consumer.heartbeat.interval.ms",
+                value: "6000",
+                want: Ok(()),
+            },
+            Row {
+                key: "consumer.assignment.interval.ms",
+                value: "500",
+                want: Ok(()),
+            },
+            Row {
+                key: "share.session.timeout.ms",
+                value: "50000",
+                want: Ok(()),
+            },
+            Row {
+                key: "share.heartbeat.interval.ms",
+                value: "6000",
+                want: Ok(()),
+            },
+            Row {
+                key: "share.record.lock.duration.ms",
+                value: "45000",
+                want: Ok(()),
+            },
+            Row {
+                key: "share.delivery.count.limit",
+                value: "7",
+                want: Ok(()),
+            },
+            Row {
+                key: "share.partition.max.record.locks",
+                value: "1000",
+                want: Ok(()),
+            },
+            Row {
+                key: "share.isolation.level",
+                value: "read_committed",
+                want: Ok(()),
+            },
+            Row {
+                key: "share.renew.acknowledge.enable",
+                value: "false",
+                want: Ok(()),
+            },
+            Row {
+                key: "share.assignment.interval.ms",
+                value: "0",
+                want: Ok(()),
+            },
+            Row {
+                key: "streams.initial.rebalance.delay.ms",
+                value: "0",
+                want: Ok(()),
+            },
+            Row {
+                key: "consumer.session.timeout.ms",
+                value: "1000",
+                want: Err(
                     "consumer.session.timeout.ms must be greater than or equal to \
                      group.consumer.min.session.timeout.ms",
                 ),
-            ),
-            (
-                ("consumer.heartbeat.interval.ms", "20000"),
-                Err(
+            },
+            Row {
+                key: "consumer.heartbeat.interval.ms",
+                value: "20000",
+                want: Err(
                     "consumer.heartbeat.interval.ms must be less than or equal to \
                      group.consumer.max.heartbeat.interval.ms",
                 ),
-            ),
-            (
-                ("share.record.lock.duration.ms", "500"),
-                Err(
+            },
+            Row {
+                key: "share.record.lock.duration.ms",
+                value: "500",
+                want: Err(
                     "Invalid value 500 for configuration share.record.lock.duration.ms: Value \
                      must be at least 1000",
                 ),
-            ),
-            (
-                ("share.record.lock.duration.ms", "3600000"),
-                Err(
+            },
+            Row {
+                key: "share.record.lock.duration.ms",
+                value: "3600000",
+                want: Err(
                     "share.record.lock.duration.ms must be less than or equal to \
                      group.share.max.record.lock.duration.ms",
                 ),
-            ),
-            (
-                ("share.delivery.count.limit", "1"),
-                Err(
+            },
+            Row {
+                key: "share.delivery.count.limit",
+                value: "1",
+                want: Err(
                     "Invalid value 1 for configuration share.delivery.count.limit: Value must \
                      be at least 2",
                 ),
-            ),
-            (
-                ("share.isolation.level", "read_everything"),
-                Err(
+            },
+            Row {
+                key: "share.isolation.level",
+                value: "read_everything",
+                want: Err(
                     "Invalid value read_everything for configuration share.isolation.level: \
                      String must be one of: read_committed, read_uncommitted",
                 ),
-            ),
-            (
-                ("share.renew.acknowledge.enable", "maybe"),
-                Err(
+            },
+            Row {
+                key: "share.renew.acknowledge.enable",
+                value: "maybe",
+                want: Err(
                     "Invalid value maybe for configuration share.renew.acknowledge.enable: \
                      Expected value to be either true or false",
                 ),
-            ),
-            (
-                ("streams.session.timeout.ms", "90000"),
-                Err("streams.session.timeout.ms must be less than or equal to \
+            },
+            Row {
+                key: "streams.session.timeout.ms",
+                value: "90000",
+                want: Err("streams.session.timeout.ms must be less than or equal to \
                      group.streams.max.session.timeout.ms"),
-            ),
-            (
-                ("streams.num.standby.replicas", "3"),
-                Err(
+            },
+            Row {
+                key: "streams.num.standby.replicas",
+                value: "3",
+                want: Err(
                     "streams.num.standby.replicas must be less than or equal to \
                      group.streams.max.standby.replicas",
                 ),
-            ),
-            (
-                ("streams.assignment.interval.ms", "20000"),
-                Err(
+            },
+            Row {
+                key: "streams.assignment.interval.ms",
+                value: "20000",
+                want: Err(
                     "streams.assignment.interval.ms must be less than or equal to \
                      group.streams.max.assignment.interval.ms",
                 ),
-            ),
+            },
         ];
-        for ((key, value), want) in cases {
+        for Row { key, value, want } in cases {
             check!(
                 validate(&[(key, value)], Disabled) == want.map_err(str::to_owned),
                 "{key}={value}"

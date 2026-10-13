@@ -23,6 +23,14 @@ mod tests;
 /// Declaring through the macro is what makes the guard total: a constant that
 /// is not written here is not a wire code, and a constant that is written here
 /// cannot escape the check against the extracted Kafka table.
+/// A wire code and the name a guard-test failure reports for it.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NamedCode {
+    name: &'static str,
+    code: i16,
+}
+
 macro_rules! wire_codes {
     ($table:ident; $( $(#[$meta:meta])* $name:ident = $value:expr; )*) => {
         $( $(#[$meta])* pub const $name: i16 = $value; )*
@@ -30,7 +38,7 @@ macro_rules! wire_codes {
         /// Every constant in this block, with the name a guard-test failure
         /// reports.
         #[cfg(test)]
-        const $table: &[(&str, i16)] = &[$( (stringify!($name), $name), )*];
+        const $table: &[NamedCode] = &[$( NamedCode { name: stringify!($name), code: $name }, )*];
     };
 }
 

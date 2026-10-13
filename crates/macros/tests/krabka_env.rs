@@ -98,10 +98,17 @@ struct WithFlattened {
     outer: Option<u32>,
 }
 
-fn argument_names(command: &Command) -> Vec<(Option<String>, Option<String>)> {
+/// The long flag and the environment variable of one argument.
+#[derive(Debug, PartialEq)]
+struct ArgumentNames {
+    long: Option<String>,
+    env: Option<String>,
+}
+
+fn argument_names(command: &Command) -> Vec<ArgumentNames> {
     argument_names_and_help(command)
         .into_iter()
-        .map(|(long, env, _help)| (long, env))
+        .map(|(long, env, _help)| ArgumentNames { long, env })
         .collect()
 }
 
@@ -109,8 +116,14 @@ fn argument_names(command: &Command) -> Vec<(Option<String>, Option<String>)> {
 fn a_field_with_its_own_command_attribute_is_left_alone() {
     let shapes = argument_names(&WithFlattened::augment_args(Command::new("flattened")));
     let expected = [
-        (Some("grouped".to_owned()), None),
-        (Some("outer".to_owned()), Some("KRABKA_OUTER".to_owned())),
+        ArgumentNames {
+            long: Some("grouped".to_owned()),
+            env: None,
+        },
+        ArgumentNames {
+            long: Some("outer".to_owned()),
+            env: Some("KRABKA_OUTER".to_owned()),
+        },
     ];
     assert!(shapes == expected);
 }
@@ -133,7 +146,10 @@ fn the_prefix_argument_replaces_krabka_in_every_variable() {
         ("ca-path", "BENCH_CA_PATH"),
         ("out", "BENCH_OUTPUT_PATH"),
     ]
-    .map(|(long, env)| (Some(long.to_owned()), Some(env.to_owned())));
+    .map(|(long, env)| ArgumentNames {
+        long: Some(long.to_owned()),
+        env: Some(env.to_owned()),
+    });
     assert!(shapes == expected);
 
     let parsed = command

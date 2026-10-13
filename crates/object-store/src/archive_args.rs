@@ -314,49 +314,62 @@ mod tests {
 
     #[test]
     fn every_sub_flag_needs_the_backend_it_belongs_to() {
-        let cases: [(&[&str], &str, &str); 8] = [
-            (
+        /// Stray flags, the flag to blame, and the flag that names the backend it needs.
+        struct StrayCase {
+            stray: &'static [&'static str],
+            flag: &'static str,
+            needs: &'static str,
+        }
+        fn stray_case(
+            stray: &'static [&'static str],
+            flag: &'static str,
+            needs: &'static str,
+        ) -> StrayCase {
+            StrayCase { stray, flag, needs }
+        }
+        let cases = [
+            stray_case(
                 &["--archive-s3-region", "eu-west-1"],
                 "--archive-s3-region",
                 "--archive-s3-bucket",
             ),
-            (
+            stray_case(
                 &["--archive-s3-endpoint", "http://minio:9000"],
                 "--archive-s3-endpoint",
                 "--archive-s3-bucket",
             ),
-            (
+            stray_case(
                 &["--archive-s3-access-key-id", "key"],
                 "--archive-s3-access-key-id",
                 "--archive-s3-bucket",
             ),
-            (
+            stray_case(
                 &["--archive-s3-secret-access-key", "secret"],
                 "--archive-s3-secret-access-key",
                 "--archive-s3-bucket",
             ),
-            (
+            stray_case(
                 &["--archive-s3-allow-http"],
                 "--archive-s3-allow-http",
                 "--archive-s3-bucket",
             ),
-            (
+            stray_case(
                 &["--archive-gcs-service-account-path", "/etc/sa.json"],
                 "--archive-gcs-service-account-path",
                 "--archive-gcs-bucket",
             ),
-            (
+            stray_case(
                 &["--archive-gcs-endpoint", "http://fake-gcs:4443"],
                 "--archive-gcs-endpoint",
                 "--archive-gcs-bucket",
             ),
-            (
+            stray_case(
                 &["--archive-gcs-allow-http"],
                 "--archive-gcs-allow-http",
                 "--archive-gcs-bucket",
             ),
         ];
-        for (stray, flag, needs) in cases {
+        for StrayCase { stray, flag, needs } in cases {
             // Each stray flag rides on the backend it does not belong to.
             let mut argv = vec!["--archive-local", "/archive"];
             argv.extend_from_slice(stray);

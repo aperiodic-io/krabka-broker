@@ -201,7 +201,7 @@ fn the_seam_encodes_the_response_header_the_dispatch_loop_encodes() {
 #[tokio::test]
 async fn the_seam_codec_writes_the_frame_the_connection_loop_writes() {
     for case in CASES {
-        let (_payload, framed) = encoded_case(&case);
+        let EncodedCase { framed, .. } = encoded_case(&case);
 
         let mut expected = BytesMut::new();
         expected.put_u32(u32::try_from(framed.len()).expect("a test frame fits in a u32"));
@@ -225,7 +225,7 @@ async fn the_seam_codec_writes_the_frame_the_connection_loop_writes() {
 #[tokio::test]
 async fn the_chained_prototype_the_bench_prices_is_wire_identical() {
     for case in CASES {
-        let (payload, framed) = encoded_case(&case);
+        let EncodedCase { payload, framed } = encoded_case(&case);
 
         let copy_path = wire_bytes(framed, codec(MAX_FRAME_BYTES)).await;
         let prototype = chained_prototype_wire(case.api_key, case.encoding, &payload);
@@ -263,8 +263,14 @@ fn encode_case(case: &Case, payload: &Bytes) -> Bytes {
     .unwrap_or_else(|error| panic!("{}: {error}", case.name))
 }
 
-fn encoded_case(case: &Case) -> (Bytes, Bytes) {
+/// A case's payload and the frame it encodes to.
+struct EncodedCase {
+    payload: Bytes,
+    framed: Bytes,
+}
+
+fn encoded_case(case: &Case) -> EncodedCase {
     let payload = body(case.body_len);
     let framed = encode_case(case, &payload);
-    (payload, framed)
+    EncodedCase { payload, framed }
 }

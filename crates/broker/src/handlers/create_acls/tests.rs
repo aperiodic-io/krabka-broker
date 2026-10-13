@@ -173,12 +173,19 @@ async fn handle_answers_security_disabled_for_each_creation_when_no_authorizer_i
 
 /// A broker with `unstable.feature.versions.enable`, the mode in which
 /// `CreateAcls` applies Kafka trunk's host validation.
-async fn start_trunk_broker() -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| {
+async fn start_trunk_broker() -> TrunkBroker {
+    let (handle, dir) = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = configured_authorizer();
         cfg.features.unstable_feature_versions = krabka_raft::UnstableFeatureVersions::Enabled;
     })
-    .await
+    .await;
+    TrunkBroker { handle, dir }
+}
+
+/// The trunk-mode broker and the temporary directory that holds its data.
+struct TrunkBroker {
+    handle: BrokerHandle,
+    dir: tempfile::TempDir,
 }
 
 /// Kafka 4.3.1 has no host check, so by default `CreateAcls` stores a host
@@ -220,7 +227,10 @@ async fn handle_stores_any_host_by_default() {
 
 macro_rules! cidr_metadata_fixture {
     (($handle:ident, $dir:ident, $broker:ident), $level:expr, $label:literal) => {
-        let ($handle, $dir) = start_trunk_broker().await;
+        let TrunkBroker {
+            handle: $handle,
+            dir: $dir,
+        } = start_trunk_broker().await;
         let $broker = $handle.broker_arc_for_test();
         $broker
             .controller
@@ -448,7 +458,10 @@ async fn handle_bounds_a_request_to_ten_thousand_new_acls() {
 /// judged against 4.3-IV0 too; `features::tests` pins that.)
 #[tokio::test]
 async fn handle_rejects_cidr_host_on_a_freshly_bootstrapped_cluster() {
-    let (broker_handle, _dir) = start_trunk_broker().await;
+    let TrunkBroker {
+        handle: broker_handle,
+        dir: _dir,
+    } = start_trunk_broker().await;
     let _broker = broker_handle.broker_arc_for_test();
     check_cidr_refusal(&broker_handle).await;
     broker_handle.shutdown().await;
@@ -467,8 +480,11 @@ fn count_new_acls_counts_distinct_new_acls_in_linear_time() {
     for n in 0..2_000 {
         image.apply(&MetadataRecord::V1AccessControlEntry(acl(n)));
     }
-    let to_submit: Vec<(usize, MetadataRecord)> = (0..300_000)
-        .map(|n| (n, MetadataRecord::V1AccessControlEntry(acl(n % 12_000))))
+    let to_submit: Vec<super::ValidCreation> = (0..300_000)
+        .map(|n| super::ValidCreation {
+            result_index: n,
+            record: MetadataRecord::V1AccessControlEntry(acl(n % 12_000)),
+        })
         .collect();
 
     let started = std::time::Instant::now();

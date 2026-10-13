@@ -266,11 +266,23 @@ async fn a_for_tests_broker_keeps_its_heartbeat_session() {
     let restarted = session_state(&broker, &config).await;
     broker.shutdown().await;
 
-    assert!([started, restarted] == [(true, BTreeSet::new()), (true, BTreeSet::new())]);
+    let healthy = SessionState {
+        alive: true,
+        fenced: BTreeSet::new(),
+    };
+    assert!([started, restarted] == [healthy.clone(), healthy]);
 }
 
-/// Whether the controller holds `broker` alive, and the brokers its image
-/// marks fenced, once a session that never heartbeated would have expired.
+/// Whether the controller holds a broker alive, and the brokers its image
+/// marks fenced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SessionState {
+    alive: bool,
+    fenced: BTreeSet<u64>,
+}
+
+/// The [`SessionState`] of `broker`, once a session that never heartbeated
+/// would have expired.
 ///
 /// It waits for three session timeouts and a liveness tick, and then for one
 /// more fencing publication, so an expired session has been decided and
@@ -278,7 +290,7 @@ async fn a_for_tests_broker_keeps_its_heartbeat_session() {
 async fn session_state(
     broker: &BrokerHandle,
     config: &krabka_broker::BrokerConfig,
-) -> (bool, BTreeSet<u64>) {
+) -> SessionState {
     tokio::time::sleep(
         config.heartbeat_timeout.to_std() * 3 + config.liveness_tick_interval.to_std(),
     )
@@ -289,8 +301,8 @@ async fn session_state(
             m.controller_fencing_publications_total.get() > published
         })
         .await;
-    (
-        broker.broker_alive_for_test(broker.node_id()).await,
-        broker.fenced_broker_ids_for_test(),
-    )
+    SessionState {
+        alive: broker.broker_alive_for_test(broker.node_id()).await,
+        fenced: broker.fenced_broker_ids_for_test(),
+    }
 }

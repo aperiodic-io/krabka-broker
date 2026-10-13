@@ -157,10 +157,17 @@ context_handler! {
                 Vec::with_capacity(topic.partitions.len());
 
             for fp in topic.partitions {
-                let (row, deleted, waiting_for) = trim_one(&env, &mut spent, &topic.name, &fp).await;
+                let TrimOutcome {
+                    row,
+                    deleted,
+                    waiting_for,
+                } = trim_one(&env, &mut spent, &topic.name, &fp).await;
                 if let Some(required) = waiting_for {
                     waiting.push(low_watermark::Waiting {
-                        row: (topic_results.len(), part_results.len()),
+                        row: low_watermark::RowPosition {
+                            topic: topic_results.len(),
+                            partition: part_results.len(),
+                        },
                         topic: topic.name.clone(),
                         partition: row.partition_index,
                         required,
@@ -218,7 +225,7 @@ async fn publish_diskless_delete_floor(
     part: &Partition,
     floor: Offset,
 ) -> Result<(), BrokerError> {
-    let Some((handle, topic_id)) = diskless_index(env, topic, part) else {
+    let Some(DisklessIndex { handle, topic_id }) = diskless_index(env, topic, part) else {
         return Ok(());
     };
     // A rebuilding projection is the one case that must not be mistaken for
@@ -248,7 +255,7 @@ async fn publish_diskless_delete_floor(
 /// `None` for a partition with no object tier behind it, which trims against
 /// its local log start like any other.
 async fn diskless_logical_start(env: &TrimEnv<'_>, topic: &str, part: &Partition) -> Option<i64> {
-    let (handle, topic_id) = diskless_index(env, topic, part)?;
+    let DisklessIndex { handle, topic_id } = diskless_index(env, topic, part)?;
     let covered = handle
         .index
         .lock()
@@ -258,11 +265,17 @@ async fn diskless_logical_start(env: &TrimEnv<'_>, topic: &str, part: &Partition
 }
 
 /// The diskless read handle and topic id behind a diskless partition.
+struct DisklessIndex<'a> {
+    handle: &'a DisklessReadHandle,
+    topic_id: Uuid,
+}
+
+/// The diskless read handle and topic id behind a diskless partition.
 fn diskless_index<'a>(
     env: &'a TrimEnv<'_>,
     topic: &str,
     part: &Partition,
-) -> Option<(&'a DisklessReadHandle, Uuid)> {
+) -> Option<DisklessIndex<'a>> {
     if !part.diskless {
         return None;
     }
@@ -270,6 +283,7 @@ fn diskless_index<'a>(
         .diskless_read
         .as_deref()
         .zip(env.image.topic(topic).map(|topic| topic.topic_id))
+        .map(|(handle, topic_id)| DisklessIndex { handle, topic_id })
 }
 
 /// Whether the partition's `cleanup.policy` forbids a `DeleteRecords` trim:
@@ -293,6 +307,15 @@ pub(super) struct TrimEnv<'a> {
     pub(super) partitions: &'a PartitionRegistry,
 }
 
+/// What trimming one partition answers: the row the response carries for it,
+/// whether the trim moved the partition's deletion frontier, and the offset the
+/// row still waits for the followers to reach.
+struct TrimOutcome {
+    row: DeleteRecordsPartitionResult,
+    deleted: bool,
+    waiting_for: Option<i64>,
+}
+
 /// Trim one partition, and answer the row the response carries for it beside
 /// whether the trim moved the partition's deletion frontier.
 ///
@@ -309,9 +332,13 @@ async fn trim_one(
     spent: &mut HashSet<Uuid>,
     topic: &str,
     fp: &DeleteRecordsPartition,
-) -> (DeleteRecordsPartitionResult, bool, Option<i64>) {
+) -> TrimOutcome {
     let index = fp.partition_index;
-    let refused = |code| (error_partition_result(index, code), false, None);
+    let refused = |code| TrimOutcome {
+        row: error_partition_result(index, code),
+        deleted: false,
+        waiting_for: None,
+    };
 
     // Kafka's `ReplicaManager.deleteRecordsOnLocalLog` refuses every partition
     // of an internal topic with `INVALID_TOPIC_EXCEPTION` before it looks for
@@ -391,7 +418,13 @@ async fn trim_one(
     // gather two signatures again over a typo.
     let consumed = match authorize_trim(env.image, &env.broker.config.break_glass, topic, index) {
         Ok(consumed) => consumed,
-        Err(denial) => return (refuse_trim(env, topic, index, &denial), false, None),
+        Err(denial) => {
+            return TrimOutcome {
+                row: refuse_trim(env, topic, index, &denial),
+                deleted: false,
+                waiting_for: None,
+            };
+        }
     };
 
     let leo = part.log_end_offset();
@@ -515,11 +548,11 @@ async fn trim_one(
             } else {
                 codes::NONE
             };
-            (
-                partition_result(index, low_watermark, code),
-                deletes,
+            TrimOutcome {
+                row: partition_result(index, low_watermark, code),
+                deleted: deletes,
                 waiting_for,
-            )
+            }
         }
         Err(e) => {
             tracing::warn!(

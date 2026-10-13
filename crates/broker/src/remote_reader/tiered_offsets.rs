@@ -26,7 +26,11 @@ impl RemoteReader {
         tp: &TopicIdPartition,
     ) -> Result<Option<LogOffset>, RemoteStorageError> {
         let listed = self.list_remote_log_segments_blocking(tp).await?;
-        let (starts, ends, finished) = tiered_segment_inputs(&listed);
+        let SegmentInputs {
+            starts,
+            ends,
+            finished,
+        } = tiered_segment_inputs(&listed);
         Ok(tiered_earliest_finished_index(&starts, &ends, &finished)
             .map(|index| listed[index].start_offset()))
     }
@@ -38,7 +42,11 @@ impl RemoteReader {
         tp: &TopicIdPartition,
     ) -> Result<Option<TieredOffset>, RemoteStorageError> {
         let listed = self.list_remote_log_segments_blocking(tp).await?;
-        let (starts, ends, finished) = tiered_segment_inputs(&listed);
+        let SegmentInputs {
+            starts,
+            ends,
+            finished,
+        } = tiered_segment_inputs(&listed);
         let Some(index) = tiered_latest_finished_index(&starts, &ends, &finished) else {
             return Ok(None);
         };
@@ -66,7 +74,15 @@ impl RemoteReader {
     }
 }
 
-fn tiered_segment_inputs(listed: &[RemoteLogSegmentMetadata]) -> (Vec<i64>, Vec<i64>, Vec<bool>) {
+/// The start offset, end offset and copy-finished flag of each listed
+/// segment, in listing order.
+struct SegmentInputs {
+    starts: Vec<i64>,
+    ends: Vec<i64>,
+    finished: Vec<bool>,
+}
+
+fn tiered_segment_inputs(listed: &[RemoteLogSegmentMetadata]) -> SegmentInputs {
     let starts = listed
         .iter()
         .map(RemoteLogSegmentMetadata::start_offset)
@@ -79,7 +95,11 @@ fn tiered_segment_inputs(listed: &[RemoteLogSegmentMetadata]) -> (Vec<i64>, Vec<
         .iter()
         .map(|metadata| metadata.state() == RemoteLogSegmentState::CopySegmentFinished)
         .collect();
-    (starts, ends, finished)
+    SegmentInputs {
+        starts,
+        ends,
+        finished,
+    }
 }
 
 #[cfg(test)]
@@ -89,7 +109,8 @@ mod tests {
         crate::{
             remote_log_manager::test_support::local_backends,
             remote_reader::test_support::{
-                not_ready_reader, reader_with_metadata as assigned_reader_with_metadata, tp,
+                ReaderWithDir, not_ready_reader,
+                reader_with_metadata as assigned_reader_with_metadata, tp,
             },
         },
         assert2::assert,
@@ -99,10 +120,13 @@ mod tests {
         uuid::Uuid,
     };
 
-    fn reader_with_metadata() -> (RemoteReader, tempfile::TempDir) {
+    fn reader_with_metadata() -> ReaderWithDir {
         let remote_dir = tempfile::tempdir().unwrap();
         let (rsm, rlmm) = local_backends(remote_dir.path());
-        (RemoteReader::new(rsm, rlmm), remote_dir)
+        ReaderWithDir {
+            reader: RemoteReader::new(rsm, rlmm),
+            dir: remote_dir,
+        }
     }
 
     use {krabka_ids::Offset, std::collections::BTreeMap};
@@ -185,7 +209,10 @@ mod tests {
 
     #[tokio::test]
     async fn tiered_frontiers_ignore_invalid_and_unfinished_candidates() {
-        let (reader, _remote_dir) = reader_with_metadata();
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = reader_with_metadata();
         add_segment()
             .reader(&reader)
             .start(-10)
@@ -225,7 +252,10 @@ mod tests {
 
     #[tokio::test]
     async fn latest_tiered_offset_rejects_a_segment_without_an_owning_epoch() {
-        let (reader, _remote_dir) = reader_with_metadata();
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = reader_with_metadata();
         add_segment().reader(&reader).call();
         add_segment()
             .reader(&reader)
@@ -238,7 +268,10 @@ mod tests {
 
     #[tokio::test]
     async fn tiered_frontiers_accept_the_maximum_offset_without_arithmetic() {
-        let (reader, _remote_dir) = reader_with_metadata();
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = reader_with_metadata();
         add_segment()
             .reader(&reader)
             .start(i64::MAX)
@@ -322,7 +355,10 @@ mod tests {
 
     #[tokio::test]
     async fn earliest_offset_propagates_not_ready() {
-        let (_remote_dir, reader) = not_ready_reader();
+        let ReaderWithDir {
+            dir: _remote_dir,
+            reader,
+        } = not_ready_reader();
         let err = reader.earliest_offset(&tp()).await.unwrap_err();
         assert!(matches!(err, RemoteStorageError::NotReady { .. }));
         let err = reader.latest_tiered_offset(&tp()).await.unwrap_err();
@@ -437,7 +473,10 @@ mod tests {
         )
         .unwrap();
 
-        let (_remote_dir, reader) = assigned_reader_with_metadata(|| m.clone());
+        let ReaderWithDir {
+            dir: _remote_dir,
+            reader,
+        } = assigned_reader_with_metadata(|| m.clone());
 
         // Unowned partition (never assigned) → the list path treats it as a
         // genuine miss: empty, not an error.

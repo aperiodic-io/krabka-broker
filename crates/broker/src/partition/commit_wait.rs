@@ -93,9 +93,12 @@ impl Partition {
 mod tests {
     use {
         super::Uncommitted,
-        crate::partition::{
-            Partition,
-            test_support::{CommitFixtureLeader, commit_partition},
+        crate::{
+            coordinator::test_support::LeaderMove,
+            partition::{
+                Partition,
+                test_support::{CommitFixtureLeader, commit_partition},
+            },
         },
         assert2::assert,
         krabka_log::Offset,
@@ -122,7 +125,7 @@ mod tests {
             /// The high watermark when the wait starts.
             hw_now: i64,
             /// The leader and epoch the partition installs during the wait.
-            moves_to: Option<(u64, i32)>,
+            moves_to: Option<LeaderMove>,
             /// The high watermark that followers bring during the wait,
             /// after any move.
             hw_later: Option<i64>,
@@ -150,7 +153,10 @@ mod tests {
             Case {
                 what: "another broker takes the partition",
                 hw_now: 0,
-                moves_to: Some((2, 1)),
+                moves_to: Some(LeaderMove {
+                    leader: 2,
+                    epoch: 1,
+                }),
                 hw_later: None,
                 timeout: long,
                 expected: Err(Uncommitted::TermEnded),
@@ -158,7 +164,10 @@ mod tests {
             Case {
                 what: "the same broker leads again at a newer epoch",
                 hw_now: 0,
-                moves_to: Some((1, 1)),
+                moves_to: Some(LeaderMove {
+                    leader: 1,
+                    epoch: 1,
+                }),
                 hw_later: None,
                 timeout: long,
                 expected: Err(Uncommitted::TermEnded),
@@ -166,7 +175,10 @@ mod tests {
             Case {
                 what: "the high watermark passes the append after the move",
                 hw_now: 0,
-                moves_to: Some((2, 1)),
+                moves_to: Some(LeaderMove {
+                    leader: 2,
+                    epoch: 1,
+                }),
                 hw_later: Some(2),
                 timeout: long,
                 expected: Err(Uncommitted::TermEnded),

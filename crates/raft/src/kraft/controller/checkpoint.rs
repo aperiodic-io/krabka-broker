@@ -2,13 +2,13 @@
 //! directory: their filename encoding, atomic write, id ordering, and the
 //! two-snapshot retention the engine keeps the directory at.
 
-use crate::error::RaftError;
+use crate::{error::RaftError, kraft::snapshot_fetch::SnapshotId};
 
 /// Kafka's `Snapshots.BOOTSTRAP_SNAPSHOT_ID`: the id of the bootstrap
 /// checkpoint that a dynamic format writes. No replica replicates it, and no
 /// replica applies its metadata records to its image. The leader writes those
 /// records to the log instead.
-pub(crate) const BOOTSTRAP_SNAPSHOT_ID: (i64, i32) = (0, 0);
+pub(crate) const BOOTSTRAP_SNAPSHOT_ID: SnapshotId = (0, 0);
 
 /// Write a KIP-630 `.checkpoint` artifact (bytes only) atomically and
 /// durably: the temporary file is synced before the rename and the directory
@@ -54,7 +54,7 @@ pub(crate) fn checkpoint_name(end_offset: i64, epoch: i32) -> String {
     format!("{end_offset:020}-{epoch:010}.checkpoint")
 }
 
-pub(crate) fn parse_checkpoint_name(name: &str) -> Option<(i64, i32)> {
+pub(crate) fn parse_checkpoint_name(name: &str) -> Option<SnapshotId> {
     let stem = name.strip_suffix(".checkpoint")?;
     let (off, ep) = stem.split_once('-')?;
     let id = (off.parse().ok()?, ep.parse().ok()?);
@@ -68,14 +68,14 @@ pub(crate) fn parse_checkpoint_name(name: &str) -> Option<(i64, i32)> {
 /// highest `(end_offset, epoch)` id, or `None` when the directory is absent or
 /// holds no checkpoint.
 #[must_use]
-pub fn latest_checkpoint_id(dir: &std::path::Path) -> Option<(i64, i32)> {
+pub fn latest_checkpoint_id(dir: &std::path::Path) -> Option<SnapshotId> {
     let ids = checkpoint_ids(dir);
     krabka_verified::latest_checkpoint_index(&ids).map(|index| ids[index])
 }
 
 /// Every parseable `(end_offset, epoch)` id in `dir`, in directory order. An
 /// absent directory and one holding no checkpoint are both empty.
-pub(crate) fn checkpoint_ids(dir: &std::path::Path) -> Vec<(i64, i32)> {
+pub(crate) fn checkpoint_ids(dir: &std::path::Path) -> Vec<SnapshotId> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -85,20 +85,26 @@ pub(crate) fn checkpoint_ids(dir: &std::path::Path) -> Vec<(i64, i32)> {
         .collect()
 }
 
+/// The two newest checkpoint ids in a directory.
+struct RecentCheckpointIds {
+    latest: SnapshotId,
+    previous: SnapshotId,
+}
+
 /// The two newest ids in `dir`: the latest and the one before it. A directory
 /// holding a single checkpoint returns that id twice, which is what
 /// [`krabka_verified::checkpoint_id_retained`] expects for "there is no
 /// runner-up".
-fn recent_checkpoint_ids(dir: &std::path::Path) -> Option<((i64, i32), (i64, i32))> {
+fn recent_checkpoint_ids(dir: &std::path::Path) -> Option<RecentCheckpointIds> {
     let mut ids = checkpoint_ids(dir);
     let latest = ids.swap_remove(krabka_verified::latest_checkpoint_index(&ids)?);
     let previous =
         krabka_verified::latest_checkpoint_index(&ids).map_or(latest, |index| ids[index]);
-    Some((latest, previous))
+    Some(RecentCheckpointIds { latest, previous })
 }
 
 #[must_use]
-pub fn checkpoint_id_is_newer(candidate: (i64, i32), current: (i64, i32)) -> bool {
+pub fn checkpoint_id_is_newer(candidate: SnapshotId, current: SnapshotId) -> bool {
     krabka_verified::checkpoint_id_newer(candidate.0, candidate.1, current.0, current.1)
 }
 
@@ -114,7 +120,7 @@ pub fn checkpoint_id_is_newer(candidate: (i64, i32), current: (i64, i32)) -> boo
 /// snapshot the same way, through retention alone rather than by tracking
 /// in-flight readers.
 pub fn retain_recent_checkpoints(dir: &std::path::Path) {
-    let Some((latest, previous)) = recent_checkpoint_ids(dir) else {
+    let Some(RecentCheckpointIds { latest, previous }) = recent_checkpoint_ids(dir) else {
         return;
     };
     retain_checkpoints(dir, latest, previous);
@@ -135,7 +141,7 @@ pub fn retain_latest_checkpoint(dir: &std::path::Path) {
 
 /// Delete every `.checkpoint` in `dir` outside the two retained ids. Passing
 /// one id as both keeps exactly that one.
-fn retain_checkpoints(dir: &std::path::Path, latest: (i64, i32), previous: (i64, i32)) {
+fn retain_checkpoints(dir: &std::path::Path, latest: SnapshotId, previous: SnapshotId) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };

@@ -68,15 +68,38 @@ async fn api_versions(
     ApiVersionsResponse::decode(&mut &response[..], version).expect("decode ApiVersions")
 }
 
-async fn controller_listener_fixture() -> (TempDir, tokio::net::TcpListener, SocketAddr) {
+/// A data directory and the controller listener bound for it.
+struct ControllerListenerFixture {
+    dir: TempDir,
+    listener: tokio::net::TcpListener,
+    addr: SocketAddr,
+}
+
+async fn controller_listener_fixture() -> ControllerListenerFixture {
     let dir = TempDir::new().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    (dir, listener, addr)
+    ControllerListenerFixture {
+        dir,
+        listener,
+        addr,
+    }
 }
 
-async fn start_sasl_controller() -> (krabka_broker::BrokerHandle, SocketAddr, TempDir) {
-    let (dir, controller, controller_addr) = controller_listener_fixture().await;
+/// A running broker, its controller listener address and the directory that
+/// backs it.
+struct ControllerNode {
+    broker: krabka_broker::BrokerHandle,
+    controller_addr: SocketAddr,
+    dir: TempDir,
+}
+
+async fn start_sasl_controller() -> ControllerNode {
+    let ControllerListenerFixture {
+        dir,
+        listener: controller,
+        addr: controller_addr,
+    } = controller_listener_fixture().await;
     let data_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let mut cfg = BrokerConfig::for_tests(dir.path().to_path_buf());
     cfg.controller_listen_addr = controller_addr;
@@ -98,12 +121,20 @@ async fn start_sasl_controller() -> (krabka_broker::BrokerHandle, SocketAddr, Te
     let broker = Broker::start_with_controller_listener(cfg, Some(controller))
         .await
         .expect("start broker");
-    (broker, controller_addr, dir)
+    ControllerNode {
+        broker,
+        controller_addr,
+        dir,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sasl_controller_listener_answers_api_versions_before_authentication() {
-    let (broker, controller_addr, _dir) = start_sasl_controller().await;
+    let ControllerNode {
+        broker,
+        controller_addr,
+        dir: _dir,
+    } = start_sasl_controller().await;
 
     // Kafka 4.3.1 serves `ApiVersions` v0-v4; v5 is trunk's, so it is
     // refused below like an unknown version, while
@@ -201,10 +232,12 @@ async fn sasl_controller_listener_answers_api_versions_before_authentication() {
 }
 
 /// A broker whose controller listener is PLAINTEXT, on `customize`d settings.
-async fn start_plaintext_controller(
-    customize: impl FnOnce(&mut BrokerConfig),
-) -> (krabka_broker::BrokerHandle, SocketAddr, TempDir) {
-    let (dir, controller, controller_addr) = controller_listener_fixture().await;
+async fn start_plaintext_controller(customize: impl FnOnce(&mut BrokerConfig)) -> ControllerNode {
+    let ControllerListenerFixture {
+        dir,
+        listener: controller,
+        addr: controller_addr,
+    } = controller_listener_fixture().await;
     let mut cfg = BrokerConfig::for_tests(dir.path().to_path_buf());
     cfg.controller_listen_addr = controller_addr;
     cfg.controller_quorum_voters = vec![(cfg.node_id, controller_addr.to_string())];
@@ -212,7 +245,11 @@ async fn start_plaintext_controller(
     let broker = Broker::start_with_controller_listener(cfg, Some(controller))
         .await
         .expect("start broker");
-    (broker, controller_addr, dir)
+    ControllerNode {
+        broker,
+        controller_addr,
+        dir,
+    }
 }
 
 /// Waits for the listener to end `stream`: the next read is end of input or
@@ -234,7 +271,11 @@ async fn assert_closed(stream: &mut TcpStream, what: &str) {
 /// where it used to allocate for whatever the four bytes said.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_controller_listener_refuses_a_request_over_socket_request_max() {
-    let (broker, controller_addr, _dir) = start_plaintext_controller(|cfg| {
+    let ControllerNode {
+        broker,
+        controller_addr,
+        dir: _dir,
+    } = start_plaintext_controller(|cfg| {
         cfg.socket_request_max = krabka_units::kibibytes(4);
     })
     .await;
@@ -259,7 +300,11 @@ async fn the_controller_listener_refuses_a_request_over_socket_request_max() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_controller_listener_closes_an_idle_connection() {
     let window = std::time::Duration::from_millis(800);
-    let (broker, controller_addr, _dir) = start_plaintext_controller(|cfg| {
+    let ControllerNode {
+        broker,
+        controller_addr,
+        dir: _dir,
+    } = start_plaintext_controller(|cfg| {
         cfg.connections_max_idle_overrides
             .insert("CONTROLLER".to_string(), krabka_units::millis(800));
     })

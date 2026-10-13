@@ -120,11 +120,18 @@ fn fetch_snapshot_response_round_trips_error_code() {
     assert2::assert!(PeerResponse::decode_fetch_snapshot(&resp.encode()) == Some(resp));
 }
 
-fn leader(leader_id: Option<u64>, epoch: Epoch, endpoint: Option<(&str, u16)>) -> QuorumLeader {
+fn leader_endpoint(host: &str, port: u16) -> LeaderEndpoint {
+    LeaderEndpoint {
+        host: host.to_string(),
+        port,
+    }
+}
+
+fn leader(leader_id: Option<u64>, epoch: Epoch, endpoint: Option<LeaderEndpoint>) -> QuorumLeader {
     QuorumLeader {
         leader_id: leader_id.map(NodeId),
         epoch,
-        endpoint: endpoint.map(|(host, port)| (host.to_string(), port)),
+        endpoint,
     }
 }
 
@@ -142,7 +149,10 @@ fn fetch_answer(error_code: i16, leader: QuorumLeader) -> FetchAnswer {
 
 #[test]
 fn fetch_response_round_trips() {
-    let served = fetch_answer(0, leader(Some(2), 5, Some(("controller-2", 9093))));
+    let served = fetch_answer(
+        0,
+        leader(Some(2), 5, Some(leader_endpoint("controller-2", 9093))),
+    );
     for (case, answer) in [
         ("served", served.clone()),
         ("records", FetchAnswer {
@@ -168,7 +178,7 @@ fn fetch_response_round_trips() {
             "follower redirect to leader 0",
             fetch_answer(
                 NOT_LEADER_OR_FOLLOWER,
-                leader(Some(0), 5, Some(("controller-0", 9093))),
+                leader(Some(0), 5, Some(leader_endpoint("controller-0", 9093))),
             ),
         ),
         (
@@ -222,7 +232,11 @@ fn a_refused_fetch_is_kafkas_empty_fetch_response() {
     for (case, answer, expected) in [
         (
             "known leader",
-            refused(leader(Some(2), 5, Some(("controller-2", 9093)))),
+            refused(leader(
+                Some(2),
+                5,
+                Some(leader_endpoint("controller-2", 9093)),
+            )),
             kafka(2, vec![fetch_resp::NodeEndpoint {
                 node_id: 2,
                 host: "controller-2".into(),
@@ -233,7 +247,7 @@ fn a_refused_fetch_is_kafkas_empty_fetch_response() {
         // `singletonFetchResponse` adds no entry without a leader id.
         (
             "unknown leader",
-            refused(leader(None, 5, Some(("controller-2", 9093)))),
+            refused(leader(None, 5, Some(leader_endpoint("controller-2", 9093)))),
             kafka(-1, Vec::new()),
         ),
     ] {

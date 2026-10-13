@@ -27,25 +27,33 @@ use {
     std::sync::Arc,
 };
 
-type RequestTopic<'a> = (&'a str, Vec<i32>);
-type RequestGroup<'a> = (&'a str, Vec<RequestTopic<'a>>);
+/// A requested topic and the partitions of it that the request names.
+struct RequestTopic<'a> {
+    topic_name: &'a str,
+    partitions: Vec<i32>,
+}
+
+/// A requested group and the topics of it that the request names.
+struct RequestGroup<'a> {
+    group_id: &'a str,
+    topics: Vec<RequestTopic<'a>>,
+}
 
 fn request(groups: &[RequestGroup<'_>]) -> DescribeShareGroupOffsetsRequest {
     DescribeShareGroupOffsetsRequest {
         groups: groups
             .iter()
-            .map(|(group_id, topics)| DescribeShareGroupOffsetsRequestGroup {
-                group_id: (*group_id).into(),
+            .map(|group| DescribeShareGroupOffsetsRequestGroup {
+                group_id: group.group_id.into(),
                 topics: Some(
-                    topics
+                    group
+                        .topics
                         .iter()
-                        .map(
-                            |(topic_name, partitions)| DescribeShareGroupOffsetsRequestTopic {
-                                topic_name: (*topic_name).into(),
-                                partitions: partitions.clone(),
-                                ..Default::default()
-                            },
-                        )
+                        .map(|topic| DescribeShareGroupOffsetsRequestTopic {
+                            topic_name: topic.topic_name.into(),
+                            partitions: topic.partitions.clone(),
+                            ..Default::default()
+                        })
                         .collect(),
                 ),
                 ..Default::default()
@@ -72,7 +80,22 @@ async fn handle_error_scenarios_preserve_expected_rows() {
             "disabled feature preserves group error rows",
             Arc::new(crate::authorizer::AllowAllAuthorizer),
             crate::test_support::ShareApiSupport::Disabled,
-            vec![("g1", vec![("t1", vec![0])]), ("g2", vec![("t2", vec![1])])],
+            vec![
+                RequestGroup {
+                    group_id: "g1",
+                    topics: vec![RequestTopic {
+                        topic_name: "t1",
+                        partitions: vec![0],
+                    }],
+                },
+                RequestGroup {
+                    group_id: "g2",
+                    topics: vec![RequestTopic {
+                        topic_name: "t2",
+                        partitions: vec![1],
+                    }],
+                },
+            ],
             unthrottled_wire!(DescribeShareGroupOffsetsResponse {
                 groups: vec![
                     tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
@@ -94,7 +117,13 @@ async fn handle_error_scenarios_preserve_expected_rows() {
             "denied group preserves group id and error code",
             Arc::new(crate::test_support::ControllerPeerAllowed(DenyAll)),
             crate::test_support::ShareApiSupport::Enabled,
-            vec![("g1", vec![("missing", vec![0])])],
+            vec![RequestGroup {
+                group_id: "g1",
+                topics: vec![RequestTopic {
+                    topic_name: "missing",
+                    partitions: vec![0],
+                }],
+            }],
             unthrottled_wire!(DescribeShareGroupOffsetsResponse {
                 groups: vec![tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
                     group_id: "g1".into(),
@@ -108,7 +137,13 @@ async fn handle_error_scenarios_preserve_expected_rows() {
             "an unknown topic has no data and no error",
             Arc::new(crate::authorizer::AllowAllAuthorizer),
             crate::test_support::ShareApiSupport::Enabled,
-            vec![("g1", vec![("missing-topic", vec![3, 5])])],
+            vec![RequestGroup {
+                group_id: "g1",
+                topics: vec![RequestTopic {
+                    topic_name: "missing-topic",
+                    partitions: vec![3, 5],
+                }],
+            }],
             unthrottled_wire!(DescribeShareGroupOffsetsResponse {
                 groups: vec![tagged_wire!(DescribeShareGroupOffsetsResponseGroup {
                     group_id: "g1".into(),

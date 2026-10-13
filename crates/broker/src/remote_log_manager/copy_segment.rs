@@ -545,13 +545,13 @@ mod tests {
     }
     /// One seal case: what it is called, the backend it runs against, where
     /// the copy sits in the chain, and the counter values it must leave.
-    type SealCase = (
-        &'static str,
-        Arc<dyn RemoteStorageManager>,
-        ChainPosition,
-        u64,
-        u64,
-    );
+    struct SealCase {
+        name: &'static str,
+        rsm: Arc<dyn RemoteStorageManager>,
+        chain: ChainPosition,
+        sealed: u64,
+        failed: u64,
+    }
 
     /// The two KFC-5 seal counters, over every outcome one copy can reach.
     ///
@@ -567,36 +567,43 @@ mod tests {
             prev_head: ChainHead::GENESIS,
         };
         let cases: [SealCase; 4] = [
-            (
-                "a sealed manifest with a matching receipt",
-                Arc::new(FakeWormArchive::new()),
-                ChainPosition::At(stamp),
-                1,
-                0,
-            ),
-            (
-                "a copy the backend refused",
-                Arc::new(AlwaysFailRsm),
-                ChainPosition::At(stamp),
-                0,
-                1,
-            ),
-            (
-                "a copy that came back with no receipt",
-                Arc::new(ReturningRsm(None)),
-                ChainPosition::At(stamp),
-                0,
-                1,
-            ),
-            (
-                "an unchained copy that failed",
-                Arc::new(AlwaysFailRsm),
-                ChainPosition::Unchained,
-                0,
-                0,
-            ),
+            SealCase {
+                name: "a sealed manifest with a matching receipt",
+                rsm: Arc::new(FakeWormArchive::new()),
+                chain: ChainPosition::At(stamp),
+                sealed: 1,
+                failed: 0,
+            },
+            SealCase {
+                name: "a copy the backend refused",
+                rsm: Arc::new(AlwaysFailRsm),
+                chain: ChainPosition::At(stamp),
+                sealed: 0,
+                failed: 1,
+            },
+            SealCase {
+                name: "a copy that came back with no receipt",
+                rsm: Arc::new(ReturningRsm(None)),
+                chain: ChainPosition::At(stamp),
+                sealed: 0,
+                failed: 1,
+            },
+            SealCase {
+                name: "an unchained copy that failed",
+                rsm: Arc::new(AlwaysFailRsm),
+                chain: ChainPosition::Unchained,
+                sealed: 0,
+                failed: 0,
+            },
         ];
-        for (name, rsm, chain, sealed, failed) in cases {
+        for SealCase {
+            name,
+            rsm,
+            chain,
+            sealed,
+            failed,
+        } in cases
+        {
             fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
             let tier = fixtures::configured_tier()
                 .rsm(&rsm)

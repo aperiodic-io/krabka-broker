@@ -99,7 +99,11 @@ impl Rule {
         let body = spec
             .strip_prefix("RULE:")
             .ok_or(SslPrincipalRuleError::Syntax)?;
-        let (pattern, replacement, flag) = split_rule(body).ok_or(SslPrincipalRuleError::Syntax)?;
+        let RuleParts {
+            pattern,
+            replacement,
+            flag,
+        } = split_rule(body).ok_or(SslPrincipalRuleError::Syntax)?;
         let case = match flag {
             "" => Case::Preserve,
             "L" => Case::Lower,
@@ -164,9 +168,16 @@ fn escape_literal_back_references(
     Ok(value.into_iter().collect())
 }
 
+/// The three parts of a `RULE:` body.
+struct RuleParts<'a> {
+    pattern: &'a str,
+    replacement: &'a str,
+    flag: &'a str,
+}
+
 /// Splits a `RULE:` body into `pattern`, `replacement` and the case flag at
 /// its first two unescaped slashes. `None` when there are fewer than two.
-fn split_rule(body: &str) -> Option<(&str, &str, &str)> {
+fn split_rule(body: &str) -> Option<RuleParts<'_>> {
     let mut slashes = [0_usize; 2];
     let mut seen = 0_usize;
     let mut escaped = false;
@@ -180,12 +191,10 @@ fn split_rule(body: &str) -> Option<(&str, &str, &str)> {
             seen += 1;
         }
     }
-    (seen == 2).then(|| {
-        (
-            &body[..slashes[0]],
-            &body[slashes[0] + 1..slashes[1]],
-            &body[slashes[1] + 1..],
-        )
+    (seen == 2).then(|| RuleParts {
+        pattern: &body[..slashes[0]],
+        replacement: &body[slashes[0] + 1..slashes[1]],
+        flag: &body[slashes[1] + 1..],
     })
 }
 
@@ -250,10 +259,33 @@ mod tests {
         assert2::{assert, check},
     };
 
-    fn check_mappings<'a>(
-        cases: impl IntoIterator<Item = (&'a [&'a str], &'a str, Option<&'a str>)>,
-    ) {
-        for (specs, distinguished_name, expected) in cases {
+    /// Rules, a distinguished name and the principal the rules map it to.
+    struct MappingCase<'a> {
+        specs: &'a [&'a str],
+        distinguished_name: &'a str,
+        expected: Option<&'a str>,
+    }
+
+    /// A [`MappingCase`] of `specs` on `distinguished_name`.
+    const fn mapping<'a>(
+        specs: &'a [&'a str],
+        distinguished_name: &'a str,
+        expected: Option<&'a str>,
+    ) -> MappingCase<'a> {
+        MappingCase {
+            specs,
+            distinguished_name,
+            expected,
+        }
+    }
+
+    fn check_mappings<'a>(cases: impl IntoIterator<Item = MappingCase<'a>>) {
+        for MappingCase {
+            specs,
+            distinguished_name,
+            expected,
+        } in cases
+        {
             let mapper =
                 SslPrincipalMapper::parse(specs).unwrap_or_else(|_| panic!("{specs:?} parses"));
             check!(
@@ -269,48 +301,48 @@ mod tests {
     fn kafka_documented_rules_map_the_subject_dn() {
         // (rules, distinguished name, principal)
         let cases = [
-            (
+            mapping(
                 &["RULE:^CN=(.*?),OU=ServiceUsers.*$/$1/"][..],
                 "CN=serviceuser,OU=ServiceUsers,O=Unknown,L=Unknown,ST=Unknown,C=Unknown",
                 Some("serviceuser"),
             ),
             // No rule matches and there is no DEFAULT tail, so the mapping is
             // refused rather than falling back to the DN.
-            (
+            mapping(
                 &["RULE:^CN=(.*?),OU=ServiceUsers.*$/$1/"][..],
                 "CN=adminUser,OU=Admin,O=Unknown,L=Unknown,ST=Unknown,C=Unknown",
                 None,
             ),
-            (
+            mapping(
                 &["RULE:^CN=(.*?),OU=(.*?),O=(.*?),L=(.*?),ST=(.*?),C=(.*?)$/$1@$2/L"][..],
                 "CN=adminUser,OU=Admin,O=Unknown,L=Unknown,ST=Unknown,C=Unknown",
                 Some("adminuser@admin"),
             ),
-            (
+            mapping(
                 &["RULE:^.*[Cc][Nn]=([a-zA-Z0-9.]*).*$/$1/U"][..],
                 "cn=User,OU=Admin,O=Unknown,L=Unknown,ST=Unknown,C=Unknown",
                 Some("USER"),
             ),
-            (
+            mapping(
                 &["DEFAULT"][..],
                 "CN=alice,OU=x,O=y",
                 Some("CN=alice,OU=x,O=y"),
             ),
             // First match wins: the specific rule shadows the DEFAULT tail.
-            (
+            mapping(
                 &["RULE:^CN=(.*?),.*$/$1/", "DEFAULT"][..],
                 "CN=alice,OU=integration,O=krabka",
                 Some("alice"),
             ),
             // The DEFAULT tail is what passes an unmatched DN through.
-            (
+            mapping(
                 &["RULE:^CN=(.*?),.*$/$1/", "DEFAULT"][..],
                 "OU=integration,O=krabka",
                 Some("OU=integration,O=krabka"),
             ),
             // An explicitly empty list has no rule to match, so it maps
             // nothing.
-            (&[][..], "CN=alice,OU=x,O=y", None),
+            mapping(&[][..], "CN=alice,OU=x,O=y", None),
         ];
         check_mappings(cases);
     }
@@ -323,37 +355,37 @@ mod tests {
     fn java_match_and_replacement_semantics() {
         // (rules, distinguished name, principal)
         let cases = [
-            (
+            mapping(
                 &["RULE:^CN=(.*),OU=(.*)$/$1_$2/"][..],
                 "CN=alice,OU=admin",
                 Some("alice_admin"),
             ),
-            (
+            mapping(
                 &["RULE:^CN=(.*),OU=.*$/$1suffix/"][..],
                 "CN=alice,OU=admin",
                 Some("alicesuffix"),
             ),
-            (
+            mapping(
                 &["RULE:^CN=(.*),OU=(.*)$/$1@$4/"][..],
                 "CN=alice,OU=admin",
                 Some("alice@$4"),
             ),
-            (
+            mapping(
                 &["RULE:^CN=(.*),OU=(.*)$/$1@$22/"][..],
                 "CN=alice,OU=admin",
                 Some("alice@admin2"),
             ),
             // A lazy pattern with no anchors spans the DN by backtracking,
             // and `replaceAll` then rewrites its leftmost matches.
-            (&["RULE:CN=(.*?)/$1/"][..], "CN=abc", Some("abc")),
-            (&["RULE:a|ab/x/"][..], "ab", Some("xb")),
-            (&["RULE:a|ab/x/"][..], "abc", None),
+            mapping(&["RULE:CN=(.*?)/$1/"][..], "CN=abc", Some("abc")),
+            mapping(&["RULE:a|ab/x/"][..], "ab", Some("xb")),
+            mapping(&["RULE:a|ab/x/"][..], "abc", None),
             // `$1` where the pattern has no group is Java's
             // `IndexOutOfBoundsException`: no principal, and no fall-through.
-            (&["RULE:^CN=.*$/$1/", "DEFAULT"][..], "CN=alice", None),
+            mapping(&["RULE:^CN=.*$/$1/", "DEFAULT"][..], "CN=alice", None),
             // Kafka's literal-escape edit lands on the wrong character when
             // two references are stray, so the second one throws.
-            (&["RULE:^(.*),(.*),(.*)$/$4@$5/"][..], "a,b,c", None),
+            mapping(&["RULE:^(.*),(.*),(.*)$/$4@$5/"][..], "a,b,c", None),
         ];
         check_mappings(cases);
     }

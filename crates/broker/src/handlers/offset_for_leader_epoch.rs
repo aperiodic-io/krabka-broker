@@ -363,6 +363,15 @@ mod tests {
         }
     }
 
+    /// One row of the fast-path table: whether the principal holds cluster
+    /// `ClusterAction`, whether it may describe `"payments"`, and the topic
+    /// rows expected.
+    struct FastPathCase {
+        cluster_action: bool,
+        payments_describe: bool,
+        expected_topics: Vec<OffsetForLeaderTopicResult>,
+    }
+
     /// `(cluster ClusterAction, topic Describe on "payments")` ->
     /// `expected topics`, in the order the response must carry them.
     ///
@@ -374,26 +383,35 @@ mod tests {
     /// in request order.
     #[tokio::test]
     async fn cluster_action_fast_path_table() {
-        let cases: [(bool, bool, Vec<OffsetForLeaderTopicResult>); 4] = [
-            (true, false, vec![
-                unknown_topic_row("orders"),
-                unknown_topic_row("payments"),
-            ]),
-            (false, true, vec![
-                unknown_topic_row("orders"),
-                unknown_topic_row("payments"),
-            ]),
-            (false, false, vec![
-                unknown_topic_row("orders"),
-                denied_row("payments"),
-            ]),
-            (true, true, vec![
-                unknown_topic_row("orders"),
-                unknown_topic_row("payments"),
-            ]),
+        let cases: [FastPathCase; 4] = [
+            FastPathCase {
+                cluster_action: true,
+                payments_describe: false,
+                expected_topics: vec![unknown_topic_row("orders"), unknown_topic_row("payments")],
+            },
+            FastPathCase {
+                cluster_action: false,
+                payments_describe: true,
+                expected_topics: vec![unknown_topic_row("orders"), unknown_topic_row("payments")],
+            },
+            FastPathCase {
+                cluster_action: false,
+                payments_describe: false,
+                expected_topics: vec![unknown_topic_row("orders"), denied_row("payments")],
+            },
+            FastPathCase {
+                cluster_action: true,
+                payments_describe: true,
+                expected_topics: vec![unknown_topic_row("orders"), unknown_topic_row("payments")],
+            },
         ];
 
-        for (cluster_action, payments_describe, expected_topics) in cases {
+        for FastPathCase {
+            cluster_action,
+            payments_describe,
+            expected_topics,
+        } in cases
+        {
             let authorizer = Arc::new(TestAuthorizer {
                 cluster_action,
                 payments_describe,

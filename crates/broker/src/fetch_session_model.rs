@@ -102,15 +102,29 @@ fn ref_matches(k: &FetchSessionKey, r: Ref, p: i32) -> bool {
 struct CacheState {
     partitions: HashMap<FetchSessionKey, CachedPartitionState>,
 }
+/// One cached partition, as the hashable projection of a [`CacheState`] sees it.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct ProjectedEntry {
+    topic_name: String,
+    topic_id: [u8; 16],
+    partition: i32,
+    max_bytes: i32,
+}
+
 impl CacheState {
     /// Canonical, hashable projection: (name, id-bytes, partition, `max_bytes`),
     /// sorted. `max_bytes` distinguishes a real entry from a default-state
     /// shadow. The other `CachedPartitionState` fields are irrelevant here.
-    fn proj(&self) -> Vec<(String, [u8; 16], i32, i32)> {
+    fn proj(&self) -> Vec<ProjectedEntry> {
         let mut v: Vec<_> = self
             .partitions
             .iter()
-            .map(|(k, s)| (k.topic_name.clone(), k.topic_id.0, k.partition, s.max_bytes))
+            .map(|(k, s)| ProjectedEntry {
+                topic_name: k.topic_name.clone(),
+                topic_id: k.topic_id.0,
+                partition: k.partition,
+                max_bytes: s.max_bytes,
+            })
             .collect();
         v.sort();
         v
@@ -128,8 +142,23 @@ impl Hash for CacheState {
 /// subscribe one (ref, partition, `max_bytes`). A real fetch can carry both.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 struct Fetch {
-    forget: Option<(Ref, i32)>,
-    sub: Option<(Ref, i32, i32)>,
+    forget: Option<ForgetTopic>,
+    sub: Option<SubscribeTopic>,
+}
+
+/// A topic partition a fetch forgets.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+struct ForgetTopic {
+    topic: Ref,
+    partition: i32,
+}
+
+/// A topic partition a fetch subscribes, with its `max_bytes`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+struct SubscribeTopic {
+    topic: Ref,
+    partition: i32,
+    max_bytes: i32,
 }
 
 struct FsModel {
@@ -190,12 +219,12 @@ impl Model for FsModel {
             let forgotten: Vec<ForgottenTopic> = a
                 .forget
                 .into_iter()
-                .map(|(r, p)| forgotten_topic(r, p))
+                .map(|ForgetTopic { topic: r, partition: p }| forgotten_topic(r, p))
                 .collect();
             let topics: Vec<FetchTopic> = a
                 .sub
                 .into_iter()
-                .map(|(r, p, mb)| fetch_topic(r, p, mb))
+                .map(|SubscribeTopic { topic: r, partition: p, max_bytes: mb }| fetch_topic(r, p, mb))
                 .collect();
 
             apply_incremental(&mut s.partitions, &forgotten, &topics);
@@ -209,7 +238,7 @@ impl Model for FsModel {
 
             // Subscription fidelity: a subscribed partition is reflected with the
             // requested max_bytes by some key matching the request's identity.
-            if let Some((r, p, mb)) = a.sub {
+            if let Some(SubscribeTopic { topic: r, partition: p, max_bytes: mb }) = a.sub {
                 let present = s
                     .partitions
                     .iter()
@@ -244,17 +273,24 @@ impl Model for FsModel {
     }
 
     fn actions(&self, _s: &Self::State, actions: &mut Vec<Self::Action>) {
-        let mut forgets: Vec<Option<(Ref, i32)>> = vec![None];
+        let mut forgets: Vec<Option<ForgetTopic>> = vec![None];
         for &r in &self.refs {
             for &p in &self.partitions {
-                forgets.push(Some((r, p)));
+                forgets.push(Some(ForgetTopic {
+                    topic: r,
+                    partition: p,
+                }));
             }
         }
-        let mut subs: Vec<Option<(Ref, i32, i32)>> = vec![None];
+        let mut subs: Vec<Option<SubscribeTopic>> = vec![None];
         for &r in &self.refs {
             for &p in &self.partitions {
                 for mb in [1, 2] {
-                    subs.push(Some((r, p, mb)));
+                    subs.push(Some(SubscribeTopic {
+                        topic: r,
+                        partition: p,
+                        max_bytes: mb,
+                    }));
                 }
             }
         }

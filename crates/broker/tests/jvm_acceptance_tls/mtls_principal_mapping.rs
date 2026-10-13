@@ -105,10 +105,16 @@ fn prepare_client_keystore() -> std::path::PathBuf {
     keystore_path
 }
 
+/// A running broker and the directory that backs it.
+struct StartedBroker {
+    broker: krabka_broker::BrokerHandle,
+    dir: tempfile::TempDir,
+}
+
 /// Spawns a broker with a single `SSL` listener that requires a client
 /// certificate, trusts the fixture client CA, and maps the peer DN through
 /// KIP-371 rules. The mapped short name is the only super-user.
-async fn start_mtls_broker() -> (krabka_broker::BrokerHandle, tempfile::TempDir) {
+async fn start_mtls_broker() -> StartedBroker {
     init_jvm_tracing("krabka_broker=debug,info");
     let dir = tempfile::tempdir().expect("tempdir");
     let listen_addr: std::net::SocketAddr = broker0_listen().parse().expect("allocated addr");
@@ -144,7 +150,10 @@ async fn start_mtls_broker() -> (krabka_broker::BrokerHandle, tempfile::TempDir)
         config.super_users.clone(),
     ));
     let handle = Broker::start(config).await.expect("start mtls broker");
-    (handle, dir)
+    StartedBroker {
+        broker: handle,
+        dir,
+    }
 }
 
 /// A JVM client that presents `CN=test-client\,OU\=integration\,O\=krabka` is
@@ -154,7 +163,7 @@ async fn start_mtls_broker() -> (krabka_broker::BrokerHandle, tempfile::TempDir)
 async fn jvm_mtls_principal_mapping_rules_shorten_the_subject_dn() {
     const TOPIC: &str = "krabka-mtls-mapping-itest";
 
-    let (broker, _dir) = start_mtls_broker().await;
+    let StartedBroker { broker, dir: _dir } = start_mtls_broker().await;
     nc_check_connectivity();
     let truststore_path = prepare_jks_truststore();
     let keystore_path = prepare_client_keystore();

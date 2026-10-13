@@ -48,18 +48,29 @@ impl QuorumGroup {
     }
 }
 
+/// The topic name, topic id and partition that a Fetch names a quorum by.
+struct FetchRoute {
+    topic: String,
+    topic_id: krabka_protocol::primitives::uuid::Uuid,
+    partition: i32,
+}
+
 /// Metadata and WAL quorums share the Fetch topic/partition routing shape.
-fn fetch_partition(group: QuorumGroup) -> (String, krabka_protocol::primitives::uuid::Uuid, i32) {
+fn fetch_partition(group: QuorumGroup) -> FetchRoute {
     match group {
-        QuorumGroup::Metadata => ("__cluster_metadata".to_string(), KRAFT_METADATA_TOPIC_ID, 0),
+        QuorumGroup::Metadata => FetchRoute {
+            topic: "__cluster_metadata".to_string(),
+            topic_id: KRAFT_METADATA_TOPIC_ID,
+            partition: 0,
+        },
         QuorumGroup::DisklessWal {
             topic_id,
             partition,
-        } => (
-            String::new(),
-            krabka_protocol::primitives::uuid::Uuid(*topic_id.as_bytes()),
-            partition.0,
-        ),
+        } => FetchRoute {
+            topic: String::new(),
+            topic_id: krabka_protocol::primitives::uuid::Uuid(*topic_id.as_bytes()),
+            partition: partition.0,
+        },
     }
 }
 
@@ -130,7 +141,11 @@ pub(crate) fn fetch_response(
 ) -> krabka_protocol::owned::fetch_response::FetchResponse {
     use krabka_protocol::{owned::fetch_response as fetch_resp, records::RecordsPayload};
 
-    let (topic, topic_id, partition) = fetch_partition(group);
+    let FetchRoute {
+        topic,
+        topic_id,
+        partition,
+    } = fetch_partition(group);
     fetch_resp::FetchResponse {
         responses: vec![fetch_resp::FetchableTopicResponse {
             topic,
@@ -201,7 +216,11 @@ pub(crate) fn fetch_request(
 ) -> FetchRequest {
     use krabka_protocol::owned::fetch_request as fetch_req;
 
-    let (topic, topic_id, partition) = fetch_partition(group);
+    let FetchRoute {
+        topic,
+        topic_id,
+        partition,
+    } = fetch_partition(group);
     FetchRequest {
         rack_id: matches!(group, QuorumGroup::DisklessWal { .. })
             .then_some(WAL_FETCH_RACK_ID.to_string())

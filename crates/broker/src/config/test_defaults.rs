@@ -250,30 +250,79 @@ mod tests {
         assert!(c.controller_heartbeat_interval <= millis(200));
     }
 
-    fn internal_topic_sizes(config: &BrokerConfig) -> (i16, i16, i32, i16, i16, i32) {
-        (
-            config.offsets_topic_replication_factor,
-            config.transaction_state_replication_factor,
-            config.transaction_state_min_isr,
-            config.barrier_state_replication_factor,
-            config.share_coordinator.state_topic_replication_factor,
-            config.share_coordinator.state_topic_min_isr,
-        )
+    /// The replication factor and minimum ISR of the internal topics.
+    #[derive(Debug, PartialEq, Eq)]
+    struct InternalTopicSizes {
+        offsets_replication_factor: i16,
+        transaction_replication_factor: i16,
+        transaction_min_isr: i32,
+        barrier_replication_factor: i16,
+        share_state_replication_factor: i16,
+        share_state_min_isr: i32,
+    }
+
+    fn internal_topic_sizes(config: &BrokerConfig) -> InternalTopicSizes {
+        InternalTopicSizes {
+            offsets_replication_factor: config.offsets_topic_replication_factor,
+            transaction_replication_factor: config.transaction_state_replication_factor,
+            transaction_min_isr: config.transaction_state_min_isr,
+            barrier_replication_factor: config.barrier_state_replication_factor,
+            share_state_replication_factor: config.share_coordinator.state_topic_replication_factor,
+            share_state_min_isr: config.share_coordinator.state_topic_min_isr,
+        }
     }
 
     #[test]
     fn for_tests_sizes_internal_topics_for_one_broker() {
         let config = BrokerConfig::for_tests(PathBuf::from("/tmp"));
-        assert!(internal_topic_sizes(&config) == (1, 1, 1, 1, 1, 1));
+        assert!(
+            internal_topic_sizes(&config)
+                == InternalTopicSizes {
+                    offsets_replication_factor: 1,
+                    transaction_replication_factor: 1,
+                    transaction_min_isr: 1,
+                    barrier_replication_factor: 1,
+                    share_state_replication_factor: 1,
+                    share_state_min_isr: 1
+                }
+        );
     }
 
     #[test]
     fn with_internal_topics_for_caps_at_kafka_defaults() {
         let cases = [
-            (1, (1, 1, 1, 1, 1, 1)),
-            (2, (2, 2, 1, 2, 2, 1)),
-            (3, (3, 3, 2, 3, 3, 2)),
-            (5, (3, 3, 2, 3, 3, 2)),
+            (1, InternalTopicSizes {
+                offsets_replication_factor: 1,
+                transaction_replication_factor: 1,
+                transaction_min_isr: 1,
+                barrier_replication_factor: 1,
+                share_state_replication_factor: 1,
+                share_state_min_isr: 1,
+            }),
+            (2, InternalTopicSizes {
+                offsets_replication_factor: 2,
+                transaction_replication_factor: 2,
+                transaction_min_isr: 1,
+                barrier_replication_factor: 2,
+                share_state_replication_factor: 2,
+                share_state_min_isr: 1,
+            }),
+            (3, InternalTopicSizes {
+                offsets_replication_factor: 3,
+                transaction_replication_factor: 3,
+                transaction_min_isr: 2,
+                barrier_replication_factor: 3,
+                share_state_replication_factor: 3,
+                share_state_min_isr: 2,
+            }),
+            (5, InternalTopicSizes {
+                offsets_replication_factor: 3,
+                transaction_replication_factor: 3,
+                transaction_min_isr: 2,
+                barrier_replication_factor: 3,
+                share_state_replication_factor: 3,
+                share_state_min_isr: 2,
+            }),
         ];
         for (brokers, expected) in cases {
             let config =

@@ -71,14 +71,27 @@ async fn read_manifest(archive_root: &std::path::Path, capture: &str) -> Manifes
     serde_json::from_slice(&bytes).expect("decode the manifest")
 }
 
-async fn captured_node() -> (FixtureNode, tempfile::TempDir, ArchiveArgs, String) {
+/// A fixture node, the archive root a capture of it was taken into, the arguments that open that archive, and the capture's id.
+struct CapturedNode {
+    node: FixtureNode,
+    archive_root: tempfile::TempDir,
+    args: ArchiveArgs,
+    capture: String,
+}
+
+async fn captured_node() -> CapturedNode {
     let node = FixtureNode::build();
     let archive_root = tempfile::tempdir().expect("archive root");
     let args = archive_args(archive_root.path());
     let capture = run::capture(Some(node.log_dir.path()), None, &args)
         .await
         .expect("capture the node");
-    (node, archive_root, args, capture)
+    CapturedNode {
+        node,
+        archive_root,
+        args,
+        capture,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -138,7 +151,12 @@ async fn a_capture_copies_both_snapshots_and_records_what_it_wrote() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_accepts_a_capture_it_just_wrote_and_list_names_it() {
-    let (_node, _archive_root, args, capture) = captured_node().await;
+    let CapturedNode {
+        node: _node,
+        archive_root: _archive_root,
+        args,
+        capture,
+    } = captured_node().await;
 
     check!(run::list(&args).await.expect("list the captures") == vec![capture.clone()]);
     check!(run::verify("latest", &args).await.is_ok());
@@ -147,7 +165,12 @@ async fn verify_accepts_a_capture_it_just_wrote_and_list_names_it() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_reports_an_artifact_the_archive_no_longer_holds_whole() {
-    let (_node, archive_root, args, capture) = captured_node().await;
+    let CapturedNode {
+        node: _node,
+        archive_root,
+        args,
+        capture,
+    } = captured_node().await;
 
     // A truncated object is what a half-finished upload leaves behind, and it
     // is exactly what a restore must not be handed.

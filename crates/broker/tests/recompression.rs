@@ -46,13 +46,19 @@ use {
 
 const CLIENT_ID: &str = "krabka-recompression-test";
 
-async fn start_broker() -> (BrokerHandle, SocketAddr) {
+/// A running broker and the address its Kafka listener is bound to.
+struct StartedBroker {
+    handle: BrokerHandle,
+    addr: SocketAddr,
+}
+
+async fn start_broker() -> StartedBroker {
     let log_dir = tempfile::tempdir().unwrap();
     let cfg = BrokerConfig::for_tests(log_dir.path().to_path_buf());
     let handle = Broker::start(cfg).await.expect("broker must start");
     let addr = handle.listen_addr();
     std::mem::forget(log_dir);
-    (handle, addr)
+    StartedBroker { handle, addr }
 }
 
 async fn create_topic_with_compression(addr: SocketAddr, topic: &str, codec: &str) {
@@ -71,8 +77,14 @@ async fn create_topic_with_compression(addr: SocketAddr, topic: &str, codec: &st
         ..Default::default()
     };
     let version: i16 = 7;
-    let (_, r): (usize, CreateTopicsResponse) =
-        kafka_wire::request_once(addr, &req, (19, version), CLIENT_ID, (1, true)).await;
+    let (_, r) = kafka_wire::request_once::<_, CreateTopicsResponse>(
+        addr,
+        &req,
+        (19, version),
+        CLIENT_ID,
+        (1, true),
+    )
+    .await;
     assert!(
         r.topics[0].error_code == 0,
         "CreateTopics must succeed for compression.type={codec}: {:?}",
@@ -83,8 +95,14 @@ async fn create_topic_with_compression(addr: SocketAddr, topic: &str, codec: &st
 async fn get_topic_id(addr: SocketAddr, topic: &str) -> Uuid {
     let req = named_topic_metadata(topic);
     let version: i16 = 12;
-    let (_, r): (usize, MetadataResponse) =
-        kafka_wire::request_once(addr, &req, (3, version), CLIENT_ID, (1, true)).await;
+    let (_, r) = kafka_wire::request_once::<_, MetadataResponse>(
+        addr,
+        &req,
+        (3, version),
+        CLIENT_ID,
+        (1, true),
+    )
+    .await;
     r.topics
         .iter()
         .find(|t| t.name.as_deref() == Some(topic))
@@ -103,8 +121,14 @@ async fn produce_gzip(addr: SocketAddr, topic: &str, topic_id: Uuid, value: &[u8
         ..SinglePartitionProduceSetup::replicated()
     });
     let version: i16 = 9;
-    let (_, r): (usize, ProduceResponse) =
-        kafka_wire::request_once(addr, &req, (0, version), CLIENT_ID, (1, true)).await;
+    let (_, r) = kafka_wire::request_once::<_, ProduceResponse>(
+        addr,
+        &req,
+        (0, version),
+        CLIENT_ID,
+        (1, true),
+    )
+    .await;
     let part = &r.responses[0].partition_responses[0];
     assert!(part.error_code == 0, "Produce must succeed: {part:?}");
 }
@@ -118,8 +142,14 @@ async fn fetch_first_batch(addr: SocketAddr, topic: &str, topic_id: Uuid) -> Rec
             .call()
     };
     let version: i16 = 12;
-    let (_, r): (usize, FetchResponse) =
-        kafka_wire::request_once(addr, &req, (1, version), CLIENT_ID, (1, true)).await;
+    let (_, r) = kafka_wire::request_once::<_, FetchResponse>(
+        addr,
+        &req,
+        (1, version),
+        CLIENT_ID,
+        (1, true),
+    )
+    .await;
     let part = &r.responses[0].partitions[0];
     assert!(part.error_code == 0, "Fetch error: {}", part.error_code);
     part.records
@@ -134,7 +164,7 @@ use crate::support::partitions::wait_for_compression;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn topic_compression_lz4_recompresses_producer_gzip_batch() {
     const TOPIC: &str = "recompress-target";
-    let (handle, addr) = start_broker().await;
+    let StartedBroker { handle, addr } = start_broker().await;
 
     create_topic_with_compression(addr, TOPIC, "lz4").await;
     // The CreateTopics path → metadata → replicator-supervisor
@@ -169,7 +199,7 @@ async fn topic_compression_lz4_recompresses_producer_gzip_batch() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn topic_compression_producer_preserves_producer_gzip() {
     const TOPIC: &str = "passthrough";
-    let (handle, addr) = start_broker().await;
+    let StartedBroker { handle, addr } = start_broker().await;
 
     create_topic_with_compression(addr, TOPIC, "producer").await;
     wait_for_compression(&handle, TOPIC, None).await;

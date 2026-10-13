@@ -570,6 +570,11 @@ mod tests {
     /// Kafka's defaults. A value that is refused names its field.
     #[test]
     fn metadata_log_keys_take_kafkas_domains() {
+        struct Case {
+            line: &'static str,
+            expected: Result<krabka_raft::MetadataLogConfig, &'static str>,
+        }
+
         use krabka_units::{bytes, days, mebibytes, millis};
 
         let base = krabka_raft::MetadataLogConfig::default();
@@ -603,114 +608,120 @@ mod tests {
                 ..base
             })
         };
-        let cases: [(&str, Result<krabka_raft::MetadataLogConfig, &str>); 26] = [
+        let cases: [Case; 26] = [
             // `INT` with `atLeast(8388608)`.
-            (
-                "metadata_log_segment_bytes = \"8MiB\"",
-                segment_size(mebibytes(8)),
-            ),
-            (
-                "metadata_log_segment_bytes = \"2147483647B\"",
-                segment_size(bytes(2_147_483_647)),
-            ),
-            (
-                "metadata_log_segment_bytes = \"8388607B\"",
-                Err("metadata_log_segment_bytes"),
-            ),
-            (
-                "metadata_log_segment_bytes = \"0B\"",
-                Err("metadata_log_segment_bytes"),
-            ),
-            (
-                "metadata_log_segment_bytes = \"2147483648B\"",
-                Err("metadata_log_segment_bytes"),
-            ),
-            (
-                "metadata_log_segment_bytes = \"8388608.5B\"",
-                Err("metadata_log_segment_bytes"),
-            ),
+            Case {
+                line: "metadata_log_segment_bytes = \"8MiB\"",
+                expected: segment_size(mebibytes(8)),
+            },
+            Case {
+                line: "metadata_log_segment_bytes = \"2147483647B\"",
+                expected: segment_size(bytes(2_147_483_647)),
+            },
+            Case {
+                line: "metadata_log_segment_bytes = \"8388607B\"",
+                expected: Err("metadata_log_segment_bytes"),
+            },
+            Case {
+                line: "metadata_log_segment_bytes = \"0B\"",
+                expected: Err("metadata_log_segment_bytes"),
+            },
+            Case {
+                line: "metadata_log_segment_bytes = \"2147483648B\"",
+                expected: Err("metadata_log_segment_bytes"),
+            },
+            Case {
+                line: "metadata_log_segment_bytes = \"8388608.5B\"",
+                expected: Err("metadata_log_segment_bytes"),
+            },
             // A `LONG` that krabka holds positive.
-            (
-                "metadata_log_segment_roll_interval = \"1ms\"",
-                segment_roll_interval(millis(1)),
-            ),
-            (
-                "metadata_log_segment_roll_interval = \"7d\"",
-                segment_roll_interval(days(7)),
-            ),
-            (
-                "metadata_log_segment_roll_interval = \"0ms\"",
-                Err("metadata_log_segment_roll_interval"),
-            ),
-            (
-                "metadata_log_segment_roll_interval = \"250us\"",
-                Err("metadata_log_segment_roll_interval"),
-            ),
+            Case {
+                line: "metadata_log_segment_roll_interval = \"1ms\"",
+                expected: segment_roll_interval(millis(1)),
+            },
+            Case {
+                line: "metadata_log_segment_roll_interval = \"7d\"",
+                expected: segment_roll_interval(days(7)),
+            },
+            Case {
+                line: "metadata_log_segment_roll_interval = \"0ms\"",
+                expected: Err("metadata_log_segment_roll_interval"),
+            },
+            Case {
+                line: "metadata_log_segment_roll_interval = \"250us\"",
+                expected: Err("metadata_log_segment_roll_interval"),
+            },
             // A `LONG` where zero is a value.
-            (
-                "metadata_max_retention_bytes = \"0B\"",
-                max_retention_size(bytes(0)),
-            ),
-            (
-                "metadata_max_retention_bytes = \"1GiB\"",
-                max_retention_size(mebibytes(1024)),
-            ),
-            (
-                "metadata_max_retention_bytes = \"1.5B\"",
-                Err("metadata_max_retention_bytes"),
-            ),
-            (
-                "metadata_max_retention_bytes = \"9223372036854775808B\"",
-                Err("metadata_max_retention_bytes"),
-            ),
-            ("metadata_max_retention = \"0ms\"", max_retention(millis(0))),
-            ("metadata_max_retention = \"30d\"", max_retention(days(30))),
-            (
-                "metadata_max_retention = \"250us\"",
-                Err("metadata_max_retention"),
-            ),
-            (
-                "metadata_max_retention = \"1.5ms\"",
-                Err("metadata_max_retention"),
-            ),
+            Case {
+                line: "metadata_max_retention_bytes = \"0B\"",
+                expected: max_retention_size(bytes(0)),
+            },
+            Case {
+                line: "metadata_max_retention_bytes = \"1GiB\"",
+                expected: max_retention_size(mebibytes(1024)),
+            },
+            Case {
+                line: "metadata_max_retention_bytes = \"1.5B\"",
+                expected: Err("metadata_max_retention_bytes"),
+            },
+            Case {
+                line: "metadata_max_retention_bytes = \"9223372036854775808B\"",
+                expected: Err("metadata_max_retention_bytes"),
+            },
+            Case {
+                line: "metadata_max_retention = \"0ms\"",
+                expected: max_retention(millis(0)),
+            },
+            Case {
+                line: "metadata_max_retention = \"30d\"",
+                expected: max_retention(days(30)),
+            },
+            Case {
+                line: "metadata_max_retention = \"250us\"",
+                expected: Err("metadata_max_retention"),
+            },
+            Case {
+                line: "metadata_max_retention = \"1.5ms\"",
+                expected: Err("metadata_max_retention"),
+            },
             // `INT` with `atLeast(0)`, where zero stops the KIP-835 no-op
             // records.
-            (
-                "metadata_max_idle_interval = \"0ms\"",
-                max_idle_interval(millis(0)),
-            ),
-            (
-                "metadata_max_idle_interval = \"500ms\"",
-                max_idle_interval(millis(500)),
-            ),
-            (
-                "metadata_max_idle_interval = \"2147483647ms\"",
-                max_idle_interval(millis(2_147_483_647)),
-            ),
-            (
-                "metadata_max_idle_interval = \"2147483648ms\"",
-                Err("metadata_max_idle_interval"),
-            ),
-            (
-                "metadata_max_idle_interval = \"250us\"",
-                Err("metadata_max_idle_interval"),
-            ),
-            (
-                "metadata_max_idle_interval = \"-1ms\"",
-                Err("metadata_max_idle_interval"),
-            ),
+            Case {
+                line: "metadata_max_idle_interval = \"0ms\"",
+                expected: max_idle_interval(millis(0)),
+            },
+            Case {
+                line: "metadata_max_idle_interval = \"500ms\"",
+                expected: max_idle_interval(millis(500)),
+            },
+            Case {
+                line: "metadata_max_idle_interval = \"2147483647ms\"",
+                expected: max_idle_interval(millis(2_147_483_647)),
+            },
+            Case {
+                line: "metadata_max_idle_interval = \"2147483648ms\"",
+                expected: Err("metadata_max_idle_interval"),
+            },
+            Case {
+                line: "metadata_max_idle_interval = \"250us\"",
+                expected: Err("metadata_max_idle_interval"),
+            },
+            Case {
+                line: "metadata_max_idle_interval = \"-1ms\"",
+                expected: Err("metadata_max_idle_interval"),
+            },
             // A negative value does not stand for "no limit" in the file.
-            (
-                "metadata_max_retention = \"-1ms\"",
-                Err("metadata_max_retention"),
-            ),
-            (
-                "metadata_log_segment_roll_interval = \"-1ms\"",
-                Err("metadata_log_segment_roll_interval"),
-            ),
+            Case {
+                line: "metadata_max_retention = \"-1ms\"",
+                expected: Err("metadata_max_retention"),
+            },
+            Case {
+                line: "metadata_log_segment_roll_interval = \"-1ms\"",
+                expected: Err("metadata_log_segment_roll_interval"),
+            },
         ];
 
-        for (line, expected) in cases {
+        for Case { line, expected } in cases {
             let source = format!("[runtime]\n{line}\n");
             let file: FileConfig = toml::from_str(&source).expect("parse runtime config");
             let mut cfg = BrokerConfig::default();
@@ -737,19 +748,26 @@ mod tests {
 
     #[test]
     fn existing_file_inputs_reject_invalid_refined_values() {
+        struct Case {
+            source: &'static str,
+            field: &'static str,
+        }
         let cases = [
-            ("heartbeat_interval = \"0ms\"\n", "heartbeat_interval"),
-            (
-                "[runtime]\noffsets_topic_replication_factor = 0\n",
-                "offsets_topic_replication_factor",
-            ),
-            (
-                "[delegation_token]\nmax_lifetime_ms = 0\n",
-                "max_lifetime_ms",
-            ),
+            Case {
+                source: "heartbeat_interval = \"0ms\"\n",
+                field: "heartbeat_interval",
+            },
+            Case {
+                source: "[runtime]\noffsets_topic_replication_factor = 0\n",
+                field: "offsets_topic_replication_factor",
+            },
+            Case {
+                source: "[delegation_token]\nmax_lifetime_ms = 0\n",
+                field: "max_lifetime_ms",
+            },
         ];
 
-        for (source, field) in cases {
+        for Case { source, field } in cases {
             let error = configured(source, "parse config").expect_err("zero must fail");
             assert!(error.to_string().contains(field));
         }

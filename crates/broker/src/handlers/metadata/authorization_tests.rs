@@ -41,7 +41,12 @@ const DESCRIBE_BIT: i32 = 1 << 8;
 const CREATE_BIT: i32 = 1 << 5;
 
 /// One grant: a resource type, a resource name and an operation.
-type Grant = (ResourceType, String, AclOperation);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Grant {
+    resource_type: ResourceType,
+    resource_name: String,
+    operation: AclOperation,
+}
 
 /// Allows [`TESTER`] exactly the grants it holds, and every other principal
 /// everything, so the broker's own setup is never refused.
@@ -56,11 +61,11 @@ impl Grants {
 
 test_authorizer!(Grants, (self, _source, request), {
     if request.principal.name != TESTER
-        || self.0.lock().expect("grants").contains(&(
-            request.resource_type,
-            request.resource_name.to_owned(),
-            request.operation,
-        ))
+        || self.0.lock().expect("grants").contains(&Grant {
+            resource_type: request.resource_type,
+            resource_name: request.resource_name.to_owned(),
+            operation: request.operation,
+        })
     {
         AuthorizationResult::Allow
     } else {
@@ -69,15 +74,19 @@ test_authorizer!(Grants, (self, _source, request), {
 });
 
 fn topic(name: &str, operation: AclOperation) -> Grant {
-    (ResourceType::Topic, name.to_owned(), operation)
+    Grant {
+        resource_type: ResourceType::Topic,
+        resource_name: name.to_owned(),
+        operation,
+    }
 }
 
 fn cluster(operation: AclOperation) -> Grant {
-    (
-        ResourceType::Cluster,
-        CLUSTER_RESOURCE_NAME.to_owned(),
+    Grant {
+        resource_type: ResourceType::Cluster,
+        resource_name: CLUSTER_RESOURCE_NAME.to_owned(),
         operation,
-    )
+    }
 }
 
 struct Fixture {

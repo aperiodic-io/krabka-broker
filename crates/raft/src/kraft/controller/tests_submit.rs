@@ -10,9 +10,8 @@ use {
         kraft::{
             KraftController,
             controller::test_support::{
-                ControllerSetup, EngineSetup, await_leader, build, build_engine_only,
-                commit_pending, one_offset_batch, submit_change_with_timeout, topic_record,
-                topic_record_named,
+                EngineInDir, await_leader, build, build_engine_only, commit_pending,
+                one_offset_batch, submit_change_with_timeout, topic_record, topic_record_named,
             },
             event::Event,
             types::NodeId,
@@ -167,33 +166,42 @@ fn guarded_delete_rejects_a_recreated_topic() {
 /// disjoint change. A fresh rebuild commits both settings.
 #[test]
 fn guarded_config_rejects_stale_maps_and_accepts_a_fresh_merge() {
+    struct Override {
+        key: &'static str,
+        value: &'static str,
+    }
+
     let TopicSubmitFixture {
         mut engine,
         _directory,
         _images,
         expected_image,
     } = topic_submit_fixture(&topic_record("orders"));
-    let config = |entries: &[(&str, &str)]| {
+    let over = |key, value| Override { key, value };
+    let config = |entries: &[Override]| {
         MetadataRecord::V1TopicConfig(TopicConfigRecord {
             topic: "orders".into(),
             overrides: entries
                 .iter()
-                .map(|(key, value)| ((*key).into(), (*value).into()))
+                .map(|entry| (entry.key.into(), entry.value.into()))
                 .collect(),
         })
     };
-    let mut updated = super::test_support::submit_on_engine(&mut engine, &[config(&[(
+    let mut updated = super::test_support::submit_on_engine(&mut engine, &[config(&[over(
         "cleanup.policy",
         "compact",
     )])]);
     assert!(matches!(updated.try_recv(), Ok(Ok(_))));
     assert_stale_submit()
         .engine(&mut engine)
-        .records(&[config(&[("retention.ms", "30000")])])
+        .records(&[config(&[over("retention.ms", "30000")])])
         .expected_image(&expected_image)
         .call();
     let expected = engine.image_tx.borrow().clone();
-    let merged = config(&[("cleanup.policy", "compact"), ("retention.ms", "30000")]);
+    let merged = config(&[
+        over("cleanup.policy", "compact"),
+        over("retention.ms", "30000"),
+    ]);
     let (reply, mut result) = oneshot::channel();
     engine.on_submit_change_if_image(std::slice::from_ref(&merged), Some(&expected), reply);
     assert!(matches!(result.try_recv(), Ok(Ok(_))));
@@ -993,10 +1001,10 @@ fn elect_three_voter_engine(engine: &mut super::Engine, epoch: u32) {
     assert!(engine.core.role().is_leader());
 }
 
-fn elected_three_voter_engine() -> (Engine, tempfile::TempDir) {
+fn elected_three_voter_engine() -> EngineInDir {
     let (mut engine, dir) = build_engine_only().call();
     elect_three_voter_engine(&mut engine, 0);
-    (engine, dir)
+    EngineInDir { engine, dir }
 }
 
 /// Kafka's `QuorumController` replays a record before it commits, so
@@ -1005,7 +1013,10 @@ fn elected_three_voter_engine() -> (Engine, tempfile::TempDir) {
 /// `TOPIC_ALREADY_EXISTS`, and no second `TopicRecord` goes into the log.
 #[tokio::test]
 async fn second_create_of_uncommitted_topic_is_refused_before_append() {
-    let (mut engine, _dir) = elected_three_voter_engine();
+    let EngineInDir {
+        mut engine,
+        dir: _dir,
+    } = elected_three_voter_engine();
 
     let mut first_rx =
         super::test_support::submit_on_engine(&mut engine, &topic_record_named("first", 1));
@@ -1047,7 +1058,10 @@ async fn second_create_of_uncommitted_topic_is_refused_before_append() {
 /// record commits, the name exists, and only one `TopicRecord` is in the log.
 #[tokio::test]
 async fn create_of_a_name_left_uncommitted_by_an_earlier_epoch_is_refused() {
-    let (mut engine, _dir) = elected_three_voter_engine();
+    let EngineInDir {
+        mut engine,
+        dir: _dir,
+    } = elected_three_voter_engine();
 
     let mut first_rx =
         super::test_support::submit_on_engine(&mut engine, &topic_record_named("first", 1));
@@ -1096,12 +1110,17 @@ async fn create_of_a_name_left_uncommitted_by_an_earlier_epoch_is_refused() {
     );
 }
 
+/// The partition record as a caller read it before a directory report, and the
+/// directory that was reported.
+struct ReportedDirectory {
+    stale: krabka_metadata::PartitionRecord,
+    directory: uuid::Uuid,
+}
+
 /// A two-replica partition whose second replica has reported its directory,
 /// and the partition record as a caller read it before that report: the
 /// directory list is still empty.
-fn partition_with_reported_directory(
-    engine: &mut super::Engine,
-) -> (krabka_metadata::PartitionRecord, uuid::Uuid) {
+fn partition_with_reported_directory(engine: &mut super::Engine) -> ReportedDirectory {
     use krabka_metadata::{
         LeaderEpoch, MetadataRecord, PartitionDirAssignmentRecord, PartitionRecord, TopicRecord,
     };
@@ -1141,7 +1160,7 @@ fn partition_with_reported_directory(
         let mut rx = super::test_support::submit_on_engine(engine, &records);
         assert!(matches!(rx.try_recv(), Ok(Ok(_))));
     }
-    (stale, directory)
+    ReportedDirectory { stale, directory }
 }
 
 /// An election computed from an image that predates a directory assignment
@@ -1156,7 +1175,7 @@ fn a_stale_partition_update_keeps_the_committed_directories() {
     };
 
     let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
-    let (stale, directory) = partition_with_reported_directory(&mut engine);
+    let ReportedDirectory { stale, directory } = partition_with_reported_directory(&mut engine);
 
     let elected = krabka_metadata::PartitionRecord {
         leader: NodeId(2),
@@ -1192,7 +1211,10 @@ fn a_record_that_would_not_replay_is_refused_and_not_appended() {
     use krabka_metadata::MetadataRecord;
 
     let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
-    let (stale, _directory) = partition_with_reported_directory(&mut engine);
+    let ReportedDirectory {
+        stale,
+        directory: _directory,
+    } = partition_with_reported_directory(&mut engine);
     let log_end = engine.log.log_end_offset();
     let before = engine.image.partition("dirs", 0).cloned();
 

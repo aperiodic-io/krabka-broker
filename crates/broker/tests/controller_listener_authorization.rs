@@ -58,39 +58,52 @@ use {
 const CLUSTER_AUTHORIZATION_FAILED: i16 = 31;
 const MESSAGE: &str = "Cluster authorization failed.";
 
-/// The node's own inter-broker principal, and its only super user.
-const NODE: (&str, &str) = ("node", "node-secret");
+/// A PLAIN user and its password.
+struct Credential {
+    user: &'static str,
+    password: &'static str,
+}
 
-async fn start(
-    protocol: ListenerProtocol,
-    users: &[(&str, &str)],
-) -> (BrokerHandle, tempfile::TempDir) {
+/// The node's own inter-broker principal, and its only super user.
+const NODE: Credential = Credential {
+    user: "node",
+    password: "node-secret",
+};
+
+/// A running broker and the directory that backs it.
+struct RunningBroker {
+    broker: BrokerHandle,
+    dir: tempfile::TempDir,
+}
+
+async fn start(protocol: ListenerProtocol, users: &[Credential]) -> RunningBroker {
     start_with(protocol, users, |_| {}).await
 }
 
 async fn start_with(
     protocol: ListenerProtocol,
-    users: &[(&str, &str)],
+    users: &[Credential],
     adjust: impl FnOnce(&mut BrokerConfig),
-) -> (BrokerHandle, tempfile::TempDir) {
-    start_with_bound_listeners(|config| {
+) -> RunningBroker {
+    let (broker, dir) = start_with_bound_listeners(|config| {
         config.controller_listener_protocol = protocol;
         config.enabled_sasl_mechanisms = vec![SaslMechanism::Plain];
-        for (user, password) in std::iter::once(&NODE).chain(users) {
+        for Credential { user, password } in std::iter::once(&NODE).chain(users) {
             config
                 .plain_credentials
                 .insert((*user).to_owned(), (*password).to_owned());
         }
         config.inter_broker_credentials = Some(InterBrokerCredentials::Plain {
-            username: NODE.0.to_owned(),
-            password: NODE.1.to_owned(),
+            username: NODE.user.to_owned(),
+            password: NODE.password.to_owned(),
         });
-        config.super_users = std::iter::once(NODE.0.to_owned()).collect();
+        config.super_users = std::iter::once(NODE.user.to_owned()).collect();
         config.authorizer =
             std::sync::Arc::new(SimpleAclAuthorizer::new(config.super_users.clone()));
         adjust(config);
     })
-    .await
+    .await;
+    RunningBroker { broker, dir }
 }
 
 async fn allow(broker: &BrokerHandle, principal: &str, operation: AclOperation) {
@@ -252,7 +265,7 @@ fn describe_quorum() -> Bytes {
 /// `User:ANONYMOUS`, the next `SubmitChange` on the same connection commits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_plaintext_controller_listener_authorizes_every_request_for_anonymous() {
-    let (broker, _dir) = start(ListenerProtocol::Plaintext, &[]).await;
+    let RunningBroker { broker, dir: _dir } = start(ListenerProtocol::Plaintext, &[]).await;
     let mut stream = TcpStream::connect(broker.controller_addr())
         .await
         .expect("connect controller listener");
@@ -349,11 +362,20 @@ async fn a_plaintext_controller_listener_authorizes_every_request_for_anonymous(
 ///   `DescribeCluster`, which needs `Alter` on a controller, is refused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_sasl_controller_listener_authorizes_each_request_for_its_principal() {
-    const CREATOR: (&str, &str) = ("creator", "creator-secret");
-    const REPLICATOR: (&str, &str) = ("replicator", "replicator-secret");
-    const READER: (&str, &str) = ("reader", "reader-secret");
+    const CREATOR: Credential = Credential {
+        user: "creator",
+        password: "creator-secret",
+    };
+    const REPLICATOR: Credential = Credential {
+        user: "replicator",
+        password: "replicator-secret",
+    };
+    const READER: Credential = Credential {
+        user: "reader",
+        password: "reader-secret",
+    };
 
-    let (broker, _dir) = start(ListenerProtocol::SaslPlaintext, &[
+    let RunningBroker { broker, dir: _dir } = start(ListenerProtocol::SaslPlaintext, &[
         CREATOR, REPLICATOR, READER,
     ])
     .await;
@@ -364,7 +386,7 @@ async fn a_sasl_controller_listener_authorizes_each_request_for_its_principal() 
     let mut creator = TcpStream::connect(broker.controller_addr())
         .await
         .expect("connect");
-    sasl_plain(&mut creator, CREATOR.0, CREATOR.1).await;
+    sasl_plain(&mut creator, CREATOR.user, CREATOR.password).await;
     let create_version = create_topics_request::MAX_VERSION;
     let created = exchange(
         &mut creator,
@@ -394,7 +416,7 @@ async fn a_sasl_controller_listener_authorizes_each_request_for_its_principal() 
     let mut replicator = TcpStream::connect(broker.controller_addr())
         .await
         .expect("connect");
-    sasl_plain(&mut replicator, REPLICATOR.0, REPLICATOR.1).await;
+    sasl_plain(&mut replicator, REPLICATOR.user, REPLICATOR.password).await;
     let mut fetch = Vec::new();
     KrabkaMetadataFetchRequest {
         fetch_offset: 0,
@@ -417,7 +439,7 @@ async fn a_sasl_controller_listener_authorizes_each_request_for_its_principal() 
     let mut reader = TcpStream::connect(broker.controller_addr())
         .await
         .expect("connect");
-    sasl_plain(&mut reader, READER.0, READER.1).await;
+    sasl_plain(&mut reader, READER.user, READER.password).await;
     let served = exchange(
         &mut reader,
         describe_quorum_request::API_KEY,
@@ -481,7 +503,7 @@ async fn an_ssl_controller_listener_authorizes_each_request_for_the_certificate_
         client_ca_path: Some(write("client_ca.pem", DEV_CLIENT_CA)),
         client_auth: krabka_security::ClientAuthMode::Required,
     };
-    let (broker, _dir) = start_with(ListenerProtocol::Ssl, &[], |config| {
+    let RunningBroker { broker, dir: _dir } = start_with(ListenerProtocol::Ssl, &[], |config| {
         config.tls_config = Some(tls);
     })
     .await;

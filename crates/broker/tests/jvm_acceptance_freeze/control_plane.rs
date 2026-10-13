@@ -11,7 +11,7 @@
 use {
     crate::{
         host_broker::{JvmBroker, start_jvm_broker},
-        jvm_acceptance::break_glass::{approve as approve_proposal, propose},
+        jvm_acceptance::break_glass::{approve, propose},
         support,
         vocabulary::{APPROVER_ONE, APPROVER_TWO, PROPOSER, WIRE_UNCLEAN_ELECT_LEADERS},
     },
@@ -81,16 +81,6 @@ pub(super) async fn freeze(client: &Client, scope: &str, pattern_type: i8, reaso
     assert!(code == 0, "freeze {scope}: code={code} message={message:?}");
 }
 
-/// How far along a proposal is after one approval.
-#[derive(Debug)]
-struct Approvals {
-    /// Distinct principals that have approved it.
-    held: i32,
-    /// Distinct principals it needs. The broker refuses a configured value
-    /// below two.
-    required: i32,
-}
-
 /// Open a break-glass proposal as `PROPOSER`, and have both approvers sign off.
 ///
 /// The target is the bare topic name rather than `<topic>-<partition>`. KFC-9
@@ -122,16 +112,6 @@ pub(super) async fn approved_unclean_election(bootstrap: &str, target: &str) {
         second.held == second.required,
         "two distinct principals must satisfy the rule: {second:?}"
     );
-}
-
-/// Add one approval to a proposal as `operator`.
-async fn approve(
-    bootstrap: &str,
-    operator: (&str, &str),
-    proposal_id: krabka_protocol::primitives::uuid::Uuid,
-) -> Approvals {
-    let (held, required) = approve_proposal(bootstrap, operator, proposal_id).await;
-    Approvals { held, required }
 }
 
 /// Plaintext fixture with all topics installed before the first control-plane mutation.

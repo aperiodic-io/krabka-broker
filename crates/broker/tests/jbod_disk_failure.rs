@@ -209,18 +209,29 @@ async fn all_log_dirs_offline_triggers_self_shutdown() {
     handle.shutdown().await;
 }
 
+/// A running broker, the directory that backs it, and its listen address.
+struct SingleDirectoryBroker {
+    primary: tempfile::TempDir,
+    handle: BrokerHandle,
+    addr: SocketAddr,
+}
+
 /// KIP-112 and KIP-858: the controller-leader broker accepts
 /// `AssignReplicasToDirs` (`api_key=73`), records the assignment, and echoes
 /// the request back with `error_code=0` on every partition.
 ///
 /// This exercises the real async `handle` path: decode, the leader gate,
 /// `plan_assignments`, `submit_change`, and encode.
-async fn single_directory_broker() -> (tempfile::TempDir, BrokerHandle, SocketAddr) {
+async fn single_directory_broker() -> SingleDirectoryBroker {
     let primary = tempfile::tempdir().unwrap();
     let config = BrokerConfig::for_tests(primary.path().to_path_buf());
     let broker = Box::pin(Broker::start(config)).await.expect("broker start");
     let address = broker.listen_addr();
-    (primary, broker, address)
+    SingleDirectoryBroker {
+        primary,
+        handle: broker,
+        addr: address,
+    }
 }
 
 #[tokio::test]
@@ -230,7 +241,11 @@ async fn assign_replicas_to_dirs_reports_and_echoes() {
     const TOPIC: &str = "kip112-assign";
     const N: i32 = 2;
     // Use a single-dir broker so the broker IS the controller leader.
-    let (_primary, handle, addr) = single_directory_broker().await;
+    let SingleDirectoryBroker {
+        primary: _primary,
+        handle,
+        addr,
+    } = single_directory_broker().await;
 
     create_and_wait(&handle, addr, Setup {
         client_id: CLIENT_ID,
@@ -310,7 +325,11 @@ async fn assign_replicas_to_dirs_reports_and_echoes() {
 #[tokio::test]
 async fn heartbeat_with_offline_log_dirs_is_accepted() {
     use krabka_protocol::owned::broker_heartbeat_request::MAX_VERSION as HB_MAX_VERSION;
-    let (_primary, handle, addr) = single_directory_broker().await;
+    let SingleDirectoryBroker {
+        primary: _primary,
+        handle,
+        addr,
+    } = single_directory_broker().await;
 
     // Wait until the broker has registered itself and elected a raft leader
     // (so the heartbeat handler reaches the leader branch, not NOT_CONTROLLER).

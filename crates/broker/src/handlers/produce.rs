@@ -529,7 +529,8 @@ pub(crate) async fn handle(
     complete_admitted(
         broker,
         admitted,
-        (services, transaction),
+        services,
+        transaction,
         &mut topic_results,
         &mut awaiting,
     )
@@ -589,7 +590,8 @@ struct AdmittedPartition {
 async fn complete_admitted(
     broker: &Broker,
     admitted: Vec<AdmittedPartition>,
-    (services, transaction): (PartitionServices<'_>, TransactionRequest<'_>),
+    services: PartitionServices<'_>,
+    transaction: TransactionRequest<'_>,
     topic_results: &mut [TopicProduceResponse],
     awaiting: &mut Vec<PendingPartition>,
 ) -> Result<(), BrokerError> {

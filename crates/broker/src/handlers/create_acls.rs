@@ -39,7 +39,7 @@ use {
         response::{
             acl_error_result, acl_success_result, apply_submit_error, create_acls_response,
         },
-        validate::{HostCheck, has_filter_only_element, has_unknown_element, validate},
+        validate::{AclRefusal, HostCheck, has_filter_only_element, has_unknown_element, validate},
     },
     super::acl_wire::{MAX_ACL_RECORDS_PER_REQUEST, NO_AUTHORIZER_EXCEPTION_MESSAGE},
     crate::codes,
@@ -52,26 +52,34 @@ const EXCESSIVE_BATCH_MESSAGE: &str = "Unable to perform excessively large batch
 /// The seven fields that make one ACL, as a value a hash set can hold. The
 /// image's [`AclEntry`] is not `Hash`, and a set is what keeps a request of
 /// tens of thousands of bindings out of quadratic time.
-type AclKey<'a> = (
-    ResourceType,
-    &'a str,
-    PatternType,
-    &'a str,
-    &'a str,
-    AclOperation,
-    PermissionType,
-);
+#[derive(PartialEq, Eq, Hash)]
+struct AclKey<'a> {
+    resource_type: ResourceType,
+    resource_name: &'a str,
+    pattern_type: PatternType,
+    principal: &'a str,
+    host: &'a str,
+    operation: AclOperation,
+    permission_type: PermissionType,
+}
 
 fn acl_key(entry: &AclEntry) -> AclKey<'_> {
-    (
-        entry.resource_type,
-        &entry.resource_name,
-        entry.pattern_type,
-        &entry.principal,
-        &entry.host,
-        entry.operation,
-        entry.permission_type,
-    )
+    AclKey {
+        resource_type: entry.resource_type,
+        resource_name: &entry.resource_name,
+        pattern_type: entry.pattern_type,
+        principal: &entry.principal,
+        host: &entry.host,
+        operation: entry.operation,
+        permission_type: entry.permission_type,
+    }
+}
+
+/// A creation that passed validation: the row of the response it answers and
+/// the record it writes.
+struct ValidCreation {
+    result_index: usize,
+    record: MetadataRecord,
 }
 
 /// How many distinct ACLs of `to_submit` the image does not hold yet, counted
@@ -81,10 +89,10 @@ fn acl_key(entry: &AclEntry) -> AclKey<'_> {
 /// of the existing ACLs and another of the ones the request has added, so this
 /// does too: a request of 10 000 bindings that are mostly duplicates is a few
 /// hash probes each, not a scan of the request and the image for every one.
-fn count_new_acls(image: &MetadataImage, to_submit: &[(usize, MetadataRecord)]) -> usize {
+fn count_new_acls(image: &MetadataImage, to_submit: &[ValidCreation]) -> usize {
     let existing: HashSet<AclKey<'_>> = image.all_acls().map(acl_key).collect();
     let mut new = HashSet::new();
-    for (_, record) in to_submit {
+    for ValidCreation { record, .. } in to_submit {
         let MetadataRecord::V1AccessControlEntry(entry) = record else {
             continue;
         };
@@ -173,17 +181,20 @@ context_handler! {
         };
 
         let mut results: Vec<AclCreationResult> = Vec::with_capacity(req.creations.len());
-        let mut to_submit: Vec<(usize, MetadataRecord)> = Vec::with_capacity(req.creations.len());
+        let mut to_submit: Vec<ValidCreation> = Vec::with_capacity(req.creations.len());
 
         for c in &req.creations {
             match validate(c, host_check) {
                 Ok(entry) => {
                     let idx = results.len();
                     results.push(acl_success_result());
-                    to_submit.push((idx, MetadataRecord::V1AccessControlEntry(entry)));
+                    to_submit.push(ValidCreation {
+                        result_index: idx,
+                        record: MetadataRecord::V1AccessControlEntry(entry),
+                    });
                 }
-                Err((code, msg)) => {
-                    results.push(acl_error_result(code, msg));
+                Err(AclRefusal { code, message }) => {
+                    results.push(acl_error_result(code, message));
                 }
             }
         }
@@ -204,7 +215,10 @@ context_handler! {
         }
 
         if !to_submit.is_empty() {
-            let records: Vec<MetadataRecord> = to_submit.iter().map(|(_, r)| r.clone()).collect();
+            let records: Vec<MetadataRecord> = to_submit
+                .iter()
+                .map(|creation| creation.record.clone())
+                .collect();
             if let Err(e) = broker.controller.submit_change(records).await {
                 tracing::warn!(error = %e, "create-acls submit failed");
                 apply_submit_error(&mut results, &to_submit, &e);
@@ -212,7 +226,7 @@ context_handler! {
         }
 
         // Audit: emit one AdminOperation record for successfully-created ACLs.
-        // `to_submit` carries (result_idx, record) for every creation that passed
+        // `to_submit` carries the result index and record of every creation that passed
         // validation; entries whose result slot still has error_code == 0 were committed.
         audit_created_acls(
             broker.audit_log.as_ref(),

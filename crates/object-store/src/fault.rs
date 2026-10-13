@@ -464,7 +464,7 @@ mod tests {
     /// asserting on luck.
     #[test]
     fn fail_rates_pick_the_same_calls_every_run() {
-        let cases: [(u32, [bool; 4]); 4] = [
+        let cases = [
             (0, [false, false, false, false]),
             (250, [false, false, false, true]),
             (500, [false, true, false, true]),

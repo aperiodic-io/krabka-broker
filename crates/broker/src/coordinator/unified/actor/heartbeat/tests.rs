@@ -295,6 +295,20 @@ enum StaticMemberPresence {
     Released,
 }
 
+/// A member id and its epoch.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct IdentityMember<'a> {
+    member_id: &'a str,
+    epoch: MemberEpoch,
+}
+
+fn member(member_id: &'static str, epoch: i32) -> IdentityMember<'static> {
+    IdentityMember {
+        member_id,
+        epoch: MemberEpoch(epoch),
+    }
+}
+
 /// One row of [`heartbeat_identity_rules_follow_kafka`].
 #[derive(krabka_macros::FieldDefaults)]
 struct IdentityRow {
@@ -310,8 +324,8 @@ struct IdentityRow {
     owned: Option<Vec<PartitionIndex>>,
     expected: ConsumerGroupHeartbeatResponse,
     /// The sorted member identities and epochs after the request.
-    #[default(vec![("m1", MemberEpoch(5)), ("s1", MemberEpoch(5))])]
-    members_after: Vec<(&'static str, MemberEpoch)>,
+    #[default(vec![member("m1", 5), member("s1", 5)])]
+    members_after: Vec<IdentityMember<'static>>,
     #[default(Some("s1"))]
     i1_after: Option<&'static str>,
 }
@@ -402,7 +416,7 @@ fn identity_rows() -> Vec<IdentityRow> {
     };
     vec![
         IdentityRow {
-            members_after: vec![("m1", MemberEpoch(5)), ("s1", MemberEpoch(-2))],
+            members_after: vec![member("m1", 5), member("s1", -2)],
             name: "static member leaves with epoch -2",
             member_id: "s1",
             instance_id: Some("i1"),
@@ -412,7 +426,7 @@ fn identity_rows() -> Vec<IdentityRow> {
         },
         IdentityRow {
             static_member: StaticMemberPresence::Released,
-            members_after: vec![("m1", MemberEpoch(5)), ("s2", MemberEpoch(5))],
+            members_after: vec![member("m1", 5), member("s2", 5)],
             i1_after: Some("s2"),
             name: "new member takes a released instance id",
             member_id: "s2",
@@ -490,7 +504,7 @@ fn identity_rows() -> Vec<IdentityRow> {
             ..Default::default()
         },
         IdentityRow {
-            members_after: vec![("s1", MemberEpoch(5))],
+            members_after: vec![member("s1", 5)],
             name: "dynamic member leaves with epoch -1",
             member_epoch: MemberEpoch(-1),
             expected: identity_ok().epoch(-1).call(),
@@ -667,10 +681,13 @@ fn heartbeat_identity_rules_follow_kafka() {
             &RegexResolution::none(),
         );
 
-        let mut members: Vec<(&str, MemberEpoch)> = state
+        let mut members: Vec<IdentityMember<'_>> = state
             .members
             .values()
-            .map(|member| (member.member_id.as_str(), MemberEpoch(member.member_epoch)))
+            .map(|member| IdentityMember {
+                member_id: member.member_id.as_str(),
+                epoch: MemberEpoch(member.member_epoch),
+            })
             .collect();
         members.sort_unstable();
         check!(step.response == row.expected, "{}", row.name);
@@ -689,23 +706,43 @@ enum MemberRecordKind {
     Value,
 }
 
+/// A member identity and the kind of record written for it.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct WrittenMember {
+    member_id: String,
+    kind: MemberRecordKind,
+}
+
+fn written_member(member_id: &str, kind: MemberRecordKind) -> WrittenMember {
+    WrittenMember {
+        member_id: member_id.to_string(),
+        kind,
+    }
+}
+
 /// The member identities and record kinds, sorted.
-fn written<T>(records: &[(String, Option<T>)]) -> Vec<(String, MemberRecordKind)> {
+fn written<T>(records: &[(String, Option<T>)]) -> Vec<WrittenMember> {
     let mut out: Vec<_> = records
         .iter()
-        .map(|(id, value)| {
-            (
-                id.clone(),
-                if value.is_some() {
-                    MemberRecordKind::Value
-                } else {
-                    MemberRecordKind::Tombstone
-                },
-            )
+        .map(|(id, value)| WrittenMember {
+            member_id: id.clone(),
+            kind: if value.is_some() {
+                MemberRecordKind::Value
+            } else {
+                MemberRecordKind::Tombstone
+            },
         })
         .collect();
     out.sort_unstable();
     out
+}
+
+/// A member id and the epoch of its current assignment record, `None` for a
+/// tombstone.
+#[derive(Debug, PartialEq)]
+struct CurrentEpoch<'a> {
+    member_id: &'a str,
+    epoch: Option<i32>,
 }
 
 /// A static member that leaves with -2 writes only its current assignment at
@@ -746,13 +783,22 @@ fn static_replacement_writes_new_records_and_tombstones_the_released_member() {
         Instant::now(),
         &RegexResolution::none(),
     );
-    let current: Vec<(&str, Option<i32>)> = left
+    let current: Vec<CurrentEpoch<'_>> = left
         .pending
         .current_per_member
         .iter()
-        .map(|(id, value)| (id.as_str(), value.as_ref().map(|value| value.member_epoch)))
+        .map(|(id, value)| CurrentEpoch {
+            member_id: id.as_str(),
+            epoch: value.as_ref().map(|value| value.member_epoch),
+        })
         .collect();
-    check!(current == vec![("s1", Some(-2))]);
+    check!(
+        current
+            == vec![CurrentEpoch {
+                member_id: "s1",
+                epoch: Some(-2),
+            }]
+    );
     check!(left.pending.member_metadata.is_empty());
     check!(left.pending.group_metadata.is_none());
 
@@ -774,8 +820,8 @@ fn static_replacement_writes_new_records_and_tombstones_the_released_member() {
     // Kafka's `replaceMember` records come first: the released member's
     // tombstones and the copy under the new id.
     let expected = vec![
-        ("s1".to_string(), MemberRecordKind::Tombstone),
-        ("s2".to_string(), MemberRecordKind::Value),
+        written_member("s1", MemberRecordKind::Tombstone),
+        written_member("s2", MemberRecordKind::Value),
     ];
     check!(written(&replaced.pending.member_metadata) == expected);
     check!(written(&replaced.pending.target_per_member) == expected);
@@ -787,8 +833,8 @@ fn static_replacement_writes_new_records_and_tombstones_the_released_member() {
         .then
         .as_deref()
         .expect("the heartbeat's records");
-    check!(written(&own.member_metadata) == vec![("s2".to_string(), MemberRecordKind::Value)]);
-    check!(written(&own.current_per_member) == vec![("s2".to_string(), MemberRecordKind::Value)]);
+    check!(written(&own.member_metadata) == vec![written_member("s2", MemberRecordKind::Value)]);
+    check!(written(&own.current_per_member) == vec![written_member("s2", MemberRecordKind::Value)]);
     let metadata_of_s2 = own
         .member_metadata
         .iter()

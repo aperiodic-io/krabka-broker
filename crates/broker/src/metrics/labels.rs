@@ -548,17 +548,42 @@ mod tests {
         partition: i32,
     }
 
-    /// One sample per case, as (topic, partition, count).
+    /// One counter sample: the topic and partition it is recorded against and
+    /// the count.
+    #[derive(Clone, Copy)]
+    struct Sample {
+        topic: &'static str,
+        partition: i32,
+        count: u64,
+    }
+
+    /// One sample per case.
     ///
     /// The names are deliberately not all well-behaved. The text exposition
     /// format gives `"`, `\` and a newline inside a label value a meaning of
     /// their own, so a rendering difference between the two encodings would
     /// show up there first if it showed up anywhere.
-    const SAMPLES: [(&str, i32, u64); 4] = [
-        ("orders", 0, 3),
-        ("orders", 7, 11),
-        ("payments.eu-west-1", 2, 5),
-        ("quote\"back\\slash\nnewline", 1, 1),
+    const SAMPLES: [Sample; 4] = [
+        Sample {
+            topic: "orders",
+            partition: 0,
+            count: 3,
+        },
+        Sample {
+            topic: "orders",
+            partition: 7,
+            count: 11,
+        },
+        Sample {
+            topic: "payments.eu-west-1",
+            partition: 2,
+            count: 5,
+        },
+        Sample {
+            topic: "quote\"back\\slash\nnewline",
+            partition: 1,
+            count: 1,
+        },
     ];
 
     /// What the `String`-labelled families rendered, sample by sample, before
@@ -606,13 +631,17 @@ mod tests {
     fn render<T, P>(
         topic_label: impl Fn(&str) -> T,
         partition_label: impl Fn(&str, i32) -> P,
-        sample: (&str, i32, u64),
+        sample: Sample,
     ) -> String
     where
         T: EncodeLabelSet + Clone + Eq + std::fmt::Debug + std::hash::Hash + Send + Sync + 'static,
         P: EncodeLabelSet + Clone + Eq + std::fmt::Debug + std::hash::Hash + Send + Sync + 'static,
     {
-        let (topic, partition, count) = sample;
+        let Sample {
+            topic,
+            partition,
+            count,
+        } = sample;
         let mut registry = Registry::default();
         let topics = Family::<T, Counter>::default();
         let partitions = Family::<P, Counter>::default();
@@ -636,7 +665,7 @@ mod tests {
     }
 
     /// Render one sample through the current, `Arc<str>`-labelled sets.
-    fn render_shared(sample: (&str, i32, u64)) -> String {
+    fn render_shared(sample: Sample) -> String {
         render(
             |topic| TopicLabel {
                 topic: topic.into(),
@@ -650,7 +679,7 @@ mod tests {
     }
 
     /// Render one sample through the previous, `String`-labelled sets.
-    fn render_owned(sample: (&str, i32, u64)) -> String {
+    fn render_owned(sample: Sample) -> String {
         render(
             |topic| OwnedTopicLabel {
                 topic: topic.to_owned(),

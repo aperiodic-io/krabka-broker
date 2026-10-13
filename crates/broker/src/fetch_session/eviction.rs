@@ -117,8 +117,9 @@ mod tests {
             SessionDecision,
             order::MIN_EVICTION,
             test_support::{
-                NAME_FETCH_VERSION, RequestSessionEpoch, RequestSessionId, SessionPrivilege,
-                SessionRequestSetup, SessionSlotCount, TICK, allocate_session, manual_cache, req,
+                ManualCache, NAME_FETCH_VERSION, RequestSessionEpoch, RequestSessionId,
+                SessionPrivilege, SessionRequestSetup, SessionSlotCount, TICK, allocate_session,
+                manual_cache, req,
             },
         },
         assert2::{assert, check},
@@ -226,7 +227,7 @@ mod tests {
     /// displace another, so Kafka answers the newcomer sessionless instead.
     #[test]
     fn a_full_cache_refuses_a_newcomer_while_its_sessions_are_active() {
-        let (cache, clock) = manual_cache(SessionSlotCount(2));
+        let ManualCache { cache, clock } = manual_cache(SessionSlotCount(2));
         let a = allocate_session()
             .cache(&cache)
             .principal("a".into())
@@ -279,7 +280,7 @@ mod tests {
             ),
         ];
         for (label, holder_is_follower, newcomer_is_follower) in cases {
-            let (cache, clock) = manual_cache(SessionSlotCount(2));
+            let ManualCache { cache, clock } = manual_cache(SessionSlotCount(2));
             let stale = allocate_session()
                 .cache(&cache)
                 .privilege(holder_is_follower)
@@ -314,7 +315,7 @@ mod tests {
     /// An incremental fetch is a use, so a busy session is not the stale one.
     #[test]
     fn an_incremental_fetch_keeps_a_session_from_going_stale() {
-        let (cache, clock) = manual_cache(SessionSlotCount(2));
+        let ManualCache { cache, clock } = manual_cache(SessionSlotCount(2));
         let busy = allocate_session()
             .cache(&cache)
             .principal("busy".into())
@@ -353,7 +354,7 @@ mod tests {
             ("smaller", 1, false),
         ];
         for (label, newcomer_partitions, displaces) in cases {
-            let (cache, clock) = manual_cache(SessionSlotCount(1));
+            let ManualCache { cache, clock } = manual_cache(SessionSlotCount(1));
             let held = allocate_session()
                 .cache(&cache)
                 .principal("held".into())
@@ -391,7 +392,7 @@ mod tests {
     /// consumer's incremental session.
     #[test]
     fn a_follower_displaces_a_consumer_session_that_is_still_active() {
-        let (cache, _clock) = manual_cache(SessionSlotCount(1));
+        let ManualCache { cache, .. } = manual_cache(SessionSlotCount(1));
         let consumer = allocate_session()
             .cache(&cache)
             .principal("consumer".into())
@@ -433,7 +434,7 @@ mod tests {
     /// stale, or older than the minimum and smaller than the newcomer.
     #[test]
     fn a_recent_follower_session_is_not_displaced_by_another_follower() {
-        let (cache, clock) = manual_cache(SessionSlotCount(1));
+        let ManualCache { cache, clock } = manual_cache(SessionSlotCount(1));
         let first = allocate_session()
             .cache(&cache)
             .privilege(SessionPrivilege::Follower)
@@ -460,7 +461,7 @@ mod tests {
         // from the map. If it did not, the index would still name the closed
         // session as the stale one and the next allocation into a full cache
         // would go looking for a session that is no longer there.
-        let (cache, clock) = manual_cache(SessionSlotCount(2));
+        let ManualCache { cache, clock } = manual_cache(SessionSlotCount(2));
         let closed = allocate_session()
             .cache(&cache)
             .principal("closed".into())
@@ -494,7 +495,7 @@ mod tests {
 
     #[test]
     fn counters_track_eviction() {
-        let (cache, clock) = manual_cache(SessionSlotCount(1));
+        let ManualCache { cache, clock } = manual_cache(SessionSlotCount(1));
         allocate_session()
             .cache(&cache)
             .principal("a".into())

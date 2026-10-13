@@ -161,14 +161,15 @@ mod tests {
         super::*,
         crate::{
             core::test_support::{
-                FakeLog, check_prevote_started, machine, three_voter_machine, voters,
+                FakeLog, MachineAndLog, MachineLogAndActions, check_prevote_started, machine,
+                three_voter_machine, voters,
             },
             event::Event,
         },
         assert2::check,
     };
 
-    fn following_second_voter_with_actions() -> (QuorumStateMachine, FakeLog, Vec<Action>) {
+    fn following_second_voter_with_actions() -> MachineLogAndActions {
         let mut m = three_voter_machine();
         let log = FakeLog::new(5, 1);
         let actions = m.on_event(
@@ -179,18 +180,26 @@ mod tests {
             &log,
             SimInstant(10),
         );
-        (m, log, actions)
+        MachineLogAndActions {
+            machine: m,
+            log,
+            actions,
+        }
     }
 
     /// A follower attached to voter 2 at epoch 4 before it resigns.
-    fn following_second_voter() -> (QuorumStateMachine, FakeLog) {
-        let (m, log, _) = following_second_voter_with_actions();
-        (m, log)
+    fn following_second_voter() -> MachineAndLog {
+        let MachineLogAndActions { machine, log, .. } = following_second_voter_with_actions();
+        MachineAndLog { machine, log }
     }
 
     #[test]
     fn begin_quorum_epoch_makes_us_follower() {
-        let (m, _log, actions) = following_second_voter_with_actions();
+        let MachineLogAndActions {
+            machine: m,
+            actions,
+            ..
+        } = following_second_voter_with_actions();
         check!(
             (
                 matches!(m.role(), Role::Follower {
@@ -211,7 +220,10 @@ mod tests {
 
     #[test]
     fn end_quorum_epoch_triggers_immediate_election() {
-        let (mut m, log) = following_second_voter();
+        let MachineAndLog {
+            machine: mut m,
+            log,
+        } = following_second_voter();
         let actions = m.on_event(
             Event::ReceiveEndQuorumEpoch {
                 leader_id: NodeId(2),
@@ -273,7 +285,11 @@ mod tests {
     #[test]
     fn begin_quorum_epoch_from_voter_leader_still_accepted() {
         // C-2 must not break the legitimate path: a voter leader is adopted.
-        let (m, _log, actions) = following_second_voter_with_actions();
+        let MachineLogAndActions {
+            machine: m,
+            actions,
+            ..
+        } = following_second_voter_with_actions();
         assert2::assert!(matches!(m.role(), Role::Follower {
             leader_id: NodeId(2),
             ..
@@ -315,7 +331,10 @@ mod tests {
     /// can grant the first candidate's pre-vote.
     #[test]
     fn end_quorum_epoch_backs_off_a_later_candidate() {
-        let (mut m, log) = following_second_voter();
+        let MachineAndLog {
+            machine: mut m,
+            log,
+        } = following_second_voter();
         let actions = m.on_event(
             Event::ReceiveEndQuorumEpoch {
                 leader_id: NodeId(2),

@@ -290,10 +290,16 @@ mod tests {
         ]
     }
 
-    fn key(parts: Vec<(&str, Option<&str>)>) -> EntityKey {
+    /// One component of a quota entity: its type and optional name.
+    struct EntityPart<'a> {
+        entity_type: &'a str,
+        entity_name: Option<&'a str>,
+    }
+
+    fn key(parts: Vec<EntityPart<'_>>) -> EntityKey {
         parts
             .into_iter()
-            .map(|(t, n)| (t.into(), n.map(Into::into)))
+            .map(|part| (part.entity_type.into(), part.entity_name.map(Into::into)))
             .collect()
     }
 
@@ -373,7 +379,10 @@ mod tests {
 
     #[test]
     fn strict_exact_match_filters_correctly() {
-        let stored = key(vec![("user", Some("alice"))]);
+        let stored = key(vec![EntityPart {
+            entity_type: "user",
+            entity_name: Some("alice"),
+        }]);
         let filter = exact_user_filter("alice");
         assert!(entity_matches_filter(
             &stored,
@@ -390,7 +399,16 @@ mod tests {
     #[test]
     fn non_strict_filter_returns_supersets() {
         // Stored has (user, client-id); filter only mentions user.
-        let stored = key(vec![("client-id", Some("app1")), ("user", Some("alice"))]);
+        let stored = key(vec![
+            EntityPart {
+                entity_type: "client-id",
+                entity_name: Some("app1"),
+            },
+            EntityPart {
+                entity_type: "user",
+                entity_name: Some("alice"),
+            },
+        ]);
         let filter = exact_user_filter("alice");
         assert!(entity_matches_filter(
             &stored,
@@ -406,8 +424,14 @@ mod tests {
 
     #[test]
     fn default_match_type_filters_by_none_entity_name() {
-        let stored_default = key(vec![("user", None)]);
-        let stored_named = key(vec![("user", Some("alice"))]);
+        let stored_default = key(vec![EntityPart {
+            entity_type: "user",
+            entity_name: None,
+        }]);
+        let stored_named = key(vec![EntityPart {
+            entity_type: "user",
+            entity_name: Some("alice"),
+        }]);
         let filter = vec![comp().matching(QuotaNameMatch::DefaultEntity).call()];
         assert!(entity_matches_filter(
             &stored_default,
@@ -423,8 +447,14 @@ mod tests {
 
     #[test]
     fn any_match_type_returns_all_names_of_type() {
-        let stored1 = key(vec![("user", Some("alice"))]);
-        let stored2 = key(vec![("user", None)]);
+        let stored1 = key(vec![EntityPart {
+            entity_type: "user",
+            entity_name: Some("alice"),
+        }]);
+        let stored2 = key(vec![EntityPart {
+            entity_type: "user",
+            entity_name: None,
+        }]);
         let filter = vec![comp().call()];
         assert!(entity_matches_filter(
             &stored1,
@@ -560,6 +590,13 @@ mod tests {
     /// match, with `entries = null` (#674). Valid filters still match.
     #[tokio::test]
     async fn invalid_filters_answer_kafkas_top_level_error() {
+        /// A case label, the filter components, and the whole response they must answer with.
+        struct RefusalRow {
+            label: &'static str,
+            components: Vec<ComponentData>,
+            expected: DescribeClientQuotasResponse,
+        }
+
         let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_alice_quota(&broker_handle).await;
         seed_quota(&broker_handle, QuotaRecordSetup {
@@ -578,81 +615,81 @@ mod tests {
                 entries: None,
             })
         };
-        let rows: Vec<(&str, Vec<ComponentData>, DescribeClientQuotasResponse)> = vec![
-            (
-                "empty entity type",
-                vec![comp().entity_type("").call()],
-                error(INVALID_REQUEST, "Invalid empty entity type."),
-            ),
-            (
-                "repeated entity type",
-                vec![
+        let rows: Vec<RefusalRow> = vec![
+            RefusalRow {
+                label: "empty entity type",
+                components: vec![comp().entity_type("").call()],
+                expected: error(INVALID_REQUEST, "Invalid empty entity type."),
+            },
+            RefusalRow {
+                label: "repeated entity type",
+                components: vec![
                     comp()
                         .matching(QuotaNameMatch::Exact)
                         .maybe_name(Some("alice"))
                         .call(),
                     comp().call(),
                 ],
-                error(
+                expected: error(
                     INVALID_REQUEST,
                     "Entity type user cannot appear more than once in the filter.",
                 ),
-            ),
-            (
-                "unknown entity type",
-                vec![comp().entity_type("group").call()],
-                error(UNSUPPORTED_VERSION, "Unsupported entity type group"),
-            ),
-            (
-                "exact with null match",
-                vec![comp().matching(QuotaNameMatch::Exact).call()],
-                error(
+            },
+            RefusalRow {
+                label: "unknown entity type",
+                components: vec![comp().entity_type("group").call()],
+                expected: error(UNSUPPORTED_VERSION, "Unsupported entity type group"),
+            },
+            RefusalRow {
+                label: "exact with null match",
+                components: vec![comp().matching(QuotaNameMatch::Exact).call()],
+                expected: error(
                     INVALID_REQUEST,
                     "Request specified MATCH_TYPE_EXACT, but set match string to null.",
                 ),
-            ),
-            (
-                "default with a match string",
-                vec![
+            },
+            RefusalRow {
+                label: "default with a match string",
+                components: vec![
                     comp()
                         .matching(QuotaNameMatch::DefaultEntity)
                         .maybe_name(Some("alice"))
                         .call(),
                 ],
-                error(
+                expected: error(
                     INVALID_REQUEST,
                     "Request specified MATCH_TYPE_DEFAULT, but also specified a match string.",
                 ),
-            ),
-            (
-                "specified with a match string",
-                vec![comp().maybe_name(Some("alice")).call()],
-                error(
+            },
+            RefusalRow {
+                label: "specified with a match string",
+                components: vec![comp().maybe_name(Some("alice")).call()],
+                expected: error(
                     INVALID_REQUEST,
                     "Request specified MATCH_TYPE_SPECIFIED, but also specified a match string.",
                 ),
-            ),
-            (
-                "unknown match type",
-                vec![
+            },
+            RefusalRow {
+                label: "unknown match type",
+                components: vec![
                     comp()
                         .matching(QuotaNameMatch::Malformed(QuotaMatchCode(7)))
                         .call(),
                 ],
-                error(INVALID_REQUEST, "Unknown match type 7"),
-            ),
-            (
-                "ip with user",
-                vec![comp().entity_type("ip").call(), comp().call()],
-                error(
+                expected: error(INVALID_REQUEST, "Unknown match type 7"),
+            },
+            RefusalRow {
+                label: "ip with user",
+                components: vec![comp().entity_type("ip").call(), comp().call()],
+                expected: error(
                     INVALID_REQUEST,
                     "Invalid entity filter component combination. IP filter component should \
                      not be used with user or clientId filter component.",
                 ),
-            ),
-            (
-                "client-id with ip",
-                vec![
+            },
+            RefusalRow {
+                label: "client-id with ip",
+                components: vec![
                     comp()
                         .entity_type("client-id")
                         .matching(QuotaNameMatch::DefaultEntity)
@@ -663,24 +700,29 @@ mod tests {
                         .maybe_name(Some("1.2.3.4"))
                         .call(),
                 ],
-                error(
+                expected: error(
                     INVALID_REQUEST,
                     "Invalid entity filter component combination. IP filter component should \
                      not be used with user or clientId filter component.",
                 ),
-            ),
-            (
-                "valid exact",
-                exact_user_filter("alice"),
-                allowed_user_quota_response(Some("alice"), 1024.0),
-            ),
-            (
-                "valid default",
-                vec![comp().matching(QuotaNameMatch::DefaultEntity).call()],
-                allowed_user_quota_response(None, 2048.0),
-            ),
+            },
+            RefusalRow {
+                label: "valid exact",
+                components: exact_user_filter("alice"),
+                expected: allowed_user_quota_response(Some("alice"), 1024.0),
+            },
+            RefusalRow {
+                label: "valid default",
+                components: vec![comp().matching(QuotaNameMatch::DefaultEntity).call()],
+                expected: allowed_user_quota_response(None, 2048.0),
+            },
         ];
-        for (name, components, expected) in rows {
+        for RefusalRow {
+            label: name,
+            components,
+            expected,
+        } in rows
+        {
             let resp = handle(
                 &broker,
                 &request()

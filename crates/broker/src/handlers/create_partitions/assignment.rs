@@ -18,6 +18,14 @@ use {
 #[cfg(test)]
 mod tests;
 
+/// A refusal of a placement: Kafka's error code and message, which the caller
+/// stamps into the per-topic result.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct PlacementRefusal {
+    pub(super) code: i16,
+    pub(super) message: String,
+}
+
 /// Resolve the replica list for each newly-added partition.
 ///
 /// `provided` is the caller's `assignments` field. `None` selects the
@@ -37,9 +45,9 @@ mod tests;
 /// the existing ones.
 ///
 /// It returns one replica list per new partition, in `existing..new_count`
-/// order. It returns an `(error_code, error_message)` pair with Kafka's
-/// message instead when the request is invalid, and the caller stamps that
-/// pair into the per-topic result.
+/// order. It returns a [`PlacementRefusal`] with Kafka's code and message
+/// instead when the request is invalid, and the caller stamps that into the
+/// per-topic result.
 pub(super) fn resolve_new_partition_assignments(
     provided: Option<&Vec<CreatePartitionsAssignment>>,
     brokers: &[SiteBrokerView],
@@ -47,7 +55,7 @@ pub(super) fn resolve_new_partition_assignments(
     rf: i16,
     preferred_site: Option<&str>,
     rng: &mut PlacementRng,
-) -> Result<Vec<Vec<NodeId>>, (i16, String)> {
+) -> Result<Vec<Vec<NodeId>>, PlacementRefusal> {
     if let Some(provided) = provided {
         let registered: Vec<NodeId> = brokers.iter().map(|broker| broker.node_id).collect();
         let replication_factor = usize::try_from(rf).ok();
@@ -59,7 +67,10 @@ pub(super) fn resolve_new_partition_assignments(
                     &registered,
                     replication_factor,
                 )
-                .map_err(|message| (codes::INVALID_REPLICA_ASSIGNMENT, message))
+                .map_err(|message| PlacementRefusal {
+                    code: codes::INVALID_REPLICA_ASSIGNMENT,
+                    message,
+                })
             })
             .collect();
     }
@@ -73,10 +84,10 @@ pub(super) fn resolve_new_partition_assignments(
     if placed.is_empty() {
         // Kafka's `createPartitions` lets the placer's message through as it
         // is, with no "Unable to replicate" prefix.
-        return Err((
-            codes::INVALID_REPLICATION_FACTOR,
-            placement_failure_reason(rf, brokers),
-        ));
+        return Err(PlacementRefusal {
+            code: codes::INVALID_REPLICATION_FACTOR,
+            message: placement_failure_reason(rf, brokers),
+        });
     }
     Ok(placed)
 }

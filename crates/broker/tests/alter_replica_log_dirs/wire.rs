@@ -94,14 +94,31 @@ pub(crate) async fn describe_log_dirs_at(
     .await
 }
 
+/// The per-resource result of an `IncrementalAlterConfigs` call.
+#[derive(Debug, PartialEq)]
+pub(crate) struct ConfigAlterOutcome {
+    pub(crate) error_code: i16,
+    pub(crate) error_message: Option<String>,
+}
+
+impl ConfigAlterOutcome {
+    /// The outcome of an alter the broker accepted.
+    pub(crate) fn accepted() -> Self {
+        Self {
+            error_code: 0,
+            error_message: None,
+        }
+    }
+}
+
 /// `IncrementalAlterConfigs` v1 that SETs one key on broker `broker`, and the
-/// per-resource `(error_code, error_message)` it answers.
+/// per-resource outcome it answers.
 pub(crate) async fn set_broker_config(
     addr: SocketAddr,
     broker: i32,
     name: &str,
     value: &str,
-) -> (i16, Option<String>) {
+) -> ConfigAlterOutcome {
     use krabka_protocol::owned::incremental_alter_configs_response::IncrementalAlterConfigsResponse;
     let version: i16 = 1;
     let req = incremental_request()
@@ -120,8 +137,8 @@ pub(crate) async fn set_broker_config(
             version: WireApiVersion(version),
         })
         .await;
-    (
-        resp.responses[0].error_code,
-        resp.responses[0].error_message.clone(),
-    )
+    ConfigAlterOutcome {
+        error_code: resp.responses[0].error_code,
+        error_message: resp.responses[0].error_message.clone(),
+    }
 }

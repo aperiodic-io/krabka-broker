@@ -590,7 +590,11 @@ pub async fn list(archive: &ArchiveArgs) -> Result<Vec<String>, BackupError> {
 /// bytes the manifest recorded, and the archive's own error when the capture
 /// cannot be read at all.
 pub async fn verify(capture: &str, archive: &ArchiveArgs) -> Result<(), BackupError> {
-    let (store, id, manifest) = open_capture(archive, capture).await?;
+    let OpenedCapture {
+        store,
+        id,
+        manifest,
+    } = open_capture(archive, capture).await?;
 
     let mut problems: Vec<String> = Vec::new();
     for artifact in &manifest.artifacts {
@@ -675,7 +679,11 @@ async fn restore_offsets_secured(
     dry_run: bool,
     archive: &ArchiveArgs,
 ) -> Result<usize, BackupError> {
-    let (store, id, manifest) = open_capture(archive, capture).await?;
+    let OpenedCapture {
+        store,
+        id,
+        manifest,
+    } = open_capture(archive, capture).await?;
     let recorded = manifest.artifact(GROUP_OFFSETS).ok_or_else(|| {
         BackupError::NoSuchCapture(format!("capture {id} holds no {GROUP_OFFSETS}"))
     })?;
@@ -877,15 +885,23 @@ async fn connect_admin(
         .map_err(|error| BackupError::Cluster(format!("cannot reach {bootstrap_server}: {error}")))
 }
 
+/// An opened archive, the id of the capture selected in it, and that capture's manifest.
+struct OpenedCapture {
+    store: Archive,
+    id: String,
+    manifest: Manifest,
+}
+
 /// Resolve a capture selector and load its manifest from the opened archive.
-async fn open_capture(
-    archive: &ArchiveArgs,
-    capture: &str,
-) -> Result<(Archive, String, Manifest), BackupError> {
+async fn open_capture(archive: &ArchiveArgs, capture: &str) -> Result<OpenedCapture, BackupError> {
     let store = Archive::open(archive)?;
     let id = resolve_capture(&store, capture).await?;
     let manifest = read_manifest(&store, &id).await?;
-    Ok((store, id, manifest))
+    Ok(OpenedCapture {
+        store,
+        id,
+        manifest,
+    })
 }
 
 /// Select the newest committed capture for `latest`, or check that a named directory exists.
@@ -981,7 +997,9 @@ mod tests {
             DISKLESS_WAL_INDEX,
         ] {
             for size in [8, 9] {
-                let (_root, _args, store) = archive_fixture();
+                let ArchiveFixture {
+                    root: _root, store, ..
+                } = archive_fixture();
                 let id = "0000000000000042";
                 // Earlier artifacts may remain orphaned after a later failure.
                 store
@@ -1040,7 +1058,11 @@ mod tests {
                 .unwrap()
                 .set_len(super::MAX_SNAPSHOT_BYTES + 1)
                 .unwrap();
-            let (_root, args, store) = archive_fixture();
+            let ArchiveFixture {
+                root: _root,
+                args,
+                store,
+            } = archive_fixture();
             let error = capture(Some(node.path()), None, &args).await.unwrap_err();
             check!(error.to_string().contains(name));
             let ids = store.child_directories(super::CAPTURE_ROOT).await.unwrap();
@@ -1065,7 +1087,11 @@ mod tests {
         let second = node_with_rlmm();
         let snapshot = second.path().join(super::RLMM_SNAPSHOT_RELATIVE);
         std::fs::write(snapshot, b"second node snapshot").unwrap();
-        let (_root, archive, store) = archive_fixture();
+        let ArchiveFixture {
+            root: _root,
+            args: archive,
+            store,
+        } = archive_fixture();
         let signing = super::CaptureSigningArgs::default();
         let (left, right) = tokio::join!(
             super::capture_secured_at(Some(first.path()), None, None, &signing, &archive, 42),
@@ -1087,7 +1113,11 @@ mod tests {
 
     #[tokio::test]
     async fn latest_ignores_newer_capture_artifacts_without_a_committed_manifest() {
-        let (_root, args, store) = archive_fixture();
+        let ArchiveFixture {
+            root: _root,
+            args,
+            store,
+        } = archive_fixture();
         let complete = "0000000000000001";
         let orphan = "0000000000000002-0123456789abcdef0123456789abcdef";
         write_offsets_capture(&store, complete, b"offsets", b"offsets").await;
@@ -1108,7 +1138,11 @@ mod tests {
 
     #[tokio::test]
     async fn document_reads_reject_independent_limits_before_buffering() {
-        let (root, archive, store) = archive_fixture();
+        let ArchiveFixture {
+            root,
+            args: archive,
+            store,
+        } = archive_fixture();
         let id = "0000000000000001";
         let key = capture_key(id, MANIFEST);
         store.put(&key, b"{}".to_vec()).await.unwrap();
@@ -1137,21 +1171,45 @@ mod tests {
         );
     }
 
-    fn archive_fixture() -> (tempfile::TempDir, ArchiveArgs, Archive) {
+    /// A temporary archive root, the arguments that open it, and the opened archive.
+    struct ArchiveFixture {
+        root: tempfile::TempDir,
+        args: ArchiveArgs,
+        store: Archive,
+    }
+
+    fn archive_fixture() -> ArchiveFixture {
         let archive_root = tempfile::tempdir().expect("archive root");
         let args = archive_args(archive_root.path());
         let store = Archive::open(&args).expect("open the archive");
-        (archive_root, args, store)
+        ArchiveFixture {
+            root: archive_root,
+            args,
+            store,
+        }
     }
 
-    async fn captured_node() -> (tempfile::TempDir, tempfile::TempDir, ArchiveArgs, String) {
+    /// A node directory, a fresh archive root, the arguments that open it, and the id of the capture of the node taken into it.
+    struct CapturedNode {
+        node: tempfile::TempDir,
+        archive_root: tempfile::TempDir,
+        args: ArchiveArgs,
+        id: String,
+    }
+
+    async fn captured_node() -> CapturedNode {
         let node = node_with_both_inputs();
         let archive_root = tempfile::tempdir().expect("archive root");
         let args = archive_args(archive_root.path());
         let id = capture(Some(node.path()), None, &args)
             .await
             .expect("capture the node");
-        (node, archive_root, args, id)
+        CapturedNode {
+            node,
+            archive_root,
+            args,
+            id,
+        }
     }
 
     async fn capture_manifest(store: &Archive, id: &str) -> Manifest {
@@ -1316,7 +1374,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_capture_records_both_snapshots_with_their_digests() {
-        let (_node, _archive_root, args, id) = captured_node().await;
+        let CapturedNode {
+            node: _node,
+            archive_root: _archive_root,
+            args,
+            id,
+        } = captured_node().await;
 
         let store = Archive::open(&args).expect("open the archive");
         let manifest = capture_manifest(&store, &id).await;
@@ -1423,7 +1486,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn list_reports_a_capture_whose_manifest_cannot_be_read_and_keeps_going() {
-        let (_archive_root, args, store) = archive_fixture();
+        let ArchiveFixture {
+            root: _archive_root,
+            args,
+            store,
+        } = archive_fixture();
         store
             .put(&capture_key("0000000000000001", MANIFEST), b"{".to_vec())
             .await
@@ -1439,7 +1506,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_accepts_a_capture_it_just_wrote_under_either_selector() {
-        let (_node, _archive_root, args, id) = captured_node().await;
+        let CapturedNode {
+            node: _node,
+            archive_root: _archive_root,
+            args,
+            id,
+        } = captured_node().await;
 
         check!(verify("latest", &args).await.is_ok());
         check!(verify(&id, &args).await.is_ok());
@@ -1447,7 +1519,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_reports_an_artifact_the_archive_no_longer_holds_whole() {
-        let (_node, archive_root, args, id) = captured_node().await;
+        let CapturedNode {
+            node: _node,
+            archive_root,
+            args,
+            id,
+        } = captured_node().await;
 
         // What a half-finished upload leaves behind, and exactly what a
         // restore must not be handed.
@@ -1490,7 +1567,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_dry_run_reports_every_offset_and_commits_nothing() {
-        let (_archive_root, args, store) = archive_fixture();
+        let ArchiveFixture {
+            root: _archive_root,
+            args,
+            store,
+        } = archive_fixture();
         let offsets = offsets_json();
         write_offsets_capture(&store, "0000000000000001", &offsets, &offsets).await;
 
@@ -1522,7 +1603,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn offsets_that_do_not_match_their_digest_are_never_committed() {
-        let (_archive_root, args, store) = archive_fixture();
+        let ArchiveFixture {
+            root: _archive_root,
+            args,
+            store,
+        } = archive_fixture();
         write_offsets_capture(&store, "0000000000000001", b"{}", &offsets_json()).await;
 
         let error = restore_offsets("latest", &closed_address(), true, &args)
@@ -1533,7 +1618,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn offsets_that_are_not_the_captured_shape_name_the_object_that_holds_them() {
-        let (_archive_root, args, store) = archive_fixture();
+        let ArchiveFixture {
+            root: _archive_root,
+            args,
+            store,
+        } = archive_fixture();
         let bytes = b"[]";
         write_offsets_capture(&store, "0000000000000001", bytes, bytes).await;
 
@@ -1598,7 +1687,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_commit_reports_the_cluster_it_could_not_reach() {
-        let (_archive_root, args, store) = archive_fixture();
+        let ArchiveFixture {
+            root: _archive_root,
+            args,
+            store,
+        } = archive_fixture();
         let offsets = offsets_json();
         write_offsets_capture(&store, "0000000000000001", &offsets, &offsets).await;
         let address = closed_address();
@@ -1612,7 +1705,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_capture_that_holds_no_offsets_commits_nothing_and_asks_the_cluster_nothing() {
-        let (_archive_root, args, store) = archive_fixture();
+        let ArchiveFixture {
+            root: _archive_root,
+            args,
+            store,
+        } = archive_fixture();
         let empty = serde_json::to_vec(&GroupOffsetsFile::default()).expect("encode the offsets");
         write_offsets_capture(&store, "0000000000000001", &empty, &empty).await;
 

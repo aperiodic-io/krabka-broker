@@ -19,7 +19,7 @@ use {
     uuid::Uuid,
 };
 
-fn fixture(root: &std::path::Path, object: bool, corrupt: bool) -> (DisklessWalCapture, Uuid) {
+fn fixture(root: &std::path::Path, object: bool, corrupt: bool) -> DisklessWalCapture {
     fixture_with_second_base(root, object, corrupt, 1)
 }
 
@@ -28,7 +28,7 @@ fn fixture_with_second_base(
     object: bool,
     corrupt: bool,
     second_base: i64,
-) -> (DisklessWalCapture, Uuid) {
+) -> DisklessWalCapture {
     let topic_id = Uuid::from_u128(44);
     let mut first = BytesMut::new();
     RecordBatch {
@@ -73,7 +73,7 @@ fn fixture_with_second_base(
         )
         .unwrap();
     }
-    let capture = DisklessWalCapture {
+    DisklessWalCapture {
         format_version: 1,
         captured_at_ms: 42,
         source_cutoffs: vec![9],
@@ -100,8 +100,7 @@ fn fixture_with_second_base(
         rlmm_snapshot_sha256: None,
         group_offsets_sha256: None,
         authentication: None,
-    };
-    (capture, topic_id)
+    }
 }
 
 fn capture_args(
@@ -167,14 +166,27 @@ fn write_capture(path: &std::path::Path, capture: &DisklessWalCapture) {
     std::fs::write(path, serde_json::to_vec(capture).unwrap()).unwrap();
 }
 
+/// The two test directories and the path of the published capture.
+struct RestoreFixture {
+    archive: tempfile::TempDir,
+    target: tempfile::TempDir,
+    capture_path: std::path::PathBuf,
+}
+
 /// Open the two test directories, build the selected WAL and publish its capture.
-fn restore_fixture(
-    object: bool,
-    corrupt: bool,
-) -> (tempfile::TempDir, tempfile::TempDir, std::path::PathBuf) {
-    let (archive, target, capture_path, capture) = unwritten_fixture(object, corrupt);
+fn restore_fixture(object: bool, corrupt: bool) -> RestoreFixture {
+    let UnwrittenFixture {
+        archive,
+        target,
+        capture_path,
+        capture,
+    } = unwritten_fixture(object, corrupt);
     write_capture(&capture_path, &capture);
-    (archive, target, capture_path)
+    RestoreFixture {
+        archive,
+        target,
+        capture_path,
+    }
 }
 
 fn check_orders_offsets(target: &std::path::Path, start: Offset, end: Offset) {
@@ -183,20 +195,25 @@ fn check_orders_offsets(target: &std::path::Path, start: Offset, end: Offset) {
     check!(log.log_end_offset() == end);
 }
 
-fn unwritten_fixture(
-    object: bool,
-    corrupt: bool,
-) -> (
-    tempfile::TempDir,
-    tempfile::TempDir,
-    std::path::PathBuf,
-    DisklessWalCapture,
-) {
+/// The two test directories, the path a capture is to be written to, and the capture itself.
+struct UnwrittenFixture {
+    archive: tempfile::TempDir,
+    target: tempfile::TempDir,
+    capture_path: std::path::PathBuf,
+    capture: DisklessWalCapture,
+}
+
+fn unwritten_fixture(object: bool, corrupt: bool) -> UnwrittenFixture {
     let archive = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
     let capture_path = archive.path().join("capture.json");
-    let (capture, _) = fixture(archive.path(), object, corrupt);
-    (archive, target, capture_path, capture)
+    let capture = fixture(archive.path(), object, corrupt);
+    UnwrittenFixture {
+        archive,
+        target,
+        capture_path,
+        capture,
+    }
 }
 
 async fn dry_run_error(
@@ -211,7 +228,11 @@ async fn dry_run_error(
 
 #[tokio::test]
 async fn referenced_wal_restores_at_original_offsets_and_orphans_are_ignored() {
-    let (archive, target, capture_path) = restore_fixture(true, false);
+    let RestoreFixture {
+        archive,
+        target,
+        capture_path,
+    } = restore_fixture(true, false);
     std::fs::write(archive.path().join("orphan.ckwl"), b"uncommitted garbage").unwrap();
     let report = restore(&args(archive.path(), target.path(), &capture_path))
         .await
@@ -222,7 +243,11 @@ async fn referenced_wal_restores_at_original_offsets_and_orphans_are_ignored() {
 
 #[tokio::test]
 async fn diskless_restore_rejects_an_offset_bound_below_the_delete_floor() {
-    let (archive, target, capture_path) = restore_fixture(true, false);
+    let RestoreFixture {
+        archive,
+        target,
+        capture_path,
+    } = restore_fixture(true, false);
 
     let error = restore(&bounded_args(archive.path(), target.path(), &capture_path))
         .await
@@ -232,7 +257,11 @@ async fn diskless_restore_rejects_an_offset_bound_below_the_delete_floor() {
 
 #[tokio::test]
 async fn diskless_capture_that_selects_nothing_is_an_empty_archive() {
-    let (archive, target, capture_path) = restore_fixture(false, false);
+    let RestoreFixture {
+        archive,
+        target,
+        capture_path,
+    } = restore_fixture(false, false);
     let mut args = args(archive.path(), target.path(), &capture_path);
     args.topic = vec!["payments".to_owned()];
 
@@ -242,7 +271,12 @@ async fn diskless_capture_that_selects_nothing_is_an_empty_archive() {
 
 #[tokio::test]
 async fn diskless_restore_accepts_complete_batch_subranges_of_a_footer_run() {
-    let (archive, target, capture_path, mut capture) = unwritten_fixture(true, false);
+    let UnwrittenFixture {
+        archive,
+        target,
+        capture_path,
+        mut capture,
+    } = unwritten_fixture(true, false);
     let range = &mut capture.partitions[0].ranges[0].entry;
     let object = std::fs::read(archive.path().join("diskless-wal/1/a.ckwl")).unwrap();
     let start = usize::try_from(range.byte_start).unwrap();
@@ -261,7 +295,12 @@ async fn diskless_restore_accepts_complete_batch_subranges_of_a_footer_run() {
 
 #[tokio::test]
 async fn diskless_restore_accepts_ranges_wholly_below_the_delete_floor() {
-    let (archive, target, capture_path, mut capture) = unwritten_fixture(true, false);
+    let UnwrittenFixture {
+        archive,
+        target,
+        capture_path,
+        mut capture,
+    } = unwritten_fixture(true, false);
     capture.partitions[0].delete_floor = 2;
     capture.partitions[0].recovery_cutoff = 2;
     write_capture(&capture_path, &capture);
@@ -283,7 +322,7 @@ async fn diskless_restore_rejects_one_topic_name_with_multiple_ids() {
     let archive = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
     let capture_path = archive.path().join("capture.json");
-    let (mut capture, _) = fixture(archive.path(), false, false);
+    let mut capture = fixture(archive.path(), false, false);
     capture.partitions[0].ranges.clear();
     capture.partitions[0].delete_floor = 0;
     capture.partitions[0].recovery_cutoff = 0;
@@ -302,7 +341,11 @@ async fn diskless_restore_rejects_one_topic_name_with_multiple_ids() {
 #[tokio::test]
 async fn missing_or_corrupt_required_wal_fails_closed() {
     for (object, corrupt) in [(false, false), (true, true)] {
-        let (archive, target, capture_path) = restore_fixture(object, corrupt);
+        let RestoreFixture {
+            archive,
+            target,
+            capture_path,
+        } = restore_fixture(object, corrupt);
         let error = restore(&args(archive.path(), target.path(), &capture_path))
             .await
             .unwrap_err();
@@ -326,7 +369,7 @@ async fn trusted_capture_accepts_only_its_key_head_state_and_wal_bytes() {
     .write_atomic(&rlmm_path)
     .unwrap();
     let rlmm_bytes = std::fs::read(&rlmm_path).unwrap();
-    let (mut capture, _) = fixture(archive.path(), true, false);
+    let mut capture = fixture(archive.path(), true, false);
     capture.metadata_snapshot_sha256 = Some(Sha256Digest::of(b"trusted metadata"));
     capture.rlmm_snapshot_sha256 = Some(Sha256Digest::of(&rlmm_bytes));
     let wal_key = capture.partitions[0].ranges[0].object_key.clone();
@@ -469,7 +512,12 @@ async fn trusted_capture_accepts_only_its_key_head_state_and_wal_bytes() {
 
 #[tokio::test]
 async fn dry_run_rejects_a_capture_that_selects_only_part_of_a_footer_run() {
-    let (archive, target, capture_path, mut capture) = unwritten_fixture(true, false);
+    let UnwrittenFixture {
+        archive,
+        target,
+        capture_path,
+        mut capture,
+    } = unwritten_fixture(true, false);
     capture.partitions[0].ranges[0].entry.last_offset = 0;
     capture.partitions[0].ranges[0].entry.byte_len /= 2;
     capture.partitions[0].recovery_cutoff = 1;
@@ -490,7 +538,7 @@ async fn dry_run_rejects_an_internal_batch_offset_gap() {
     let archive = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
     let capture_path = archive.path().join("capture.json");
-    let (capture, _) = fixture_with_second_base(archive.path(), true, false, 2);
+    let capture = fixture_with_second_base(archive.path(), true, false, 2);
     assert_dry_run_error(
         DryRunErrorSetup::builder()
             .archive(archive.path())

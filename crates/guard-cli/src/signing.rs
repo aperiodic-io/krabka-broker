@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn a_change_to_any_signed_freeze_field_changes_the_bytes() {
         let baseline = freeze_signing_bytes(&freeze_input());
-        let cases: [(&'static str, FreezeSigningInput<'static>); 8] = [
+        let cases = [
             ("another cluster", FreezeSigningInput {
                 cluster_id: "other-cluster",
                 ..freeze_input()
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn a_change_to_any_signed_approval_field_changes_the_bytes() {
         let baseline = approval_signing_bytes(&approval_input());
-        let cases: [(&'static str, ApprovalSigningInput<'static>); 6] = [
+        let cases = [
             ("another proposal", ApprovalSigningInput {
                 proposal_id: [0; 16],
                 ..approval_input()

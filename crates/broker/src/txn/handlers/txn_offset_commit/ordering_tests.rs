@@ -9,7 +9,12 @@
 //! surviving rows only (line 2185).
 
 use {
-    super::integration_tests::{log_holds_key, seed_topic_a, seed_transaction, topic},
+    super::{
+        integration_tests::{
+            ExpectedRow, expected_row, log_holds_key, seed_topic_a, seed_transaction, topic,
+        },
+        test_support::RowKey,
+    },
     crate::{
         authorizer::AuthorizationResult,
         broker::{Broker, BrokerHandle},
@@ -70,24 +75,28 @@ struct Case {
     /// Whether the transactional id holds a staged producer identity.
     staged: bool,
     member: Member,
-    expected: Vec<(&'static str, i32, i16)>,
-    appended: Vec<(&'static str, i32)>,
+    expected: Vec<ExpectedRow>,
+    appended: Vec<RowKey<'static>>,
 }
 
 /// One response topic per row, which is the shape every case's request has.
 /// The rows are in response order: Kafka's response builder holds the topic
 /// sweep's rows before the coordinator's.
-fn expected_response(rows: &[(&str, i32, i16)]) -> TxnOffsetCommitResponse {
+fn expected_response(rows: &[ExpectedRow]) -> TxnOffsetCommitResponse {
     TxnOffsetCommitResponse {
         throttle_time_ms: 0,
         topics: rows
             .iter()
             .map(
-                |&(name, partition_index, error_code)| TxnOffsetCommitResponseTopic {
-                    name: name.to_string(),
+                |&ExpectedRow {
+                     topic,
+                     partition,
+                     code,
+                 }| TxnOffsetCommitResponseTopic {
+                    name: topic.to_string(),
                     partitions: vec![TxnOffsetCommitResponsePartition {
-                        partition_index,
-                        error_code,
+                        partition_index: partition,
+                        error_code: code,
                         ..Default::default()
                     }],
                     ..Default::default()
@@ -180,10 +189,13 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             staged: false,
             member: Member::Simple,
             expected: vec![
-                (DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED),
-                ("a", 0, codes::NONE),
+                expected_row(DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED),
+                expected_row("a", 0, codes::NONE),
             ],
-            appended: vec![("a", 0)],
+            appended: vec![RowKey {
+                topic: "a",
+                partition: 0,
+            }],
         },
         Case {
             name: "all_rows_denied_skips_fencing",
@@ -191,7 +203,7 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             coordinator: true,
             staged: false,
             member: Member::Unregistered,
-            expected: vec![(DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED)],
+            expected: vec![expected_row(DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED)],
             appended: vec![],
         },
         Case {
@@ -200,7 +212,11 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             coordinator: true,
             staged: false,
             member: Member::Unregistered,
-            expected: vec![("missing", 0, codes::UNKNOWN_TOPIC_OR_PARTITION)],
+            expected: vec![expected_row(
+                "missing",
+                0,
+                codes::UNKNOWN_TOPIC_OR_PARTITION,
+            )],
             appended: vec![],
         },
         Case {
@@ -209,7 +225,7 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             coordinator: true,
             staged: false,
             member: Member::Unregistered,
-            expected: vec![("a", 0, codes::ILLEGAL_GENERATION)],
+            expected: vec![expected_row("a", 0, codes::ILLEGAL_GENERATION)],
             appended: vec![],
         },
         Case {
@@ -219,8 +235,8 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             staged: true,
             member: Member::Simple,
             expected: vec![
-                (DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED),
-                ("a", 0, codes::INVALID_TXN_STATE),
+                expected_row(DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED),
+                expected_row("a", 0, codes::INVALID_TXN_STATE),
             ],
             appended: vec![],
         },
@@ -230,7 +246,7 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             coordinator: true,
             staged: true,
             member: Member::Simple,
-            expected: vec![(DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED)],
+            expected: vec![expected_row(DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED)],
             appended: vec![],
         },
         Case {
@@ -240,8 +256,8 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             staged: false,
             member: Member::Simple,
             expected: vec![
-                (DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED),
-                ("a", 0, codes::NOT_COORDINATOR),
+                expected_row(DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED),
+                expected_row("a", 0, codes::NOT_COORDINATOR),
             ],
             appended: vec![],
         },
@@ -251,7 +267,7 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             coordinator: false,
             staged: false,
             member: Member::Unregistered,
-            expected: vec![("a", 0, codes::NOT_COORDINATOR)],
+            expected: vec![expected_row("a", 0, codes::NOT_COORDINATOR)],
             appended: vec![],
         },
         Case {
@@ -260,7 +276,7 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             coordinator: false,
             staged: true,
             member: Member::Simple,
-            expected: vec![("a", 0, codes::NOT_COORDINATOR)],
+            expected: vec![expected_row("a", 0, codes::NOT_COORDINATOR)],
             appended: vec![],
         },
         Case {
@@ -269,7 +285,7 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             coordinator: false,
             staged: false,
             member: Member::Simple,
-            expected: vec![(DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED)],
+            expected: vec![expected_row(DENIED, 0, codes::TOPIC_AUTHORIZATION_FAILED)],
             appended: vec![],
         },
     ];
@@ -334,7 +350,7 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
 
         super::test_support::check_appended_keys(&case.topics, &case.appended, |key, expected| {
             check!(
-                log_holds_key(&broker, &group_id, key.0, key.1) == expected,
+                log_holds_key(&broker, &group_id, key.topic, key.partition) == expected,
                 "{}: log holds {:?}",
                 case.name,
                 key

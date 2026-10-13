@@ -80,6 +80,12 @@ pub(super) fn image_with_follower_throttle(value: &str) -> MetadataImage {
     image
 }
 
+/// A replicator config and the log directory that backs it.
+pub(super) struct ConfigWithDir {
+    pub(super) cfg: Config,
+    pub(super) dir: tempfile::TempDir,
+}
+
 pub(super) fn test_config(image: MetadataImage) -> (Config, tempfile::TempDir) {
     let log_dir = tempfile::tempdir().unwrap();
     let cfg = Config {

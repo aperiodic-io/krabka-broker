@@ -6,7 +6,7 @@
 //! so it is separate from the group edits and the injection protocol.
 
 use {
-    super::BarrierCoordinator,
+    super::{BarrierCoordinator, NamedGroup},
     crate::{
         barrier::{
             STATE_TOPIC,
@@ -75,13 +75,20 @@ impl BarrierCoordinator {
     /// coordinator did not observe the offsets, so the cut names every frozen
     /// target as missing.
     async fn finalize_open_injections(&self, image: &MetadataImage) -> Result<(), BarrierError> {
-        let open: Vec<(String, Arc<Mutex<GroupEntry>>)> = self
+        let open: Vec<NamedGroup> = self
             .groups
             .iter()
-            .map(|e| (e.key().clone(), e.value().clone()))
+            .map(|e| NamedGroup {
+                name: e.key().clone(),
+                entry: e.value().clone(),
+            })
             .collect();
 
-        for (group, handle) in open {
+        for NamedGroup {
+            name: group,
+            entry: handle,
+        } in open
+        {
             let mut entry = handle.lock().await;
             let pending = entry.pending.clone();
             let frozen_coordinator_epoch = pending
@@ -284,7 +291,7 @@ mod tests {
             barrier::{
                 STATE_TOPIC,
                 coordinator::{
-                    BarrierCoordinator, GroupDescription, RetainedCut,
+                    AppendRecord, BarrierCoordinator, GroupDescription, RetainedCut,
                     test_support::{Fixture, GROUP, spec},
                 },
                 error::BarrierError,
@@ -359,16 +366,22 @@ mod tests {
         assert!(third.epoch == 3);
     }
 
-    async fn recover_one_cut(
-        fixture: &Fixture,
-        epoch: InjectionEpoch,
-    ) -> (BarrierCoordinator, RetainedCut) {
+    /// A recovered coordinator, and the one cut it holds.
+    struct RecoveredCut {
+        coordinator: BarrierCoordinator,
+        cut: RetainedCut,
+    }
+
+    async fn recover_one_cut(fixture: &Fixture, epoch: InjectionEpoch) -> RecoveredCut {
         let replayed = fixture.recovered().await;
         let mut cuts = replayed.list_cuts(GROUP).await.expect("the group is live");
         assert!(cuts.len() == 1);
         let cut = cuts.remove(0);
         assert!(cut.epoch == epoch.0);
-        (replayed, cut)
+        RecoveredCut {
+            coordinator: replayed,
+            cut,
+        }
     }
 
     #[derive(Clone, Copy)]
@@ -384,10 +397,10 @@ mod tests {
         context: &str,
     ) {
         coordinator
-            .append_records(GROUP, vec![(
-                RecordKey::injection_start(GROUP, epoch.0),
-                Some(encode_injection_start(start).expect("encodes").into()),
-            )])
+            .append_records(GROUP, vec![AppendRecord {
+                key: RecordKey::injection_start(GROUP, epoch.0),
+                value: Some(encode_injection_start(start).expect("encodes").into()),
+            }])
             .await
             .expect(context);
     }
@@ -419,7 +432,10 @@ mod tests {
         )
         .await;
 
-        let (replayed, cut) = recover_one_cut(&fixture, InjectionEpoch(1)).await;
+        let RecoveredCut {
+            coordinator: replayed,
+            cut,
+        } = recover_one_cut(&fixture, InjectionEpoch(1)).await;
         assert!(cut.cut.status == CutStatus::Partial);
         assert!(cut.cut.triggered_at == 1_000);
         assert!(
@@ -469,10 +485,10 @@ mod tests {
             let fixture = Fixture::new();
             let coordinator = fixture.coordinator_with_group(group, spec().call()).await;
             coordinator
-                .append_records(group, vec![(
-                    RecordKey::injection_start(group, 1),
-                    Some(encode_injection_start(&start).expect("encodes").into()),
-                )])
+                .append_records(group, vec![AppendRecord {
+                    key: RecordKey::injection_start(group, 1),
+                    value: Some(encode_injection_start(&start).expect("encodes").into()),
+                }])
                 .await
                 .expect("the injection-start record lands");
 
@@ -503,7 +519,10 @@ mod tests {
         )
         .await;
 
-        let (replayed, cut) = recover_one_cut(&fixture, InjectionEpoch(i64::MAX)).await;
+        let RecoveredCut {
+            coordinator: replayed,
+            cut,
+        } = recover_one_cut(&fixture, InjectionEpoch(i64::MAX)).await;
         assert!(cut.cut.status == CutStatus::Partial);
         assert!(matches!(
             replayed.trigger_injection(GROUP, None).await,

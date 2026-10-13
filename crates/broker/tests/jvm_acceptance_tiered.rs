@@ -18,24 +18,32 @@ use {
 // 200 records of ~30 bytes seal several segments at TIERED_SEGMENT_SIZE.
 const RECORDS: usize = 200;
 
-type MinioTopic = (
-    u16,
-    MinioContainer,
-    krabka_broker::BrokerHandle,
-    tempfile::TempDir,
-    krabka_broker::BrokerConfig,
-);
+/// A tiered topic on a running broker: the `MinIO` port and container, the
+/// broker, its directory and the config it started from.
+struct MinioTopic {
+    port: u16,
+    minio: MinioContainer,
+    broker: krabka_broker::BrokerHandle,
+    dir: tempfile::TempDir,
+    config: krabka_broker::BrokerConfig,
+}
 
 async fn start_minio_topic(topic: &str, rlmm: krabka_broker::RlmmKind) -> MinioTopic {
     let port = minio_port();
     let minio = MinioContainer::start();
     minio_make_bucket(MINIO_BUCKET);
     let s3 = mutable_minio_config(port);
-    let (broker, dir, config) = start_host_broker_with_minio_tier(s3, rlmm).await;
+    let started = start_host_broker_with_minio_tier(s3, rlmm).await;
     nc_check_connectivity();
-    create_tiered_topic(&broker, topic).await;
+    create_tiered_topic(&started.broker, topic).await;
     produce_records(topic, RECORDS);
-    (port, minio, broker, dir, config)
+    MinioTopic {
+        port,
+        minio,
+        broker: started.broker,
+        dir: started.dir,
+        config: started.config,
+    }
 }
 
 // Same multi-thread caveat as `console_producer_round_trip`: blocking
@@ -46,8 +54,7 @@ async fn start_minio_topic(topic: &str, rlmm: krabka_broker::RlmmKind) -> MinioT
 async fn tiered_storage_round_trip_through_minio() {
     const TOPIC: &str = "krabka-tiered-minio-itest";
 
-    let (_minio_port, _minio, broker, _dir, _cfg) =
-        start_minio_topic(TOPIC, krabka_broker::RlmmKind::InMemory).await;
+    let minio_topic = start_minio_topic(TOPIC, krabka_broker::RlmmKind::InMemory).await;
 
     // Give the `RemoteLogManager` enough ticks (1 s interval) to (a) copy
     // every sealed segment to MinIO and (b) run the local-retention pass.
@@ -67,7 +74,7 @@ async fn tiered_storage_round_trip_through_minio() {
         "expected >={RECORDS} records from remote tier, got {consumed}"
     );
 
-    broker.shutdown().await;
+    minio_topic.broker.shutdown().await;
     // `_minio` is dropped here; the container is removed via `docker rm -f`.
 }
 
@@ -85,8 +92,7 @@ async fn tiered_storage_round_trip_through_minio() {
 async fn tiered_storage_disable_needs_delete_on_disable() {
     const TOPIC: &str = "krabka-tiered-disable-itest";
 
-    let (_minio_port, _minio, broker, _dir, _cfg) =
-        start_minio_topic(TOPIC, krabka_broker::RlmmKind::InMemory).await;
+    let minio_topic = start_minio_topic(TOPIC, krabka_broker::RlmmKind::InMemory).await;
     wait_for_minio_segments(MINIO_BUCKET, 2).await;
 
     let bootstrap = broker0_advertised();
@@ -144,13 +150,14 @@ async fn tiered_storage_disable_needs_delete_on_disable() {
         "the disabled topic's segments must be gone from the bucket: {listing}"
     );
     check!(
-        broker
+        minio_topic
+            .broker
             .partition_log_start_for_test(TOPIC, 0)
             .is_some_and(|start| start > 0),
         "the log start offset must have risen to the local log start"
     );
 
-    broker.shutdown().await;
+    minio_topic.broker.shutdown().await;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +183,13 @@ async fn tiered_storage_topic_rlmm_survives_restart() {
     // the fix that makes empty bootstrap work for plaintext single-broker
     // setups without an explicit address. `snapshot_dir` is left empty; the
     // broker derives it from `log.dir` at startup.
-    let (_minio_port, _minio, broker, _dir, config) = start_minio_topic(
+    let MinioTopic {
+        port: _minio_port,
+        minio: _minio,
+        broker,
+        dir: _dir,
+        config,
+    } = start_minio_topic(
         TOPIC,
         krabka_broker::RlmmKind::TopicBacked(krabka_broker::KafkaRlmmConfig {
             bootstrap: String::new(),
@@ -312,8 +325,13 @@ fn restore_argv(minio_port: u16, log_dir: &std::path::Path) -> Vec<String> {
 async fn restored_cluster_serves_the_jvm_console_consumer() {
     const TOPIC: &str = "krabka-tiered-restore-itest";
 
-    let (minio_port, _minio, broker, source_dir, _cfg) =
-        start_minio_topic(TOPIC, krabka_broker::RlmmKind::InMemory).await;
+    let MinioTopic {
+        port: minio_port,
+        minio: _minio,
+        broker,
+        dir: source_dir,
+        config: _cfg,
+    } = start_minio_topic(TOPIC, krabka_broker::RlmmKind::InMemory).await;
     // Not `wait_for_minio_segments`: that returns as soon as the `.log`
     // objects appear, and `copy_segment_objects` uploads the `.log` before the
     // indexes, producer snapshot and leader-epoch checkpoint that

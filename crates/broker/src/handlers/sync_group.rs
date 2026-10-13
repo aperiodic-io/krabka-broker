@@ -124,7 +124,13 @@ mod tests {
         request_context(principal, peer, "sync-group-client")
     }
 
-    async fn bootstrap_member(broker: &Broker, ctx: &RequestContext<'_>) -> (String, i32) {
+    /// A member that joined the group, and the generation it joined.
+    struct JoinedMember {
+        member_id: String,
+        generation_id: i32,
+    }
+
+    async fn bootstrap_member(broker: &Broker, ctx: &RequestContext<'_>) -> JoinedMember {
         let version = join_group_response::MAX_VERSION;
         let join = |member_id: String| JoinGroupRequest {
             group_id: GROUP.into(),
@@ -157,7 +163,10 @@ mod tests {
             ) == (codes::NONE, Some(PROTOCOL_TYPE), Some(PROTOCOL_NAME)),
             "{r2:?}"
         );
-        (r2.member_id, r2.generation_id)
+        JoinedMember {
+            member_id: r2.member_id,
+            generation_id: r2.generation_id,
+        }
     }
 
     use {
@@ -315,7 +324,10 @@ mod tests {
         let version = sync_group_response::MAX_VERSION;
         broker_fixture!((broker_handle, _dir, broker), group_allow_all);
         request_identity!((principal, peer, ctx), principal("alice"), context);
-        let (member_id, generation_id) = bootstrap_member(&broker, &ctx).await;
+        let JoinedMember {
+            member_id,
+            generation_id,
+        } = bootstrap_member(&broker, &ctx).await;
         let assignment = Bytes::from_static(b"assignment-payload");
         let req = sync_request()
             .member_id(member_id.clone())

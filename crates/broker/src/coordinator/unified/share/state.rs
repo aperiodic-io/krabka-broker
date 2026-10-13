@@ -8,7 +8,10 @@ use {
     super::super::INITIAL_GROUP_EPOCH,
     crate::{
         codes::{FENCED_MEMBER_EPOCH, UNKNOWN_MEMBER_ID},
-        coordinator::unified::{actor::MetadataProvider, member_helpers::new_target_assignment},
+        coordinator::unified::{
+            actor::MetadataProvider, assignor::TopicIdPartition,
+            member_helpers::new_target_assignment,
+        },
     },
     krabka_protocol::primitives::uuid::Uuid,
     std::{
@@ -16,6 +19,43 @@ use {
         time::Instant,
     },
 };
+
+/// The name and partition count of a topic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedTopic {
+    pub name: String,
+    pub partition_count: i32,
+}
+
+/// The id and partition count of a topic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdentifiedTopic {
+    pub topic_id: uuid::Uuid,
+    pub partition_count: i32,
+}
+
+/// The partitions of one topic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TopicPartitionList {
+    pub topic_id: Uuid,
+    pub partitions: Vec<i32>,
+}
+
+/// A topic whose share state a group delete removes: its name, and the
+/// partitions to delete.
+struct DeleteCandidate {
+    name: String,
+    partitions: HashSet<i32>,
+}
+
+/// A share partition of `topic_id`.
+#[cfg(test)]
+pub(crate) fn share_partition(topic_id: Uuid, partition: i32) -> TopicIdPartition {
+    TopicIdPartition {
+        topic_id,
+        partition,
+    }
+}
 
 /// One member of a share group.
 #[derive(Debug, Clone)]
@@ -76,7 +116,7 @@ pub struct ShareGroupState {
     /// the replayed `ShareGroupStatePartitionMetadata` (key v15) so a
     /// post-restart heartbeat does not re-Initialize. The lifecycle hook adds
     /// to this on each successful `SharePersister::initialize`.
-    pub initialized: HashSet<(Uuid, i32)>,
+    pub initialized: HashSet<TopicIdPartition>,
     /// KIP-932: `(topic_id, partition)` share-states whose `Initialize` the
     /// group has recorded but the persister has not yet confirmed, each with
     /// the time in milliseconds it was recorded. Kafka's
@@ -84,7 +124,7 @@ pub struct ShareGroupState {
     /// a partition here before it calls the persister, so a group delete
     /// never misses state that an initialize may have written. An entry older
     /// than the retry interval is initialized again.
-    pub initializing: HashMap<(Uuid, i32), i64>,
+    pub initializing: HashMap<TopicIdPartition, i64>,
     /// KIP-932: the topics whose share state the group is deleting, each with
     /// the topic name the group writes for it. Kafka's
     /// `ShareGroupStatePartitionMetadata.DeletingTopics`: `DeleteShareGroupOffsets`
@@ -147,7 +187,7 @@ impl ShareGroupState {
 
     /// Records that the persister initialized `tp`, as Kafka's
     /// `initializeShareGroupState` moves it from initializing to initialized.
-    pub fn mark_initialized(&mut self, tp: (Uuid, i32)) {
+    pub fn mark_initialized(&mut self, tp: TopicIdPartition) {
         self.initializing.remove(&tp);
         self.initialized.insert(tp);
     }
@@ -163,16 +203,16 @@ impl ShareGroupState {
     /// partition that is also initialized stays initialized.
     pub fn add_initializing(
         &mut self,
-        partitions: &[(Uuid, i32)],
+        partitions: &[TopicIdPartition],
         names: &HashMap<Uuid, String>,
         now_ms: i64,
     ) {
         if partitions.is_empty() {
             return;
         }
-        let topics: HashSet<Uuid> = partitions.iter().map(|(topic_id, _)| *topic_id).collect();
+        let topics: HashSet<Uuid> = partitions.iter().map(|tp| tp.topic_id).collect();
         for (tp, at) in &mut self.initializing {
-            if topics.contains(&tp.0) {
+            if topics.contains(&tp.topic_id) {
                 *at = now_ms;
             }
         }
@@ -190,7 +230,7 @@ impl ShareGroupState {
     /// Kafka's `GroupMetadataManager.uninitializeShareGroupState`: the
     /// partitions of `partitions` leave the initializing set, and the
     /// initialized and deleting sets stay as they are.
-    pub fn uninitialize(&mut self, partitions: &[(Uuid, i32)]) {
+    pub fn uninitialize(&mut self, partitions: &[TopicIdPartition]) {
         for tp in partitions {
             self.initializing.remove(tp);
         }
@@ -209,9 +249,9 @@ impl ShareGroupState {
             self.deleting.len(),
         );
         self.initializing
-            .retain(|(topic_id, _), _| !deleted.contains(topic_id));
+            .retain(|tp, _| !deleted.contains(&tp.topic_id));
         self.initialized
-            .retain(|(topic_id, _)| !deleted.contains(topic_id));
+            .retain(|tp| !deleted.contains(&tp.topic_id));
         self.deleting
             .retain(|topic_id, _| !deleted.contains(topic_id));
         let changed = before
@@ -233,7 +273,7 @@ impl ShareGroupState {
         self.initialized
             .iter()
             .chain(self.initializing.keys())
-            .map(|(topic_id, _)| *topic_id)
+            .map(|tp| tp.topic_id)
             .chain(self.deleting.keys().copied())
             .collect()
     }
@@ -266,12 +306,12 @@ impl ShareGroupState {
         let mut initialized: Vec<i32> = self
             .initialized
             .iter()
-            .filter(|(id, _)| *id == topic_id)
-            .map(|(_, partition)| *partition)
+            .filter(|tp| tp.topic_id == topic_id)
+            .map(|tp| tp.partition)
             .collect();
         if !initialized.is_empty() {
             initialized.sort_unstable();
-            self.initialized.retain(|(id, _)| *id != topic_id);
+            self.initialized.retain(|tp| tp.topic_id != topic_id);
             self.deleting.insert(topic_id, topic_name.to_owned());
             self.forget_unused_topic_names();
             return Some(initialized);
@@ -302,48 +342,61 @@ impl ShareGroupState {
     /// topic, sorted.
     pub fn move_all_to_deleting(
         &mut self,
-        image: impl Fn(&Uuid) -> Option<(String, i32)>,
-    ) -> Vec<(Uuid, Vec<i32>)> {
-        let mut candidates: HashMap<Uuid, (String, HashSet<i32>)> = HashMap::new();
-        for (topic_id, partition) in self.initialized.iter().chain(self.initializing.keys()) {
+        image: impl Fn(&Uuid) -> Option<NamedTopic>,
+    ) -> Vec<TopicPartitionList> {
+        let mut candidates: HashMap<Uuid, DeleteCandidate> = HashMap::new();
+        for tp in self.initialized.iter().chain(self.initializing.keys()) {
             let name = self
                 .topic_names
-                .get(topic_id)
+                .get(&tp.topic_id)
                 .cloned()
                 .unwrap_or_else(|| super::persistence::UNKNOWN_TOPIC_NAME.to_owned());
             candidates
-                .entry(*topic_id)
-                .or_insert_with(|| (name, HashSet::new()))
-                .1
-                .insert(*partition);
+                .entry(tp.topic_id)
+                .or_insert_with(|| DeleteCandidate {
+                    name,
+                    partitions: HashSet::new(),
+                })
+                .partitions
+                .insert(tp.partition);
         }
         // A deleting topic that the image no longer holds is dropped: the
         // share coordinator removed its state when the topic went.
         for topic_id in self.deleting.keys() {
-            if let Some((name, partition_count)) = image(topic_id) {
+            if let Some(NamedTopic {
+                name,
+                partition_count,
+            }) = image(topic_id)
+            {
                 let entry = candidates
                     .entry(*topic_id)
-                    .or_insert_with(|| (name.clone(), HashSet::new()));
-                entry.0 = name;
-                entry.1.extend(0..partition_count);
+                    .or_insert_with(|| DeleteCandidate {
+                        name: name.clone(),
+                        partitions: HashSet::new(),
+                    });
+                entry.name = name;
+                entry.partitions.extend(0..partition_count);
             }
         }
         self.initialized.clear();
         self.initializing.clear();
         self.deleting = candidates
             .iter()
-            .map(|(topic_id, (name, _))| (*topic_id, name.clone()))
+            .map(|(topic_id, candidate)| (*topic_id, candidate.name.clone()))
             .collect();
         self.forget_unused_topic_names();
-        let mut out: Vec<(Uuid, Vec<i32>)> = candidates
+        let mut out: Vec<TopicPartitionList> = candidates
             .into_iter()
-            .map(|(topic_id, (_, partitions))| {
-                let mut partitions: Vec<i32> = partitions.into_iter().collect();
+            .map(|(topic_id, candidate)| {
+                let mut partitions: Vec<i32> = candidate.partitions.into_iter().collect();
                 partitions.sort_unstable();
-                (topic_id, partitions)
+                TopicPartitionList {
+                    topic_id,
+                    partitions,
+                }
             })
             .collect();
-        out.sort_unstable_by_key(|(topic_id, _)| topic_id.0);
+        out.sort_unstable_by_key(|list| list.topic_id.0);
         out
     }
 
@@ -361,7 +414,7 @@ impl ShareGroupState {
         let live: HashSet<Uuid> = initialized
             .iter()
             .chain(initializing.keys())
-            .map(|(topic_id, _)| *topic_id)
+            .map(|tp| tp.topic_id)
             .collect();
         topic_names.retain(|topic_id, _| live.contains(topic_id));
     }
@@ -546,7 +599,7 @@ mod tests {
         let kept = Uuid([1; 16]);
         let dropped = Uuid([2; 16]);
         let mut g = ShareGroupState::new("g1");
-        g.initialized.insert((kept, 0));
+        g.initialized.insert(share_partition(kept, 0));
         g.topic_names.insert(kept, "orders".to_owned());
         g.topic_names.insert(dropped, "carts".to_owned());
 
@@ -564,14 +617,14 @@ mod tests {
         let orders = Uuid([1; 16]);
         let carts = Uuid([2; 16]);
         let mut g = ShareGroupState::new("g1");
-        g.initializing.insert((orders, 0), 10);
-        g.initializing.insert((carts, 0), 10);
-        g.initialized.insert((orders, 1));
+        g.initializing.insert(share_partition(orders, 0), 10);
+        g.initializing.insert(share_partition(carts, 0), 10);
+        g.initialized.insert(share_partition(orders, 1));
         g.deleting.insert(orders, "orders".to_owned());
         g.deleting.insert(carts, "carts".to_owned());
 
         g.add_initializing(
-            &[(orders, 1), (orders, 2)],
+            &[share_partition(orders, 1), share_partition(orders, 2)],
             &HashMap::from([(orders, "orders".to_owned())]),
             99,
         );
@@ -579,13 +632,13 @@ mod tests {
         assert!(
             g.initializing
                 == HashMap::from([
-                    ((orders, 0), 99),
-                    ((orders, 1), 99),
-                    ((orders, 2), 99),
-                    ((carts, 0), 10),
+                    (share_partition(orders, 0), 99),
+                    (share_partition(orders, 1), 99),
+                    (share_partition(orders, 2), 99),
+                    (share_partition(carts, 0), 10),
                 ])
         );
-        assert!(g.initialized == HashSet::from([(orders, 1)]));
+        assert!(g.initialized == HashSet::from([share_partition(orders, 1)]));
         assert!(g.deleting == HashMap::from([(carts, "carts".to_owned())]));
         assert!(g.topic_names == HashMap::from([(orders, "orders".to_owned())]));
     }
@@ -596,60 +649,72 @@ mod tests {
     /// delete. The initializing set is never touched.
     #[test]
     fn offset_deletion_moves_initialized_topics_to_deleting() {
-        // (row, initialized, deleting, expected partitions, expected
-        //  initialized, expected deleting)
-        type Row = (
-            &'static str,
-            Vec<i32>,
-            bool,
-            Option<Vec<i32>>,
-            HashSet<(Uuid, i32)>,
-            HashMap<Uuid, String>,
-        );
+        struct Row {
+            name: &'static str,
+            initialized: Vec<i32>,
+            is_deleting: bool,
+            expected: Option<Vec<i32>>,
+            after_initialized: HashSet<TopicIdPartition>,
+            after_deleting: HashMap<Uuid, String>,
+        }
         let orders = Uuid([1; 16]);
         let deleting = || HashMap::from([(orders, "orders".to_owned())]);
         let rows: [Row; 3] = [
-            (
-                "initialized partitions",
-                vec![2, 0],
-                false,
-                Some(vec![0, 2]),
-                HashSet::new(),
-                deleting(),
-            ),
-            (
-                "a retry of a deleting topic",
-                vec![],
-                true,
-                Some(vec![0, 1, 2]),
-                HashSet::new(),
-                deleting(),
-            ),
-            (
-                "nothing to delete",
-                vec![],
-                false,
-                None,
-                HashSet::new(),
-                HashMap::new(),
-            ),
+            Row {
+                name: "initialized partitions",
+                initialized: vec![2, 0],
+                is_deleting: false,
+                expected: Some(vec![0, 2]),
+                after_initialized: HashSet::new(),
+                after_deleting: deleting(),
+            },
+            Row {
+                name: "a retry of a deleting topic",
+                initialized: vec![],
+                is_deleting: true,
+                expected: Some(vec![0, 1, 2]),
+                after_initialized: HashSet::new(),
+                after_deleting: deleting(),
+            },
+            Row {
+                name: "nothing to delete",
+                initialized: vec![],
+                is_deleting: false,
+                expected: None,
+                after_initialized: HashSet::new(),
+                after_deleting: HashMap::new(),
+            },
         ];
-        for (row, initialized, is_deleting, expected, after_initialized, after_deleting) in rows {
+        for Row {
+            name,
+            initialized,
+            is_deleting,
+            expected,
+            after_initialized,
+            after_deleting,
+        } in rows
+        {
             let mut g = ShareGroupState::new("g1");
-            g.initialized
-                .extend(initialized.into_iter().map(|partition| (orders, partition)));
-            g.initializing.insert((orders, 5), 1);
+            g.initialized.extend(
+                initialized
+                    .into_iter()
+                    .map(|partition| share_partition(orders, partition)),
+            );
+            g.initializing.insert(share_partition(orders, 5), 1);
             if is_deleting {
                 g.deleting.insert(orders, "stale".to_owned());
             }
 
             assert!(
                 g.mark_topic_deleting(orders, "orders", 3) == expected,
-                "{row}"
+                "{name}"
             );
-            assert!(g.initialized == after_initialized, "{row}");
-            assert!(g.deleting == after_deleting, "{row}");
-            assert!(g.initializing == HashMap::from([((orders, 5), 1)]), "{row}");
+            assert!(g.initialized == after_initialized, "{name}");
+            assert!(g.deleting == after_deleting, "{name}");
+            assert!(
+                g.initializing == HashMap::from([(share_partition(orders, 5), 1)]),
+                "{name}"
+            );
         }
     }
 
@@ -663,16 +728,32 @@ mod tests {
         let carts = Uuid([2; 16]);
         let gone = Uuid([3; 16]);
         let mut g = ShareGroupState::new("g1");
-        g.initialized.insert((orders, 1));
-        g.initializing.insert((orders, 0), 5);
+        g.initialized.insert(share_partition(orders, 1));
+        g.initializing.insert(share_partition(orders, 0), 5);
         g.topic_names.insert(orders, "orders".to_owned());
         g.deleting.insert(carts, "carts".to_owned());
         g.deleting.insert(gone, "gone".to_owned());
 
-        let deletes = g
-            .move_all_to_deleting(|topic_id| (*topic_id == carts).then(|| ("carts".to_owned(), 2)));
+        let deletes = g.move_all_to_deleting(|topic_id| {
+            (*topic_id == carts).then(|| NamedTopic {
+                name: "carts".to_owned(),
+                partition_count: 2,
+            })
+        });
 
-        assert!(deletes == vec![(orders, vec![0, 1]), (carts, vec![0, 1])]);
+        assert!(
+            deletes
+                == vec![
+                    TopicPartitionList {
+                        topic_id: orders,
+                        partitions: vec![0, 1],
+                    },
+                    TopicPartitionList {
+                        topic_id: carts,
+                        partitions: vec![0, 1],
+                    },
+                ]
+        );
         assert!(g.initialized.is_empty());
         assert!(g.initializing.is_empty());
         assert!(

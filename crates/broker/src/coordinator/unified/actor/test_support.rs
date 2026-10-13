@@ -401,13 +401,19 @@ pub(super) fn upgrade_coordinator() -> (Arc<GroupCoordinator>, Arc<InMemoryOffse
     make_coordinator_with_topic_policy("t", 2, ConsumerGroupMigrationPolicy::Upgrade)
 }
 
+/// The group actor of an upgraded group, and the classic member's rejoin.
+pub(super) struct RejoinedClassic {
+    pub handle: Arc<GroupActorHandle>,
+    pub joined: super::JoinResult,
+}
+
 /// Upgrade the fixture's hosted member, then rejoin it on the classic facade.
 pub(super) async fn upgrade_and_rejoin_classic(
     coordinator: &Arc<GroupCoordinator>,
-) -> (Arc<GroupActorHandle>, super::JoinResult) {
+) -> RejoinedClassic {
     let handle = seed_and_upgrade(coordinator, "t").await;
     let joined = rpc::classic_join(&handle, "m-classic", "t").await;
-    (handle, joined)
+    RejoinedClassic { handle, joined }
 }
 
 /// Drive an in-place upgrade with a native join, then have that member leave.
@@ -588,13 +594,22 @@ pub(super) async fn join_native_consumer(handle: &Arc<GroupActorHandle>) -> Join
     }
 }
 
+/// A group actor that holds a classic member and a native consumer.
+pub(super) struct ClassicWithNative {
+    pub handle: Arc<GroupActorHandle>,
+    pub native_member_id: String,
+}
+
 /// Seed a convertible classic member and join its first native consumer.
 pub(super) async fn seed_classic_with_native(
     coordinator: &Arc<GroupCoordinator>,
-) -> (Arc<GroupActorHandle>, String) {
+) -> ClassicWithNative {
     let handle = seed_classic_member().coord(coordinator).call();
     let native = join_native_consumer(&handle).await;
-    (handle, native.member_id)
+    ClassicWithNative {
+        handle,
+        native_member_id: native.member_id,
+    }
 }
 
 /// A marked classic handle, in the same get-before-mark order as coordinator dispatch.
@@ -615,6 +630,9 @@ pub(super) async fn bidirectional_with_members() -> (
     String,
 ) {
     let (coord, log) = bidirectional_coordinator();
-    let (handle, native) = seed_classic_with_native(&coord).await;
+    let ClassicWithNative {
+        handle,
+        native_member_id: native,
+    } = seed_classic_with_native(&coord).await;
     (coord, log, handle, native)
 }

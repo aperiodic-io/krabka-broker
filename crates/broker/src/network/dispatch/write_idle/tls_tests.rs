@@ -84,7 +84,15 @@ impl AsyncWrite for PacedReader {
 type ServerTls = tokio_rustls::server::TlsStream<WriteIdle<DuplexStream>>;
 type ClientTls = tokio_rustls::client::TlsStream<PacedReader>;
 
-async fn tls_pair(window: Duration) -> (ServerTls, ClientTls, Arc<AtomicBool>) {
+/// Both ends of a completed TLS handshake, and the switch that paces the
+/// client's reads.
+struct TlsPair {
+    server: ServerTls,
+    client: ClientTls,
+    paced: Arc<AtomicBool>,
+}
+
+async fn tls_pair(window: Duration) -> TlsPair {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let (certificate, key) = localhost_ecdsa_pair();
     let cert = certificate.der().clone();
@@ -118,17 +126,21 @@ async fn tls_pair(window: Duration) -> (ServerTls, ClientTls, Arc<AtomicBool>) {
             reader
         ),
     );
-    (
-        server.expect("server handshake"),
-        client.expect("client handshake"),
+    TlsPair {
+        server: server.expect("server handshake"),
+        client: client.expect("client handshake"),
         paced,
-    )
+    }
 }
 
 #[tokio::test(start_paused = true)]
 async fn tls_ciphertext_progress_rearms_idle_during_a_long_flush() {
     let window = Duration::from_millis(100);
-    let (server, mut client, paced) = tls_pair(window).await;
+    let TlsPair {
+        server,
+        mut client,
+        paced,
+    } = tls_pair(window).await;
     paced.store(true, Ordering::Relaxed);
     let start = Instant::now();
     let writer = tokio::spawn(async move {
@@ -154,7 +166,11 @@ async fn tls_ciphertext_progress_rearms_idle_during_a_long_flush() {
 #[tokio::test(start_paused = true)]
 async fn a_tls_reader_that_stops_ciphertext_progress_expires() {
     let window = Duration::from_millis(100);
-    let (server, _nonreading_client, _paced) = tls_pair(window).await;
+    let TlsPair {
+        server,
+        client: _nonreading_client,
+        paced: _paced,
+    } = tls_pair(window).await;
     let mut server = WriteIdle::for_response(server, Some(window));
     let result = async {
         server.write_all(&vec![7; 64 * 1024]).await?;

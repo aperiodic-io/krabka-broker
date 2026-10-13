@@ -36,8 +36,10 @@ where
     // KIP-124 meters the time a request holds a handler thread. A handler
     // future that is parked (on a group rebalance, a replication wait, a raft
     // commit) holds none, so only the time spent polling it is charged.
-    let (dispatched, handler_time) =
-        with_active_time(dispatch_registry_response(entry, context).instrument(request_span)).await;
+    let Timed {
+        output: dispatched,
+        active: handler_time,
+    } = with_active_time(dispatch_registry_response(entry, context).instrument(request_span)).await;
     let mut response = match dispatched {
         Ok(Some(response)) => response,
         Ok(None) => {
@@ -206,11 +208,15 @@ async fn dispatch_registered_bytes(
     }
 }
 
+/// The output of a future, and the time spent inside its `poll` calls.
+pub(super) struct Timed<T> {
+    pub(super) output: T,
+    pub(super) active: std::time::Duration,
+}
+
 /// Awaits `future` and reports, beside its output, the time spent inside its
 /// `poll` calls. The time the future is parked between polls is not counted.
-pub(super) async fn with_active_time<F: std::future::Future>(
-    future: F,
-) -> (F::Output, std::time::Duration) {
+pub(super) async fn with_active_time<F: std::future::Future>(future: F) -> Timed<F::Output> {
     let mut future = std::pin::pin!(future);
     let mut active = std::time::Duration::ZERO;
     let output = std::future::poll_fn(|cx| {
@@ -220,7 +226,7 @@ pub(super) async fn with_active_time<F: std::future::Future>(
         poll
     })
     .await;
-    (output, active)
+    Timed { output, active }
 }
 
 /// Pairs a handler's framed bytes with the KIP-219 window that handler
@@ -272,14 +278,21 @@ async fn dispatch_registry_response(
 
 #[cfg(test)]
 mod tests {
-    use {super::with_active_time, assert2::check, std::time::Duration};
+    use {
+        super::{Timed, with_active_time},
+        assert2::check,
+        std::time::Duration,
+    };
 
     /// KIP-124 meters the time a request holds a handler thread, so a handler
     /// parked on a timer, a channel or a raft commit is not charged for the
     /// wait. Only the time spent inside `poll` counts.
     #[tokio::test]
     async fn active_time_counts_polling_and_not_parking() {
-        let (value, parked) = with_active_time(async {
+        let Timed {
+            output: value,
+            active: parked,
+        } = with_active_time(async {
             tokio::time::sleep(Duration::from_millis(300)).await;
             7
         })
@@ -287,7 +300,10 @@ mod tests {
         check!(value == 7);
         check!(parked < Duration::from_millis(100), "{parked:?}");
 
-        let ((), working) = with_active_time(async {
+        let Timed {
+            output: (),
+            active: working,
+        } = with_active_time(async {
             std::thread::sleep(Duration::from_millis(60));
         })
         .await;

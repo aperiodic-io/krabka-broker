@@ -242,12 +242,18 @@ mod tests {
 
     #[test]
     fn classifies_marker_failures_by_the_code_they_carry() {
+        /// A failure and the class it falls in.
+        struct Case {
+            error: BrokerError,
+            expected: MarkerFailureClass,
+        }
         let refused = |code| BrokerError::MarkerWriteRefused {
             code,
             message: "refused".into(),
         };
-        let cases: &[(BrokerError, MarkerFailureClass)] = &[
-            (
+        let case = |error, expected| Case { error, expected };
+        let cases = &[
+            case(
                 BrokerError::ProducerEpochFenced {
                     producer_id: 7,
                     current: 3,
@@ -255,54 +261,54 @@ mod tests {
                 },
                 MarkerFailureClass::Fenced,
             ),
-            (
+            case(
                 BrokerError::CoordinatorEpochFenced {
                     current: 9,
                     requested: 3,
                 },
                 MarkerFailureClass::Fenced,
             ),
-            (
+            case(
                 refused(codes::INVALID_PRODUCER_EPOCH),
                 MarkerFailureClass::Fenced,
             ),
-            (
+            case(
                 refused(codes::TRANSACTION_COORDINATOR_FENCED),
                 MarkerFailureClass::Fenced,
             ),
-            (
+            case(
                 refused(codes::NOT_LEADER_OR_FOLLOWER),
                 MarkerFailureClass::Retriable,
             ),
-            (
+            case(
                 refused(codes::UNKNOWN_TOPIC_OR_PARTITION),
                 MarkerFailureClass::Retriable,
             ),
-            (
+            case(
                 refused(codes::REQUEST_TIMED_OUT),
                 MarkerFailureClass::Retriable,
             ),
-            (
+            case(
                 refused(codes::CORRUPT_MESSAGE),
                 MarkerFailureClass::Unexpected,
             ),
-            (
+            case(
                 refused(codes::UNKNOWN_SERVER_ERROR),
                 MarkerFailureClass::Unexpected,
             ),
             // Neither code is ever recorded as a failure.
-            (refused(codes::NONE), MarkerFailureClass::Unexpected),
-            (
+            case(refused(codes::NONE), MarkerFailureClass::Unexpected),
+            case(
                 refused(codes::UNSUPPORTED_VERSION),
                 MarkerFailureClass::Unexpected,
             ),
             // No wire code: an unreachable leader, which Kafka re-enqueues.
-            (
+            case(
                 BrokerError::Txn("connect failed".into()),
                 MarkerFailureClass::Retriable,
             ),
         ];
-        for (error, expected) in cases {
+        for Case { error, expected } in cases {
             assert!(classify_marker_failure(error) == *expected, "{error:?}");
         }
     }

@@ -316,104 +316,116 @@ mod tests {
     /// it, and every input Kafka refuses is refused.
     #[test]
     fn parse_and_render_match_kafka_uuid() {
+        /// An input, and Kafka's rendering of it or the error this parser gives.
+        struct Case {
+            input: String,
+            want: Result<&'static str, &'static str>,
+        }
         let a20 = "A".repeat(20);
         let a21 = "A".repeat(21);
         let a22 = "A".repeat(22);
-        // (input, Kafka's rendering, or the error this parser gives)
-        let cases: Vec<(String, Result<&str, &str>)> = vec![
-            (
-                "AQIDBAUGBwgJCgsMDQ4PEA".into(),
-                Ok("AQIDBAUGBwgJCgsMDQ4PEA"),
-            ),
-            (
-                "U-hCdTzaSPyFB3swwc7Qdw".into(),
-                Ok("U-hCdTzaSPyFB3swwc7Qdw"),
-            ),
+        let cases: Vec<Case> = vec![
+            Case {
+                input: "AQIDBAUGBwgJCgsMDQ4PEA".into(),
+                want: Ok("AQIDBAUGBwgJCgsMDQ4PEA"),
+            },
+            Case {
+                input: "U-hCdTzaSPyFB3swwc7Qdw".into(),
+                want: Ok("U-hCdTzaSPyFB3swwc7Qdw"),
+            },
             // The reserved ids parse, as they do in Kafka.
-            (a22.clone(), Ok("AAAAAAAAAAAAAAAAAAAAAA")),
-            (
-                "AAAAAAAAAAAAAAAAAAAAAQ".into(),
-                Ok("AAAAAAAAAAAAAAAAAAAAAQ"),
-            ),
+            Case {
+                input: a22.clone(),
+                want: Ok("AAAAAAAAAAAAAAAAAAAAAA"),
+            },
+            Case {
+                input: "AAAAAAAAAAAAAAAAAAAAAQ".into(),
+                want: Ok("AAAAAAAAAAAAAAAAAAAAAQ"),
+            },
             // Kafka ignores the four unused bits of the last character.
-            (
-                "_____________________x".into(),
-                Ok("_____________________w"),
-            ),
-            (
-                "AAAAAAAAAAAAAAAAAAAAAB".into(),
-                Ok("AAAAAAAAAAAAAAAAAAAAAA"),
-            ),
+            Case {
+                input: "_____________________x".into(),
+                want: Ok("_____________________w"),
+            },
+            Case {
+                input: "AAAAAAAAAAAAAAAAAAAAAB".into(),
+                want: Ok("AAAAAAAAAAAAAAAAAAAAAA"),
+            },
             // And it accepts canonical padding.
-            (format!("{a22}=="), Ok("AAAAAAAAAAAAAAAAAAAAAA")),
-            (
-                "01020304-0506-0708-090a-0b0c0d0e0f10".into(),
-                Err(
+            Case {
+                input: format!("{a22}=="),
+                want: Ok("AAAAAAAAAAAAAAAAAAAAAA"),
+            },
+            Case {
+                input: "01020304-0506-0708-090a-0b0c0d0e0f10".into(),
+                want: Err(
                     "Input string with prefix `01020304-0506-0708-090a-` is too long to be \
                      decoded as a base64 UUID",
                 ),
-            ),
-            (
-                format!("{}\u{1f600}", "A".repeat(23)),
-                Err(
+            },
+            Case {
+                input: format!("{}\u{1f600}", "A".repeat(23)),
+                want: Err(
                     "Input string with prefix `AAAAAAAAAAAAAAAAAAAAAAA?` is too long to be \
                      decoded as a base64 UUID",
                 ),
-            ),
-            (
-                "A".repeat(24),
-                Err(
+            },
+            Case {
+                input: "A".repeat(24),
+                want: Err(
                     "Input string `AAAAAAAAAAAAAAAAAAAAAAAA` decoded as 18 bytes, which is not \
                      equal to the expected 16 bytes of a base64-encoded UUID",
                 ),
-            ),
-            (
-                String::new(),
-                Err(
+            },
+            Case {
+                input: String::new(),
+                want: Err(
                     "Input string `` decoded as 0 bytes, which is not equal to the expected 16 \
                      bytes of a base64-encoded UUID",
                 ),
-            ),
-            (
-                "AAAAAA".into(),
-                Err(
+            },
+            Case {
+                input: "AAAAAA".into(),
+                want: Err(
                     "Input string `AAAAAA` decoded as 4 bytes, which is not equal to the \
                      expected 16 bytes of a base64-encoded UUID",
                 ),
-            ),
-            (
-                format!("{a20}=="),
-                Err(
+            },
+            Case {
+                input: format!("{a20}=="),
+                want: Err(
                     "Input string `AAAAAAAAAAAAAAAAAAAA==` decoded as 15 bytes, which is not \
                      equal to the expected 16 bytes of a base64-encoded UUID",
                 ),
-            ),
-            (
-                a21.clone(),
-                Err(
+            },
+            Case {
+                input: a21.clone(),
+                want: Err(
                     "Input string `AAAAAAAAAAAAAAAAAAAAA` is not base64url: Invalid input length: 21",
                 ),
-            ),
-            (
-                format!("{a20}+A"),
-                Err(
+            },
+            Case {
+                input: format!("{a20}+A"),
+                want: Err(
                     "Input string `AAAAAAAAAAAAAAAAAAAA+A` is not base64url: Invalid symbol 43, \
                      offset 20.",
                 ),
-            ),
-            (
-                format!("{a22}="),
-                Err("Input string `AAAAAAAAAAAAAAAAAAAAAA=` is not base64url: Invalid padding"),
-            ),
-            (
-                format!("{a21}\u{e9}"),
-                Err(
+            },
+            Case {
+                input: format!("{a22}="),
+                want: Err(
+                    "Input string `AAAAAAAAAAAAAAAAAAAAAA=` is not base64url: Invalid padding",
+                ),
+            },
+            Case {
+                input: format!("{a21}\u{e9}"),
+                want: Err(
                     "Input string `AAAAAAAAAAAAAAAAAAAAAé` is not base64url: Invalid symbol \
                      195, offset 21.",
                 ),
-            ),
+            },
         ];
-        for (input, want) in cases {
+        for Case { input, want } in cases {
             let want = want.map(str::to_owned).map_err(str::to_owned);
             let as_cluster = input
                 .parse::<ClusterId>()

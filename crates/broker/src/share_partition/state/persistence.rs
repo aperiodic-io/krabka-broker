@@ -213,6 +213,45 @@ mod tests {
         let _ = s.acquire("m1", 10, Offset(i64::MAX), t0(), LOCK, 5);
     }
 
+    /// Loads a mixed window: one Available batch and two terminal ones.
+    fn load_terminal_batches_above_the_spso(s: &mut AcquisitionState) {
+        s.load_from(Offset(2), 1, 0, &[
+            persisted().bounds(Offset(2)..=Offset(3)).call(),
+            persisted()
+                .bounds(Offset(4)..=Offset(5))
+                .delivery(FixtureDeliveryState::Acknowledged)
+                .call(),
+            persisted()
+                .bounds(Offset(6)..=Offset(6))
+                .delivery(FixtureDeliveryState::Archived)
+                .attempts(DeliveryAttemptCount(2))
+                .call(),
+        ]);
+    }
+
+    /// Loads a window that opens with a terminal prefix.
+    fn load_a_terminal_prefix(s: &mut AcquisitionState) {
+        s.load_from(Offset(0), 1, 0, &[
+            persisted()
+                .bounds(Offset(0)..=Offset(1))
+                .delivery(FixtureDeliveryState::Acknowledged)
+                .call(),
+            persisted().bounds(Offset(2)..=Offset(3)).call(),
+            persisted()
+                .bounds(Offset(4)..=Offset(4))
+                .delivery(FixtureDeliveryState::Archived)
+                .call(),
+        ]);
+    }
+
+    /// Loads a window whose batches are all terminal.
+    fn load_an_all_terminal_window(s: &mut AcquisitionState) {
+        s.load_from(Offset(0), 1, 0, &[persisted()
+            .bounds(Offset(0)..=Offset(3))
+            .delivery(FixtureDeliveryState::Acknowledged)
+            .call()]);
+    }
+
     /// Kafka's `SharePartition.deliveryCompleteCount`: the number of
     /// Acknowledged and Archived records in the window at or above the SPSO.
     /// A record adds to it when it becomes terminal, and leaves it when the
@@ -220,47 +259,74 @@ mod tests {
     #[test]
     fn delivery_complete_count_counts_the_terminal_records_in_the_window() {
         type Setup = fn(&mut AcquisitionState);
-        // (name, setup, expected (SPSO, SPEO, delivery complete count))
-        let cases: [(&str, Setup, (i64, i64, i32)); 13] = [
-            (
-                "accept counts the acknowledged records",
-                |s| {
+        /// The expected SPSO, SPEO and delivery complete count.
+        #[derive(Debug, PartialEq, Eq)]
+        struct Expected {
+            spso: i64,
+            speo: i64,
+            delivery_complete_count: i32,
+        }
+        struct Case {
+            name: &'static str,
+            setup: Setup,
+            want: Expected,
+        }
+        let cases: [Case; 13] = [
+            Case {
+                name: "accept counts the acknowledged records",
+                setup: |s| {
                     five_acquired_in_two_runs(s);
                     s.acknowledge("m1", Offset(2), Offset(3), AckType::Accept, 5)
                         .unwrap();
                 },
-                (0, 5, 2),
-            ),
-            (
-                "reject counts the archived records",
-                |s| {
+                want: Expected {
+                    spso: 0,
+                    speo: 5,
+                    delivery_complete_count: 2,
+                },
+            },
+            Case {
+                name: "reject counts the archived records",
+                setup: |s| {
                     five_acquired_in_two_runs(s);
                     s.acknowledge("m1", Offset(2), Offset(3), AckType::Reject, 5)
                         .unwrap();
                 },
-                (0, 5, 2),
-            ),
-            (
-                "release is not terminal and does not count",
-                |s| {
+                want: Expected {
+                    spso: 0,
+                    speo: 5,
+                    delivery_complete_count: 2,
+                },
+            },
+            Case {
+                name: "release is not terminal and does not count",
+                setup: |s| {
                     five_acquired_in_two_runs(s);
                     s.acknowledge("m1", Offset(2), Offset(3), AckType::Release, 5)
                         .unwrap();
                 },
-                (0, 5, 0),
-            ),
-            (
-                "release at the delivery limit archives and counts",
-                |s| {
+                want: Expected {
+                    spso: 0,
+                    speo: 5,
+                    delivery_complete_count: 0,
+                },
+            },
+            Case {
+                name: "release at the delivery limit archives and counts",
+                setup: |s| {
                     five_acquired_in_two_runs(s);
                     s.acknowledge("m1", Offset(2), Offset(3), AckType::Release, 1)
                         .unwrap();
                 },
-                (0, 5, 2),
-            ),
-            (
-                "a lock that expires at the delivery limit archives and counts",
-                |s| {
+                want: Expected {
+                    spso: 0,
+                    speo: 5,
+                    delivery_complete_count: 2,
+                },
+            },
+            Case {
+                name: "a lock that expires at the delivery limit archives and counts",
+                setup: |s| {
                     s.materialize(Offset(5), 100);
                     let _ = s.acquire("m1", 1, Offset(i64::MAX), t0(), LOCK, 5);
                     s.renew("m1", Offset(0), Offset(0), t0(), LOCK * 100)
@@ -268,108 +334,118 @@ mod tests {
                     let _ = s.acquire("m1", 10, Offset(i64::MAX), t0(), LOCK, 5);
                     s.expire_locks(t0() + LOCK * 2, 1);
                 },
-                (0, 5, 4),
-            ),
-            (
-                "acquire archives an available run at the delivery limit and counts it",
-                |s| {
+                want: Expected {
+                    spso: 0,
+                    speo: 5,
+                    delivery_complete_count: 4,
+                },
+            },
+            Case {
+                name: "acquire archives an available run at the delivery limit and counts it",
+                setup: |s| {
                     five_acquired_in_two_runs(s);
                     s.acknowledge("m1", Offset(1), Offset(4), AckType::Release, 5)
                         .unwrap();
                     let _ = s.acquire("m2", 10, Offset(i64::MAX), t0(), LOCK, 1);
                 },
-                (0, 5, 4),
-            ),
-            (
-                "an archived internal offset counts",
-                |s| {
+                want: Expected {
+                    spso: 0,
+                    speo: 5,
+                    delivery_complete_count: 4,
+                },
+            },
+            Case {
+                name: "an archived internal offset counts",
+                setup: |s| {
                     s.materialize(Offset(5), 100);
                     s.archive_internal(Offset(2), Offset(2));
                 },
-                (0, 5, 1),
-            ),
-            (
-                "the SPSO moving past terminal records takes them out",
-                |s| {
+                want: Expected {
+                    spso: 0,
+                    speo: 5,
+                    delivery_complete_count: 1,
+                },
+            },
+            Case {
+                name: "the SPSO moving past terminal records takes them out",
+                setup: |s| {
                     s.materialize(Offset(3), 100);
                     let _ = s.acquire("m1", 10, Offset(i64::MAX), t0(), LOCK, 5);
                     s.acknowledge("m1", Offset(0), Offset(2), AckType::Accept, 5)
                         .unwrap();
                 },
-                (3, 3, 0),
-            ),
-            (
-                "a partial SPSO move keeps the terminal records above it",
-                |s| {
+                want: Expected {
+                    spso: 3,
+                    speo: 3,
+                    delivery_complete_count: 0,
+                },
+            },
+            Case {
+                name: "a partial SPSO move keeps the terminal records above it",
+                setup: |s| {
                     five_acquired_in_two_runs(s);
                     s.acknowledge("m1", Offset(2), Offset(3), AckType::Accept, 5)
                         .unwrap();
                     s.acknowledge("m1", Offset(0), Offset(0), AckType::Accept, 5)
                         .unwrap();
                 },
-                (1, 5, 2),
-            ),
-            (
-                "the log start moving past the window archives without counting",
-                |s| {
+                want: Expected {
+                    spso: 1,
+                    speo: 5,
+                    delivery_complete_count: 2,
+                },
+            },
+            Case {
+                name: "the log start moving past the window archives without counting",
+                setup: |s| {
                     s.materialize(Offset(5), 100);
                     s.advance_past_log_start(Offset(3));
                 },
-                (3, 5, 0),
-            ),
-            (
-                "initialization counts the persisted terminal batches",
-                |s| {
-                    s.load_from(Offset(2), 1, 0, &[
-                        persisted().bounds(Offset(2)..=Offset(3)).call(),
-                        persisted()
-                            .bounds(Offset(4)..=Offset(5))
-                            .delivery(FixtureDeliveryState::Acknowledged)
-                            .call(),
-                        persisted()
-                            .bounds(Offset(6)..=Offset(6))
-                            .delivery(FixtureDeliveryState::Archived)
-                            .attempts(DeliveryAttemptCount(2))
-                            .call(),
-                    ]);
+                want: Expected {
+                    spso: 3,
+                    speo: 5,
+                    delivery_complete_count: 0,
                 },
-                (2, 7, 3),
-            ),
-            (
-                "initialization moves the SPSO past a terminal prefix",
-                |s| {
-                    s.load_from(Offset(0), 1, 0, &[
-                        persisted()
-                            .bounds(Offset(0)..=Offset(1))
-                            .delivery(FixtureDeliveryState::Acknowledged)
-                            .call(),
-                        persisted().bounds(Offset(2)..=Offset(3)).call(),
-                        persisted()
-                            .bounds(Offset(4)..=Offset(4))
-                            .delivery(FixtureDeliveryState::Archived)
-                            .call(),
-                    ]);
+            },
+            Case {
+                name: "initialization counts the persisted terminal batches",
+                setup: load_terminal_batches_above_the_spso,
+                want: Expected {
+                    spso: 2,
+                    speo: 7,
+                    delivery_complete_count: 3,
                 },
-                (2, 5, 1),
-            ),
-            (
-                "initialization of an all-terminal window empties it",
-                |s| {
-                    s.load_from(Offset(0), 1, 0, &[persisted()
-                        .bounds(Offset(0)..=Offset(3))
-                        .delivery(FixtureDeliveryState::Acknowledged)
-                        .call()]);
+            },
+            Case {
+                name: "initialization moves the SPSO past a terminal prefix",
+                setup: load_a_terminal_prefix,
+                want: Expected {
+                    spso: 2,
+                    speo: 5,
+                    delivery_complete_count: 1,
                 },
-                (4, 4, 0),
-            ),
+            },
+            Case {
+                name: "initialization of an all-terminal window empties it",
+                setup: load_an_all_terminal_window,
+                want: Expected {
+                    spso: 4,
+                    speo: 4,
+                    delivery_complete_count: 0,
+                },
+            },
         ];
         let mut actual = Vec::new();
         let mut expected = Vec::new();
-        for (name, setup, want) in cases {
+        for Case { name, setup, want } in cases {
             let mut s = AcquisitionState::new(Offset(0));
             setup(&mut s);
             let (start, dcc, _) = s.to_persist_batches();
-            actual.push((name, (start.0, s.end_offset.0, dcc)));
+            actual.push((name, Expected {
+                spso: start.0,
+                speo: s.end_offset.0,
+                delivery_complete_count: dcc,
+            }));
             expected.push((name, want));
         }
         assert!(actual == expected);

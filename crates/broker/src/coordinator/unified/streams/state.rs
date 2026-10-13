@@ -73,12 +73,24 @@ pub struct StreamsTargetAssignment {
     pub warmup: HashMap<String, BTreeMap<String, Vec<i32>>>,
 }
 
-/// Kafka's `TasksTuple`: a member's active, standby and warmup tasks, each by
-/// subtopology.
-pub type TasksTuple = (TaskMap, TaskMap, TaskMap);
-
 /// Tasks of one role, keyed by subtopology with sorted partition lists.
 pub type TaskMap = BTreeMap<String, Vec<i32>>;
+
+/// The status that keeps a streams group from an assignment, for example
+/// `MISSING_SOURCE_TOPICS`: Kafka's `topicConfigurationException`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TopologyStatus {
+    pub code: i8,
+    pub detail: String,
+}
+
+/// An armed rebalance timeout: the instant it fires, and the member epoch
+/// that armed it.
+#[derive(Debug, Clone, Copy)]
+pub struct RebalanceDeadline {
+    pub deadline: Instant,
+    pub member_epoch: i32,
+}
 
 /// A minimal handle for the resolved topology that lives in `topology.rs`.
 ///
@@ -108,10 +120,10 @@ pub struct StreamsGroupState {
     /// pending. It clears the flag once the reconcile installs a target.
     pub dirty: bool,
     pub phase: StreamsGroupStatePhase,
-    /// The `(status_code, status_detail)` that the most recent topology
+    /// The status code and detail that the most recent topology
     /// configuration gave, for example `MISSING_SOURCE_TOPICS`: Kafka's
     /// `topicConfigurationException`. Every heartbeat response carries it.
-    pub status: Option<(i8, String)>,
+    pub status: Option<TopologyStatus>,
     /// The member that first asked the application to shut down (KIP-1071
     /// `ShutdownApplication`). Kafka keeps it in memory only and clears it
     /// when the group becomes empty.
@@ -120,7 +132,7 @@ pub struct StreamsGroupState {
     /// and the member epoch that armed it. Kafka's
     /// `scheduleStreamsGroupRebalanceTimeout` keeps the same deadline in a
     /// timer.
-    pub rebalance_deadlines: HashMap<String, (Instant, i32)>,
+    pub rebalance_deadlines: HashMap<String, RebalanceDeadline>,
     /// Kafka's `StreamsGroup.endpointInformationEpoch`: bumped when the user
     /// endpoint of a member changes, or the tasks of a member with an
     /// endpoint change. A member whose last seen epoch differs gets the
@@ -277,15 +289,19 @@ impl StreamsGroupState {
         let mut member_ids: Vec<&String> = self.members.keys().collect();
         member_ids.sort_unstable();
         for member_id in member_ids {
-            let tuple = (
-                take(&mut target.active, member_id),
-                take(&mut target.standby, member_id),
-                take(&mut target.warmup, member_id),
-            );
+            let tuple = RoleTasks {
+                active: take(&mut target.active, member_id),
+                standby: take(&mut target.standby, member_id),
+                warmup: take(&mut target.warmup, member_id),
+            };
             if self.target_tuple(member_id).as_ref() != Some(&tuple) {
                 changed.push(member_id.clone());
             }
-            let (active, standby, warmup) = tuple;
+            let RoleTasks {
+                active,
+                standby,
+                warmup,
+            } = tuple;
             installed.active.insert(member_id.clone(), active);
             if !standby.is_empty() {
                 installed.standby.insert(member_id.clone(), standby);
@@ -303,18 +319,18 @@ impl StreamsGroupState {
     /// The target of `member_id` as Kafka's `TasksTuple`, or `None` when the
     /// group holds no target for it.
     #[must_use]
-    pub fn target_tuple(&self, member_id: &str) -> Option<TasksTuple> {
+    pub fn target_tuple(&self, member_id: &str) -> Option<RoleTasks> {
         let active = self.target.active.get(member_id);
         let standby = self.target.standby.get(member_id);
         let warmup = self.target.warmup.get(member_id);
         if active.is_none() && standby.is_none() && warmup.is_none() {
             return None;
         }
-        Some((
-            active.cloned().unwrap_or_default(),
-            standby.cloned().unwrap_or_default(),
-            warmup.cloned().unwrap_or_default(),
-        ))
+        Some(RoleTasks {
+            active: active.cloned().unwrap_or_default(),
+            standby: standby.cloned().unwrap_or_default(),
+            warmup: warmup.cloned().unwrap_or_default(),
+        })
     }
 
     /// Validates the `member_epoch` of a heartbeat from `member_id`, as Kafka's
@@ -419,7 +435,10 @@ impl StreamsGroupState {
                 let timeout =
                     Duration::from_millis(u64::try_from(member.rebalance_timeout_ms).unwrap_or(0));
                 self.rebalance_deadlines
-                    .insert(member_id.to_string(), (now + timeout, member.member_epoch));
+                    .insert(member_id.to_string(), RebalanceDeadline {
+                        deadline: now + timeout,
+                        member_epoch: member.member_epoch,
+                    });
             }
             _ => {
                 self.rebalance_deadlines.remove(member_id);
@@ -433,7 +452,7 @@ impl StreamsGroupState {
     pub fn next_rebalance_deadline(&self) -> Option<Instant> {
         self.rebalance_deadlines
             .values()
-            .map(|(deadline, _)| *deadline)
+            .map(|armed| armed.deadline)
             .min()
     }
 
@@ -444,17 +463,17 @@ impl StreamsGroupState {
         let mut fenced: Vec<String> = self
             .rebalance_deadlines
             .iter()
-            .filter(|(member_id, (deadline, epoch))| {
-                now >= *deadline
+            .filter(|(member_id, armed)| {
+                now >= armed.deadline
                     && self
                         .members
                         .get(*member_id)
-                        .is_some_and(|member| member.member_epoch == *epoch)
+                        .is_some_and(|member| member.member_epoch == armed.member_epoch)
             })
             .map(|(member_id, _)| member_id.clone())
             .collect();
         self.rebalance_deadlines
-            .retain(|_, (deadline, _)| now < *deadline);
+            .retain(|_, armed| now < armed.deadline);
         fenced.sort_unstable();
         fenced
     }
@@ -676,29 +695,87 @@ mod tests {
         }
     }
 
-    type Expected = (
-        bool,
-        StreamsMemberAssignmentState,
-        i32,
-        &'static [i32],
-        &'static [i32],
-        &'static [i32],
-        &'static [i32],
-    );
+    /// What a reconciliation leaves of `m1`: whether it changed, its state and
+    /// epoch, and its assigned and pending tasks of subtopology `s`.
+    struct ExpectedMember {
+        changed: bool,
+        state: StreamsMemberAssignmentState,
+        epoch: i32,
+        active: &'static [i32],
+        standby: &'static [i32],
+        active_pending: &'static [i32],
+        standby_pending: &'static [i32],
+    }
+
+    /// The owned active and standby tasks that a heartbeat reports.
+    struct OwnedSetup {
+        active: &'static [i32],
+        standby: &'static [i32],
+    }
+
+    /// An expectation with no standby tasks and nothing pending.
+    fn settled(
+        changed: bool,
+        state: StreamsMemberAssignmentState,
+        epoch: i32,
+        active: &'static [i32],
+    ) -> ExpectedMember {
+        ExpectedMember {
+            changed,
+            state,
+            epoch,
+            active,
+            standby: &[],
+            active_pending: &[],
+            standby_pending: &[],
+        }
+    }
+
+    /// An expectation that holds epoch 1 with task `1` pending revocation.
+    fn waiting(changed: bool, active: &'static [i32]) -> ExpectedMember {
+        ExpectedMember {
+            changed,
+            state: StreamsMemberAssignmentState::UnrevokedTasks,
+            epoch: 1,
+            active,
+            standby: &[],
+            active_pending: &[1],
+            standby_pending: &[],
+        }
+    }
+
+    /// A heartbeat that reports `active` and no standby tasks.
+    fn owning(active: &'static [i32]) -> OwnedSetup {
+        OwnedSetup {
+            active,
+            standby: &[],
+        }
+    }
 
     /// One row: the name, `m1`, another member, the target active and standby
-    /// tasks of `m1`, the owned active and standby tasks of its heartbeat or
-    /// `None`, and the expected (changed, state, epoch, active, standby, active
-    /// pending, standby pending) of `m1`.
-    type BuilderRow = (
-        &'static str,
-        Member,
-        Option<Member>,
-        &'static [i32],
-        &'static [i32],
-        Option<(&'static [i32], &'static [i32])>,
-        Expected,
-    );
+    /// tasks of `m1`, the owned tasks of its heartbeat or `None`, and what is
+    /// expected of `m1`.
+    struct BuilderRow {
+        name: &'static str,
+        m1: Member,
+        other: Option<Member>,
+        target_active: &'static [i32],
+        target_standby: &'static [i32],
+        owned: Option<OwnedSetup>,
+        expected: ExpectedMember,
+    }
+
+    /// What a reconciliation leaves of a member, as the group holds it.
+    #[derive(Debug, PartialEq)]
+    struct ReconciledMember {
+        changed: bool,
+        state: StreamsMemberAssignmentState,
+        epoch: i32,
+        active: TaskMap,
+        standby: TaskMap,
+        active_pending: TaskMap,
+        standby_pending: TaskMap,
+    }
 
     fn unrevoked_member() -> Member {
         Member {
@@ -709,122 +786,146 @@ mod tests {
         }
     }
 
+    fn stable_active(active: &'static [i32]) -> Member {
+        Member {
+            active,
+            ..stable("m1", "p1", 1)
+        }
+    }
+
     fn builder_rows() -> Vec<BuilderRow> {
+        use StreamsMemberAssignmentState::Stable;
+
+        vec![
+            BuilderRow {
+                name: "a stable member takes the new tasks at the target epoch",
+                m1: stable_active(&[0]),
+                other: None,
+                target_active: &[0, 1],
+                target_standby: &[],
+                owned: Some(owning(&[0])),
+                expected: settled(true, Stable, 2, &[0, 1]),
+            },
+            BuilderRow {
+                name: "a member keeps its epoch while it owns a revoked task",
+                m1: stable_active(&[0, 1]),
+                other: None,
+                target_active: &[0],
+                target_standby: &[],
+                owned: Some(owning(&[0, 1])),
+                expected: waiting(true, &[0]),
+            },
+            BuilderRow {
+                name: "a member that reports no tasks has nothing to revoke",
+                m1: stable_active(&[0, 1]),
+                other: None,
+                target_active: &[0],
+                target_standby: &[],
+                owned: Some(owning(&[])),
+                expected: settled(true, Stable, 2, &[0]),
+            },
+            BuilderRow {
+                name: "an unrevoked member moves on once it stops reporting the task",
+                m1: unrevoked_member(),
+                other: None,
+                target_active: &[0],
+                target_standby: &[],
+                owned: Some(owning(&[0])),
+                expected: settled(true, Stable, 2, &[0]),
+            },
+            BuilderRow {
+                name: "an unrevoked member that still reports the task waits",
+                m1: unrevoked_member(),
+                other: None,
+                target_active: &[0],
+                target_standby: &[],
+                owned: Some(owning(&[0, 1])),
+                expected: waiting(false, &[0]),
+            },
+            BuilderRow {
+                name: "an unrevoked member without owned tasks waits",
+                m1: unrevoked_member(),
+                other: None,
+                target_active: &[0],
+                target_standby: &[],
+                owned: None,
+                expected: waiting(false, &[0]),
+            },
+        ]
+    }
+
+    fn held_back_builder_rows() -> Vec<BuilderRow> {
         use StreamsMemberAssignmentState::{Stable, UnreleasedTasks, UnrevokedTasks};
 
         vec![
-            (
-                "a stable member takes the new tasks at the target epoch",
-                Member {
-                    active: &[0],
-                    ..stable("m1", "p1", 1)
-                },
-                None,
-                &[0, 1],
-                &[],
-                Some((&[0], &[])),
-                (true, Stable, 2, &[0, 1], &[], &[], &[]),
-            ),
-            (
-                "a member keeps its epoch while it owns a revoked task",
-                Member {
-                    active: &[0, 1],
-                    ..stable("m1", "p1", 1)
-                },
-                None,
-                &[0],
-                &[],
-                Some((&[0, 1], &[])),
-                (true, UnrevokedTasks, 1, &[0], &[], &[1], &[]),
-            ),
-            (
-                "a member that reports no tasks has nothing to revoke",
-                Member {
-                    active: &[0, 1],
-                    ..stable("m1", "p1", 1)
-                },
-                None,
-                &[0],
-                &[],
-                Some((&[], &[])),
-                (true, Stable, 2, &[0], &[], &[], &[]),
-            ),
-            (
-                "an unrevoked member moves on once it stops reporting the task",
-                unrevoked_member(),
-                None,
-                &[0],
-                &[],
-                Some((&[0], &[])),
-                (true, Stable, 2, &[0], &[], &[], &[]),
-            ),
-            (
-                "an unrevoked member that still reports the task waits",
-                unrevoked_member(),
-                None,
-                &[0],
-                &[],
-                Some((&[0, 1], &[])),
-                (false, UnrevokedTasks, 1, &[0], &[], &[1], &[]),
-            ),
-            (
-                "an unrevoked member without owned tasks waits",
-                unrevoked_member(),
-                None,
-                &[0],
-                &[],
-                None,
-                (false, UnrevokedTasks, 1, &[0], &[], &[1], &[]),
-            ),
-            (
-                "an active task that another member still owns is held back",
-                stable("m1", "p1", 1),
-                Some(Member {
+            BuilderRow {
+                name: "an active task that another member still owns is held back",
+                m1: stable("m1", "p1", 1),
+                other: Some(Member {
                     state: UnrevokedTasks,
                     active_pending: &[1],
                     ..stable("m2", "p2", 1)
                 }),
-                &[0, 1],
-                &[],
-                Some((&[], &[])),
-                (true, UnreleasedTasks, 2, &[0], &[], &[], &[]),
-            ),
-            (
-                "a standby task that the same process runs as active is held back",
-                stable("m1", "p1", 1),
-                Some(Member {
+                target_active: &[0, 1],
+                target_standby: &[],
+                owned: Some(owning(&[])),
+                expected: settled(true, UnreleasedTasks, 2, &[0]),
+            },
+            BuilderRow {
+                name: "a standby task that the same process runs as active is held back",
+                m1: stable("m1", "p1", 1),
+                other: Some(Member {
                     active: &[0],
                     ..stable("m2", "p1", 1)
                 }),
-                &[],
-                &[0],
-                Some((&[], &[])),
-                (true, UnreleasedTasks, 2, &[], &[], &[], &[]),
-            ),
-            (
-                "a standby task that another process runs as active is given",
-                stable("m1", "p1", 1),
-                Some(Member {
+                target_active: &[],
+                target_standby: &[0],
+                owned: Some(owning(&[])),
+                expected: settled(true, UnreleasedTasks, 2, &[]),
+            },
+            BuilderRow {
+                name: "a standby task that another process runs as active is given",
+                m1: stable("m1", "p1", 1),
+                other: Some(Member {
                     active: &[0],
                     ..stable("m2", "p2", 1)
                 }),
-                &[],
-                &[0],
-                Some((&[], &[])),
-                (true, Stable, 2, &[], &[0], &[], &[]),
-            ),
-            (
-                "a revoked standby task waits for its release",
-                Member {
+                target_active: &[],
+                target_standby: &[0],
+                owned: Some(owning(&[])),
+                expected: ExpectedMember {
+                    changed: true,
+                    state: Stable,
+                    epoch: 2,
+                    active: &[],
+                    standby: &[0],
+                    active_pending: &[],
+                    standby_pending: &[],
+                },
+            },
+            BuilderRow {
+                name: "a revoked standby task waits for its release",
+                m1: Member {
                     standby: &[0],
                     ..stable("m1", "p1", 1)
                 },
-                None,
-                &[],
-                &[],
-                Some((&[], &[0])),
-                (true, UnrevokedTasks, 1, &[], &[], &[], &[0]),
-            ),
+                other: None,
+                target_active: &[],
+                target_standby: &[],
+                owned: Some(OwnedSetup {
+                    active: &[],
+                    standby: &[0],
+                }),
+                expected: ExpectedMember {
+                    changed: true,
+                    state: UnrevokedTasks,
+                    epoch: 1,
+                    active: &[],
+                    standby: &[],
+                    active_pending: &[],
+                    standby_pending: &[0],
+                },
+            },
         ]
     }
 
@@ -834,8 +935,17 @@ mod tests {
     /// reconciliation state of `m1` afterwards.
     #[test]
     fn reconcile_member_follows_kafka_current_assignment_builder() {
-        let rows = builder_rows();
-        for (name, m1, other, target_active, target_standby, owned, expected) in rows {
+        let rows = builder_rows().into_iter().chain(held_back_builder_rows());
+        for BuilderRow {
+            name,
+            m1,
+            other,
+            target_active,
+            target_standby,
+            owned,
+            expected,
+        } in rows
+        {
             let mut group = StreamsGroupState::new("g");
             group.group_epoch = 2;
             for member in std::iter::once(m1).chain(other) {
@@ -853,42 +963,33 @@ mod tests {
             target.active.insert("m1".into(), tasks_of(target_active));
             target.standby.insert("m1".into(), tasks_of(target_standby));
             group.install_target(target);
-            let owned = owned.map(|(active, standby)| RoleTasks {
-                active: tasks_of(active),
-                standby: tasks_of(standby),
+            let owned = owned.map(|owned| RoleTasks {
+                active: tasks_of(owned.active),
+                standby: tasks_of(owned.standby),
                 warmup: BTreeMap::new(),
             });
 
             let changed = group.reconcile_member("m1", owned.as_ref());
 
             let m1 = &group.members["m1"];
-            let (
-                e_changed,
-                e_state,
-                e_epoch,
-                e_active,
-                e_standby,
-                e_active_pending,
-                e_standby_pending,
-            ) = expected;
             check!(
-                (
+                ReconciledMember {
                     changed,
-                    m1.assignment_state,
-                    m1.member_epoch,
-                    m1.active.clone(),
-                    m1.standby.clone(),
-                    m1.active_pending_revocation.clone(),
-                    m1.standby_pending_revocation.clone(),
-                ) == (
-                    e_changed,
-                    e_state,
-                    e_epoch,
-                    tasks_of(e_active),
-                    tasks_of(e_standby),
-                    tasks_of(e_active_pending),
-                    tasks_of(e_standby_pending),
-                ),
+                    state: m1.assignment_state,
+                    epoch: m1.member_epoch,
+                    active: m1.active.clone(),
+                    standby: m1.standby.clone(),
+                    active_pending: m1.active_pending_revocation.clone(),
+                    standby_pending: m1.standby_pending_revocation.clone(),
+                } == ReconciledMember {
+                    changed: expected.changed,
+                    state: expected.state,
+                    epoch: expected.epoch,
+                    active: tasks_of(expected.active),
+                    standby: tasks_of(expected.standby),
+                    active_pending: tasks_of(expected.active_pending),
+                    standby_pending: tasks_of(expected.standby_pending),
+                },
                 "{name}"
             );
         }

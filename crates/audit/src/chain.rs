@@ -21,6 +21,15 @@ pub fn chain_hash(prev: &[u8; 32], seq: u64, value: &[u8]) -> [u8; 32] {
     h.finalize().into()
 }
 
+/// The chain position a record is stamped with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChainLink {
+    /// Sequence number of the record.
+    pub seq: u64,
+    /// Chain head as it was before the record.
+    pub prev_head: [u8; 32],
+}
+
 /// Running per-broker chain state.
 #[derive(Debug, Clone, krabka_macros::FieldDefaults)]
 pub struct ChainState {
@@ -39,16 +48,19 @@ impl ChainState {
 
     /// Advance the chain for a record that holds `value`.
     ///
-    /// Returns the `(seq, prev_head)` to stamp on that record. `prev_head` is
+    /// Returns the [`ChainLink`] to stamp on that record. `prev_head` is
     /// the head as it was *before* this record. The method then updates the
     /// head with this record.
     #[tracing::instrument(level = "debug", skip_all, fields(seq = self.next_seq, bytes = value.len()))]
-    pub fn extend(&mut self, value: &[u8]) -> (u64, [u8; 32]) {
+    pub fn extend(&mut self, value: &[u8]) -> ChainLink {
         let seq = self.next_seq;
         let prev = self.head;
         self.head = chain_hash(&prev, seq, value);
         self.next_seq += 1;
-        (seq, prev)
+        ChainLink {
+            seq,
+            prev_head: prev,
+        }
     }
 
     #[must_use]
@@ -96,21 +108,25 @@ mod tests {
     fn chain_state_advances_and_reports_prev() {
         let mut c = ChainState::new();
         check!(c.next_seq() == 0);
-        let (s0, p0) = c.extend(b"r0");
+        let link0 = c.extend(b"r0");
         check!(
-            (s0, p0, c.next_seq(), c.head())
-                == (0, GENESIS_HEAD, 1, chain_hash(&GENESIS_HEAD, 0, b"r0"))
+            link0
+                == ChainLink {
+                    seq: 0,
+                    prev_head: GENESIS_HEAD
+                }
         );
+        check!((c.next_seq(), c.head()) == (1, chain_hash(&GENESIS_HEAD, 0, b"r0")));
 
-        let (s1, p1) = c.extend(b"r1");
+        let link1 = c.extend(b"r1");
         check!(
-            (s1, p1, c.head())
-                == (
-                    1,
-                    chain_hash(&GENESIS_HEAD, 0, b"r0"),
-                    chain_hash(&p1, 1, b"r1"),
-                )
+            link1
+                == ChainLink {
+                    seq: 1,
+                    prev_head: chain_hash(&GENESIS_HEAD, 0, b"r0"),
+                }
         );
+        check!(c.head() == chain_hash(&link1.prev_head, 1, b"r1"));
     }
 
     #[test]
@@ -118,8 +134,14 @@ mod tests {
         let head = chain_hash(&GENESIS_HEAD, 4, b"r4");
         let mut c = ChainState::resume(5, head);
         check!((c.next_seq(), c.head()) == (5, head));
-        let (seq, prev) = c.extend(b"r5");
-        check!((seq, prev, c.head()) == (5, head, chain_hash(&head, 5, b"r5")));
+        let link = c.extend(b"r5");
+        check!(
+            link == ChainLink {
+                seq: 5,
+                prev_head: head
+            }
+        );
+        check!(c.head() == chain_hash(&head, 5, b"r5"));
     }
 
     #[test]

@@ -14,7 +14,7 @@ use {
         broker::BrokerHandle,
         codes,
         handlers::test_support::{
-            create_topic as create_topic_from_test_support, share_fetch_wire,
+            StartedBroker, create_topic as create_topic_from_test_support, share_fetch_wire,
         },
         test_support::start_broker_no_audit_with,
     },
@@ -51,10 +51,16 @@ struct Case {
 }
 
 /// The actual or the expected outcome of one [`Case`].
-type Outcome = (i16, TopicRef, ShareFetchResponse);
+#[derive(Debug, PartialEq)]
+struct Outcome {
+    version: i16,
+    topic: TopicRef,
+    response: ShareFetchResponse,
+}
 
-async fn start(authorizer: Arc<dyn Authorizer>) -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await
+async fn start(authorizer: Arc<dyn Authorizer>) -> StartedBroker {
+    let (broker, dir) = start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await;
+    StartedBroker { broker, dir }
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
@@ -156,13 +162,15 @@ fn one_row(topic_id: WireUuid, partition: PartitionData) -> ShareFetchResponse {
     }
 }
 
+/// The outcomes that `drive` got and the ones it expected.
+struct DrivenCases {
+    actual: Vec<Outcome>,
+    expected: Vec<Outcome>,
+}
+
 /// Run every case in its own share session on `broker`. `known` is the id of
 /// a topic that exists.
-async fn drive(
-    broker: &BrokerHandle,
-    known: WireUuid,
-    cases: &[Case],
-) -> (Vec<Outcome>, Vec<Outcome>) {
+async fn drive(broker: &BrokerHandle, known: WireUuid, cases: &[Case]) -> DrivenCases {
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
     for (row, case) in cases.iter().enumerate() {
@@ -178,16 +186,24 @@ async fn drive(
             &request().member(&member).topic_id(topic_id).call(),
         )
         .await;
-        actual.push((case.version, case.topic, response));
+        actual.push(Outcome {
+            version: case.version,
+            topic: case.topic,
+            response,
+        });
         let partition = PartitionData {
             partition_index: 0,
             error_code: case.error_code,
             records: Some(no_records()),
             ..Default::default()
         };
-        expected.push((case.version, case.topic, one_row(topic_id, partition)));
+        expected.push(Outcome {
+            version: case.version,
+            topic: case.topic,
+            response: one_row(topic_id, partition),
+        });
     }
-    (actual, expected)
+    DrivenCases { actual, expected }
 }
 
 /// The cases for every supported version: `known` is the error code for a
@@ -225,7 +241,7 @@ async fn partition_row_error_follows_topic_id() {
         "resolution-group"
     );
 
-    let (actual, expected) = drive(&broker, known, &cases(codes::NONE)).await;
+    let DrivenCases { actual, expected } = drive(&broker, known, &cases(codes::NONE)).await;
 
     assert!(actual == expected);
     broker.shutdown().await;
@@ -243,7 +259,8 @@ async fn unresolved_id_answers_before_topic_authorization() {
         "resolution-group"
     );
 
-    let (actual, expected) = drive(&broker, known, &cases(codes::TOPIC_AUTHORIZATION_FAILED)).await;
+    let DrivenCases { actual, expected } =
+        drive(&broker, known, &cases(codes::TOPIC_AUTHORIZATION_FAILED)).await;
 
     assert!(actual == expected);
     broker.shutdown().await;
@@ -255,7 +272,7 @@ async fn unresolved_id_answers_before_topic_authorization() {
 #[tokio::test]
 async fn a_piggybacked_acknowledgement_on_an_unresolved_id_answers_unknown_topic_id() {
     let version = krabka_protocol::owned::share_fetch_request::MAX_VERSION;
-    let (broker, _dir) = start(Arc::new(AllowAllAuthorizer)).await;
+    let StartedBroker { broker, dir: _dir } = start(Arc::new(AllowAllAuthorizer)).await;
 
     let mut actual = Vec::new();
     for topic_id in [UNKNOWN_ID, WireUuid::ZERO] {

@@ -21,8 +21,22 @@ fn product() -> ProductInfo {
     }
 }
 
-fn check_fields(value: &serde_json::Value, expected: &[(&str, serde_json::Value)]) {
-    for (path, expected) in expected {
+/// A JSON pointer into an OCSF document and the value expected there.
+struct ExpectedField {
+    path: &'static str,
+    value: serde_json::Value,
+}
+
+fn field(path: &'static str, value: serde_json::Value) -> ExpectedField {
+    ExpectedField { path, value }
+}
+
+fn check_fields(value: &serde_json::Value, expected: &[ExpectedField]) {
+    for ExpectedField {
+        path,
+        value: expected,
+    } in expected
+    {
         check!(value.pointer(path) == Some(expected), "field {path}");
     }
 }
@@ -32,15 +46,15 @@ fn authentication_failure_maps_to_3002() {
     let ev = authentication(51120, Some("authentication failed"), 1_700_000_000_000);
     let j = to_ocsf(&ev, &product());
     check_fields(&j, &[
-        ("/class_uid", serde_json::json!(3002)),
-        ("/category_uid", serde_json::json!(3)),
-        ("/status_id", serde_json::json!(2)),
-        ("/time", serde_json::json!(1_700_000_000_000_i64)),
-        ("/actor/user/name", serde_json::json!("alice")),
-        ("/src_endpoint/ip", serde_json::json!("10.0.0.1")),
-        ("/src_endpoint/port", serde_json::json!(51120)),
-        ("/auth_protocol", serde_json::json!("SASL/PLAIN")),
-        ("/metadata/product/vendor_name", serde_json::json!("Krabka")),
+        field("/class_uid", serde_json::json!(3002)),
+        field("/category_uid", serde_json::json!(3)),
+        field("/status_id", serde_json::json!(2)),
+        field("/time", serde_json::json!(1_700_000_000_000_i64)),
+        field("/actor/user/name", serde_json::json!("alice")),
+        field("/src_endpoint/ip", serde_json::json!("10.0.0.1")),
+        field("/src_endpoint/port", serde_json::json!(51120)),
+        field("/auth_protocol", serde_json::json!("SASL/PLAIN")),
+        field("/metadata/product/vendor_name", serde_json::json!("Krabka")),
     ]);
 }
 
@@ -49,13 +63,13 @@ fn authorization_denied_maps_to_3003_failure() {
     let ev = denied(5);
     let j = to_ocsf(&ev, &product());
     check_fields(&j, &[
-        ("/class_uid", serde_json::json!(3003)),
-        ("/status_id", serde_json::json!(2)),
-        ("/type_uid", serde_json::json!(300_302_i64)),
-        ("/actor/user/name", serde_json::json!("bob")),
-        ("/resources/0/type", serde_json::json!("Topic")),
-        ("/resources/0/name", serde_json::json!("secrets")),
-        ("/operation", serde_json::json!("Write")),
+        field("/class_uid", serde_json::json!(3003)),
+        field("/status_id", serde_json::json!(2)),
+        field("/type_uid", serde_json::json!(300_302_i64)),
+        field("/actor/user/name", serde_json::json!("bob")),
+        field("/resources/0/type", serde_json::json!("Topic")),
+        field("/resources/0/name", serde_json::json!("secrets")),
+        field("/operation", serde_json::json!("Write")),
     ]);
 }
 
@@ -64,11 +78,11 @@ fn admin_operation_maps_to_6003_with_resources() {
     let ev = admin(6);
     let j = to_ocsf(&ev, &product());
     check_fields(&j, &[
-        ("/class_uid", serde_json::json!(6003)),
-        ("/category_uid", serde_json::json!(6)),
-        ("/status_id", serde_json::json!(1)),
-        ("/api/operation", serde_json::json!("CreateTopics")),
-        ("/resources/0/name", serde_json::json!("orders")),
+        field("/class_uid", serde_json::json!(6003)),
+        field("/category_uid", serde_json::json!(6)),
+        field("/status_id", serde_json::json!(1)),
+        field("/api/operation", serde_json::json!("CreateTopics")),
+        field("/resources/0/name", serde_json::json!("orders")),
     ]);
 }
 

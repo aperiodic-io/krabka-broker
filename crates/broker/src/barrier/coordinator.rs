@@ -169,6 +169,19 @@ pub(crate) fn validate_spec_limits(
 ///
 /// `Broker::start` builds it and shares it with the barrier wire handlers and
 /// the scheduler through an `Arc`.
+/// One record of the state partition: its key, and its value, which is `None`
+/// for a tombstone.
+pub(super) struct AppendRecord {
+    pub(super) key: RecordKey,
+    pub(super) value: Option<Bytes>,
+}
+
+/// A group entry with the name the group is registered under.
+pub(super) struct NamedGroup {
+    pub(super) name: String,
+    pub(super) entry: Arc<Mutex<GroupEntry>>,
+}
+
 pub(crate) struct BarrierCoordinator {
     pub(crate) node_id: NodeId,
     partitions: Arc<PartitionRegistry>,
@@ -271,7 +284,7 @@ impl BarrierCoordinator {
     async fn append_records(
         &self,
         group: &str,
-        records: Vec<(RecordKey, Option<Bytes>)>,
+        records: Vec<AppendRecord>,
     ) -> Result<Offset, BarrierError> {
         let index = self.state_partition_for(group);
         let partition = self
@@ -289,7 +302,7 @@ impl BarrierCoordinator {
             records: Vec::with_capacity(records.len()),
             ..RecordBatch::default()
         };
-        for (delta, (key, value)) in records.into_iter().enumerate() {
+        for (delta, AppendRecord { key, value }) in records.into_iter().enumerate() {
             batch.records.push(Record {
                 offset_delta: i32::try_from(delta).expect("the record count fits in an i32"),
                 key: Some(encode_key(&key)?.into()),
@@ -377,34 +390,55 @@ mod tests {
 
     #[test]
     fn a_definition_must_name_at_least_one_usable_topic() {
-        let cases: &[(&str, GroupSpec, bool)] = &[
-            (
-                "good",
-                spec().maybe_interval(Some(millis(1_000))).call(),
-                true,
-            ),
-            ("no interval", spec().retained_cuts(1).call(), true),
-            ("no topic", spec().topics(&[]).call(), false),
-            (
-                "empty topic name",
-                spec().topics(&["orders", ""]).call(),
-                false,
-            ),
-            (
-                "duplicate topic",
-                spec().topics(&["orders", "orders"]).call(),
-                false,
-            ),
-            ("no retention", spec().retained_cuts(0).call(), false),
-            ("negative retention", spec().retained_cuts(-1).call(), false),
-            (
-                "zero interval",
-                spec().maybe_interval(Some(Time::ZERO)).call(),
-                false,
-            ),
+        struct Case {
+            label: &'static str,
+            spec: GroupSpec,
+            ok: bool,
+        }
+        let cases = &[
+            Case {
+                label: "good",
+                spec: spec().maybe_interval(Some(millis(1_000))).call(),
+                ok: true,
+            },
+            Case {
+                label: "no interval",
+                spec: spec().retained_cuts(1).call(),
+                ok: true,
+            },
+            Case {
+                label: "no topic",
+                spec: spec().topics(&[]).call(),
+                ok: false,
+            },
+            Case {
+                label: "empty topic name",
+                spec: spec().topics(&["orders", ""]).call(),
+                ok: false,
+            },
+            Case {
+                label: "duplicate topic",
+                spec: spec().topics(&["orders", "orders"]).call(),
+                ok: false,
+            },
+            Case {
+                label: "no retention",
+                spec: spec().retained_cuts(0).call(),
+                ok: false,
+            },
+            Case {
+                label: "negative retention",
+                spec: spec().retained_cuts(-1).call(),
+                ok: false,
+            },
+            Case {
+                label: "zero interval",
+                spec: spec().maybe_interval(Some(Time::ZERO)).call(),
+                ok: false,
+            },
         ];
-        for (case, spec, ok) in cases {
-            check!(validate_spec(spec).is_ok() == *ok, "{case}");
+        for Case { label, spec, ok } in cases {
+            check!(validate_spec(spec).is_ok() == *ok, "{label}");
         }
     }
 

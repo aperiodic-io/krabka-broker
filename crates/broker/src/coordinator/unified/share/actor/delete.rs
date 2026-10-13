@@ -25,7 +25,7 @@ use {
                 offsets_log::OffsetsLog,
                 share::{
                     persistence::{ShareGroupKey, encode_share_key},
-                    state::ShareGroupState,
+                    state::{ShareGroupState, TopicPartitionList},
                 },
             },
         },
@@ -125,7 +125,11 @@ async fn delete_share_state(
     }
 
     let mut error_code = codes::NONE;
-    for (topic_id, partitions) in candidates {
+    for TopicPartitionList {
+        topic_id,
+        partitions,
+    } in candidates
+    {
         let topic_uuid = uuid::Uuid::from_bytes(topic_id.0);
         for partition in partitions {
             if let Err(error) = persister
@@ -206,15 +210,17 @@ mod tests {
         std::collections::HashMap,
     };
 
-    /// `(share group seed, persister wired, expected result, group kept,
-    /// expected appended records)`.
-    type Row = (
-        Option<ShareGroupSeed>,
-        bool,
-        Result<(), DeleteGroupError>,
-        bool,
-        Appended,
-    );
+    struct Row {
+        /// The share group seed, `None` for no group.
+        group_seed: Option<ShareGroupSeed>,
+        /// Whether a share persister is wired.
+        persister: bool,
+        expected: Result<(), DeleteGroupError>,
+        /// Whether the group is kept.
+        kept: bool,
+        /// The expected appended records.
+        appended: Appended,
+    }
 
     fn seed(members: usize, initialized_partitions: &[i32]) -> ShareGroupSeed {
         let initialized = if initialized_partitions.is_empty() {
@@ -297,72 +303,84 @@ mod tests {
             }],
             ..Default::default()
         });
-        // (share group seed, persister wired, expected result, group kept,
-        //  expected appended records)
         let rows: [Row; 7] = [
-            (
-                None,
-                true,
-                Err(DeleteGroupError::NotFound),
-                false,
-                Vec::new(),
-            ),
-            (
-                Some(seed(1, &[])),
-                true,
-                Err(DeleteGroupError::NonEmpty),
-                true,
-                Vec::new(),
-            ),
-            (Some(seed(0, &[])), false, Ok(()), false, tombstones.clone()),
-            (
-                Some(seed(0, &[0, 1])),
-                true,
-                Err(DeleteGroupError::ShareState(
+            Row {
+                group_seed: None,
+                persister: true,
+                expected: Err(DeleteGroupError::NotFound),
+                kept: false,
+                appended: Vec::new(),
+            },
+            Row {
+                group_seed: Some(seed(1, &[])),
+                persister: true,
+                expected: Err(DeleteGroupError::NonEmpty),
+                kept: true,
+                appended: Vec::new(),
+            },
+            Row {
+                group_seed: Some(seed(0, &[])),
+                persister: false,
+                expected: Ok(()),
+                kept: false,
+                appended: tombstones.clone(),
+            },
+            Row {
+                group_seed: Some(seed(0, &[0, 1])),
+                persister: true,
+                expected: Err(DeleteGroupError::ShareState(
                     codes::COORDINATOR_NOT_AVAILABLE,
                 )),
-                true,
-                orders_deleting,
-            ),
+                kept: true,
+                appended: orders_deleting,
+            },
             // A deleting topic that the metadata image no longer holds is
             // dropped from the record, and with nothing left to delete the
             // group goes.
-            (
-                Some(deleting_seed()),
-                true,
-                Ok(()),
-                false,
-                [
+            Row {
+                group_seed: Some(deleting_seed()),
+                persister: true,
+                expected: Ok(()),
+                kept: false,
+                appended: [
                     metadata_record(ShareGroupStatePartitionMetadataValue::default()),
                     tombstones.clone(),
                 ]
                 .concat(),
-            ),
-            (
-                Some(seed(0, &[0])),
-                false,
-                Err(DeleteGroupError::ShareState(
+            },
+            Row {
+                group_seed: Some(seed(0, &[0])),
+                persister: false,
+                expected: Err(DeleteGroupError::ShareState(
                     codes::COORDINATOR_NOT_AVAILABLE,
                 )),
-                true,
-                Vec::new(),
-            ),
+                kept: true,
+                appended: Vec::new(),
+            },
             // Kafka's `shareGroupBuildPartitionDeleteRequest` deletes the
             // initializing partitions too, so a group that holds only those
             // still needs the persister.
-            (
-                Some(initializing_seed(&[0])),
-                false,
-                Err(DeleteGroupError::ShareState(
+            Row {
+                group_seed: Some(initializing_seed(&[0])),
+                persister: false,
+                expected: Err(DeleteGroupError::ShareState(
                     codes::COORDINATOR_NOT_AVAILABLE,
                 )),
-                true,
-                Vec::new(),
-            ),
+                kept: true,
+                appended: Vec::new(),
+            },
         ];
 
-        for (index, (group_seed, persister, expected, kept, appended)) in
-            rows.into_iter().enumerate()
+        for (
+            index,
+            Row {
+                group_seed,
+                persister,
+                expected,
+                kept,
+                appended,
+            },
+        ) in rows.into_iter().enumerate()
         {
             let (coordinator, log) = make_coord_with_log();
             if persister {

@@ -24,7 +24,7 @@ use {
         codes,
         handlers::{
             acl_wire::CLUSTER_RESOURCE_NAME,
-            test_support::{default_records_batch, seed_partition_replicas},
+            test_support::{StartedBroker, default_records_batch, seed_partition_replicas},
         },
         partition::Partition,
         test_support::{append_partition_batch, start_broker_no_audit_with},
@@ -115,14 +115,21 @@ use crate::test_support::KafkaErrorCode;
 #[derive(derive_more::From, derive_more::Into, Debug, Clone, Copy)]
 struct FetchApiVersion(i16);
 
+/// A topic a fetch names: its name and its topic id.
+#[derive(Debug, Clone, Copy)]
+struct TopicRef<'a> {
+    name: &'a str,
+    id: WireUuid,
+}
+
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 struct FetchRequestSetup<'a> {
     #[default(FetchApiVersion(12))]
     version: FetchApiVersion,
     #[default(Sender::Follower)]
     sender: Sender,
-    #[default(("replicated", WireUuid::ZERO))]
-    topic: (&'a str, WireUuid),
+    #[default(TopicRef { name: "replicated", id: WireUuid::ZERO })]
+    topic: TopicRef<'a>,
     offset: Offset,
 }
 
@@ -158,14 +165,24 @@ struct Outcome {
     high_watermark: Offset,
 }
 
-async fn start() -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| {
+async fn start() -> StartedBroker {
+    let (handle, dir) = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = Arc::new(Grants);
         // Node 2 never fetches. Keep it in the ISR for the whole test, so only
         // a fetch as node 2 can move the high watermark.
         cfg.replica_lag_time_max = krabka_units::secs(600);
     })
-    .await
+    .await;
+    StartedBroker {
+        broker: handle,
+        dir,
+    }
+}
+
+/// The leader partition a case seeded and the batch as the log stored it.
+struct SeededPartition {
+    partition: Arc<Partition>,
+    batch: RecordBatch,
 }
 
 /// Create `topic` with one partition that this broker leads and that node 2
@@ -175,7 +192,7 @@ async fn replicated_partition(
     broker: &BrokerHandle,
     topic: &str,
     topic_id: uuid::Uuid,
-) -> (Arc<Partition>, RecordBatch) {
+) -> SeededPartition {
     seed_partition_replicas()
         .broker(broker)
         .topic(topic)
@@ -195,7 +212,7 @@ async fn replicated_partition(
 
     let mut batch = default_records_batch(&RECORDS);
     append_partition_batch(&partition, &mut batch);
-    (partition, batch)
+    SeededPartition { partition, batch }
 }
 
 /// A sessionless one-row fetch of partition 0 of `topic`, from `fetch_offset`.
@@ -203,7 +220,7 @@ async fn replicated_partition(
 fn request(
     #[builder(into, default = FetchApiVersion (12))] version: FetchApiVersion,
     #[builder(default = Sender :: Follower)] sender: Sender,
-    #[builder(default = ("replicated" , WireUuid :: ZERO))] topic: (&'_ str, WireUuid),
+    #[builder(default = TopicRef { name: "replicated", id: WireUuid::ZERO })] topic: TopicRef<'_>,
     #[builder(into, default)] offset: Offset,
 ) -> FetchRequest {
     let setup = FetchRequestSetup {
@@ -215,7 +232,7 @@ fn request(
     let FetchRequestSetup {
         version,
         sender,
-        topic: (name, topic_id),
+        topic: TopicRef { name, id: topic_id },
         offset,
     } = setup;
     let replica_id = match sender {
@@ -269,12 +286,12 @@ async fn fetch(
 /// The one-row response of `case` for partition 0 of `topic`.
 fn response(
     version: FetchApiVersion,
-    topic: (&str, WireUuid),
+    topic: TopicRef<'_>,
     partition: PartitionData,
 ) -> FetchResponse {
     super::test_support::expected_single_topic(
         super::test_support::TopicRepresentation::for_version(krabka_ids::ApiVersion(version.0)),
-        topic,
+        (topic.name, topic.id),
         partition,
     )
 }
@@ -287,7 +304,7 @@ fn refused(error_code: KafkaErrorCode) -> PartitionData {
 /// The record set of a row that carries nothing, as a client decodes it.
 fn no_records() -> RecordsPayload { RecordsPayload::Legacy(Bytes::new()) }
 
-fn expected(case: Case, label: String, topic: (&str, WireUuid), batch: RecordBatch) -> Outcome {
+fn expected(case: Case, label: String, topic: TopicRef<'_>, batch: RecordBatch) -> Outcome {
     let (from_start, from_log_end, high_watermark) = match case.expect {
         // Kafka reports the leader's high watermark to a follower, not its log
         // end. The first fetch reports node 2 at offset 0, which holds the
@@ -366,7 +383,7 @@ async fn follower_fetch_needs_cluster_action() {
         ]);
     }
 
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
     topic_case_outcomes!(
         (actual, want),
         (index, case, label, name),
@@ -375,8 +392,12 @@ async fn follower_fetch_needs_cluster_action() {
         {
             let topic_id = uuid::Uuid::from_u128(index + 1);
             let wire_id = WireUuid(topic_id.into_bytes());
-            let (partition, batch) = replicated_partition(&broker, &name, topic_id).await;
-            let topic = (name.as_str(), wire_id);
+            let SeededPartition { partition, batch } =
+                replicated_partition(&broker, &name, topic_id).await;
+            let topic = TopicRef {
+                name: name.as_str(),
+                id: wire_id,
+            };
             let fetch_setup = FetchRequestSetup {
                 version: case.version,
                 sender: case.sender,

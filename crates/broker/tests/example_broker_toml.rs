@@ -168,6 +168,12 @@ fn object_branches<'a>(root: &'a Json, node: &'a Json, out: &mut Vec<&'a Json>) 
     }
 }
 
+/// A property name the schema knows, and the schema that describes it.
+struct KnownProperty<'a> {
+    name: &'a String,
+    schema: &'a Json,
+}
+
 /// Check every key of `table` against the schema `node` describes, then
 /// descend into nested tables and arrays of tables.
 fn check_table_keys(root: &Json, node: &Json, table: &toml::Table, path: &str) {
@@ -183,10 +189,11 @@ fn check_table_keys(root: &Json, node: &Json, table: &toml::Table, path: &str) {
     }) {
         return;
     }
-    let known: Vec<(&String, &Json)> = branches
+    let known: Vec<KnownProperty<'_>> = branches
         .iter()
         .filter_map(|branch| branch.get("properties").and_then(Json::as_object))
         .flat_map(|properties| properties.iter())
+        .map(|(name, schema)| KnownProperty { name, schema })
         .collect();
     assert!(
         !known.is_empty(),
@@ -195,8 +202,8 @@ fn check_table_keys(root: &Json, node: &Json, table: &toml::Table, path: &str) {
     for (key, value) in table {
         let field = known
             .iter()
-            .find(|(name, _)| *name == key)
-            .map(|(_, field)| *field);
+            .find(|property| property.name == key)
+            .map(|property| property.schema);
         let Some(field) = field else {
             panic!("{path}.{key} is not a key docs/config-schema.json knows");
         };

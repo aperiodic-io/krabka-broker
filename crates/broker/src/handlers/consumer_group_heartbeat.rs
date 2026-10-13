@@ -867,16 +867,26 @@ mod tests {
         }
     }
 
+    /// A topic the test broker creates, with the id it creates it under.
+    struct DescribedTopic<'a> {
+        name: &'a str,
+        id: uuid::Uuid,
+    }
+
+    /// A running broker and the temporary directory that holds its data.
+    struct StartedBroker {
+        handle: BrokerHandle,
+        dir: tempfile::TempDir,
+    }
+
     /// A broker whose group `g` and topics `topics` (each with two partitions
     /// and a `Describe` grant for alice) exist, and the broker's handle.
-    async fn broker_with_described_topics(
-        topics: &[(&str, uuid::Uuid)],
-    ) -> (BrokerHandle, tempfile::TempDir) {
+    async fn broker_with_described_topics(topics: &[DescribedTopic<'_>]) -> StartedBroker {
         let (broker_handle, dir, broker) =
             versioned_group_broker(Arc::new(acl_authorizer()), GroupFeatureLevel(1)).await;
         let node = krabka_raft::NodeId(broker_handle.node_id());
         let mut records = vec![group_read_acl("g")];
-        for (name, id) in topics {
+        for DescribedTopic { name, id } in topics {
             records.push(describe_acl(name));
             records.extend(
                 topic_with_partitions()
@@ -891,7 +901,10 @@ mod tests {
             .submit_change(records)
             .await
             .expect("grant ACLs and create topics");
-        (broker_handle, dir)
+        StartedBroker {
+            handle: broker_handle,
+            dir,
+        }
     }
 
     /// Kafka refreshes the resolution of a group's regular expressions when the
@@ -901,7 +914,10 @@ mod tests {
     /// through that refresh.
     macro_rules! joined_regex_member {
         (($handle:ident, $directory:ident, $broker:ident, $member:ident), $topics:expr) => {
-            let ($handle, $directory) = broker_with_described_topics($topics).await;
+            let StartedBroker {
+                handle: $handle,
+                dir: $directory,
+            } = broker_with_described_topics($topics).await;
             let $broker = $handle.broker_arc_for_test();
             let mut $member = RegexMember::new($broker.clone(), "m1");
             $member.heartbeat(Some("^orders-.*")).await;
@@ -913,10 +929,10 @@ mod tests {
     {
         let first = uuid::Uuid::from_u128(1);
         let second = uuid::Uuid::from_u128(2);
-        joined_regex_member!((broker_handle, _dir, broker, member), &[(
-            "orders-eu",
-            first
-        )]);
+        joined_regex_member!((broker_handle, _dir, broker, member), &[DescribedTopic {
+            name: "orders-eu",
+            id: first
+        }]);
         member.heartbeat_until_holding(&[first]).await;
 
         let node = krabka_raft::NodeId(broker_handle.node_id());
@@ -946,8 +962,14 @@ mod tests {
         let allowed = uuid::Uuid::from_u128(1);
         let revoked = uuid::Uuid::from_u128(2);
         joined_regex_member!((broker_handle, _dir, broker, member), &[
-            ("orders-eu", allowed),
-            ("orders-us", revoked)
+            DescribedTopic {
+                name: "orders-eu",
+                id: allowed
+            },
+            DescribedTopic {
+                name: "orders-us",
+                id: revoked
+            }
         ]);
         member.heartbeat_until_holding(&[allowed, revoked]).await;
 

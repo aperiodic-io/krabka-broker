@@ -14,7 +14,7 @@ use {
     super::{
         MAX_DECOMPRESSED_MESSAGE_BYTES, REMOTE_COPY_LAG_BYTES, REMOTE_COPY_LAG_MS,
         SOFT_MAX_ARRAY_LENGTH,
-        lookup::{topic_node_or_cluster_default, topic_node_or_cluster_synonym},
+        lookup::{ConfigSynonym, topic_node_or_cluster_default, topic_node_or_cluster_synonym},
         parse::{int_value, long_value},
     },
     crate::api_catalog::UnstableApiVersions,
@@ -96,18 +96,24 @@ pub(crate) fn resolve_remote_copy_lag(
     node: NodeId,
     topic: &str,
 ) -> RemoteCopyLag {
-    let read = |keys: (&str, &str), default: i64| {
+    let read = |keys: ConfigSynonym<'_>, default: i64| {
         topic_node_or_cluster_synonym(image, node, topic, keys)
             .and_then(long_value)
             .unwrap_or(default)
     };
     RemoteCopyLag {
         ms: read(
-            (REMOTE_COPY_LAG_MS, LOG_REMOTE_COPY_LAG_MS),
+            ConfigSynonym {
+                topic_key: REMOTE_COPY_LAG_MS,
+                broker_key: LOG_REMOTE_COPY_LAG_MS,
+            },
             RemoteCopyLag::DEFAULT.ms,
         ),
         bytes: read(
-            (REMOTE_COPY_LAG_BYTES, LOG_REMOTE_COPY_LAG_BYTES),
+            ConfigSynonym {
+                topic_key: REMOTE_COPY_LAG_BYTES,
+                broker_key: LOG_REMOTE_COPY_LAG_BYTES,
+            },
             RemoteCopyLag::DEFAULT.bytes,
         ),
     }
@@ -117,29 +123,50 @@ pub(crate) fn resolve_remote_copy_lag(
 mod tests {
     use {
         super::*,
-        crate::{
-            config_keys::test_support::topic_config_record, test_support::single_partition_topic,
-        },
+        crate::test_support::single_partition_topic,
         assert2::check,
-        krabka_metadata::{BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord},
+        krabka_metadata::{
+            BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord, TopicConfigRecord,
+        },
     };
 
     const NODE: NodeId = NodeId(1);
 
-    /// An image with topic `t`, its overrides, and broker configs given as
-    /// `(node, key, value)`.
-    fn image(overrides: &[(&str, &str)], broker: &[(NodeId, &str, &str)]) -> MetadataImage {
+    /// A config override of topic `t`.
+    struct TopicOverride<'a> {
+        key: &'a str,
+        value: &'a str,
+    }
+
+    /// A broker config set for `node_id`.
+    struct BrokerSetting<'a> {
+        node_id: NodeId,
+        key: &'a str,
+        value: &'a str,
+    }
+
+    /// An image with topic `t`, its overrides, and broker configs.
+    fn image(overrides: &[TopicOverride<'_>], broker: &[BrokerSetting<'_>]) -> MetadataImage {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&MetadataRecord::V1Topic(single_partition_topic(
             "t",
             uuid::Uuid::from_u128(1),
         )));
-        image.apply(&MetadataRecord::V1TopicConfig(
-            topic_config_record().overrides(overrides).call(),
-        ));
-        for (node, key, value) in broker {
+        image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
+            topic: "t".into(),
+            overrides: overrides
+                .iter()
+                .map(|TopicOverride { key, value }| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+        }));
+        for BrokerSetting {
+            node_id,
+            key,
+            value,
+        } in broker
+        {
             image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
-                node_id: *node,
+                node_id: *node_id,
                 config_name: (*key).to_owned(),
                 config_value: Some((*value).to_owned()),
             }));
@@ -155,43 +182,76 @@ mod tests {
             ("nothing set is no limit", vec![], vec![], None),
             (
                 "the topic's own limit",
-                vec![(key, "512")],
+                vec![TopicOverride { key, value: "512" }],
                 vec![],
                 Some(512),
             ),
             (
                 "a cluster default",
                 vec![],
-                vec![(cluster, key, "1024")],
+                vec![BrokerSetting {
+                    node_id: cluster,
+                    key,
+                    value: "1024",
+                }],
                 Some(1024),
             ),
             (
                 "a node beats the cluster",
                 vec![],
-                vec![(cluster, key, "1024"), (NODE, key, "2048")],
+                vec![
+                    BrokerSetting {
+                        node_id: cluster,
+                        key,
+                        value: "1024",
+                    },
+                    BrokerSetting {
+                        node_id: NODE,
+                        key,
+                        value: "2048",
+                    },
+                ],
                 Some(2048),
             ),
             (
                 "another node's is not this node's",
                 vec![],
-                vec![(NodeId(2), key, "2048")],
+                vec![BrokerSetting {
+                    node_id: NodeId(2),
+                    key,
+                    value: "2048",
+                }],
                 None,
             ),
             (
                 "the topic beats both",
-                vec![(key, "512")],
-                vec![(cluster, key, "1024"), (NODE, key, "2048")],
+                vec![TopicOverride { key, value: "512" }],
+                vec![
+                    BrokerSetting {
+                        node_id: cluster,
+                        key,
+                        value: "1024",
+                    },
+                    BrokerSetting {
+                        node_id: NODE,
+                        key,
+                        value: "2048",
+                    },
+                ],
                 Some(512),
             ),
             (
                 "Kafka's default is no limit",
-                vec![(key, "2147483639")],
+                vec![TopicOverride {
+                    key,
+                    value: "2147483639",
+                }],
                 vec![],
                 None,
             ),
             (
                 "an unparseable value is no limit",
-                vec![(key, "many")],
+                vec![TopicOverride { key, value: "many" }],
                 vec![],
                 None,
             ),
@@ -215,8 +275,14 @@ mod tests {
             (
                 "the topic's own lag",
                 vec![
-                    (REMOTE_COPY_LAG_MS, "60000"),
-                    (REMOTE_COPY_LAG_BYTES, "4096"),
+                    TopicOverride {
+                        key: REMOTE_COPY_LAG_MS,
+                        value: "60000",
+                    },
+                    TopicOverride {
+                        key: REMOTE_COPY_LAG_BYTES,
+                        value: "4096",
+                    },
                 ],
                 vec![],
                 RemoteCopyLag {
@@ -228,8 +294,16 @@ mod tests {
                 "the broker keys carry a default",
                 vec![],
                 vec![
-                    (cluster, LOG_REMOTE_COPY_LAG_MS, "1000"),
-                    (cluster, LOG_REMOTE_COPY_LAG_BYTES, "100"),
+                    BrokerSetting {
+                        node_id: cluster,
+                        key: LOG_REMOTE_COPY_LAG_MS,
+                        value: "1000",
+                    },
+                    BrokerSetting {
+                        node_id: cluster,
+                        key: LOG_REMOTE_COPY_LAG_BYTES,
+                        value: "100",
+                    },
                 ],
                 RemoteCopyLag {
                     ms: 1000,
@@ -238,17 +312,35 @@ mod tests {
             ),
             (
                 "a node beats the cluster and the topic beats both, key by key",
-                vec![(REMOTE_COPY_LAG_BYTES, "7")],
+                vec![TopicOverride {
+                    key: REMOTE_COPY_LAG_BYTES,
+                    value: "7",
+                }],
                 vec![
-                    (cluster, LOG_REMOTE_COPY_LAG_MS, "1000"),
-                    (NODE, LOG_REMOTE_COPY_LAG_MS, "2000"),
-                    (NODE, LOG_REMOTE_COPY_LAG_BYTES, "9"),
+                    BrokerSetting {
+                        node_id: cluster,
+                        key: LOG_REMOTE_COPY_LAG_MS,
+                        value: "1000",
+                    },
+                    BrokerSetting {
+                        node_id: NODE,
+                        key: LOG_REMOTE_COPY_LAG_MS,
+                        value: "2000",
+                    },
+                    BrokerSetting {
+                        node_id: NODE,
+                        key: LOG_REMOTE_COPY_LAG_BYTES,
+                        value: "9",
+                    },
                 ],
                 RemoteCopyLag { ms: 2000, bytes: 7 },
             ),
             (
                 "an unparseable value is the default",
-                vec![(REMOTE_COPY_LAG_MS, "soon")],
+                vec![TopicOverride {
+                    key: REMOTE_COPY_LAG_MS,
+                    value: "soon",
+                }],
                 vec![],
                 RemoteCopyLag::DEFAULT,
             ),

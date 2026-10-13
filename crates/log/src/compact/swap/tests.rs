@@ -232,7 +232,13 @@ const CONSUMED: [Offset; 2] = [Offset(0), Offset(10)];
 
 /// The directory before compaction, and after a clean compaction, both as
 /// `Log::open` leaves them; and the operations a clean swap performs.
-fn references(survivor_txnindex: bool) -> (Files, Files, Vec<String>) {
+struct References {
+    before: Files,
+    after: Files,
+    ops: Vec<String>,
+}
+
+fn references(survivor_txnindex: bool) -> References {
     let dir = tempfile::tempdir().unwrap();
     compactable(dir.path(), survivor_txnindex);
     let before: Files = directory_files(dir.path())
@@ -245,13 +251,17 @@ fn references(survivor_txnindex: bool) -> (Files, Files, Vec<String>) {
     let io = CrashingIo::new(usize::MAX);
     atomic_swap(&io, dir.path(), &CONSUMED, &rewrite).unwrap();
     reopen(dir.path()).unwrap();
-    (before, directory_files(dir.path()), io.ops())
+    References {
+        before,
+        after: directory_files(dir.path()),
+        ops: io.ops(),
+    }
 }
 
 #[test]
 fn a_clean_swap_replaces_the_consumed_segments_with_the_survivor() {
     for survivor_txnindex in [false, true] {
-        let (before, after, _) = references(survivor_txnindex);
+        let References { before, after, .. } = references(survivor_txnindex);
         let segments = |listing: &Files| -> Vec<String> {
             listing
                 .keys()
@@ -291,7 +301,7 @@ fn a_clean_swap_replaces_the_consumed_segments_with_the_survivor() {
 #[test]
 fn every_crash_point_recovers_to_the_old_or_the_new_segments() {
     for survivor_txnindex in [false, true] {
-        let (before, after, ops) = references(survivor_txnindex);
+        let References { before, after, ops } = references(survivor_txnindex);
         // The first unlink of a consumed segment comes after the commit's
         // directory fsync; a crash from there on must complete the swap.
         let committed_from = ops
@@ -333,7 +343,7 @@ fn every_crash_point_recovers_to_the_old_or_the_new_segments() {
 /// here would lose that segment's records.
 #[test]
 fn a_committed_swap_is_completed_even_when_its_base_segment_survives() {
-    let (_, after, _) = references(false);
+    let References { after, .. } = references(false);
     let dir = tempfile::tempdir().unwrap();
     let rewrite = compactable(dir.path(), false);
     // Commit by hand, then lose only the consumed segment at 10.
@@ -374,7 +384,7 @@ fn a_failed_unlink_fails_the_swap_and_recovery_completes_it() {
         }
     }
 
-    let (_, after, _) = references(false);
+    let References { after, .. } = references(false);
     let dir = tempfile::tempdir().unwrap();
     let rewrite = compactable(dir.path(), false);
 

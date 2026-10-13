@@ -14,7 +14,7 @@ use {
         partition_registry::PartitionRegistry,
         producer_id_manager::ProducerIdManager,
         producer_state::ProducerState,
-        test_support::{replica_nodes, string_pairs, topic_partition_image},
+        test_support::{replica_nodes, topic_partition_image},
         txn::coordinator::TxnCoordinator,
     },
     bytes::{Bytes, BytesMut},
@@ -197,11 +197,21 @@ pub(super) fn set_min_isr(img: &mut MetadataImage, topic: &str, n: i32) {
     }));
 }
 
-pub(super) fn image_with_overrides(topic: &str, overrides: &[(&str, &str)]) -> MetadataImage {
+/// One topic config override: the config key and its value.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ConfigOverride<'a> {
+    pub(super) key: &'a str,
+    pub(super) value: &'a str,
+}
+
+pub(super) fn image_with_overrides(topic: &str, overrides: &[ConfigOverride<'_>]) -> MetadataImage {
     let mut image = image_with_topic(topic, &[1]);
     image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
         topic: topic.into(),
-        overrides: string_pairs(overrides),
+        overrides: overrides
+            .iter()
+            .map(|config| (config.key.to_owned(), config.value.to_owned()))
+            .collect(),
     }));
     image
 }

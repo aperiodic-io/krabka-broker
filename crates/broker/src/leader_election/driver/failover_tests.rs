@@ -353,8 +353,8 @@ async fn sweep_walks_the_image_once_per_change_while_a_dead_broker_stays_resolve
         .clean_sweep
         .as_ref()
         .expect("a clean sweep is remembered");
-    assert!(Arc::ptr_eq(&memo.0, &controller.current_image()));
-    assert!(memo.1 == [1].into_iter().collect());
+    assert!(Arc::ptr_eq(&memo.image, &controller.current_image()));
+    assert!(memo.dead == [1].into_iter().collect());
     assert!(source.submitted().is_empty());
 
     // Broker 1 comes back: the dead set changes and the memo is dropped.

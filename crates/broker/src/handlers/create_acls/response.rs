@@ -7,8 +7,8 @@
 //! constructors together makes that invariant easy to see.
 
 use {
+    super::ValidCreation,
     crate::{codes, handlers::submit_failure_code},
-    krabka_metadata::MetadataRecord,
     krabka_protocol::owned::create_acls_response::{AclCreationResult, CreateAclsResponse},
     krabka_raft::RaftError,
 };
@@ -53,15 +53,15 @@ pub(super) fn create_acls_response(results: Vec<AclCreationResult>) -> CreateAcl
 /// Kafka writes `ApiError.message()`, which is null for both.
 pub(super) fn apply_submit_error(
     results: &mut [AclCreationResult],
-    to_submit: &[(usize, MetadataRecord)],
+    to_submit: &[ValidCreation],
     err: &RaftError,
 ) {
     let code = match err {
         RaftError::NotLeader { .. } | RaftError::LeaderUnknown => codes::NOT_CONTROLLER,
         other => submit_failure_code(other, codes::UNKNOWN_SERVER_ERROR),
     };
-    for (idx, _) in to_submit {
-        results[*idx] = AclCreationResult {
+    for creation in to_submit {
+        results[creation.result_index] = AclCreationResult {
             error_code: code,
             error_message: None,
             ..Default::default()
@@ -75,17 +75,18 @@ mod tests {
         super::*,
         crate::handlers::create_acls::test_support::{OPERATION_READ, creation, validate},
         assert2::assert,
+        krabka_metadata::MetadataRecord,
     };
 
     #[test]
     fn submit_error_maps_controller_failures_and_leaves_rejected_rows() {
-        let submitted = vec![(
-            0usize,
-            MetadataRecord::V1AccessControlEntry(
+        let submitted = vec![ValidCreation {
+            result_index: 0,
+            record: MetadataRecord::V1AccessControlEntry(
                 validate(&creation("topic-a", "User:alice", OPERATION_READ))
                     .expect("valid creation"),
             ),
-        )];
+        }];
         let cases = [
             (
                 RaftError::NotLeader {

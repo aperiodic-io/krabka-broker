@@ -42,6 +42,7 @@
 //! [`EXIT_OK`] for the codes.
 
 use {
+    self::diskless::CaptureAuthentication,
     clap::Parser,
     krabka_remote_storage::{
         AuthenticatedArchive, Sha256Digest, TrustedManifestKeys, VerifyRequest,
@@ -82,7 +83,10 @@ pub use self::{
         AuthenticationReport, DisklessPartitionReport, DisklessRestoreReport,
         MetadataRestoreReport, PartitionReport, ReportFormat, RestoreReport, SkippedSegment,
     },
-    verify::{SegmentFacts, VerifiedSegment, verify_segment, verify_segment_authenticated},
+    verify::{
+        LeaderEpochStart, SegmentFacts, VerifiedSegment, verify_segment,
+        verify_segment_authenticated,
+    },
 };
 
 /// The restore command line.
@@ -180,9 +184,8 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
                 .is_some_and(|(name, _)| name != CAPTURE_HEAD_NAME)
         });
     let diskless_authentication = match (&diskless_capture, &trusted) {
-        (Some(capture), Some((trusted, count))) => {
-            let (claims, head) = diskless::authenticate(capture, trusted, args)?;
-            Some((claims, head, *count))
+        (Some(capture), Some(trusted)) => {
+            Some(diskless::authenticate(capture, &trusted.keys, args)?)
         }
         (None, _) => {
             if args.worm_expect_head.iter().any(|value| {
@@ -200,30 +203,16 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
     };
     let diskless_claims = diskless_authentication
         .as_ref()
-        .map(|(claims, _, _)| claims);
+        .map(|authentication| &authentication.claims);
     let mut authenticated = match (&trusted, has_classic) {
-        (Some((trusted, count)), true) => {
-            authenticate_source(&store, args, trusted, *count, diskless_claims).await?
+        (Some(trusted), true) => {
+            authenticate_source(&store, args, trusted, diskless_claims).await?
         }
         _ => None,
     };
-    if let Some((_, head, count)) = &diskless_authentication {
-        let report = authenticated.get_or_insert_with(|| {
-            (None, AuthenticationReport {
-                partitions: 0,
-                manifests: 0,
-                objects: 0,
-                trusted_keys: *count,
-                chain_heads: std::collections::BTreeMap::new(),
-                tail_truncation_protected: true,
-            })
-        });
-        report.1.partitions += 1;
-        report.1.manifests += 1;
-        report
-            .1
-            .chain_heads
-            .insert(CAPTURE_HEAD_NAME.to_owned(), head.clone());
+    if let Some(CaptureAuthentication { head, .. }) = &diskless_authentication {
+        let count = trusted.as_ref().map_or(0, |trusted| trusted.count);
+        record_capture_head(&mut authenticated, head, count);
     }
     let AuthenticatedSnapshots {
         metadata: metadata_bytes,
@@ -252,7 +241,7 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
         args,
         authenticated
             .as_ref()
-            .and_then(|(archive, _)| archive.as_ref())
+            .and_then(|source| source.archive.as_ref())
             .map(AuthenticatedArchive::report),
         rlmm_snapshot.as_ref(),
     )?;
@@ -274,7 +263,10 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
         let mut skipped_predecessor = false;
         for segment in &entry.segments {
             let verification = match &authenticated {
-                Some((Some(authenticated), _)) => {
+                Some(SourceAuthentication {
+                    archive: Some(authenticated),
+                    ..
+                }) => {
                     verify_segment_authenticated(
                         &store,
                         &entry.partition,
@@ -283,7 +275,9 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
                     )
                     .await
                 }
-                Some((None, _)) | None => verify_segment(&store, &entry.partition, segment).await,
+                Some(SourceAuthentication { archive: None, .. }) | None => {
+                    verify_segment(&store, &entry.partition, segment).await
+                }
             };
             let verified = match verification {
                 Ok(verified) => verified,
@@ -302,7 +296,13 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
                 }
                 Err(error) => return Err(error),
             };
-            if matches!(&authenticated, Some((Some(_), _))) {
+            if matches!(
+                &authenticated,
+                Some(SourceAuthentication {
+                    archive: Some(_),
+                    ..
+                })
+            ) {
                 consumed_authenticated_objects
                     .extend(segment.artifacts().map(|object| object.key.to_string()));
             }
@@ -344,14 +344,14 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
         }
         None => None,
     };
-    if let Some((_, report)) = &mut authenticated {
+    if let Some(SourceAuthentication { report, .. }) = &mut authenticated {
         report.objects = u64::try_from(consumed_authenticated_objects.len()).unwrap_or(u64::MAX);
     }
     Ok(RestoreReport {
         dry_run: args.dry_run,
         log_dir: args.target.log_dir.clone(),
         cluster_id: format.cluster_id,
-        authentication: authenticated.map(|(_, report)| report),
+        authentication: authenticated.map(|source| source.report),
         diskless,
         metadata: format.metadata,
         partitions,
@@ -426,15 +426,50 @@ async fn authenticate_captured_snapshot(
     Ok(Some(bytes))
 }
 
+/// Count the diskless capture's signed boundary in the authentication report,
+/// creating the report when the archive held no classic segments.
+fn record_capture_head(authenticated: &mut Option<SourceAuthentication>, head: &str, count: usize) {
+    let source = authenticated.get_or_insert_with(|| SourceAuthentication {
+        archive: None,
+        report: AuthenticationReport {
+            partitions: 0,
+            manifests: 0,
+            objects: 0,
+            trusted_keys: count,
+            chain_heads: std::collections::BTreeMap::new(),
+            tail_truncation_protected: true,
+        },
+    });
+    source.report.partitions += 1;
+    source.report.manifests += 1;
+    source
+        .report
+        .chain_heads
+        .insert(CAPTURE_HEAD_NAME.to_owned(), head.to_owned());
+}
+
+/// The trusted WORM manifest keys and how many the operator supplied.
+struct TrustedKeySet {
+    keys: TrustedManifestKeys,
+    count: usize,
+}
+
+/// What authenticating the classic archive established: the authenticated
+/// objects, when the archive holds classic segments, and the coverage the
+/// report states.
+struct SourceAuthentication {
+    archive: Option<AuthenticatedArchive>,
+    report: AuthenticationReport,
+}
+
 async fn authenticate_source(
     store: &ArchiveStore,
     args: &RestoreArgs,
-    trusted: &TrustedManifestKeys,
-    trusted_keys: usize,
+    trusted: &TrustedKeySet,
     diskless_claims: Option<
         &std::collections::BTreeMap<String, krabka_remote_storage::ObjectEntry>,
     >,
-) -> Result<Option<(Option<AuthenticatedArchive>, AuthenticationReport)>, RestoreError> {
+) -> Result<Option<SourceAuthentication>, RestoreError> {
     let request = VerifyRequest {
         prefix: store.prefix().map(str::to_owned),
         externally_authenticated_objects: diskless_claims
@@ -443,7 +478,7 @@ async fn authenticate_source(
             .collect(),
         ..VerifyRequest::default()
     };
-    let authenticated = authenticate_archive(store.store(), &request, trusted)
+    let authenticated = authenticate_archive(store.store(), &request, &trusted.keys)
         .await
         .map_err(|error| RestoreError::Authenticity {
             reason: error.to_string(),
@@ -495,14 +530,17 @@ async fn authenticate_source(
         partitions: report.partitions.len(),
         manifests: report.manifests(),
         objects: u64::try_from(authenticated.objects().len()).unwrap_or(u64::MAX),
-        trusted_keys,
+        trusted_keys: trusted.count,
         chain_heads: actual_heads,
         tail_truncation_protected: true,
     };
-    Ok(Some((Some(authenticated), coverage)))
+    Ok(Some(SourceAuthentication {
+        archive: Some(authenticated),
+        report: coverage,
+    }))
 }
 
-fn trusted_keys(args: &RestoreArgs) -> Result<Option<(TrustedManifestKeys, usize)>, RestoreError> {
+fn trusted_keys(args: &RestoreArgs) -> Result<Option<TrustedKeySet>, RestoreError> {
     if args.archive.worm_key_id.is_empty() {
         return Ok(None);
     }
@@ -523,7 +561,10 @@ fn trusted_keys(args: &RestoreArgs) -> Result<Option<(TrustedManifestKeys, usize
         })
         .collect::<Result<Vec<_>, _>>()?;
     let count = pairs.len();
-    Ok(Some((TrustedManifestKeys::from_pairs(pairs), count)))
+    Ok(Some(TrustedKeySet {
+        keys: TrustedManifestKeys::from_pairs(pairs),
+        count,
+    }))
 }
 
 /// Refuse a target that already holds entries.

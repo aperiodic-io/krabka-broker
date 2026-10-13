@@ -12,7 +12,6 @@ use {
             admin::describe_producers_request,
             produce::{SinglePartitionProduceSetup, batch_request},
             records::{ProducerSequence, ProducerValuesSetup},
-            transactions::ProducerEpoch,
         },
     },
     assert2::{assert, check},
@@ -26,13 +25,13 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
     let p = support::start().await;
     create_topic(&p.client, "transactions").await;
     let topic_id = topic_id_for(&p.client, "transactions").await;
-    let (pid, epoch) = init_transactional_producer(&p, "describe-producers-tid").await;
+    let producer = init_transactional_producer(&p, "describe-producers-tid").await;
 
     let produce_response = p
         .client
         .send(transaction_values_request(topic_id, ProducerValuesSetup {
-            pid: krabka_ids::ProducerId(pid),
-            epoch: ProducerEpoch(epoch),
+            pid: producer.id,
+            epoch: producer.epoch,
             values: &["first"],
             ..Default::default()
         }))
@@ -43,7 +42,10 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
     check_transaction_state(
         &p.client,
         "DescribeProducers during first transaction",
-        (0, -1),
+        TransactionState {
+            current_txn_start_offset: 0,
+            coordinator_epoch: -1,
+        },
     )
     .await;
 
@@ -52,9 +54,7 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
         .send(WriteTxnMarkersRequest {
             markers: vec![
                 crate::support::transactions::transaction_marker()
-                    .producer(crate::support::transactions::ProducerIdentity::from_wire((
-                        pid, epoch,
-                    )))
+                    .producer(producer)
                     .coordinator_epoch(17)
                     .transaction_version(1)
                     .topics(vec![crate::support::transactions::marker_topic(
@@ -69,13 +69,21 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
         .expect("WriteTxnMarkers");
     assert!(marker.markers[0].topics[0].partitions[0].error_code == 0);
 
-    check_transaction_state(&p.client, "DescribeProducers after marker", (-1, 17)).await;
+    check_transaction_state(
+        &p.client,
+        "DescribeProducers after marker",
+        TransactionState {
+            current_txn_start_offset: -1,
+            coordinator_epoch: 17,
+        },
+    )
+    .await;
 
     let produce_response = p
         .client
         .send(transaction_values_request(topic_id, ProducerValuesSetup {
-            pid: krabka_ids::ProducerId(pid),
-            epoch: ProducerEpoch(epoch),
+            pid: producer.id,
+            epoch: producer.epoch,
             base_seq: ProducerSequence(1),
             values: &["second"],
         }))
@@ -86,25 +94,34 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
     check_transaction_state(
         &p.client,
         "DescribeProducers during second transaction",
-        (2, 17),
+        TransactionState {
+            current_txn_start_offset: 2,
+            coordinator_epoch: 17,
+        },
     )
     .await;
 
     p.broker.shutdown().await;
 }
 
+/// The transaction fields one active producer reports.
+struct TransactionState {
+    current_txn_start_offset: i64,
+    coordinator_epoch: i32,
+}
+
 async fn check_transaction_state(
     client: &krabka_client_core::Client,
     context: &str,
-    expected: (i64, i32),
+    expected: TransactionState,
 ) {
     let describe = client
         .send(describe_producers_request("transactions".into(), vec![0]))
         .await
         .expect(context);
     let producer_row = &describe.topics[0].partitions[0].active_producers[0];
-    check!(producer_row.current_txn_start_offset == expected.0);
-    check!(producer_row.coordinator_epoch == expected.1);
+    check!(producer_row.current_txn_start_offset == expected.current_txn_start_offset);
+    check!(producer_row.coordinator_epoch == expected.coordinator_epoch);
 }
 
 fn transaction_values_request(

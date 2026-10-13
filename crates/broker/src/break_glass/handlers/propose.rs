@@ -159,8 +159,7 @@ async fn propose(
         .await
         .map_err(|error| {
             tracing::warn!(error = %error, "ProposeBreakGlass: submit_change failed");
-            let (code, message) = submit_error(&error);
-            Refusal::new(code, message)
+            submit_error(&error)
         })?;
     Ok(proposal)
 }

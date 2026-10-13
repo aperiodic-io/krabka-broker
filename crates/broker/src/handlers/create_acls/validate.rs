@@ -137,7 +137,19 @@ fn permission_type_name(code: i8) -> &'static str {
     }
 }
 
-fn invalid(message: String) -> (i16, String) { (codes::INVALID_REQUEST, message) }
+/// A binding that `CreateAcls` refuses: Kafka's error code and message.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct AclRefusal {
+    pub(super) code: i16,
+    pub(super) message: String,
+}
+
+fn invalid(message: String) -> AclRefusal {
+    AclRefusal {
+        code: codes::INVALID_REQUEST,
+        message,
+    }
+}
 
 /// What `CreateAcls` checks about the host of a binding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,7 +164,7 @@ pub(super) enum HostCheck {
     Trunk { cidr_hosts_supported: bool },
 }
 
-pub(super) fn validate(c: &AclCreation, host_check: HostCheck) -> Result<AclEntry, (i16, String)> {
+pub(super) fn validate(c: &AclCreation, host_check: HostCheck) -> Result<AclEntry, AclRefusal> {
     // `AclApis.handleCreateAcls`, before the binding reaches the controller.
     // The authorizer only ever asks about `kafka-cluster`, so a CLUSTER ACL
     // under any other name would be stored and never match.
@@ -220,7 +232,7 @@ pub(super) fn validate(c: &AclCreation, host_check: HostCheck) -> Result<AclEntr
 /// rejected. `CreateAcls` stores whatever host string is accepted as literal
 /// text -- this only rejects what Kafka would also reject, it does not
 /// normalize the text that gets stored.
-fn validate_host(host: &str, cidr_hosts_supported: bool) -> Result<(), (i16, String)> {
+fn validate_host(host: &str, cidr_hosts_supported: bool) -> Result<(), AclRefusal> {
     if host.is_empty() {
         return Err(invalid("Host pattern cannot be null or empty".to_owned()));
     }
@@ -228,10 +240,10 @@ fn validate_host(host: &str, cidr_hosts_supported: bool) -> Result<(), (i16, Str
         return Ok(());
     }
     if !cidr_hosts_supported {
-        return Err((
-            codes::UNSUPPORTED_VERSION,
-            CIDR_UNSUPPORTED_VERSION_MESSAGE.to_owned(),
-        ));
+        return Err(AclRefusal {
+            code: codes::UNSUPPORTED_VERSION,
+            message: CIDR_UNSUPPORTED_VERSION_MESSAGE.to_owned(),
+        });
     }
     Cidr::parse(host)
         .map(|_| ())
@@ -241,7 +253,7 @@ fn validate_host(host: &str, cidr_hosts_supported: bool) -> Result<(), (i16, Str
 #[cfg(test)]
 mod tests {
     use {
-        super::{HostCheck, has_filter_only_element, has_unknown_element},
+        super::{AclRefusal, HostCheck, has_filter_only_element, has_unknown_element},
         crate::{
             codes::{self, INVALID_REQUEST, UNSUPPORTED_VERSION},
             handlers::create_acls::test_support::{OPERATION_READ, creation, validate},
@@ -254,34 +266,45 @@ mod tests {
 
     #[test]
     fn validate_accepts_any_principal_type_and_the_kafka_cluster_name() {
-        type Shape = fn(&mut AclCreation);
-        let cases: [(Shape, AclEntry); 4] = [
-            (|_| {}, AclEntry {
-                resource_type: ResourceType::Topic,
-                resource_name: "topic-a".into(),
-                pattern_type: PatternType::Literal,
-                principal: "User:alice".into(),
-                host: "*".into(),
-                operation: AclOperation::Read,
-                permission_type: PermissionType::Allow,
-            }),
-            (|c| c.principal = "Group:ops".into(), AclEntry {
-                resource_type: ResourceType::Topic,
-                resource_name: "topic-a".into(),
-                pattern_type: PatternType::Literal,
-                principal: "Group:ops".into(),
-                host: "*".into(),
-                operation: AclOperation::Read,
-                permission_type: PermissionType::Allow,
-            }),
-            (
-                |c| {
+        /// A mutation of the baseline creation, and the entry `validate` builds from it.
+        struct ShapeCase {
+            shape: fn(&mut AclCreation),
+            expected: AclEntry,
+        }
+
+        let cases: [ShapeCase; 4] = [
+            ShapeCase {
+                shape: |_| {},
+                expected: AclEntry {
+                    resource_type: ResourceType::Topic,
+                    resource_name: "topic-a".into(),
+                    pattern_type: PatternType::Literal,
+                    principal: "User:alice".into(),
+                    host: "*".into(),
+                    operation: AclOperation::Read,
+                    permission_type: PermissionType::Allow,
+                },
+            },
+            ShapeCase {
+                shape: |c| c.principal = "Group:ops".into(),
+                expected: AclEntry {
+                    resource_type: ResourceType::Topic,
+                    resource_name: "topic-a".into(),
+                    pattern_type: PatternType::Literal,
+                    principal: "Group:ops".into(),
+                    host: "*".into(),
+                    operation: AclOperation::Read,
+                    permission_type: PermissionType::Allow,
+                },
+            },
+            ShapeCase {
+                shape: |c| {
                     c.resource_type = 4;
                     c.resource_name = "kafka-cluster".into();
                     c.operation = 7;
                     c.permission_type = 2;
                 },
-                AclEntry {
+                expected: AclEntry {
                     resource_type: ResourceType::Cluster,
                     resource_name: "kafka-cluster".into(),
                     pattern_type: PatternType::Literal,
@@ -290,23 +313,23 @@ mod tests {
                     operation: AclOperation::Alter,
                     permission_type: PermissionType::Deny,
                 },
-            ),
+            },
             // KIP-373: Kafka's `validateNewAcl` accepts the `USER` resource
             // type and the `CREATE_TOKENS` operation like any other.
-            (
-                |c| {
+            ShapeCase {
+                shape: |c| {
                     c.resource_type = 7;
                     c.resource_name = "User:bob".into();
                     c.operation = 13;
                 },
-                allow_acl()
+                expected: allow_acl()
                     .resource_type(ResourceType::User)
                     .resource_name("User:bob")
                     .operation(AclOperation::CreateTokens)
                     .call(),
-            ),
+            },
         ];
-        for (shape, expected) in cases {
+        for ShapeCase { shape, expected } in cases {
             let mut c = creation("topic-a", "User:alice", OPERATION_READ);
             shape(&mut c);
             assert!(validate(&c) == Ok(expected));
@@ -317,42 +340,66 @@ mod tests {
     /// `AclApis.handleCreateAcls` and `AclControlManager.validateNewAcl`.
     #[test]
     fn validate_refuses_with_kafka_messages() {
-        type Corrupt = fn(&mut AclCreation);
-        let cases: [(Corrupt, &str); 9] = [
-            (
-                |c| {
+        /// A corruption of the baseline creation, and the message `validate` refuses it with.
+        struct CorruptCase {
+            corrupt: fn(&mut AclCreation),
+            want: &'static str,
+        }
+
+        let cases: [CorruptCase; 9] = [
+            CorruptCase {
+                corrupt: |c| {
                     c.resource_type = 4;
                     c.resource_name = "my-cluster".into();
                 },
-                "The only valid name for the CLUSTER resource is kafka-cluster",
-            ),
-            (
-                |c| {
+                want: "The only valid name for the CLUSTER resource is kafka-cluster",
+            },
+            CorruptCase {
+                corrupt: |c| {
                     c.resource_type = 4;
                     c.resource_name.clear();
                 },
-                "The only valid name for the CLUSTER resource is kafka-cluster",
-            ),
-            (|c| c.resource_name.clear(), "Invalid empty resource name"),
-            (|c| c.resource_type = 99, "Invalid resourceType UNKNOWN"),
-            (
-                |c| c.resource_pattern_type = 9,
-                "Invalid patternType UNKNOWN",
-            ),
-            (|c| c.operation = 42, "Invalid operation UNKNOWN"),
-            (|c| c.permission_type = 5, "Invalid permissionType UNKNOWN"),
-            (
-                |c| c.principal = "alice".into(),
-                "Could not parse principal from `alice` (no colon is present separating the \
+                want: "The only valid name for the CLUSTER resource is kafka-cluster",
+            },
+            CorruptCase {
+                corrupt: |c| c.resource_name.clear(),
+                want: "Invalid empty resource name",
+            },
+            CorruptCase {
+                corrupt: |c| c.resource_type = 99,
+                want: "Invalid resourceType UNKNOWN",
+            },
+            CorruptCase {
+                corrupt: |c| c.resource_pattern_type = 9,
+                want: "Invalid patternType UNKNOWN",
+            },
+            CorruptCase {
+                corrupt: |c| c.operation = 42,
+                want: "Invalid operation UNKNOWN",
+            },
+            CorruptCase {
+                corrupt: |c| c.permission_type = 5,
+                want: "Invalid permissionType UNKNOWN",
+            },
+            CorruptCase {
+                corrupt: |c| c.principal = "alice".into(),
+                want: "Could not parse principal from `alice` (no colon is present separating the \
                  principal type from the principal name)",
-            ),
-            (|c| c.host.clear(), "Host pattern cannot be null or empty"),
+            },
+            CorruptCase {
+                corrupt: |c| c.host.clear(),
+                want: "Host pattern cannot be null or empty",
+            },
         ];
-        for (corrupt, want) in cases {
+        for CorruptCase { corrupt, want } in cases {
             let mut c = creation("topic-a", "User:alice", OPERATION_READ);
             corrupt(&mut c);
             assert!(
-                validate(&c) == Err((codes::INVALID_REQUEST, want.to_owned())),
+                validate(&c)
+                    == Err(AclRefusal {
+                        code: codes::INVALID_REQUEST,
+                        message: want.to_owned()
+                    }),
                 "expected {want:?}"
             );
         }
@@ -367,21 +414,72 @@ mod tests {
 
     #[test]
     fn whole_request_element_checks_match_kafka_parse_and_binding_construction() {
-        type Shape = fn(&mut AclCreation);
-        // (shape, has an UNKNOWN element, has a filter-only element)
-        let cases: [(Shape, bool, bool); 10] = [
-            (|_| {}, false, false),
-            (|c| c.resource_type = 0, true, false),
-            (|c| c.resource_pattern_type = 0, true, false),
-            (|c| c.operation = 0, true, false),
-            (|c| c.permission_type = 0, true, false),
-            (|c| c.resource_type = 1, false, true),
-            (|c| c.resource_pattern_type = 1, false, true),
-            (|c| c.resource_pattern_type = 2, false, true),
-            (|c| c.operation = 1, false, true),
-            (|c| c.permission_type = 1, false, true),
+        /// A mutation of the baseline creation, whether it makes an UNKNOWN element, and
+        /// whether it makes a filter-only element.
+        struct ElementCase {
+            shape: fn(&mut AclCreation),
+            unknown: bool,
+            filter_only: bool,
+        }
+
+        let cases: [ElementCase; 10] = [
+            ElementCase {
+                shape: |_| {},
+                unknown: false,
+                filter_only: false,
+            },
+            ElementCase {
+                shape: |c| c.resource_type = 0,
+                unknown: true,
+                filter_only: false,
+            },
+            ElementCase {
+                shape: |c| c.resource_pattern_type = 0,
+                unknown: true,
+                filter_only: false,
+            },
+            ElementCase {
+                shape: |c| c.operation = 0,
+                unknown: true,
+                filter_only: false,
+            },
+            ElementCase {
+                shape: |c| c.permission_type = 0,
+                unknown: true,
+                filter_only: false,
+            },
+            ElementCase {
+                shape: |c| c.resource_type = 1,
+                unknown: false,
+                filter_only: true,
+            },
+            ElementCase {
+                shape: |c| c.resource_pattern_type = 1,
+                unknown: false,
+                filter_only: true,
+            },
+            ElementCase {
+                shape: |c| c.resource_pattern_type = 2,
+                unknown: false,
+                filter_only: true,
+            },
+            ElementCase {
+                shape: |c| c.operation = 1,
+                unknown: false,
+                filter_only: true,
+            },
+            ElementCase {
+                shape: |c| c.permission_type = 1,
+                unknown: false,
+                filter_only: true,
+            },
         ];
-        for (shape, unknown, filter_only) in cases {
+        for ElementCase {
+            shape,
+            unknown,
+            filter_only,
+        } in cases
+        {
             let valid = creation("topic-a", "User:alice", OPERATION_READ);
             let mut c = valid.clone();
             shape(&mut c);
@@ -402,49 +500,99 @@ mod tests {
     /// rejected regardless of the gate.
     #[test]
     fn validate_host_matches_kafka_cidr_gating() {
-        type Case = (&'static str, bool, Option<(i16, &'static str)>);
-        let cases: &[Case] = &[
-            ("*", false, None),
-            ("*", true, None),
-            ("10.0.0.1", false, None),
-            ("10.0.0.1", true, None),
-            ("10.0.0.0/8", true, None),
-            (
-                "10.0.0.0/8",
-                false,
-                Some((
-                    UNSUPPORTED_VERSION,
-                    "CIDR-based ACL host patterns require metadata version 4.4-IV1 or higher.",
-                )),
-            ),
-            (
-                "10.0.0.0/33",
-                true,
-                Some((
-                    INVALID_REQUEST,
-                    "Invalid CIDR notation '10.0.0.0/33': Value [33] not in range [0,32]",
-                )),
-            ),
-            ("2001:db8::/32", true, None),
-            (
-                "",
-                true,
-                Some((INVALID_REQUEST, "Host pattern cannot be null or empty")),
-            ),
-            (
-                "",
-                false,
-                Some((INVALID_REQUEST, "Host pattern cannot be null or empty")),
-            ),
+        /// The refusal expected for a host: Kafka's code and message.
+        struct HostRefusal {
+            code: i16,
+            message: &'static str,
+        }
+
+        /// A host, whether CIDR hosts are supported, and the refusal expected, if any.
+        struct HostCase {
+            host: &'static str,
+            cidr_hosts_supported: bool,
+            expected_err: Option<HostRefusal>,
+        }
+
+        let cases: &[HostCase] = &[
+            HostCase {
+                host: "*",
+                cidr_hosts_supported: false,
+                expected_err: None,
+            },
+            HostCase {
+                host: "*",
+                cidr_hosts_supported: true,
+                expected_err: None,
+            },
+            HostCase {
+                host: "10.0.0.1",
+                cidr_hosts_supported: false,
+                expected_err: None,
+            },
+            HostCase {
+                host: "10.0.0.1",
+                cidr_hosts_supported: true,
+                expected_err: None,
+            },
+            HostCase {
+                host: "10.0.0.0/8",
+                cidr_hosts_supported: true,
+                expected_err: None,
+            },
+            HostCase {
+                host: "10.0.0.0/8",
+                cidr_hosts_supported: false,
+                expected_err: Some(HostRefusal {
+                    code: UNSUPPORTED_VERSION,
+                    message: "CIDR-based ACL host patterns require metadata version 4.4-IV1 or higher.",
+                }),
+            },
+            HostCase {
+                host: "10.0.0.0/33",
+                cidr_hosts_supported: true,
+                expected_err: Some(HostRefusal {
+                    code: INVALID_REQUEST,
+                    message: "Invalid CIDR notation '10.0.0.0/33': Value [33] not in range [0,32]",
+                }),
+            },
+            HostCase {
+                host: "2001:db8::/32",
+                cidr_hosts_supported: true,
+                expected_err: None,
+            },
+            HostCase {
+                host: "",
+                cidr_hosts_supported: true,
+                expected_err: Some(HostRefusal {
+                    code: INVALID_REQUEST,
+                    message: "Host pattern cannot be null or empty",
+                }),
+            },
+            HostCase {
+                host: "",
+                cidr_hosts_supported: false,
+                expected_err: Some(HostRefusal {
+                    code: INVALID_REQUEST,
+                    message: "Host pattern cannot be null or empty",
+                }),
+            },
         ];
-        for (host, cidr_hosts_supported, expected_err) in cases {
+        for HostCase {
+            host,
+            cidr_hosts_supported,
+            expected_err,
+        } in cases
+        {
             let mut c = creation("topic-a", "User:alice", OPERATION_READ);
             c.host = (*host).into();
             let got = super::validate(&c, HostCheck::Trunk {
                 cidr_hosts_supported: *cidr_hosts_supported,
             })
             .err();
-            let expected = expected_err.map(|(code, msg)| (code, msg.to_owned()));
+            let expected = expected_err.as_ref().map(|refusal| AclRefusal {
+                code: refusal.code,
+                message: refusal.message.to_owned(),
+            });
             assert!(
                 got == expected,
                 "host {host:?} cidr_hosts_supported {cidr_hosts_supported}"

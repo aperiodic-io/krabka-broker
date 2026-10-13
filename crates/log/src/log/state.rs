@@ -502,7 +502,7 @@ mod tests {
         super::*,
         crate::{
             log::test_support::{
-                append_samples, append_transaction, rolled_sample_log, sample_batch,
+                TempLog, append_samples, append_transaction, rolled_sample_log, sample_batch,
                 sample_batch_with_epoch, test_log, tiny_segments,
             },
             test_support::open_log,
@@ -521,7 +521,7 @@ mod tests {
     /// short of the base would expose an offset the log does not have.
     #[test]
     fn a_reset_puts_the_stable_offset_at_the_new_base() {
-        let (_dir, mut log) = test_log();
+        let TempLog { dir: _dir, mut log } = test_log();
         append_samples(&mut log, 3, 2);
         check!(log.log_end_offset() == Offset(6));
 
@@ -541,7 +541,7 @@ mod tests {
     /// Zero is a legal log start; only a negative one is rejected.
     #[test]
     fn the_log_start_may_be_set_to_zero_but_not_below() {
-        let (_dir, mut log) = test_log();
+        let TempLog { dir: _dir, mut log } = test_log();
         check!(
             log.set_log_start_offset(Offset(0)).is_ok(),
             "zero is a real offset"
@@ -567,8 +567,8 @@ mod tests {
             ("the start reaches the marker", 1, false),
             ("the start passes the marker", 2, true),
         ] {
-            let (_dir, mut log) = test_log();
-            append_transaction(&mut log, (42, 0), &["a"]);
+            let TempLog { dir: _dir, mut log } = test_log();
+            append_transaction(&mut log, 42, 0, &["a"]);
             log.append(&mut commit_marker(42, 0)).unwrap();
             log.append(&mut sample_batch(3)).unwrap();
             check!(log.lso() == Offset(0), "{name}: held before the move");
@@ -592,7 +592,7 @@ mod tests {
     fn raising_the_log_start_truncates_the_epoch_cache_from_the_start() {
         use crate::leader_epoch_checkpoint::EpochEntry;
 
-        let (dir, mut log) = test_log();
+        let TempLog { dir, mut log } = test_log();
         log.append(&mut sample_batch_with_epoch(3, 1)).unwrap(); // epoch 1 @ 0
         log.append(&mut sample_batch_with_epoch(3, 2)).unwrap(); // epoch 2 @ 3
         log.append(&mut sample_batch_with_epoch(3, 4)).unwrap(); // epoch 4 @ 6
@@ -693,13 +693,13 @@ mod tests {
         // The broker's KIP-113 move machinery reads this back to
         // determine a partition's current owning `log.dir` without
         // re-implementing the directory-layout convention.
-        let (dir, log) = test_log();
+        let TempLog { dir, log } = test_log();
         assert2::assert!(log.dir() == dir.path());
     }
 
     #[test]
     fn reset_to_clears_leader_epoch_checkpoint() {
-        let (dir, mut log) = test_log();
+        let TempLog { dir, mut log } = test_log();
         // A follower that replicated real data builds an epoch history.
         log.append(&mut sample_batch_with_epoch(3, 1)).unwrap(); // epoch 1 @ 0
         log.append(&mut sample_batch_with_epoch(2, 2)).unwrap(); // epoch 2 @ 3
@@ -728,7 +728,7 @@ mod tests {
         // Guards against the subtly-wrong fix `truncate_from_end(new_base)`,
         // which retains an entry whose `start_offset < new_base` even though
         // the reset log holds no records below `new_base`.
-        let (_dir, mut log) = test_log();
+        let TempLog { dir: _dir, mut log } = test_log();
         log.append(&mut sample_batch_with_epoch(3, 1)).unwrap(); // epoch 1 @ 0
         assert2::assert!(log.epoch_checkpoint().latest_epoch() == Some(LeaderEpoch(1)));
         log.reset_to(Offset(1000)).unwrap(); // empty log starting at 1000
@@ -754,7 +754,7 @@ mod tests {
     fn transaction_marker_state_and_producer_state_entry() {
         use crate::log::test_support::commit_marker;
 
-        let (_dir, mut log) = test_log();
+        let TempLog { dir: _dir, mut log } = test_log();
         let pid = ProducerId(42);
         assert2::assert!(log.transaction_marker_state(pid) == (-1, -1, false));
         assert2::assert!(log.producer_state_entry(pid).is_none());

@@ -9,8 +9,8 @@ use {
     crate::{
         config_keys::{UNCLEAN_LEADER_ELECTION_ENABLE, UNCLEAN_RECOVERY_STRATEGY},
         leader_election::test_support::{
-            expected_clean_election, expected_partition, img_with_partition, liveness_with_alive,
-            one_partition_change,
+            TopicConfigOverride, expected_clean_election, expected_partition, img_with_partition,
+            liveness_with_alive, one_partition_change,
         },
         metrics::BrokerMetrics,
     },
@@ -28,7 +28,17 @@ struct OfflinePartitionSetup<'a> {
     isr: &'a [NodeId],
     #[default(Some(ReplicaSlot(0)))]
     failed_replica: Option<ReplicaSlot>,
-    configs: &'a [(&'a str, &'a str)],
+    configs: &'a [TopicConfigOverride<'a>],
+}
+
+/// An image with one partition on a failed log dir, and the two directory ids
+/// its replicas were given.
+struct OfflineImage {
+    image: MetadataImage,
+    /// The directory the failed replica sits on.
+    bad: uuid::Uuid,
+    /// The directory every other replica sits on.
+    good: uuid::Uuid,
 }
 
 #[bon::builder]
@@ -36,8 +46,8 @@ fn offline_image(
     #[builder(into, default = NodeId (1))] leader: NodeId,
     #[builder(default = & [NodeId (1) , NodeId (2)])] isr: &'_ [NodeId],
     #[builder(required)] failed_replica: Option<usize>,
-    #[builder(default)] configs: &'_ [(&'_ str, &'_ str)],
-) -> (MetadataImage, uuid::Uuid, uuid::Uuid) {
+    #[builder(default)] configs: &'_ [TopicConfigOverride<'_>],
+) -> OfflineImage {
     let setup = OfflinePartitionSetup {
         leader,
         isr,
@@ -56,8 +66,8 @@ fn offline_image(
     if let Some(index) = failed_replica {
         directories[index.0] = bad;
     }
-    (
-        img_with_partition()
+    OfflineImage {
+        image: img_with_partition()
             .leader(leader)
             .isr(isr)
             .dirs(&directories)
@@ -65,15 +75,17 @@ fn offline_image(
             .call(),
         bad,
         good,
-    )
+    }
 }
 
-fn unclean_election_image() -> (MetadataImage, uuid::Uuid, uuid::Uuid) {
-    let (img, bad, good) = offline_image()
+fn unclean_election_image() -> OfflineImage {
+    offline_image()
         .failed_replica(Some(0))
-        .configs(&[(UNCLEAN_LEADER_ELECTION_ENABLE, "true")])
-        .call();
-    (img, bad, good)
+        .configs(&[TopicConfigOverride::new(
+            UNCLEAN_LEADER_ELECTION_ENABLE,
+            "true",
+        )])
+        .call()
 }
 
 async fn scan_offline_dir(
@@ -84,7 +96,13 @@ async fn scan_offline_dir(
 ) -> FailoverPlan {
     scan_offline_dir_with_metrics(image, broker, bad, alive)
         .await
-        .0
+        .plan
+}
+
+/// What an offline-dir scan produced, and the metrics it counted into.
+struct ScanOutcome {
+    plan: FailoverPlan,
+    metrics: BrokerMetrics,
 }
 
 async fn scan_offline_dir_with_metrics(
@@ -92,7 +110,7 @@ async fn scan_offline_dir_with_metrics(
     broker: u64,
     bad: uuid::Uuid,
     alive: &[u64],
-) -> (FailoverPlan, BrokerMetrics) {
+) -> ScanOutcome {
     let liveness = liveness_with_alive(alive).await;
     let metrics = BrokerMetrics::new();
     let plan = compute_offline_dir_failover_changes(
@@ -103,12 +121,16 @@ async fn scan_offline_dir_with_metrics(
         &metrics,
     )
     .await;
-    (plan, metrics)
+    ScanOutcome { plan, metrics }
 }
 
 #[tokio::test]
 async fn offline_dir_elects_alive_isr_member_when_leader_dir_failed() {
-    let (img, bad, good) = offline_image()
+    let OfflineImage {
+        image: img,
+        bad,
+        good,
+    } = offline_image()
         .isr(&[NodeId(1), NodeId(2), NodeId(3)])
         .failed_replica(Some(0))
         .call();
@@ -125,7 +147,9 @@ async fn offline_dir_elects_alive_isr_member_when_leader_dir_failed() {
 }
 
 async fn assert_offline_dir_no_changes(setup: OfflinePartitionSetup<'_>) {
-    let (img, bad, _good) = offline_image()
+    let OfflineImage {
+        image: img, bad, ..
+    } = offline_image()
         .leader(setup.leader.0)
         .isr(setup.isr)
         .failed_replica(setup.failed_replica.map(|slot| slot.0))
@@ -147,7 +171,11 @@ async fn offline_dir_leaves_healthy_dir_partition_untouched() {
 
 #[tokio::test]
 async fn offline_dir_shrinks_isr_for_non_leader_replica() {
-    let (img, bad, good) = offline_image()
+    let OfflineImage {
+        image: img,
+        bad,
+        good,
+    } = offline_image()
         .isr(&[NodeId(1), NodeId(2), NodeId(3)])
         .failed_replica(Some(1))
         .call();
@@ -182,9 +210,11 @@ async fn offline_dir_empty_isr_defers_offset_aware_strategies_to_urm() {
         ("Balanced", RecoveryStrategy::Balanced),
         ("Aggressive", RecoveryStrategy::Aggressive),
     ] {
-        let (img, bad, _good) = offline_image()
+        let OfflineImage {
+            image: img, bad, ..
+        } = offline_image()
             .failed_replica(Some(0))
-            .configs(&[(UNCLEAN_RECOVERY_STRATEGY, name)])
+            .configs(&[TopicConfigOverride::new(UNCLEAN_RECOVERY_STRATEGY, name)])
             .call();
         // Only node 3 is alive, and it is outside the ISR.
         let plan = scan_offline_dir(&img, 1, bad, &[3]).await;
@@ -203,8 +233,12 @@ async fn offline_dir_empty_isr_unclean_enabled_elects_out_of_isr_replica() {
     // broker 3 is alive and out-of-ISR.
     // unclean.leader.election.enable=true → elect broker 3, singleton ISR,
     // bump unclean_leader_elections_total.
-    let (img, bad, good) = unclean_election_image();
-    let (plan, metrics) = scan_offline_dir_with_metrics(&img, 1, bad, &[3]).await;
+    let OfflineImage {
+        image: img,
+        bad,
+        good,
+    } = unclean_election_image();
+    let ScanOutcome { plan, metrics } = scan_offline_dir_with_metrics(&img, 1, bad, &[3]).await;
     assert!(plan.recoveries.is_empty());
     let pr = one_partition_change(&plan.changes);
     // Must elect broker 3 (only alive out-of-ISR) with a singleton
@@ -224,7 +258,9 @@ async fn offline_dir_empty_isr_unclean_enabled_elects_out_of_isr_replica() {
 async fn offline_dir_empty_isr_no_unclean_leaves_partition_unavailable() {
     // Broker 1 is leader on bad dir, broker 2 dead, broker 3 alive but
     // not in ISR.  No recovery strategy, no unclean flag → no change.
-    let (img, bad, _good) = offline_image().failed_replica(Some(0)).call();
+    let OfflineImage {
+        image: img, bad, ..
+    } = offline_image().failed_replica(Some(0)).call();
     // only 3 alive, but not in ISR
     let plan = scan_offline_dir(&img, 1, bad, &[3]).await;
     assert!(
@@ -239,8 +275,10 @@ async fn offline_dir_empty_isr_no_unclean_leaves_partition_unavailable() {
 async fn offline_dir_empty_isr_unclean_enabled_no_alive_replica_stays_unavailable() {
     // Broker 1 is leader on bad dir, ALL brokers are dead.
     // unclean enabled but no alive replica → no change.
-    let (img, bad, _good) = unclean_election_image();
-    let (plan, metrics) = scan_offline_dir_with_metrics(&img, 1, bad, &[]).await;
+    let OfflineImage {
+        image: img, bad, ..
+    } = unclean_election_image();
+    let ScanOutcome { plan, metrics } = scan_offline_dir_with_metrics(&img, 1, bad, &[]).await;
     check!(
         plan.changes.is_empty(),
         "no alive replica → no election; got {:?}",

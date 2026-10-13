@@ -128,7 +128,9 @@ async fn request_json(
 mod tests {
     use {
         super::*,
-        crate::test_support::{ecdsa_pair_for_host, serve_loopback_tls},
+        crate::test_support::{
+            EcdsaPair, LoopbackTlsServer, ecdsa_pair_for_host, serve_loopback_tls,
+        },
         assert2::assert,
         krabka_units::{millis, secs},
         std::{net::SocketAddr, sync::Mutex},
@@ -164,17 +166,20 @@ mod tests {
         userinfo_body: Option<&'static str>,
     }
 
+    /// A running HTTPS server, its trust bundle and the requests it saw.
+    struct HttpsServer {
+        addr: SocketAddr,
+        shutdown: CancellationToken,
+        ca_path: std::path::PathBuf,
+        observed: Arc<ObservedRequests>,
+    }
+
     #[bon::builder]
     async fn serve_https(
         #[builder(default = "{}")] introspect_body: &'static str,
         #[builder(into, default = HttpStatusCode (200))] introspect_status: HttpStatusCode,
         userinfo_body: Option<&'static str>,
-    ) -> (
-        SocketAddr,
-        CancellationToken,
-        std::path::PathBuf,
-        Arc<ObservedRequests>,
-    ) {
+    ) -> HttpsServer {
         let setup = HttpsResponseSetup {
             introspect_body,
             introspect_status,
@@ -188,7 +193,11 @@ mod tests {
         let introspect_status = introspect_status.0;
         let observed = Arc::new(ObservedRequests::default());
         let observed_in_task = observed.clone();
-        let (addr, shutdown, cert_path) = serve_loopback_tls(move |mut tls| {
+        let LoopbackTlsServer {
+            addr,
+            shutdown,
+            cert_path,
+        } = serve_loopback_tls(move |mut tls| {
             let observed = observed_in_task.clone();
             async move {
                             let mut buf = vec![0u8; 8192];
@@ -251,7 +260,12 @@ mod tests {
             }
         }).await;
 
-        (addr, shutdown, cert_path, observed)
+        HttpsServer {
+            addr,
+            shutdown,
+            ca_path: cert_path,
+            observed,
+        }
     }
 
     /// A trusted HTTPS introspection client without a user-info endpoint.
@@ -295,45 +309,58 @@ mod tests {
     }
 
     /// A server and trusted client, retaining the request observations and shutdown handle.
+    /// A trusted client of a running server, with the server's shutdown handle
+    /// and request observations.
+    struct HttpsFixture {
+        client: Arc<dyn IntrospectionClient>,
+        shutdown: CancellationToken,
+        observed: Arc<ObservedRequests>,
+    }
+
     #[bon::builder]
     async fn https_fixture(
         #[builder(default = "{}")] introspect_body: &'static str,
         #[builder(into, default = HttpStatusCode (200))] introspect_status: HttpStatusCode,
         userinfo_body: Option<&'static str>,
         client: HttpsClientSetup<'_>,
-    ) -> (
-        Arc<dyn IntrospectionClient>,
-        CancellationToken,
-        Arc<ObservedRequests>,
-    ) {
+    ) -> HttpsFixture {
         let response = HttpsResponseSetup {
             introspect_body,
             introspect_status,
             userinfo_body,
         };
-        let (addr, shutdown, ca, observed) = serve_https()
+        let HttpsServer {
+            addr,
+            shutdown,
+            ca_path,
+            observed,
+        } = serve_https()
             .introspect_body(response.introspect_body)
             .introspect_status(response.introspect_status)
             .maybe_userinfo_body(response.userinfo_body)
             .call()
             .await;
-        (
-            https_client()
+        HttpsFixture {
+            client: https_client()
                 .addr(addr)
-                .ca(&ca)
+                .ca(&ca_path)
                 .client_id(client.client_id)
                 .secret(client.secret)
                 .timeout(client.timeout)
                 .call(),
             shutdown,
             observed,
-        )
+        }
     }
 
     #[tokio::test]
     async fn introspection_fetches_active_token_over_https_with_custom_trust() {
         let body = r#"{"active":true,"sub":"alice"}"#;
-        let (client, srv_shutdown, _observed) = https_fixture()
+        let HttpsFixture {
+            client,
+            shutdown: srv_shutdown,
+            observed: _observed,
+        } = https_fixture()
             .introspect_body(body)
             .client(HttpsClientSetup {
                 client_id: "kafka-broker",
@@ -350,7 +377,11 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_returns_inactive_when_idp_says_inactive() {
-        let (client, srv_shutdown, _) = https_fixture()
+        let HttpsFixture {
+            client,
+            shutdown: srv_shutdown,
+            ..
+        } = https_fixture()
             .introspect_body(r#"{"active":false}"#)
             .client(HttpsClientSetup::default())
             .call()
@@ -362,7 +393,11 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_returns_transport_error_on_non_2xx() {
-        let (client, srv_shutdown, _) = https_fixture()
+        let HttpsFixture {
+            client,
+            shutdown: srv_shutdown,
+            ..
+        } = https_fixture()
             .introspect_body(r#"{"error":"x"}"#)
             .introspect_status(500)
             .client(HttpsClientSetup::default())
@@ -378,7 +413,12 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_userinfo_endpoint_is_called_after_active_introspection() {
-        let (addr, srv_shutdown, ca, observed) = serve_https()
+        let HttpsServer {
+            addr,
+            shutdown: srv_shutdown,
+            ca_path: ca,
+            observed,
+        } = serve_https()
             .introspect_body(r#"{"active":true,"sub":"alice"}"#)
             .maybe_userinfo_body(Some(r#"{"preferred_username":"alice","email":"a@b.c"}"#))
             .call()
@@ -401,7 +441,11 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_userinfo_endpoint_is_not_called_when_endpoint_unset() {
-        let (client, srv_shutdown, _) = https_fixture()
+        let HttpsFixture {
+            client,
+            shutdown: srv_shutdown,
+            ..
+        } = https_fixture()
             .introspect_body(r#"{"active":true,"sub":"a"}"#)
             .client(HttpsClientSetup::default())
             .call()
@@ -414,7 +458,11 @@ mod tests {
     #[tokio::test]
     async fn introspection_handles_keycloak_response_shape() {
         let body = r#"{"active":true,"sub":"svc-account-kafka-client","client_id":"kafka-client","scope":"kafka.write profile","exp":9999999999}"#;
-        let (client, srv_shutdown, _) = https_fixture()
+        let HttpsFixture {
+            client,
+            shutdown: srv_shutdown,
+            ..
+        } = https_fixture()
             .introspect_body(body)
             .client(HttpsClientSetup::default())
             .call()
@@ -427,7 +475,11 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_basic_auth_sent_with_configured_client_id_and_secret() {
-        let (client, srv_shutdown, observed) = https_fixture()
+        let HttpsFixture {
+            client,
+            shutdown: srv_shutdown,
+            observed,
+        } = https_fixture()
             .introspect_body(r#"{"active":true,"sub":"a"}"#)
             .client(HttpsClientSetup {
                 client_id: "kafka-broker",
@@ -446,7 +498,11 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_form_body_token_field() {
-        let (client, srv_shutdown, observed) = https_fixture()
+        let HttpsFixture {
+            client,
+            shutdown: srv_shutdown,
+            observed,
+        } = https_fixture()
             .introspect_body(r#"{"active":true,"sub":"a"}"#)
             .client(HttpsClientSetup::default())
             .call()
@@ -466,7 +522,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let (cert, _key) = ecdsa_pair_for_host("127.0.0.1");
+        let EcdsaPair { cert, .. } = ecdsa_pair_for_host("127.0.0.1");
         let ca_path = dir.path().join("ca.pem");
         std::fs::write(&ca_path, cert.pem()).unwrap();
         drop(listener);

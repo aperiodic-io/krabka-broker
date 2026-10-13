@@ -39,9 +39,15 @@ use {
     support::topic_id_for,
 };
 
+/// A batch of large records, and the values it carries.
+struct LargeRecords {
+    batch: RecordBatch,
+    expected: Vec<Bytes>,
+}
+
 /// Build `n` records whose values are distinct, large, and content-addressed
 /// by index. Any misplaced byte is then detectable.
-fn large_records(n: i32, value_len: usize) -> (RecordBatch, Vec<Bytes>) {
+fn large_records(n: i32, value_len: usize) -> LargeRecords {
     let mut batch = RecordBatch {
         last_offset_delta: (n - 1).max(0),
         ..RecordBatch::default()
@@ -64,7 +70,7 @@ fn large_records(n: i32, value_len: usize) -> (RecordBatch, Vec<Bytes>) {
             ..value_record(i, Some(value))
         });
     }
-    (batch, expected)
+    LargeRecords { batch, expected }
 }
 
 /// The path this target must drain a large plaintext fetch on.
@@ -118,7 +124,7 @@ async fn large_message_fetch_round_trips_byte_exact() {
 
     // 64 records × 2 KiB ≈ 128 KiB of records — far over `sendfile_min`, so
     // the Linux plaintext fetch goes zero-copy.
-    let (batch, expected) = large_records(64, 2 * 1024);
+    let LargeRecords { batch, expected } = large_records(64, 2 * 1024);
 
     let prod = send_batch(&p.client, batch, SinglePartitionProduceSetup {
         topic: ("big").into(),

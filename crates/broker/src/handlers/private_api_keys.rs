@@ -56,27 +56,76 @@ pub(crate) const DESCRIBE_BREAK_GLASS_API_KEY: ApiKeyCode = 1019;
 mod tests {
     use {super::*, assert2::assert};
 
+    /// A krabka-private api key, the name a failure reports, and the key it
+    /// must have.
+    struct PrivateApiKey {
+        name: &'static str,
+        api_key: ApiKeyCode,
+        want: ApiKeyCode,
+    }
+
     /// Every krabka-private api key, with the name a failure reports.
-    const KRABKA_PRIVATE_API_KEYS: [(&str, ApiKeyCode, ApiKeyCode); 10] = [
-        ("AlterBarrierGroups", ALTER_BARRIER_GROUPS_API_KEY, 1010),
-        (
-            "DescribeBarrierGroups",
-            DESCRIBE_BARRIER_GROUPS_API_KEY,
-            1011,
-        ),
-        ("TriggerBarrier", TRIGGER_BARRIER_API_KEY, 1012),
-        ("ListBarrierCuts", LIST_BARRIER_CUTS_API_KEY, 1013),
-        ("WriteBarrierMarkers", WRITE_BARRIER_MARKERS_API_KEY, 1014),
-        ("SetTopicFreeze", SET_TOPIC_FREEZE_API_KEY, 1015),
-        ("DescribeTopicFreezes", DESCRIBE_TOPIC_FREEZES_API_KEY, 1016),
-        ("ProposeBreakGlass", PROPOSE_BREAK_GLASS_API_KEY, 1017),
-        ("ApproveBreakGlass", APPROVE_BREAK_GLASS_API_KEY, 1018),
-        ("DescribeBreakGlass", DESCRIBE_BREAK_GLASS_API_KEY, 1019),
+    const KRABKA_PRIVATE_API_KEYS: [PrivateApiKey; 10] = [
+        PrivateApiKey {
+            name: "AlterBarrierGroups",
+            api_key: ALTER_BARRIER_GROUPS_API_KEY,
+            want: 1010,
+        },
+        PrivateApiKey {
+            name: "DescribeBarrierGroups",
+            api_key: DESCRIBE_BARRIER_GROUPS_API_KEY,
+            want: 1011,
+        },
+        PrivateApiKey {
+            name: "TriggerBarrier",
+            api_key: TRIGGER_BARRIER_API_KEY,
+            want: 1012,
+        },
+        PrivateApiKey {
+            name: "ListBarrierCuts",
+            api_key: LIST_BARRIER_CUTS_API_KEY,
+            want: 1013,
+        },
+        PrivateApiKey {
+            name: "WriteBarrierMarkers",
+            api_key: WRITE_BARRIER_MARKERS_API_KEY,
+            want: 1014,
+        },
+        PrivateApiKey {
+            name: "SetTopicFreeze",
+            api_key: SET_TOPIC_FREEZE_API_KEY,
+            want: 1015,
+        },
+        PrivateApiKey {
+            name: "DescribeTopicFreezes",
+            api_key: DESCRIBE_TOPIC_FREEZES_API_KEY,
+            want: 1016,
+        },
+        PrivateApiKey {
+            name: "ProposeBreakGlass",
+            api_key: PROPOSE_BREAK_GLASS_API_KEY,
+            want: 1017,
+        },
+        PrivateApiKey {
+            name: "ApproveBreakGlass",
+            api_key: APPROVE_BREAK_GLASS_API_KEY,
+            want: 1018,
+        },
+        PrivateApiKey {
+            name: "DescribeBreakGlass",
+            api_key: DESCRIBE_BREAK_GLASS_API_KEY,
+            want: 1019,
+        },
     ];
 
     #[test]
     fn krabka_private_api_keys_sit_in_the_private_range() {
-        for (name, api_key, want) in KRABKA_PRIVATE_API_KEYS {
+        for PrivateApiKey {
+            name,
+            api_key,
+            want,
+        } in KRABKA_PRIVATE_API_KEYS
+        {
             assert!(api_key == want, "{name}");
             assert!(api_key >= KRABKA_PRIVATE_API_KEY_FLOOR, "{name}");
         }
@@ -84,9 +133,14 @@ mod tests {
 
     #[test]
     fn krabka_private_api_keys_are_pairwise_distinct() {
-        for (index, (left_name, left, _)) in KRABKA_PRIVATE_API_KEYS.iter().enumerate() {
-            for (right_name, right, _) in &KRABKA_PRIVATE_API_KEYS[index + 1..] {
-                assert!(left != right, "{left_name} and {right_name}");
+        for (index, left) in KRABKA_PRIVATE_API_KEYS.iter().enumerate() {
+            for right in &KRABKA_PRIVATE_API_KEYS[index + 1..] {
+                assert!(
+                    left.api_key != right.api_key,
+                    "{} and {}",
+                    left.name,
+                    right.name
+                );
             }
         }
     }

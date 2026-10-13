@@ -37,8 +37,21 @@ use {
     tracing::{debug, info, warn},
 };
 
+/// An inclusive range of offsets, ordered by its start and then its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct OffsetRange {
+    /// The first offset in the range.
+    pub(crate) start: i64,
+    /// The last offset in the range.
+    pub(crate) end: i64,
+}
+
+impl OffsetRange {
+    pub(crate) const fn new(start: i64, end: i64) -> Self { Self { start, end } }
+}
+
 /// The offset through which the remote tier holds an unbroken copy of this
-/// partition, given the `(start, end)` range of every `CopySegmentFinished`
+/// partition, given the range of every `CopySegmentFinished`
 /// segment and the base offset of the replica's oldest local segment.
 /// Returns `None` when the remote tier does not reach `local_start` at all.
 ///
@@ -55,10 +68,14 @@ use {
 /// The walk stops at the first gap rather than taking the maximum end, because
 /// a copy that failed between two that succeeded leaves a hole, and the
 /// segments past it cover none of it.
-pub(crate) fn remote_covered_through(finished: &[(i64, i64)], local_start: i64) -> Option<i64> {
-    let mut ranges: Vec<(i64, i64)> = finished.to_vec();
+pub(crate) fn remote_covered_through(finished: &[OffsetRange], local_start: i64) -> Option<i64> {
+    let mut ranges = finished.to_vec();
     ranges.sort_unstable();
-    krabka_verified::retention::remote_covered_through(&ranges, local_start)
+    let bounds: Vec<_> = ranges
+        .iter()
+        .map(|range| (range.start, range.end))
+        .collect();
+    krabka_verified::retention::remote_covered_through(&bounds, local_start)
 }
 
 /// The local log as one local-retention walk reads it: the sealed segments,
@@ -293,7 +310,7 @@ pub(crate) fn local_retention_pass(
     let covered_through = match exports.first() {
         None => None,
         Some(first) => {
-            let finished: Vec<(i64, i64)> = match rlmm.list_remote_log_segments(tp) {
+            let finished: Vec<OffsetRange> = match rlmm.list_remote_log_segments(tp) {
                 Ok(list) => finished_segment_ranges(&list),
                 Err(e) => {
                     warn!(topic = %tp.topic, partition = tp.partition, error = %e,
@@ -365,10 +382,10 @@ mod tests;
 /// Offset ranges whose remote metadata has reached the copy-finished state.
 pub(crate) fn finished_segment_ranges(
     segments: &[krabka_remote_storage::RemoteLogSegmentMetadata],
-) -> Vec<(i64, i64)> {
+) -> Vec<OffsetRange> {
     segments
         .iter()
         .filter(|metadata| metadata.state() == RemoteLogSegmentState::CopySegmentFinished)
-        .map(|metadata| (metadata.start_offset(), metadata.end_offset()))
+        .map(|metadata| OffsetRange::new(metadata.start_offset(), metadata.end_offset()))
         .collect()
 }

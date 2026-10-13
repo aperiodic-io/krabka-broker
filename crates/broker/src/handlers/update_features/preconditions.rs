@@ -12,12 +12,23 @@ use std::collections::BTreeMap;
 const CONTROLLER_REGISTRATION_MIN_LEVEL: i16 =
     krabka_metadata::metadata_version::ONLINE_DOWNGRADE_MIN_LEVEL;
 
+/// The inclusive range of levels that a node supports for a feature.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SupportedRange {
+    min: i16,
+    max: i16,
+}
+
 /// Kafka's `QuorumFeatures.DISABLED`: what a node that did not register a
 /// feature supports.
-const DISABLED: (i16, i16) = (0, 0);
+const DISABLED: SupportedRange = SupportedRange { min: 0, max: 0 };
 
 /// `QuorumFeatures.reasonNotSupported`, with `VersionRange.toString`.
-fn reason_range_not_supported(level: i16, what: &str, (min, max): (i16, i16)) -> Option<String> {
+fn reason_range_not_supported(
+    level: i16,
+    what: &str,
+    SupportedRange { min, max }: SupportedRange,
+) -> Option<String> {
     if (min..=max).contains(&level) {
         None
     } else if max == 0 {
@@ -54,10 +65,12 @@ pub(super) fn reason_not_supported(
 ) -> Option<String> {
     let local_controller = local.node_id;
     let local = krabka_metadata::feature(feature).map_or(DISABLED, |feature| {
-        krabka_raft::supported_feature_range(feature, local.unstable_features)
+        let (min, max) = krabka_raft::supported_feature_range(feature, local.unstable_features);
+        SupportedRange { min, max }
     });
-    let range = |features: &BTreeMap<String, (i16, i16)>| {
-        features.get(feature).copied().unwrap_or(DISABLED)
+    let range = |registered| match registered {
+        Some((min, max)) => SupportedRange { min, max },
+        None => DISABLED,
     };
     reason_range_not_supported(
         level,
@@ -69,7 +82,7 @@ pub(super) fn reason_not_supported(
             reason_range_not_supported(
                 level,
                 &format!("Broker {}", broker.node_id),
-                range(&broker.features),
+                range(broker.features.get(feature).copied()),
             )
         })
     })
@@ -87,7 +100,7 @@ pub(super) fn reason_not_supported(
                 reason_range_not_supported(
                     level,
                     &format!("Controller {}", controller.node_id),
-                    range(&controller.features),
+                    range(controller.features.get(feature).copied()),
                 )
             })
             .or_else(|| {
@@ -149,9 +162,17 @@ mod tests {
     #[test]
     fn range_reasons_use_kafka_version_range_text() {
         let cases = [
-            (1, (0, 1), None),
-            (9, (0, 1), Some("Broker 2 only supports versions 0-1")),
-            (2, (1, 1), Some("Broker 2 only supports versions 1")),
+            (1, SupportedRange { min: 0, max: 1 }, None),
+            (
+                9,
+                SupportedRange { min: 0, max: 1 },
+                Some("Broker 2 only supports versions 0-1"),
+            ),
+            (
+                2,
+                SupportedRange { min: 1, max: 1 },
+                Some("Broker 2 only supports versions 1"),
+            ),
             (1, DISABLED, Some("Broker 2 does not support this feature.")),
             (0, DISABLED, None),
         ];

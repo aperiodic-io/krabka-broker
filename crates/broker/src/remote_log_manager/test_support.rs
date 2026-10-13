@@ -128,6 +128,34 @@ pub fn configured_tier<'a>(
     }
 }
 
+/// The offsets a sealed local segment spans: its base and its last offset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SealedRange {
+    pub base: Offset,
+    pub last: Offset,
+}
+
+impl SealedRange {
+    pub const fn new(base: Offset, last: Offset) -> Self { Self { base, last } }
+}
+
+/// The sealed segments of `log` as offset ranges. A rolled segment is
+/// tierable once its rollover flush publishes the boundary snapshot, so this
+/// waits for the flush first.
+pub fn sealed_ranges(log: &mut Log) -> Vec<SealedRange> {
+    log.sync().expect("flush rolled segments");
+    log.tierable_segments()
+        .iter()
+        .map(|export| SealedRange::new(export.base_offset, export.last_offset))
+        .collect()
+}
+
+/// A storage manager and the metadata manager that tracks what it holds.
+pub struct Backends {
+    pub rsm: Arc<dyn RemoteStorageManager>,
+    pub rlmm: Arc<dyn RemoteLogMetadataManager>,
+}
+
 /// Fresh mutable storage and metadata backends for one test's temporary directory.
 pub fn local_backends(
     remote_dir: &std::path::Path,
@@ -201,17 +229,33 @@ pub async fn sweep_once(
     .await;
 }
 
+/// The sealed exports of a partition and its config.
+pub struct PartitionSnapshot {
+    pub exports: Vec<SegmentExport>,
+    pub config: LogConfig,
+}
+
 /// The sealed exports and their config from one hold of the partition's log lock.
-pub fn partition_snapshot(partition: &Partition) -> (Vec<SegmentExport>, LogConfig) {
+pub fn partition_snapshot(partition: &Partition) -> PartitionSnapshot {
     let log = partition.log.lock().expect("partition log mutex poisoned");
-    (log.tierable_segments(), log.config_snapshot())
+    PartitionSnapshot {
+        exports: log.tierable_segments(),
+        config: log.config_snapshot(),
+    }
+}
+
+/// How many segments the remote tier finished and how many sealed segments
+/// stayed local.
+pub struct SweepCounts {
+    pub remote_finished: usize,
+    pub local_sealed: usize,
 }
 
 /// Remote and local counts after a sweep; the local count waits for rollover flush.
 pub fn sweep_counts(
     partition: &Partition,
     rlmm: &Arc<dyn RemoteLogMetadataManager>,
-) -> (usize, usize) {
+) -> SweepCounts {
     let remote_finished = rlmm
         .list_remote_log_segments(&tp())
         .unwrap()
@@ -220,20 +264,20 @@ pub fn sweep_counts(
         .count();
     let mut log = partition.log.lock().expect("partition log mutex poisoned");
     log.sync().expect("flush rolled segments");
-    (remote_finished, log.tierable_segments().len())
+    SweepCounts {
+        remote_finished,
+        local_sealed: log.tierable_segments().len(),
+    }
 }
 
 /// Fresh mutable backends with every supplied fixture export successfully archived.
 pub async fn archived_backends(
     remote_dir: &std::path::Path,
     exports: &[SegmentExport],
-) -> (
-    Arc<dyn RemoteStorageManager>,
-    Arc<dyn RemoteLogMetadataManager>,
-) {
+) -> Backends {
     let (rsm, rlmm) = local_backends(remote_dir);
     copy_all_exports(&tier(ArchiveMode::Mutable, &rsm, &rlmm), exports).await;
-    (rsm, rlmm)
+    Backends { rsm, rlmm }
 }
 
 /// A stand-in write-once archive. Every copy seals a real (unsigned) WORM
@@ -572,11 +616,17 @@ macro_rules! owned_tier_resources {
 }
 pub(crate) use owned_tier_resources;
 
+/// The local and remote directory guards of one fixture.
+pub struct TempDirs {
+    pub local: tempfile::TempDir,
+    pub remote: tempfile::TempDir,
+}
+
 /// The local and remote guards, declared in the same order as the fixture call sites.
-pub fn temporary_dirs() -> (tempfile::TempDir, tempfile::TempDir) {
+pub fn temporary_dirs() -> TempDirs {
     let local = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    (local, remote)
+    TempDirs { local, remote }
 }
 
 pub fn orders_label() -> TopicLabel {
@@ -592,9 +642,12 @@ pub fn append_fixture_batches(log: &mut Log, count: u32) {
     }
 }
 
-pub fn multiple_segment_snapshot(partition: &Partition) -> (Vec<SegmentExport>, LogConfig) {
+pub fn multiple_segment_snapshot(partition: &Partition) -> PartitionSnapshot {
     let snapshot = partition_snapshot(partition);
-    assert2::assert!(snapshot.0.len() >= 2, "test needs multiple sealed segments");
+    assert2::assert!(
+        snapshot.exports.len() >= 2,
+        "test needs multiple sealed segments"
+    );
     snapshot
 }
 
@@ -606,12 +659,18 @@ pub fn sealed_segment_count(partition: &Partition) -> usize {
     partition_log_guard(partition).tierable_segments().len()
 }
 
+/// The API-version gate and the clock that a local retention pass runs under.
+pub struct RetentionPolicy {
+    pub unstable: UnstableApiVersions,
+    pub now_ms: i64,
+}
+
 pub async fn local_retention_at(
     partition: &Partition,
     exports: &[SegmentExport],
     config: &LogConfig,
     rlmm: &Arc<dyn RemoteLogMetadataManager>,
-    policy: (UnstableApiVersions, i64),
+    policy: RetentionPolicy,
 ) -> usize {
     super::local_retention_pass(
         &tp(),
@@ -620,10 +679,10 @@ pub async fn local_retention_at(
         config,
         rlmm,
         super::LocalRetentionBounds {
-            now_ms: policy.1,
+            now_ms: policy.now_ms,
             high_watermark: partition.high_watermark().await,
         },
-        policy.0,
+        policy.unstable,
     )
 }
 
@@ -666,14 +725,11 @@ pub fn check_partitions_copied(
     }
 }
 
-pub fn write_once_backends() -> (
-    Arc<dyn RemoteStorageManager>,
-    Arc<dyn RemoteLogMetadataManager>,
-) {
-    (
-        Arc::new(FakeWormArchive::new()),
-        Arc::new(InmemoryRemoteLogMetadataManager::new()),
-    )
+pub fn write_once_backends() -> Backends {
+    Backends {
+        rsm: Arc::new(FakeWormArchive::new()),
+        rlmm: Arc::new(InmemoryRemoteLogMetadataManager::new()),
+    }
 }
 
 pub fn two_exports() -> Vec<SegmentExport> { two_exports_with_size(bytes(64)) }
@@ -735,7 +791,10 @@ macro_rules! rolled_partition_fixture {
         );
     };
     ($local:ident, $remote:ident, $registry:ident, $partition:ident, $config:expr) => {
-        let ($local, $remote) = crate::remote_log_manager::test_support::temporary_dirs();
+        let crate::remote_log_manager::test_support::TempDirs {
+            local: $local,
+            remote: $remote,
+        } = crate::remote_log_manager::test_support::temporary_dirs();
         let $registry = crate::partition_registry::PartitionRegistry::new();
         let $partition =
             crate::remote_log_manager::test_support::rolled_tiered_partition_with_config(
@@ -770,27 +829,33 @@ macro_rules! registered_sweep_fixture {
 }
 pub(crate) use registered_sweep_fixture;
 
+/// What archiving a partition's sealed segments and then running local
+/// retention left behind.
+pub struct ArchivedRetention {
+    pub exports: Vec<SegmentExport>,
+    pub _rsm: Arc<dyn RemoteStorageManager>,
+    pub _rlmm: Arc<dyn RemoteLogMetadataManager>,
+    pub removed: usize,
+}
+
 /// Archive the current sealed segments, then run local retention at the future fixture clock.
 /// Backend guards and the original exports remain owned by the caller through its assertions.
 pub async fn archived_local_retention(
     partition: &Partition,
     remote_dir: &std::path::Path,
     unstable: UnstableApiVersions,
-) -> (
-    Vec<SegmentExport>,
-    Arc<dyn RemoteStorageManager>,
-    Arc<dyn RemoteLogMetadataManager>,
-    usize,
-) {
-    let (exports, config) = multiple_segment_snapshot(partition);
-    let (rsm, rlmm) = archived_backends(remote_dir, &exports).await;
-    let removed = local_retention_at(
-        partition,
-        &exports,
-        &config,
-        &rlmm,
-        (unstable, now_ms() + 1_000_000),
-    )
+) -> ArchivedRetention {
+    let PartitionSnapshot { exports, config } = multiple_segment_snapshot(partition);
+    let Backends { rsm, rlmm } = archived_backends(remote_dir, &exports).await;
+    let removed = local_retention_at(partition, &exports, &config, &rlmm, RetentionPolicy {
+        unstable,
+        now_ms: now_ms() + 1_000_000,
+    })
     .await;
-    (exports, rsm, rlmm, removed)
+    ArchivedRetention {
+        exports,
+        _rsm: rsm,
+        _rlmm: rlmm,
+        removed,
+    }
 }

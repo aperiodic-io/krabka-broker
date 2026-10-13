@@ -105,13 +105,22 @@ pub const LATEST_PRODUCTION_METADATA_VERSION: i16 =
 /// In Kafka 4.3.1 that is `metadata.version`, whose trunk levels are `4.4-IV0`
 /// and above, and `share.version`, whose level 2 is trunk's `SV_2`
 /// (KIP-1191).
-const LATEST_PRODUCTION_LEVELS: [(&str, i16); 2] = [
-    (
-        krabka_metadata::metadata_version::METADATA_VERSION_FEATURE,
-        LATEST_PRODUCTION_METADATA_VERSION,
-    ),
-    (krabka_metadata::metadata_version::SHARE_VERSION_FEATURE, 1),
+const LATEST_PRODUCTION_LEVELS: [ProductionLevel; 2] = [
+    ProductionLevel {
+        feature: krabka_metadata::metadata_version::METADATA_VERSION_FEATURE,
+        level: LATEST_PRODUCTION_METADATA_VERSION,
+    },
+    ProductionLevel {
+        feature: krabka_metadata::metadata_version::SHARE_VERSION_FEATURE,
+        level: 1,
+    },
 ];
+
+/// The latest production level of one feature.
+struct ProductionLevel {
+    feature: &'static str,
+    level: i16,
+}
 
 /// The supported range of `feature` under `unstable`: the `krabka_metadata`
 /// registry's range, which lists the levels of Kafka trunk, capped at the
@@ -126,10 +135,10 @@ pub fn supported_feature_range(
     let (min, max) = feature.supported_range();
     match LATEST_PRODUCTION_LEVELS
         .iter()
-        .find(|(name, _)| *name == feature.name())
+        .find(|production| production.feature == feature.name())
     {
-        Some(&(_, production)) if unstable == UnstableFeatureVersions::Disabled => {
-            (min, max.min(production))
+        Some(production) if unstable == UnstableFeatureVersions::Disabled => {
+            (min, max.min(production.level))
         }
         _ => (min, max),
     }
@@ -229,14 +238,18 @@ mod tests {
     use {super::*, assert2::assert};
 
     /// A registry feature with a chosen name and range.
-    struct Listed(&'static str, (i16, i16));
+    struct Listed {
+        name: &'static str,
+        min: i16,
+        max: i16,
+    }
 
     impl krabka_metadata::Feature for Listed {
-        fn name(&self) -> &'static str { self.0 }
+        fn name(&self) -> &'static str { self.name }
 
-        fn supported_range(&self) -> (i16, i16) { self.1 }
+        fn supported_range(&self) -> (i16, i16) { (self.min, self.max) }
 
-        fn default_level(&self, _bootstrap_mv: i16) -> i16 { self.1.0 }
+        fn default_level(&self, _bootstrap_mv: i16) -> i16 { self.min }
     }
 
     /// The range each node advertises: Kafka 4.3.1's by default, and the
@@ -266,7 +279,14 @@ mod tests {
                 (
                     name,
                     unstable,
-                    supported_feature_range(&Listed(name, range), unstable),
+                    supported_feature_range(
+                        &Listed {
+                            name,
+                            min: range.0,
+                            max: range.1,
+                        },
+                        unstable,
+                    ),
                 )
             })
             .collect();

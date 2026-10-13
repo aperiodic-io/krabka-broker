@@ -36,7 +36,16 @@ macro_rules! assert_single_response_error {
     }};
 }
 
-async fn stopped_observer() -> (BrokerHandle, BrokerHandle, TempDir, TempDir) {
+/// A controller and an observer whose controller client is stopped, with the
+/// temporary directories that hold their data.
+struct StoppedObserver {
+    controller: BrokerHandle,
+    observer: BrokerHandle,
+    _controller_dir: TempDir,
+    _observer_dir: TempDir,
+}
+
+async fn stopped_observer() -> StoppedObserver {
     let (controller, controller_dir) = start_broker_no_audit().await;
     controller.wait_until_controller_leader().await;
     let authority = controller.broker_arc_for_test();
@@ -58,7 +67,12 @@ async fn stopped_observer() -> (BrokerHandle, BrokerHandle, TempDir, TempDir) {
         .expect("seed topic");
     observer.wait_until_partition_present("orders", 0).await;
     observer.broker_arc_for_test().controller.cancel().await;
-    (controller, observer, controller_dir, observer_dir)
+    StoppedObserver {
+        controller,
+        observer,
+        _controller_dir: controller_dir,
+        _observer_dir: observer_dir,
+    }
 }
 
 fn topic_records(id: u128) -> Vec<MetadataRecord> {
@@ -75,7 +89,12 @@ fn topic_records(id: u128) -> Vec<MetadataRecord> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_stale_observer_cannot_delete_a_recreated_topic_by_old_id() {
-    let (controller, observer, _controller_dir, _observer_dir) = stopped_observer().await;
+    let StoppedObserver {
+        controller,
+        observer,
+        _controller_dir,
+        _observer_dir,
+    } = stopped_observer().await;
     let authority = controller.broker_arc_for_test();
     authority
         .controller
@@ -134,7 +153,12 @@ async fn a_stale_observer_cannot_delete_a_recreated_topic_by_old_id() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_incremental_update_through_a_stale_observer_keeps_unrelated_config() {
-    let (controller, observer, _controller_dir, _observer_dir) = stopped_observer().await;
+    let StoppedObserver {
+        controller,
+        observer,
+        _controller_dir,
+        _observer_dir,
+    } = stopped_observer().await;
     let authority = controller.broker_arc_for_test();
     authority
         .controller
@@ -211,7 +235,12 @@ fn named_broker_config_request(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn named_broker_list_operations_merge_at_authority_and_keep_local_dir_checks() {
-    let (controller, observer, _controller_dir, _observer_dir) = stopped_observer().await;
+    let StoppedObserver {
+        controller,
+        observer,
+        _controller_dir,
+        _observer_dir,
+    } = stopped_observer().await;
     let authority = controller.broker_arc_for_test();
     authority
         .controller

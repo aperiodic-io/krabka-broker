@@ -6,7 +6,10 @@
 //! connection per attempt is what keeps the retry loops stateless.
 
 use {
-    crate::{host_port::parse_host_port, network::client::InterBrokerClient},
+    crate::{
+        host_port::{HostPort, parse_host_port},
+        network::client::InterBrokerClient,
+    },
     bytes::{Bytes, BytesMut},
     krabka_protocol::{
         Decode, Encode,
@@ -37,7 +40,10 @@ pub(super) async fn send_remove_raft_voter(
         protocol,
         server_name,
         target,
-        (remove_raft_voter_request::API_KEY, version),
+        ApiSelection {
+            api_key: remove_raft_voter_request::API_KEY,
+            version,
+        },
         body.into(),
         "RemoveRaftVoter",
     )
@@ -64,7 +70,10 @@ pub(super) async fn send_update_voter(
         protocol,
         server_name,
         target,
-        (update_raft_voter_request::API_KEY, version),
+        ApiSelection {
+            api_key: update_raft_voter_request::API_KEY,
+            version,
+        },
         body.into(),
         "UpdateVoter",
     )
@@ -95,7 +104,10 @@ pub(super) async fn send_add_raft_voter(
         protocol,
         server_name,
         target,
-        (add_raft_voter_request::API_KEY, version),
+        ApiSelection {
+            api_key: add_raft_voter_request::API_KEY,
+            version,
+        },
         body.into(),
         "AddRaftVoter",
     )
@@ -105,17 +117,24 @@ pub(super) async fn send_add_raft_voter(
     AddRaftVoterResponse::decode(&mut cur, version).map_err(|e| format!("AddRaftVoter decode: {e}"))
 }
 
+/// The API key and version of a request to send.
+#[derive(Clone, Copy)]
+struct ApiSelection {
+    api_key: i16,
+    version: i16,
+}
+
 /// One fresh connection per attempt; close it even when the request fails.
 async fn controller_request(
     client: &InterBrokerClient,
     protocol: krabka_security::ListenerProtocol,
     server_name: &str,
     target: &str,
-    api: (i16, i16),
+    api: ApiSelection,
     body: Bytes,
     operation: &str,
 ) -> Result<Bytes, String> {
-    let (host, port) = split_bootstrap_server(target)?;
+    let HostPort { host, port } = split_bootstrap_server(target)?;
     let connection = client
         .connect_as_connection(
             &host,
@@ -127,7 +146,7 @@ async fn controller_request(
         .await
         .map_err(|error| format!("dial {target}: {error}"))?;
     let response = connection
-        .raw_request(api.0, api.1, body)
+        .raw_request(api.api_key, api.version, body)
         .await
         .map_err(|error| format!("{operation} raw_request: {error}"));
     connection.close();
@@ -136,10 +155,13 @@ async fn controller_request(
 
 /// Splits a `<host>:<port>` bootstrap server, dropping the brackets of an IPv6
 /// literal so the dialer resolves the bare address.
-fn split_bootstrap_server(target: &str) -> Result<(String, u16), String> {
-    let (host, port) = parse_host_port(target)
+fn split_bootstrap_server(target: &str) -> Result<HostPort, String> {
+    let HostPort { host, port } = parse_host_port(target)
         .ok_or_else(|| format!("bootstrap server {target:?} must use <host>:<port>"))?;
-    Ok((host.trim_matches(['[', ']']).to_owned(), port))
+    Ok(HostPort {
+        host: host.trim_matches(['[', ']']).to_owned(),
+        port,
+    })
 }
 
 fn auto_join_connection_options() -> krabka_client_core::ConnectionOptions {

@@ -3,7 +3,9 @@
 
 use {
     super::{
-        coordinator::completion::{apply_completion, completion_decision, completion_for},
+        coordinator::completion::{
+            PreparedCompletion, apply_completion, completion_decision, completion_for,
+        },
         handlers::end_txn::{
             completion_producer_identity, prepare_server_abort_identities_with_fresh,
         },
@@ -94,7 +96,7 @@ pub fn initialize(
 /// Complete the prepared snapshot atomically with the production completion
 /// gate and identity. Each model keeps its own finalization history and oracle.
 pub fn complete_prepared(entry: &TxnEntry, now_ms: i64) -> Option<(TxnEntry, TxnState)> {
-    let (_, complete) = completion_for(entry.state)?;
+    let PreparedCompletion { complete, .. } = completion_for(entry.state)?;
     match completion_decision(entry, entry, (entry.state, complete)) {
         TransactionReaperCompletionDecision::Proceed => {
             let mut completed = entry.clone();

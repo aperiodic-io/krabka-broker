@@ -1,8 +1,8 @@
 //! Bounded Direct I/O groups for ordinary producer batches.
 
 use {
-    super::{Log, VerbatimBatch},
-    crate::{DeliveryPolicy, LogError, SegmentAllocation},
+    super::{Log, VerbatimBatch, open::DataProducerAppend},
+    crate::{DeliveryPolicy, LogError, SegmentAllocation, segment::PlacedBatch},
     krabka_ids::Offset,
     krabka_protocol::records::{Attributes, CRC_COVERAGE_START, HEADER_LEN, TimestampType},
     krabka_units::prelude::{ByteSize, ByteSizeExt as _, mebibytes},
@@ -61,7 +61,7 @@ impl Log {
                 next,
             )
             .ok()?;
-            placed.push((batch, next));
+            placed.push(PlacedBatch { batch, base: next });
             next = Offset(end);
             size = size.checked_add(u64::try_from(batch.bytes.len()).ok()?)?;
             max_timestamp = max_timestamp.max(batch.max_timestamp);
@@ -96,7 +96,7 @@ impl Log {
 
     fn append_direct_group(
         &mut self,
-        batches: &[(&VerbatimBatch, Offset)],
+        batches: &[PlacedBatch<'_>],
         index_interval: ByteSize,
     ) -> Result<Vec<Offset>, LogError> {
         self.rollover_flusher.check()?;
@@ -105,18 +105,22 @@ impl Log {
             .expect("group admission requires an active segment")
             .append_verbatim_group(batches, index_interval)?;
         let result = (|| {
-            for &(batch, base) in batches {
+            for &PlacedBatch { batch, base } in batches {
                 self.flush_after_append(batch.last_offset_delta, false)?;
-                self.update_data_producer_entry(
-                    (batch.producer_id, batch.producer_epoch),
-                    (batch.base_sequence, batch.last_offset_delta),
-                    (base, batch.max_timestamp, false),
-                )?;
+                self.update_data_producer_entry(DataProducerAppend {
+                    producer_id: batch.producer_id,
+                    producer_epoch: batch.producer_epoch,
+                    base_sequence: batch.base_sequence,
+                    last_offset_delta: batch.last_offset_delta,
+                    base_offset: base,
+                    timestamp: batch.max_timestamp,
+                    is_transactional: false,
+                })?;
                 self.assign_appended_epoch(batch.leader_epoch, base)?;
             }
             self.refresh_lso()
         })();
-        self.complete_append_state(result, batches[0].1)?;
-        Ok(batches.iter().map(|&(_, base)| base).collect())
+        self.complete_append_state(result, batches[0].base)?;
+        Ok(batches.iter().map(|placed| placed.base).collect())
     }
 }

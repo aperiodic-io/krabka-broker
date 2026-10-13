@@ -252,6 +252,13 @@ enum Role {
     OffsetSyncs,
 }
 
+/// A topic on the target and the part MM2 plays for it.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct RoleTopic {
+    role: Role,
+    name: String,
+}
+
 /// Every role, in the order [`Role`]'s own `Ord` puts them, which is the order
 /// a sorted reading of the target's topics comes back in.
 const ROLES: [Role; 3] = [Role::Checkpoints, Role::Heartbeats, Role::OffsetSyncs];
@@ -1042,9 +1049,9 @@ async fn assert_internal_topics(target: &str, mm2: &MirrorMaker) {
         "MM2's internal topics appeared on krabka",
         mm2,
         || {
-            let mut topics: Vec<(Role, String)> = list_topics(target)
+            let mut topics: Vec<RoleTopic> = list_topics(target)
                 .into_iter()
-                .filter_map(|name| role_of(&name).map(|role| (role, name)))
+                .filter_map(|name| role_of(&name).map(|role| RoleTopic { role, name }))
                 .collect();
             topics.sort();
             // Every role present, rather than a count of three. The two are
@@ -1053,7 +1060,7 @@ async fn assert_internal_topics(target: &str, mm2: &MirrorMaker) {
             // waits out the whole budget and reports a timeout, where this
             // hands the extra topic to the comparison below and the failure
             // says what was found.
-            let covered = |role: Role| topics.iter().any(|(found, _)| *found == role);
+            let covered = |role: Role| topics.iter().any(|topic| topic.role == role);
             ROLES.into_iter().all(covered).then_some(topics)
         },
     )
@@ -1061,7 +1068,7 @@ async fn assert_internal_topics(target: &str, mm2: &MirrorMaker) {
 
     let described: Vec<InternalTopic> = found
         .iter()
-        .map(|(role, name)| InternalTopic {
+        .map(|RoleTopic { role, name }| InternalTopic {
             role: *role,
             partitions: partition_count(target, name),
             cleanup_policy: topic_config(target, name, "cleanup.policy").unwrap_or_default(),

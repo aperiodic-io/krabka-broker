@@ -8,7 +8,7 @@
 //! `fully_covers` is the interval arithmetic behind that proof.
 
 use {
-    super::Predicates,
+    super::{ExcludedOffsets, Predicates},
     crate::{
         args::{PartitionRef, RestoreArgs},
         error::RestoreError,
@@ -44,12 +44,15 @@ impl Predicates {
             to_offset.insert(bound.partition.clone(), bound.last_offset);
         }
 
-        let mut exclude_offset: HashMap<PartitionRef, Vec<(Offset, Offset)>> = HashMap::new();
+        let mut exclude_offset: HashMap<PartitionRef, Vec<ExcludedOffsets>> = HashMap::new();
         for range in &args.exclude_offset {
             exclude_offset
                 .entry(range.partition.clone())
                 .or_default()
-                .push((range.start, range.end_exclusive));
+                .push(ExcludedOffsets {
+                    start: range.start,
+                    end_exclusive: range.end_exclusive,
+                });
         }
 
         for (partition, &last_offset) in &to_offset {
@@ -80,12 +83,16 @@ impl Predicates {
 /// [`Predicates::from_args`]: a partition's whole possible keep window, from
 /// offset zero through its `--to-offset` bound, counts as covered only when
 /// the exclude ranges leave no gap in it.
-fn fully_covers(ranges: &[(Offset, Offset)], last_offset: Offset) -> bool {
+fn fully_covers(ranges: &[ExcludedOffsets], last_offset: Offset) -> bool {
     let mut sorted = ranges.to_vec();
-    sorted.sort_unstable_by_key(|&(start, _)| start);
+    sorted.sort_unstable_by_key(|range| range.start);
 
     let mut covered_through = Offset::ZERO;
-    for (start, end_exclusive) in sorted {
+    for ExcludedOffsets {
+        start,
+        end_exclusive,
+    } in sorted
+    {
         if start > covered_through {
             return false;
         }

@@ -293,10 +293,19 @@ mod tests {
         krabka_protocol::records::{Record, RecordBatch},
     };
 
-    fn fresh_follower() -> (tempfile::TempDir, FollowerLog) {
+    /// A directory and the follower log opened in it.
+    struct FreshFollower {
+        dir: tempfile::TempDir,
+        follower: FollowerLog,
+    }
+
+    fn fresh_follower() -> FreshFollower {
         let dir = tempfile::tempdir().unwrap();
         let log = Log::open(dir.path(), LogConfig::default()).unwrap();
-        (dir, FollowerLog::for_log(log))
+        FreshFollower {
+            dir,
+            follower: FollowerLog::for_log(log),
+        }
     }
 
     fn assert_empty(follower: &FollowerLog) {
@@ -419,7 +428,7 @@ mod tests {
 
     #[tokio::test]
     async fn follower_appends_and_syncs_a_contiguous_fetch() {
-        let (dir, follower) = fresh_follower();
+        let FreshFollower { dir, follower } = fresh_follower();
         let batch = RecordBatch {
             base_offset: 0,
             records: vec![Record::default()],
@@ -439,7 +448,10 @@ mod tests {
 
     #[tokio::test]
     async fn follower_rejects_a_gap_before_writing() {
-        let (_dir, follower) = fresh_follower();
+        let FreshFollower {
+            dir: _dir,
+            follower,
+        } = fresh_follower();
         let batch = RecordBatch {
             base_offset: 1,
             records: vec![Record::default()],
@@ -457,7 +469,10 @@ mod tests {
 
     #[tokio::test]
     async fn follower_accepts_a_partial_fetch_and_rejects_a_leader_overrun() {
-        let (_dir, follower) = fresh_follower();
+        let FreshFollower {
+            dir: _dir,
+            follower,
+        } = fresh_follower();
         let first = RecordBatch {
             base_offset: 0,
             records: vec![Record::default()],
@@ -489,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn follower_reset_persists_the_leader_log_start() {
-        let (dir, follower) = fresh_follower();
+        let FreshFollower { dir, follower } = fresh_follower();
 
         follower.reset_to(Offset(7)).await.unwrap();
 
@@ -502,7 +517,7 @@ mod tests {
 
     #[tokio::test]
     async fn follower_trim_persists_the_leader_log_start() {
-        let (dir, follower) = fresh_follower();
+        let FreshFollower { dir, follower } = fresh_follower();
         let batches = (0..2)
             .map(|base_offset| RecordBatch {
                 base_offset,
@@ -531,7 +546,10 @@ mod tests {
     /// epoch 5, so its copy of that epoch ends where epoch 7 starts.
     #[tokio::test]
     async fn unplaceable_epoch_divergence_truncates_to_the_local_end_of_the_leader_epoch() {
-        let (_dir, follower) = fresh_follower();
+        let FreshFollower {
+            dir: _dir,
+            follower,
+        } = fresh_follower();
         follower
             .append(
                 Offset(0),
@@ -563,7 +581,10 @@ mod tests {
 
     #[tokio::test]
     async fn divergence_before_the_retained_range_resets_to_the_leader_start() {
-        let (_dir, follower) = fresh_follower();
+        let FreshFollower {
+            dir: _dir,
+            follower,
+        } = fresh_follower();
         follower
             .append(
                 Offset(0),

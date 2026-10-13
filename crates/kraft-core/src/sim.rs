@@ -50,6 +50,13 @@ pub use self::{
     trace::{InFlight, NodeRole, ScenarioTrace, SimSnapshot, TraceAction, TraceStep},
 };
 
+/// A leader's promotion: the node that leads and the epoch it leads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Promotion {
+    node: NodeId,
+    epoch: Epoch,
+}
+
 /// A deterministic multi-node `KRaft` simulation over the in-memory fake log,
 /// instrumented to record a [`ScenarioTrace`].
 ///
@@ -68,7 +75,7 @@ pub struct Sim {
     steps: Vec<TraceStep>,
     /// Leader epochs already recorded with an `Elected` step, so we record each
     /// promotion exactly once.
-    elected_seen: BTreeSet<(NodeId, Epoch)>,
+    elected_seen: BTreeSet<Promotion>,
 }
 
 impl Sim {
@@ -143,15 +150,19 @@ impl Sim {
 
     /// Record any newly-promoted leaders after the machine runs.
     fn record_new_leaders(&mut self) {
-        let promotions: Vec<(NodeId, Epoch)> = self
+        let promotions: Vec<Promotion> = self
             .nodes
             .values()
             .filter(|n| n.machine.role().is_leader())
-            .map(|n| (n.id, n.machine.quorum_state().leader_epoch))
+            .map(|n| Promotion {
+                node: n.id,
+                epoch: n.machine.quorum_state().leader_epoch,
+            })
             .filter(|key| !self.elected_seen.contains(key))
             .collect();
-        for (id, epoch) in promotions {
-            self.elected_seen.insert((id, epoch));
+        for promotion in promotions {
+            let Promotion { node: id, epoch } = promotion;
+            self.elected_seen.insert(promotion);
             self.record(
                 TraceAction::Elected {
                     node: id.0,

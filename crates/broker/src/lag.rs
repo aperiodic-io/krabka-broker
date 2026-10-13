@@ -57,8 +57,19 @@ use {
     tokio_util::sync::CancellationToken,
 };
 
-/// One `(topic, partition)` pair, as both samplers key their lookups.
-type TopicPartition = (String, i32);
+/// One topic partition, as both samplers key their lookups.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TopicPartition {
+    topic: String,
+    partition: i32,
+}
+
+/// The `Fetch` that probes one leader, and the topic names its reply has to be
+/// read back through.
+struct WatermarkProbe<'a> {
+    request: FetchRequest,
+    names: HashMap<WireUuid, &'a str>,
+}
 
 /// How often both lag families are resampled.
 ///
@@ -162,7 +173,7 @@ impl LagPoller {
             };
             let offsets = committed_offsets(&handle.tx).await;
             let mut group_offsets = HashMap::new();
-            for ((topic, partition), entry) in offsets {
+            for (TopicPartition { topic, partition }, entry) in offsets {
                 // A negative offset is the "no committed offset" sentinel the
                 // OffsetFetch response encodes, and a partition the image no
                 // longer holds has no watermark to lag behind. Neither is a
@@ -170,8 +181,11 @@ impl LagPoller {
                 if entry.offset.0 < 0 || image.partition(&topic, partition).is_none() {
                     continue;
                 }
-                wanted.insert((topic.clone(), partition));
-                group_offsets.insert((topic, partition), entry.offset.0);
+                wanted.insert(TopicPartition {
+                    topic: topic.clone(),
+                    partition,
+                });
+                group_offsets.insert(TopicPartition { topic, partition }, entry.offset.0);
             }
             if !group_offsets.is_empty() {
                 committed.insert(group_id, group_offsets);
@@ -180,10 +194,12 @@ impl LagPoller {
         let watermarks = self.high_watermarks(image, &wanted).await;
         let mut samples = HashMap::new();
         for (group_id, offsets) in committed {
-            for ((topic, partition), offset) in offsets {
-                let Some(high_watermark) = watermarks.get(&(topic.clone(), partition)) else {
+            for (TopicPartition { topic, partition }, offset) in offsets {
+                let key = TopicPartition { topic, partition };
+                let Some(high_watermark) = watermarks.get(&key) else {
                     continue;
                 };
+                let TopicPartition { topic, partition } = key;
                 samples.insert(
                     ConsumerGroupLabel {
                         group_id: group_id.clone(),
@@ -215,19 +231,17 @@ impl LagPoller {
     ) -> HashMap<TopicPartition, i64> {
         let mut watermarks = HashMap::new();
         let mut remote: HashMap<NodeId, Vec<TopicPartition>> = HashMap::new();
-        for (topic, partition) in wanted {
+        for key in wanted {
+            let TopicPartition { topic, partition } = key;
             let Some(record) = image.partition(topic, *partition) else {
                 continue;
             };
             if record.leader == self.node_id {
                 if let Some(local) = self.partitions.get(topic, PartitionIndex(*partition)) {
-                    watermarks.insert((topic.clone(), *partition), local.high_watermark().await.0);
+                    watermarks.insert(key.clone(), local.high_watermark().await.0);
                 }
             } else {
-                remote
-                    .entry(record.leader)
-                    .or_default()
-                    .push((topic.clone(), *partition));
+                remote.entry(record.leader).or_default().push(key.clone());
             }
         }
         for (leader, partitions) in remote {
@@ -282,7 +296,9 @@ impl LagPoller {
                 .send(offset_request)
                 .await
                 .map_err(|error| error.to_string())?;
-            let Some((request, names)) = probe_request(image, partitions, &offsets) else {
+            let Some(WatermarkProbe { request, names }) =
+                probe_request(image, partitions, &offsets)
+            else {
                 connection.close();
                 return Ok(HashMap::new());
             };
@@ -306,7 +322,7 @@ fn probe_offsets_request(
     partitions: &[TopicPartition],
 ) -> Option<ListOffsetsRequest> {
     let mut topics: BTreeMap<&str, ListOffsetsTopic> = BTreeMap::new();
-    for (topic, partition) in partitions {
+    for TopicPartition { topic, partition } in partitions {
         let Some(record) = image.partition(topic, *partition) else {
             continue;
         };
@@ -347,7 +363,7 @@ fn probe_request<'a>(
     image: &MetadataImage,
     partitions: &'a [TopicPartition],
     offsets: &ListOffsetsResponse,
-) -> Option<(FetchRequest, HashMap<WireUuid, &'a str>)> {
+) -> Option<WatermarkProbe<'a>> {
     let offsets: HashMap<_, _> = offsets
         .topics
         .iter()
@@ -360,7 +376,7 @@ fn probe_request<'a>(
         .collect();
     let mut topics: BTreeMap<&str, FetchTopic> = BTreeMap::new();
     let mut names: HashMap<WireUuid, &str> = HashMap::new();
-    for (topic, partition) in partitions {
+    for TopicPartition { topic, partition } in partitions {
         let Some(record) = image.partition(topic, *partition) else {
             continue;
         };
@@ -390,8 +406,8 @@ fn probe_request<'a>(
     if topics.is_empty() {
         return None;
     }
-    Some((
-        FetchRequest {
+    Some(WatermarkProbe {
+        request: FetchRequest {
             replica_id: -1,
             max_wait_ms: 0,
             min_bytes: 0,
@@ -401,7 +417,7 @@ fn probe_request<'a>(
             ..Default::default()
         },
         names,
-    ))
+    })
 }
 
 /// The high watermark of every partition row `response` reported without an
@@ -433,7 +449,10 @@ fn probed_high_watermarks(
         for partition in &topic.partitions {
             if partition.error_code == codes::NONE && partition.high_watermark >= 0 {
                 watermarks.insert(
-                    (name.to_owned(), partition.partition_index),
+                    TopicPartition {
+                        topic: name.to_owned(),
+                        partition: partition.partition_index,
+                    },
                     partition.high_watermark,
                 );
             }
@@ -480,7 +499,12 @@ async fn committed_offsets(
         tracing::debug!("a group actor did not answer the lag sampler in time");
         return HashMap::new();
     };
-    offsets.unwrap_or_default().committed
+    offsets
+        .unwrap_or_default()
+        .committed
+        .into_iter()
+        .map(|((topic, partition), entry)| (TopicPartition { topic, partition }, entry))
+        .collect()
 }
 
 /// Lag of every follower of every partition `node_id` currently leads.

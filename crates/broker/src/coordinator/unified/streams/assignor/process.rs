@@ -196,21 +196,25 @@ impl LocalState {
         members: Option<&Vec<Member>>,
         standby_task: Option<&Task>,
     ) -> Option<Member> {
-        let mut candidate: Option<(&Member, &ProcessState, i64)> = None;
+        let mut candidate: Option<LoadedMember<'_>> = None;
         for member in members? {
             let process = &self.processes[&member.process_id];
             if standby_task.is_some_and(|task| process.has_task(task)) {
                 continue;
             }
             let member_load = process.member_count(&member.member_id);
-            let better = candidate.is_none_or(|(_, best_process, best_member_load)| {
-                process.cmp_load(best_process) == Ordering::Less && member_load < best_member_load
+            let better = candidate.as_ref().is_none_or(|best| {
+                process.cmp_load(best.process) == Ordering::Less && member_load < best.member_load
             });
             if better {
-                candidate = Some((member, process, member_load));
+                candidate = Some(LoadedMember {
+                    member,
+                    process,
+                    member_load,
+                });
             }
         }
-        candidate.map(|(member, _, _)| member.clone())
+        candidate.map(|best| best.member.clone())
     }
 
     /// The process ids in ascending load order, the smaller id on a tie.
@@ -239,6 +243,13 @@ impl LocalState {
             .get(&member.process_id)
             .map_or(0, |process| process.member_count(&member.member_id))
     }
+}
+
+/// A previous owner of a task, the process it runs in, and its load.
+struct LoadedMember<'a> {
+    member: &'a Member,
+    process: &'a ProcessState,
+    member_load: i64,
 }
 
 /// Kafka's `collectStandbyCandidates`: the members that hold a task as a

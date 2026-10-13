@@ -74,7 +74,7 @@ pub use self::{
 use {
     self::{
         ensemble::{Ensemble, SurveyError, remove_partial_output},
-        features::resolve_format_features,
+        features::{ResolvedFeatures, resolve_format_features},
         output::{Fault, write_bootstrap_files, write_dynamic_checkpoint, write_meta_properties},
         quorum::{build_initial_voters, is_dynamic_format},
     },
@@ -152,7 +152,7 @@ pub async fn run(args: FormatArgs) -> i32 { run_with_records(args, Vec::new()).a
 pub async fn run_with_records(args: FormatArgs, extra: Vec<MetadataRecord>) -> i32 {
     match plan(args, extra).and_then(|plan| plan.execute(&Fault::from_env())) {
         Ok(()) => EXIT_OK,
-        Err((code, message)) => {
+        Err(Failure { code, message }) => {
             eprintln!("{message}");
             code
         }
@@ -160,12 +160,19 @@ pub async fn run_with_records(args: FormatArgs, extra: Vec<MetadataRecord>) -> i
 }
 
 /// A failed run: its exit code and the line it prints on stderr.
-type Failure = (i32, String);
+#[derive(Debug, PartialEq, Eq)]
+struct Failure {
+    code: i32,
+    message: String,
+}
 
 /// Prefixes `message` with the command name, as every krabka-specific
 /// message is. Kafka's own messages are printed bare.
 fn krabka(code: i32, message: impl std::fmt::Display) -> Failure {
-    (code, format!("krabka format: {message}"))
+    Failure {
+        code,
+        message: format!("krabka format: {message}"),
+    }
 }
 
 /// What a run writes, and where. [`plan`] builds it without touching the
@@ -237,7 +244,10 @@ fn plan(args: FormatArgs, extra: Vec<MetadataRecord>) -> Result<Plan, Failure> {
     // metadata.version, group.version, etc. at their 4.0 defaults so a fresh
     // cluster engages each feature with no manual step; a level-0 feature is
     // omitted (absent = disabled), matching `kafka-storage format`.
-    let (bootstrap_mv, feature_overrides) = resolve_format_features(
+    let ResolvedFeatures {
+        metadata_version: bootstrap_mv,
+        overrides: feature_overrides,
+    } = resolve_format_features(
         args.release_version.as_deref(),
         &args.feature,
         args.unstable_feature_versions_enable,
@@ -332,35 +342,38 @@ fn plan(args: FormatArgs, extra: Vec<MetadataRecord>) -> Result<Plan, Failure> {
         ),
     })?;
     if ensemble.errors.contains(&metadata_log_dir) {
-        return Err((
-            EXIT_DIRTY_LOG_DIR,
-            format!(
+        return Err(Failure {
+            code: EXIT_DIRTY_LOG_DIR,
+            message: format!(
                 "Encountered I/O error in metadata log directory {}. Cannot continue.",
                 metadata_log_dir.display()
             ),
-        ));
+        });
     }
     let cluster_id = ensemble
         .verify(args.cluster_id, node_id)
-        .map_err(|message| (EXIT_DIRTY_LOG_DIR, message))?
+        .map_err(|message| Failure {
+            code: EXIT_DIRTY_LOG_DIR,
+            message,
+        })?
         .unwrap_or_else(ClusterId::random);
     if !args.ignore_formatted
-        && let Some((first, _)) = ensemble.formatted.first()
+        && let Some(first) = ensemble.formatted.first()
     {
-        return Err((
-            EXIT_DIRTY_LOG_DIR,
-            format!(
+        return Err(Failure {
+            code: EXIT_DIRTY_LOG_DIR,
+            message: format!(
                 "Log directory {} is already formatted. Use --ignore-formatted to ignore this \
                  directory and format the others.",
-                first.display()
+                first.dir.display()
             ),
-        ));
+        });
     }
 
     let mut used: Vec<DirectoryId> = ensemble
         .formatted
         .iter()
-        .filter_map(|(_, meta)| meta.directory_id)
+        .filter_map(|formatted| formatted.meta.directory_id)
         .collect();
     let mut targets = Vec::with_capacity(ensemble.empty.len());
     for dir in ensemble.empty {
@@ -377,10 +390,10 @@ fn plan(args: FormatArgs, extra: Vec<MetadataRecord>) -> Result<Plan, Failure> {
         });
     }
     if targets.is_empty() && ensemble.formatted.is_empty() {
-        return Err((
-            EXIT_BOOTSTRAP_FAIL,
-            "No available log directories to format.".to_owned(),
-        ));
+        return Err(Failure {
+            code: EXIT_BOOTSTRAP_FAIL,
+            message: "No available log directories to format.".to_owned(),
+        });
     }
 
     Ok(Plan {
@@ -388,7 +401,11 @@ fn plan(args: FormatArgs, extra: Vec<MetadataRecord>) -> Result<Plan, Failure> {
         node_id,
         metadata_version,
         targets,
-        skipped: ensemble.formatted.into_iter().map(|(dir, _)| dir).collect(),
+        skipped: ensemble
+            .formatted
+            .into_iter()
+            .map(|formatted| formatted.dir)
+            .collect(),
         errors: ensemble.errors,
         raft_control_records,
         records,

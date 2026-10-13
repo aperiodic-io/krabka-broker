@@ -71,6 +71,14 @@ pub(crate) fn add_loss_state(generation: u64, count: u64, added: u64) -> (u64, u
     (generation, count.saturating_add(added))
 }
 
+/// What a scan of the spool file found.
+struct ScannedSpool {
+    /// The records that decoded, in order.
+    records: Vec<AuditRecord>,
+    /// The byte length of the file after the last complete frame.
+    valid_bytes: SpoolBytes,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReplayRecovery {
     ClearPoison,
@@ -389,7 +397,10 @@ impl Spool {
             replay_offset,
             pending_losses,
         };
-        let (records, valid_bytes) = s.scan()?;
+        let ScannedSpool {
+            records,
+            valid_bytes,
+        } = s.scan()?;
         let physical = s.file.metadata().map_err(io)?.len();
         s.recovered_torn_tail = header_len_u64() + valid_bytes.0 < physical;
         if s.recovered_torn_tail {
@@ -591,7 +602,7 @@ impl Spool {
         fields(records = tracing::field::Empty, valid_bytes = tracing::field::Empty),
         err
     )]
-    fn scan(&self) -> Result<(Vec<AuditRecord>, SpoolBytes), AuditError> {
+    fn scan(&self) -> Result<ScannedSpool, AuditError> {
         let mut buf = Vec::new();
         {
             let mut f = File::open(&self.path).map_err(io)?;
@@ -618,7 +629,10 @@ impl Spool {
         let span = tracing::Span::current();
         span.record("records", out.len());
         span.record("valid_bytes", valid_bytes.0);
-        Ok((out, valid_bytes))
+        Ok(ScannedSpool {
+            records: out,
+            valid_bytes,
+        })
     }
 
     fn unread_records(
@@ -664,7 +678,10 @@ impl Spool {
     /// # Errors
     /// Returns an error if the spool file cannot be opened or read.
     pub fn read_all(&self) -> Result<Vec<AuditRecord>, AuditError> {
-        let (records, valid_bytes) = self.scan()?;
+        let ScannedSpool {
+            records,
+            valid_bytes,
+        } = self.scan()?;
         self.unread_records(&records, valid_bytes)
     }
 
@@ -732,9 +749,10 @@ mod tests {
             },
             ocsf::ProductInfo,
             spool::test_support::{
-                ROOMY_CAP, chained_record, check_empty_file, reopen_after_losses, seeded_spool,
-                spool_with_losses,
+                LossySpool, ROOMY_CAP, SeededSpool, chained_record, check_empty_file,
+                reopen_after_losses, seeded_spool, spool_with_losses,
             },
+            test_support::TempSpool,
         },
         assert2::check,
         krabka_units::prelude::ByteSize,
@@ -893,7 +911,11 @@ mod tests {
     #[test]
     fn open_heals_torn_tail_frame() {
         use std::io::Write;
-        let (dir, r0, spool) = seeded_spool(b"good");
+        let SeededSpool {
+            dir,
+            record: r0,
+            spool,
+        } = seeded_spool(b"good");
         drop(spool);
 
         // Simulate a crash mid-append: a length prefix claiming 100 bytes, only 3 follow.
@@ -919,7 +941,7 @@ mod tests {
     #[test]
     fn open_reports_whether_it_healed_a_torn_tail() {
         use std::io::Write;
-        let (dir, _r0, spool) = seeded_spool(b"good");
+        let SeededSpool { dir, spool, .. } = seeded_spool(b"good");
         drop(spool);
         let spool_file = dir.path().join(SPOOL_FILE);
 
@@ -1023,7 +1045,7 @@ mod tests {
 
     #[test]
     fn pending_loss_survives_reopen_and_reconciles_a_durable_marker() {
-        let (dir, spool, losses) = spool_with_losses(ByteSize::from_bytes(0), 3);
+        let LossySpool { dir, spool, losses } = spool_with_losses(ByteSize::from_bytes(0), 3);
         losses.persist().unwrap();
         let batch = losses.snapshot().unwrap();
         drop(losses);
@@ -1069,7 +1091,7 @@ mod tests {
 
     #[test]
     fn commit_and_persist_pending_losses() {
-        let (dir, spool, losses) = spool_with_losses(ROOMY_CAP, 5);
+        let LossySpool { dir, spool, losses } = spool_with_losses(ROOMY_CAP, 5);
         losses.persist().unwrap();
         let batch = losses.snapshot().unwrap();
         let wrong_batch = AuditLosses {
@@ -1088,7 +1110,11 @@ mod tests {
 
     #[test]
     fn reconcile_requires_matching_class_and_generation() {
-        let (_dir, _spool, losses) = spool_with_losses(ROOMY_CAP, 4);
+        let LossySpool {
+            dir: _dir,
+            spool: _spool,
+            losses,
+        } = spool_with_losses(ROOMY_CAP, 4);
         let generation = losses.snapshot().unwrap().generation;
 
         let payload =
@@ -1110,7 +1136,7 @@ mod tests {
     /// is neither settled by that marker nor left in its generation.
     #[test]
     fn commit_carries_a_concurrent_loss_into_a_fresh_generation() {
-        let (dir, spool, losses) = spool_with_losses(ROOMY_CAP, 3);
+        let LossySpool { dir, spool, losses } = spool_with_losses(ROOMY_CAP, 3);
         let batch = losses.persist_with(Ok).unwrap().unwrap();
         check!(
             losses.state()
@@ -1141,7 +1167,11 @@ mod tests {
     /// and a later reopen does not settle the remainder a second time.
     #[test]
     fn reconcile_settles_only_the_markers_count() {
-        let (dir, mut spool, losses) = spool_with_losses(ROOMY_CAP, 3);
+        let LossySpool {
+            dir,
+            mut spool,
+            losses,
+        } = spool_with_losses(ROOMY_CAP, 3);
         let batch = losses.snapshot().unwrap();
         losses.persist().unwrap();
         losses.add(1);
@@ -1195,7 +1225,7 @@ mod tests {
 
     #[test]
     fn abort_replay_clears_poison_and_clear_poison_handles_absent() {
-        let (dir, record, spool) = seeded_spool(b"data");
+        let SeededSpool { dir, record, spool } = seeded_spool(b"data");
 
         check!(spool.clear_replay_poison().is_ok());
 
@@ -1225,7 +1255,11 @@ mod tests {
 
     #[test]
     fn replayed_spool_is_truncated_on_reopen() {
-        let (dir, record, mut spool) = seeded_spool(b"hello");
+        let SeededSpool {
+            dir,
+            record,
+            mut spool,
+        } = seeded_spool(b"hello");
         spool.commit_replay(&record).unwrap();
         drop(spool);
 
@@ -1236,7 +1270,7 @@ mod tests {
 
     #[test]
     fn unread_records_rejects_replay_offset_past_valid_bytes() {
-        let (dir, _record, spool) = seeded_spool(b"valid");
+        let SeededSpool { dir, spool, .. } = seeded_spool(b"valid");
         let valid_len = spool.size().bytes_u64();
         drop(spool);
 
@@ -1255,7 +1289,7 @@ mod tests {
     #[cfg(unix)]
     fn clear_replay_poison_propagates_permission_denied() {
         use std::os::unix::fs::PermissionsExt;
-        let (dir, record, spool) = seeded_spool(b"data");
+        let SeededSpool { dir, record, spool } = seeded_spool(b"data");
         spool.begin_replay(&record).unwrap();
 
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
@@ -1314,16 +1348,29 @@ mod tests {
         }
     }
 
-    fn spooled_golden_record() -> (tempfile::TempDir, Spool) {
+    /// A sidecar file and the golden bytes it must hold.
+    struct ExpectedSidecar {
+        file: &'static str,
+        want: Vec<u8>,
+    }
+
+    /// A spool file with its contents and the version its header refusal must name.
+    struct HeaderCase {
+        file: &'static str,
+        contents: Vec<u8>,
+        found: Option<i16>,
+    }
+
+    fn spooled_golden_record() -> TempSpool {
         let dir = tempfile::tempdir().unwrap();
         let mut spool = Spool::open(dir.path(), ROOMY_CAP).unwrap();
         check!(spool.append(&golden_record()).unwrap());
-        (dir, spool)
+        TempSpool { dir, spool }
     }
 
     #[test]
     fn spool_file_is_the_golden_bytes() {
-        let (dir, _spool) = spooled_golden_record();
+        let TempSpool { dir, spool: _spool } = spooled_golden_record();
 
         check!(std::fs::read(dir.path().join(SPOOL_FILE)).unwrap() == GOLDEN_SPOOL);
     }
@@ -1344,24 +1391,27 @@ mod tests {
     /// its replay and lost three records in generation 1 leaves them.
     #[test]
     fn sidecar_files_are_the_golden_bytes() {
-        let (dir, spool) = spooled_golden_record();
+        let TempSpool { dir, spool } = spooled_golden_record();
         spool.pending_losses().add(3);
         spool.pending_losses().persist().unwrap();
         spool.begin_replay(&golden_record()).unwrap();
 
         let header: &[u8] = &[b'K', b'A', b'U', b'D', 0x00, 0x00];
-        let cases: [(&str, Vec<u8>); 3] = [
-            (
-                LOSS_STATE_FILE,
-                [header, &1u64.to_be_bytes(), &3u64.to_be_bytes()].concat(),
-            ),
-            (REPLAY_OFFSET_FILE, [header, &0u64.to_be_bytes()].concat()),
-            (
-                REPLAY_POISON_FILE,
-                [header, &0u64.to_be_bytes(), &GOLDEN_SPOOL[6..]].concat(),
-            ),
+        let cases: [ExpectedSidecar; 3] = [
+            ExpectedSidecar {
+                file: LOSS_STATE_FILE,
+                want: [header, &1u64.to_be_bytes(), &3u64.to_be_bytes()].concat(),
+            },
+            ExpectedSidecar {
+                file: REPLAY_OFFSET_FILE,
+                want: [header, &0u64.to_be_bytes()].concat(),
+            },
+            ExpectedSidecar {
+                file: REPLAY_POISON_FILE,
+                want: [header, &0u64.to_be_bytes(), &GOLDEN_SPOOL[6..]].concat(),
+            },
         ];
-        for (file, want) in cases {
+        for ExpectedSidecar { file, want } in cases {
             check!(
                 std::fs::read(dir.path().join(file)).unwrap() == want,
                 "{file}"
@@ -1422,29 +1472,38 @@ mod tests {
         let v0_frame = &GOLDEN_SPOOL[6..];
         let future: &[u8] = &[b'K', b'A', b'U', b'D', 0x00, 0x01];
         let negative: &[u8] = &[b'K', b'A', b'U', b'D', 0xff, 0xff];
-        // (file, contents, version the error must report)
-        let cases: Vec<(&str, Vec<u8>, Option<i16>)> = vec![
-            (SPOOL_FILE, v0_frame.to_vec(), None),
-            (SPOOL_FILE, Vec::new(), None),
-            (SPOOL_FILE, b"KAU".to_vec(), None),
-            (SPOOL_FILE, [future, v0_frame].concat(), Some(1)),
-            (SPOOL_FILE, negative.to_vec(), Some(-1)),
-            (LOSS_STATE_FILE, [0u8; 16].to_vec(), None),
-            (LOSS_STATE_FILE, [future, &[0u8; 16]].concat(), Some(1)),
-            (REPLAY_OFFSET_FILE, [0u8; 8].to_vec(), None),
-            (REPLAY_OFFSET_FILE, [future, &[0u8; 8]].concat(), Some(1)),
-            (
+        let case = |file, contents, found| HeaderCase {
+            file,
+            contents,
+            found,
+        };
+        let cases: Vec<HeaderCase> = vec![
+            case(SPOOL_FILE, v0_frame.to_vec(), None),
+            case(SPOOL_FILE, Vec::new(), None),
+            case(SPOOL_FILE, b"KAU".to_vec(), None),
+            case(SPOOL_FILE, [future, v0_frame].concat(), Some(1)),
+            case(SPOOL_FILE, negative.to_vec(), Some(-1)),
+            case(LOSS_STATE_FILE, [0u8; 16].to_vec(), None),
+            case(LOSS_STATE_FILE, [future, &[0u8; 16]].concat(), Some(1)),
+            case(REPLAY_OFFSET_FILE, [0u8; 8].to_vec(), None),
+            case(REPLAY_OFFSET_FILE, [future, &[0u8; 8]].concat(), Some(1)),
+            case(
                 REPLAY_POISON_FILE,
                 [&0u64.to_be_bytes()[..], v0_frame].concat(),
                 None,
             ),
-            (
+            case(
                 REPLAY_POISON_FILE,
                 [future, &0u64.to_be_bytes(), v0_frame].concat(),
                 Some(1),
             ),
         ];
-        for (file, contents, found) in cases {
+        for HeaderCase {
+            file,
+            contents,
+            found,
+        } in cases
+        {
             let dir = tempfile::tempdir().unwrap();
             std::fs::write(dir.path().join(file), &contents).unwrap();
             let got = match Spool::open(dir.path(), ROOMY_CAP) {

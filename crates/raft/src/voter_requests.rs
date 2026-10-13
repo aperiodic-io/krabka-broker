@@ -107,15 +107,24 @@ fn carries_leader_listener<'a>(
         .is_none_or(|leader| names.any(|name| name.eq_ignore_ascii_case(&leader)))
 }
 
+/// A listener as a request names it on the wire, borrowed from the request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListenerAddress<'a> {
+    /// The listener name.
+    pub name: &'a str,
+    /// The host the listener is reached at.
+    pub host: &'a str,
+    /// The port the listener is reached at.
+    pub port: u16,
+}
+
 /// A listener set is usable when every entry is named, hosted and on a real
 /// port, no name repeats, and there is at least one.
 #[must_use]
-pub fn valid_wire_listeners<'a>(
-    listeners: impl IntoIterator<Item = (&'a str, &'a str, u16)>,
-) -> bool {
+pub fn valid_wire_listeners<'a>(listeners: impl IntoIterator<Item = ListenerAddress<'a>>) -> bool {
     let mut names = std::collections::BTreeSet::new();
     let mut count = 0usize;
-    for (name, host, port) in listeners {
+    for ListenerAddress { name, host, port } in listeners {
         count += 1;
         if name.is_empty() || host.is_empty() || port == 0 || !names.insert(name) {
             return false;
@@ -159,12 +168,10 @@ pub fn add_voter_refusal(
         || {
             request.voter_id >= 0
                 && request.voter_directory_id != WireUuid::ZERO
-                && valid_wire_listeners(request.listeners.iter().map(|listener| {
-                    (
-                        listener.name.as_str(),
-                        listener.host.as_str(),
-                        listener.port,
-                    )
+                && valid_wire_listeners(request.listeners.iter().map(|listener| ListenerAddress {
+                    name: listener.name.as_str(),
+                    host: listener.host.as_str(),
+                    port: listener.port,
                 }))
         },
         "Add voter request didn't include a valid voter",
@@ -269,12 +276,10 @@ pub fn update_voter_refusal(
         || request.voter_directory_id == WireUuid::ZERO
         || feature.min_supported_version < 0
         || feature.max_supported_version < feature.min_supported_version
-        || !valid_wire_listeners(request.listeners.iter().map(|listener| {
-            (
-                listener.name.as_str(),
-                listener.host.as_str(),
-                listener.port,
-            )
+        || !valid_wire_listeners(request.listeners.iter().map(|listener| ListenerAddress {
+            name: listener.name.as_str(),
+            host: listener.host.as_str(),
+            port: listener.port,
         }))
         || !carries_leader_listener(
             quorum,
@@ -482,6 +487,13 @@ mod tests {
 
     #[test]
     fn add_voter_checks_run_in_kafka_order() {
+        struct Row {
+            label: &'static str,
+            request: AddRaftVoterRequest,
+            is_leader: bool,
+            expected: Option<Refusal>,
+        }
+
         let listener = |name: &str| AddListener {
             name: name.into(),
             host: "host-3".into(),
@@ -504,34 +516,48 @@ mod tests {
             INVALID_REQUEST,
             Some("Add voter request didn't include a valid voter".into()),
         ));
-        let rows: Vec<(&str, AddRaftVoterRequest, bool, Option<Refusal>)> =
-            vec![
-            (
-                "foreign cluster id, on a follower",
-                request(|r| r.cluster_id = Some("cluster-b".into())),
-                false,
-                Some(foreign_cluster_refusal()),
-            ),
-            ("a follower", request(|_| {}), false, Some((NOT_LEADER_OR_FOLLOWER, None))),
-            (
-                "a follower, with an invalid voter",
-                request(|r| r.voter_id = -1),
-                false,
-                Some((NOT_LEADER_OR_FOLLOWER, None)),
-            ),
-            ("negative voter id", request(|r| r.voter_id = -1), true, invalid_voter.clone()),
-            (
-                "zero directory id",
-                request(|r| r.voter_directory_id = WireUuid::ZERO),
-                true,
-                invalid_voter.clone(),
-            ),
-            ("no listeners", request(|r| r.listeners.clear()), true, invalid_voter),
-            (
-                "no controller listener",
-                request(|r| r.listeners[0].name = "PLAINTEXT".into()),
-                true,
-                Some((
+        let rows = vec![
+            Row {
+                label: "foreign cluster id, on a follower",
+                request: request(|r| r.cluster_id = Some("cluster-b".into())),
+                is_leader: false,
+                expected: Some(foreign_cluster_refusal()),
+            },
+            Row {
+                label: "a follower",
+                request: request(|_| {}),
+                is_leader: false,
+                expected: Some((NOT_LEADER_OR_FOLLOWER, None)),
+            },
+            Row {
+                label: "a follower, with an invalid voter",
+                request: request(|r| r.voter_id = -1),
+                is_leader: false,
+                expected: Some((NOT_LEADER_OR_FOLLOWER, None)),
+            },
+            Row {
+                label: "negative voter id",
+                request: request(|r| r.voter_id = -1),
+                is_leader: true,
+                expected: invalid_voter.clone(),
+            },
+            Row {
+                label: "zero directory id",
+                request: request(|r| r.voter_directory_id = WireUuid::ZERO),
+                is_leader: true,
+                expected: invalid_voter.clone(),
+            },
+            Row {
+                label: "no listeners",
+                request: request(|r| r.listeners.clear()),
+                is_leader: true,
+                expected: invalid_voter,
+            },
+            Row {
+                label: "no controller listener",
+                request: request(|r| r.listeners[0].name = "PLAINTEXT".into()),
+                is_leader: true,
+                expected: Some((
                     INVALID_REQUEST,
                     Some(
                         "Add voter request didn't include the endpoint for the default listener \
@@ -539,11 +565,27 @@ mod tests {
                             .into(),
                     ),
                 )),
-            ),
-            ("this cluster", request(|r| r.cluster_id = Some(CLUSTER.into())), true, None),
-            ("no cluster id", request(|_| {}), true, None),
+            },
+            Row {
+                label: "this cluster",
+                request: request(|r| r.cluster_id = Some(CLUSTER.into())),
+                is_leader: true,
+                expected: None,
+            },
+            Row {
+                label: "no cluster id",
+                request: request(|_| {}),
+                is_leader: true,
+                expected: None,
+            },
         ];
-        for (label, request, is_leader, expected) in rows {
+        for Row {
+            label,
+            request,
+            is_leader,
+            expected,
+        } in rows
+        {
             check!(
                 add_voter_refusal(&request, CLUSTER, &quorum(is_leader)) == expected,
                 "{label}"
@@ -606,6 +648,13 @@ mod tests {
 
     #[test]
     fn update_voter_checks_run_in_kafka_order() {
+        struct Row {
+            label: &'static str,
+            request: UpdateRaftVoterRequest,
+            is_leader: bool,
+            expected: Option<i16>,
+        }
+
         let request = |edit: fn(&mut UpdateRaftVoterRequest)| {
             let mut request = UpdateRaftVoterRequest {
                 // A request with no cluster id skips Kafka's cluster check.
@@ -629,58 +678,69 @@ mod tests {
             edit(&mut request);
             request
         };
-        let rows: Vec<(&str, UpdateRaftVoterRequest, bool, Option<i16>)> = vec![
-            (
-                "foreign cluster id",
-                request(|r| r.cluster_id = Some("cluster-b".into())),
-                true,
-                Some(INCONSISTENT_CLUSTER_ID),
-            ),
-            (
-                "an epoch below the local one",
-                request(|r| r.current_leader_epoch = 6),
-                true,
-                Some(FENCED_LEADER_EPOCH),
-            ),
-            (
-                "an epoch above the local one",
-                request(|r| r.current_leader_epoch = 8),
-                true,
-                Some(UNKNOWN_LEADER_EPOCH),
-            ),
-            (
-                "a follower",
-                request(|_| {}),
-                false,
-                Some(NOT_LEADER_OR_FOLLOWER),
-            ),
-            (
-                "zero directory id",
-                request(|r| r.voter_directory_id = WireUuid::ZERO),
-                true,
-                Some(INVALID_REQUEST),
-            ),
-            (
-                "a negative kraft.version",
-                request(|r| r.k_raft_version_feature.min_supported_version = -1),
-                true,
-                Some(INVALID_REQUEST),
-            ),
-            (
-                "an inverted kraft.version range",
-                request(|r| r.k_raft_version_feature.min_supported_version = 2),
-                true,
-                Some(INVALID_REQUEST),
-            ),
-            (
-                "no controller listener",
-                request(|r| r.listeners[0].name = "PLAINTEXT".into()),
-                true,
-                Some(INVALID_REQUEST),
-            ),
-            ("a valid update", request(|_| {}), true, None),
+        let rows = vec![
+            Row {
+                label: "foreign cluster id",
+                request: request(|r| r.cluster_id = Some("cluster-b".into())),
+                is_leader: true,
+                expected: Some(INCONSISTENT_CLUSTER_ID),
+            },
+            Row {
+                label: "an epoch below the local one",
+                request: request(|r| r.current_leader_epoch = 6),
+                is_leader: true,
+                expected: Some(FENCED_LEADER_EPOCH),
+            },
+            Row {
+                label: "an epoch above the local one",
+                request: request(|r| r.current_leader_epoch = 8),
+                is_leader: true,
+                expected: Some(UNKNOWN_LEADER_EPOCH),
+            },
+            Row {
+                label: "a follower",
+                request: request(|_| {}),
+                is_leader: false,
+                expected: Some(NOT_LEADER_OR_FOLLOWER),
+            },
+            Row {
+                label: "zero directory id",
+                request: request(|r| r.voter_directory_id = WireUuid::ZERO),
+                is_leader: true,
+                expected: Some(INVALID_REQUEST),
+            },
+            Row {
+                label: "a negative kraft.version",
+                request: request(|r| r.k_raft_version_feature.min_supported_version = -1),
+                is_leader: true,
+                expected: Some(INVALID_REQUEST),
+            },
+            Row {
+                label: "an inverted kraft.version range",
+                request: request(|r| r.k_raft_version_feature.min_supported_version = 2),
+                is_leader: true,
+                expected: Some(INVALID_REQUEST),
+            },
+            Row {
+                label: "no controller listener",
+                request: request(|r| r.listeners[0].name = "PLAINTEXT".into()),
+                is_leader: true,
+                expected: Some(INVALID_REQUEST),
+            },
+            Row {
+                label: "a valid update",
+                request: request(|_| {}),
+                is_leader: true,
+                expected: None,
+            },
         ];
-        for (label, request, is_leader, expected) in rows {
+        for Row {
+            label,
+            request,
+            is_leader,
+            expected,
+        } in rows
+        {
             check!(
                 update_voter_refusal(&request, CLUSTER, &quorum(is_leader)) == expected,
                 "{label}"
@@ -713,33 +773,43 @@ mod tests {
 
     #[test]
     fn reconfiguration_outcomes_get_kafka_codes() {
+        struct Row {
+            label: &'static str,
+            outcome: Result<ReconfigOutcome, RaftError>,
+            expected: Refusal,
+        }
+
         let key = "ReplicaKey(id=3, directoryId=CQkJCQkJCQkJCQkJCQkJCQ)";
-        let rows: Vec<(&str, Result<ReconfigOutcome, RaftError>, Refusal)> = vec![
-            ("committed", Ok(ReconfigOutcome::Committed), (0, None)),
-            (
-                "not the leader",
-                Ok(ReconfigOutcome::NotLeader {
+        let rows = vec![
+            Row {
+                label: "committed",
+                outcome: Ok(ReconfigOutcome::Committed),
+                expected: (0, None),
+            },
+            Row {
+                label: "not the leader",
+                outcome: Ok(ReconfigOutcome::NotLeader {
                     leader: Some(NodeId(2)),
                 }),
-                (NOT_LEADER_OR_FOLLOWER, None),
-            ),
-            (
-                "a lagging candidate",
-                Err(RaftError::VoterNotCaughtUp {
+                expected: (NOT_LEADER_OR_FOLLOWER, None),
+            },
+            Row {
+                label: "a lagging candidate",
+                outcome: Err(RaftError::VoterNotCaughtUp {
                     id: NodeId(3),
                     lag: 10,
                 }),
-                (
+                expected: (
                     REQUEST_TIMED_OUT,
                     Some(format!(
                         "Aborted add voter operation for {key} since it is lagging behind"
                     )),
                 ),
-            ),
-            (
-                "a pending change",
-                Err(RaftError::ReconfigInProgress),
-                (
+            },
+            Row {
+                label: "a pending change",
+                outcome: Err(RaftError::ReconfigInProgress),
+                expected: (
                     REQUEST_TIMED_OUT,
                     Some(
                         "Request timed out waiting for leader to handle previous voter change \
@@ -747,32 +817,37 @@ mod tests {
                             .into(),
                     ),
                 ),
-            ),
-            (
-                "a duplicate voter",
-                Err(RaftError::DuplicateVoter(NodeId(3))),
-                (
+            },
+            Row {
+                label: "a duplicate voter",
+                outcome: Err(RaftError::DuplicateVoter(NodeId(3))),
+                expected: (
                     DUPLICATE_VOTER,
                     Some(format!(
                         "The voter id for {key} is already part of the set of voters"
                     )),
                 ),
-            ),
-            (
-                "an unknown voter",
-                Err(RaftError::VoterNotFound(NodeId(3))),
-                (
+            },
+            Row {
+                label: "an unknown voter",
+                outcome: Err(RaftError::VoterNotFound(NodeId(3))),
+                expected: (
                     VOTER_NOT_FOUND,
                     Some(format!("Cannot remove voter {key} from the set of voters")),
                 ),
-            ),
-            (
-                "a rejected change",
-                Err(RaftError::ReconfigRejected("empty voter set".into())),
-                (INVALID_REQUEST, Some("empty voter set".into())),
-            ),
+            },
+            Row {
+                label: "a rejected change",
+                outcome: Err(RaftError::ReconfigRejected("empty voter set".into())),
+                expected: (INVALID_REQUEST, Some("empty voter set".into())),
+            },
         ];
-        for (label, result, expected) in rows {
+        for Row {
+            label,
+            outcome: result,
+            expected,
+        } in rows
+        {
             check!(
                 reconfiguration_refusal(result, VoterOperation::Add, 3, DIRECTORY) == expected,
                 "{label}"

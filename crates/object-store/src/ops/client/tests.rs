@@ -17,16 +17,21 @@ fn local_file(contents: &[u8]) -> tempfile::NamedTempFile {
     file
 }
 
-fn counting_file(
-    contents: &[u8],
-) -> (
-    Arc<CountingStore>,
-    ObjectStoreClient,
-    tempfile::NamedTempFile,
-) {
+/// A counting store, a client over it, and a local file to upload.
+struct CountingFile {
+    store: Arc<CountingStore>,
+    client: ObjectStoreClient,
+    file: tempfile::NamedTempFile,
+}
+
+fn counting_file(contents: &[u8]) -> CountingFile {
     let store = Arc::new(CountingStore::new());
     let client = ObjectStoreClient::new(store.clone());
-    (store, client, local_file(contents))
+    CountingFile {
+        store,
+        client,
+        file: local_file(contents),
+    }
 }
 
 fn check_upload_counts(store: &CountingStore, puts: usize, multiparts: usize) {
@@ -426,7 +431,11 @@ impl object_store::ObjectStore for CountingStore {
 /// take the single-PUT path and must never take multipart.
 #[tokio::test]
 async fn put_from_path_at_threshold_minus_one_takes_single_put() {
-    let (store, c, f) = counting_file(&[1u8; 7]); // len 7, threshold 8
+    let CountingFile {
+        store,
+        client: c,
+        file: f,
+    } = counting_file(&[1u8; 7]); // len 7, threshold 8
     c.put_from_path(
         &Path::from("b/under"),
         f.path(),
@@ -444,7 +453,11 @@ async fn put_from_path_at_threshold_minus_one_takes_single_put() {
 /// `<=`.
 #[tokio::test]
 async fn put_from_path_at_exact_threshold_takes_multipart() {
-    let (store, c, f) = counting_file(&[2u8; 8]); // len 8 == threshold 8
+    let CountingFile {
+        store,
+        client: c,
+        file: f,
+    } = counting_file(&[2u8; 8]); // len 8 == threshold 8
     c.put_from_path(&Path::from("b/at"), f.path(), 8, 4, PutRequest::default())
         .await
         .unwrap();
@@ -453,7 +466,11 @@ async fn put_from_path_at_exact_threshold_takes_multipart() {
 
 #[tokio::test]
 async fn multipart_create_atomically_reserves_the_key() {
-    let (store, c, f) = counting_file(&[3u8; 8]);
+    let CountingFile {
+        store,
+        client: c,
+        file: f,
+    } = counting_file(&[3u8; 8]);
 
     c.put_from_path(&Path::from("worm/segment"), f.path(), 8, 4, PutRequest {
         mode: PutMode::Create,
@@ -545,9 +562,18 @@ impl object_store::MultipartUpload for FailingUpload {
     }
 }
 
-fn failing_client(pending: bool) -> (ObjectStoreClient, Arc<CountingStore>) {
+/// A client over a failing store, and the store.
+struct FailingClient {
+    client: ObjectStoreClient,
+    store: Arc<CountingStore>,
+}
+
+fn failing_client(pending: bool) -> FailingClient {
     let store = Arc::new(CountingStore::failing(pending));
-    (ObjectStoreClient::new(store.clone()), store)
+    FailingClient {
+        client: ObjectStoreClient::new(store.clone()),
+        store,
+    }
 }
 
 async fn wait_for_abort(store: &CountingStore) {
@@ -578,7 +604,7 @@ async fn cancel_after_progress<T: std::fmt::Debug>(
 
 #[tokio::test]
 async fn put_from_path_aborts_after_a_part_failure() {
-    let (client, store) = failing_client(false);
+    let FailingClient { client, store } = failing_client(false);
     let file = local_file(&[1; 12]);
 
     client
@@ -597,7 +623,7 @@ async fn put_from_path_aborts_after_a_part_failure() {
 
 #[tokio::test]
 async fn put_from_path_aborts_when_cancelled() {
-    let (client, store) = failing_client(true);
+    let FailingClient { client, store } = failing_client(true);
     let file = local_file(&[1; 12]);
     let task = tokio::spawn(async move {
         client
@@ -616,7 +642,7 @@ async fn put_from_path_aborts_when_cancelled() {
 
 #[tokio::test]
 async fn multipart_backpressure_bounds_pending_parts_and_cancellation_aborts() {
-    let (client, store) = failing_client(true);
+    let FailingClient { client, store } = failing_client(true);
     let file = local_file(&[1; 400]);
     let task = tokio::spawn(async move {
         client

@@ -393,44 +393,51 @@ mod tests {
             krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
         };
 
-        // (label, the replayed resolution, the pattern of a heartbeat after
-        // the replay, the group's subscribed topics)
-        type Row<'a> = (
-            &'a str,
-            Option<&'a [&'a str]>,
-            Option<&'a str>,
-            SubscribedTopics,
-        );
+        struct Row<'a> {
+            label: &'a str,
+            /// The replayed resolution.
+            resolved: Option<&'a [&'a str]>,
+            /// The pattern of a heartbeat after the replay.
+            heartbeat_pattern: Option<&'a str>,
+            /// The group's subscribed topics.
+            want: SubscribedTopics,
+        }
         let named = |topics: &[&str]| {
             SubscribedTopics::Named(topics.iter().map(|topic| (*topic).to_string()).collect())
         };
         let rows: [Row<'_>; 4] = [
-            (
-                "replayed with its resolution",
-                Some(&["payments"]),
-                None,
-                named(&["orders", "payments"]),
-            ),
-            (
-                "the resolution stands when a heartbeat does not carry the pattern",
-                Some(&["payments", "payouts"]),
-                None,
-                named(&["orders", "payments", "payouts"]),
-            ),
-            (
-                "replayed without a resolution",
-                None,
-                None,
-                SubscribedTopics::All,
-            ),
-            (
-                "a heartbeat with the empty pattern drops the regex",
-                Some(&["payments"]),
-                Some(""),
-                named(&["orders"]),
-            ),
+            Row {
+                label: "replayed with its resolution",
+                resolved: Some(&["payments"]),
+                heartbeat_pattern: None,
+                want: named(&["orders", "payments"]),
+            },
+            Row {
+                label: "the resolution stands when a heartbeat does not carry the pattern",
+                resolved: Some(&["payments", "payouts"]),
+                heartbeat_pattern: None,
+                want: named(&["orders", "payments", "payouts"]),
+            },
+            Row {
+                label: "replayed without a resolution",
+                resolved: None,
+                heartbeat_pattern: None,
+                want: SubscribedTopics::All,
+            },
+            Row {
+                label: "a heartbeat with the empty pattern drops the regex",
+                resolved: Some(&["payments"]),
+                heartbeat_pattern: Some(""),
+                want: named(&["orders"]),
+            },
         ];
-        for (label, resolved, heartbeat_pattern, want) in rows {
+        for Row {
+            label,
+            resolved,
+            heartbeat_pattern,
+            want,
+        } in rows
+        {
             let mut state = GroupState::new("g");
             apply_seed(&mut state, regex_seed(resolved));
             if heartbeat_pattern.is_some() || resolved.is_some() {

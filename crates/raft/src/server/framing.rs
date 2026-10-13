@@ -68,6 +68,19 @@ fn request_is_flexible(
     flexible_min.is_some_and(|minimum| version >= minimum)
 }
 
+/// A request frame with its header parsed.
+#[derive(Debug)]
+pub(super) struct RequestFrame {
+    pub(super) api_key: ApiKey,
+    pub(super) api_version: ApiVersion,
+    pub(super) correlation_id: CorrelationId,
+    pub(super) client_id: Option<String>,
+    /// The request body, after the header.
+    pub(super) body: Bytes,
+    /// Whether the response header carries tagged fields.
+    pub(super) flexible: bool,
+}
+
 /// Reads one request frame and parses its header.
 ///
 /// A size prefix that is negative, or above `max_request_bytes`
@@ -78,17 +91,7 @@ pub(super) async fn read_one_request<S>(
     stream: &mut S,
     admin_router: Option<&dyn ControllerAdminRouter>,
     max_request_bytes: usize,
-) -> Result<
-    (
-        ApiKey,
-        ApiVersion,
-        CorrelationId,
-        Option<String>,
-        Bytes,
-        bool,
-    ),
-    RaftError,
->
+) -> Result<RequestFrame, RaftError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -144,14 +147,14 @@ where
         krabka_protocol::tagged_fields::read_tagged_fields(&mut cur, |_tag, _payload| Ok(false))?;
     }
 
-    Ok((
-        api_key_n,
+    Ok(RequestFrame {
+        api_key: api_key_n,
         api_version,
         correlation_id,
         client_id,
-        Bytes::copy_from_slice(cur),
-        response_flexible,
-    ))
+        body: Bytes::copy_from_slice(cur),
+        flexible: response_flexible,
+    })
 }
 
 pub(super) async fn write_response<S>(
@@ -322,19 +325,10 @@ mod tests {
         out
     }
 
-    type DecodedFrame = (
-        ApiKey,
-        ApiVersion,
-        CorrelationId,
-        Option<String>,
-        Bytes,
-        bool,
-    );
-
     async fn decode_frame(
         frame: Vec<u8>,
         router: Option<&dyn ControllerAdminRouter>,
-    ) -> DecodedFrame {
+    ) -> RequestFrame {
         let (mut client, mut server) = tokio::io::duplex(256);
         let write_fut = async move {
             client.write_all(&frame).await.unwrap();
@@ -515,8 +509,14 @@ mod tests {
             ),
         ];
         for (case, frame, want_body) in cases {
-            let (api_key, api_version, correlation_id, client_id, body, flexible) =
-                decode_frame(frame, None).await;
+            let RequestFrame {
+                api_key,
+                api_version,
+                correlation_id,
+                client_id,
+                body,
+                flexible,
+            } = decode_frame(frame, None).await;
 
             check!(
                 (
@@ -613,7 +613,7 @@ mod tests {
             client.write_all(&frame).await.unwrap();
         });
 
-        let (_, _, _, _, body, flexible) =
+        let RequestFrame { body, flexible, .. } =
             super::read_one_request(&mut server, None, MAX_REQUEST_BYTES)
                 .await
                 .expect("decode");
@@ -718,8 +718,14 @@ mod tests {
         ];
 
         for (case, want_key, want_version, frame, want_flexible) in cases {
-            let (api_key, api_version, correlation_id, decoded_client_id, body, flexible) =
-                decode_frame(frame, Some(&router)).await;
+            let RequestFrame {
+                api_key,
+                api_version,
+                correlation_id,
+                client_id: decoded_client_id,
+                body,
+                flexible,
+            } = decode_frame(frame, Some(&router)).await;
 
             check!(
                 (

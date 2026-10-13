@@ -238,9 +238,16 @@ fn offset_row(json: &serde_json::Value) -> OffsetRow {
     }
 }
 
-/// A `"key"`/`"value"` object as [`GroupMetadataRow`] and the identities of its
-/// members, in the members' own order.
-fn group_metadata_row(json: &serde_json::Value) -> (GroupMetadataRow, Vec<MemberIdentity>) {
+/// A group-metadata row and the identities of its members, in the members' own
+/// order.
+#[derive(Debug)]
+struct GroupMetadata {
+    row: GroupMetadataRow,
+    identities: Vec<MemberIdentity>,
+}
+
+/// A `"key"`/`"value"` object as [`GroupMetadata`].
+fn group_metadata_row(json: &serde_json::Value) -> GroupMetadata {
     let key = &json["key"];
     let value = &json["value"];
     let data = &value["data"];
@@ -275,7 +282,7 @@ fn group_metadata_row(json: &serde_json::Value) -> (GroupMetadataRow, Vec<Member
         leader: optional_string_field(data, "leader"),
         members,
     };
-    (row, identities)
+    GroupMetadata { row, identities }
 }
 
 fn int_field(json: &serde_json::Value, name: &str) -> i64 {
@@ -357,6 +364,12 @@ fn docker_run_ok(image: &str, args: &[&str]) -> std::process::Output {
 }
 
 // ------------------------------------------------------------- the krabka side
+
+/// The rows a formatter run decoded, and how many records the run read.
+struct OffsetsRead {
+    decoded: Vec<serde_json::Value>,
+    processed: usize,
+}
 
 /// One krabka broker the containers reach at `host.docker.internal`.
 struct Cluster {
@@ -529,7 +542,7 @@ impl Cluster {
     /// commits nothing for it. Its own group-metadata records land in this
     /// topic like any other group's; every assertion below is filtered by group
     /// id, so they are inert.
-    fn read_offsets_topic(&self, formatter: &str) -> (Vec<serde_json::Value>, usize) {
+    fn read_offsets_topic(&self, formatter: &str) -> OffsetsRead {
         let out = docker_run_ok(KAFKA_IMAGE, &[
             CONSOLE_CONSUMER,
             "--bootstrap-server",
@@ -546,7 +559,7 @@ impl Cluster {
         ]);
         let decoded = decode_stream(&String::from_utf8_lossy(&out.stdout));
         let processed = processed_records(&String::from_utf8_lossy(&out.stderr));
-        (decoded, processed)
+        OffsetsRead { decoded, processed }
     }
 
     async fn shutdown(self) { self.handle.shutdown().await; }
@@ -649,10 +662,16 @@ async fn kafka_formatters_decode_krabka_consumer_offsets() {
 
     // The group-metadata run first, so its row count is a lower bound on the
     // key version 2 records the offsets run then skips.
-    let (raw_metadata, _) = cluster.read_offsets_topic(GROUP_METADATA_FORMATTER);
-    let decoded_metadata: Vec<(GroupMetadataRow, Vec<MemberIdentity>)> =
+    let OffsetsRead {
+        decoded: raw_metadata,
+        ..
+    } = cluster.read_offsets_topic(GROUP_METADATA_FORMATTER);
+    let decoded_metadata: Vec<GroupMetadata> =
         raw_metadata.iter().map(group_metadata_row).collect();
-    let (offsets_json, offsets_processed) = cluster.read_offsets_topic(OFFSETS_FORMATTER);
+    let OffsetsRead {
+        decoded: offsets_json,
+        processed: offsets_processed,
+    } = cluster.read_offsets_topic(OFFSETS_FORMATTER);
     let offsets: Vec<OffsetRow> = offsets_json.iter().map(offset_row).collect();
 
     // 1. Both groups' committed offsets decode to what krabka says it holds.
@@ -671,13 +690,16 @@ async fn kafka_formatters_decode_krabka_consumer_offsets() {
     }
 
     // 2. The classic group's rebalances decode to the group krabka served.
-    let classic_metadata: Vec<&(GroupMetadataRow, Vec<MemberIdentity>)> = decoded_metadata
+    let classic_metadata: Vec<&GroupMetadata> = decoded_metadata
         .iter()
-        .filter(|(row, _)| row.group == CLASSIC_GROUP)
+        .filter(|metadata| metadata.row.group == CLASSIC_GROUP)
         .collect();
-    let (with_members, identities) = classic_metadata
+    let GroupMetadata {
+        row: with_members,
+        identities,
+    } = classic_metadata
         .iter()
-        .find(|(row, _)| !row.members.is_empty())
+        .find(|metadata| !metadata.row.members.is_empty())
         .unwrap_or_else(|| panic!("no group-metadata row carries a member: {classic_metadata:?}"));
     assert!(
         *with_members
@@ -700,7 +722,9 @@ async fn kafka_formatters_decode_krabka_consumer_offsets() {
 
     // The `LeaveGroup` on close is a rebalance of its own: krabka empties the
     // group under a higher generation.
-    let (last_classic, _) = classic_metadata
+    let GroupMetadata {
+        row: last_classic, ..
+    } = classic_metadata
         .last()
         .expect("the classic group has at least one row");
     assert!(
@@ -715,7 +739,7 @@ async fn kafka_formatters_decode_krabka_consumer_offsets() {
     assert!(
         !decoded_metadata
             .iter()
-            .any(|(row, _)| row.group == NEXT_GEN_GROUP),
+            .any(|metadata| metadata.row.group == NEXT_GEN_GROUP),
         "a KIP-848 group must not appear as classic group metadata: {decoded_metadata:?}",
     );
 

@@ -95,6 +95,13 @@ pub struct SchemaValidator {
     clock: Arc<dyn qubit_clock::WallClock>,
 }
 
+/// The credentials of HTTP Basic authentication to the registry.
+#[derive(Debug, Clone)]
+pub struct BasicAuth {
+    pub username: String,
+    pub password: String,
+}
+
 impl SchemaValidator {
     /// Build a validator against the registry at `url`.
     ///
@@ -141,7 +148,7 @@ impl SchemaValidator {
             maximum_cache_size,
             expire_after,
             http_timeout,
-            Some((username, password)),
+            Some(BasicAuth { username, password }),
             Arc::new(qubit_clock::StdWallClock::new()),
         )
     }
@@ -161,13 +168,13 @@ impl SchemaValidator {
         maximum_cache_size: usize,
         expire_after: Time,
         http_timeout: Time,
-        basic_auth: Option<(String, String)>,
+        basic_auth: Option<BasicAuth>,
         clock: Arc<dyn qubit_clock::WallClock>,
     ) -> Result<Self, SchemaValidatorError> {
         let capacity =
             NonZeroUsize::new(maximum_cache_size).ok_or(SchemaValidatorError::ZeroCache)?;
         let mut headers = reqwest::header::HeaderMap::new();
-        if let Some((username, password)) = basic_auth {
+        if let Some(BasicAuth { username, password }) = basic_auth {
             let encoded = STANDARD.encode(format!("{username}:{password}"));
             let mut authorization = format!("Basic {encoded}")
                 .parse::<reqwest::header::HeaderValue>()

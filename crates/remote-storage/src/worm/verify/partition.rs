@@ -11,12 +11,12 @@ use {
         TrustedManifestKeys, VerifyRequest,
         listing::{DirListing, orphans},
         manifest_read::{KeyedManifest, ManifestRead, read_manifest},
-        report::{PartitionVerifyReport, VerifyBreak, broken_before_walk},
+        report::{VerifiedPartition, VerifyBreak, broken_before_walk},
         walk::walk_partition,
     },
     crate::worm::{
         error::WormError,
-        manifest::{MANIFEST_SUFFIX, ManifestBody, ObjectEntry},
+        manifest::{MANIFEST_SUFFIX, ManifestBody},
     },
     object_store::ObjectStore,
     std::{collections::BTreeMap, sync::Arc},
@@ -29,12 +29,15 @@ pub(super) async fn verify_partition(
     listing: &DirListing,
     request: &VerifyRequest,
     trusted: &TrustedManifestKeys,
-) -> Result<Option<(PartitionVerifyReport, BTreeMap<String, ObjectEntry>)>, WormError> {
+) -> Result<Option<VerifiedPartition>, WormError> {
     let mut decoded: Vec<KeyedManifest> = Vec::new();
     let mut rejected: Option<VerifyBreak> = None;
     for key in listing.keys().filter(|key| key.ends_with(MANIFEST_SUFFIX)) {
         match read_manifest(store, key).await? {
-            ManifestRead::Decoded(manifest) => decoded.push((key.clone(), *manifest)),
+            ManifestRead::Decoded(manifest) => decoded.push(KeyedManifest {
+                key: key.clone(),
+                manifest: *manifest,
+            }),
             ManifestRead::Rejected(reason) => {
                 rejected.get_or_insert_with(|| VerifyBreak {
                     manifest_key: key.clone(),
@@ -45,16 +48,16 @@ pub(super) async fn verify_partition(
         }
     }
 
-    if !selected(request, decoded.first().map(|(_, m)| &m.body)) {
+    if !selected(request, decoded.first().map(|keyed| &keyed.manifest.body)) {
         return Ok(None);
     }
 
     let orphan_objects = orphans(listing, &decoded);
     if let Some(first_break) = rejected {
-        return Ok(Some((
-            broken_before_walk(dir, orphan_objects, first_break),
-            BTreeMap::new(),
-        )));
+        return Ok(Some(VerifiedPartition {
+            report: broken_before_walk(dir, orphan_objects, first_break),
+            objects: BTreeMap::new(),
+        }));
     }
 
     let walk = walk_partition(store, &decoded, listing, request, trusted).await?;

@@ -268,8 +268,15 @@ pub(super) fn write_snapshot(path: &std::path::Path, dump: RlmmCacheDump) {
     .expect("write snapshot");
 }
 
+/// A one-segment archive on disk, with the ids of its topic and segment.
+pub(super) struct SingleSegmentArchive {
+    pub(super) dir: tempfile::TempDir,
+    pub(super) topic_id: Uuid,
+    pub(super) segment_id: Uuid,
+}
+
 /// One complete orders-0 segment with caller-chosen base offset.
-pub(super) fn single_segment_archive(base_offset: Offset) -> (tempfile::TempDir, Uuid, Uuid) {
+pub(super) fn single_segment_archive(base_offset: Offset) -> SingleSegmentArchive {
     let archive = tempfile::tempdir().expect("temp dir");
     let topic_id = Uuid::from_u128(1);
     let segment_id = Uuid::from_u128(10);
@@ -282,5 +289,9 @@ pub(super) fn single_segment_archive(base_offset: Offset) -> (tempfile::TempDir,
         .base_offset(base_offset)
         .segment_id(segment_id)
         .call();
-    (archive, topic_id, segment_id)
+    SingleSegmentArchive {
+        dir: archive,
+        topic_id,
+        segment_id,
+    }
 }

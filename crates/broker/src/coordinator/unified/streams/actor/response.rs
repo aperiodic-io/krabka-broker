@@ -16,7 +16,7 @@ use {
         coordinator::unified::streams::{
             config::StreamsGroupConfig,
             persistence::StreamsGroupTopologyValue,
-            state::{StreamsGroupState, StreamsMemberState},
+            state::{StreamsGroupState, StreamsMemberState, TopologyStatus},
             topology::{ConfiguredSubtopology, ConfiguredTopology, status as topo_status},
         },
     },
@@ -140,7 +140,7 @@ pub(super) fn build_assignment_resp(
             detail.to_owned(),
         ));
     }
-    if let Some((code, detail)) = &state.status {
+    if let Some(TopologyStatus { code, detail }) = &state.status {
         status.push(status_entry(*code, detail.clone()));
     }
     if let Some(requester) = &state.shutdown_request_member_id {

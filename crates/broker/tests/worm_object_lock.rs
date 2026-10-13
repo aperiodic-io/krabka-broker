@@ -82,7 +82,10 @@ async fn object_lock_bucket_refuses_delete_of_an_archived_segment() {
         ..krabka_remote_storage::S3Config::default()
     };
 
-    let (broker, _dir) = start_worm_broker(s3.clone(), &key_path).await;
+    let WormBroker {
+        handle: broker,
+        dir: _dir,
+    } = start_worm_broker(s3.clone(), &key_path).await;
     nc_check_connectivity();
 
     create_tiered_topic(&broker, TOPIC).await;
@@ -186,6 +189,12 @@ async fn object_lock_bucket_refuses_delete_of_an_archived_segment() {
     // `_minio` is dropped here; the container is removed with `docker rm -f`.
 }
 
+/// A running WORM broker and its `log.dir`, which the caller keeps alive.
+struct WormBroker {
+    handle: krabka_broker::BrokerHandle,
+    dir: tempfile::TempDir,
+}
+
 /// Boot a broker whose S3 tier is a WORM archive signed by the key at
 /// `key_path`.
 ///
@@ -196,7 +205,7 @@ async fn object_lock_bucket_refuses_delete_of_an_archived_segment() {
 async fn start_worm_broker(
     s3: krabka_remote_storage::S3Config,
     key_path: &std::path::Path,
-) -> (krabka_broker::BrokerHandle, tempfile::TempDir) {
+) -> WormBroker {
     init_tracing_with("krabka_broker=debug,info");
     let dir = tempfile::tempdir().expect("tempdir for log.dir");
     let listen_addr: std::net::SocketAddr = broker0_listen().parse().expect("allocated addr");
@@ -241,7 +250,7 @@ async fn start_worm_broker(
         listen = broker0_listen(),
         advertised = broker0_advertised()
     );
-    (handle, dir)
+    WormBroker { handle, dir }
 }
 
 /// Poll the bucket until every archived `.log` has a `.manifest` beside it,

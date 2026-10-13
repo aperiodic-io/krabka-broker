@@ -9,7 +9,8 @@
 //! request in request order.
 
 use {
-    crate::codes,
+    crate::{codes, txn::state::TopicPartition},
+    krabka_ids::PartitionIndex,
     krabka_protocol::owned::{
         txn_offset_commit_request::{TxnOffsetCommitRequest, TxnOffsetCommitRequestTopic},
         txn_offset_commit_response::{
@@ -32,14 +33,17 @@ pub(super) fn build_response(
     code: i16,
     topic_ids: bool,
     denied_topics: &std::collections::HashSet<String>,
-    unknown_rows: &std::collections::HashSet<(String, i32)>,
+    unknown_rows: &std::collections::HashSet<TopicPartition>,
 ) -> TxnOffsetCommitResponse {
     let sweep_code = |topic: &TxnOffsetCommitRequestTopic, partition: i32| {
         if topic_ids && topic.name.is_empty() {
             Some(codes::UNKNOWN_TOPIC_ID)
         } else if denied_topics.contains(&topic.name) {
             Some(codes::TOPIC_AUTHORIZATION_FAILED)
-        } else if unknown_rows.contains(&(topic.name.clone(), partition)) {
+        } else if unknown_rows.contains(&TopicPartition {
+            topic: topic.name.clone(),
+            partition: PartitionIndex(partition),
+        }) {
             Some(codes::UNKNOWN_TOPIC_OR_PARTITION)
         } else {
             None
@@ -195,16 +199,35 @@ mod tests {
             .call()
     }
 
-    fn response_topic(name: &str, id: u128, rows: &[(i32, i16)]) -> TxnOffsetCommitResponseTopic {
+    /// The code a response answers for one partition.
+    #[derive(Clone, Copy)]
+    struct PartitionCode {
+        partition: i32,
+        code: i16,
+    }
+
+    fn rc(partition: i32, code: i16) -> PartitionCode { PartitionCode { partition, code } }
+
+    fn response_topic(
+        name: &str,
+        id: u128,
+        rows: &[PartitionCode],
+    ) -> TxnOffsetCommitResponseTopic {
         TxnOffsetCommitResponseTopic {
             name: name.into(),
             topic_id: WireUuid(uuid::Uuid::from_u128(id).into_bytes()),
             partitions: rows
                 .iter()
-                .map(|&(partition_index, error_code)| row(partition_index, error_code))
+                .map(|&PartitionCode { partition, code }| row(partition, code))
                 .collect(),
             ..Default::default()
         }
+    }
+
+    /// A row the existence check flagged.
+    struct UnknownRow {
+        topic: &'static str,
+        partition: i32,
     }
 
     struct Case {
@@ -213,7 +236,7 @@ mod tests {
         topics: Vec<TxnOffsetCommitRequestTopic>,
         code: i16,
         denied: &'static [&'static str],
-        unknown: &'static [(&'static str, i32)],
+        unknown: &'static [UnknownRow],
         expected: Vec<TxnOffsetCommitResponseTopic>,
     }
 
@@ -231,8 +254,8 @@ mod tests {
                 denied: &[],
                 unknown: &[],
                 expected: vec![response_topic("orders", 0, &[
-                    (2, codes::INVALID_TXN_STATE),
-                    (3, codes::INVALID_TXN_STATE),
+                    rc(2, codes::INVALID_TXN_STATE),
+                    rc(3, codes::INVALID_TXN_STATE),
                 ])],
             },
             Case {
@@ -243,8 +266,8 @@ mod tests {
                 denied: &["orders"],
                 unknown: &[],
                 expected: vec![response_topic("orders", 0, &[
-                    (2, codes::TOPIC_AUTHORIZATION_FAILED),
-                    (3, codes::TOPIC_AUTHORIZATION_FAILED),
+                    rc(2, codes::TOPIC_AUTHORIZATION_FAILED),
+                    rc(3, codes::TOPIC_AUTHORIZATION_FAILED),
                 ])],
             },
             Case {
@@ -253,10 +276,13 @@ mod tests {
                 topics: vec![request_topic("orders", 0, &[2, 3])],
                 code: codes::NONE,
                 denied: &[],
-                unknown: &[("orders", 3)],
+                unknown: &[UnknownRow {
+                    topic: "orders",
+                    partition: 3,
+                }],
                 expected: vec![response_topic("orders", 0, &[
-                    (3, codes::UNKNOWN_TOPIC_OR_PARTITION),
-                    (2, codes::NONE),
+                    rc(3, codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    rc(2, codes::NONE),
                 ])],
             },
             Case {
@@ -269,11 +295,14 @@ mod tests {
                 ],
                 code: codes::NONE,
                 denied: &["denied"],
-                unknown: &[("missing", 0)],
+                unknown: &[UnknownRow {
+                    topic: "missing",
+                    partition: 0,
+                }],
                 expected: vec![
-                    response_topic("denied", 0, &[(0, codes::TOPIC_AUTHORIZATION_FAILED)]),
-                    response_topic("missing", 0, &[(0, codes::UNKNOWN_TOPIC_OR_PARTITION)]),
-                    response_topic("a", 0, &[(0, codes::NONE)]),
+                    response_topic("denied", 0, &[rc(0, codes::TOPIC_AUTHORIZATION_FAILED)]),
+                    response_topic("missing", 0, &[rc(0, codes::UNKNOWN_TOPIC_OR_PARTITION)]),
+                    response_topic("a", 0, &[rc(0, codes::NONE)]),
                 ],
             },
             Case {
@@ -286,14 +315,17 @@ mod tests {
                 ],
                 code: codes::NONE,
                 denied: &[],
-                unknown: &[("a", 5)],
+                unknown: &[UnknownRow {
+                    topic: "a",
+                    partition: 5,
+                }],
                 expected: vec![
-                    response_topic("", 7, &[(0, codes::UNKNOWN_TOPIC_ID)]),
+                    response_topic("", 7, &[rc(0, codes::UNKNOWN_TOPIC_ID)]),
                     response_topic("a", 1, &[
-                        (5, codes::UNKNOWN_TOPIC_OR_PARTITION),
-                        (0, codes::NONE),
+                        rc(5, codes::UNKNOWN_TOPIC_OR_PARTITION),
+                        rc(0, codes::NONE),
                     ]),
-                    response_topic("", 8, &[(1, codes::UNKNOWN_TOPIC_ID)]),
+                    response_topic("", 8, &[rc(1, codes::UNKNOWN_TOPIC_ID)]),
                 ],
             },
             Case {
@@ -302,8 +334,11 @@ mod tests {
                 topics: vec![request_topic("", 7, &[0])],
                 code: codes::NONE,
                 denied: &[],
-                unknown: &[("", 0)],
-                expected: vec![response_topic("", 7, &[(
+                unknown: &[UnknownRow {
+                    topic: "",
+                    partition: 0,
+                }],
+                expected: vec![response_topic("", 7, &[rc(
                     0,
                     codes::UNKNOWN_TOPIC_OR_PARTITION,
                 )])],
@@ -315,10 +350,13 @@ mod tests {
                 ..request()
             };
             let denied: HashSet<String> = case.denied.iter().map(|&t| t.to_string()).collect();
-            let unknown: HashSet<(String, i32)> = case
+            let unknown: HashSet<TopicPartition> = case
                 .unknown
                 .iter()
-                .map(|&(t, p)| (t.to_string(), p))
+                .map(|&UnknownRow { topic, partition }| TopicPartition {
+                    topic: topic.to_string(),
+                    partition: PartitionIndex(partition),
+                })
                 .collect();
             let response = build_response(&req, case.code, case.topic_ids, &denied, &unknown);
             assert!(
@@ -343,7 +381,10 @@ mod tests {
             ..request()
         };
         for (version, name, id) in [(5, "orders", 0), (6, "", 9)] {
-            let rows = [(2, codes::INVALID_TXN_STATE), (3, codes::INVALID_TXN_STATE)];
+            let rows = [
+                rc(2, codes::INVALID_TXN_STATE),
+                rc(3, codes::INVALID_TXN_STATE),
+            ];
             let expected = TxnOffsetCommitResponse {
                 throttle_time_ms: 0,
                 topics: vec![response_topic(name, id, &rows)],

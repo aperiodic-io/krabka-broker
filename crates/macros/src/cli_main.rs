@@ -8,13 +8,27 @@ use {
     },
 };
 
+/// The two halves of the `cli_main!` input.
+struct Split<'a> {
+    /// The path of the crate whose `run_from_args` the `main` calls.
+    path: &'a [TokenTree],
+    /// The arguments of `#[tokio::main(...)]`.
+    runtime: &'a [TokenTree],
+}
+
 /// Splits `tokens` at its first top-level comma into the crate path and the
 /// `#[tokio::main(...)]` arguments. A comma inside a group belongs to the
 /// group, so only the outermost one splits.
-fn split(tokens: &[TokenTree]) -> (&[TokenTree], &[TokenTree]) {
+fn split(tokens: &[TokenTree]) -> Split<'_> {
     match tokens.iter().position(TokenTree::is_punct_comma) {
-        Some(comma) => (&tokens[..comma], &tokens[comma + 1..]),
-        None => (tokens, &[]),
+        Some(comma) => Split {
+            path: &tokens[..comma],
+            runtime: &tokens[comma + 1..],
+        },
+        None => Split {
+            path: tokens,
+            runtime: &[],
+        },
     }
 }
 
@@ -22,7 +36,7 @@ fn split(tokens: &[TokenTree]) -> (&[TokenTree], &[TokenTree]) {
 /// `main`.
 pub(crate) fn expand(tokens: TokenStream) -> Result<TokenStream, ParseError> {
     let tokens = Vec::from(tokens);
-    let (path, runtime) = split(&tokens);
+    let Split { path, runtime } = split(&tokens);
     let path = required_tokens(
         TokenStream::from(path),
         "`cli_main!` needs the path of the crate whose `run_from_args` it calls",
@@ -49,20 +63,27 @@ pub(crate) fn expand(tokens: TokenStream) -> Result<TokenStream, ParseError> {
 #[cfg(test)]
 mod tests {
     use {
-        super::{expand, split},
+        super::{Split, expand, split},
         crate::meta::compact,
         assert2::assert,
         moxy::token::TokenStream,
     };
 
+    /// Both sides of a split, printed without whitespace.
+    #[derive(Debug, PartialEq)]
+    struct SplitText {
+        path: String,
+        runtime: String,
+    }
+
     /// `tokens` parsed, split, and each side printed without whitespace.
-    fn split_text(tokens: &str) -> (String, String) {
+    fn split_text(tokens: &str) -> SplitText {
         let tokens: TokenStream = tokens.parse().expect("tokens");
-        let (path, runtime) = split(&tokens);
-        (
-            compact(&TokenStream::from(path)),
-            compact(&TokenStream::from(runtime)),
-        )
+        let Split { path, runtime } = split(&tokens);
+        SplitText {
+            path: compact(&TokenStream::from(path)),
+            runtime: compact(&TokenStream::from(runtime)),
+        }
     }
 
     #[test]
@@ -82,7 +103,11 @@ mod tests {
             ),
         ] {
             assert!(
-                split_text(tokens) == (path.to_owned(), runtime.to_owned()),
+                split_text(tokens)
+                    == SplitText {
+                        path: path.to_owned(),
+                        runtime: runtime.to_owned(),
+                    },
                 "{tokens}"
             );
         }

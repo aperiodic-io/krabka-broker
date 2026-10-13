@@ -14,7 +14,9 @@ use {
             transaction_wire::{partitions_request, transaction_topic},
             transactions::{ProducerIdentity, end_transaction_request, init_producer_request},
         },
-        txnver_harness::{NONE, create_topic, downgrade_transaction_version, expected_partitions},
+        txnver_harness::{
+            NONE, create_topic, downgrade_transaction_version, expected_partitions, partition_code,
+        },
     },
     assert2::assert,
     krabka_broker::{BootstrapMode, BrokerConfig},
@@ -64,8 +66,8 @@ async fn find_ready_coordinator(client: &Client, tid: &str) {
 /// `InitProducerId` for `tid`. It retries while the coordinator is still
 /// loading, that is, on `COORDINATOR_NOT_AVAILABLE(15)` or
 /// `NOT_COORDINATOR(16)`. Returns the assigned
-/// `(producer_id, producer_epoch)`.
-async fn init_producer_id(client: &Client, tid: &str) -> (i64, i16) {
+/// producer identity.
+async fn init_producer_id(client: &Client, tid: &str) -> ProducerIdentity {
     // FindCoordinator locates and triggers loading of the coordinator for tid;
     // on a single-broker cluster the coordinator load can lag broker boot.
     find_ready_coordinator(client, tid).await;
@@ -94,7 +96,7 @@ async fn init_producer_id(client: &Client, tid: &str) -> (i64, i16) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     let init = init.expect("InitProducerId did not become ready within 10s");
-    (init.producer_id, init.producer_epoch)
+    ProducerIdentity::from_wire((init.producer_id, init.producer_epoch))
 }
 
 /// `AddPartitionsToTxn` to add `(topic, partition)` to the ongoing txn for
@@ -104,8 +106,7 @@ async fn init_producer_id(client: &Client, tid: &str) -> (i64, i16) {
 async fn add_partition_ongoing(
     client: &Client,
     tid: &str,
-    pid: i64,
-    epoch: i16,
+    producer: ProducerIdentity,
     topic: &str,
     partition: i32,
 ) {
@@ -114,13 +115,13 @@ async fn add_partition_ongoing(
         .send(
             partitions_request()
                 .transactional_id(tid)
-                .producer(ProducerIdentity::from_wire((pid, epoch)))
+                .producer(producer)
                 .topics(vec![added_topic])
                 .call(),
         )
         .await
         .expect("AddPartitionsToTxn add");
-    let expected = expected_partitions(tid, topic, &[(partition, NONE)]);
+    let expected = expected_partitions(tid, topic, &[partition_code(partition, NONE)]);
     assert!(
         add == expected,
         "adding ({topic},{partition}) returned an unexpected response: {add:?}"
@@ -133,7 +134,11 @@ async fn add_partition_ongoing(
 /// whose `(producer_id, producer_epoch)` match. On a freshly-rebooted broker
 /// that entry can come only from a decode of the persisted
 /// `__transaction_state` record. Returns the complete `EndTxn` response.
-async fn commit_via_end_txn(client: &Client, tid: &str, pid: i64, epoch: i16) -> EndTxnResponse {
+async fn commit_via_end_txn(
+    client: &Client,
+    tid: &str,
+    producer: ProducerIdentity,
+) -> EndTxnResponse {
     // FindCoordinator both locates and triggers loading of the coordinator.
     find_ready_coordinator(client, tid).await;
 
@@ -144,7 +149,7 @@ async fn commit_via_end_txn(client: &Client, tid: &str, pid: i64, epoch: i16) ->
             .send(
                 end_transaction_request()
                     .transactional_id(tid)
-                    .producer(ProducerIdentity::from_wire((pid, epoch)))
+                    .producer(producer)
                     .call(),
             )
             .await
@@ -181,7 +186,7 @@ async fn assert_ongoing_txn_survives_restart(case: &RecoveryCase) {
     let dir = TempDir::new().unwrap();
     let log_dir = dir.path().to_path_buf();
 
-    let (pid, epoch);
+    let producer;
     {
         let (broker, _bootstrap, client) =
             start_client(recovery_config(log_dir.clone()), Some("krabka-txnv-test")).await;
@@ -190,8 +195,8 @@ async fn assert_ongoing_txn_survives_restart(case: &RecoveryCase) {
             downgrade_transaction_version(&client, level).await;
         }
 
-        (pid, epoch) = init_producer_id(&client, case.tid).await;
-        add_partition_ongoing(&client, case.tid, pid, epoch, case.topic, 0).await;
+        producer = init_producer_id(&client, case.tid).await;
+        add_partition_ongoing(&client, case.tid, producer, case.topic, 0).await;
         // Deliberately do NOT commit: the entry stays Ongoing on disk.
 
         broker.shutdown().await;
@@ -202,10 +207,10 @@ async fn assert_ongoing_txn_survives_restart(case: &RecoveryCase) {
         let (broker, _bootstrap, client) =
             start_client(rejoin_config(log_dir), Some("krabka-txnv-test")).await;
 
-        let response = commit_via_end_txn(&client, case.tid, pid, epoch).await;
+        let response = commit_via_end_txn(&client, case.tid, producer).await;
         let expected = EndTxnResponse {
-            producer_id: pid,
-            producer_epoch: epoch + case.completion_epoch_delta,
+            producer_id: producer.id.0,
+            producer_epoch: producer.epoch.0 + case.completion_epoch_delta,
             ..Default::default()
         };
         assert!(

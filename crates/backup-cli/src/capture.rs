@@ -37,21 +37,35 @@ const OFFSET_WIDTH: usize = 20;
 /// Width of the epoch field in a checkpoint name.
 const EPOCH_WIDTH: usize = 10;
 
-/// The `(end_offset, epoch)` a checkpoint file name encodes, or `None` when
-/// the name is not a checkpoint.
+/// The identity of a metadata checkpoint, as its file name encodes it.
+///
+/// The derived order is the checkpoint order: end offset first, then epoch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CheckpointId {
+    /// The offset the checkpoint ends at.
+    pub end_offset: u64,
+    /// The epoch of the controller that wrote it.
+    pub epoch: u64,
+}
+
+/// The [`CheckpointId`] a checkpoint file name encodes, or `None` when the
+/// name is not a checkpoint.
 ///
 /// The encoding is `<end_offset:020>-<epoch:010>.checkpoint`, which
 /// `krabka-raft`'s `checkpoint_name` writes. A name that parses to numbers but
 /// does not re-encode to itself is rejected, so a hand-made `1-0.checkpoint`
 /// is not mistaken for an artifact the controller wrote.
 #[must_use]
-pub fn checkpoint_id(name: &str) -> Option<(u64, u64)> {
+pub fn checkpoint_id(name: &str) -> Option<CheckpointId> {
     let stem = name.strip_suffix(CHECKPOINT_SUFFIX)?;
     let (offset, epoch) = stem.split_once('-')?;
     if offset.len() != OFFSET_WIDTH || epoch.len() != EPOCH_WIDTH {
         return None;
     }
-    Some((offset.parse().ok()?, epoch.parse().ok()?))
+    Some(CheckpointId {
+        end_offset: offset.parse().ok()?,
+        epoch: epoch.parse().ok()?,
+    })
 }
 
 /// The newest checkpoint among `names`, by `(end_offset, epoch)`.
@@ -81,6 +95,12 @@ pub fn file_names(dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// A checkpoint file and the id its name encodes.
+struct LocatedCheckpoint {
+    id: CheckpointId,
+    path: PathBuf,
+}
+
 /// The newest metadata checkpoint under `log_dir`, the node's metadata log
 /// directory, looking in the controller's directory and then in the
 /// observer's.
@@ -96,18 +116,21 @@ pub fn file_names(dir: &Path) -> Vec<String> {
 /// second parsed.
 #[must_use]
 pub fn newest_metadata_checkpoint(log_dir: &Path) -> Option<PathBuf> {
-    let mut best: Option<((u64, u64), PathBuf)> = None;
+    let mut best: Option<LocatedCheckpoint> = None;
     for subdir in [CONTROLLER_CHECKPOINT_DIR, OBSERVER_CHECKPOINT_DIR] {
         let dir = log_dir.join(subdir);
         let Some(name) = newest_checkpoint(&file_names(&dir)) else {
             continue;
         };
         let id = checkpoint_id(&name).expect("newest_checkpoint returns a parseable name");
-        if best.as_ref().is_none_or(|(seen, _)| id > *seen) {
-            best = Some((id, dir.join(name)));
+        if best.as_ref().is_none_or(|seen| id > seen.id) {
+            best = Some(LocatedCheckpoint {
+                id,
+                path: dir.join(name),
+            });
         }
     }
-    best.map(|(_, path)| path)
+    best.map(|located| located.path)
 }
 
 /// The id a capture taken at `now_ms` carries, which is also its directory
@@ -127,7 +150,8 @@ pub fn capture_key(capture_id: &str, artifact: &str) -> String {
 mod tests {
     use {
         super::{
-            capture_id, capture_key, checkpoint_id, newest_checkpoint, newest_metadata_checkpoint,
+            CheckpointId, capture_id, capture_key, checkpoint_id, newest_checkpoint,
+            newest_metadata_checkpoint,
         },
         assert2::check,
     };
@@ -137,9 +161,18 @@ mod tests {
         let cases = [
             (
                 "00000000000000123456-0000000042.checkpoint",
-                Some((123_456, 42)),
+                Some(CheckpointId {
+                    end_offset: 123_456,
+                    epoch: 42,
+                }),
             ),
-            ("00000000000000000000-0000000000.checkpoint", Some((0, 0))),
+            (
+                "00000000000000000000-0000000000.checkpoint",
+                Some(CheckpointId {
+                    end_offset: 0,
+                    epoch: 0,
+                }),
+            ),
             // Too few digits in either field: not a name the controller wrote.
             ("123456-42.checkpoint", None),
             ("00000000000000123456-42.checkpoint", None),

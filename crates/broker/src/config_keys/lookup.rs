@@ -33,7 +33,17 @@ pub(super) fn topic_node_or_cluster_default<'a>(
     topic: &str,
     key: &str,
 ) -> Option<&'a str> {
-    topic_node_or_cluster_synonym(image, node, topic, (key, key))
+    topic_node_or_cluster_synonym(image, node, topic, ConfigSynonym {
+        topic_key: key,
+        broker_key: key,
+    })
+}
+
+/// A topic key and the broker key that carries its broker-wide default.
+#[derive(Clone, Copy)]
+pub(super) struct ConfigSynonym<'a> {
+    pub(super) topic_key: &'a str,
+    pub(super) broker_key: &'a str,
 }
 
 /// [`topic_node_or_cluster_default`] for a topic key whose broker-wide default
@@ -43,7 +53,10 @@ pub(super) fn topic_node_or_cluster_synonym<'a>(
     image: &'a krabka_metadata::MetadataImage,
     node: krabka_metadata::NodeId,
     topic: &str,
-    (topic_key, broker_key): (&str, &str),
+    ConfigSynonym {
+        topic_key,
+        broker_key,
+    }: ConfigSynonym<'_>,
 ) -> Option<&'a str> {
     image
         .topic_config(topic)

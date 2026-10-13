@@ -63,7 +63,7 @@
 
 pub(crate) use self::{
     canonical_bytes::freeze_signing_bytes,
-    refusal::SignatureRefusal,
+    refusal::{SignatureRefusal, WireRefusal},
     verify::{FreezeSignatureCheck, verify_freeze_signature},
 };
 

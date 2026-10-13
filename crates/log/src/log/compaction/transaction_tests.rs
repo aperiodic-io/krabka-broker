@@ -7,9 +7,10 @@ use {
     crate::{
         config::LogConfig,
         log::test_support::{
-            abort_marker, commit_marker, compacting_segments, compaction_ctx, keyed_batch,
-            set_segment_size,
+            KeyedRecord, abort_marker, commit_marker, compacting_segments, compaction_ctx,
+            keyed_batch, set_segment_size,
         },
+        test_support::KeyValue,
         txn_index::AbortedTxn,
     },
     bytes::Bytes,
@@ -27,8 +28,8 @@ struct KeyedTransactionSetup<'a> {
     #[default(ProducerId(1000))]
     producer: ProducerId,
     sequence: ProducerSequence,
-    #[default((b"k", b"v"))]
-    payload: (&'a [u8], &'a [u8]),
+    #[default(KeyValue { key: b"k", value: b"v" })]
+    payload: KeyValue<'a>,
 }
 
 /// One keyed transactional record; `Log::append` assigns its offset.
@@ -36,15 +37,19 @@ struct KeyedTransactionSetup<'a> {
 fn transactional_keyed(
     #[builder(into, default = ProducerId (1000))] producer: ProducerId,
     #[builder(into, default)] sequence: ProducerSequence,
-    #[builder(default = (b"k" , b"v"))] payload: (&'_ [u8], &'_ [u8]),
+    #[builder(default = KeyValue { key: b"k", value: b"v" })] payload: KeyValue<'_>,
 ) -> RecordBatch {
     let setup = KeyedTransactionSetup {
         producer,
         sequence,
         payload,
     };
-    let (key, value) = setup.payload;
-    let mut batch = keyed_batch(0, &[(0, key, value)]);
+    let KeyValue { key, value } = setup.payload;
+    let mut batch = keyed_batch(0, &[KeyedRecord {
+        offset_delta: 0,
+        key,
+        value,
+    }]);
     batch.producer_id = setup.producer.0;
     batch.producer_epoch = 0;
     batch.base_sequence = setup.sequence.0;
@@ -60,7 +65,11 @@ fn log_with_a_batch_per_segment(dir: &std::path::Path, batches: Vec<RecordBatch>
     for mut batch in batches {
         log.append(&mut batch).unwrap();
     }
-    let mut tail = keyed_batch(0, &[(0, b"tail", b"t")]);
+    let mut tail = keyed_batch(0, &[KeyedRecord {
+        offset_delta: 0,
+        key: b"tail",
+        value: b"t",
+    }]);
     log.append(&mut tail).unwrap();
     // The pass groups by `segment.bytes`; widen it so this pass merges them.
     set_segment_size(&mut log, mebibytes(1));
@@ -104,11 +113,19 @@ fn index_of_the_fixture(log: &Log) -> Vec<AbortedTxn> {
 
 fn committed_and_aborted_batches(tail: [RecordBatch; 2]) -> Vec<RecordBatch> {
     let mut batches = vec![
-        transactional_keyed().payload((b"k", b"committed")).call(), // 0
-        commit_marker(1000, 0),                                     // 1
+        transactional_keyed()
+            .payload(KeyValue {
+                key: b"k",
+                value: b"committed",
+            })
+            .call(), // 0
+        commit_marker(1000, 0), // 1
         transactional_keyed()
             .producer(2000)
-            .payload((b"k", b"aborted"))
+            .payload(KeyValue {
+                key: b"k",
+                value: b"aborted",
+            })
             .call(), // 2
     ];
     batches.extend(tail);
@@ -120,8 +137,12 @@ fn committed_then_aborted(dir: &std::path::Path) -> Log {
     log_with_a_batch_per_segment(
         dir,
         committed_and_aborted_batches([
-            abort_marker(2000, 0),                  // 3
-            keyed_batch(0, &[(0, b"after", b"a")]), // 4
+            abort_marker(2000, 0), // 3
+            keyed_batch(0, &[KeyedRecord {
+                offset_delta: 0,
+                key: b"after",
+                value: b"a",
+            }]), // 4
         ]),
     )
 }
@@ -213,8 +234,12 @@ fn an_aborted_batch_is_dropped_when_its_marker_lies_beyond_the_consumed_range() 
     let mut log = log_with_a_batch_per_segment(
         dir.path(),
         committed_and_aborted_batches([
-            keyed_batch(0, &[(0, b"other", b"o")]), // 3
-            abort_marker(2000, 0),                  // 4
+            keyed_batch(0, &[KeyedRecord {
+                offset_delta: 0,
+                key: b"other",
+                value: b"o",
+            }]), // 3
+            abort_marker(2000, 0), // 4
         ]),
     );
     // The pass consumes the sealed segments below offset 4 only.

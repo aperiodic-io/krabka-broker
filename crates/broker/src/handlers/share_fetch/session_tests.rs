@@ -14,9 +14,9 @@ use {
         broker::BrokerHandle,
         codes,
         handlers::test_support::{
-            acquired_share_records, create_topic as create_topic_from_test_support,
-            initialize_earliest_share, produce_records, share_fetch_topics, share_fetch_wire,
-            share_record_states,
+            OffsetRun, StartedBroker, WireAckBatch, acquired_share_records,
+            create_topic as create_topic_from_test_support, initialize_earliest_share,
+            produce_records, share_fetch_topics, share_fetch_wire, share_record_states,
         },
         share_partition::state::RecordState::{self, Acquired, Available},
         test_support::{
@@ -44,12 +44,13 @@ use {
 const VERSION: i16 = 2;
 const ACCEPT: i8 = 1;
 
-async fn start(session_max: usize) -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(move |cfg| {
+async fn start(session_max: usize) -> StartedBroker {
+    let (broker, dir) = start_broker_no_audit_with(move |cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.share_session_cache_max_when_unlimited = session_max;
     })
-    .await
+    .await;
+    StartedBroker { broker, dir }
 }
 
 /// Creates `topic` with `partitions` partitions and returns its id.
@@ -78,8 +79,12 @@ async fn earliest(broker: &BrokerHandle, group: &str, topic_id: WireUuid, partit
     initialize_earliest_share(broker, group, topic_id, 0..partitions).await;
 }
 
-/// One request row: `(partition, acknowledgement batches)`.
-type Row = (i32, &'static [(i64, i64, &'static [i8])]);
+/// One request row: a partition and its acknowledgement batches.
+#[derive(Clone, Copy)]
+struct Row {
+    partition: i32,
+    batches: &'static [WireAckBatch<'static>],
+}
 
 struct Fetch<'a> {
     group: &'a str,
@@ -107,16 +112,18 @@ async fn share_fetch(broker: &BrokerHandle, fetch: &Fetch<'_>) -> ShareFetchResp
                 partitions: fetch
                     .rows
                     .iter()
-                    .map(|&(partition_index, batches)| FetchPartition {
-                        partition_index,
+                    .map(|&Row { partition, batches }| FetchPartition {
+                        partition_index: partition,
                         acknowledgement_batches: batches
                             .iter()
-                            .map(|&(first_offset, last_offset, types)| AcknowledgementBatch {
-                                first_offset,
-                                last_offset,
-                                acknowledge_types: types.to_vec(),
-                                ..Default::default()
-                            })
+                            .map(
+                                |&WireAckBatch { first, last, types }| AcknowledgementBatch {
+                                    first_offset: first,
+                                    last_offset: last,
+                                    acknowledge_types: types.to_vec(),
+                                    ..Default::default()
+                                },
+                            )
                             .collect(),
                         ..Default::default()
                     })
@@ -147,9 +154,14 @@ async fn states(broker: &BrokerHandle, group: &str, topic_id: WireUuid) -> Vec<R
     share_record_states(broker, group, topic_id).await
 }
 
-/// `(partition, error_code, acknowledge_error_code, acquired ranges)` of one
-/// response row.
-type RowOutcome = (i32, i16, i16, Vec<(i64, i64)>);
+/// The partition, error codes and acquired ranges of one response row.
+#[derive(Debug, PartialEq, Eq)]
+struct RowOutcome {
+    partition: i32,
+    error_code: i16,
+    acknowledge_error_code: i16,
+    acquired: Vec<OffsetRun>,
+}
 
 /// The [`RowOutcome`] of every row of `response`.
 fn rows(response: &ShareFetchResponse) -> Vec<RowOutcome> {
@@ -157,13 +169,11 @@ fn rows(response: &ShareFetchResponse) -> Vec<RowOutcome> {
         .responses
         .iter()
         .flat_map(|topic| &topic.partitions)
-        .map(|row| {
-            (
-                row.partition_index,
-                row.error_code,
-                row.acknowledge_error_code,
-                acquired_share_records(row),
-            )
+        .map(|row| RowOutcome {
+            partition: row.partition_index,
+            error_code: row.error_code,
+            acknowledge_error_code: row.acknowledge_error_code,
+            acquired: acquired_share_records(row),
         })
         .collect()
 }
@@ -175,7 +185,7 @@ const HELD: &[RecordState] = &[Acquired, Acquired, Acquired];
 /// nothing and releases what the member holds.
 #[tokio::test]
 async fn reopening_keeps_records_and_a_final_fetch_fetches_nothing() {
-    let (broker, _dir) = start(10_000).await;
+    let StartedBroker { broker, dir: _dir } = start(10_000).await;
     let topic_id = create_topic(&broker, "reopen", 1).await;
     produce(&broker, "reopen", 0).await;
     earliest(&broker, "g", topic_id, 1).await;
@@ -188,13 +198,61 @@ async fn reopening_keeps_records_and_a_final_fetch_fetches_nothing() {
         max_wait_ms: 0,
     };
 
-    let opened = share_fetch(&broker, &fetch(0, &[(0, &[])], &[])).await;
+    let opened = share_fetch(
+        &broker,
+        &fetch(
+            0,
+            &[Row {
+                partition: 0,
+                batches: &[],
+            }],
+            &[],
+        ),
+    )
+    .await;
     // Epoch 0 again, forgetting the partition it names: Kafka ignores the
     // forgotten partitions of an initial request.
-    let reopened = share_fetch(&broker, &fetch(0, &[(0, &[])], &[0])).await;
+    let reopened = share_fetch(
+        &broker,
+        &fetch(
+            0,
+            &[Row {
+                partition: 0,
+                batches: &[],
+            }],
+            &[0],
+        ),
+    )
+    .await;
     let after_reopen = states(&broker, "g", topic_id).await;
-    let accepted = share_fetch(&broker, &fetch(1, &[(0, &[(0, 0, &[ACCEPT])])], &[])).await;
-    let closed = share_fetch(&broker, &fetch(-1, &[(0, &[])], &[0])).await;
+    let accepted = share_fetch(
+        &broker,
+        &fetch(
+            1,
+            &[Row {
+                partition: 0,
+                batches: &[WireAckBatch {
+                    first: 0,
+                    last: 0,
+                    types: &[ACCEPT],
+                }],
+            }],
+            &[],
+        ),
+    )
+    .await;
+    let closed = share_fetch(
+        &broker,
+        &fetch(
+            -1,
+            &[Row {
+                partition: 0,
+                batches: &[],
+            }],
+            &[0],
+        ),
+    )
+    .await;
     let after_close = states(&broker, "g", topic_id).await;
 
     assert!(
@@ -206,12 +264,28 @@ async fn reopening_keeps_records_and_a_final_fetch_fetches_nothing() {
             (closed.error_code, rows(&closed)),
             after_close,
         ) == (
-            (codes::NONE, vec![(0, codes::NONE, codes::NONE, vec![(
-                0, 2
-            )])]),
-            (codes::NONE, vec![(0, codes::NONE, codes::NONE, Vec::new())]),
+            (codes::NONE, vec![RowOutcome {
+                partition: 0,
+                error_code: codes::NONE,
+                acknowledge_error_code: codes::NONE,
+                acquired: vec![OffsetRun {
+                    first_offset: 0,
+                    last_offset: 2
+                }]
+            }]),
+            (codes::NONE, vec![RowOutcome {
+                partition: 0,
+                error_code: codes::NONE,
+                acknowledge_error_code: codes::NONE,
+                acquired: Vec::new()
+            }]),
             HELD.to_vec(),
-            (codes::NONE, vec![(0, codes::NONE, codes::NONE, Vec::new())]),
+            (codes::NONE, vec![RowOutcome {
+                partition: 0,
+                error_code: codes::NONE,
+                acknowledge_error_code: codes::NONE,
+                acquired: Vec::new()
+            }]),
             (codes::NONE, Vec::new()),
             vec![Available, Available],
         )
@@ -223,7 +297,7 @@ async fn reopening_keeps_records_and_a_final_fetch_fetches_nothing() {
 /// `MaxWaitMs`, not at once.
 #[tokio::test]
 async fn a_full_session_cache_answers_after_max_wait() {
-    let (broker, _dir) = start(1).await;
+    let StartedBroker { broker, dir: _dir } = start(1).await;
     let topic_id = create_topic(&broker, "full", 1).await;
     let first = share_fetch(&broker, &Fetch {
         group: "first",
@@ -259,7 +333,7 @@ async fn a_full_session_cache_answers_after_max_wait() {
 /// An incremental response carries only the partition that has records.
 #[tokio::test]
 async fn an_incremental_response_leaves_out_partitions_without_news() {
-    let (broker, _dir) = start(10_000).await;
+    let StartedBroker { broker, dir: _dir } = start(10_000).await;
     let topic_id = create_topic(&broker, "incremental", 3).await;
     earliest(&broker, "g", topic_id, 3).await;
     let fetch = |epoch, rows| Fetch {
@@ -271,7 +345,24 @@ async fn an_incremental_response_leaves_out_partitions_without_news() {
         max_wait_ms: 0,
     };
 
-    let opened = share_fetch(&broker, &fetch(0, &[(0, &[]), (1, &[]), (2, &[])])).await;
+    let opened = share_fetch(
+        &broker,
+        &fetch(0, &[
+            Row {
+                partition: 0,
+                batches: &[],
+            },
+            Row {
+                partition: 1,
+                batches: &[],
+            },
+            Row {
+                partition: 2,
+                batches: &[],
+            },
+        ]),
+    )
+    .await;
     produce(&broker, "incremental", 1).await;
     let continued = share_fetch(&broker, &fetch(1, &[])).await;
     let quiet = share_fetch(&broker, &fetch(2, &[])).await;
@@ -280,7 +371,15 @@ async fn an_incremental_response_leaves_out_partitions_without_news() {
         (rows(&opened).len(), rows(&continued), rows(&quiet))
             == (
                 3,
-                vec![(1, codes::NONE, codes::NONE, vec![(0, 2)])],
+                vec![RowOutcome {
+                    partition: 1,
+                    error_code: codes::NONE,
+                    acknowledge_error_code: codes::NONE,
+                    acquired: vec![OffsetRun {
+                        first_offset: 0,
+                        last_offset: 2
+                    }]
+                }],
                 Vec::new()
             )
     );
@@ -337,9 +436,38 @@ async fn group_share_settings_override_the_broker_defaults() {
             .collect::<Vec<_>>()
     };
 
-    let first = share_fetch(&broker, &fetch(0, &[(0, &[])])).await;
-    let second = share_fetch(&broker, &fetch(1, &[(0, &[(0, 1, &[RELEASE])])])).await;
-    let third = share_fetch(&broker, &fetch(2, &[(0, &[(0, 1, &[RELEASE])])])).await;
+    let first = share_fetch(
+        &broker,
+        &fetch(0, &[Row {
+            partition: 0,
+            batches: &[],
+        }]),
+    )
+    .await;
+    let second = share_fetch(
+        &broker,
+        &fetch(1, &[Row {
+            partition: 0,
+            batches: &[WireAckBatch {
+                first: 0,
+                last: 1,
+                types: &[RELEASE],
+            }],
+        }]),
+    )
+    .await;
+    let third = share_fetch(
+        &broker,
+        &fetch(2, &[Row {
+            partition: 0,
+            batches: &[WireAckBatch {
+                first: 0,
+                last: 1,
+                types: &[RELEASE],
+            }],
+        }]),
+    )
+    .await;
 
     assert!(
         (
@@ -357,30 +485,89 @@ async fn group_share_settings_override_the_broker_defaults() {
     broker.shutdown().await;
 }
 
-/// `(version, ShareAcquireMode, MaxRecords, BatchSize, acquired rows)`.
-type ShapeCase = (i16, i8, i32, i32, Vec<(i64, i64)>);
+/// The version, `ShareAcquireMode`, `MaxRecords` and `BatchSize` of a request,
+/// and the acquired rows expected.
+struct ShapeCase {
+    version: i16,
+    mode: i8,
+    max_records: i32,
+    batch_size: i32,
+    rows: Vec<OffsetRun>,
+}
 
 /// Kafka's `ShareAcquireMode` and `BatchSize` over two three-record log
 /// batches at offsets 0 and 3, each case in a group of its own.
 #[tokio::test]
 async fn the_acquire_mode_and_batch_size_shape_the_acquired_rows() {
-    let (broker, _dir) = start(10_000).await;
+    let StartedBroker { broker, dir: _dir } = start(10_000).await;
     let topic_id = create_topic(&broker, "shaped", 1).await;
     produce(&broker, "shaped", 0).await;
     produce(&broker, "shaped", 0).await;
     // (version, ShareAcquireMode, MaxRecords, BatchSize, acquired rows)
     let cases: [ShapeCase; 4] = [
         // batch_optimized, the only mode at v1: a whole log batch.
-        (1, 0, 2, 500, vec![(0, 2)]),
+        ShapeCase {
+            version: 1,
+            mode: 0,
+            max_records: 2,
+            batch_size: 500,
+            rows: vec![OffsetRun {
+                first_offset: 0,
+                last_offset: 2,
+            }],
+        },
         // record_limit: exactly MaxRecords.
-        (2, 1, 2, 500, vec![(0, 1)]),
+        ShapeCase {
+            version: 2,
+            mode: 1,
+            max_records: 2,
+            batch_size: 500,
+            rows: vec![OffsetRun {
+                first_offset: 0,
+                last_offset: 1,
+            }],
+        },
         // BatchSize splits new records on log batch boundaries.
-        (2, 0, 500, 3, vec![(0, 2), (3, 5)]),
-        (2, 1, 500, 3, vec![(0, 5)]),
+        ShapeCase {
+            version: 2,
+            mode: 0,
+            max_records: 500,
+            batch_size: 3,
+            rows: vec![
+                OffsetRun {
+                    first_offset: 0,
+                    last_offset: 2,
+                },
+                OffsetRun {
+                    first_offset: 3,
+                    last_offset: 5,
+                },
+            ],
+        },
+        ShapeCase {
+            version: 2,
+            mode: 1,
+            max_records: 500,
+            batch_size: 3,
+            rows: vec![OffsetRun {
+                first_offset: 0,
+                last_offset: 5,
+            }],
+        },
     ];
     let mut actual = Vec::new();
     let mut expected = Vec::new();
-    for (index, (version, mode, max_records, batch_size, rows)) in cases.into_iter().enumerate() {
+    for (
+        index,
+        ShapeCase {
+            version,
+            mode,
+            max_records,
+            batch_size,
+            rows,
+        },
+    ) in cases.into_iter().enumerate()
+    {
         let group = format!("shaped-{index}");
         earliest(&broker, &group, topic_id, 1).await;
         let request = ShareFetchRequest {
@@ -403,12 +590,12 @@ async fn the_acquire_mode_and_batch_size_shape_the_acquired_rows() {
             .version(version)
             .call()
             .await;
-        let acquired: Vec<(i64, i64)> = response
+        let acquired: Vec<OffsetRun> = response
             .responses
             .iter()
             .flat_map(|topic| &topic.partitions)
             .flat_map(|row| &row.acquired_records)
-            .map(|range| (range.first_offset, range.last_offset))
+            .map(|range| OffsetRun::new(range.first_offset, range.last_offset))
             .collect();
         actual.push((index, acquired));
         expected.push((index, rows));
@@ -417,17 +604,42 @@ async fn the_acquire_mode_and_batch_size_shape_the_acquired_rows() {
     broker.shutdown().await;
 }
 
-/// A `ShareFetch` with the limits of `(max_bytes, min_bytes, max_wait_ms)`
-/// over `partitions` of `topic_id`, at session epoch 0 of `group`. It returns
-/// the acquired ranges per partition, in partition order, and the time the
-/// response took.
+/// The size and wait limits of a `ShareFetch`.
+#[derive(Clone, Copy)]
+struct FetchLimits {
+    max_bytes: i32,
+    min_bytes: i32,
+    max_wait_ms: i32,
+}
+
+/// The acquired ranges of one response partition.
+#[derive(Debug, PartialEq, Eq)]
+struct PartitionRuns {
+    partition: i32,
+    acquired: Vec<OffsetRun>,
+}
+
+/// The acquired ranges per partition of a response, and the time it took.
+struct LimitedFetch {
+    partitions: Vec<PartitionRuns>,
+    took: Duration,
+}
+
+/// A `ShareFetch` with `limits` over `partitions` of `topic_id`, at session
+/// epoch 0 of `group`. It returns the acquired ranges per partition, in
+/// partition order, and the time the response took.
 async fn fetch_with_limits(
     broker: &BrokerHandle,
     group: &str,
     topic_id: WireUuid,
     partitions: &[i32],
-    (max_bytes, min_bytes, max_wait_ms): (i32, i32, i32),
-) -> (Vec<(i32, Vec<(i64, i64)>)>, Duration) {
+    limits: FetchLimits,
+) -> LimitedFetch {
+    let FetchLimits {
+        max_bytes,
+        min_bytes,
+        max_wait_ms,
+    } = limits;
     let request = ShareFetchRequest {
         group_id: Some(group.into()),
         member_id: Some("member".into()),
@@ -457,14 +669,20 @@ async fn fetch_with_limits(
     .expect("handle share fetch");
     let took = started.elapsed();
     let response: ShareFetchResponse = decode_response(&response, VERSION);
-    let mut rows: Vec<(i32, Vec<(i64, i64)>)> = response
+    let mut rows: Vec<PartitionRuns> = response
         .responses
         .iter()
         .flat_map(|topic| &topic.partitions)
-        .map(|row| (row.partition_index, acquired_share_records(row)))
+        .map(|row| PartitionRuns {
+            partition: row.partition_index,
+            acquired: acquired_share_records(row),
+        })
         .collect();
-    rows.sort_unstable();
-    (rows, took)
+    rows.sort_unstable_by_key(|row| row.partition);
+    LimitedFetch {
+        partitions: rows,
+        took,
+    }
 }
 
 /// Kafka's `PartitionMaxBytesStrategy.UNIFORM`: `MaxBytes` is the budget of
@@ -472,7 +690,7 @@ async fn fetch_with_limits(
 /// reaches one of two partitions, which still gets its first batch whole.
 #[tokio::test]
 async fn max_bytes_is_split_across_the_partitions() {
-    let (broker, _dir) = start(10_000).await;
+    let StartedBroker { broker, dir: _dir } = start(10_000).await;
     let topic_id = create_topic(&broker, "split", 2).await;
     for partition in [0, 1] {
         produce(&broker, "split", partition).await;
@@ -481,15 +699,56 @@ async fn max_bytes_is_split_across_the_partitions() {
     earliest(&broker, "tight", topic_id, 2).await;
     earliest(&broker, "roomy", topic_id, 2).await;
 
-    let (tight, _) = fetch_with_limits(&broker, "tight", topic_id, &[0, 1], (1, 0, 0)).await;
-    let (roomy, _) = fetch_with_limits(&broker, "roomy", topic_id, &[0, 1], (1 << 20, 0, 0)).await;
+    let LimitedFetch {
+        partitions: tight, ..
+    } = fetch_with_limits(&broker, "tight", topic_id, &[0, 1], FetchLimits {
+        max_bytes: 1,
+        min_bytes: 0,
+        max_wait_ms: 0,
+    })
+    .await;
+    let LimitedFetch {
+        partitions: roomy, ..
+    } = fetch_with_limits(&broker, "roomy", topic_id, &[0, 1], FetchLimits {
+        max_bytes: 1 << 20,
+        min_bytes: 0,
+        max_wait_ms: 0,
+    })
+    .await;
 
     assert!(
         (tight, roomy)
-            == (vec![(0, vec![(0, 2)]), (1, Vec::new())], vec![
-                (0, vec![(0, 5)]),
-                (1, vec![(0, 5)])
-            ],)
+            == (
+                vec![
+                    PartitionRuns {
+                        partition: 0,
+                        acquired: vec![OffsetRun {
+                            first_offset: 0,
+                            last_offset: 2
+                        }]
+                    },
+                    PartitionRuns {
+                        partition: 1,
+                        acquired: Vec::new()
+                    }
+                ],
+                vec![
+                    PartitionRuns {
+                        partition: 0,
+                        acquired: vec![OffsetRun {
+                            first_offset: 0,
+                            last_offset: 5
+                        }]
+                    },
+                    PartitionRuns {
+                        partition: 1,
+                        acquired: vec![OffsetRun {
+                            first_offset: 0,
+                            last_offset: 5
+                        }]
+                    }
+                ],
+            )
     );
     broker.shutdown().await;
 }
@@ -499,16 +758,30 @@ async fn max_bytes_is_split_across_the_partitions() {
 /// answers at once.
 #[tokio::test]
 async fn min_bytes_holds_the_response_until_max_wait() {
-    let (broker, _dir) = start(10_000).await;
+    let StartedBroker { broker, dir: _dir } = start(10_000).await;
     let topic_id = create_topic(&broker, "min-bytes", 1).await;
     produce(&broker, "min-bytes", 0).await;
     earliest(&broker, "short", topic_id, 1).await;
     earliest(&broker, "enough", topic_id, 1).await;
 
-    let (short, short_took) =
-        fetch_with_limits(&broker, "short", topic_id, &[0], (1 << 20, 1 << 20, 300)).await;
-    let (enough, enough_took) =
-        fetch_with_limits(&broker, "enough", topic_id, &[0], (1 << 20, 1, 30_000)).await;
+    let LimitedFetch {
+        partitions: short,
+        took: short_took,
+    } = fetch_with_limits(&broker, "short", topic_id, &[0], FetchLimits {
+        max_bytes: 1 << 20,
+        min_bytes: 1 << 20,
+        max_wait_ms: 300,
+    })
+    .await;
+    let LimitedFetch {
+        partitions: enough,
+        took: enough_took,
+    } = fetch_with_limits(&broker, "enough", topic_id, &[0], FetchLimits {
+        max_bytes: 1 << 20,
+        min_bytes: 1,
+        max_wait_ms: 30_000,
+    })
+    .await;
 
     assert!(
         (
@@ -516,7 +789,24 @@ async fn min_bytes_holds_the_response_until_max_wait() {
             short_took >= Duration::from_millis(300),
             enough,
             enough_took < Duration::from_secs(10),
-        ) == (vec![(0, vec![(0, 2)])], true, vec![(0, vec![(0, 2)])], true)
+        ) == (
+            vec![PartitionRuns {
+                partition: 0,
+                acquired: vec![OffsetRun {
+                    first_offset: 0,
+                    last_offset: 2
+                }]
+            }],
+            true,
+            vec![PartitionRuns {
+                partition: 0,
+                acquired: vec![OffsetRun {
+                    first_offset: 0,
+                    last_offset: 2
+                }]
+            }],
+            true
+        )
     );
     broker.shutdown().await;
 }

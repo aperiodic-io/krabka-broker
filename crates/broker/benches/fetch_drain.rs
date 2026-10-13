@@ -41,24 +41,6 @@
 
 use criterion::{criterion_group, criterion_main};
 
-/// Every response size the sweep covers, and the label each is reported under.
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "tvos",
-    target_os = "watchos",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-))]
-const SIZES: [(&str, usize); 5] = [
-    ("4KiB", 4 * 1024),
-    ("16KiB", 16 * 1024),
-    ("32KiB", 32 * 1024),
-    ("64KiB", 64 * 1024),
-    ("256KiB", 256 * 1024),
-];
-
 /// The sweep, on the platforms that have a file-to-socket `sendfile(2)`:
 /// Linux, the Apple targets, and FreeBSD/DragonFly.
 #[cfg(any(
@@ -72,7 +54,6 @@ const SIZES: [(&str, usize); 5] = [
 ))]
 mod sweep {
     use {
-        super::SIZES,
         assert2::assert,
         bytes::{BufMut, Bytes, BytesMut},
         criterion::{Criterion, Throughput},
@@ -94,6 +75,30 @@ mod sweep {
             runtime::Runtime,
         },
     };
+
+    /// Every response size the sweep covers, and the label each is reported under.
+    const SIZES: [ResponseSize; 5] = [
+        ResponseSize::new("4KiB", 4 * 1024),
+        ResponseSize::new("16KiB", 16 * 1024),
+        ResponseSize::new("32KiB", 32 * 1024),
+        ResponseSize::new("64KiB", 64 * 1024),
+        ResponseSize::new("256KiB", 256 * 1024),
+    ];
+
+    /// One response size the sweep covers, with the label it is reported under.
+    struct ResponseSize {
+        label: &'static str,
+        records_bytes: usize,
+    }
+
+    impl ResponseSize {
+        const fn new(label: &'static str, records_bytes: usize) -> Self {
+            Self {
+                label,
+                records_bytes,
+            }
+        }
+    }
 
     /// Untimed drains run before the measured ones, over the same socket.
     ///
@@ -278,7 +283,11 @@ mod sweep {
     pub(crate) fn bench_fetch_drain(c: &mut Criterion) {
         let mut group = c.benchmark_group("broker/fetch_drain");
 
-        for (label, records_bytes) in SIZES {
+        for ResponseSize {
+            label,
+            records_bytes,
+        } in SIZES
+        {
             let response = Response::new(records_bytes);
             group.throughput(Throughput::Bytes(response.records_bytes as u64));
             for case in [Case::Vectored, Case::Sendfile] {
@@ -315,7 +324,11 @@ mod sweep {
             "size", "vectored", "sendfile", "sendfile/vectored"
         );
         let mut crossover: Option<&str> = None;
-        for (label, records_bytes) in SIZES {
+        for ResponseSize {
+            label,
+            records_bytes,
+        } in SIZES
+        {
             let response = Response::new(records_bytes);
             let cost = |case| {
                 (0..RUNS)

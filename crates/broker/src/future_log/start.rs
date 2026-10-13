@@ -246,11 +246,12 @@ mod tests {
         };
     }
 
-    type MoveRegistries = (
-        Vec<PathBuf>,
-        Arc<PartitionRegistry>,
-        Arc<DashMap<(String, PartitionIndex), Arc<FutureLogState>>>,
-    );
+    /// The log dirs, the partitions and the future logs of a move.
+    struct MoveRegistries {
+        log_dirs: Vec<PathBuf>,
+        partitions: Arc<PartitionRegistry>,
+        future_logs: Arc<DashMap<(String, PartitionIndex), Arc<FutureLogState>>>,
+    }
 
     fn registered_move(primary: &Path, target: &Path) -> MoveRegistries {
         let partitions = Arc::new(PartitionRegistry::new());
@@ -259,11 +260,11 @@ mod tests {
             PartitionIndex(0),
             fixture_partition(primary, "t", PartitionIndex(0)),
         );
-        (
-            vec![primary.to_path_buf(), target.to_path_buf()],
+        MoveRegistries {
+            log_dirs: vec![primary.to_path_buf(), target.to_path_buf()],
             partitions,
-            Arc::new(DashMap::new()),
-        )
+            future_logs: Arc::new(DashMap::new()),
+        }
     }
 
     #[tokio::test]
@@ -405,7 +406,11 @@ mod tests {
         // Asking to move a partition to the directory it already
         // lives in returns success without touching `future_logs`.
         let (primary, extra) = (tempdir().unwrap(), tempdir().unwrap());
-        let (log_dirs, partitions, future_logs) = registered_move(primary.path(), extra.path());
+        let MoveRegistries {
+            log_dirs,
+            partitions,
+            future_logs,
+        } = registered_move(primary.path(), extra.path());
 
         move_with_defaults!(
             &partitions,
@@ -451,7 +456,11 @@ mod tests {
         // and the registry still has one entry.
         let primary = tempdir().unwrap();
         let extra = tempdir().unwrap();
-        let (log_dirs, partitions, future_logs) = registered_move(primary.path(), extra.path());
+        let MoveRegistries {
+            log_dirs,
+            partitions,
+            future_logs,
+        } = registered_move(primary.path(), extra.path());
 
         // Plant a registry entry as if a prior ARLD already kicked off
         // a move — exercises the "already moving, same target" branch

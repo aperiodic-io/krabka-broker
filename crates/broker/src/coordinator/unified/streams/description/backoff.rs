@@ -159,69 +159,127 @@ mod tests {
             Arm(i32, u64),
             Clear(i32),
         }
-        /// The window as (epoch, attempts, end second).
-        type Expected = Option<(i32, u32, u64)>;
-        /// A label, the second, the operation, its answer, and the window.
-        type Step = (&'static str, u64, Op, Option<bool>, Expected);
+        /// The window as its topology epoch, attempts and end second.
+        struct ExpectedWindow {
+            topology_epoch: i32,
+            attempts: u32,
+            ends: u64,
+        }
+        /// An operation at a time in seconds, what `arm_if_not_active`
+        /// answers, and the window afterwards.
+        struct Step {
+            label: &'static str,
+            secs: u64,
+            op: Op,
+            answered: Option<bool>,
+            window: Option<ExpectedWindow>,
+        }
         use Op::{Arm, Clear};
 
         let start = Instant::now();
         let at = |secs: u64| start + Duration::from_secs(secs);
         let rows: [Step; 9] = [
-            (
-                "the first heartbeat asks",
-                0,
-                Arm(0, 1_000),
-                Some(true),
-                Some((0, 0, 30)),
-            ),
-            (
-                "a second member is not asked",
-                10,
-                Arm(0, 1_000),
-                Some(false),
-                Some((0, 0, 30)),
-            ),
-            (
-                "still inside the window",
-                29,
-                Arm(0, 1_000),
-                Some(false),
-                Some((0, 0, 30)),
-            ),
-            (
-                "an ended window asks again, twice as long",
-                30,
-                Arm(0, 1_000),
-                Some(true),
-                Some((0, 1, 90)),
-            ),
-            (
-                "a newer epoch starts a fresh chain",
-                40,
-                Arm(1, 800),
-                Some(true),
-                Some((1, 0, 64)),
-            ),
-            (
-                "a late push of the old epoch keeps the window",
-                41,
-                Clear(0),
-                None,
-                Some((1, 0, 64)),
-            ),
-            ("the push of the epoch clears it", 42, Clear(1), None, None),
-            (
-                "a cleared window asks at once",
-                43,
-                Arm(1, 1_000),
-                Some(true),
-                Some((1, 0, 73)),
-            ),
-            ("clearing again", 44, Clear(1), None, None),
+            Step {
+                label: "the first heartbeat asks",
+                secs: 0,
+                op: Arm(0, 1_000),
+                answered: Some(true),
+                window: Some(ExpectedWindow {
+                    topology_epoch: 0,
+                    attempts: 0,
+                    ends: 30,
+                }),
+            },
+            Step {
+                label: "a second member is not asked",
+                secs: 10,
+                op: Arm(0, 1_000),
+                answered: Some(false),
+                window: Some(ExpectedWindow {
+                    topology_epoch: 0,
+                    attempts: 0,
+                    ends: 30,
+                }),
+            },
+            Step {
+                label: "still inside the window",
+                secs: 29,
+                op: Arm(0, 1_000),
+                answered: Some(false),
+                window: Some(ExpectedWindow {
+                    topology_epoch: 0,
+                    attempts: 0,
+                    ends: 30,
+                }),
+            },
+            Step {
+                label: "an ended window asks again, twice as long",
+                secs: 30,
+                op: Arm(0, 1_000),
+                answered: Some(true),
+                window: Some(ExpectedWindow {
+                    topology_epoch: 0,
+                    attempts: 1,
+                    ends: 90,
+                }),
+            },
+            Step {
+                label: "a newer epoch starts a fresh chain",
+                secs: 40,
+                op: Arm(1, 800),
+                answered: Some(true),
+                window: Some(ExpectedWindow {
+                    topology_epoch: 1,
+                    attempts: 0,
+                    ends: 64,
+                }),
+            },
+            Step {
+                label: "a late push of the old epoch keeps the window",
+                secs: 41,
+                op: Clear(0),
+                answered: None,
+                window: Some(ExpectedWindow {
+                    topology_epoch: 1,
+                    attempts: 0,
+                    ends: 64,
+                }),
+            },
+            Step {
+                label: "the push of the epoch clears it",
+                secs: 42,
+                op: Clear(1),
+                answered: None,
+                window: None,
+            },
+            Step {
+                label: "a cleared window asks at once",
+                secs: 43,
+                op: Arm(1, 1_000),
+                answered: Some(true),
+                window: Some(ExpectedWindow {
+                    topology_epoch: 1,
+                    attempts: 0,
+                    ends: 73,
+                }),
+            },
+            Step {
+                label: "clearing again",
+                secs: 44,
+                op: Clear(1),
+                answered: None,
+                window: None,
+            },
         ];
         let mut backoff = SolicitationBackoff::default();
-        for (row, secs, op, answered, window) in rows {
+        for Step {
+            label: row,
+            secs,
+            op,
+            answered,
+            window,
+        } in rows
+        {
             let answer = match op {
                 Arm(epoch, per_mille) => {
                     Some(backoff.arm_if_not_active(epoch, at(secs), Jitter::per_mille(per_mille)))
@@ -232,10 +290,10 @@ mod tests {
                 }
             };
             let expected = SolicitationBackoff {
-                window: window.map(|(topology_epoch, attempts, ends)| Window {
-                    topology_epoch,
-                    attempts,
-                    ends: at(ends),
+                window: window.map(|window| Window {
+                    topology_epoch: window.topology_epoch,
+                    attempts: window.attempts,
+                    ends: at(window.ends),
                 }),
             };
             assert!(answer == answered, "{row}");

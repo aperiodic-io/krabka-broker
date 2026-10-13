@@ -70,7 +70,16 @@ pub struct SegmentFacts {
     pub log_bytes: u64,
     /// The offset each leader epoch starts at, from the leader-epoch
     /// checkpoint. The target partition needs it to answer `OffsetForLeaderEpoch`.
-    pub leader_epochs: Vec<(LeaderEpoch, Offset)>,
+    pub leader_epochs: Vec<LeaderEpochStart>,
+}
+
+/// The offset a leader epoch starts at, from a leader-epoch checkpoint row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderEpochStart {
+    /// The leader epoch.
+    pub epoch: LeaderEpoch,
+    /// The first offset written under `epoch`.
+    pub start_offset: Offset,
 }
 
 /// A segment that passed verification, with the bytes that passed it.

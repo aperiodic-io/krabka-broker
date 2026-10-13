@@ -298,14 +298,25 @@ mod tests {
 
     /// A conversion row: its label, each member's subscription and
     /// assignment, and the refusal it expects.
-    type ConversionRow = (
-        &'static str,
-        Vec<(Bytes, Option<Bytes>)>,
-        Result<(), &'static str>,
-    );
+    struct ConversionRow {
+        label: &'static str,
+        members: Vec<MemberBlobs>,
+        want: Result<(), &'static str>,
+    }
+
+    /// A member's `ConsumerProtocolSubscription` blob and, once it has
+    /// synced, its `ConsumerProtocolAssignment` blob.
+    struct MemberBlobs {
+        subscription: Bytes,
+        assignment: Option<Bytes>,
+    }
 
     /// A subscription row: its label, the blob, and the topics it decodes to.
-    type SubscriptionRow<'a> = (&'static str, &'a [u8], Option<Vec<String>>);
+    struct SubscriptionRow<'a> {
+        label: &'static str,
+        blob: &'a [u8],
+        topics: Option<Vec<String>>,
+    }
 
     /// A `ConsumerProtocolAssignment` blob of `version` for partition 0 of
     /// `t1`, with `user_data`.
@@ -340,60 +351,102 @@ mod tests {
                       a default assignor before re-attempting the upgrade.";
         let valid = subscription_blob(&["t1"]);
         let rows: Vec<ConversionRow> = vec![
-            ("no member synced yet", vec![(valid.clone(), None)], Ok(())),
-            (
-                "an empty assignment",
-                vec![(valid.clone(), Some(Bytes::new()))],
-                Ok(()),
-            ),
-            (
-                "an assignment without user data",
-                vec![(valid.clone(), Some(assignment_blob(0, None)))],
-                Ok(()),
-            ),
-            (
-                "empty user data",
-                vec![(valid.clone(), Some(assignment_blob(1, Some(b""))))],
-                Ok(()),
-            ),
-            (
-                "an assignment of a version above the schema's",
-                vec![(valid.clone(), Some(assignment_blob(9, None)))],
-                Ok(()),
-            ),
-            (
-                "an undecodable subscription",
-                vec![
-                    (valid.clone(), None),
-                    (Bytes::from_static(&[0xff, 0xff, 0x01]), None),
+            ConversionRow {
+                label: "no member synced yet",
+                members: vec![MemberBlobs {
+                    subscription: valid.clone(),
+                    assignment: None,
+                }],
+                want: Ok(()),
+            },
+            ConversionRow {
+                label: "an empty assignment",
+                members: vec![MemberBlobs {
+                    subscription: valid.clone(),
+                    assignment: Some(Bytes::new()),
+                }],
+                want: Ok(()),
+            },
+            ConversionRow {
+                label: "an assignment without user data",
+                members: vec![MemberBlobs {
+                    subscription: valid.clone(),
+                    assignment: Some(assignment_blob(0, None)),
+                }],
+                want: Ok(()),
+            },
+            ConversionRow {
+                label: "empty user data",
+                members: vec![MemberBlobs {
+                    subscription: valid.clone(),
+                    assignment: Some(assignment_blob(1, Some(b""))),
+                }],
+                want: Ok(()),
+            },
+            ConversionRow {
+                label: "an assignment of a version above the schema's",
+                members: vec![MemberBlobs {
+                    subscription: valid.clone(),
+                    assignment: Some(assignment_blob(9, None)),
+                }],
+                want: Ok(()),
+            },
+            ConversionRow {
+                label: "an undecodable subscription",
+                members: vec![
+                    MemberBlobs {
+                        subscription: valid.clone(),
+                        assignment: None,
+                    },
+                    MemberBlobs {
+                        subscription: Bytes::from_static(&[0xff, 0xff, 0x01]),
+                        assignment: None,
+                    },
                 ],
-                Err(malformed),
-            ),
-            (
-                "an undecodable assignment",
-                vec![(valid.clone(), Some(Bytes::from_static(b"garbage")))],
-                Err(malformed),
-            ),
-            (
-                "user data from a custom assignor",
-                vec![(valid.clone(), Some(assignment_blob(0, Some(b"sticky"))))],
-                Err(custom),
-            ),
-            (
-                "user data before a malformed subscription of a later member",
-                vec![
-                    (valid.clone(), Some(assignment_blob(0, Some(b"sticky")))),
-                    (Bytes::from_static(&[0]), None),
+                want: Err(malformed),
+            },
+            ConversionRow {
+                label: "an undecodable assignment",
+                members: vec![MemberBlobs {
+                    subscription: valid.clone(),
+                    assignment: Some(Bytes::from_static(b"garbage")),
+                }],
+                want: Err(malformed),
+            },
+            ConversionRow {
+                label: "user data from a custom assignor",
+                members: vec![MemberBlobs {
+                    subscription: valid.clone(),
+                    assignment: Some(assignment_blob(0, Some(b"sticky"))),
+                }],
+                want: Err(custom),
+            },
+            ConversionRow {
+                label: "user data before a malformed subscription of a later member",
+                members: vec![
+                    MemberBlobs {
+                        subscription: valid.clone(),
+                        assignment: Some(assignment_blob(0, Some(b"sticky"))),
+                    },
+                    MemberBlobs {
+                        subscription: Bytes::from_static(&[0]),
+                        assignment: None,
+                    },
                 ],
-                Err(custom),
-            ),
+                want: Err(custom),
+            },
         ];
-        for (label, members, want) in rows {
+        for ConversionRow {
+            label,
+            members,
+            want,
+        } in rows
+        {
             let mut g = ClassicGroup::new("g");
             g.protocol_type = Some("consumer".into());
-            for (index, (metadata, assignment)) in members.into_iter().enumerate() {
-                let mut member = consumer_member(&format!("m{index}"), metadata);
-                member.assignment = assignment;
+            for (index, blobs) in members.into_iter().enumerate() {
+                let mut member = consumer_member(&format!("m{index}"), blobs.subscription);
+                member.assignment = blobs.assignment;
                 g.add_member(member);
             }
 
@@ -417,14 +470,36 @@ mod tests {
         .encode(&mut above, 3)
         .unwrap();
         let rows: [SubscriptionRow<'_>; 4] = [
-            ("empty", &[], None),
-            ("too short", &[0], None),
-            ("negative version", &[0xff, 0xff, 0, 0, 0, 0], None),
-            ("above the highest", &above, Some(vec!["t1".into()])),
+            SubscriptionRow {
+                label: "empty",
+                blob: &[],
+                topics: None,
+            },
+            SubscriptionRow {
+                label: "too short",
+                blob: &[0],
+                topics: None,
+            },
+            SubscriptionRow {
+                label: "negative version",
+                blob: &[0xff, 0xff, 0, 0, 0, 0],
+                topics: None,
+            },
+            SubscriptionRow {
+                label: "above the highest",
+                blob: &above,
+                topics: Some(vec!["t1".into()]),
+            },
         ];
-        for (label, input, want) in rows {
+        for SubscriptionRow {
+            label,
+            blob,
+            topics,
+        } in rows
+        {
             check!(
-                decode_consumer_subscription(input).map(|subscription| subscription.topics) == want,
+                decode_consumer_subscription(blob).map(|subscription| subscription.topics)
+                    == topics,
                 "{label}"
             );
         }

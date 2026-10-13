@@ -71,13 +71,16 @@ async fn audit_chain_continues_across_restart() {
     // First boot: generate some audit events, then shut down cleanly.
     {
         let request = configured_topic_request().topic("r1").call();
-        let (broker, _client) = boot_with_audited_topic(dir.path(), request).await;
+        let AuditedBoot {
+            broker,
+            client: _client,
+        } = boot_with_audited_topic(dir.path(), request).await;
         broker.shutdown().await;
     }
 
     // Second boot on the SAME data dir: more events.
     let request = configured_topic_request().topic("r2").call();
-    let (broker, client) = boot_with_audited_topic(dir.path(), request).await;
+    let AuditedBoot { broker, client } = boot_with_audited_topic(dir.path(), request).await;
 
     // Consume the audit topic and assert seqs are a contiguous, duplicate-free
     // chain (recovery worked — no reset to 0 on the second boot).
@@ -92,11 +95,17 @@ async fn audit_chain_continues_across_restart() {
     broker.shutdown().await;
 }
 
+/// A broker booted on a data directory, with a client connected to it.
+struct AuditedBoot {
+    broker: krabka_broker::BrokerHandle,
+    client: krabka_client_core::Client,
+}
+
 /// Await the exact topic-creation audit event on each boot before shutdown or consumption.
 async fn boot_with_audited_topic(
     directory: &std::path::Path,
     request: krabka_protocol::owned::create_topics_request::CreateTopicsRequest,
-) -> (krabka_broker::BrokerHandle, krabka_client_core::Client) {
+) -> AuditedBoot {
     let (broker, client) = support::start_with_dir(directory).await;
     let audit_before = broker.metrics().audit_events.get();
     let _ = support::client::send_topic_creation(&client, request).await;
@@ -105,5 +114,5 @@ async fn boot_with_audited_topic(
             metrics.audit_events.get() > audit_before
         })
         .await;
-    (broker, client)
+    AuditedBoot { broker, client }
 }

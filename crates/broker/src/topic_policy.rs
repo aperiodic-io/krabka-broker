@@ -166,90 +166,97 @@ mod tests {
     fn each_rule_refuses_what_it_names_and_passes_what_it_allows() {
         /// Label, partitions, replication factor, configs, and the substring
         /// the refusal must name — `None` for a topic the policy accepts.
-        type Case<'a> = (
-            &'a str,
-            Option<usize>,
-            Option<usize>,
-            Vec<(&'a str, &'a str)>,
-            Option<&'a str>,
-        );
+        struct Case<'a> {
+            label: &'a str,
+            partitions: Option<usize>,
+            replication_factor: Option<usize>,
+            pairs: Vec<(&'a str, &'a str)>,
+            want: Option<&'a str>,
+        }
 
         let ok = vec![("cleanup.policy", "delete"), ("min.insync.replicas", "2")];
         let cases: Vec<Case<'_>> = vec![
-            (
-                "a topic that satisfies every rule",
-                Some(64),
-                Some(3),
-                ok.clone(),
-                None,
-            ),
-            (
-                "one partition over the ceiling",
-                Some(65),
-                Some(3),
-                ok.clone(),
-                Some("at most 64"),
-            ),
-            (
-                "one replica under the floor",
-                Some(1),
-                Some(2),
-                ok.clone(),
-                Some("at least 3"),
-            ),
-            (
-                "min.insync.replicas under the floor",
-                Some(1),
-                Some(3),
-                vec![("cleanup.policy", "delete"), ("min.insync.replicas", "1")],
-                Some("min.insync.replicas = 1"),
-            ),
-            (
-                "min.insync.replicas absent leaves the cluster default in force",
-                Some(1),
-                Some(3),
-                vec![("cleanup.policy", "delete")],
-                None,
-            ),
-            (
-                "a required key with the wrong value",
-                Some(1),
-                Some(3),
-                vec![("cleanup.policy", "compact"), ("min.insync.replicas", "2")],
-                Some("must set `cleanup.policy` to `delete`"),
-            ),
-            (
-                "a required key that is absent",
-                Some(1),
-                Some(3),
-                vec![("min.insync.replicas", "2")],
-                Some("must set `cleanup.policy` to `delete`"),
-            ),
-            (
-                "a forbidden key at its forbidden value",
-                Some(1),
-                Some(3),
-                vec![
+            Case {
+                label: "a topic that satisfies every rule",
+                partitions: Some(64),
+                replication_factor: Some(3),
+                pairs: ok.clone(),
+                want: None,
+            },
+            Case {
+                label: "one partition over the ceiling",
+                partitions: Some(65),
+                replication_factor: Some(3),
+                pairs: ok.clone(),
+                want: Some("at most 64"),
+            },
+            Case {
+                label: "one replica under the floor",
+                partitions: Some(1),
+                replication_factor: Some(2),
+                pairs: ok.clone(),
+                want: Some("at least 3"),
+            },
+            Case {
+                label: "min.insync.replicas under the floor",
+                partitions: Some(1),
+                replication_factor: Some(3),
+                pairs: vec![("cleanup.policy", "delete"), ("min.insync.replicas", "1")],
+                want: Some("min.insync.replicas = 1"),
+            },
+            Case {
+                label: "min.insync.replicas absent leaves the cluster default in force",
+                partitions: Some(1),
+                replication_factor: Some(3),
+                pairs: vec![("cleanup.policy", "delete")],
+                want: None,
+            },
+            Case {
+                label: "a required key with the wrong value",
+                partitions: Some(1),
+                replication_factor: Some(3),
+                pairs: vec![("cleanup.policy", "compact"), ("min.insync.replicas", "2")],
+                want: Some("must set `cleanup.policy` to `delete`"),
+            },
+            Case {
+                label: "a required key that is absent",
+                partitions: Some(1),
+                replication_factor: Some(3),
+                pairs: vec![("min.insync.replicas", "2")],
+                want: Some("must set `cleanup.policy` to `delete`"),
+            },
+            Case {
+                label: "a forbidden key at its forbidden value",
+                partitions: Some(1),
+                replication_factor: Some(3),
+                pairs: vec![
                     ("cleanup.policy", "delete"),
                     ("min.insync.replicas", "2"),
                     ("unclean.leader.election.enable", "true"),
                 ],
-                Some("forbids"),
-            ),
-            (
-                "a forbidden key at another value",
-                Some(1),
-                Some(3),
-                vec![
+                want: Some("forbids"),
+            },
+            Case {
+                label: "a forbidden key at another value",
+                partitions: Some(1),
+                replication_factor: Some(3),
+                pairs: vec![
                     ("cleanup.policy", "delete"),
                     ("min.insync.replicas", "2"),
                     ("unclean.leader.election.enable", "false"),
                 ],
-                None,
-            ),
+                want: None,
+            },
         ];
 
-        for (label, partitions, replication_factor, pairs, want) in cases {
+        for Case {
+            label,
+            partitions,
+            replication_factor,
+            pairs,
+            want,
+        } in cases
+        {
             let result = check(
                 &policy(),
                 "orders",

@@ -9,11 +9,13 @@ use {
     crate::{
         alter_scram::{
             KAFKA_DUPLICATE_RESOURCE, KAFKA_MAX_SCRAM_ITERATIONS, KAFKA_UNACCEPTABLE_CREDENTIAL,
-            KAFKA_UNSUPPORTED_SASL_MECHANISM, WIRE_MECH_SCRAM_SHA_256, WIRE_MECH_SCRAM_SHA_512,
-            drive_alter_user_scram_credentials_as_plain, pbkdf2_salt_and_salted,
-            provision_as_admin,
+            KAFKA_UNSUPPORTED_SASL_MECHANISM, SaltedPassword, WIRE_MECH_SCRAM_SHA_256,
+            WIRE_MECH_SCRAM_SHA_512, drive_alter_user_scram_credentials_as_plain,
+            pbkdf2_salt_and_salted, provision_as_admin,
         },
-        harness::{alice_password, scram_admin_fixture, start_scram_admin},
+        harness::{
+            ListeningBroker, RetainedBroker, alice_password, scram_admin_fixture, start_scram_admin,
+        },
         support::{
             sasl::{ScramAlgorithm, ScramMechanismCode, scram_upsertion},
             sasl_plaintext_config,
@@ -33,7 +35,11 @@ use {
 /// is the parameter validation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_low_iterations_rejected() {
-    let (_log_dir, handle, addr) = scram_admin_fixture(vec![SaslMechanism::Plain]).await;
+    let RetainedBroker {
+        log_dir: _log_dir,
+        handle,
+        addr,
+    } = scram_admin_fixture(vec![SaslMechanism::Plain]).await;
 
     // 64-byte salted_password length is valid; only `iterations` violates.
     let req = AlterUserScramCredentialsRequest {
@@ -52,7 +58,11 @@ async fn alter_scram_creds_low_iterations_rejected() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_high_iterations_rejected_but_max_allowed() {
-    let (_log_dir, handle, addr) = scram_admin_fixture(vec![SaslMechanism::Plain]).await;
+    let RetainedBroker {
+        log_dir: _log_dir,
+        handle,
+        addr,
+    } = scram_admin_fixture(vec![SaslMechanism::Plain]).await;
     let req = AlterUserScramCredentialsRequest {
         upsertions: vec![
             scram_upsertion()
@@ -141,9 +151,13 @@ async fn alter_scram_creds_unknown_mechanism_returns_unsupported_sasl_mechanism(
 /// `DUPLICATE_RESOURCE` (92) even when the mechanisms differ.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_duplicate_resource_rejected() {
-    let (_log_dir, handle, addr) = scram_admin_fixture(vec![SaslMechanism::Plain]).await;
+    let RetainedBroker {
+        log_dir: _log_dir,
+        handle,
+        addr,
+    } = scram_admin_fixture(vec![SaslMechanism::Plain]).await;
 
-    let (salt, salted) = pbkdf2_salt_and_salted(alice_password().as_bytes(), 4096);
+    let SaltedPassword { salt, salted } = pbkdf2_salt_and_salted(alice_password().as_bytes(), 4096);
     let upsert = scram_upsertion()
         .salt(bytes::Bytes::from(salt))
         .salted_password(bytes::Bytes::from(salted.to_vec()))
@@ -167,7 +181,12 @@ async fn alter_scram_creds_duplicate_resource_rejected() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_duplicate_deletion_and_upsertion_rejected_per_user() {
-    let (_log_dir, admin_password, handle, addr) = random_scram_admin_fixture().await;
+    let RandomScramAdmin {
+        log_dir: _log_dir,
+        admin_password,
+        handle,
+        addr,
+    } = random_scram_admin_fixture().await;
     handle
         .submit_metadata_record_for_test(krabka_metadata::MetadataRecord::V1ScramCredential(
             krabka_metadata::ScramCredentialRecord {
@@ -221,7 +240,12 @@ async fn alter_scram_creds_duplicate_deletion_and_upsertion_rejected_per_user() 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alter_scram_creds_missing_deletion_returns_resource_not_found_91() {
-    let (_log_dir, admin_password, handle, addr) = random_scram_admin_fixture().await;
+    let RandomScramAdmin {
+        log_dir: _log_dir,
+        admin_password,
+        handle,
+        addr,
+    } = random_scram_admin_fixture().await;
     let req = AlterUserScramCredentialsRequest {
         deletions: vec![ScramCredentialDeletion {
             name: "ghost".to_string(),
@@ -245,15 +269,24 @@ async fn alter_scram_creds_missing_deletion_returns_resource_not_found_91() {
     );
 }
 
-async fn random_scram_admin_fixture() -> (
-    tempfile::TempDir,
-    String,
-    krabka_broker::BrokerHandle,
-    std::net::SocketAddr,
-) {
+/// A SCRAM-admin broker with a random admin password, and the log directory
+/// that backs it.
+struct RandomScramAdmin {
+    log_dir: tempfile::TempDir,
+    admin_password: String,
+    handle: krabka_broker::BrokerHandle,
+    addr: std::net::SocketAddr,
+}
+
+async fn random_scram_admin_fixture() -> RandomScramAdmin {
     let log_dir = tempfile::tempdir().unwrap();
     let admin_password = uuid::Uuid::new_v4().to_string();
-    let (handle, addr) =
+    let ListeningBroker { handle, addr } =
         start_scram_admin(log_dir.path(), &admin_password, vec![SaslMechanism::Plain]).await;
-    (log_dir, admin_password, handle, addr)
+    RandomScramAdmin {
+        log_dir,
+        admin_password,
+        handle,
+        addr,
+    }
 }

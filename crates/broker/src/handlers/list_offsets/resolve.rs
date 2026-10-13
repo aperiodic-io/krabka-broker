@@ -56,12 +56,18 @@ struct EarliestContext<'a> {
     local_log_start: i64,
 }
 
+/// An offset with the leader epoch that goes with it.
+struct ResolvedOffset {
+    offset: i64,
+    leader_epoch: i32,
+}
+
 /// Resolve the EARLIEST sentinel's offset across the local log, the remote
 /// tier and the diskless index, and the leader epoch that goes with it.
 ///
 /// Split out of [`resolve_partition`] purely to keep that function's line
 /// count down.
-async fn resolve_earliest(ctx: EarliestContext<'_>) -> Result<(i64, i32), i16> {
+async fn resolve_earliest(ctx: EarliestContext<'_>) -> Result<ResolvedOffset, i16> {
     let mut remote_candidate = None;
     if let (Some(reader), Some(id)) = (ctx.broker.remote_reader.as_ref(), ctx.remote_topic_id) {
         let topic_partition =
@@ -109,7 +115,10 @@ async fn resolve_earliest(ctx: EarliestContext<'_>) -> Result<(i64, i32), i16> {
     // below the log start, which is always true of the offset just
     // selected: it is by definition the earliest one this broker can name.
     // `UnifiedLog.java:1690-1700`.
-    Ok((earliest, leader_epoch_for_offset(ctx.partition, earliest)))
+    Ok(ResolvedOffset {
+        offset: earliest,
+        leader_epoch: leader_epoch_for_offset(ctx.partition, earliest),
+    })
 }
 
 /// Resolve the KIP-1023 `EARLIEST_PENDING_UPLOAD` sentinel: the first offset
@@ -120,7 +129,7 @@ async fn resolve_earliest(ctx: EarliestContext<'_>) -> Result<(i64, i32), i16> {
 /// count down.
 async fn resolve_earliest_pending_upload(
     ctx: EarliestContext<'_>,
-) -> Result<Option<(i64, i32)>, i16> {
+) -> Result<Option<ResolvedOffset>, i16> {
     let Some((reader, id)) = ctx.broker.remote_reader.as_ref().zip(ctx.remote_topic_id) else {
         return Ok(None);
     };
@@ -151,7 +160,10 @@ async fn resolve_earliest_pending_upload(
             } else {
                 local_epoch
             };
-            Ok(Some((offset, leader_epoch)))
+            Ok(Some(ResolvedOffset {
+                offset,
+                leader_epoch,
+            }))
         }
         // The RLMM lists no segment. When the local log still holds
         // everything from the log start, nothing has ever been tiered and
@@ -159,10 +171,10 @@ async fn resolve_earliest_pending_upload(
         // has moved ahead of it, segments were evicted on the strength of a
         // tier upload this leader cannot currently confirm, and Kafka
         // reports -1 rather than naming an offset it cannot stand behind.
-        Some(Ok(None)) if ctx.local_log_start == ctx.local_start => Ok(Some((
-            ctx.local_start,
-            leader_epoch_for_offset(ctx.partition, ctx.local_start),
-        ))),
+        Some(Ok(None)) if ctx.local_log_start == ctx.local_start => Ok(Some(ResolvedOffset {
+            offset: ctx.local_start,
+            leader_epoch: leader_epoch_for_offset(ctx.partition, ctx.local_start),
+        })),
         Some(Ok(None)) => Ok(None),
         Some(Err(error)) => {
             tracing::warn!(topic = ctx.topic_name, partition = ctx.index,
@@ -176,21 +188,36 @@ async fn resolve_earliest_pending_upload(
 pub(super) struct LatestContext<'a> {
     pub(super) broker: &'a Broker,
     pub(super) partition: &'a Partition,
-    pub(super) topic: (&'a str, i32),
+    pub(super) topic: TopicPartitionName<'a>,
     pub(super) remote_timeout: Duration,
     pub(super) remote_topic_id: Option<uuid::Uuid>,
     /// Config, log end, local floor and established deletion floor, all read
     /// under the same log mutex hold.
-    pub(super) snapshot: (
-        &'a krabka_log::LogConfig,
-        i64,
-        i64,
-        Option<krabka_log::Offset>,
-    ),
+    pub(super) snapshot: LatestSnapshot<'a>,
+}
+
+/// A topic-partition by topic name.
+#[derive(Clone, Copy)]
+pub(super) struct TopicPartitionName<'a> {
+    pub(super) name: &'a str,
+    pub(super) partition: i32,
+}
+
+/// The log facts that LATEST resolution reads under one log mutex hold.
+pub(super) struct LatestSnapshot<'a> {
+    pub(super) config: &'a krabka_log::LogConfig,
+    pub(super) local_end: i64,
+    pub(super) local_log_start: i64,
+    pub(super) deleted_below: Option<krabka_log::Offset>,
 }
 
 pub(super) async fn resolve_latest(ctx: LatestContext<'_>) -> Result<i64, i16> {
-    let (log_config, local_end, local_log_start, deleted_below) = ctx.snapshot;
+    let LatestSnapshot {
+        config: log_config,
+        local_end,
+        local_log_start,
+        deleted_below,
+    } = ctx.snapshot;
     let scheduled = scheduled_latest_offset(ctx.partition, log_config.delivery_policy);
     let latest = scheduled.unwrap_or(local_end);
     let Some((reader, id)) = ctx.broker.remote_reader.as_ref().zip(ctx.remote_topic_id) else {
@@ -201,7 +228,10 @@ pub(super) async fn resolve_latest(ctx: LatestContext<'_>) -> Result<i64, i16> {
     }
     // Older brokers, or an immediate topic switched to scheduled, may already
     // have evicted a pending batch. LATEST must stop at that archived batch.
-    let (topic_name, index) = ctx.topic;
+    let TopicPartitionName {
+        name: topic_name,
+        partition: index,
+    } = ctx.topic;
     let tp = krabka_remote_storage::TopicIdPartition::new(id, topic_name, index);
     match await_remote(
         ctx.remote_timeout,
@@ -306,17 +336,27 @@ fn lagging_high_watermark_fences(
 /// measuring them. Skipping the read for those two also skips the high
 /// watermark's async mutex and the epoch-start lookup, which the fence never
 /// needs for them.
+/// What [`measure`] read: the last fetchable offset of the bound and the
+/// error a lagging high watermark would raise.
+struct Measured {
+    last_fetchable: Option<i64>,
+    offsets_error: Option<i16>,
+}
+
 async fn measure(
     partition: &Partition,
     kind: ListOffsetsKind,
     bound: FetchBound,
     version: i16,
-) -> Result<(Option<i64>, Option<i16>), i16> {
+) -> Result<Measured, i16> {
     if matches!(
         kind,
         ListOffsetsKind::Earliest | ListOffsetsKind::EarliestLocal
     ) {
-        return Ok((None, None));
+        return Ok(Measured {
+            last_fetchable: None,
+            offsets_error: None,
+        });
     }
     let Some(offsets) = fetchable_offsets(partition, bound).await else {
         return Err(codes::KAFKA_STORAGE_ERROR);
@@ -329,7 +369,10 @@ async fn measure(
     );
     match offsets_error {
         Some(error_code) if kind == ListOffsetsKind::Latest => Err(error_code),
-        _ => Ok((Some(offsets.last_fetchable), offsets_error)),
+        _ => Ok(Measured {
+            last_fetchable: Some(offsets.last_fetchable),
+            offsets_error,
+        }),
     }
 }
 
@@ -450,33 +493,36 @@ pub(super) async fn resolve_partition(
     let remote_topic_id = if remote_enabled { topic_id } else { None };
     // Read here, ahead of the match, because several arms below hold the log
     // mutex and the high watermark must not be awaited under it.
-    let (last_fetchable, offsets_error) = match measure(&partition, kind, bound, version).await {
+    let Measured {
+        last_fetchable,
+        offsets_error,
+    } = match measure(&partition, kind, bound, version).await {
         Ok(measured) => measured,
         Err(error_code) => return error_response(index, error_code),
     };
+    let earliest_context = || EarliestContext {
+        broker,
+        topic_name,
+        index,
+        partition: &partition,
+        remote_timeout,
+        remote_topic_id,
+        topic_id,
+        local_start,
+        deleted_below,
+        local_log_start,
+    };
     let (offset, timestamp) = match kind {
-        ListOffsetsKind::Earliest => {
-            match resolve_earliest(EarliestContext {
-                broker,
-                topic_name,
-                index,
-                partition: &partition,
-                remote_timeout,
-                remote_topic_id,
-                topic_id,
-                local_start,
-                deleted_below,
-                local_log_start,
-            })
-            .await
-            {
-                Ok((earliest, leader_epoch)) => {
-                    response.leader_epoch = leader_epoch;
-                    (earliest, UNKNOWN_TIMESTAMP)
-                }
-                Err(error_code) => return error_response(index, error_code),
+        ListOffsetsKind::Earliest => match resolve_earliest(earliest_context()).await {
+            Ok(ResolvedOffset {
+                offset: earliest,
+                leader_epoch,
+            }) => {
+                response.leader_epoch = leader_epoch;
+                (earliest, UNKNOWN_TIMESTAMP)
             }
-        }
+            Err(error_code) => return error_response(index, error_code),
+        },
         ListOffsetsKind::Latest => {
             // Kafka answers LATEST with the partition's live leader epoch,
             // not the epoch recorded for whatever offset the log end
@@ -487,10 +533,18 @@ pub(super) async fn resolve_partition(
             match resolve_latest(LatestContext {
                 broker,
                 partition: &partition,
-                topic: (topic_name, index),
+                topic: TopicPartitionName {
+                    name: topic_name,
+                    partition: index,
+                },
                 remote_timeout,
                 remote_topic_id,
-                snapshot: (&log_config, local_end, local_log_start, deleted_below),
+                snapshot: LatestSnapshot {
+                    config: &log_config,
+                    local_end,
+                    local_log_start,
+                    deleted_below,
+                },
             })
             .await
             {
@@ -534,22 +588,12 @@ pub(super) async fn resolve_partition(
             }
         }
         ListOffsetsKind::EarliestPendingUpload => {
-            match resolve_earliest_pending_upload(EarliestContext {
-                broker,
-                topic_name,
-                index,
-                partition: &partition,
-                remote_timeout,
-                remote_topic_id,
-                topic_id,
-                local_start,
-                deleted_below,
-                local_log_start,
-            })
-            .await
-            {
+            match resolve_earliest_pending_upload(earliest_context()).await {
                 Ok(None) => (UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP),
-                Ok(Some((offset, leader_epoch))) => {
+                Ok(Some(ResolvedOffset {
+                    offset,
+                    leader_epoch,
+                })) => {
                     response.leader_epoch = leader_epoch;
                     (offset, UNKNOWN_TIMESTAMP)
                 }
@@ -634,7 +678,7 @@ pub(super) async fn resolve_partition(
 mod tests {
     use crate::{
         broker::BrokerHandle,
-        handlers::list_offsets::test_support::{remote_topic, test_context},
+        handlers::list_offsets::test_support::{ClientBroker, remote_topic, test_context},
         partition::Partition,
     };
     mod timestamp_visibility;
@@ -791,7 +835,11 @@ mod tests {
 
         const TOPIC: &str = "list-offsets-tiered";
 
-        let (broker, client, _dirs) = remote_topic(TOPIC, vec![]).await;
+        let ClientBroker {
+            broker,
+            client,
+            dirs: _dirs,
+        } = remote_topic(TOPIC, vec![]).await;
         broker
             .produce_records_for_test(TOPIC, 0, 10)
             .await
@@ -905,7 +953,11 @@ mod tests {
     async fn earliest_pending_upload_falls_back_to_earliest_when_nothing_is_tiered() {
         const TOPIC: &str = "list-offsets-pending-upload-empty-tier";
 
-        let (broker, client, _dirs) = remote_topic(TOPIC, vec![]).await;
+        let ClientBroker {
+            broker,
+            client,
+            dirs: _dirs,
+        } = remote_topic(TOPIC, vec![]).await;
         broker
             .produce_records_for_test(TOPIC, 0, 4)
             .await
@@ -935,7 +987,11 @@ mod tests {
     async fn earliest_pending_upload_stays_unknown_when_local_segments_outrun_the_rlmm() {
         const TOPIC: &str = "list-offsets-pending-upload-unconfirmed";
 
-        let (broker, client, _dirs) = remote_topic(TOPIC, vec![CreatableTopicConfig {
+        let ClientBroker {
+            broker,
+            client,
+            dirs: _dirs,
+        } = remote_topic(TOPIC, vec![CreatableTopicConfig {
             name: "internal.segment.bytes".into(),
             value: Some("1".into()),
             ..Default::default()
@@ -1282,7 +1338,7 @@ mod tests {
                     )
                 });
                 assert!(
-                    list_one_at_version(&broker, TOPIC, (timestamp, isolation_level), version)
+                    list_one_at_version(&broker, TOPIC, (timestamp, isolation_level), version,)
                         .await
                         == expected,
                     "lagging: {label} at v{version}"
@@ -1329,7 +1385,7 @@ mod tests {
         ];
         for (label, timestamp, isolation_level, expected) in caught_up {
             assert!(
-                list_one_at_version(&broker, TOPIC, (timestamp, isolation_level), 11).await
+                list_one_at_version(&broker, TOPIC, (timestamp, isolation_level), 11,).await
                     == expected,
                 "caught up: {label}"
             );

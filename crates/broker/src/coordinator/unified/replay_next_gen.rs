@@ -386,15 +386,12 @@ mod tests {
             },
             share::persistence::ShareGroupMetadataValue,
             test_support::{
-                check_replay_cases, deletion_replay_cases, next_current, next_member, proto_uuid,
-                replay_tombstone_constructor,
+                ReplayCase, check_replay_cases, deletion_replay_cases,
+                group_deletion_with_member_case, member_deletion_with_target_case, next_current,
+                next_member, proto_uuid, replay_tombstone_constructor,
             },
         },
     };
-
-    /// What a log leaves: the group that replay holds, or the message of
-    /// the exception that fails the load.
-    type Outcome = Result<Option<GroupSeed>, String>;
 
     /// One record of the replayed log.
     #[derive(Clone)]
@@ -519,56 +516,56 @@ mod tests {
             ]
         };
         let tombstone = replay_tombstone_constructor(key, Record::Tombstone);
-        let mut rows: Vec<(&str, Vec<Record>, Outcome)> = vec![
-            (
-                "a member record creates the group and the member",
-                vec![Record::Member("m")],
-                group(&|seed| {
+        let mut rows: Vec<ReplayCase<'_, Record, GroupSeed>> = vec![
+            ReplayCase {
+                case: "a member record creates the group and the member",
+                records: vec![Record::Member("m")],
+                expected: group(&|seed| {
                     seed.members.insert("m".into(), next_member("m"));
                 }),
-            ),
-            (
-                "a current assignment creates an uninitialized member",
-                vec![Record::Current("m", 3)],
-                group(&|seed| {
+            },
+            ReplayCase {
+                case: "a current assignment creates an uninitialized member",
+                records: vec![Record::Current("m", 3)],
+                expected: group(&|seed| {
                     seed.members.insert("m".into(), uninitialized_member());
                     seed.current_per_member.insert("m".into(), next_current(3));
                 }),
-            ),
-            (
-                "a target assignment creates the group but no member",
-                vec![Record::Target("m")],
-                group(&|seed| {
+            },
+            ReplayCase {
+                case: "a target assignment creates the group but no member",
+                records: vec![Record::Target("m")],
+                expected: group(&|seed| {
                     seed.target_per_member.insert("m".into(), target());
                 }),
-            ),
-            (
-                "a regular expression creates the group",
-                vec![Record::Regex("r")],
-                group(&|seed| {
+            },
+            ReplayCase {
+                case: "a regular expression creates the group",
+                records: vec![Record::Regex("r")],
+                expected: group(&|seed| {
                     seed.resolved_regexes.insert("r".into(), resolved());
                 }),
-            ),
-            (
-                "an epoch replaces the last one, lower or not",
-                vec![Record::Group(5), Record::Group(2), Record::TargetEpoch(0)],
-                group(&|seed| {
+            },
+            ReplayCase {
+                case: "an epoch replaces the last one, lower or not",
+                records: vec![Record::Group(5), Record::Group(2), Record::TargetEpoch(0)],
+                expected: group(&|seed| {
                     seed.group_epoch = 2;
                     seed.metadata_hash = 9;
                     seed.target_epoch = 0;
                     seed.assignment_timestamp_ms = 4;
                 }),
-            ),
-            (
-                "the tombstone of a current assignment leaves the member at epoch -1",
-                vec![
+            },
+            ReplayCase {
+                case: "the tombstone of a current assignment leaves the member at epoch -1",
+                records: vec![
                     Record::Member("m"),
                     Record::Current("m", 3),
                     tombstone("current", "m"),
                     tombstone("target", "other"),
                     tombstone("member", "other"),
                 ],
-                group(&|seed| {
+                expected: group(&|seed| {
                     seed.members.insert("m".into(), next_member("m"));
                     seed.current_per_member
                         .insert("m".into(), next_current(LEAVE_GROUP_MEMBER_EPOCH));
@@ -577,72 +574,70 @@ mod tests {
                     current.assigned_partitions.clear();
                     current.partitions_pending_revocation.clear();
                 }),
-            ),
-            (
-                "a member tombstone before its current assignment tombstone",
-                vec![
+            },
+            ReplayCase {
+                case: "a member tombstone before its current assignment tombstone",
+                records: vec![
                     Record::Member("m"),
                     Record::Current("m", 3),
                     tombstone("member", "m"),
                 ],
-                Err(
+                expected: Err(
                     "Received a tombstone record to delete member m but did not receive \
                      ConsumerGroupCurrentMemberAssignmentValue tombstone."
                         .into(),
                 ),
-            ),
-            (
-                "a member tombstone of a member that never had a current assignment",
-                vec![Record::Member("m"), tombstone("member", "m")],
-                Err(
+            },
+            ReplayCase {
+                case: "a member tombstone of a member that never had a current assignment",
+                records: vec![Record::Member("m"), tombstone("member", "m")],
+                expected: Err(
                     "Received a tombstone record to delete member m but did not receive \
                      ConsumerGroupCurrentMemberAssignmentValue tombstone."
                         .into(),
                 ),
-            ),
-            crate::coordinator::unified::test_support::member_deletion_with_target_case(
-                (Record::Member("m"), Record::Target("m")),
+            },
+            member_deletion_with_target_case(
+                Record::Member("m"),
+                Record::Target("m"),
                 tombstone,
                 "Received a tombstone record to delete member m but did not receive \
                      ConsumerGroupTargetAssignmentMetadataValue tombstone.",
             ),
-            (
-                "a target metadata tombstone while a member has a target",
-                vec![Record::Target("m"), tombstone("target-epoch", "")],
-                Err(
+            ReplayCase {
+                case: "a target metadata tombstone while a member has a target",
+                records: vec![Record::Target("m"), tombstone("target-epoch", "")],
+                expected: Err(
                     "Received a tombstone record to delete target assignment of g but the \
                      assignment still has 1 members."
                         .into(),
                 ),
-            ),
-            crate::coordinator::unified::test_support::group_deletion_with_member_case(
-                Record::Member("m"),
-                tombstone,
-            ),
-            (
-                "a group tombstone before the target metadata tombstone",
-                vec![Record::Group(3), tombstone("group", "")],
-                Err(
+            },
+            group_deletion_with_member_case(Record::Member("m"), tombstone),
+            ReplayCase {
+                case: "a group tombstone before the target metadata tombstone",
+                records: vec![Record::Group(3), tombstone("group", "")],
+                expected: Err(
                     "Received a tombstone record to delete group g but did not receive \
                      ConsumerGroupTargetAssignmentMetadataValue tombstone."
                         .into(),
                 ),
-            ),
-            (
-                "an assignment epoch below -1",
-                vec![Record::TargetEpoch(-2)],
-                Err("The assignment epoch must be non-negative or -1.".into()),
-            ),
-            (
-                "a consumer record for a share group",
-                vec![Record::ShareGroup, Record::Member("m")],
-                Err("Group g is not a consumer group".into()),
-            ),
-            (
-                "a consumer tombstone for a share group",
-                vec![Record::ShareGroup, tombstone("member", "m")],
-                Err("Group g is not a consumer group".into()),
-            ),
+            },
+            ReplayCase {
+                case: "an assignment epoch below -1",
+                records: vec![Record::TargetEpoch(-2)],
+                expected: Err("The assignment epoch must be non-negative or -1.".into()),
+            },
+            ReplayCase {
+                case: "a consumer record for a share group",
+                records: vec![Record::ShareGroup, Record::Member("m")],
+                expected: Err("Group g is not a consumer group".into()),
+            },
+            ReplayCase {
+                case: "a consumer tombstone for a share group",
+                records: vec![Record::ShareGroup, tombstone("member", "m")],
+                expected: Err("Group g is not a consumer group".into()),
+            },
         ];
         rows.splice(5..5, deletion_replay_cases(full_group(), kafka_deletion()));
         check_replay_cases(

@@ -62,18 +62,25 @@ async fn bootstrap_fixture() -> BootstrapFixture {
     }
 }
 
+/// The pieces `bootstrap` takes besides the config and the controller.
+struct BootstrapComponents {
+    partitions: Arc<PartitionRegistry>,
+    coordinator: Arc<GroupCoordinator>,
+    log_dir_status: LogDirRegistry,
+}
+
 fn bootstrap_components(
     config: &BrokerConfig,
     controller: &Arc<dyn MetadataSource>,
-) -> (
-    Arc<PartitionRegistry>,
-    Arc<GroupCoordinator>,
-    LogDirRegistry,
-) {
+) -> BootstrapComponents {
     let partitions = Arc::new(PartitionRegistry::new());
     let coordinator = test_coordinator(controller, &partitions);
     let status = LogDirRegistry::probe(&config.all_log_dirs());
-    (partitions, coordinator, status)
+    BootstrapComponents {
+        partitions,
+        coordinator,
+        log_dir_status: status,
+    }
 }
 
 /// The startup bootstrap creates no topic. Kafka creates `__consumer_offsets`
@@ -87,7 +94,11 @@ async fn bootstrap_creates_no_offsets_topic() {
         controller,
         _dir,
     } = bootstrap_fixture().await;
-    let (partitions, coordinator, log_dir_status) = bootstrap_components(&config, &controller);
+    let BootstrapComponents {
+        partitions,
+        coordinator,
+        log_dir_status,
+    } = bootstrap_components(&config, &controller);
     bootstrap(
         &config,
         &controller,
@@ -112,7 +123,11 @@ async fn bootstrap_opens_the_local_partitions_of_an_existing_offsets_topic() {
         _dir,
     } = bootstrap_fixture().await;
     register_offsets_topic(&controller).await;
-    let (partitions, coordinator, log_dir_status) = bootstrap_components(&config, &controller);
+    let BootstrapComponents {
+        partitions,
+        coordinator,
+        log_dir_status,
+    } = bootstrap_components(&config, &controller);
     for _boot in 0..2 {
         bootstrap(
             &config,

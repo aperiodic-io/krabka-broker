@@ -173,12 +173,31 @@ fn production_partition(dir: &TempDir) -> Arc<Partition> {
 // Explicit epochs retain the original unclamped last-offset delta.
 krabka_macros::record_batch_fixture!(make_batch, LEADER_EPOCH);
 
+/// One batch shape: its name, its record count and its record payload size.
+struct Shape {
+    name: &'static str,
+    records: i32,
+    payload: usize,
+}
+
 /// The batch shapes the bench measures, scaled down to what a unit test should
 /// write to disk. The shape mix is what matters here, not the magnitude.
-const SHAPES: [(&str, i32, usize); 3] = [
-    ("1rec_1KiB", 1, 1024),
-    ("16rec_64B", 16, 64),
-    ("128rec_8B", 128, 8),
+const SHAPES: [Shape; 3] = [
+    Shape {
+        name: "1rec_1KiB",
+        records: 1,
+        payload: 1024,
+    },
+    Shape {
+        name: "16rec_64B",
+        records: 16,
+        payload: 64,
+    },
+    Shape {
+        name: "128rec_8B",
+        records: 128,
+        payload: 8,
+    },
 ];
 
 struct ReplicaPair {
@@ -232,7 +251,12 @@ async fn the_seam_reconstructs_the_partition_the_broker_spawns() {
 /// is byte-for-byte the append the broker runs.
 #[tokio::test]
 async fn the_seam_replicates_the_bytes_the_broker_partition_replicates() {
-    for (name, records, payload) in SHAPES {
+    for Shape {
+        name,
+        records,
+        payload,
+    } in SHAPES
+    {
         let pair = replica_pair();
         let seam = &pair.seam;
         let production = &pair.production;
@@ -275,7 +299,12 @@ async fn the_seam_replicates_the_bytes_the_broker_partition_replicates() {
 /// benchmark another.
 #[tokio::test]
 async fn the_walk_the_perf_note_prices_counts_the_bytes_the_append_lands() {
-    for (name, records, payload) in SHAPES {
+    for Shape {
+        name,
+        records,
+        payload,
+    } in SHAPES
+    {
         let dir = tempfile::tempdir().expect("tempdir");
         let seam = ReplicaSeam::spawn(dir.path()).expect("open the seam's follower log");
 

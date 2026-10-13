@@ -3,7 +3,7 @@
 #[cfg(test)]
 use crate::config::BrokerConfig;
 use {
-    super::wal_index::WalIndexCache,
+    super::wal_index::{FetchRange, IndexedRange, WalIndexCache},
     crate::{
         broker::Broker,
         codes,
@@ -76,7 +76,11 @@ impl DisklessReadHandle {
                 "diskless WAL index projection is unavailable or invalid".into(),
             ));
         }
-        let Some((object_key, byte_start, byte_len)) = self
+        let Some(FetchRange {
+            object_key,
+            byte_start,
+            byte_len,
+        }) = self
             .index
             .lock()
             .await
@@ -144,16 +148,20 @@ impl DisklessReadHandle {
         };
         if ranges
             .iter()
-            .any(|(_, entry)| entry.first_offset > entry.last_offset)
+            .any(|range| range.entry.first_offset > range.entry.last_offset)
             || ranges
                 .windows(2)
-                .any(|pair| pair[0].1.last_offset >= pair[1].1.first_offset)
+                .any(|pair| pair[0].entry.last_offset >= pair[1].entry.first_offset)
         {
             return Err(wal_timestamp_error(
                 "WAL index ranges overlap or are inverted",
             ));
         }
-        for (key, entry) in ranges {
+        for IndexedRange {
+            object_key: key,
+            entry,
+        } in ranges
+        {
             if entry.last_offset < minimum
                 || (entry.max_timestamp_ms != -1 && entry.max_timestamp_ms < timestamp)
             {

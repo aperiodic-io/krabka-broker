@@ -25,6 +25,23 @@ fn config(name: &str, operation: i8, value: Option<&str>) -> AlterableConfig {
     }
 }
 
+/// The response of one alter beside the controller it changed, so a test can
+/// read the levels back.
+struct Applied {
+    response: AlterConfigsResourceResponse,
+    levels: LogLevelController,
+}
+
+/// One refused alter: what it does, its resource name and operations, and the
+/// code and message of the refusal.
+struct Refusal<'a> {
+    what: &'a str,
+    resource_name: &'a str,
+    configs: Vec<AlterableConfig>,
+    code: i16,
+    message: &'a str,
+}
+
 /// Apply `configs` to a fresh controller seeded with `spec` and return the
 /// response beside the controller, so a test can read the levels back.
 fn apply(
@@ -32,7 +49,7 @@ fn apply(
     resource_name: &str,
     configs: Vec<AlterableConfig>,
     validate_only: bool,
-) -> (AlterConfigsResourceResponse, LogLevelController) {
+) -> Applied {
     let (levels, _filter) = LogLevelController::new(spec);
     let resource = AlterConfigsResource {
         resource_type: 8,
@@ -48,12 +65,18 @@ fn apply(
         ..Default::default()
     };
     handle_broker_logger_scoped(&resource, NODE_ID, &levels, validate_only, &mut out);
-    (out, levels)
+    Applied {
+        response: out,
+        levels,
+    }
 }
 
 #[test]
 fn a_set_retargets_the_named_logger() {
-    let (out, levels) = apply(
+    let Applied {
+        response: out,
+        levels,
+    } = apply(
         "info,krabka_broker=info",
         "3",
         vec![config("krabka_broker", 0, Some("DEBUG"))],
@@ -66,7 +89,10 @@ fn a_set_retargets_the_named_logger() {
 
 #[test]
 fn a_delete_puts_the_logger_back_on_the_root_level() {
-    let (out, levels) = apply(
+    let Applied {
+        response: out,
+        levels,
+    } = apply(
         "warn,krabka_broker=trace",
         "3",
         vec![config("krabka_broker", 1, None)],
@@ -79,7 +105,10 @@ fn a_delete_puts_the_logger_back_on_the_root_level() {
 
 #[test]
 fn a_set_of_the_root_logger_moves_every_unpinned_target() {
-    let (out, levels) = apply("info", "3", vec![config("root", 0, Some("TRACE"))], false);
+    let Applied {
+        response: out,
+        levels,
+    } = apply("info", "3", vec![config("root", 0, Some("TRACE"))], false);
 
     assert!(out.error_code == codes::NONE, "{out:?}");
     assert!(levels.level("root") == Some(LogLevel::Trace));
@@ -87,7 +116,10 @@ fn a_set_of_the_root_logger_moves_every_unpinned_target() {
 
 #[test]
 fn validate_only_reports_the_verdict_and_changes_nothing() {
-    let (out, levels) = apply(
+    let Applied {
+        response: out,
+        levels,
+    } = apply(
         "info,krabka_broker=info",
         "3",
         vec![config("krabka_broker", 0, Some("TRACE"))],
@@ -100,7 +132,10 @@ fn validate_only_reports_the_verdict_and_changes_nothing() {
 
 #[test]
 fn one_bad_config_leaves_the_whole_resource_unapplied() {
-    let (out, levels) = apply(
+    let Applied {
+        response: out,
+        levels,
+    } = apply(
         "info,krabka_broker=info,krabka_log=info",
         "3",
         vec![
@@ -116,74 +151,82 @@ fn one_bad_config_leaves_the_whole_resource_unapplied() {
 
 #[test]
 fn refusals_carry_kafkas_own_message() {
-    let cases: Vec<(&str, &str, Vec<AlterableConfig>, i16, &str)> = vec![
-        (
-            "a name that is not a node id",
-            "not-a-number",
-            vec![config("krabka_broker", 0, Some("DEBUG"))],
-            codes::INVALID_REQUEST,
-            "Node id must be an integer, but it is: not-a-number",
-        ),
-        (
-            "another node's id",
-            "4",
-            vec![config("krabka_broker", 0, Some("DEBUG"))],
-            codes::INVALID_REQUEST,
-            "Unexpected node id. Expected 3, but received 4",
-        ),
-        (
-            "a logger this node does not have",
-            "3",
-            vec![config("no_such_target", 0, Some("DEBUG"))],
-            codes::INVALID_CONFIG,
-            "Logger no_such_target does not exist!",
-        ),
-        (
-            "a level that is not a level",
-            "3",
-            vec![config("krabka_broker", 0, Some("VERBOSE"))],
-            codes::INVALID_CONFIG,
-            "Cannot set the log level of krabka_broker to VERBOSE as it is not a supported log level. Valid log levels are DEBUG, ERROR, FATAL, INFO, TRACE, WARN",
-        ),
-        (
-            "a set with no value at all",
-            "3",
-            vec![config("krabka_broker", 0, None)],
-            codes::INVALID_CONFIG,
-            "Cannot set the log level of krabka_broker to null as it is not a supported log level. Valid log levels are DEBUG, ERROR, FATAL, INFO, TRACE, WARN",
-        ),
-        (
-            "a delete of the root logger",
-            "3",
-            vec![config("root", 1, None)],
-            codes::INVALID_REQUEST,
-            "Removing the log level of the root logger is not allowed",
-        ),
-        (
-            "an append",
-            "3",
-            vec![config("krabka_broker", 2, Some("DEBUG"))],
-            codes::INVALID_REQUEST,
-            "APPEND operation is not allowed for the BROKER_LOGGER resource",
-        ),
-        (
-            "a subtract",
-            "3",
-            vec![config("krabka_broker", 3, Some("DEBUG"))],
-            codes::INVALID_REQUEST,
-            "SUBTRACT operation is not allowed for the BROKER_LOGGER resource",
-        ),
-        (
-            "an operation byte no version defines",
-            "3",
-            vec![config("krabka_broker", 9, Some("DEBUG"))],
-            codes::INVALID_REQUEST,
-            "Unknown operation type 9 is not allowed for the BROKER_LOGGER resource",
-        ),
+    let cases: Vec<Refusal<'_>> = vec![
+        Refusal {
+            what: "a name that is not a node id",
+            resource_name: "not-a-number",
+            configs: vec![config("krabka_broker", 0, Some("DEBUG"))],
+            code: codes::INVALID_REQUEST,
+            message: "Node id must be an integer, but it is: not-a-number",
+        },
+        Refusal {
+            what: "another node's id",
+            resource_name: "4",
+            configs: vec![config("krabka_broker", 0, Some("DEBUG"))],
+            code: codes::INVALID_REQUEST,
+            message: "Unexpected node id. Expected 3, but received 4",
+        },
+        Refusal {
+            what: "a logger this node does not have",
+            resource_name: "3",
+            configs: vec![config("no_such_target", 0, Some("DEBUG"))],
+            code: codes::INVALID_CONFIG,
+            message: "Logger no_such_target does not exist!",
+        },
+        Refusal {
+            what: "a level that is not a level",
+            resource_name: "3",
+            configs: vec![config("krabka_broker", 0, Some("VERBOSE"))],
+            code: codes::INVALID_CONFIG,
+            message: "Cannot set the log level of krabka_broker to VERBOSE as it is not a supported log level. Valid log levels are DEBUG, ERROR, FATAL, INFO, TRACE, WARN",
+        },
+        Refusal {
+            what: "a set with no value at all",
+            resource_name: "3",
+            configs: vec![config("krabka_broker", 0, None)],
+            code: codes::INVALID_CONFIG,
+            message: "Cannot set the log level of krabka_broker to null as it is not a supported log level. Valid log levels are DEBUG, ERROR, FATAL, INFO, TRACE, WARN",
+        },
+        Refusal {
+            what: "a delete of the root logger",
+            resource_name: "3",
+            configs: vec![config("root", 1, None)],
+            code: codes::INVALID_REQUEST,
+            message: "Removing the log level of the root logger is not allowed",
+        },
+        Refusal {
+            what: "an append",
+            resource_name: "3",
+            configs: vec![config("krabka_broker", 2, Some("DEBUG"))],
+            code: codes::INVALID_REQUEST,
+            message: "APPEND operation is not allowed for the BROKER_LOGGER resource",
+        },
+        Refusal {
+            what: "a subtract",
+            resource_name: "3",
+            configs: vec![config("krabka_broker", 3, Some("DEBUG"))],
+            code: codes::INVALID_REQUEST,
+            message: "SUBTRACT operation is not allowed for the BROKER_LOGGER resource",
+        },
+        Refusal {
+            what: "an operation byte no version defines",
+            resource_name: "3",
+            configs: vec![config("krabka_broker", 9, Some("DEBUG"))],
+            code: codes::INVALID_REQUEST,
+            message: "Unknown operation type 9 is not allowed for the BROKER_LOGGER resource",
+        },
     ];
 
-    for (what, resource_name, configs, code, message) in cases {
-        let (out, _levels) = apply("info,krabka_broker=info", resource_name, configs, false);
+    for Refusal {
+        what,
+        resource_name,
+        configs,
+        code,
+        message,
+    } in cases
+    {
+        let Applied { response: out, .. } =
+            apply("info,krabka_broker=info", resource_name, configs, false);
         check!(out.error_code == code, "{what}");
         check!(out.error_message.as_deref() == Some(message), "{what}");
     }
@@ -196,7 +239,10 @@ fn the_default_filter_names_the_loggers_an_operator_reaches_for() {
     // starting spec seeds them. If that seed stops naming them, the headline
     // `--add-config krabka_broker=DEBUG` is refused on a real broker.
     for target in ["krabka_broker", "krabka_log"] {
-        let (out, levels) = apply(
+        let Applied {
+            response: out,
+            levels,
+        } = apply(
             DEFAULT_LOG_FILTER,
             "3",
             vec![config(target, 0, Some("DEBUG"))],
@@ -211,7 +257,7 @@ fn the_default_filter_names_the_loggers_an_operator_reaches_for() {
 fn a_lowercase_level_is_not_a_level() {
     // Kafka tests the value against a set of uppercase names, so `debug` is
     // rejected there and must be rejected here.
-    let (out, _levels) = apply(
+    let Applied { response: out, .. } = apply(
         "info,krabka_broker=info",
         "3",
         vec![config("krabka_broker", 0, Some("debug"))],

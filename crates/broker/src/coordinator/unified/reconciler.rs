@@ -5,8 +5,8 @@
 
 use {
     super::assignor::{
-        Assignor, GroupSpec, MemberSubscription, SubscriptionShape, TopicMetadata,
-        subscription_type,
+        Assignor, GroupSpec, MemberSubscription, SubscriptionShape, TopicIdPartition,
+        TopicMetadata, subscription_type,
     },
     crate::coordinator::unified::{
         consumer_state::{GroupState, MemberState},
@@ -26,7 +26,7 @@ pub struct ReconcileInput {
     /// missing entry means there is no rack data for that partition.
     /// [`Self::topic_metadata`] gives the assignors the set of these racks,
     /// which the built-in assignors do not read, as in Kafka.
-    pub partition_racks: HashMap<(Uuid, i32), Vec<String>>,
+    pub partition_racks: HashMap<TopicIdPartition, Vec<String>>,
 }
 
 impl ReconcileInput {
@@ -44,7 +44,10 @@ impl ReconcileInput {
         let racks: Vec<Vec<&str>> = (0..partitions)
             .map(|partition| {
                 self.partition_racks
-                    .get(&(*topic_id, partition))
+                    .get(&TopicIdPartition {
+                        topic_id: *topic_id,
+                        partition,
+                    })
                     .map(|racks| racks.iter().map(String::as_str).collect())
                     .unwrap_or_default()
             })
@@ -57,11 +60,10 @@ impl ReconcileInput {
     #[must_use]
     pub fn metadata_hash<'a>(&self, topics: impl IntoIterator<Item = &'a str>) -> i64 {
         let topics: BTreeSet<&str> = topics.into_iter().collect();
-        topic_hash::group_hash(
-            topics
-                .into_iter()
-                .filter_map(|topic| self.topic_hash(topic).map(|hash| (topic, hash))),
-        )
+        topic_hash::group_hash(topics.into_iter().filter_map(|topic| {
+            self.topic_hash(topic)
+                .map(|hash| topic_hash::NamedTopicHash { name: topic, hash })
+        }))
     }
 
     /// The assignors' view of the snapshot: the partition counts, and for each
@@ -270,16 +272,22 @@ mod tests {
 
     fn fresh_member(id: &str, topic: &str) -> MemberState { subscribed_member(id, &[topic]) }
 
-    fn input(topic_name: &str, partitions: i32) -> (ReconcileInput, Uuid) {
+    /// A snapshot that holds one topic, and the id of that topic.
+    struct SingleTopic {
+        input: ReconcileInput,
+        topic_id: Uuid,
+    }
+
+    fn input(topic_name: &str, partitions: i32) -> SingleTopic {
         let t = Uuid([1; 16]);
-        (
-            ReconcileInput {
+        SingleTopic {
+            input: ReconcileInput {
                 topic_id_by_name: [(topic_name.into(), t)].into(),
                 partitions_per_topic: [(t, partitions)].into(),
                 ..Default::default()
             },
-            t,
-        )
+            topic_id: t,
+        }
     }
 
     /// Kafka's `updateSubscriptionMetadata`: (case, bump asked, the topic's
@@ -298,9 +306,9 @@ mod tests {
         for (case, bump, recorded, now, expected) in rows {
             let mut g = GroupState::new("g");
             g.add_or_update_member(fresh_member("m1", "t"));
-            let (at_record, _) = input("t", recorded);
+            let at_record = input("t", recorded).input;
             g.record_metadata_hash(metadata_hash(&g, &at_record));
-            let (current, _) = input("t", now);
+            let current = input("t", now).input;
             let bumped = update_subscription_metadata(&mut g, &current, bump).unwrap();
             check!((bumped, g.group_epoch) == expected, "{case}");
             check!(g.metadata_hash() == metadata_hash(&g, &current), "{case}");
@@ -312,7 +320,7 @@ mod tests {
     fn an_exhausted_epoch_bumps_nothing() {
         let mut group = GroupState::new("g");
         group.group_epoch = i32::MAX;
-        let (input, _) = input("t", 1);
+        let input = input("t", 1).input;
         assert!(update_subscription_metadata(&mut group, &input, true) == Err(EpochExhausted));
         assert!(bump_with_metadata_hash(&mut group, &input) == Err(EpochExhausted));
         assert!(group.group_epoch == i32::MAX);
@@ -325,7 +333,10 @@ mod tests {
     fn compute_target_reports_the_members_whose_target_changed() {
         let mut g = GroupState::new("g");
         g.add_or_update_member(fresh_member("m1", "t"));
-        let (inp, t) = input("t", 4);
+        let SingleTopic {
+            input: inp,
+            topic_id: t,
+        } = input("t", 4);
         g.bump_epoch();
         let first = compute_target(&mut g, &inp, &UniformAssignor);
         check!(first == vec!["m1".to_string()]);
@@ -346,20 +357,29 @@ mod tests {
     fn subscription_topic_ids_resolved() {
         let mut g = GroupState::new("g");
         g.add_or_update_member(fresh_member("m1", "t"));
-        let (inp, t) = input("t", 2);
+        let SingleTopic {
+            input: inp,
+            topic_id: t,
+        } = input("t", 2);
         let ids = membership_topic_ids(&g, &inp);
         assert!(ids.contains(&t));
     }
 
     // ── subscribed_topic_regex resolution ───────────────────
 
-    fn input_with_topics(topics: &[(&str, i32)]) -> ReconcileInput {
+    /// A topic of a snapshot, and its partition count.
+    struct TopicSize {
+        name: &'static str,
+        partitions: i32,
+    }
+
+    fn input_with_topics(topics: &[TopicSize]) -> ReconcileInput {
         let mut topic_id_by_name = HashMap::new();
         let mut partitions_per_topic = HashMap::new();
-        for (i, (name, parts)) in topics.iter().enumerate() {
+        for (i, topic) in topics.iter().enumerate() {
             let id = Uuid([u8::try_from(i + 1).unwrap_or(255); 16]);
-            topic_id_by_name.insert((*name).to_string(), id);
-            partitions_per_topic.insert(id, *parts);
+            topic_id_by_name.insert(topic.name.to_string(), id);
+            partitions_per_topic.insert(id, topic.partitions);
         }
         ReconcileInput {
             topic_id_by_name,
@@ -413,31 +433,72 @@ mod tests {
     /// subscribes to nothing.
     #[test]
     fn a_member_is_assigned_the_names_and_the_topics_its_regex_resolved_to() {
-        type Row<'a> = (&'a str, &'a [&'a str], Option<&'a [&'a str]>, &'a [&'a str]);
+        struct Row<'a> {
+            regex: &'a str,
+            names: &'a [&'a str],
+            resolved: Option<&'a [&'a str]>,
+            expected: &'a [&'a str],
+        }
+
         let inp = input_with_topics(&[
-            ("orders-eu", 1),
-            ("orders-us", 1),
-            ("audit", 1),
-            ("shipments", 1),
+            TopicSize {
+                name: "orders-eu",
+                partitions: 1,
+            },
+            TopicSize {
+                name: "orders-us",
+                partitions: 1,
+            },
+            TopicSize {
+                name: "audit",
+                partitions: 1,
+            },
+            TopicSize {
+                name: "shipments",
+                partitions: 1,
+            },
         ]);
         let rows: [Row<'_>; 5] = [
-            ("^orders-.*", &[], Some(&["orders-eu", "orders-us"]), &[
-                "orders-eu",
-                "orders-us",
-            ]),
-            ("^orders-.*", &[], Some(&["orders-eu"]), &["orders-eu"]),
-            ("^orders-.*", &["audit"], Some(&["orders-eu"]), &[
-                "audit",
-                "orders-eu",
-            ]),
+            Row {
+                regex: "^orders-.*",
+                names: &[],
+                resolved: Some(&["orders-eu", "orders-us"]),
+                expected: &["orders-eu", "orders-us"],
+            },
+            Row {
+                regex: "^orders-.*",
+                names: &[],
+                resolved: Some(&["orders-eu"]),
+                expected: &["orders-eu"],
+            },
+            Row {
+                regex: "^orders-.*",
+                names: &["audit"],
+                resolved: Some(&["orders-eu"]),
+                expected: &["audit", "orders-eu"],
+            },
             // The resolution may name a topic that has been deleted since.
-            ("^orders-.*", &[], Some(&["orders-eu", "orders-gone"]), &[
-                "orders-eu",
-            ]),
+            Row {
+                regex: "^orders-.*",
+                names: &[],
+                resolved: Some(&["orders-eu", "orders-gone"]),
+                expected: &["orders-eu"],
+            },
             // No resolution yet: the names still apply.
-            ("^orders-.*", &["audit"], None, &["audit"]),
+            Row {
+                regex: "^orders-.*",
+                names: &["audit"],
+                resolved: None,
+                expected: &["audit"],
+            },
         ];
-        for (regex, names, resolved, expected) in rows {
+        for Row {
+            regex,
+            names,
+            resolved,
+            expected,
+        } in rows
+        {
             let mut g = GroupState::new("g");
             g.add_or_update_member(member_with_regex("m1", names, Some(regex)));
             if let Some(topics) = resolved {
@@ -457,7 +518,20 @@ mod tests {
     /// regex gets that regex's.
     #[test]
     fn members_share_the_resolution_of_the_same_regex() {
-        let inp = input_with_topics(&[("a1", 2), ("a2", 2), ("b1", 2)]);
+        let inp = input_with_topics(&[
+            TopicSize {
+                name: "a1",
+                partitions: 2,
+            },
+            TopicSize {
+                name: "a2",
+                partitions: 2,
+            },
+            TopicSize {
+                name: "b1",
+                partitions: 2,
+            },
+        ]);
         let mut g = GroupState::new("g");
         g.add_or_update_member(member_with_regex("m1", &[], Some("a.*")));
         g.add_or_update_member(member_with_regex("m2", &[], Some("a.*")));
@@ -473,71 +547,168 @@ mod tests {
         assert!(assigned == [vec!["a1", "a2"], vec!["a1", "a2"], vec!["b1"]]);
     }
 
-    /// Kafka's metadata hash covers the id, the name, the partition count and
-    /// the partition racks of every topic that the group subscribes to, by
-    /// name or through a resolved regex, and nothing else.
-    #[test]
-    fn the_metadata_hash_moves_with_the_subscribed_topics_only() {
-        let snapshot = |topics: &[(&str, u8, i32)], racks: &[(u8, i32, &str)]| ReconcileInput {
+    /// A topic of a snapshot: the id is the byte that fills its `Uuid`.
+    #[derive(Clone, Copy)]
+    struct SnapshotTopic {
+        name: &'static str,
+        id: u8,
+        partitions: i32,
+    }
+
+    /// The rack of one partition of a snapshot topic.
+    #[derive(Clone, Copy)]
+    struct RackEntry {
+        id: u8,
+        partition: i32,
+        rack: &'static str,
+    }
+
+    fn snapshot(topics: &[SnapshotTopic], racks: &[RackEntry]) -> ReconcileInput {
+        ReconcileInput {
             topic_id_by_name: topics
                 .iter()
-                .map(|(name, id, _)| ((*name).to_string(), Uuid([*id; 16])))
+                .map(|topic| (topic.name.to_string(), Uuid([topic.id; 16])))
                 .collect(),
             partitions_per_topic: topics
                 .iter()
-                .map(|(_, id, partitions)| (Uuid([*id; 16]), *partitions))
+                .map(|topic| (Uuid([topic.id; 16]), topic.partitions))
                 .collect(),
             partition_racks: racks
                 .iter()
-                .map(|(id, partition, rack)| ((Uuid([*id; 16]), *partition), vec![(*rack).into()]))
+                .map(|entry| {
+                    (
+                        TopicIdPartition {
+                            topic_id: Uuid([entry.id; 16]),
+                            partition: entry.partition,
+                        },
+                        vec![entry.rack.into()],
+                    )
+                })
                 .collect(),
-        };
-        let base: &[(&str, u8, i32)] = &[
-            ("orders", 1, 2),
-            ("payments", 2, 1),
-            ("payouts", 3, 1),
-            ("audit", 4, 1),
-        ];
-        let mut g = GroupState::new("g");
-        g.add_or_update_member(fresh_member("m1", "orders"));
-        g.add_or_update_member(member_with_regex("m2", &[], Some("^pay.*")));
-        resolve(&mut g, "^pay.*", &["payments"]);
-        let before = metadata_hash(&g, &snapshot(base, &[(1, 0, "rack-a")]));
+        }
+    }
 
-        // (name, the snapshot after, whether the hash moves)
-        let rows = [
+    const BASE: &[SnapshotTopic] = &[
+        SnapshotTopic {
+            name: "orders",
+            id: 1,
+            partitions: 2,
+        },
+        SnapshotTopic {
+            name: "payments",
+            id: 2,
+            partitions: 1,
+        },
+        SnapshotTopic {
+            name: "payouts",
+            id: 3,
+            partitions: 1,
+        },
+        SnapshotTopic {
+            name: "audit",
+            id: 4,
+            partitions: 1,
+        },
+    ];
+
+    /// The snapshots after a change, and whether the metadata hash moves.
+    fn hash_rows() -> Vec<(&'static str, ReconcileInput, bool)> {
+        let base = BASE;
+        vec![
             (
                 "nothing changes",
-                snapshot(base, &[(1, 0, "rack-a")]),
+                snapshot(base, &[RackEntry {
+                    id: 1,
+                    partition: 0,
+                    rack: "rack-a",
+                }]),
                 false,
             ),
             (
                 "an unsubscribed topic is created",
-                snapshot(&[base, &[("refunds", 5, 1)][..]].concat(), &[(
-                    1, 0, "rack-a",
-                )]),
+                snapshot(
+                    &[
+                        base,
+                        &[SnapshotTopic {
+                            name: "refunds",
+                            id: 5,
+                            partitions: 1,
+                        }][..],
+                    ]
+                    .concat(),
+                    &[RackEntry {
+                        id: 1,
+                        partition: 0,
+                        rack: "rack-a",
+                    }],
+                ),
                 false,
             ),
             (
                 "an unsubscribed topic grows",
-                snapshot(&[&base[..3], &[("audit", 4, 2)][..]].concat(), &[(
-                    1, 0, "rack-a",
-                )]),
+                snapshot(
+                    &[
+                        &base[..3],
+                        &[SnapshotTopic {
+                            name: "audit",
+                            id: 4,
+                            partitions: 2,
+                        }][..],
+                    ]
+                    .concat(),
+                    &[RackEntry {
+                        id: 1,
+                        partition: 0,
+                        rack: "rack-a",
+                    }],
+                ),
                 false,
             ),
             (
                 "a topic that the regex matches without authorization grows",
                 snapshot(
-                    &[&base[..2], &[("payouts", 3, 2), ("audit", 4, 1)][..]].concat(),
-                    &[(1, 0, "rack-a")],
+                    &[
+                        &base[..2],
+                        &[
+                            SnapshotTopic {
+                                name: "payouts",
+                                id: 3,
+                                partitions: 2,
+                            },
+                            SnapshotTopic {
+                                name: "audit",
+                                id: 4,
+                                partitions: 1,
+                            },
+                        ][..],
+                    ]
+                    .concat(),
+                    &[RackEntry {
+                        id: 1,
+                        partition: 0,
+                        rack: "rack-a",
+                    }],
                 ),
                 false,
             ),
             (
                 "a subscribed topic grows",
-                snapshot(&[&[("orders", 1, 3)][..], &base[1..]].concat(), &[(
-                    1, 0, "rack-a",
-                )]),
+                snapshot(
+                    &[
+                        &[SnapshotTopic {
+                            name: "orders",
+                            id: 1,
+                            partitions: 3,
+                        }][..],
+                        &base[1..],
+                    ]
+                    .concat(),
+                    &[RackEntry {
+                        id: 1,
+                        partition: 0,
+                        rack: "rack-a",
+                    }],
+                ),
                 true,
             ),
             (
@@ -547,25 +718,75 @@ mod tests {
             ),
             (
                 "a subscribed topic is created again with a new id",
-                snapshot(&[&[("orders", 9, 2)][..], &base[1..]].concat(), &[(
-                    9, 0, "rack-a",
-                )]),
+                snapshot(
+                    &[
+                        &[SnapshotTopic {
+                            name: "orders",
+                            id: 9,
+                            partitions: 2,
+                        }][..],
+                        &base[1..],
+                    ]
+                    .concat(),
+                    &[RackEntry {
+                        id: 9,
+                        partition: 0,
+                        rack: "rack-a",
+                    }],
+                ),
                 true,
             ),
             (
                 "a partition of a subscribed topic moves to another rack",
-                snapshot(base, &[(1, 0, "rack-b")]),
+                snapshot(base, &[RackEntry {
+                    id: 1,
+                    partition: 0,
+                    rack: "rack-b",
+                }]),
                 true,
             ),
             (
                 "a topic that the regex resolved to grows",
                 snapshot(
-                    &[&base[..1], &[("payments", 2, 2)][..], &base[2..]].concat(),
-                    &[(1, 0, "rack-a")],
+                    &[
+                        &base[..1],
+                        &[SnapshotTopic {
+                            name: "payments",
+                            id: 2,
+                            partitions: 2,
+                        }][..],
+                        &base[2..],
+                    ]
+                    .concat(),
+                    &[RackEntry {
+                        id: 1,
+                        partition: 0,
+                        rack: "rack-a",
+                    }],
                 ),
                 true,
             ),
-        ];
+        ]
+    }
+
+    /// Kafka's metadata hash covers the id, the name, the partition count and
+    /// the partition racks of every topic that the group subscribes to, by
+    /// name or through a resolved regex, and nothing else.
+    #[test]
+    fn the_metadata_hash_moves_with_the_subscribed_topics_only() {
+        let mut g = GroupState::new("g");
+        g.add_or_update_member(fresh_member("m1", "orders"));
+        g.add_or_update_member(member_with_regex("m2", &[], Some("^pay.*")));
+        resolve(&mut g, "^pay.*", &["payments"]);
+        let before = metadata_hash(
+            &g,
+            &snapshot(BASE, &[RackEntry {
+                id: 1,
+                partition: 0,
+                rack: "rack-a",
+            }]),
+        );
+        let rows = hash_rows();
         let mut found = Vec::new();
         let mut expected = Vec::new();
         for (name, after, moves) in rows {
@@ -581,7 +802,16 @@ mod tests {
         let mut g = GroupState::new("g");
         g.add_or_update_member(member_with_regex("m1", &[], Some("^orders-.*")));
         resolve(&mut g, "^orders-.*", &["orders-eu"]);
-        let inp = input_with_topics(&[("orders-eu", 1), ("shipments", 1)]);
+        let inp = input_with_topics(&[
+            TopicSize {
+                name: "orders-eu",
+                partitions: 1,
+            },
+            TopicSize {
+                name: "shipments",
+                partitions: 1,
+            },
+        ]);
         let orders = inp.topic_id_by_name["orders-eu"];
         let ids = membership_topic_ids(&g, &inp);
         assert!(

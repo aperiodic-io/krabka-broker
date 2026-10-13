@@ -26,6 +26,13 @@ pub(super) type LogStorage<'a> = (
     &'a LogDirRegistry,
 );
 
+/// The owning directory's storage-failure registry and the path it keys on.
+#[derive(Clone, Copy)]
+pub(super) struct StorageStatus<'a> {
+    pub(super) log_dir: &'a Arc<ArcSwap<PathBuf>>,
+    pub(super) registry: &'a LogDirRegistry,
+}
+
 /// Completion of a maintenance pass after storage-error classification.
 pub(super) type MaintenanceAck = tokio::sync::oneshot::Sender<Result<(), BrokerError>>;
 
@@ -83,14 +90,14 @@ pub(crate) fn storage_failure_error(context: &str, detail: impl std::fmt::Displa
 pub(super) async fn run_log_mutation<T: Send + 'static>(
     operation: impl FnOnce() -> Result<T, BrokerError> + Send + 'static,
     panic_context: &'static str,
-    storage: (&Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
+    storage: StorageStatus<'_>,
 ) -> Result<T, BrokerError> {
     let result = match spawn_blocking(operation).await {
         Ok(value) => value,
         Err(join_err) => Err(storage_failure_error(panic_context, join_err)),
     };
     if let Err(err) = &result {
-        flag_storage_failure(err, storage.0, storage.1);
+        flag_storage_failure(err, storage.log_dir, storage.registry);
     }
     result
 }
@@ -117,7 +124,10 @@ pub(super) async fn maintain_log(
     let result = run_log_mutation(
         move || operation(&mut lock_log(&log), now, high_watermark).map_err(BrokerError::from),
         panic_context,
-        (log_dir, log_dir_status),
+        StorageStatus {
+            log_dir,
+            registry: log_dir_status,
+        },
     )
     .await;
     let _ = ack.send(result);
@@ -132,20 +142,30 @@ mod tests {
         tempfile::tempdir,
     };
 
-    fn storage_fixture() -> (
-        tempfile::TempDir,
-        LogDirRegistry,
-        ArcSwap<std::path::PathBuf>,
-    ) {
+    struct StorageFixture {
+        dir: tempfile::TempDir,
+        status: LogDirRegistry,
+        log_dir: ArcSwap<std::path::PathBuf>,
+    }
+
+    fn storage_fixture() -> StorageFixture {
         let dir = tempdir().expect("tempdir");
         let status = LogDirRegistry::probe(&[dir.path().to_path_buf()]);
         let log_dir = ArcSwap::from_pointee(dir.path().to_path_buf());
-        (dir, status, log_dir)
+        StorageFixture {
+            dir,
+            status,
+            log_dir,
+        }
     }
 
     #[test]
     fn flag_storage_failure_marks_io_errors_offline() {
-        let (dir, status, log_dir) = storage_fixture();
+        let StorageFixture {
+            dir,
+            status,
+            log_dir,
+        } = storage_fixture();
         let err = storage_failure_error("append failed", "synthetic EIO");
 
         assert!(flag_storage_failure(&err, &log_dir, &status));
@@ -160,7 +180,11 @@ mod tests {
 
     #[test]
     fn flag_storage_failure_ignores_non_storage_errors() {
-        let (dir, status, log_dir) = storage_fixture();
+        let StorageFixture {
+            dir,
+            status,
+            log_dir,
+        } = storage_fixture();
         let err = BrokerError::UnsupportedApi {
             api_key: 123,
             version: 0,

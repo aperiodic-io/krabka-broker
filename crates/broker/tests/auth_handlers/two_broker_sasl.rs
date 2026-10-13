@@ -27,8 +27,14 @@ use {
     tempfile::TempDir,
 };
 
+/// Ephemeral loopback ports and the open listeners that hold them.
+struct ReservedListeners {
+    addrs: Vec<SocketAddr>,
+    listeners: Vec<tokio::net::TcpListener>,
+}
+
 /// Reserve `n` ephemeral loopback ports and keep their listeners open.
-async fn reserve_listeners(n: usize) -> (Vec<SocketAddr>, Vec<tokio::net::TcpListener>) {
+async fn reserve_listeners(n: usize) -> ReservedListeners {
     let mut addrs = Vec::with_capacity(n);
     let mut listeners = Vec::with_capacity(n);
     for _ in 0..n {
@@ -36,7 +42,7 @@ async fn reserve_listeners(n: usize) -> (Vec<SocketAddr>, Vec<tokio::net::TcpLis
         addrs.push(l.local_addr().unwrap());
         listeners.push(l);
     }
-    (addrs, listeners)
+    ReservedListeners { addrs, listeners }
 }
 
 /// Build a SASL-enabled broker config with two listeners.
@@ -106,9 +112,18 @@ async fn start_two_node_sasl() -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     init_tracing_with("warn");
 
-    let (plaintext_addrs, plaintext_listeners) = reserve_listeners(2).await;
-    let (sasl_addrs, sasl_listeners) = reserve_listeners(2).await;
-    let (controller_addrs, controller_listeners) = reserve_listeners(2).await;
+    let ReservedListeners {
+        addrs: plaintext_addrs,
+        listeners: plaintext_listeners,
+    } = reserve_listeners(2).await;
+    let ReservedListeners {
+        addrs: sasl_addrs,
+        listeners: sasl_listeners,
+    } = reserve_listeners(2).await;
+    let ReservedListeners {
+        addrs: controller_addrs,
+        listeners: controller_listeners,
+    } = reserve_listeners(2).await;
     let voters: Vec<(u64, SocketAddr)> = (0..2_u64)
         .map(|i| (i + 1, controller_addrs[usize::try_from(i).unwrap()]))
         .collect();

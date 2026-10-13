@@ -52,12 +52,15 @@ use {
 /// - Otherwise the lower of this replica's end for the epoch and the leader's,
 ///   capped at the log end.
 fn diverging_truncation_offset(
-    follower: (LeaderEpoch, Offset),
+    follower: EpochEnd,
     leader_epoch: LeaderEpoch,
     leader_end: Offset,
     log_end: Offset,
 ) -> Offset {
-    let (follower_epoch, follower_end) = follower;
+    let EpochEnd {
+        epoch: follower_epoch,
+        end_offset: follower_end,
+    } = follower;
     if leader_end < Offset(0) {
         log_end
     } else if follower_end < Offset(0) {
@@ -69,6 +72,14 @@ fn diverging_truncation_offset(
     }
 }
 
+/// An epoch and the offset at which it ends in a log, or `(-1, -1)` when the
+/// log cannot place the epoch.
+#[derive(Clone, Copy)]
+struct EpochEnd {
+    epoch: LeaderEpoch,
+    end_offset: Offset,
+}
+
 /// Where the local log of `part` truncates for the leader's `diverging`
 /// epoch and end offset. See [`diverging_truncation_offset`].
 pub(super) fn diverging_epoch_truncation_target(
@@ -78,9 +89,10 @@ pub(super) fn diverging_epoch_truncation_target(
     let leader_epoch = LeaderEpoch(diverging.epoch);
     let log = part.log.lock().expect("log mutex poisoned");
     let log_end = log.log_end_offset();
-    let follower = log
+    let (epoch, end_offset) = log
         .epoch_checkpoint()
         .epoch_and_offset_for(leader_epoch, log_end);
+    let follower = EpochEnd { epoch, end_offset };
     diverging_truncation_offset(
         follower,
         leader_epoch,
@@ -586,7 +598,9 @@ mod tests {
         super::*,
         crate::replicator::{
             ensure_local_partition,
-            test_support::{LEADER_ID, NODE_ID, PARTITION, TOPIC, image_with_leader, test_config},
+            test_support::{
+                ConfigWithDir, LEADER_ID, NODE_ID, PARTITION, TOPIC, image_with_leader, test_config,
+            },
         },
         assert2::assert,
         krabka_raft::NodeId,
@@ -595,13 +609,19 @@ mod tests {
     /// One row per branch of `getOffsetTruncationState`.
     #[test]
     fn diverging_truncation_offset_follows_kafka_get_offset_truncation_state() {
-        let unplaced = (LeaderEpoch(-1), Offset(-1));
+        let unplaced = EpochEnd {
+            epoch: LeaderEpoch(-1),
+            end_offset: Offset(-1),
+        };
         // (name, this replica's endOffsetFor, leader epoch, leader end, log end,
         // expected offset)
         for (name, follower, leader_epoch, leader_end, log_end, expected) in [
             (
                 "the leader's end offset is undefined",
-                (LeaderEpoch(4), Offset(8)),
+                EpochEnd {
+                    epoch: LeaderEpoch(4),
+                    end_offset: Offset(8),
+                },
                 4,
                 -1,
                 9,
@@ -625,7 +645,10 @@ mod tests {
             ),
             (
                 "the epoch is unknown here: only the end of the smaller epoch",
-                (LeaderEpoch(4), Offset(10)),
+                EpochEnd {
+                    epoch: LeaderEpoch(4),
+                    end_offset: Offset(10),
+                },
                 5,
                 12,
                 15,
@@ -633,7 +656,10 @@ mod tests {
             ),
             (
                 "the epoch is unknown here, and that end is past the log end",
-                (LeaderEpoch(4), Offset(10)),
+                EpochEnd {
+                    epoch: LeaderEpoch(4),
+                    end_offset: Offset(10),
+                },
                 5,
                 12,
                 8,
@@ -641,7 +667,10 @@ mod tests {
             ),
             (
                 "a known epoch: the leader ends first",
-                (LeaderEpoch(5), Offset(12)),
+                EpochEnd {
+                    epoch: LeaderEpoch(5),
+                    end_offset: Offset(12),
+                },
                 5,
                 10,
                 15,
@@ -649,7 +678,10 @@ mod tests {
             ),
             (
                 "a known epoch: this replica ends first",
-                (LeaderEpoch(5), Offset(10)),
+                EpochEnd {
+                    epoch: LeaderEpoch(5),
+                    end_offset: Offset(10),
+                },
                 5,
                 12,
                 15,
@@ -657,7 +689,10 @@ mod tests {
             ),
             (
                 "a known epoch: the log ends first",
-                (LeaderEpoch(5), Offset(12)),
+                EpochEnd {
+                    epoch: LeaderEpoch(5),
+                    end_offset: Offset(12),
+                },
                 5,
                 14,
                 11,
@@ -820,13 +855,13 @@ mod tests {
         }
     }
 
-    fn unreachable_local_config() -> (Config, tempfile::TempDir) {
+    fn unreachable_local_config() -> ConfigWithDir {
         let (mut cfg, log_dir) = test_config(image_with_leader(LEADER_ID));
         ensure_local_partition(&cfg).unwrap();
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         cfg.leader_port = listener.local_addr().unwrap().port();
         drop(listener);
-        (cfg, log_dir)
+        ConfigWithDir { cfg, dir: log_dir }
     }
 
     /// A lookup that never reached the leader says nothing about the log, so
@@ -834,7 +869,7 @@ mod tests {
     /// that separates the tiered restart from a reset on a transient failure.
     #[tokio::test]
     async fn a_failed_earliest_local_lookup_backs_off_without_touching_the_log() {
-        let (cfg, _log_dir) = unreachable_local_config();
+        let ConfigWithDir { cfg, dir: _log_dir } = unreachable_local_config();
         let before = cfg
             .partitions
             .get(&cfg.topic, cfg.partition)
@@ -978,7 +1013,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_epoch_fence_surfaces_connection_failure_for_local_partition() {
-        let (cfg, _log_dir) = unreachable_local_config();
+        let ConfigWithDir { cfg, dir: _log_dir } = unreachable_local_config();
 
         let err = handle_epoch_fence(&cfg).await.unwrap_err();
 

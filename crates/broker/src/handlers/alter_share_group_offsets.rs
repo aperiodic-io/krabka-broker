@@ -483,54 +483,71 @@ mod tests {
     /// topic exists, expected top-level code, expected partition code)`.
     #[tokio::test]
     async fn acl_scenarios_match_kafka_semantics() {
-        type Row = (&'static str, bool, bool, bool, bool, i16, Option<i16>);
-        let rows: [Row; 4] = [
-            (
-                "group Read only is allowed (the normal share-consumer grant)",
-                true,
-                false,
-                false,
-                true,
-                codes::NONE,
-                Some(codes::NONE),
-            ),
-            (
-                "group Alter only, with no Read, is refused",
-                false,
-                true,
-                false,
-                true,
-                codes::GROUP_AUTHORIZATION_FAILED,
-                None,
-            ),
-            (
-                "group Read granted but the topic is denied",
-                true,
-                false,
-                true,
-                true,
-                codes::NONE,
-                Some(codes::TOPIC_AUTHORIZATION_FAILED),
-            ),
-            (
-                "group Read granted, topic unknown to the cluster",
-                true,
-                false,
-                false,
-                false,
-                codes::NONE,
-                Some(codes::UNKNOWN_TOPIC_OR_PARTITION),
-            ),
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum GroupGrant {
+            ReadOnly,
+            AlterOnly,
+        }
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum TopicState {
+            Granted,
+            Denied,
+            Unknown,
+        }
+        struct AclRow {
+            case: &'static str,
+            group: GroupGrant,
+            topic: TopicState,
+            top: i16,
+            partition: Option<i16>,
+        }
+        let rows: [AclRow; 4] = [
+            AclRow {
+                case: "group Read only is allowed (the normal share-consumer grant)",
+                group: GroupGrant::ReadOnly,
+                topic: TopicState::Granted,
+                top: codes::NONE,
+                partition: Some(codes::NONE),
+            },
+            AclRow {
+                case: "group Alter only, with no Read, is refused",
+                group: GroupGrant::AlterOnly,
+                topic: TopicState::Granted,
+                top: codes::GROUP_AUTHORIZATION_FAILED,
+                partition: None,
+            },
+            AclRow {
+                case: "group Read granted but the topic is denied",
+                group: GroupGrant::ReadOnly,
+                topic: TopicState::Denied,
+                top: codes::NONE,
+                partition: Some(codes::TOPIC_AUTHORIZATION_FAILED),
+            },
+            AclRow {
+                case: "group Read granted, topic unknown to the cluster",
+                group: GroupGrant::ReadOnly,
+                topic: TopicState::Unknown,
+                top: codes::NONE,
+                partition: Some(codes::UNKNOWN_TOPIC_OR_PARTITION),
+            },
         ];
 
-        for (index, (case, group_read, group_alter, topic_denied, topic_exists, top, partition)) in
-            rows.into_iter().enumerate()
+        for (
+            index,
+            AclRow {
+                case,
+                group,
+                topic,
+                top,
+                partition,
+            },
+        ) in rows.into_iter().enumerate()
         {
             let topic_name = "acl-topic";
             let authorizer = Arc::new(ScenarioAuthorizer {
-                group_read,
-                group_alter,
-                denied_topics: if topic_denied {
+                group_read: group == GroupGrant::ReadOnly,
+                group_alter: group == GroupGrant::AlterOnly,
+                denied_topics: if topic == TopicState::Denied {
                     vec![topic_name.to_string()]
                 } else {
                     Vec::new()
@@ -539,6 +556,7 @@ mod tests {
             let (broker_handle, _dir) = start_share_broker().authorizer(authorizer).call().await;
             let broker = broker_handle.broker_arc_for_test();
             test_ctx!(ctx, "alice");
+            let topic_exists = topic != TopicState::Unknown;
             if topic_exists {
                 create_topic(&broker_handle, &ctx, CreateTopicSetup {
                     topic: topic_name,

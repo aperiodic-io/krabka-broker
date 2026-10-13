@@ -7,7 +7,11 @@
 //! trip returns.
 
 use {
-    super::{ObserverConfig, snapshot::install_snapshot, store::ObserverStore},
+    super::{
+        ObserverConfig,
+        snapshot::{SnapshotTarget, install_snapshot},
+        store::ObserverStore,
+    },
     krabka_metadata::MetadataImage,
     krabka_protocol::records::{
         HEADER_LEN, RecordBatch, RecordBatchHeader, RecordsError, validate_one_v2_batch,
@@ -150,7 +154,10 @@ async fn fetch_over(
                 next_offset: install_snapshot(
                     config,
                     conn,
-                    (target, resp.leader_epoch),
+                    SnapshotTarget {
+                        controller: target,
+                        leader_epoch: resp.leader_epoch,
+                    },
                     snapshot_id,
                     image_tx,
                     store,
@@ -200,6 +207,12 @@ pub(super) struct Applied {
     pub(super) last_applied_record_timestamp_ms: Option<i64>,
 }
 
+/// One whole v2 batch of a fetch response: its parsed header and its bytes.
+struct FramedBatch<'a> {
+    header: &'a RecordBatchHeader,
+    bytes: &'a [u8],
+}
+
 /// The batches of one fetch response, each with its header, after the checks
 /// Kafka's raft layer makes before it appends the records of a `FETCH`
 /// response.
@@ -218,14 +231,17 @@ pub(super) struct Applied {
 ///
 /// # Errors
 /// The first batch whose framing is corrupt, other than a truncated tail.
-fn framed_batches(records: &[u8]) -> Result<Vec<(&RecordBatchHeader, &[u8])>, RecordsError> {
+fn framed_batches(records: &[u8]) -> Result<Vec<FramedBatch<'_>>, RecordsError> {
     let mut framed = Vec::new();
     let mut rest = records;
     while !rest.is_empty() {
         match validate_one_v2_batch(rest) {
             Ok(batch) => {
                 let (bytes, after) = rest.split_at(batch.total_len);
-                framed.push((batch.header, bytes));
+                framed.push(FramedBatch {
+                    header: batch.header,
+                    bytes,
+                });
                 rest = after;
             }
             // A batch the response holds only part of, as a fetch cut at its
@@ -317,7 +333,7 @@ fn apply_fetch_records(
     let mut load_errors = 0;
     let mut fatal = None;
     let mut last_applied_record_timestamp_ms = None;
-    for (header, mut bytes) in framed {
+    for FramedBatch { header, mut bytes } in framed {
         let index = u64::try_from(header.base_offset.get().max(0)).unwrap_or(0);
         let next_offset = index
             .saturating_add(u64::try_from(header.last_offset_delta.get().max(0)).unwrap_or(0))
@@ -602,6 +618,16 @@ mod tests {
         assert!(new_offset == 1_004);
     }
 
+    /// One record that does not apply, and what applying it must do.
+    struct Case<'a> {
+        /// What the record is.
+        name: &'a str,
+        /// The record value that does not apply.
+        failing: Vec<u8>,
+        /// What applying it must do.
+        want: Want,
+    }
+
     /// What applying one response must do with a record that does not
     /// apply.
     enum Want {
@@ -678,59 +704,68 @@ mod tests {
             .encode_value(0)
             .expect("encode a broker registration change")
             .to_vec();
-        let cases: [(&str, Vec<u8>, Want); 8] = [
-            (
-                "unknown apiKey",
-                patched_topic_value(1, 99),
-                Want::LoadError,
-            ),
-            (
-                "value version above the highest supported",
-                patched_topic_value(2, 99),
-                Want::LoadError,
-            ),
-            (
-                "undecodable krabka-private record",
-                undecodable_private_value(),
-                Want::LoadError,
-            ),
+        let cases: [Case<'_>; 8] = [
+            Case {
+                name: "unknown apiKey",
+                failing: patched_topic_value(1, 99),
+                want: Want::LoadError,
+            },
+            Case {
+                name: "value version above the highest supported",
+                failing: patched_topic_value(2, 99),
+                want: Want::LoadError,
+            },
+            Case {
+                name: "undecodable krabka-private record",
+                failing: undecodable_private_value(),
+                want: Want::LoadError,
+            },
             // `krabka-metadata` checks the KIP-631 frame version from the
             // revision that versions the private records on.
-            (
-                "frame version other than 1",
-                patched_topic_value(0, 2),
-                Want::AsTheDecoderSays,
-            ),
-            ("validate failure", unknown_topic_config, Want::Skip),
-            (
-                "empty KIP-835 no-op",
-                krabka_protocol::records::metadata::KraftMetadataRecord::NoOp(
+            Case {
+                name: "frame version other than 1",
+                failing: patched_topic_value(0, 2),
+                want: Want::AsTheDecoderSays,
+            },
+            Case {
+                name: "validate failure",
+                failing: unknown_topic_config,
+                want: Want::Skip,
+            },
+            Case {
+                name: "empty KIP-835 no-op",
+                failing: krabka_protocol::records::metadata::KraftMetadataRecord::NoOp(
                     krabka_protocol::owned::no_op_record::NoOpRecord::default(),
                 )
                 .encode_value(0)
                 .expect("encode a no-op")
                 .to_vec(),
-                Want::Skip,
-            ),
-            (
-                "invalid reference: unknown partition of a known topic",
-                unknown_partition_change,
-                Want::SkipOn(TranslateError::InvalidReference {
+                want: Want::Skip,
+            },
+            Case {
+                name: "invalid reference: unknown partition of a known topic",
+                failing: unknown_partition_change,
+                want: Want::SkipOn(TranslateError::InvalidReference {
                     field: "partition change",
                     detail: "unknown partition before-0".into(),
                 }),
-            ),
-            (
-                "invalid value: unknown fenced value",
-                unknown_fenced_change,
-                Want::LoadErrorOn(TranslateError::InvalidValue {
+            },
+            Case {
+                name: "invalid value: unknown fenced value",
+                failing: unknown_fenced_change,
+                want: Want::LoadErrorOn(TranslateError::InvalidValue {
                     field: "broker registration change fenced",
                     detail: "unknown value 2".into(),
                 }),
-            ),
+            },
         ];
 
-        for (case, failing, want) in cases {
+        for Case {
+            name: case,
+            failing,
+            want,
+        } in cases
+        {
             let cluster_id = Uuid::nil();
             let image_tx = image_channel(cluster_id);
             let records = encode_batches(&[

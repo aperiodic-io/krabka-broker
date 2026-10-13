@@ -1,10 +1,20 @@
 pub(crate) const DEFAULT_KAFKA_HOST: &str = "localhost";
 pub(crate) const DEFAULT_KAFKA_PORT: u16 = 9092;
 
-pub(crate) fn parse_host_port(addr: &str) -> Option<(String, u16)> {
+/// A `host:port` address split into its host and port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HostPort {
+    pub(crate) host: String,
+    pub(crate) port: u16,
+}
+
+pub(crate) fn parse_host_port(addr: &str) -> Option<HostPort> {
     let (host, port) = addr.rsplit_once(':')?;
     let port = port.parse::<u16>().ok()?;
-    Some((host.to_string(), port))
+    Some(HostPort {
+        host: host.to_string(),
+        port,
+    })
 }
 
 /// Split an advertised `host:port` listener address for a `BrokerEndpoint` or
@@ -12,8 +22,8 @@ pub(crate) fn parse_host_port(addr: &str) -> Option<(String, u16)> {
 /// literal keeps its inner colons. A value that is not `host:port` logs a
 /// warning naming it and falls back to `localhost:9092`.
 pub(crate) fn parse_advertised_host_port(addr: &str) -> (String, u16) {
-    if let Some(host_port) = parse_host_port(addr) {
-        return host_port;
+    if let Some(HostPort { host, port }) = parse_host_port(addr) {
+        return (host, port);
     }
     tracing::warn!(
         addr,
@@ -67,41 +77,67 @@ mod tests {
     /// advertises the host name, and loopback only when there is no name.
     #[test]
     fn a_wildcard_bind_advertises_the_host_name() {
+        struct Case {
+            want: &'static str,
+            advertised: String,
+        }
+
         let name = || Some("ducker02".to_owned());
         let nameless = || None;
         let cases = [
-            (
-                "192.0.2.10",
-                advertised_host("192.0.2.10".parse().unwrap(), name),
-            ),
-            (
-                "ducker02",
-                advertised_host("0.0.0.0".parse().unwrap(), name),
-            ),
-            ("ducker02", advertised_host("::".parse().unwrap(), name)),
-            (
-                "127.0.0.1",
-                advertised_host("0.0.0.0".parse().unwrap(), nameless),
-            ),
+            Case {
+                want: "192.0.2.10",
+                advertised: advertised_host("192.0.2.10".parse().unwrap(), name),
+            },
+            Case {
+                want: "ducker02",
+                advertised: advertised_host("0.0.0.0".parse().unwrap(), name),
+            },
+            Case {
+                want: "ducker02",
+                advertised: advertised_host("::".parse().unwrap(), name),
+            },
+            Case {
+                want: "127.0.0.1",
+                advertised: advertised_host("0.0.0.0".parse().unwrap(), nameless),
+            },
         ];
-        let advertised: Vec<&str> = cases.iter().map(|(_, host)| host.as_str()).collect();
-        let expected: Vec<&str> = cases.iter().map(|(want, _)| *want).collect();
+        let advertised: Vec<&str> = cases.iter().map(|case| case.advertised.as_str()).collect();
+        let expected: Vec<&str> = cases.iter().map(|case| case.want).collect();
         assert!(advertised == expected);
     }
 
     #[test]
     fn advertised_listener_parser_preserves_valid_host_ports_and_uses_fallback() {
+        struct Case {
+            input: &'static str,
+            want: HostPort,
+        }
+        let host_port = |host: &str, port| HostPort {
+            host: host.to_owned(),
+            port,
+        };
         let cases = [
-            ("broker-1.example:19092", ("broker-1.example", 19092)),
-            ("[2001:db8::7]:9094", ("[2001:db8::7]", 9094)),
-            ("missing-port", ("localhost", 9092)),
-            ("broker:not-a-port", ("localhost", 9092)),
+            Case {
+                input: "broker-1.example:19092",
+                want: host_port("broker-1.example", 19092),
+            },
+            Case {
+                input: "[2001:db8::7]:9094",
+                want: host_port("[2001:db8::7]", 9094),
+            },
+            Case {
+                input: "missing-port",
+                want: host_port("localhost", 9092),
+            },
+            Case {
+                input: "broker:not-a-port",
+                want: host_port("localhost", 9092),
+            },
         ];
-        for (input, (host, port)) in cases {
-            assert!(
-                parse_advertised_host_port(input) == (host.to_string(), port),
-                "input {input:?}"
-            );
+        for Case { input, want } in cases {
+            let (host, port) = parse_advertised_host_port(input);
+            assert!(HostPort { host, port } == want, "input {input:?}");
         }
     }
 }

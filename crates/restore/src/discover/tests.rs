@@ -6,8 +6,9 @@
 use {
     super::{
         test_support::{
-            FULL_SEGMENT_SUFFIXES, PartitionKey, args_from, expected_full_segment, inventory_error,
-            single_segment_archive, write_artifact, write_full_segment, write_topic_segment,
+            FULL_SEGMENT_SUFFIXES, PartitionKey, SingleSegmentArchive, args_from,
+            expected_full_segment, inventory_error, single_segment_archive, write_artifact,
+            write_full_segment, write_topic_segment,
         },
         *,
     },
@@ -178,7 +179,7 @@ async fn a_clean_archive_groups_and_sorts_by_topic_partition_and_base_offset() {
     // `TopicIdPartition` equality ignores the topic name, so pin the
     // names too: a bug that mixed up which name goes with which id would
     // not otherwise be caught by the struct comparison above.
-    let names: Vec<(&str, i32)> = result
+    let names: Vec<_> = result
         .partitions
         .iter()
         .map(|p| (p.partition.topic.as_str(), p.partition.partition))
@@ -230,7 +231,7 @@ async fn a_topic_filter_narrows_the_selection_and_the_rest_lands_in_unrecognized
 
 #[tokio::test]
 async fn malformed_keys_land_in_unrecognized_not_dropped_and_not_an_error() {
-    let (archive, _topic_id, _) = single_segment_archive(Offset(0));
+    let SingleSegmentArchive { dir: archive, .. } = single_segment_archive(Offset(0));
     // Wrong number of path components: a key directly under the root.
     std::fs::write(archive.path().join("not-a-valid-key.log"), b"junk").expect("write");
     // Two components, but the directory name does not decode.
@@ -332,7 +333,7 @@ async fn a_key_prefix_does_not_confuse_the_relative_path_split() {
 /// is the case the bound exists for.
 #[tokio::test]
 async fn a_scan_past_the_sample_limit_keeps_the_sample_and_the_exact_total() {
-    let (archive, _topic_id, _) = single_segment_archive(Offset(0));
+    let SingleSegmentArchive { dir: archive, .. } = single_segment_archive(Offset(0));
 
     let junk = UNRECOGNIZED_SAMPLE_LIMIT + 6;
     let dir = archive.path().join("not-a-partition-dir");
@@ -366,7 +367,7 @@ async fn an_archive_with_nothing_in_it_is_an_empty_archive_error() {
 
 #[tokio::test]
 async fn a_topic_filter_that_selects_nothing_is_also_an_empty_archive_error() {
-    let (archive, _topic_id, _) = single_segment_archive(Offset(0));
+    let SingleSegmentArchive { dir: archive, .. } = single_segment_archive(Offset(0));
 
     let args = args_from(archive.path(), &["--topic", "bogus"]);
     let err = inventory_error(&args).await;

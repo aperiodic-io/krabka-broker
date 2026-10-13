@@ -105,50 +105,57 @@ fn other_node(coordinator: u64) -> u64 {
         .expect("another broker")
 }
 
-async fn init_producer(connection: &Connection) -> (i64, i16) {
-    initialized_identity(
-        || async {
-            connection
-                .send(init_producer_request(TID))
-                .await
-                .expect("InitProducerId")
-        },
-        retriable,
-        SETTLE,
+async fn init_producer(connection: &Connection) -> ProducerIdentity {
+    ProducerIdentity::from_wire(
+        initialized_identity(
+            || async {
+                connection
+                    .send(init_producer_request(TID))
+                    .await
+                    .expect("InitProducerId")
+            },
+            retriable,
+            SETTLE,
+        )
+        .await,
     )
-    .await
 }
 
-async fn add_partition(connection: &Connection, producer: (i64, i16)) {
-    partition_added(connection.send(add_partition_request(TID, TOPIC, producer))).await;
+async fn add_partition(connection: &Connection, producer: ProducerIdentity) {
+    partition_added(connection.send(add_partition_request(
+        TID,
+        TOPIC,
+        (producer.id.0, producer.epoch.0),
+    )))
+    .await;
 }
 
 async fn produce(
     connection: &Connection,
     topic_id: WireUuid,
-    producer: Option<(i64, i16)>,
+    producer: Option<ProducerIdentity>,
     values: &[&'static str],
 ) {
     produce_fixture()
         .transactional_id(TID)
         .topic(TOPIC)
         .topic_id(topic_id)
-        .maybe_producer(producer.map(ProducerIdentity::from_wire))
+        .maybe_producer(producer)
         .values(values)
         .send(|request| connection.send(request))
         .call()
         .await;
 }
 
-fn end_txn_request((producer_id, epoch): (i64, i16)) -> EndTxnRequest {
+fn end_txn_request(producer: ProducerIdentity) -> EndTxnRequest {
     end_transaction_request()
         .transactional_id(TID)
-        .producer(ProducerIdentity::from_wire((producer_id, epoch)))
+        .producer(producer)
         .call()
 }
 
 /// Commit, and retry while the coordinator answers a retriable error.
-async fn end_txn(connection: &Connection, producer: (i64, i16)) -> EndTxnResponse {
+async fn end_txn(connection: &Connection, producer: ProducerIdentity) -> EndTxnResponse {
     retry_coordinator(
         || async {
             connection
@@ -163,9 +170,27 @@ async fn end_txn(connection: &Connection, producer: (i64, i16)) -> EndTxnRespons
     .await
 }
 
+/// The code a response answers for one partition.
+#[derive(Debug, PartialEq, Eq)]
+struct PartitionCode {
+    partition: i32,
+    code: i16,
+}
+
 /// The state of a transaction as its coordinator describes it, and the
 /// partitions whose markers are outstanding.
-type Described = (String, Vec<(String, Vec<i32>)>);
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Described {
+    state: String,
+    topics: Vec<DescribedTopic>,
+}
+
+/// A topic of a described transaction, and its partitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DescribedTopic {
+    topic: String,
+    partitions: Vec<i32>,
+}
 
 /// Describe the transaction until its coordinator answers `expected`, and
 /// return the last answer. A coordinator that loads its partition answers a
@@ -185,14 +210,16 @@ async fn describe_until(connection: &Connection, expected: &Described) -> Option
             row.error_code == 0 || retriable(row.error_code),
             "DescribeTransactions: {described:?}"
         );
-        let answer = (row.error_code == 0).then(|| {
-            (
-                row.transaction_state.clone(),
-                row.topics
-                    .iter()
-                    .map(|topic| (topic.topic.clone(), topic.partitions.clone()))
-                    .collect(),
-            )
+        let answer = (row.error_code == 0).then(|| Described {
+            state: row.transaction_state.clone(),
+            topics: row
+                .topics
+                .iter()
+                .map(|topic| DescribedTopic {
+                    topic: topic.topic.clone(),
+                    partitions: topic.partitions.clone(),
+                })
+                .collect(),
         });
         if answer.as_ref() == Some(expected) || Instant::now() >= deadline {
             return answer;
@@ -244,7 +271,7 @@ impl RelayedCluster {
         for address in &client_addrs {
             relays.push(Relay::start(*address).await);
         }
-        let voters: Vec<(u64, SocketAddr)> = (0..3)
+        let voters: Vec<_> = (0..3)
             .map(|index| (u64::try_from(index + 1).unwrap(), controller_addrs[index]))
             .collect();
         let topology = support::RoleTopology::new(&client_addrs, &controller_addrs, &voters);
@@ -343,19 +370,29 @@ impl RelayedCluster {
     }
 }
 
-async fn connected_transaction(address: SocketAddr) -> (Connection, (i64, i16)) {
+/// A connection to a coordinator, and the producer whose transaction it holds.
+struct ConnectedTransaction {
+    connection: Connection,
+    producer: ProducerIdentity,
+}
+
+async fn connected_transaction(address: SocketAddr) -> ConnectedTransaction {
     let connection = connect(address).await;
     let producer = init_producer(&connection).await;
     add_partition(&connection, producer).await;
-    (connection, producer)
+    ConnectedTransaction {
+        connection,
+        producer,
+    }
 }
 
 async fn cut_and_append_commit(
     cluster: &RelayedCluster,
     coordinator: u64,
     connection: Connection,
-    producer: (i64, i16),
-    (topic, offset): (&str, i64),
+    producer: ProducerIdentity,
+    topic: &str,
+    offset: i64,
 ) -> tokio::task::JoinHandle<Result<EndTxnResponse, krabka_client_core::ClientError>> {
     cluster.relay(coordinator).cut();
     let commit = tokio::spawn(async move { connection.send(end_txn_request(producer)).await });
@@ -366,9 +403,15 @@ async fn cut_and_append_commit(
     commit
 }
 
-async fn relayed_transaction_cluster(
-    configure: impl Fn(&mut BrokerConfig),
-) -> (RelayedCluster, Client, u64) {
+/// A relayed cluster, an admin client of it, and the node that coordinates
+/// the transaction.
+struct RelayedTransaction {
+    cluster: RelayedCluster,
+    admin: Client,
+    coordinator: u64,
+}
+
+async fn relayed_transaction_cluster(configure: impl Fn(&mut BrokerConfig)) -> RelayedTransaction {
     let cluster = RelayedCluster::start(configure).await;
     // __consumer_offsets needs three brokers for replication, including readers after a broker dies.
     for node in 1..=3 {
@@ -382,7 +425,11 @@ async fn relayed_transaction_cluster(
         .await
         .node_id;
     let coordinator = u64::try_from(coordinator).expect("a node id");
-    (cluster, admin, coordinator)
+    RelayedTransaction {
+        cluster,
+        admin,
+        coordinator,
+    }
 }
 
 /// An `EndTxn` whose `PrepareCommit` cannot reach a follower gets no answer,
@@ -398,7 +445,11 @@ async fn relayed_transaction_cluster(
 /// next transaction.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_end_txn_is_answered_only_once_its_commit_decision_is_replicated() {
-    let (mut cluster, admin, coordinator) = relayed_transaction_cluster(|config| {
+    let RelayedTransaction {
+        mut cluster,
+        admin,
+        coordinator,
+    } = relayed_transaction_cluster(|config| {
         config.transaction_state_num_partitions = 1;
         // The coordinator keeps its followers in the ISR while they cannot
         // reach it, so the high watermark stops below what it appends then.
@@ -423,7 +474,10 @@ async fn an_end_txn_is_answered_only_once_its_commit_decision_is_replicated() {
         .wait_until_local_partition_leader(TOPIC, 0, NodeId(data_node))
         .await;
 
-    let (to_coordinator, producer) = connected_transaction(cluster.address(coordinator)).await;
+    let ConnectedTransaction {
+        connection: to_coordinator,
+        producer,
+    } = connected_transaction(cluster.address(coordinator)).await;
     let to_data = connect(cluster.address(data_node)).await;
     produce(&to_data, topic_id, Some(producer), &["a", "b", "c"]).await;
 
@@ -437,7 +491,8 @@ async fn an_end_txn_is_answered_only_once_its_commit_decision_is_replicated() {
         coordinator,
         to_coordinator,
         producer,
-        (STATE_TOPIC, state_end + 1),
+        STATE_TOPIC,
+        state_end + 1,
     )
     .await;
     let answered = tokio::time::timeout(Duration::from_secs(2), &mut commit).await;
@@ -470,8 +525,8 @@ async fn an_end_txn_is_answered_only_once_its_commit_decision_is_replicated() {
     assert!(
         committed
             == EndTxnResponse {
-                producer_id: producer.0,
-                producer_epoch: producer.1 + 1,
+                producer_id: producer.id.0,
+                producer_epoch: producer.epoch.0 + 1,
                 ..Default::default()
             }
     );
@@ -499,7 +554,11 @@ async fn an_end_txn_is_answered_only_once_its_commit_decision_is_replicated() {
 /// the transaction, and a `read_committed` consumer read nothing after it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_transaction_completes_only_once_its_markers_are_committed() {
-    let (mut cluster, admin, coordinator) = relayed_transaction_cluster(|config| {
+    let RelayedTransaction {
+        mut cluster,
+        admin,
+        coordinator,
+    } = relayed_transaction_cluster(|config| {
         config.transaction_state_num_partitions = 1;
         // The coordinator is the only replica of the state partition, so a
         // state record commits at its append, and the cut below stops only
@@ -530,22 +589,29 @@ async fn a_transaction_completes_only_once_its_markers_are_committed() {
         .wait_until_isr_len(TOPIC, 0, 2)
         .await;
 
-    let (to_coordinator, producer) = connected_transaction(cluster.address(coordinator)).await;
+    let ConnectedTransaction {
+        connection: to_coordinator,
+        producer,
+    } = connected_transaction(cluster.address(coordinator)).await;
     produce(&to_coordinator, topic_id, Some(producer), &["a", "b", "c"]).await;
 
     // Cut the follower off from the coordinator, and commit. The marker comes
     // after the three records.
     let mut commit =
-        cut_and_append_commit(&cluster, coordinator, to_coordinator, producer, (TOPIC, 4)).await;
+        cut_and_append_commit(&cluster, coordinator, to_coordinator, producer, TOPIC, 4).await;
     let answered = tokio::time::timeout(Duration::from_secs(2), &mut commit).await;
     assert!(
         answered.is_err(),
         "EndTxn answered for a marker that only its leader holds: {answered:?}"
     );
     let to_coordinator = connect(cluster.address(coordinator)).await;
-    let preparing: Described = ("PrepareCommit".to_owned(), vec![(TOPIC.to_owned(), vec![
-        0,
-    ])]);
+    let preparing = Described {
+        state: "PrepareCommit".to_owned(),
+        topics: vec![DescribedTopic {
+            topic: TOPIC.to_owned(),
+            partitions: vec![0],
+        }],
+    };
     assert!(describe_until(&to_coordinator, &preparing).await == Some(preparing));
     to_coordinator.close();
 
@@ -568,7 +634,10 @@ async fn a_transaction_completes_only_once_its_markers_are_committed() {
     let seen = read_committed(cluster.address(follower), "z").await;
     assert!(seen == ["a", "b", "c", "z"]);
     let to_coordinator = connect(cluster.address(coordinator)).await;
-    let completed: Described = ("CompleteCommit".to_owned(), vec![]);
+    let completed = Described {
+        state: "CompleteCommit".to_owned(),
+        topics: vec![],
+    };
     assert!(describe_until(&to_coordinator, &completed).await == Some(completed));
 
     cluster.shutdown().await;
@@ -590,7 +659,7 @@ async fn group_coordinator_writes_are_answered_only_once_committed() {
         config.heartbeat_timeout = krabka_units::minutes(10);
     })
     .await;
-    let address = |cluster: &[(BrokerHandle, BrokerConfig, TempDir)], node: u64| {
+    let address = |node: u64| {
         cluster
             .iter()
             .find(|(handle, _, _)| handle.node_id() == node)
@@ -628,7 +697,7 @@ async fn group_coordinator_writes_are_answered_only_once_committed() {
 
     // A committed offset, for the delete below, and an open transaction that
     // holds the group's offsets partition.
-    let to_group = connect(address(&cluster, group_node)).await;
+    let to_group = connect(address(group_node)).await;
     let committed = to_group
         .send(OffsetCommitRequest {
             group_id: GROUP.into(),
@@ -644,13 +713,13 @@ async fn group_coordinator_writes_are_answered_only_once_committed() {
         committed.topics[0].partitions[0].error_code == 0,
         "{committed:?}"
     );
-    let to_txn = connect(address(&cluster, txn_node)).await;
-    let (producer_id, producer_epoch) = init_producer(&to_txn).await;
+    let to_txn = connect(address(txn_node)).await;
+    let producer = init_producer(&to_txn).await;
     let added = to_txn
         .send(AddOffsetsToTxnRequest {
             transactional_id: TID.into(),
-            producer_id,
-            producer_epoch,
+            producer_id: producer.id.0,
+            producer_epoch: producer.epoch.0,
             group_id: GROUP.into(),
             ..Default::default()
         })
@@ -670,8 +739,8 @@ async fn group_coordinator_writes_are_answered_only_once_committed() {
         .send(TxnOffsetCommitRequest {
             transactional_id: TID.into(),
             group_id: GROUP.into(),
-            producer_id,
-            producer_epoch,
+            producer_id: producer.id.0,
+            producer_epoch: producer.epoch.0,
             generation_id_or_member_epoch: -1,
             member_id: String::new(),
             topics: vec![txn_offset_topic(TOPIC, topic_id, vec![
@@ -681,13 +750,23 @@ async fn group_coordinator_writes_are_answered_only_once_committed() {
         })
         .await
         .expect("TxnOffsetCommit");
-    let codes: Vec<(i32, i16)> = offsets
+    let codes: Vec<PartitionCode> = offsets
         .topics
         .iter()
         .flat_map(|topic| &topic.partitions)
-        .map(|row| (row.partition_index, row.error_code))
+        .map(|row| PartitionCode {
+            partition: row.partition_index,
+            code: row.error_code,
+        })
         .collect();
-    assert!(codes == [(0, COORDINATOR_NOT_AVAILABLE)], "{offsets:?}");
+    assert!(
+        codes
+            == [PartitionCode {
+                partition: 0,
+                code: COORDINATOR_NOT_AVAILABLE
+            }],
+        "{offsets:?}"
+    );
 
     let deleted = to_group
         .send(offset_delete_request(GROUP, vec![offset_delete_topic(

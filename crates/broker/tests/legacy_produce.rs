@@ -31,18 +31,24 @@ use {
 
 // ── Raw TCP wire helpers ──────────────────────────────────────────────────────
 
-/// Build a v0 `MessageSet` that contains one record per `(key, value)` pair.
+/// The key and value of one record in a v0 `MessageSet`.
+struct KeyValue<'a> {
+    key: &'a str,
+    value: &'a str,
+}
+
+/// Build a v0 `MessageSet` that contains one record per [`KeyValue`].
 /// It uses `krabka_records_legacy::encode_flat_message_set`, so this file does
 /// not hand-roll the CRC logic.
-fn build_v0_messageset(pairs: &[(&str, &str)]) -> Bytes {
+fn build_v0_messageset(pairs: &[KeyValue<'_>]) -> Bytes {
     let records: Vec<ParsedRecord> = pairs
         .iter()
         .enumerate()
-        .map(|(i, (k, v))| ParsedRecord {
+        .map(|(i, KeyValue { key, value })| ParsedRecord {
             offset: Offset(i64::try_from(i).expect("index fits in i64")),
             timestamp: None, // v0 has no timestamps
-            key: Some(Bytes::copy_from_slice(k.as_bytes())),
-            value: Some(Bytes::copy_from_slice(v.as_bytes())),
+            key: Some(Bytes::copy_from_slice(key.as_bytes())),
+            value: Some(Bytes::copy_from_slice(value.as_bytes())),
         })
         .collect();
     let mut buf = BytesMut::new();
@@ -83,7 +89,10 @@ async fn produce_v0_upconverts_and_is_readable_via_fetch() {
     stream.set_nodelay(true).ok();
 
     // 3. Build the v0 MessageSet with key="k", value="v".
-    let messageset_bytes = build_v0_messageset(&[("k", "v")]);
+    let messageset_bytes = build_v0_messageset(&[KeyValue {
+        key: "k",
+        value: "v",
+    }]);
 
     // 4. Build the kafka_3_6_2 ProduceRequest at v0 and encode it.
     let legacy_req = LegacyProduceRequest {

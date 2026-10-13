@@ -8,26 +8,35 @@
 
 use super::{process::LocalState, types::Task};
 
+/// A task and the number of standby copies of it that are still to place.
+struct UnplacedStandby {
+    task: Task,
+    remaining: i64,
+}
+
 /// Places the standby copies of every task in `stateful_tasks`.
 pub(super) fn assign_standby(state: &mut LocalState, stateful_tasks: &[Task]) {
     // Kafka walks the tasks by partition, then subtopology, in reverse.
     let mut tasks: Vec<Task> = stateful_tasks.to_vec();
     tasks.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
 
-    let mut to_least_loaded: Vec<(Task, i64)> = Vec::new();
+    let mut to_least_loaded: Vec<UnplacedStandby> = Vec::new();
     for task in &tasks {
         for placed in 0..state.num_standby_replicas {
             if place_on_prev_owner(state, task) {
                 continue;
             }
-            to_least_loaded.push((task.clone(), state.num_standby_replicas - placed));
+            to_least_loaded.push(UnplacedStandby {
+                task: task.clone(),
+                remaining: state.num_standby_replicas - placed,
+            });
             break;
         }
     }
 
     // By subtopology, then partition, in reverse.
-    to_least_loaded.sort_by(|a, b| b.0.cmp(&a.0));
-    for (task, remaining) in &to_least_loaded {
+    to_least_loaded.sort_by(|a, b| b.task.cmp(&a.task));
+    for UnplacedStandby { task, remaining } in &to_least_loaded {
         for placed in 0..*remaining {
             if !place_on_least_loaded_process(state, task) {
                 tracing::warn!(

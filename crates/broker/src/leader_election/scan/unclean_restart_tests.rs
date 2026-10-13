@@ -6,7 +6,7 @@
 //! out of `kafka-metadata-4.3.1.jar` and quoted where each half is
 //! implemented.
 
-use {super::*, assert2::assert};
+use {super::*, crate::leader_election::test_support::TopicConfigOverride, assert2::assert};
 
 /// Liveness where each of `alive` heartbeated inside the current window.
 async fn alive(alive: &[u64]) -> ControllerLivenessState {
@@ -57,7 +57,7 @@ fn expected_isr_removal(leader_epoch: Option<i32>) -> krabka_metadata::Partition
 #[tokio::test]
 async fn a_returning_broker_leaves_the_isr_and_does_not_re_enter_the_elr() {
     let image = img_with_partition()
-        .configs(&[(MIN_INSYNC_REPLICAS, "3")])
+        .configs(&[TopicConfigOverride::new(MIN_INSYNC_REPLICAS, "3")])
         .elr(ElrFinalization::Enabled)
         .call();
 
@@ -75,7 +75,7 @@ async fn a_returning_broker_leaves_the_isr_and_does_not_re_enter_the_elr() {
 async fn a_published_membership_is_withdrawn_without_a_partition_change() {
     let image = img_with_partition()
         .isr(&[krabka_raft::NodeId(1), krabka_raft::NodeId(2)])
-        .configs(&[(ELIGIBLE_LEADER_REPLICAS, "0:3:")])
+        .configs(&[TopicConfigOverride::new(ELIGIBLE_LEADER_REPLICAS, "0:3:")])
         .elr(ElrFinalization::Enabled)
         .call();
 

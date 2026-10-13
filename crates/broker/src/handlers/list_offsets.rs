@@ -85,8 +85,29 @@ use {
     },
 };
 
-/// The `(topic_index, partition)` rows whose `(name, partition)` key appears
-/// more than once in `topics`.
+/// A topic entry of a request: its name and the partition indexes it names.
+struct TopicPartitions<'a, P> {
+    name: &'a str,
+    partitions: P,
+}
+
+/// A partition row of a request: the index of its topic entry and its
+/// partition index.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct PartitionRow {
+    topic_index: usize,
+    partition: i32,
+}
+
+/// A topic-partition as the request names it: by topic name.
+#[derive(PartialEq, Eq, Hash)]
+struct NamedPartition<'a> {
+    name: &'a str,
+    partition: i32,
+}
+
+/// The `PartitionRow`s whose `(name, partition)` key appears more than once in
+/// `topics`.
 ///
 /// Kafka collects these once over the whole request, before authorization or
 /// resolution runs, so a topic-partition named twice -- whether within one
@@ -96,27 +117,42 @@ use {
 /// name and many partition rows can't multiply that name into an
 /// unbounded amount of retained memory.
 fn duplicate_partition_keys<'a, P: IntoIterator<Item = i32>>(
-    topics: impl Iterator<Item = (&'a str, P)> + Clone,
-) -> HashSet<(usize, i32)> {
-    let mut counts: std::collections::HashMap<(&str, i32), usize> =
+    topics: impl Iterator<Item = TopicPartitions<'a, P>> + Clone,
+) -> HashSet<PartitionRow> {
+    let mut counts: std::collections::HashMap<NamedPartition<'_>, usize> =
         std::collections::HashMap::new();
-    for (name, partitions) in topics.clone() {
+    for TopicPartitions { name, partitions } in topics.clone() {
         for partition in partitions {
-            *counts.entry((name, partition)).or_insert(0) += 1;
+            *counts
+                .entry(NamedPartition { name, partition })
+                .or_insert(0) += 1;
         }
     }
     let mut duplicates = HashSet::new();
-    for (topic_index, (name, partitions)) in topics.enumerate() {
+    for (topic_index, TopicPartitions { name, partitions }) in topics.enumerate() {
         for partition in partitions {
-            if counts[&(name, partition)] > 1 {
-                duplicates.insert((topic_index, partition));
+            if counts[&NamedPartition { name, partition }] > 1 {
+                duplicates.insert(PartitionRow {
+                    topic_index,
+                    partition,
+                });
             }
         }
     }
     duplicates
 }
 
-type IndexedTopics<T> = Vec<(usize, T)>;
+/// A request entry with its position in the request.
+struct IndexedTopic<T> {
+    index: usize,
+    topic: T,
+}
+
+/// The topics of a request, split by whether the principal may describe them.
+struct DescribeSplit<T> {
+    authorized: Vec<IndexedTopic<T>>,
+    denied: Vec<IndexedTopic<T>>,
+}
 
 /// Retain request indexes while moving Describe-authorized rows ahead of denials.
 fn partition_topics_by_describe<T>(
@@ -125,17 +161,22 @@ fn partition_topics_by_describe<T>(
     broker: &Broker,
     image: &krabka_metadata::MetadataImage,
     ctx: &RequestContext<'_>,
-) -> (IndexedTopics<T>, IndexedTopics<T>) {
-    topics.into_iter().enumerate().partition(|(_, topic)| {
-        !acl_denied(
-            broker.config.authorizer.as_ref(),
-            image,
-            ctx,
-            ResourceType::Topic,
-            name(topic),
-            AclOperation::Describe,
-        )
-    })
+) -> DescribeSplit<T> {
+    let (authorized, denied) = topics
+        .into_iter()
+        .enumerate()
+        .map(|(index, topic)| IndexedTopic { index, topic })
+        .partition::<Vec<_>, _>(|indexed| {
+            !acl_denied(
+                broker.config.authorizer.as_ref(),
+                image,
+                ctx,
+                ResourceType::Topic,
+                name(&indexed.topic),
+                AclOperation::Describe,
+            )
+        });
+    DescribeSplit { authorized, denied }
 }
 
 wire_handler! {
@@ -176,23 +217,28 @@ wire_handler! {
             // `INVALID_REQUEST` instead of being resolved. See
             // `ReplicaManager.scala:1473-1478`.
             let duplicates = duplicate_partition_keys(req.topics.iter().map(|topic| {
-                (
-                    topic.name.as_str(),
-                    topic.partitions.iter().map(|part| part.partition_index),
-                )
+                TopicPartitions {
+                    name: topic.name.as_str(),
+                    partitions: topic.partitions.iter().map(|part| part.partition_index),
+                }
             }));
 
-            let (authorized_topics, denied_topics) =
-                partition_topics_by_describe(req.topics, |topic| &topic.name, broker, &acl_image, ctx);
+            let DescribeSplit {
+                authorized: authorized_topics,
+                denied: denied_topics,
+            } = partition_topics_by_describe(req.topics, |topic| &topic.name, broker, &acl_image, ctx);
 
             let mut topics_out =
-                concurrently(authorized_topics.into_iter().map(|(topic_index, topic)| {
+                concurrently(authorized_topics.into_iter().map(|IndexedTopic { index: topic_index, topic }| {
                     let duplicates = &duplicates;
                     async move {
                         let name = topic.name;
                         let partitions = concurrently(topic.partitions.into_iter().map(|part| {
                             let is_duplicate =
-                                duplicates.contains(&(topic_index, part.partition_index));
+                                duplicates.contains(&PartitionRow {
+                                    topic_index,
+                                    partition: part.partition_index,
+                                });
                             let name = name.clone();
                             async move {
                                 if is_duplicate {
@@ -213,7 +259,7 @@ wire_handler! {
                 }))
                 .await;
 
-            topics_out.extend(denied_topics.into_iter().map(|(_, topic)| {
+            topics_out.extend(denied_topics.into_iter().map(|IndexedTopic { topic, .. }| {
                 let partitions = topic
                     .partitions
                     .into_iter()

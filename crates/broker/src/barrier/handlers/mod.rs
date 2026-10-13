@@ -189,61 +189,69 @@ mod tests {
 
     #[test]
     fn every_coordinator_error_takes_the_code_of_its_family() {
-        let cases: Vec<(BarrierError, i16)> = vec![
-            (
-                BarrierError::InjectionInProgress {
+        struct Case {
+            error: BarrierError,
+            code: i16,
+        }
+        let cases: Vec<Case> = vec![
+            Case {
+                error: BarrierError::InjectionInProgress {
                     group: "g".to_owned(),
                 },
-                codes::BARRIER_INJECTION_IN_PROGRESS,
-            ),
-            (
-                BarrierError::EpochExhausted {
+                code: codes::BARRIER_INJECTION_IN_PROGRESS,
+            },
+            Case {
+                error: BarrierError::EpochExhausted {
                     group: "g".to_owned(),
                 },
-                codes::INVALID_REQUEST,
-            ),
-            (
-                BarrierError::NotCoordinator {
+                code: codes::INVALID_REQUEST,
+            },
+            Case {
+                error: BarrierError::NotCoordinator {
                     group: "g".to_owned(),
                 },
-                codes::NOT_COORDINATOR,
-            ),
-            (
-                BarrierError::CoordinatorEpochChanged {
+                code: codes::NOT_COORDINATOR,
+            },
+            Case {
+                error: BarrierError::CoordinatorEpochChanged {
                     group: "g".to_owned(),
                     expected: 3,
                     current: 4,
                 },
-                codes::NOT_COORDINATOR,
-            ),
-            (
-                BarrierError::UnknownGroup {
+                code: codes::NOT_COORDINATOR,
+            },
+            Case {
+                error: BarrierError::UnknownGroup {
                     group: "g".to_owned(),
                 },
-                codes::RESOURCE_NOT_FOUND,
-            ),
-            (
-                BarrierError::GroupExists {
+                code: codes::RESOURCE_NOT_FOUND,
+            },
+            Case {
+                error: BarrierError::GroupExists {
                     group: "g".to_owned(),
                 },
-                codes::TOPIC_ALREADY_EXISTS,
-            ),
-            (
-                BarrierError::InvalidDefinition("retained_cuts is 0".to_owned()),
-                codes::INVALID_CONFIG,
-            ),
-            (
-                BarrierError::StateNotLocal {
+                code: codes::TOPIC_ALREADY_EXISTS,
+            },
+            Case {
+                error: BarrierError::InvalidDefinition("retained_cuts is 0".to_owned()),
+                code: codes::INVALID_CONFIG,
+            },
+            Case {
+                error: BarrierError::StateNotLocal {
                     partition: PartitionIndex(2),
                 },
-                codes::COORDINATOR_NOT_AVAILABLE,
-            ),
-            (
-                BarrierError::Persist(BrokerError::Replication("append failed".into())),
-                codes::COORDINATOR_NOT_AVAILABLE,
-            ),
+                code: codes::COORDINATOR_NOT_AVAILABLE,
+            },
+            Case {
+                error: BarrierError::Persist(BrokerError::Replication("append failed".into())),
+                code: codes::COORDINATOR_NOT_AVAILABLE,
+            },
         ];
-        for (error, expected) in cases {
+        for Case {
+            error,
+            code: expected,
+        } in cases
+        {
             check!(error_code(&error) == expected, "{error}");
         }
     }
@@ -285,12 +293,25 @@ mod tests {
 
     #[test]
     fn an_interval_round_trips_through_the_wire_field() {
-        let cases: &[(Option<Time>, i64)] = &[
-            (None, INTERVAL_OFF),
-            (Some(millis(1)), 1),
-            (Some(millis(60_000)), 60_000),
+        struct Case {
+            interval: Option<Time>,
+            wire: i64,
+        }
+        let cases: &[Case] = &[
+            Case {
+                interval: None,
+                wire: INTERVAL_OFF,
+            },
+            Case {
+                interval: Some(millis(1)),
+                wire: 1,
+            },
+            Case {
+                interval: Some(millis(60_000)),
+                wire: 60_000,
+            },
         ];
-        for (interval, wire) in cases {
+        for Case { interval, wire } in cases {
             check!(interval_to_wire(*interval) == *wire, "{wire}");
             check!(interval_from_wire(*wire) == *interval, "{wire}");
         }

@@ -56,12 +56,20 @@ const SEGMENT_SIZE: ByteSize = mebibytes(8);
 
 krabka_macros::record_batch_fixture!(make_batch);
 
+/// A log with several sealed segments, and one of those segments.
+struct SealedLog {
+    /// The directory, which the caller keeps alive.
+    dir: TempDir,
+    /// The open log.
+    log: Log,
+    /// The path of a fully-populated sealed `.log` file.
+    sealed_path: PathBuf,
+    /// The size of that file.
+    sealed_size: u64,
+}
+
 /// Build a log with several *sealed* segments.
-///
-/// The function returns the directory, which the caller keeps alive, the open
-/// `Log`, the path of a fully-populated sealed `.log` file, and the size of
-/// that file.
-fn build_log() -> (TempDir, Log, PathBuf, u64) {
+fn build_log() -> SealedLog {
     let dir = tempfile::tempdir().unwrap();
     // 8 MiB segments so a 1 MiB read stays inside one sealed segment and we
     // accumulate several sealed files to choose from.
@@ -90,7 +98,12 @@ fn build_log() -> (TempDir, Log, PathBuf, u64) {
         .expect("at least one sealed segment");
     let size = std::fs::metadata(&chosen).unwrap().len();
     assert2::assert!(size >= READ_LEN.bytes_u64());
-    (dir, log, chosen, size)
+    SealedLog {
+        dir,
+        log,
+        sealed_path: chosen,
+        sealed_size: size,
+    }
 }
 
 /// Mirrors `Segment::read_log_range`: clone the handle, seek, then do a bounded
@@ -112,7 +125,12 @@ fn checksum(bytes: &[u8]) -> u64 {
 }
 
 fn bench_segment_io(c: &mut Criterion) {
-    let (_dir, _log, path, size) = build_log();
+    let SealedLog {
+        dir: _dir,
+        log: _log,
+        sealed_path: path,
+        sealed_size: size,
+    } = build_log();
     let file = OpenOptions::new().read(true).open(&path).unwrap();
     // Map once for the steady-state variants. In a broker the segment would
     // be mapped on open and reused for the life of the segment.
@@ -179,7 +197,7 @@ fn bench_segment_io(c: &mut Criterion) {
 /// than `pread_to_vec`, the decode dominates and a change from the current I/O
 /// to mmap cannot help much.
 fn bench_full_path(c: &mut Criterion) {
-    let (_dir, log, _path, _size) = build_log();
+    let SealedLog { dir: _dir, log, .. } = build_log();
     let end = log.log_end_offset();
     let mid = Offset(end.0 / 2);
 

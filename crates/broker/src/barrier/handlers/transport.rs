@@ -38,6 +38,7 @@ use {
         },
         codes,
         error::BrokerError,
+        host_port::HostPort,
         metadata_source::MetadataSource,
         network::client::InterBrokerClient,
     },
@@ -98,7 +99,7 @@ impl RemoteMarkerWriter for InterBrokerMarkerWriter {
                 "WriteBarrierMarkers: leader node {leader} is not in the metadata image"
             )));
         };
-        let (host, port) = endpoint_of(broker_info, &self.listener_name);
+        let HostPort { host, port } = endpoint_of(broker_info, &self.listener_name);
 
         let options = krabka_client_core::ConnectionOptions {
             client_id: format!("krabka-broker-barrier-{}", self.node_id),
@@ -142,14 +143,20 @@ impl RemoteMarkerWriter for InterBrokerMarkerWriter {
 ///
 /// The named listener wins. A registration record that projects no such
 /// endpoint falls back to its top-level host and port.
-fn endpoint_of(broker_info: &BrokerRegistrationRecord, listener_name: &str) -> (String, u16) {
+fn endpoint_of(broker_info: &BrokerRegistrationRecord, listener_name: &str) -> HostPort {
     broker_info
         .endpoints
         .iter()
         .find(|endpoint| endpoint.name == listener_name)
         .map_or_else(
-            || (broker_info.host.clone(), broker_info.port),
-            |endpoint| (endpoint.host.clone(), endpoint.port),
+            || HostPort {
+                host: broker_info.host.clone(),
+                port: broker_info.port,
+            },
+            |endpoint| HostPort {
+                host: endpoint.host.clone(),
+                port: endpoint.port,
+            },
         )
 }
 
@@ -237,6 +244,7 @@ mod tests {
                 test_support::{at, marker},
             },
             codes,
+            host_port::HostPort,
             test_support::broker_registration,
         },
         assert2::check,
@@ -353,19 +361,43 @@ mod tests {
             endpoint("PLAINTEXT", "public.example", 9092),
             endpoint("INTERNAL", "internal.example", 9093),
         ]);
-        check!(endpoint_of(&record, "INTERNAL") == ("internal.example".to_owned(), 9093));
+        check!(
+            endpoint_of(&record, "INTERNAL")
+                == HostPort {
+                    host: "internal.example".to_owned(),
+                    port: 9093,
+                }
+        );
     }
 
     #[test]
     fn a_leader_with_no_such_listener_falls_back_to_the_top_level_address() {
-        let cases: &[(Vec<BrokerEndpoint>, &str)] = &[
-            (Vec::new(), "INTERNAL"),
-            (vec![endpoint("PLAINTEXT", "public.example", 9092)], "SSL"),
+        struct Case {
+            endpoints: Vec<BrokerEndpoint>,
+            listener: &'static str,
+        }
+        let cases: &[Case] = &[
+            Case {
+                endpoints: Vec::new(),
+                listener: "INTERNAL",
+            },
+            Case {
+                endpoints: vec![endpoint("PLAINTEXT", "public.example", 9092)],
+                listener: "SSL",
+            },
         ];
-        for (endpoints, listener) in cases {
+        for Case {
+            endpoints,
+            listener,
+        } in cases
+        {
             let record = registration(endpoints.clone());
             check!(
-                endpoint_of(&record, listener) == ("legacy.example".to_owned(), 9092),
+                endpoint_of(&record, listener)
+                    == HostPort {
+                        host: "legacy.example".to_owned(),
+                        port: 9092,
+                    },
                 "{listener}"
             );
         }

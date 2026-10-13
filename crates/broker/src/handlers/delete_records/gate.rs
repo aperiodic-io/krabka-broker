@@ -99,40 +99,59 @@ mod tests {
 
     #[test]
     fn the_trim_gate_answers_from_the_proposal_registry() {
-        let cases: [(&'static str, MetadataImage, BreakGlassConfig, bool); 5] = [
-            (
-                "an approved proposal on the partition",
-                image_of(&[approved_proposal(
+        /// An image and break-glass config with whether the trim gate admits the trim.
+        struct GateCase {
+            label: &'static str,
+            image: MetadataImage,
+            config: BreakGlassConfig,
+            expected: bool,
+        }
+
+        let cases: [GateCase; 5] = [
+            GateCase {
+                label: "an approved proposal on the partition",
+                image: image_of(&[approved_proposal(
                     BreakGlassAction::DeleteRecords,
                     "orders-3",
                 )]),
-                gated_config(),
-                true,
-            ),
-            (
-                "an approved proposal on the whole topic",
-                image_of(&[approved_proposal(BreakGlassAction::DeleteRecords, "orders")]),
-                gated_config(),
-                true,
-            ),
-            (
-                "a proposal for another partition",
-                image_of(&[approved_proposal(
+                config: gated_config(),
+                expected: true,
+            },
+            GateCase {
+                label: "an approved proposal on the whole topic",
+                image: image_of(&[approved_proposal(BreakGlassAction::DeleteRecords, "orders")]),
+                config: gated_config(),
+                expected: true,
+            },
+            GateCase {
+                label: "a proposal for another partition",
+                image: image_of(&[approved_proposal(
                     BreakGlassAction::DeleteRecords,
                     "orders-4",
                 )]),
-                gated_config(),
-                false,
-            ),
-            ("no proposal at all", image_of(&[]), gated_config(), false),
-            (
-                "no approver set, so nothing is gated",
-                image_of(&[]),
-                BreakGlassConfig::default(),
-                true,
-            ),
+                config: gated_config(),
+                expected: false,
+            },
+            GateCase {
+                label: "no proposal at all",
+                image: image_of(&[]),
+                config: gated_config(),
+                expected: false,
+            },
+            GateCase {
+                label: "no approver set, so nothing is gated",
+                image: image_of(&[]),
+                config: BreakGlassConfig::default(),
+                expected: true,
+            },
         ];
-        for (label, image, config, expected) in cases {
+        for GateCase {
+            label,
+            image,
+            config,
+            expected,
+        } in cases
+        {
             let authorized = authorize_trim(&image, &config, "orders", 3).is_ok();
             check!(authorized == expected, "case {label}");
         }

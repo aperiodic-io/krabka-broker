@@ -14,6 +14,14 @@ use {
     krabka_log::LogConfig,
 };
 
+/// A running tiered-storage broker, the directory that backs it and the
+/// config it started from.
+pub(crate) struct TieredBroker {
+    pub(crate) broker: krabka_broker::BrokerHandle,
+    pub(crate) dir: tempfile::TempDir,
+    pub(crate) config: krabka_broker::BrokerConfig,
+}
+
 /// Same shape as [`start_host_broker`] but with the S3 tiered-storage
 /// backend wired in and a lower `RemoteLogManager` tick, so the acceptance
 /// loop completes in seconds rather than at the 30s production default.
@@ -29,13 +37,7 @@ use {
 pub(crate) fn start_host_broker_with_minio_tier(
     s3: krabka_remote_storage::S3Config,
     rlmm: krabka_broker::RlmmKind,
-) -> impl std::future::Future<
-    Output = (
-        krabka_broker::BrokerHandle,
-        tempfile::TempDir,
-        krabka_broker::BrokerConfig,
-    ),
-> {
+) -> impl std::future::Future<Output = TieredBroker> {
     init_jvm_tracing("krabka_broker=debug,info");
     let dir = tempfile::tempdir().expect("tempdir");
     let config = BrokerConfig {
@@ -60,6 +62,10 @@ pub(crate) fn start_host_broker_with_minio_tier(
             bootstrap = broker0_advertised(),
             listen = broker0_listen()
         );
-        (handle, dir, config)
+        TieredBroker {
+            broker: handle,
+            dir,
+            config,
+        }
     })
 }

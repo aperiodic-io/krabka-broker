@@ -23,7 +23,14 @@ pub(super) struct StoredPoint {
     pub(super) at: Instant,
 }
 
-type SeriesKey = (String, String, String, Vec<(String, String)>);
+/// The identity of one stored series.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct SeriesKey {
+    pub(super) metric: String,
+    pub(super) client_instance_id: String,
+    pub(super) client_id: String,
+    pub(super) attributes: Vec<(String, String)>,
+}
 
 #[derive(Debug)]
 pub(crate) struct ClientMetricsCollector {
@@ -51,12 +58,12 @@ impl ClientMetricsCollector {
             return;
         }
         for p in points {
-            let key = (
-                p.metric.clone(),
-                p.client_instance_id.clone(),
-                p.client_id.clone(),
-                p.attributes.clone(),
-            );
+            let key = SeriesKey {
+                metric: p.metric.clone(),
+                client_instance_id: p.client_instance_id.clone(),
+                client_id: p.client_id.clone(),
+                attributes: p.attributes.clone(),
+            };
             if let Some(start) = p.delta_start
                 && let Some(stored) = guard.get_mut(&key)
                 && stored
@@ -137,7 +144,12 @@ mod tests {
             }
             let guard = sink.points.lock().unwrap();
             let point = guard
-                .get(&(metric.into(), "i".into(), "c".into(), vec![]))
+                .get(&SeriesKey {
+                    metric: metric.into(),
+                    client_instance_id: "i".into(),
+                    client_id: "c".into(),
+                    attributes: vec![],
+                })
                 .unwrap();
             assert2::assert!(
                 matches!(point.value, PointValue::Counter(value) if (value - expected).abs() < f64::EPSILON)

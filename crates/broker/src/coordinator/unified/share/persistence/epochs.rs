@@ -79,26 +79,31 @@ mod tests {
     /// hash is a plain field, so 0 is on the wire too.
     #[test]
     fn group_metadata_bytes_match_kafka_schema() {
-        // (case, value, Kafka's bytes)
-        let rows: [(&str, ShareGroupMetadataValue, &[u8]); 2] = [
-            (
-                "no subscribed topic",
-                ShareGroupMetadataValue {
+        struct Row {
+            case: &'static str,
+            value: ShareGroupMetadataValue,
+            /// Kafka's bytes.
+            bytes: &'static [u8],
+        }
+        let rows: [Row; 2] = [
+            Row {
+                case: "no subscribed topic",
+                value: ShareGroupMetadataValue {
                     epoch: 7,
                     metadata_hash: 0,
                 },
-                b"\x00\x00\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00",
-            ),
-            (
-                "Kafka's group hash of the golden topics foo and bar",
-                ShareGroupMetadataValue {
+                bytes: b"\x00\x00\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+            },
+            Row {
+                case: "Kafka's group hash of the golden topics foo and bar",
+                value: ShareGroupMetadataValue {
                     epoch: 2,
                     metadata_hash: -556_879_919_459_959_918,
                 },
-                b"\x00\x00\x00\x00\x00\x02\xf8\x45\x90\xa9\xea\x0a\x7b\x92\x00",
-            ),
+                bytes: b"\x00\x00\x00\x00\x00\x02\xf8\x45\x90\xa9\xea\x0a\x7b\x92\x00",
+            },
         ];
-        for (case, value, bytes) in rows {
+        for Row { case, value, bytes } in rows {
             check!(&value.encode()[..] == bytes, "{case}");
             check!(
                 ShareGroupMetadataValue::decode(bytes).unwrap() == value,

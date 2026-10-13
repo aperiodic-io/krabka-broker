@@ -196,7 +196,7 @@ impl<T: ProduceTransport> Inner<T> {
     fn take(&self, node: NodeId) -> Option<Packed> {
         let mut queues = self.queues();
         let queue = queues.entry(node).or_default();
-        let (packed, deferred) = pack(std::mem::take(&mut queue.waiting));
+        let PackedRounds { packed, deferred } = pack(std::mem::take(&mut queue.waiting));
         queue.waiting = deferred;
         if packed.answers.is_empty() {
             queue.sending = false;
@@ -272,7 +272,7 @@ impl PartitionBatch {
     }
 
     /// The batch as a row of the request.
-    fn into_wire(self) -> (String, WireUuid, PartitionProduceData) {
+    fn into_wire(self) -> WirePartition {
         let count = i32::try_from(self.records.len()).unwrap_or(i32::MAX);
         let batch = RecordBatch {
             last_offset_delta: count - 1,
@@ -286,7 +286,11 @@ impl PartitionBatch {
             records: Some(batch.into()),
             ..Default::default()
         };
-        (self.topic, WireUuid(*self.topic_id.as_bytes()), data)
+        WirePartition {
+            name: self.topic,
+            topic_id: WireUuid(*self.topic_id.as_bytes()),
+            data,
+        }
     }
 }
 
@@ -302,6 +306,20 @@ fn renumber(records: &mut [Record], first_delta: i32, timestamp_delta: i64) -> i
     size
 }
 
+/// A partition's batch as a row of a request: the topic's name and id, and the
+/// partition's data.
+struct WirePartition {
+    name: String,
+    topic_id: WireUuid,
+    data: PartitionProduceData,
+}
+
+/// The request that [`pack`] builds, and the rounds that did not fit in it.
+struct PackedRounds {
+    packed: Packed,
+    deferred: Vec<Pending>,
+}
+
 /// Builds one request from the `waiting` rounds of a node: Kafka's
 /// `coalesceProduceRequests`. It returns the request and the rounds that did
 /// not fit, which wait for the next.
@@ -310,7 +328,7 @@ fn renumber(records: &mut [Record], first_delta: i32, timestamp_delta: i64) -> i
 /// so has an older timestamp than the rounds beside it, does not put a
 /// negative timestamp delta in a record. The order is otherwise the order the
 /// rounds arrived in, and so is the order of the partitions in the request.
-fn pack(mut waiting: Vec<Pending>) -> (Packed, Vec<Pending>) {
+fn pack(mut waiting: Vec<Pending>) -> PackedRounds {
     waiting.sort_by_key(|pending| pending.produce.batch.base_timestamp);
     let mut partitions: Vec<PartitionBatch> = Vec::new();
     let mut answers = Vec::with_capacity(waiting.len());
@@ -336,7 +354,11 @@ fn pack(mut waiting: Vec<Pending>) -> (Packed, Vec<Pending>) {
     }
     let mut topic_data: Vec<TopicProduceData> = Vec::new();
     for partition in partitions {
-        let (name, topic_id, data) = partition.into_wire();
+        let WirePartition {
+            name,
+            topic_id,
+            data,
+        } = partition.into_wire();
         match topic_data
             .iter_mut()
             .find(|topic| topic.topic_id == topic_id)
@@ -357,7 +379,10 @@ fn pack(mut waiting: Vec<Pending>) -> (Packed, Vec<Pending>) {
         topic_data,
         ..Default::default()
     };
-    (Packed { request, answers }, deferred)
+    PackedRounds {
+        packed: Packed { request, answers },
+        deferred,
+    }
 }
 
 /// A broker that the tests send requests to.
@@ -374,6 +399,13 @@ pub(super) mod test_support {
         tokio::sync::Semaphore,
     };
 
+    /// A request, and the node it was sent to.
+    #[derive(Clone, Debug, PartialEq)]
+    pub(in crate::share_partition::dlq) struct SentRequest {
+        pub node: NodeId,
+        pub request: ProduceRequest,
+    }
+
     type Script = dyn Fn(usize, &ProduceRequest) -> Result<ProduceResponse, String> + Send + Sync;
 
     /// A transport that keeps the requests it is sent, holds each in flight
@@ -381,7 +413,7 @@ pub(super) mod test_support {
     /// index of the request and the request.
     #[derive(Clone)]
     pub(in crate::share_partition::dlq) struct FakeBroker {
-        sent: Arc<Mutex<Vec<(NodeId, ProduceRequest)>>>,
+        sent: Arc<Mutex<Vec<SentRequest>>>,
         gate: Arc<Semaphore>,
         script: Arc<Script>,
     }
@@ -423,7 +455,7 @@ pub(super) mod test_support {
         /// Lets every request, now and later, answer.
         pub(in crate::share_partition::dlq) fn release(&self) { self.gate.add_permits(1_000); }
 
-        pub(in crate::share_partition::dlq) fn sent(&self) -> Vec<(NodeId, ProduceRequest)> {
+        pub(in crate::share_partition::dlq) fn sent(&self) -> Vec<SentRequest> {
             self.sent.lock().expect("sent lock").clone()
         }
     }
@@ -437,7 +469,10 @@ pub(super) mod test_support {
         ) -> Result<ProduceResponse, String> {
             let index = {
                 let mut sent = self.sent.lock().expect("sent lock");
-                sent.push((node, request.clone()));
+                sent.push(SentRequest {
+                    node,
+                    request: request.clone(),
+                });
                 sent.len() - 1
             };
             self.gate.acquire().await.expect("gate is open").forget();
@@ -449,7 +484,10 @@ pub(super) mod test_support {
 #[cfg(test)]
 mod tests {
     use {
-        super::{test_support::FakeBroker, *},
+        super::{
+            test_support::{FakeBroker, SentRequest},
+            *,
+        },
         assert2::assert,
         bytes::Bytes,
         futures_util::future::join_all,
@@ -507,7 +545,7 @@ mod tests {
             limit,
         } = setup;
         let id = id.0;
-        let records: Vec<(i64, &str)> = values.iter().map(|value| (0, *value)).collect();
+        let records: Vec<TimedValue<'_>> = values.iter().map(|value| rec(0, value)).collect();
         Produce {
             topic: format!("dlq.{id}"),
             topic_id: uuid::Uuid::from_bytes([id; 16]),
@@ -518,8 +556,14 @@ mod tests {
         }
     }
 
+    /// A round, with a count of the requests that took it as it stands.
+    struct Counted {
+        produce: Produce,
+        count: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
     /// `produce`, with a count of the requests that took it as it stands.
-    fn counted(produce: Produce) -> (Produce, Arc<std::sync::atomic::AtomicUsize>) {
+    fn counted(produce: Produce) -> Counted {
         let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let admitted = Arc::clone(&count);
         let produce = Produce {
@@ -528,11 +572,28 @@ mod tests {
             }),
             ..produce
         };
-        (produce, count)
+        Counted { produce, count }
+    }
+
+    /// A record's timestamp delta and value.
+    struct TimedValue<'a> {
+        timestamp_delta: i64,
+        value: &'a str,
+    }
+
+    fn rec(timestamp_delta: i64, value: &str) -> TimedValue<'_> {
+        TimedValue {
+            timestamp_delta,
+            value,
+        }
     }
 
     /// A batch of records, each with a timestamp delta and a value.
-    fn batch_of(base_timestamp: i64, max_timestamp: i64, records: &[(i64, &str)]) -> RecordBatch {
+    fn batch_of(
+        base_timestamp: i64,
+        max_timestamp: i64,
+        records: &[TimedValue<'_>],
+    ) -> RecordBatch {
         RecordBatch {
             last_offset_delta: i32::try_from(records.len()).unwrap() - 1,
             base_timestamp,
@@ -540,10 +601,10 @@ mod tests {
             records: records
                 .iter()
                 .enumerate()
-                .map(|(delta, (timestamp_delta, value))| Record {
+                .map(|(delta, timed)| Record {
                     offset_delta: i32::try_from(delta).unwrap(),
-                    timestamp_delta: *timestamp_delta,
-                    value: Some(Bytes::copy_from_slice(value.as_bytes())),
+                    timestamp_delta: timed.timestamp_delta,
+                    value: Some(Bytes::copy_from_slice(timed.value.as_bytes())),
                     ..Default::default()
                 })
                 .collect(),
@@ -578,10 +639,16 @@ mod tests {
     /// What the healthy broker answers every round with.
     fn reached() -> Arc<ProduceResponse> { Arc::new(ProduceResponse::default()) }
 
-    fn healthy() -> (FakeBroker, Coalescer<FakeBroker>) {
+    /// A broker that answers every round, and a coalescer over it.
+    struct Healthy {
+        broker: FakeBroker,
+        coalescer: Coalescer<FakeBroker>,
+    }
+
+    fn healthy() -> Healthy {
         let broker = FakeBroker::answering(|_, _| Ok(ProduceResponse::default()));
         let coalescer = Coalescer::new(broker.clone());
-        (broker, coalescer)
+        Healthy { broker, coalescer }
     }
 
     /// Releases the transport and joins these rounds in their original order.
@@ -627,7 +694,7 @@ mod tests {
     /// starts a request again.
     #[tokio::test(start_paused = true)]
     async fn the_rounds_for_one_broker_go_in_one_request() {
-        let (broker, coalescer) = healthy();
+        let Healthy { broker, coalescer } = healthy();
 
         let answers = join_all([
             coalescer.produce(NodeId(1), round().values(&["a0", "a1"]).call()),
@@ -643,36 +710,36 @@ mod tests {
         // Which broker's queue empties first is the scheduler's choice, so the
         // requests are read by broker, each broker's in the order sent.
         let mut sent = broker.sent();
-        sent.sort_by_key(|(node, _)| node.0);
+        sent.sort_by_key(|sent| sent.node.0);
 
         assert!(answers == vec![Ok(reached()); 4]);
         assert!(later == Ok(reached()));
         assert!(
             sent == vec![
-                (
-                    NodeId(1),
-                    request(1, vec![
+                SentRequest {
+                    node: NodeId(1),
+                    request: request(1, vec![
                         partition_data(
                             0,
-                            batch_of(1_000, 1_000, &[(0, "a0"), (0, "a1"), (0, "c0")])
+                            batch_of(1_000, 1_000, &[rec(0, "a0"), rec(0, "a1"), rec(0, "c0")])
                         ),
-                        partition_data(1, batch_of(1_000, 1_000, &[(0, "b0")])),
-                    ]),
-                ),
-                (
-                    NodeId(1),
-                    request(1, vec![partition_data(
+                        partition_data(1, batch_of(1_000, 1_000, &[rec(0, "b0")])),
+                    ])
+                },
+                SentRequest {
+                    node: NodeId(1),
+                    request: request(1, vec![partition_data(
                         0,
-                        batch_of(1_000, 1_000, &[(0, "e0")])
-                    )]),
-                ),
-                (
-                    NodeId(2),
-                    request(1, vec![partition_data(
+                        batch_of(1_000, 1_000, &[rec(0, "e0")])
+                    )])
+                },
+                SentRequest {
+                    node: NodeId(2),
+                    request: request(1, vec![partition_data(
                         0,
-                        batch_of(1_000, 1_000, &[(0, "d0")])
-                    )]),
-                ),
+                        batch_of(1_000, 1_000, &[rec(0, "d0")])
+                    )])
+                },
             ]
         );
     }
@@ -699,20 +766,20 @@ mod tests {
         assert!(
             broker.sent()
                 == vec![
-                    (
-                        NodeId(1),
-                        request(1, vec![partition_data(
+                    SentRequest {
+                        node: NodeId(1),
+                        request: request(1, vec![partition_data(
                             0,
-                            batch_of(1_000, 1_000, &[(0, "a0")])
-                        )]),
-                    ),
-                    (
-                        NodeId(1),
-                        request(1, vec![
-                            partition_data(1, batch_of(1_000, 1_000, &[(0, "b0")])),
-                            partition_data(2, batch_of(1_000, 1_000, &[(0, "c0")])),
-                        ]),
-                    ),
+                            batch_of(1_000, 1_000, &[rec(0, "a0")])
+                        )])
+                    },
+                    SentRequest {
+                        node: NodeId(1),
+                        request: request(1, vec![
+                            partition_data(1, batch_of(1_000, 1_000, &[rec(0, "b0")])),
+                            partition_data(2, batch_of(1_000, 1_000, &[rec(0, "c0")])),
+                        ])
+                    },
                 ]
         );
     }
@@ -725,16 +792,16 @@ mod tests {
     /// each one out.
     #[tokio::test(start_paused = true)]
     async fn a_batch_holds_the_rounds_that_the_topic_limit_lets_it() {
-        let together = batch_of(1_000, 1_000, &[(0, "a0"), (0, "b0")]);
-        let a = || partition_data(0, batch_of(1_000, 1_000, &[(0, "a0")]));
-        let b = || partition_data(0, batch_of(1_000, 1_000, &[(0, "b0")]));
+        let together = batch_of(1_000, 1_000, &[rec(0, "a0"), rec(0, "b0")]);
+        let a = || partition_data(0, batch_of(1_000, 1_000, &[rec(0, "a0")]));
+        let b = || partition_data(0, batch_of(1_000, 1_000, &[rec(0, "b0")]));
         let merged = request(1, vec![partition_data(0, together.clone())]);
         let split = vec![request(1, vec![a()]), request(1, vec![b()])];
         let fit = i32::try_from(together.encoded_len()).unwrap();
         let cases = [(fit, vec![merged]), (fit - 1, split.clone()), (1, split)];
 
         for (limit, expected) in cases {
-            let (broker, coalescer) = healthy();
+            let Healthy { broker, coalescer } = healthy();
 
             let answers = join_all([
                 coalescer.produce(NodeId(1), round().limit(limit).call()),
@@ -747,7 +814,7 @@ mod tests {
                 broker
                     .sent()
                     .into_iter()
-                    .map(|(_, request)| request)
+                    .map(|sent| sent.request)
                     .collect::<Vec<_>>()
                     == expected,
                 "limit {limit}"
@@ -760,7 +827,7 @@ mod tests {
     /// timestamp delta, and each record keeps the time its round was built.
     #[tokio::test(start_paused = true)]
     async fn the_oldest_round_sets_the_base_timestamp_of_the_batch() {
-        let (broker, coalescer) = healthy();
+        let Healthy { broker, coalescer } = healthy();
 
         join_all([
             coalescer.produce(NodeId(1), round().timestamp(2_000).values(&["new"]).call()),
@@ -770,13 +837,13 @@ mod tests {
 
         assert!(
             broker.sent()
-                == vec![(
-                    NodeId(1),
-                    request(1, vec![partition_data(
+                == vec![SentRequest {
+                    node: NodeId(1),
+                    request: request(1, vec![partition_data(
                         0,
-                        batch_of(1_000, 2_000, &[(0, "old"), (1_000, "new")])
-                    )]),
-                )]
+                        batch_of(1_000, 2_000, &[rec(0, "old"), rec(1_000, "new")])
+                    )])
+                }]
         );
     }
 
@@ -848,11 +915,14 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_round_counts_when_a_request_takes_it() {
         // A limit that one record of a batch fits under, and two do not.
-        let two = batch_of(1_000, 1_000, &[(0, "b0"), (0, "c0")]);
+        let two = batch_of(1_000, 1_000, &[rec(0, "b0"), rec(0, "c0")]);
         let limit = i32::try_from(two.encoded_len()).unwrap() - 1;
         let rounds =
             ["a0", "b0", "c0"].map(|value| counted(round().values(&[value]).limit(limit).call()));
-        let counts: Vec<_> = rounds.iter().map(|(_, count)| Arc::clone(count)).collect();
+        let counts: Vec<_> = rounds
+            .iter()
+            .map(|counted| Arc::clone(&counted.count))
+            .collect();
         let read = |counts: &[Arc<std::sync::atomic::AtomicUsize>]| -> Vec<usize> {
             counts
                 .iter()
@@ -873,7 +943,7 @@ mod tests {
             let coalescer = Arc::clone(&coalescer);
             tokio::spawn(async move { coalescer.produce(NodeId(1), produce).await })
         };
-        let [(first, _), (second, _), (third, _)] = rounds;
+        let [first, second, third] = rounds.map(|counted| counted.produce);
 
         let first = send(first);
         settle().await;

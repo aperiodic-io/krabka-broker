@@ -71,10 +71,22 @@ fn topic_records(name: &str, partitions: i32, elr: &str) -> Vec<MetadataRecord> 
     records
 }
 
-fn image_of(topics: &[(&str, i32, &str)]) -> MetadataImage {
+/// A topic, the number of its partitions, and its ELR config value.
+struct TopicElrSetup<'a> {
+    name: &'a str,
+    partitions: i32,
+    elr: &'a str,
+}
+
+fn image_of(topics: &[TopicElrSetup<'_>]) -> MetadataImage {
     let mut image = MetadataImage::new(uuid::Uuid::nil());
     finalize_elr_version(&mut image);
-    for (name, partitions, elr) in topics {
+    for TopicElrSetup {
+        name,
+        partitions,
+        elr,
+    } in topics
+    {
         for record in topic_records(name, *partitions, elr) {
             image.apply(&record);
         }
@@ -100,7 +112,11 @@ fn elr_after(image: &MetadataImage, records: &[MetadataRecord], topic: &str) -> 
 /// with the last-known set empty).
 #[test]
 fn an_unclean_replica_is_struck_from_the_elr_and_lands_nowhere() {
-    let image = image_of(&[("orders", 1, "0:2,3:")]);
+    let image = image_of(&[TopicElrSetup {
+        name: "orders",
+        partitions: 1,
+        elr: "0:2,3:",
+    }]);
 
     let records = withdraw_elr_membership(&image, NodeId(2));
 
@@ -118,7 +134,18 @@ fn an_unclean_replica_is_struck_from_the_elr_and_lands_nowhere() {
 /// `brokersToElrs.partitionsWithBrokerInElr(brokerId)`.
 #[test]
 fn withdrawal_reaches_every_partition_that_names_the_replica() {
-    let image = image_of(&[("orders", 2, "0:2,3:;1:3:"), ("payments", 1, "0:2:4")]);
+    let image = image_of(&[
+        TopicElrSetup {
+            name: "orders",
+            partitions: 2,
+            elr: "0:2,3:;1:3:",
+        },
+        TopicElrSetup {
+            name: "payments",
+            partitions: 1,
+            elr: "0:2:4",
+        },
+    ]);
 
     let records = withdraw_elr_membership(&image, NodeId(2));
 
@@ -153,7 +180,18 @@ fn withdrawal_reaches_every_partition_that_names_the_replica() {
 /// and the one that must not churn the metadata log on every restart.
 #[test]
 fn a_replica_in_no_elr_produces_no_records() {
-    let image = image_of(&[("orders", 1, "0:2,3:"), ("payments", 1, "")]);
+    let image = image_of(&[
+        TopicElrSetup {
+            name: "orders",
+            partitions: 1,
+            elr: "0:2,3:",
+        },
+        TopicElrSetup {
+            name: "payments",
+            partitions: 1,
+            elr: "",
+        },
+    ]);
 
     assert!(withdraw_elr_membership(&image, NodeId(9)).is_empty());
 }
@@ -163,7 +201,11 @@ fn a_replica_in_no_elr_produces_no_records() {
 /// overrides survive: applying a `V1TopicConfig` replaces the whole map.
 #[test]
 fn the_last_eligible_replica_leaving_tombstones_the_key_and_keeps_other_overrides() {
-    let image = image_of(&[("orders", 1, "0:2:")]);
+    let image = image_of(&[TopicElrSetup {
+        name: "orders",
+        partitions: 1,
+        elr: "0:2:",
+    }]);
 
     let records = withdraw_elr_membership(&image, NodeId(2));
 

@@ -73,7 +73,7 @@ pub(crate) async fn start_three_tiered_brokers_with_segment_sizes(
     let remote_dir = TempDir::new().expect("shared remote dir");
 
     // 3-voter static voter set.
-    let voters: Vec<(u64, std::net::SocketAddr)> = (0..3)
+    let voters: Vec<_> = (0..3)
         .map(|i| (u64::try_from(i + 1).unwrap(), controller_addrs[i]))
         .collect();
 

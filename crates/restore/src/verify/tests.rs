@@ -35,11 +35,21 @@ fn archive_at(dir: &std::path::Path) -> ArchiveStore {
 }
 
 /// A local archive and the partition identity shared by verification cases.
-fn verification_context() -> (TempDir, ArchiveStore, TopicIdPartition) {
+struct VerificationContext {
+    dir: TempDir,
+    store: ArchiveStore,
+    partition: TopicIdPartition,
+}
+
+fn verification_context() -> VerificationContext {
     let dir = TempDir::new().expect("tempdir");
     let store = archive_at(dir.path());
     let partition = test_partition();
-    (dir, store, partition)
+    VerificationContext {
+        dir,
+        store,
+        partition,
+    }
 }
 
 fn write_object(root: &std::path::Path, relative: &str, bytes: &[u8]) -> ArchiveObject {
@@ -201,30 +211,54 @@ fn encode_all(batches: &[RecordBatch]) -> Bytes {
     buf.freeze()
 }
 
-fn offset_index_bytes(entries: &[(u32, u32)]) -> Bytes {
+/// One `.index` entry.
+#[derive(Clone, Copy)]
+struct OffsetIndexRow {
+    relative_offset: u32,
+    position: u32,
+}
+
+fn offset_index_bytes(entries: &[OffsetIndexRow]) -> Bytes {
     let mut buf = BytesMut::new();
-    for &(rel, pos) in entries {
-        buf.put_u32(rel);
-        buf.put_u32(pos);
+    for entry in entries {
+        buf.put_u32(entry.relative_offset);
+        buf.put_u32(entry.position);
     }
     buf.freeze()
 }
 
-fn time_index_bytes(entries: &[(i64, u32)]) -> Bytes {
+/// One `.timeindex` entry.
+#[derive(Clone, Copy)]
+struct TimeIndexRow {
+    timestamp: i64,
+    relative_offset: u32,
+}
+
+fn time_index_bytes(entries: &[TimeIndexRow]) -> Bytes {
     let mut buf = BytesMut::new();
-    for &(ts, rel) in entries {
-        buf.put_i64(ts);
-        buf.put_u32(rel);
+    for entry in entries {
+        buf.put_i64(entry.timestamp);
+        buf.put_u32(entry.relative_offset);
     }
     buf.freeze()
 }
 
-/// `(start_offset, last_offset, producer_id)` of one `.txnindex` entry.
-type TxnEntry = (i64, i64, i64);
+/// One `.txnindex` entry.
+#[derive(Clone, Copy)]
+struct TxnEntry {
+    start_offset: i64,
+    last_offset: i64,
+    producer_id: i64,
+}
 
 fn txn_index_bytes(entries: &[TxnEntry]) -> Bytes {
     let mut buf = BytesMut::new();
-    for &(start, last, producer_id) in entries {
+    for &TxnEntry {
+        start_offset: start,
+        last_offset: last,
+        producer_id,
+    } in entries
+    {
         buf.put_i16(0); // version
         buf.put_i64(producer_id);
         buf.put_i64(start);
@@ -234,7 +268,18 @@ fn txn_index_bytes(entries: &[TxnEntry]) -> Bytes {
     buf.freeze()
 }
 
-type SnapshotEntry = (i64, i16, i32, i64, i32, i64, i32, i64);
+/// One producer-state entry of a `.snapshot`.
+#[derive(Clone, Copy)]
+struct SnapshotEntry {
+    producer_id: i64,
+    producer_epoch: i16,
+    last_sequence: i32,
+    last_offset: i64,
+    offset_delta: i32,
+    timestamp: i64,
+    coordinator_epoch: i32,
+    current_txn_first_offset: i64,
+}
 
 /// Kafka's v1 producer-state `.snapshot` layout, written independently of
 /// `krabka_log`'s encoder: version, CRC32C over everything after the CRC
@@ -244,15 +289,15 @@ fn snapshot_bytes(entries: &[SnapshotEntry]) -> Bytes {
     buf.put_i16(1);
     buf.put_u32(0); // CRC placeholder, patched below.
     buf.put_i32(i32::try_from(entries.len()).unwrap());
-    for &(producer_id, epoch, sequence, last, delta, timestamp, coordinator, txn) in entries {
-        buf.put_i64(producer_id);
-        buf.put_i16(epoch);
-        buf.put_i32(sequence);
-        buf.put_i64(last);
-        buf.put_i32(delta);
-        buf.put_i64(timestamp);
-        buf.put_i32(coordinator);
-        buf.put_i64(txn);
+    for entry in entries {
+        buf.put_i64(entry.producer_id);
+        buf.put_i16(entry.producer_epoch);
+        buf.put_i32(entry.last_sequence);
+        buf.put_i64(entry.last_offset);
+        buf.put_i32(entry.offset_delta);
+        buf.put_i64(entry.timestamp);
+        buf.put_i32(entry.coordinator_epoch);
+        buf.put_i64(entry.current_txn_first_offset);
     }
     check!(buf.len() == 10 + entries.len() * 46);
     let crc = crc32c(&buf[6..]);
@@ -260,12 +305,23 @@ fn snapshot_bytes(entries: &[SnapshotEntry]) -> Bytes {
     buf.freeze()
 }
 
-fn build_checkpoint(entries: &[(i32, i64)]) -> Bytes {
+/// One row of a `.leader_epoch_checkpoint`.
+#[derive(Clone, Copy)]
+struct CheckpointRow {
+    epoch: i32,
+    start_offset: i64,
+}
+
+fn build_checkpoint(entries: &[CheckpointRow]) -> Bytes {
     use std::fmt::Write as _;
 
     let mut s = format!("0\n{}\n", entries.len());
-    for (epoch, offset) in entries {
-        let _ = writeln!(s, "{epoch} {offset}");
+    for CheckpointRow {
+        epoch,
+        start_offset,
+    } in entries
+    {
+        let _ = writeln!(s, "{epoch} {start_offset}");
     }
     Bytes::from(s.into_bytes())
 }
@@ -285,7 +341,7 @@ struct SegmentBytes {
     max_timestamp_ms: i64,
     batches: u64,
     records: u64,
-    leader_epochs: Vec<(LeaderEpoch, Offset)>,
+    leader_epochs: Vec<LeaderEpochStart>,
 }
 
 fn segment_bytes(batch1_max_ts: i64, batch2_max_ts: i64) -> SegmentBytes {
@@ -309,17 +365,47 @@ fn segment_bytes(batch1_max_ts: i64, batch2_max_ts: i64) -> SegmentBytes {
 
     SegmentBytes {
         log,
-        offset_index: offset_index_bytes(&[(0, 0), (3, u32::try_from(batch1_len).unwrap())]),
-        time_index: time_index_bytes(&[(0, 0)]),
+        offset_index: offset_index_bytes(&[
+            OffsetIndexRow {
+                relative_offset: 0,
+                position: 0,
+            },
+            OffsetIndexRow {
+                relative_offset: 3,
+                position: u32::try_from(batch1_len).unwrap(),
+            },
+        ]),
+        time_index: time_index_bytes(&[TimeIndexRow {
+            timestamp: 0,
+            relative_offset: 0,
+        }]),
         transaction_index: None,
         snapshot: snapshot_bytes(&[]),
-        checkpoint: build_checkpoint(&[(0, 100), (1, 103)]),
+        checkpoint: build_checkpoint(&[
+            CheckpointRow {
+                epoch: 0,
+                start_offset: 100,
+            },
+            CheckpointRow {
+                epoch: 1,
+                start_offset: 103,
+            },
+        ]),
         base_offset: Offset(100),
         end_offset: Offset(104),
         max_timestamp_ms,
         batches: 2,
         records: 5,
-        leader_epochs: vec![(LeaderEpoch(0), Offset(100)), (LeaderEpoch(1), Offset(103))],
+        leader_epochs: vec![
+            LeaderEpochStart {
+                epoch: LeaderEpoch(0),
+                start_offset: Offset(100),
+            },
+            LeaderEpochStart {
+                epoch: LeaderEpoch(1),
+                start_offset: Offset(103),
+            },
+        ],
     }
 }
 
@@ -353,7 +439,11 @@ fn write_segment(dir: &std::path::Path, bytes: &SegmentBytes, omit: &[&str]) -> 
 
 #[tokio::test]
 async fn a_clean_segment_verifies_and_reports_its_facts() {
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let fixture = valid_segment_bytes();
     let segment = write_segment(dir.path(), &fixture, &[]);
 
@@ -379,7 +469,11 @@ async fn a_clean_segment_verifies_and_reports_its_facts() {
 
 #[tokio::test]
 async fn authenticated_fetch_rejects_object_replacement() {
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let fixture = valid_segment_bytes();
     let segment = write_segment(dir.path(), &fixture, &[]);
     let objects = segment
@@ -413,23 +507,50 @@ async fn authenticated_fetch_rejects_object_replacement() {
 
 #[tokio::test]
 async fn missing_mandatory_artifacts_are_torn_copies_in_written_order() {
-    let cases: [(&[&str], &str); 7] = [
-        (&[".log"], ".log"),
-        (&[".index"], ".index"),
-        (&[".timeindex"], ".timeindex"),
-        (&[".snapshot"], ".snapshot"),
-        (&[".leader_epoch_checkpoint"], ".leader_epoch_checkpoint"),
+    struct TornCase<'a> {
+        omit: &'a [&'a str],
+        expected: &'a str,
+    }
+
+    let cases = [
+        TornCase {
+            omit: &[".log"],
+            expected: ".log",
+        },
+        TornCase {
+            omit: &[".index"],
+            expected: ".index",
+        },
+        TornCase {
+            omit: &[".timeindex"],
+            expected: ".timeindex",
+        },
+        TornCase {
+            omit: &[".snapshot"],
+            expected: ".snapshot",
+        },
+        TornCase {
+            omit: &[".leader_epoch_checkpoint"],
+            expected: ".leader_epoch_checkpoint",
+        },
         // When more than one artifact is absent, the first in the
         // documented order is the one reported.
-        (&[".log", ".timeindex"], ".log"),
-        (
-            &[".index", ".snapshot", ".leader_epoch_checkpoint"],
-            ".index",
-        ),
+        TornCase {
+            omit: &[".log", ".timeindex"],
+            expected: ".log",
+        },
+        TornCase {
+            omit: &[".index", ".snapshot", ".leader_epoch_checkpoint"],
+            expected: ".index",
+        },
     ];
 
-    for (omit, expected) in cases {
-        let (dir, store, partition) = verification_context();
+    for TornCase { omit, expected } in cases {
+        let VerificationContext {
+            dir,
+            store,
+            partition,
+        } = verification_context();
         let fixture = valid_segment_bytes();
         let segment = write_segment(dir.path(), &fixture, omit);
 
@@ -455,7 +576,11 @@ enum CorruptedArtifact {
 )]
 #[test_macro(tokio::test)]
 async fn a_corrupted_crc_covered_artifact_is_a_checksum_mismatch(artifact: CorruptedArtifact) {
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let mut fixture = valid_segment_bytes();
 
     match artifact {
@@ -492,7 +617,11 @@ async fn a_corrupted_crc_covered_artifact_is_a_checksum_mismatch(artifact: Corru
 
 #[tokio::test]
 async fn a_log_truncated_mid_batch_is_a_truncated_segment() {
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let mut fixture = valid_segment_bytes();
 
     let full_len = fixture.log.len();
@@ -507,7 +636,11 @@ async fn a_log_truncated_mid_batch_is_a_truncated_segment() {
 
 #[tokio::test]
 async fn a_gap_between_crc_valid_batches_is_accepted() {
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let mut fixture = valid_segment_bytes();
 
     // The first batch ends at 102, but the second starts at 104. Both batches
@@ -531,7 +664,11 @@ async fn a_gap_between_crc_valid_batches_is_accepted() {
 
 #[tokio::test]
 async fn first_batch_must_match_the_segment_base_offset() {
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let mut fixture = valid_segment_bytes();
 
     fixture.log = single_record_bytes().base_offset(101).call();
@@ -545,7 +682,11 @@ async fn first_batch_must_match_the_segment_base_offset() {
 
 #[tokio::test]
 async fn a_batch_whose_exclusive_end_overflows_is_rejected() {
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let mut fixture = valid_segment_bytes();
 
     fixture.base_offset = Offset(i64::MAX);
@@ -560,11 +701,24 @@ async fn a_batch_whose_exclusive_end_overflows_is_rejected() {
 
 #[tokio::test]
 async fn an_offset_index_entry_past_the_log_end_is_rejected() {
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let mut fixture = valid_segment_bytes();
 
     let log_len = u32::try_from(fixture.log.len()).unwrap();
-    fixture.offset_index = offset_index_bytes(&[(0, 0), (3, log_len + 1_000)]);
+    fixture.offset_index = offset_index_bytes(&[
+        OffsetIndexRow {
+            relative_offset: 0,
+            position: 0,
+        },
+        OffsetIndexRow {
+            relative_offset: 3,
+            position: log_len + 1_000,
+        },
+    ]);
 
     let segment = write_segment(dir.path(), &fixture, &[]);
     let error = verify_segment(&store, &partition, &segment)
@@ -575,10 +729,23 @@ async fn an_offset_index_entry_past_the_log_end_is_rejected() {
 
 #[tokio::test]
 async fn a_non_monotonic_time_index_is_rejected() {
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let mut fixture = valid_segment_bytes();
 
-    fixture.time_index = time_index_bytes(&[(1_030, 3), (1_000, 0)]);
+    fixture.time_index = time_index_bytes(&[
+        TimeIndexRow {
+            timestamp: 1_030,
+            relative_offset: 3,
+        },
+        TimeIndexRow {
+            timestamp: 1_000,
+            relative_offset: 0,
+        },
+    ]);
 
     let segment = write_segment(dir.path(), &fixture, &[]);
     let error = verify_segment(&store, &partition, &segment)
@@ -596,25 +763,90 @@ async fn sparse_indexes_require_complete_strict_bounded_entries() {
     }
 
     let cases = [
-        Sidecar::Offset(offset_index_bytes(&[(0, 0), (0, 10)])),
-        Sidecar::Offset(offset_index_bytes(&[(0, 0), (3, 0)])),
+        Sidecar::Offset(offset_index_bytes(&[
+            OffsetIndexRow {
+                relative_offset: 0,
+                position: 0,
+            },
+            OffsetIndexRow {
+                relative_offset: 0,
+                position: 10,
+            },
+        ])),
+        Sidecar::Offset(offset_index_bytes(&[
+            OffsetIndexRow {
+                relative_offset: 0,
+                position: 0,
+            },
+            OffsetIndexRow {
+                relative_offset: 3,
+                position: 0,
+            },
+        ])),
         Sidecar::Offset(Bytes::from_static(&[0; 7])),
-        Sidecar::Time(time_index_bytes(&[(1_000, 0), (1_010, 0)])),
+        Sidecar::Time(time_index_bytes(&[
+            TimeIndexRow {
+                timestamp: 1_000,
+                relative_offset: 0,
+            },
+            TimeIndexRow {
+                timestamp: 1_010,
+                relative_offset: 0,
+            },
+        ])),
         Sidecar::Time(Bytes::from_static(&[0; 11])),
         // Abort markers out of order, then repeated.
-        Sidecar::Transaction(txn_index_bytes(&[(100, 104, 7), (101, 103, 8)])),
-        Sidecar::Transaction(txn_index_bytes(&[(100, 103, 7), (101, 103, 8)])),
+        Sidecar::Transaction(txn_index_bytes(&[
+            TxnEntry {
+                start_offset: 100,
+                last_offset: 104,
+                producer_id: 7,
+            },
+            TxnEntry {
+                start_offset: 101,
+                last_offset: 103,
+                producer_id: 8,
+            },
+        ])),
+        Sidecar::Transaction(txn_index_bytes(&[
+            TxnEntry {
+                start_offset: 100,
+                last_offset: 103,
+                producer_id: 7,
+            },
+            TxnEntry {
+                start_offset: 101,
+                last_offset: 103,
+                producer_id: 8,
+            },
+        ])),
         // A marker before or past the segment that indexes it.
-        Sidecar::Transaction(txn_index_bytes(&[(90, 99, 7)])),
-        Sidecar::Transaction(txn_index_bytes(&[(100, 105, 7)])),
+        Sidecar::Transaction(txn_index_bytes(&[TxnEntry {
+            start_offset: 90,
+            last_offset: 99,
+            producer_id: 7,
+        }])),
+        Sidecar::Transaction(txn_index_bytes(&[TxnEntry {
+            start_offset: 100,
+            last_offset: 105,
+            producer_id: 7,
+        }])),
         // A transaction without a producer. (One that starts after its
         // marker is already rejected by `parse_txn_index`.)
-        Sidecar::Transaction(txn_index_bytes(&[(100, 102, -1)])),
+        Sidecar::Transaction(txn_index_bytes(&[TxnEntry {
+            start_offset: 100,
+            last_offset: 102,
+            producer_id: -1,
+        }])),
         Sidecar::Transaction(Bytes::from_static(&[0; 33])),
     ];
 
     for sidecar in cases {
-        let (dir, store, partition) = verification_context();
+        let VerificationContext {
+            dir,
+            store,
+            partition,
+        } = verification_context();
         let mut fixture = valid_segment_bytes();
         match sidecar {
             Sidecar::Offset(bytes) => fixture.offset_index = bytes,
@@ -639,18 +871,62 @@ async fn sparse_indexes_require_complete_strict_bounded_entries() {
 /// the segment base or by the previous entry.
 #[tokio::test]
 async fn transaction_index_accepts_kafka_marker_order() {
-    let cases: [(&str, &[TxnEntry]); 3] = [
-        ("sequential aborts", &[(100, 101, 7), (102, 103, 8)]),
+    struct MarkerOrderCase<'a> {
+        name: &'a str,
+        entries: &'a [TxnEntry],
+    }
+
+    let cases = [
+        MarkerOrderCase {
+            name: "sequential aborts",
+            entries: &[
+                TxnEntry {
+                    start_offset: 100,
+                    last_offset: 101,
+                    producer_id: 7,
+                },
+                TxnEntry {
+                    start_offset: 102,
+                    last_offset: 103,
+                    producer_id: 8,
+                },
+            ],
+        },
         // Producer 2 opens at 102 and aborts at 103; producer 1 opened
         // earlier at 100 and aborts later at 104.
-        ("interleaved aborts", &[(102, 103, 2), (100, 104, 1)]),
+        MarkerOrderCase {
+            name: "interleaved aborts",
+            entries: &[
+                TxnEntry {
+                    start_offset: 102,
+                    last_offset: 103,
+                    producer_id: 2,
+                },
+                TxnEntry {
+                    start_offset: 100,
+                    last_offset: 104,
+                    producer_id: 1,
+                },
+            ],
+        },
         // The transaction's data sits in an earlier segment; its abort marker
         // at 100 is the first offset of this one.
-        ("transaction spanning a segment roll", &[(40, 100, 1_000)]),
+        MarkerOrderCase {
+            name: "transaction spanning a segment roll",
+            entries: &[TxnEntry {
+                start_offset: 40,
+                last_offset: 100,
+                producer_id: 1_000,
+            }],
+        },
     ];
 
-    for (name, entries) in cases {
-        let (dir, store, partition) = verification_context();
+    for MarkerOrderCase { name, entries } in cases {
+        let VerificationContext {
+            dir,
+            store,
+            partition,
+        } = verification_context();
         let mut fixture = valid_segment_bytes();
         fixture.transaction_index = Some(txn_index_bytes(entries));
 
@@ -663,12 +939,34 @@ async fn transaction_index_accepts_kafka_marker_order() {
 #[tokio::test]
 async fn producer_snapshots_require_legal_unique_states_in_any_order() {
     let valid = [
-        (9, 2, 4, 104, 1, 1_040, 1, 103),
-        (7, 1, 3, 102, 2, 1_020, 0, -1),
+        SnapshotEntry {
+            producer_id: 9,
+            producer_epoch: 2,
+            last_sequence: 4,
+            last_offset: 104,
+            offset_delta: 1,
+            timestamp: 1_040,
+            coordinator_epoch: 1,
+            current_txn_first_offset: 103,
+        },
+        SnapshotEntry {
+            producer_id: 7,
+            producer_epoch: 1,
+            last_sequence: 3,
+            last_offset: 102,
+            offset_delta: 2,
+            timestamp: 1_020,
+            coordinator_epoch: 0,
+            current_txn_first_offset: -1,
+        },
     ];
 
     // The same verified bytes are safe to retry.
-    let (dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir,
+        store,
+        partition,
+    } = verification_context();
     let mut fixture = valid_segment_bytes();
     fixture.snapshot = snapshot_bytes(&valid);
     let segment = write_segment(dir.path(), &fixture, &[]);
@@ -680,12 +978,37 @@ async fn producer_snapshots_require_legal_unique_states_in_any_order() {
         .expect("retry verification");
 
     let invalid = [
-        vec![valid[0], valid[0]],               // duplicate producer ID
-        vec![(7, 1, 3, 105, 2, 1_050, 0, -1)],  // state at the frontier
-        vec![(-1, 1, 3, 102, 2, 1_020, 0, -1)], // invalid producer ID
+        // duplicate producer ID
+        vec![valid[0], valid[0]],
+        // state at the frontier
+        vec![SnapshotEntry {
+            producer_id: 7,
+            producer_epoch: 1,
+            last_sequence: 3,
+            last_offset: 105,
+            offset_delta: 2,
+            timestamp: 1_050,
+            coordinator_epoch: 0,
+            current_txn_first_offset: -1,
+        }],
+        // invalid producer ID
+        vec![SnapshotEntry {
+            producer_id: -1,
+            producer_epoch: 1,
+            last_sequence: 3,
+            last_offset: 102,
+            offset_delta: 2,
+            timestamp: 1_020,
+            coordinator_epoch: 0,
+            current_txn_first_offset: -1,
+        }],
     ];
     for entries in invalid {
-        let (dir, store, partition) = verification_context();
+        let VerificationContext {
+            dir,
+            store,
+            partition,
+        } = verification_context();
         let mut fixture = valid_segment_bytes();
         fixture.snapshot = snapshot_bytes(&entries);
         let segment = write_segment(dir.path(), &fixture, &[]);
@@ -711,7 +1034,11 @@ async fn malformed_leader_epoch_checkpoints_are_rejected() {
     ];
 
     for bad in cases {
-        let (dir, store, partition) = verification_context();
+        let VerificationContext {
+            dir,
+            store,
+            partition,
+        } = verification_context();
         let mut fixture = valid_segment_bytes();
         fixture.checkpoint = Bytes::from_static(bad.as_bytes());
 
@@ -728,7 +1055,11 @@ async fn malformed_leader_epoch_checkpoints_are_rejected() {
 
 #[tokio::test]
 async fn every_batch_reporting_unknown_timestamp_keeps_the_sentinel() {
-    let (ctx_dir, store, partition) = verification_context();
+    let VerificationContext {
+        dir: ctx_dir,
+        store,
+        partition,
+    } = verification_context();
     let bytes_fixture = segment_bytes(-1, -1);
 
     let target_segment = write_segment(ctx_dir.path(), &bytes_fixture, &[]);

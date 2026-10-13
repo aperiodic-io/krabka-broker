@@ -40,7 +40,7 @@ fn the_shared_exit_codes_keep_the_barrier_meanings() {
 /// is the difference between it and a refusal.
 #[test]
 fn a_failure_reports_its_own_exit_code() {
-    let cases: [(&'static str, Failure, i32); 3] = [
+    let cases = [
         (
             "a request that did not complete",
             Failure::Transport("gone".to_owned()),

@@ -43,11 +43,12 @@ fn the_error_table_records_the_image_the_build_pins() {
 
 #[test]
 fn every_kafka_range_constant_appears_in_the_kafka_table() {
-    for (name, code) in KAFKA_RANGE_CODES {
+    for wire in KAFKA_RANGE_CODES {
+        let NamedCode { name, code } = wire;
         let kafka = KAFKA_ERROR_TABLE
             .iter()
-            .find(|(kafka_name, _)| kafka_name == name);
-        assert!(kafka == Some(&(*name, *code)), "{name} = {code}");
+            .find(|kafka| kafka.name == wire.name);
+        assert!(kafka == Some(wire), "{name} = {code}");
     }
 }
 
@@ -55,23 +56,33 @@ fn every_kafka_range_constant_appears_in_the_kafka_table() {
 /// `org.apache.kafka.common.protocol.Errors` assigns them at trunk
 /// `abf522e1ca5d`: 134 is `GROUP_DELETION_FAILED`, which krabka does not
 /// return, 135 is KIP-1331's and 136 is KIP-1312's.
-const KAFKA_TRUNK_ERROR_TABLE: &[(&str, i16)] = &[
-    ("GROUP_DELETION_FAILED", 134),
-    ("STREAMS_TOPOLOGY_DESCRIPTION_UPDATE_FAILED", 135),
-    ("CONTROLLER_ID_NOT_REGISTERED", 136),
+const KAFKA_TRUNK_ERROR_TABLE: &[NamedCode] = &[
+    NamedCode {
+        name: "GROUP_DELETION_FAILED",
+        code: 134,
+    },
+    NamedCode {
+        name: "STREAMS_TOPOLOGY_DESCRIPTION_UPDATE_FAILED",
+        code: 135,
+    },
+    NamedCode {
+        name: "CONTROLLER_ID_NOT_REGISTERED",
+        code: 136,
+    },
 ];
 
 #[test]
 fn every_trunk_constant_appears_in_the_trunk_table_and_not_in_the_release() {
-    for (name, code) in KAFKA_TRUNK_CODES {
+    for wire in KAFKA_TRUNK_CODES {
+        let NamedCode { name, code } = wire;
         let trunk = KAFKA_TRUNK_ERROR_TABLE
             .iter()
-            .find(|(trunk_name, _)| trunk_name == name);
-        assert!(trunk == Some(&(*name, *code)), "{name} = {code}");
+            .find(|trunk| trunk.name == wire.name);
+        assert!(trunk == Some(wire), "{name} = {code}");
         assert!(
             KAFKA_ERROR_TABLE
                 .iter()
-                .all(|(_, released)| released != code),
+                .all(|released| released.code != *code),
             "{name} is in the release table and belongs with the Kafka-range codes"
         );
     }
@@ -79,14 +90,25 @@ fn every_trunk_constant_appears_in_the_trunk_table_and_not_in_the_release() {
 
 #[test]
 fn no_two_error_code_constants_collide() {
-    let all: Vec<(&str, i16)> = KAFKA_RANGE_CODES
+    let all: Vec<NamedCode> = KAFKA_RANGE_CODES
         .iter()
         .chain(KAFKA_TRUNK_CODES)
         .chain(KRABKA_PRIVATE_CODES)
         .copied()
         .collect();
-    for (index, (left_name, left)) in all.iter().enumerate() {
-        for (right_name, right) in &all[index + 1..] {
+    for (
+        index,
+        NamedCode {
+            name: left_name,
+            code: left,
+        },
+    ) in all.iter().enumerate()
+    {
+        for NamedCode {
+            name: right_name,
+            code: right,
+        } in &all[index + 1..]
+        {
             assert!(
                 left != right,
                 "{left_name} and {right_name} both use {left}"
@@ -99,15 +121,15 @@ fn no_two_error_code_constants_collide() {
 fn krabka_private_codes_sit_above_the_whole_kafka_table() {
     let highest_kafka = KAFKA_ERROR_TABLE
         .iter()
-        .map(|(_, code)| *code)
+        .map(|kafka| kafka.code)
         .max()
         .expect("the extracted Kafka table is not empty");
     let highest_trunk = KAFKA_TRUNK_ERROR_TABLE
         .iter()
-        .map(|(_, code)| *code)
+        .map(|trunk| trunk.code)
         .max()
         .expect("the trunk table is not empty");
-    for (name, code) in KRABKA_PRIVATE_CODES {
+    for NamedCode { name, code } in KRABKA_PRIVATE_CODES {
         assert!(*code >= 1000, "{name}");
         assert!(*code > highest_kafka, "{name}");
         assert!(*code > highest_trunk, "{name}");
@@ -223,8 +245,8 @@ fn replica_not_available_is_not_the_controller_moved_code() {
     // replica this broker simply does not host.
     let stale_controller_epoch = KAFKA_ERROR_TABLE
         .iter()
-        .find(|(name, _)| *name == "STALE_CONTROLLER_EPOCH")
-        .map(|(_, code)| *code);
+        .find(|kafka| kafka.name == "STALE_CONTROLLER_EPOCH")
+        .map(|kafka| kafka.code);
     assert!(stale_controller_epoch == Some(11));
     assert!(REPLICA_NOT_AVAILABLE == 9);
 }

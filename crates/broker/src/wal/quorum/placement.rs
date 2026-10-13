@@ -31,7 +31,7 @@ pub(crate) fn select_voters_from_sorted_racks(
     // Map exact rack-string equality to compact primitive IDs for the verified
     // selector. Brokers without a rack are deliberately absent.
     let mut rack_names: Vec<&str> = Vec::new();
-    let mut candidates: Vec<(u64, u64)> = Vec::new();
+    let mut candidates = Vec::new();
     for (node_id, rack) in brokers {
         let Some(rack) = rack.as_deref() else {
             continue;

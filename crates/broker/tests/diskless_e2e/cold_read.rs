@@ -35,7 +35,11 @@ async fn trimmed_diskless_offsets_are_served_from_the_object_store() {
     // committed prefix and for the trim behind it to move the log start off
     // zero.
     let (leader_broker, committed) = seeded_leader(&cluster, leader);
-    let (log_start, high_watermark, frontier) = await_trimmed_flush(leader_broker, committed).await;
+    let TrimmedFlush {
+        log_start,
+        high_watermark,
+        frontier,
+    } = await_trimmed_flush(leader_broker, committed).await;
     assert!(frontier == Some(committed));
     assert!(high_watermark == committed);
     assert!(
@@ -60,18 +64,22 @@ async fn trimmed_diskless_offsets_are_served_from_the_object_store() {
     cluster.shutdown().await;
 }
 
+/// The leader's log start, high watermark and projected flush frontier.
+struct TrimmedFlush {
+    log_start: i64,
+    high_watermark: i64,
+    frontier: Option<i64>,
+}
+
 /// Poll the leader's own flush inputs until the committed prefix is both
-/// flushed and trimmed, and return `(log start, high watermark, projected
-/// flush frontier)`.
+/// flushed and trimmed, and return the log start, high watermark and projected
+/// flush frontier.
 ///
 /// `diskless_flush_state_for_test` reports the same values the flusher itself
 /// reads, so this waits on the real flush pipeline rather than on a proxy for
 /// it. The `diskless` flag is asserted here because every other assertion in
 /// this case would also hold for an ordinary topic that simply never trimmed.
-async fn await_trimmed_flush(
-    leader: &krabka_broker::BrokerHandle,
-    committed: i64,
-) -> (i64, i64, Option<i64>) {
+async fn await_trimmed_flush(leader: &krabka_broker::BrokerHandle, committed: i64) -> TrimmedFlush {
     let deadline = std::time::Instant::now() + Duration::from_secs(90);
     loop {
         let state = leader.diskless_flush_state_for_test(TOPIC, 0).await;
@@ -81,7 +89,11 @@ async fn await_trimmed_flush(
                 "the topic must be diskless for this case to mean anything"
             );
             if log_start > 0 && frontier == Some(committed) {
-                return (log_start, high_watermark, frontier);
+                return TrimmedFlush {
+                    log_start,
+                    high_watermark,
+                    frontier,
+                };
             }
         }
         assert!(
@@ -110,7 +122,7 @@ async fn deleted_diskless_records_leave_the_object_store_unreadable() {
     let bootstrap = cluster.bootstrap_for_node(leader);
 
     let (leader_broker, committed) = seeded_leader(&cluster, leader);
-    let (log_start, _, _) = await_trimmed_flush(leader_broker, committed).await;
+    let TrimmedFlush { log_start, .. } = await_trimmed_flush(leader_broker, committed).await;
     // Everything the case deletes is already below the local log start, so the
     // delete can only be answered by the index.
     let floor = 4;
@@ -140,7 +152,7 @@ async fn deleted_diskless_records_leave_the_object_store_unreadable() {
         Duration::from_secs(90),
     )
     .await;
-    assert!(kept.records[0].0 == floor);
+    assert!(kept.records[0].offset == floor);
 
     drop(producer);
     drop(admin);

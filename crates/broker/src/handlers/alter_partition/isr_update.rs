@@ -30,6 +30,12 @@ use {
     std::collections::HashSet,
 };
 
+/// A broker the request proposes for the ISR, with the broker epoch it claims.
+struct ProposedReplica {
+    broker_id: i32,
+    broker_epoch: i64,
+}
+
 /// Validates and applies the ISR proposal of one partition of the known topic
 /// `topic_name`, sent by broker `requester`. It returns the per-partition
 /// response data, and on success it appends to `changes`.
@@ -74,26 +80,40 @@ pub(super) fn handle_partition_with_recovery(
     // also refuses a broker whose change has not committed yet. A request
     // older than v3 carries no epochs, so Kafka checks its `new_isr` with -1
     // for each. Any ineligible replica fails the whole partition.
-    let proposed_states: Vec<(i32, i64)> =
+    let proposed_states: Vec<ProposedReplica> =
         if !new_isr_i32.is_empty() || new_isr_with_epochs.is_empty() {
-            effective_isr_i32.iter().map(|&id| (id, -1)).collect()
+            effective_isr_i32
+                .iter()
+                .map(|&broker_id| ProposedReplica {
+                    broker_id,
+                    broker_epoch: -1,
+                })
+                .collect()
         } else {
             new_isr_with_epochs
                 .iter()
-                .map(|state| (state.broker_id, state.broker_epoch))
+                .map(|state| ProposedReplica {
+                    broker_id: state.broker_id,
+                    broker_epoch: state.broker_epoch,
+                })
                 .collect()
         };
-    let replicas_eligible = proposed_states.iter().all(|&(broker_id, broker_epoch)| {
-        let Ok(id) = u64::try_from(broker_id) else {
-            return false;
-        };
-        image.broker(NodeId(id)).is_some_and(|registration| {
-            !registration.fenced
-                && !registration.in_controlled_shutdown
-                && active.contains(&id)
-                && (broker_epoch == -1 || registration.broker_epoch == broker_epoch)
-        })
-    });
+    let replicas_eligible = proposed_states.iter().all(
+        |&ProposedReplica {
+             broker_id,
+             broker_epoch,
+         }| {
+            let Ok(id) = u64::try_from(broker_id) else {
+                return false;
+            };
+            image.broker(NodeId(id)).is_some_and(|registration| {
+                !registration.fenced
+                    && !registration.in_controlled_shutdown
+                    && active.contains(&id)
+                    && (broker_epoch == -1 || registration.broker_epoch == broker_epoch)
+            })
+        },
+    );
 
     let requested_recovery_state = match request.leader_recovery_state {
         0 => Some(LeaderRecoveryState::Recovered),
@@ -268,8 +288,9 @@ mod tests {
         super::*,
         crate::{
             handlers::alter_partition::test_support::{
-                ONE_REGISTERED_BROKER, PartitionFixture, THREE_REGISTERED_BROKERS,
-                TWO_REGISTERED_BROKERS, bs, image_with, image_with_partition, three_broker_states,
+                ONE_REGISTERED_BROKER, PartitionFixture, RegisteredBroker,
+                THREE_REGISTERED_BROKERS, TWO_REGISTERED_BROKERS, bs, image_with,
+                image_with_partition, three_broker_states,
             },
             test_support::{BrokerEpoch, PartitionEpoch, WireBrokerId},
         },
@@ -471,9 +492,18 @@ mod tests {
                 partition_epoch: PartitionEpoch(11),
             },
             &[
-                (krabka_metadata::NodeId(2), BrokerEpoch(20)),
-                (krabka_metadata::NodeId(4), BrokerEpoch(40)),
-                (krabka_metadata::NodeId(6), BrokerEpoch(60)),
+                RegisteredBroker {
+                    node_id: krabka_metadata::NodeId(2),
+                    epoch: BrokerEpoch(20),
+                },
+                RegisteredBroker {
+                    node_id: krabka_metadata::NodeId(4),
+                    epoch: BrokerEpoch(40),
+                },
+                RegisteredBroker {
+                    node_id: krabka_metadata::NodeId(6),
+                    epoch: BrokerEpoch(60),
+                },
             ],
         )
     }
@@ -519,7 +549,14 @@ mod tests {
     /// the error code a Kafka controller answers it with.
     /// A validation row: its label, then the request's broker id, leader
     /// epoch and partition epoch, the proposed ISR, and the expected error.
-    type ValidationCase<'a> = (&'a str, i32, i32, i32, &'a [i32], i16);
+    struct ValidationCase<'a> {
+        label: &'a str,
+        requester: i32,
+        leader_epoch: i32,
+        partition_epoch: i32,
+        new_isr: &'a [i32],
+        expected: i16,
+    }
 
     #[test]
     fn rows_are_validated_in_kafkas_order() {
@@ -530,65 +567,80 @@ mod tests {
         let image = image_with_partition(&fixture, THREE_REGISTERED_BROKERS);
         let active = image.brokers().map(|broker| broker.node_id.0).collect();
         let cases: &[ValidationCase<'_>] = &[
-            ("current epochs", 1, 5, 10, &[1], codes::NONE),
-            (
-                "a leader epoch the controller has not seen",
-                1,
-                6,
-                10,
-                &[1],
-                codes::NOT_CONTROLLER,
-            ),
-            (
-                "a partition epoch the controller has not seen",
-                1,
-                4,
-                11,
-                &[1],
-                codes::NOT_CONTROLLER,
-            ),
-            (
-                "an older leader epoch",
-                2,
-                4,
-                9,
-                &[1],
-                codes::FENCED_LEADER_EPOCH,
-            ),
-            (
-                "a requester that is not the leader",
-                2,
-                5,
-                9,
-                &[1],
-                codes::INVALID_REQUEST,
-            ),
-            (
-                "an older partition epoch",
-                1,
-                5,
-                9,
-                &[1, 4],
-                codes::INVALID_UPDATE_VERSION,
-            ),
-            (
-                "an ISR without the leader",
-                1,
-                5,
-                10,
-                &[2],
-                codes::INVALID_REQUEST,
-            ),
-            (
-                "an ISR naming a replica twice",
-                1,
-                5,
-                10,
-                &[1, 2, 2],
-                codes::INVALID_REQUEST,
-            ),
+            ValidationCase {
+                label: "current epochs",
+                requester: 1,
+                leader_epoch: 5,
+                partition_epoch: 10,
+                new_isr: &[1],
+                expected: codes::NONE,
+            },
+            ValidationCase {
+                label: "a leader epoch the controller has not seen",
+                requester: 1,
+                leader_epoch: 6,
+                partition_epoch: 10,
+                new_isr: &[1],
+                expected: codes::NOT_CONTROLLER,
+            },
+            ValidationCase {
+                label: "a partition epoch the controller has not seen",
+                requester: 1,
+                leader_epoch: 4,
+                partition_epoch: 11,
+                new_isr: &[1],
+                expected: codes::NOT_CONTROLLER,
+            },
+            ValidationCase {
+                label: "an older leader epoch",
+                requester: 2,
+                leader_epoch: 4,
+                partition_epoch: 9,
+                new_isr: &[1],
+                expected: codes::FENCED_LEADER_EPOCH,
+            },
+            ValidationCase {
+                label: "a requester that is not the leader",
+                requester: 2,
+                leader_epoch: 5,
+                partition_epoch: 9,
+                new_isr: &[1],
+                expected: codes::INVALID_REQUEST,
+            },
+            ValidationCase {
+                label: "an older partition epoch",
+                requester: 1,
+                leader_epoch: 5,
+                partition_epoch: 9,
+                new_isr: &[1, 4],
+                expected: codes::INVALID_UPDATE_VERSION,
+            },
+            ValidationCase {
+                label: "an ISR without the leader",
+                requester: 1,
+                leader_epoch: 5,
+                partition_epoch: 10,
+                new_isr: &[2],
+                expected: codes::INVALID_REQUEST,
+            },
+            ValidationCase {
+                label: "an ISR naming a replica twice",
+                requester: 1,
+                leader_epoch: 5,
+                partition_epoch: 10,
+                new_isr: &[1, 2, 2],
+                expected: codes::INVALID_REQUEST,
+            },
         ];
-        for &(label, requester, leader_epoch, partition_epoch, new_isr, expected) in cases {
+        for &ValidationCase {
+            label,
+            requester,
+            leader_epoch,
+            partition_epoch,
+            new_isr,
+            expected,
+        } in cases
+        {
             let mut changes = Vec::new();
             let response = handle_partition_with_recovery(
                 &image,
@@ -790,8 +842,14 @@ mod tests {
                 ..Default::default()
             },
             &[
-                (krabka_metadata::NodeId(0), BrokerEpoch(0)),
-                (krabka_metadata::NodeId(1), BrokerEpoch(10)),
+                RegisteredBroker {
+                    node_id: krabka_metadata::NodeId(0),
+                    epoch: BrokerEpoch(0),
+                },
+                RegisteredBroker {
+                    node_id: krabka_metadata::NodeId(1),
+                    epoch: BrokerEpoch(10),
+                },
             ],
         );
         let mut changes = Vec::new();
@@ -871,6 +929,12 @@ mod tests {
             fencing::{RegistrationChange, registration_change as registration_change_record},
         };
 
+        /// A broker 2 situation and the error code the ISR check answers with.
+        struct Broker2Case {
+            broker_2: Broker2,
+            expected: i16,
+        }
+
         /// Where broker 2 stands.
         #[derive(Debug, Clone, Copy)]
         enum Broker2 {
@@ -883,20 +947,38 @@ mod tests {
             RegistrationInControlledShutdown,
         }
 
-        let cases: &[(Broker2, i16)] = &[
-            (Broker2::Unfenced, codes::NONE),
-            (Broker2::Fenced, codes::INELIGIBLE_REPLICA),
-            (Broker2::InControlledShutdown, codes::INELIGIBLE_REPLICA),
-            (Broker2::NeverHeartbeated, codes::INELIGIBLE_REPLICA),
-            (Broker2::NotRegistered, codes::INELIGIBLE_REPLICA),
-            (Broker2::RegistrationFenced, codes::INELIGIBLE_REPLICA),
-            (
-                Broker2::RegistrationInControlledShutdown,
-                codes::INELIGIBLE_REPLICA,
-            ),
+        let cases: &[Broker2Case] = &[
+            Broker2Case {
+                broker_2: Broker2::Unfenced,
+                expected: codes::NONE,
+            },
+            Broker2Case {
+                broker_2: Broker2::Fenced,
+                expected: codes::INELIGIBLE_REPLICA,
+            },
+            Broker2Case {
+                broker_2: Broker2::InControlledShutdown,
+                expected: codes::INELIGIBLE_REPLICA,
+            },
+            Broker2Case {
+                broker_2: Broker2::NeverHeartbeated,
+                expected: codes::INELIGIBLE_REPLICA,
+            },
+            Broker2Case {
+                broker_2: Broker2::NotRegistered,
+                expected: codes::INELIGIBLE_REPLICA,
+            },
+            Broker2Case {
+                broker_2: Broker2::RegistrationFenced,
+                expected: codes::INELIGIBLE_REPLICA,
+            },
+            Broker2Case {
+                broker_2: Broker2::RegistrationInControlledShutdown,
+                expected: codes::INELIGIBLE_REPLICA,
+            },
         ];
-        for (broker_2, expected) in cases {
-            let registered: &[(krabka_metadata::NodeId, BrokerEpoch)] = match broker_2 {
+        for Broker2Case { broker_2, expected } in cases {
+            let registered: &[RegisteredBroker] = match broker_2 {
                 Broker2::NotRegistered => ONE_REGISTERED_BROKER,
                 _ => TWO_REGISTERED_BROKERS,
             };
@@ -914,7 +996,7 @@ mod tests {
                 image.apply(&record);
             }
             let liveness = ControllerLivenessState::new(krabka_units::secs(10));
-            for (node, _) in registered {
+            for RegisteredBroker { node_id: node, .. } in registered {
                 if *node == 2 && matches!(broker_2, Broker2::NeverHeartbeated) {
                     liveness.track_registered([2]).await;
                     continue;

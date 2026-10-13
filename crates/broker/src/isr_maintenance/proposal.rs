@@ -260,15 +260,31 @@ mod tests {
         }
     }
 
-    /// A scan row: its label, the installed ISR, the replica set, the
-    /// followers' progress, and the proposal the scan must make.
-    type ScanCase<'a> = (
-        &'a str,
-        &'a [u64],
-        &'a [u64],
-        Vec<(u64, FollowerStats)>,
-        Option<Proposal>,
-    );
+    /// A follower's progress, by node id.
+    struct FollowerRow {
+        node: u64,
+        stats: FollowerStats,
+    }
+
+    /// Followers' progress rows, in the order given.
+    fn follower_rows<const N: usize>(rows: [(u64, FollowerStats); N]) -> Vec<FollowerRow> {
+        rows.into_iter()
+            .map(|(node, stats)| FollowerRow { node, stats })
+            .collect()
+    }
+
+    /// A scan row.
+    struct ScanCase<'a> {
+        label: &'a str,
+        /// The installed ISR.
+        isr: &'a [u64],
+        /// The replica set.
+        replicas: &'a [u64],
+        /// The followers' progress.
+        followers: Vec<FollowerRow>,
+        /// The proposal the scan must make.
+        expected: Option<Proposal>,
+    }
 
     /// One scan with a 1 s `replica.lag.time.max.ms`. In-sync followers follow
     /// Kafka's `Partition.getOutOfSyncReplicas`, out-of-sync ones
@@ -276,99 +292,107 @@ mod tests {
     #[test]
     fn a_scan_proposes_the_isr_kafkas_rules_select() {
         let now = Instant::now() + Duration::from_secs(60);
-        let follower_pair =
-            |candidate| vec![(2, follower(now, 100, Some(10), Some(10))), (3, candidate)];
+        let follower_pair = |candidate| {
+            follower_rows([(2, follower(now, 100, Some(10), Some(10))), (3, candidate)])
+        };
         let cases: [ScanCase<'_>; 10] = [
-            (
-                "every follower caught up recently",
-                &[1, 2, 3],
-                &[1, 2, 3],
-                vec![
+            ScanCase {
+                label: "every follower caught up recently",
+                isr: &[1, 2, 3],
+                replicas: &[1, 2, 3],
+                followers: follower_rows([
                     (2, follower(now, 90, Some(10), Some(500))),
                     (3, follower(now, 80, Some(10), Some(1_000))),
-                ],
-                None,
-            ),
-            (
-                "a follower fetching but not caught up for too long leaves",
-                &[1, 2, 3],
-                &[1, 2, 3],
-                vec![
+                ]),
+                expected: None,
+            },
+            ScanCase {
+                label: "a follower fetching but not caught up for too long leaves",
+                isr: &[1, 2, 3],
+                replicas: &[1, 2, 3],
+                followers: follower_rows([
                     (2, follower(now, 90, Some(10), Some(10))),
                     (3, follower(now, 80, Some(10), Some(1_001))),
-                ],
-                Some(proposal(&[1, 2, 3], &[1, 2])),
-            ),
-            (
-                "an idle follower at the leader's log end stays",
-                &[1, 2],
-                &[1, 2],
-                vec![(2, follower(now, 100, Some(30_000), Some(30_000)))],
-                None,
-            ),
-            (
-                "a follower that never fetched from this leader leaves after the bound",
-                &[1, 2],
-                &[1, 2],
-                vec![(2, follower(now, 100, None, Some(1_001)))],
-                Some(proposal(&[1, 2], &[1])),
-            ),
-            (
-                "an out-of-sync follower at the high watermark joins",
-                &[1, 2],
-                &[1, 2, 3],
-                follower_pair(follower(now, 90, Some(30_000), Some(30_000))),
-                Some(proposal(&[1, 2], &[1, 2, 3])),
-            ),
-            (
-                "an out-of-sync follower one short of the high watermark stays out",
-                &[1, 2],
-                &[1, 2, 3],
-                follower_pair(follower(now, 89, Some(10), Some(10))),
-                None,
-            ),
-            (
-                "a follower past the high watermark that has not fetched from this leader stays out",
-                &[1, 2],
-                &[1, 2, 3],
-                follower_pair(follower(now, 100, None, Some(10))),
-                None,
-            ),
-            (
-                "an out-of-sync replica with no progress stays out",
-                &[1, 2],
-                &[1, 2, 3],
-                vec![(2, follower(now, 100, Some(10), Some(10)))],
-                None,
-            ),
-            (
-                "a follower whose fetch carried a stale broker epoch stays out",
-                &[1, 2],
-                &[1, 2, 3],
-                vec![
+                ]),
+                expected: Some(proposal(&[1, 2, 3], &[1, 2])),
+            },
+            ScanCase {
+                label: "an idle follower at the leader's log end stays",
+                isr: &[1, 2],
+                replicas: &[1, 2],
+                followers: follower_rows([(2, follower(now, 100, Some(30_000), Some(30_000)))]),
+                expected: None,
+            },
+            ScanCase {
+                label: "a follower that never fetched from this leader leaves after the bound",
+                isr: &[1, 2],
+                replicas: &[1, 2],
+                followers: follower_rows([(2, follower(now, 100, None, Some(1_001)))]),
+                expected: Some(proposal(&[1, 2], &[1])),
+            },
+            ScanCase {
+                label: "an out-of-sync follower at the high watermark joins",
+                isr: &[1, 2],
+                replicas: &[1, 2, 3],
+                followers: follower_pair(follower(now, 90, Some(30_000), Some(30_000))),
+                expected: Some(proposal(&[1, 2], &[1, 2, 3])),
+            },
+            ScanCase {
+                label: "an out-of-sync follower one short of the high watermark stays out",
+                isr: &[1, 2],
+                replicas: &[1, 2, 3],
+                followers: follower_pair(follower(now, 89, Some(10), Some(10))),
+                expected: None,
+            },
+            ScanCase {
+                label: "a follower past the high watermark that has not fetched from this leader stays out",
+                isr: &[1, 2],
+                replicas: &[1, 2, 3],
+                followers: follower_pair(follower(now, 100, None, Some(10))),
+                expected: None,
+            },
+            ScanCase {
+                label: "an out-of-sync replica with no progress stays out",
+                isr: &[1, 2],
+                replicas: &[1, 2, 3],
+                followers: follower_rows([(2, follower(now, 100, Some(10), Some(10)))]),
+                expected: None,
+            },
+            ScanCase {
+                label: "a follower whose fetch carried a stale broker epoch stays out",
+                isr: &[1, 2],
+                replicas: &[1, 2, 3],
+                followers: follower_rows([
                     (2, follower(now, 100, Some(10), Some(10))),
                     (3, FollowerStats {
                         broker_epoch: Some(4),
                         ..follower(now, 100, Some(10), Some(10))
                     }),
-                ],
-                None,
-            ),
-            (
-                "the leader's own lag and a duplicate assignment change nothing",
-                &[1, 1, 2, 2],
-                &[1, 1, 2],
-                vec![
+                ]),
+                expected: None,
+            },
+            ScanCase {
+                label: "the leader's own lag and a duplicate assignment change nothing",
+                isr: &[1, 1, 2, 2],
+                replicas: &[1, 1, 2],
+                followers: follower_rows([
                     (1, follower(now, 0, Some(30_000), Some(30_000))),
                     (2, follower(now, 100, Some(10), Some(10))),
-                ],
-                None,
-            ),
+                ]),
+                expected: None,
+            },
         ];
-        for (label, isr, replicas, followers, expected) in cases {
+        for ScanCase {
+            label,
+            isr,
+            replicas,
+            followers,
+            expected,
+        } in cases
+        {
             let record = record(isr, replicas);
             let mut st = installed(&record, now, policy());
-            for (node, stats) in followers {
+            for FollowerRow { node, stats } in followers {
                 st.per_follower.insert(NodeId(node), stats);
             }
             assert2::check!(

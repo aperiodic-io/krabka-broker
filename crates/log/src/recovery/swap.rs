@@ -163,7 +163,7 @@ pub fn recover_swaps(io: &dyn LogIo, dir: &Path) -> Result<(), LogError> {
     tracing::Span::current().record("swaps", listing.swap_bases.len());
     for &base in &listing.swap_bases {
         let facts = LocalRecoverySwapFacts {
-            log_cleaned_exists: listing.cleaned.contains(&(base, "log")),
+            log_cleaned_exists: listing.cleaned.contains(&SwapFile { base, ext: "log" }),
             log_swap_exists: listing.log_swap_bases.contains(&base),
             final_log_exists: listing.log_bases.contains(&base),
         };
@@ -197,7 +197,7 @@ pub fn recover_swaps(io: &dyn LogIo, dir: &Path) -> Result<(), LogError> {
         // An aborted swap's unlinks must be durable before its `.log.cleaned`
         // goes: a `.log.swap` that outlived it would read as committed.
         io.sync_dir(dir)?;
-        for &(base, ext) in &listing.cleaned {
+        for &SwapFile { base, ext } in &listing.cleaned {
             remove_if_present(io, &cleaned_path(dir, base, ext))?;
         }
     }
@@ -245,6 +245,13 @@ fn swap_next_offset(path: &Path, base: i64) -> Result<i64, LogError> {
     Ok(next)
 }
 
+/// A swap-set file, named by its base offset and extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SwapFile {
+    base: i64,
+    ext: &'static str,
+}
+
 /// The swap-relevant names of one directory listing.
 struct Listing {
     /// Every base with at least one `.swap` file, ascending.
@@ -253,8 +260,8 @@ struct Listing {
     log_swap_bases: BTreeSet<i64>,
     /// Every base with a final `.log`.
     log_bases: BTreeSet<i64>,
-    /// Every `.cleaned` file, by base and extension.
-    cleaned: BTreeSet<(i64, &'static str)>,
+    /// Every `.cleaned` file.
+    cleaned: BTreeSet<SwapFile>,
 }
 
 impl Listing {
@@ -271,7 +278,7 @@ impl Listing {
             let Some(value) = file_name.to_str() else {
                 continue;
             };
-            if let Some((base, ext)) = parse_suffixed(value, ".swap") {
+            if let Some(SwapFile { base, ext }) = parse_suffixed(value, ".swap") {
                 listing.swap_bases.insert(base);
                 if ext == "log" {
                     listing.log_swap_bases.insert(base);
@@ -288,11 +295,11 @@ impl Listing {
 
 /// The base and extension `value` names when it is exactly
 /// `<20 digits>.<ext><suffix>` for one of the swap-set extensions.
-fn parse_suffixed(value: &str, suffix: &str) -> Option<(i64, &'static str)> {
+fn parse_suffixed(value: &str, suffix: &str) -> Option<SwapFile> {
     let stem = value.strip_suffix(suffix)?;
     SWAP_EXTENSIONS
         .into_iter()
-        .find_map(|ext| canonical_base(stem, ext).map(|base| (base, ext)))
+        .find_map(|ext| canonical_base(stem, ext).map(|base| SwapFile { base, ext }))
 }
 
 #[cfg(test)]

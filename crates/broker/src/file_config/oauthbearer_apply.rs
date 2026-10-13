@@ -292,11 +292,17 @@ mod tests {
         ));
     }
 
-    fn client_secret(value: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    /// A client secret file, and the directory that holds it.
+    struct ClientSecret {
+        dir: tempfile::TempDir,
+        path: std::path::PathBuf,
+    }
+
+    fn client_secret(value: &str) -> ClientSecret {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("client-secret");
         std::fs::write(&path, value).unwrap();
-        (dir, path)
+        ClientSecret { dir, path }
     }
 
     #[test]
@@ -446,7 +452,10 @@ jwks_endpoint_uri = "https://idp.example/certs"
 
     #[test]
     fn apply_to_oauthbearer_selects_introspection_validator_when_endpoint_set() {
-        let (_dir, secret_path) = client_secret("the-secret");
+        let ClientSecret {
+            dir: _dir,
+            path: secret_path,
+        } = client_secret("the-secret");
         let toml = format!(
             r#"
 [oauthbearer]
@@ -466,7 +475,10 @@ introspection_client_secret_path = '{}'
     #[test]
     #[should_panic(expected = "mutually exclusive")]
     fn apply_to_oauthbearer_rejects_both_jwks_and_introspection_set() {
-        let (_dir, secret_path) = client_secret("x");
+        let ClientSecret {
+            dir: _dir,
+            path: secret_path,
+        } = client_secret("x");
         let toml = format!(
             r#"
 [oauthbearer]
@@ -483,7 +495,10 @@ introspection_client_secret_path = '{}'
     #[test]
     #[should_panic(expected = "introspection_client_id")]
     fn apply_to_oauthbearer_introspection_requires_client_id() {
-        let (_dir, secret_path) = client_secret("x");
+        let ClientSecret {
+            dir: _dir,
+            path: secret_path,
+        } = client_secret("x");
         let toml = format!(
             r#"
 [oauthbearer]
@@ -515,7 +530,10 @@ introspection_client_id = "kafka-broker"
             ),
             ("", false),
         ] {
-            let (_dir, secret_path) = client_secret("x");
+            let ClientSecret {
+                dir: _dir,
+                path: secret_path,
+            } = client_secret("x");
             let toml = format!(
                 r#"
 [oauthbearer]

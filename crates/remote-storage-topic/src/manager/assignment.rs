@@ -224,7 +224,7 @@ impl TopicBasedRemoteLogMetadataManager {
             let keys: Vec<_> = waiters
                 .keys()
                 .copied()
-                .filter(|(partition, _)| *partition == mp)
+                .filter(|key| key.partition == mp)
                 .collect();
             for key in keys {
                 if let Some(reply) = waiters.remove(&key) {

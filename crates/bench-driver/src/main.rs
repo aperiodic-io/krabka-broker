@@ -246,7 +246,7 @@ async fn main() -> Result<()> {
             .tls_server_name
             .context("BENCH_TLS_ENABLED set but BENCH_TLS_SERVER_NAME missing")?;
         let client_identity = match (cli.tls_client_cert, cli.tls_client_key) {
-            (Some(cert), Some(key)) => Some((cert, key)),
+            (Some(cert_pem), Some(key_pem)) => Some(workload::ClientIdentity { cert_pem, key_pem }),
             (None, None) => None,
             _ => anyhow::bail!(
                 "BENCH_TLS_CLIENT_CERT and BENCH_TLS_CLIENT_KEY must be set together (mTLS) or both unset (one-way TLS)"
@@ -345,15 +345,21 @@ mod tests {
         ]
     }
 
+    /// One environment variable to set in the child test process.
+    struct EnvVar<'a> {
+        name: &'a str,
+        value: &'a str,
+    }
+
     // Each environment case executes in a separate process, preserving parallel test isolation.
-    fn run_environment_child(marker: &str, test: &str, env: &[(&str, &str)]) -> bool {
+    fn run_environment_child(marker: &str, test: &str, env: &[EnvVar<'_>]) -> bool {
         if std::env::var_os(marker).is_some() {
             return false;
         }
         let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args(["--exact", test])
             .env(marker, "1")
-            .envs(env.iter().copied())
+            .envs(env.iter().map(|var| (var.name, var.value)))
             .status()
             .expect("child test");
         assert!(status.success());
@@ -417,8 +423,14 @@ mod tests {
             "BENCH_CLIENT_RESOURCE_POLICY_CHILD",
             "tests::client_resource_policy_reads_environment_and_prefers_cli",
             &[
-                ("BENCH_CLIENT_DISPATCH_QUEUE_CAPACITY", "7"),
-                ("BENCH_CLIENT_FRAME_MAX", "32KiB"),
+                EnvVar {
+                    name: "BENCH_CLIENT_DISPATCH_QUEUE_CAPACITY",
+                    value: "7",
+                },
+                EnvVar {
+                    name: "BENCH_CLIENT_FRAME_MAX",
+                    value: "32KiB",
+                },
             ],
         ) {
             return;
@@ -486,9 +498,18 @@ mod tests {
             "KRABKA_BENCH_CONSUMER_BUILD_RETRY_CHILD",
             "tests::consumer_build_retry_reads_environment_and_prefers_cli",
             &[
-                ("BENCH_CONSUMER_BUILD_ATTEMPTS", "2"),
-                ("BENCH_CONSUMER_BUILD_INITIAL_BACKOFF", "11ms"),
-                ("BENCH_CONSUMER_BUILD_MAX_BACKOFF", "12ms"),
+                EnvVar {
+                    name: "BENCH_CONSUMER_BUILD_ATTEMPTS",
+                    value: "2",
+                },
+                EnvVar {
+                    name: "BENCH_CONSUMER_BUILD_INITIAL_BACKOFF",
+                    value: "11ms",
+                },
+                EnvVar {
+                    name: "BENCH_CONSUMER_BUILD_MAX_BACKOFF",
+                    value: "12ms",
+                },
             ],
         ) {
             return;
@@ -538,8 +559,14 @@ mod tests {
             "KRABKA_BENCH_CONSUMER_POLL_TIMING_CHILD",
             "tests::consumer_poll_timing_reads_environment_and_prefers_cli",
             &[
-                ("BENCH_CONSUMER_POLL_TIMEOUT", "11ms"),
-                ("BENCH_CONSUMER_POLL_ERROR_BACKOFF", "12ms"),
+                EnvVar {
+                    name: "BENCH_CONSUMER_POLL_TIMEOUT",
+                    value: "11ms",
+                },
+                EnvVar {
+                    name: "BENCH_CONSUMER_POLL_ERROR_BACKOFF",
+                    value: "12ms",
+                },
             ],
         ) {
             return;
@@ -582,7 +609,10 @@ mod tests {
         if run_environment_child(
             "KRABKA_BENCH_PRODUCER_FINAL_DRAIN_TIMEOUT_CHILD",
             "tests::producer_final_drain_timeout_reads_environment_and_prefers_cli",
-            &[("BENCH_PRODUCER_FINAL_DRAIN_TIMEOUT", "11s")],
+            &[EnvVar {
+                name: "BENCH_PRODUCER_FINAL_DRAIN_TIMEOUT",
+                value: "11s",
+            }],
         ) {
             return;
         }
@@ -617,7 +647,10 @@ mod tests {
         if run_environment_child(
             "KRABKA_BENCH_SAMPLE_INTERVAL_CHILD",
             "tests::sample_interval_reads_environment_and_prefers_cli",
-            &[("BENCH_SAMPLE_INTERVAL", "11ms")],
+            &[EnvVar {
+                name: "BENCH_SAMPLE_INTERVAL",
+                value: "11ms",
+            }],
         ) {
             return;
         }
@@ -637,8 +670,14 @@ mod tests {
             "KRABKA_BENCH_CLIENT_TIMEOUTS_CHILD",
             "tests::client_request_timeouts_read_environment_and_prefer_cli",
             &[
-                ("BENCH_PRODUCER_REQUEST_TIMEOUT", "11s"),
-                ("BENCH_CONSUMER_REQUEST_TIMEOUT", "12s"),
+                EnvVar {
+                    name: "BENCH_PRODUCER_REQUEST_TIMEOUT",
+                    value: "11s",
+                },
+                EnvVar {
+                    name: "BENCH_CONSUMER_REQUEST_TIMEOUT",
+                    value: "12s",
+                },
             ],
         ) {
             return;
@@ -671,7 +710,10 @@ mod tests {
         if run_environment_child(
             "KRABKA_BENCH_PROMETHEUS_TIMEOUT_CHILD",
             "tests::prometheus_request_timeout_environment_and_cli_precedence",
-            &[("BENCH_PROMETHEUS_REQUEST_TIMEOUT", "32s")],
+            &[EnvVar {
+                name: "BENCH_PROMETHEUS_REQUEST_TIMEOUT",
+                value: "32s",
+            }],
         ) {
             return;
         }

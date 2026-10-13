@@ -276,7 +276,14 @@ async fn a_reload_keeps_last_producer_epoch_only_in_trunk_mode() {
 struct PartitionView {
     status: Option<LoadStatus>,
     coordinator_error: Option<i16>,
-    entries: Vec<(String, Option<TxnEntry>)>,
+    entries: Vec<ServedEntry>,
+}
+
+/// What the coordinator serves for one transactional id.
+#[derive(Debug, PartialEq, Eq)]
+struct ServedEntry {
+    transactional_id: String,
+    entry: Option<TxnEntry>,
 }
 
 /// Loads `__transaction_state-0` of a two-partition topic from `batches` and
@@ -314,7 +321,10 @@ async fn load_view(
             Some(handle) => Some(handle.lock().await.clone()),
             None => None,
         };
-        entries.push(((*tid).to_owned(), entry));
+        entries.push(ServedEntry {
+            transactional_id: (*tid).to_owned(),
+            entry,
+        });
     }
     PartitionView {
         status: coordinator.load_status(P0).await,
@@ -358,7 +368,7 @@ async fn a_bad_record_loads_the_transactions_before_it_and_serves_them() {
     let before_only = load_view(vec![good(&first, 1)], &tids).await;
     let both = load_view(vec![good(&first, 1), good(&second, 2)], &tids).await;
     check!(before_only.status == Some(LoadStatus::Loaded));
-    check!(before_only.entries[0].1.is_some() && both.entries[1].1.is_some());
+    check!(before_only.entries[0].entry.is_some() && both.entries[1].entry.is_some());
 
     let mut corrupt = value(&misplaced, 3).unwrap();
     corrupt.truncate(9);

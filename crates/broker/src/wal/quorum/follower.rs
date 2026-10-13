@@ -218,11 +218,13 @@ mod tests {
         }
     }
 
-    fn leader_registry(
-        shard: ShardId,
-        leader: &Arc<Mutex<Log>>,
-        epoch: i32,
-    ) -> (WalShardRegistry, Arc<WalShardEngine>) {
+    /// A registry and the leader engine that it holds.
+    struct LeaderRegistry {
+        registry: WalShardRegistry,
+        engine: Arc<WalShardEngine>,
+    }
+
+    fn leader_registry(shard: ShardId, leader: &Arc<Mutex<Log>>, epoch: i32) -> LeaderRegistry {
         let registry = WalShardRegistry::new(NodeId(1));
         let engine = Arc::new(WalShardEngine::new_distributed(Arc::clone(leader), 3).unwrap());
         registry.insert(shard, Arc::clone(&engine));
@@ -230,7 +232,7 @@ mod tests {
             voters: vec![NodeId(1), NodeId(2), NodeId(3)],
             leader_epoch: epoch,
         }});
-        (registry, engine)
+        LeaderRegistry { registry, engine }
     }
 
     fn fetch_follower(
@@ -400,7 +402,7 @@ mod tests {
             topic_id: uuid::Uuid::from_u128(100),
             partition: PartitionIndex(0),
         };
-        let (registry, engine) = leader_registry(shard, &leader, 1);
+        let LeaderRegistry { registry, engine } = leader_registry(shard, &leader, 1);
 
         let partition = fetch_follower(&registry, shard, &follower);
         assert2::assert!((partition.diverging_epoch.end_offset) == (1));
@@ -470,7 +472,7 @@ mod tests {
             topic_id: uuid::Uuid::from_u128(101),
             partition: PartitionIndex(0),
         };
-        let (registry, _engine) = leader_registry(shard, &leader, 2);
+        let LeaderRegistry { registry, .. } = leader_registry(shard, &leader, 2);
         let fetch = |follower: &FollowerLog| {
             let response = registry
                 .route_fetch_request(

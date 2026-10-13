@@ -59,13 +59,16 @@ fn coordinator_is_loading(code: i16) -> bool { coordinator_loading(code) }
 async fn init_producer_id(
     client: &Client,
     transactional_id: &str,
-    identity: (i64, i16),
+    identity: Identity,
 ) -> InitProducerIdResponse {
     client
         .send(
             init_producer_request()
                 .maybe_transactional_id(Some(transactional_id.into()))
-                .producer(ProducerIdentity::from_wire((identity.0, identity.1)))
+                .producer(ProducerIdentity::from_wire((
+                    identity.producer_id,
+                    identity.epoch,
+                )))
                 .call(),
         )
         .await
@@ -75,7 +78,12 @@ async fn init_producer_id(
 async fn init_producer(client: &Client, transactional_id: &str) -> Identity {
     find_coordinator(client, transactional_id).await;
     let response = initialize_producer(
-        || init_producer_id(client, transactional_id, (-1, -1)),
+        || {
+            init_producer_id(client, transactional_id, Identity {
+                producer_id: -1,
+                epoch: -1,
+            })
+        },
         coordinator_is_loading,
         SETTLE,
     )
@@ -95,22 +103,30 @@ async fn add_partition(client: &Client, transactional_id: &str, producer: Identi
     .await;
 }
 
+/// A transaction a produce request belongs to: the transactional id the
+/// request carries, and the producer that opened it.
+#[derive(Clone, Copy)]
+struct Transaction<'a> {
+    transactional_id: &'a str,
+    producer: Identity,
+}
+
 /// Produce `values` in one batch. `transaction` is `None` for a plain batch,
 /// and otherwise names the transactional id the request carries, as a Kafka
 /// producer's request does.
 async fn produce(
     client: &Client,
     topic: &str,
-    transaction: Option<(&str, Identity)>,
+    transaction: Option<Transaction<'_>>,
     values: &[&'static str],
 ) {
-    let producer = transaction.map(|(_, producer)| producer);
+    let producer = transaction.map(|transaction| transaction.producer);
     let batch = records_batch(
         producer.map(|producer| (producer.producer_id, producer.epoch)),
         values,
     );
     let request = ProduceRequest {
-        transactional_id: transaction.map(|(transactional_id, _)| transactional_id.to_owned()),
+        transactional_id: transaction.map(|transaction| transaction.transactional_id.to_owned()),
         ..batch_request(batch, SinglePartitionProduceSetup {
             topic: (topic).into(),
             topic_id: topic_id(client, topic).await,
@@ -198,11 +214,23 @@ async fn open_transaction(
     }
     let producer = init_producer(client, transactional_id).await;
     add_partition(client, transactional_id, producer, topic).await;
-    produce(client, topic, Some((transactional_id, producer)), &[
-        "a", "b", "c",
-    ])
+    produce(
+        client,
+        topic,
+        Some(Transaction {
+            transactional_id,
+            producer,
+        }),
+        &["a", "b", "c"],
+    )
     .await;
     producer
+}
+
+/// A started broker holding a transaction, and the producer that opened it.
+struct FanoutTransaction {
+    started: Started,
+    producer: Identity,
 }
 
 async fn fanout_transaction(
@@ -211,11 +239,11 @@ async fn fanout_transaction(
     topic: &str,
     downgrade_to: Option<i16>,
     mode: MarkerFanoutMode,
-) -> (Started, Identity) {
+) -> FanoutTransaction {
     let started = start(log_dir, None).await;
     let producer = open_transaction(&started.client, transactional_id, topic, downgrade_to).await;
     started.broker.set_transaction_marker_fanout_for_test(mode);
-    (started, producer)
+    FanoutTransaction { started, producer }
 }
 
 /// The `EndTxn` v5 answer for a completed transaction. A v5 request is a `TV_2`
@@ -241,11 +269,22 @@ struct CutCase {
     visible: &'static [&'static str],
 }
 
+/// What a cut `EndTxn` leaves behind: the producer, the answer to its retry,
+/// and the records a `read_committed` consumer reads.
+struct CutOutcome {
+    producer: Identity,
+    retried: EndTxnResponse,
+    seen: Vec<String>,
+}
+
 /// Stop the broker while `EndTxn` waits between its `Prepare*` append and its
 /// markers, start it again, and retry `EndTxn`.
-async fn end_txn_cut_by_shutdown(case: &CutCase) -> (Identity, EndTxnResponse, Vec<String>) {
+async fn end_txn_cut_by_shutdown(case: &CutCase) -> CutOutcome {
     let directory = TempDir::new().expect("tempdir");
-    let (first, producer) = fanout_transaction(
+    let FanoutTransaction {
+        started: first,
+        producer,
+    } = fanout_transaction(
         directory.path(),
         case.name,
         case.topic,
@@ -273,7 +312,11 @@ async fn end_txn_cut_by_shutdown(case: &CutCase) -> (Identity, EndTxnResponse, V
     produce(&second.client, case.topic, None, &["z"]).await;
     let seen = read_committed_through(&second.bootstrap, case.topic, "z").await;
     second.broker.shutdown().await;
-    (producer, retried, seen)
+    CutOutcome {
+        producer,
+        retried,
+        seen,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -305,7 +348,11 @@ async fn end_txn_cut_between_prepare_and_complete_completes_after_restart() {
         },
     ];
     for case in &cases {
-        let (producer, retried, seen) = end_txn_cut_by_shutdown(case).await;
+        let CutOutcome {
+            producer,
+            retried,
+            seen,
+        } = end_txn_cut_by_shutdown(case).await;
         assert!(
             retried == completed(producer, case.epoch_bump),
             "{}: retried EndTxn",
@@ -327,7 +374,7 @@ async fn init_producer_id_during_prepare_commit_is_concurrent_transactions() {
     let transactional_id = "init-during-prepare";
     let topic = "init-during-prepare";
     let directory = TempDir::new().expect("tempdir");
-    let (started, producer) = fanout_transaction(
+    let FanoutTransaction { started, producer } = fanout_transaction(
         directory.path(),
         transactional_id,
         topic,
@@ -346,15 +393,25 @@ async fn init_producer_id_during_prepare_commit_is_concurrent_transactions() {
     // Kafka `prepareInitProducerIdTransit`: a producer ID that is not the
     // entry's is fenced, and any other request waits for the transition.
     let cases = [
-        ("no identity", (-1, -1), CONCURRENT_TRANSACTIONS),
+        (
+            "no identity",
+            Identity {
+                producer_id: -1,
+                epoch: -1,
+            },
+            CONCURRENT_TRANSACTIONS,
+        ),
         (
             "the transaction's identity",
-            (producer.producer_id, producer.epoch),
+            producer,
             CONCURRENT_TRANSACTIONS,
         ),
         (
             "another producer ID",
-            (producer.producer_id + 1_000, 0),
+            Identity {
+                producer_id: producer.producer_id + 1_000,
+                epoch: 0,
+            },
             PRODUCER_FENCED,
         ),
     ];
@@ -382,7 +439,7 @@ async fn end_txn_with_a_failed_marker_fanout_answers_none_and_completes_later() 
     let transactional_id = "failed-fanout";
     let topic = "failed-fanout";
     let directory = TempDir::new().expect("tempdir");
-    let (started, producer) = fanout_transaction(
+    let FanoutTransaction { started, producer } = fanout_transaction(
         directory.path(),
         transactional_id,
         topic,

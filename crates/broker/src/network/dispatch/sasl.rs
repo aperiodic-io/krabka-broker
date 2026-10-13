@@ -133,12 +133,25 @@ pub(super) async fn delay_failed_authentication(broker: &Broker) {
     }
 }
 
+/// Where a refused authentication is counted and audited.
+pub(super) struct AuthenticationSinks<'a> {
+    pub(super) metrics: &'a BrokerMetrics,
+    pub(super) audit_log: &'a krabka_audit::AuditLog,
+}
+
+/// Where the SASL frames of one connection are handled: the listener's
+/// settings and the connection's session.
+pub(super) struct SaslConnection<'a, 'b> {
+    pub(super) listener: &'a SaslListener<'a>,
+    pub(super) session: &'b mut SaslSession,
+}
+
 /// Counts and audits one authentication that failed before any credential was
 /// judged: a request the per-state gate refused, or a frame over
 /// `sasl.server.max.receive.size`. The row names the mechanism a handshake
 /// chose, or the `Unknown` sentinel when none did.
 pub(super) fn record_refused_authentication(
-    (metrics, audit_log): (&BrokerMetrics, &krabka_audit::AuditLog),
+    AuthenticationSinks { metrics, audit_log }: AuthenticationSinks<'_>,
     auth: &ConnectionAuth,
     peer: &SocketAddr,
     reason: &str,
@@ -191,7 +204,10 @@ pub(super) async fn refuse_gated_request(
         "request blocked by per-state auth gate (ILLEGAL_SASL_STATE), closing connection"
     );
     record_refused_authentication(
-        (&broker.metrics, &broker.audit_log),
+        AuthenticationSinks {
+            metrics: &broker.metrics,
+            audit_log: &broker.audit_log,
+        },
         auth,
         peer,
         "request blocked by per-state auth gate",
@@ -251,7 +267,7 @@ pub(super) async fn handle_raw_sasl_token(
     broker: &Broker,
     token: &Bytes,
     auth: &mut ConnectionAuth,
-    (listener, session): (&SaslListener<'_>, &mut SaslSession),
+    SaslConnection { listener, session }: SaslConnection<'_, '_>,
     peer: &SocketAddr,
 ) -> Option<Bytes> {
     let req = SaslAuthenticateRequest {
@@ -305,7 +321,7 @@ pub(super) async fn try_handle_sasl_frame(
 
             let (resp_body, close_after) = match parsed.api_key {
                 SASL_HANDSHAKE_KEY => {
-                    let (body, close_after) =
+                    let HandshakeResponse { body, close_after } =
                         handle_sasl_handshake(parsed, auth, listener.mechanisms, session)?;
                     // Kafka's `handleHandshakeRequest` turns
                     // `enableKafkaSaslAuthenticateHeaders` on only for v1+.
@@ -577,12 +593,19 @@ fn claimed_principal(
     }
 }
 
+/// The encoded `SaslHandshake` response and whether the connection closes after
+/// it.
+struct HandshakeResponse {
+    body: Bytes,
+    close_after: bool,
+}
+
 fn handle_sasl_handshake(
     parsed: &ParsedRequest<'_>,
     auth: &mut ConnectionAuth,
     sasl_mechanisms: &[SaslMechanism],
     session: &mut SaslSession,
-) -> Result<(Bytes, bool), BrokerError> {
+) -> Result<HandshakeResponse, BrokerError> {
     use krabka_protocol::{Decode, Encode};
 
     let mut body = parsed.body;
@@ -594,7 +617,10 @@ fn handle_sasl_handshake(
     let response = outcome.response;
     let mut encoded = BytesMut::with_capacity(response.encoded_len(parsed.api_version));
     response.encode(&mut encoded, parsed.api_version)?;
-    Ok((encoded.freeze(), outcome.close_after))
+    Ok(HandshakeResponse {
+        body: encoded.freeze(),
+        close_after: outcome.close_after,
+    })
 }
 
 #[cfg(test)]
@@ -723,8 +749,14 @@ mod tests {
             &event,
             krabka_audit::AuditOutcome::Failure,
             "PLAIN",
-            ("User:alice", "SaslPlain"),
-            ("192.0.2.9", 9092),
+            krabka_audit::AuditPrincipal {
+                name: "User:alice".into(),
+                auth_method: "SaslPlain".into(),
+            },
+            krabka_audit::AuditEndpoint {
+                ip: "192.0.2.9".into(),
+                port: 9092,
+            },
             Some("authentication failed".to_string()),
         );
         assert!(rx.try_recv().is_err(), "exactly one row per refusal");

@@ -11,14 +11,16 @@
 use {
     crate::{
         authorizer::AuthorizationResult,
-        broker::BrokerHandle,
+        broker::Broker,
         codes,
+        handlers::{RequestContext, test_support::StartedBroker},
         test_support::{
             decode_response, encode_request, peer, principal,
             start_broker_with_authorizer_no_audit, try_dispatch_context,
         },
     },
     assert2::assert,
+    bytes::Bytes,
     krabka_metadata::{AclOperation, ResourceType},
     krabka_protocol::owned::{
         share_acknowledge_request::ShareAcknowledgeRequest,
@@ -50,8 +52,9 @@ test_authorizer!(ReadOneGroup, (self, _source, request), {
     }
 });
 
-async fn start() -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_with_authorizer_no_audit(Arc::new(ReadOneGroup)).await
+async fn start() -> StartedBroker {
+    let (broker, dir) = start_broker_with_authorizer_no_audit(Arc::new(ReadOneGroup)).await;
+    StartedBroker { broker, dir }
 }
 
 macro_rules! share_request_identity {
@@ -151,9 +154,27 @@ fn acknowledge_response(error_code: i16) -> ShareAcknowledgeResponse {
     }
 }
 
+/// Dispatches one `ShareFetch` request and returns the encoded response.
+async fn dispatch_share_fetch(
+    broker: &Broker,
+    fetch: &ShareFetchRequest,
+    version: i16,
+    ctx: &RequestContext<'_>,
+) -> Bytes {
+    try_dispatch_context(
+        broker,
+        krabka_protocol::owned::share_fetch_request::API_KEY,
+        version,
+        &encode_request(fetch, version),
+        ctx,
+    )
+    .await
+    .expect("handle share fetch")
+}
+
 #[tokio::test]
 async fn group_and_member_ids_are_checked_in_kafka_order() {
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
     let shared = broker.broker_arc_for_test();
     share_request_identity!((user, address, ctx));
     let fetch_version = share_fetch_response::MAX_VERSION;
@@ -168,15 +189,7 @@ async fn group_and_member_ids_are_checked_in_kafka_order() {
             share_session_epoch: 0,
             ..Default::default()
         };
-        let fetched = try_dispatch_context(
-            &shared,
-            krabka_protocol::owned::share_fetch_request::API_KEY,
-            fetch_version,
-            &encode_request(&fetch, fetch_version),
-            &ctx,
-        )
-        .await
-        .expect("handle share fetch");
+        let fetched = dispatch_share_fetch(&shared, &fetch, fetch_version, &ctx).await;
         let acknowledge = ShareAcknowledgeRequest {
             group_id: case.group.map(str::to_owned),
             member_id: case.member.clone(),
@@ -212,7 +225,7 @@ async fn group_and_member_ids_are_checked_in_kafka_order() {
 /// member still serves it.
 #[tokio::test]
 async fn a_member_the_group_does_not_know_still_fetches() {
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
     let shared = broker.broker_arc_for_test();
     share_request_identity!((user, address, ctx));
     let version = share_fetch_response::MAX_VERSION;
@@ -224,15 +237,7 @@ async fn a_member_the_group_does_not_know_still_fetches() {
         share_session_epoch: 0,
         ..Default::default()
     };
-    let response = try_dispatch_context(
-        &shared,
-        krabka_protocol::owned::share_fetch_request::API_KEY,
-        version,
-        &encode_request(&fetch, version),
-        &ctx,
-    )
-    .await
-    .expect("handle share fetch");
+    let response = dispatch_share_fetch(&shared, &fetch, version, &ctx).await;
 
     assert!(
         decode_response::<ShareFetchResponse>(&response, version) == fetch_response(codes::NONE)

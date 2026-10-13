@@ -20,10 +20,16 @@ use {
     std::path::PathBuf,
 };
 
-fn configs(pairs: &[(&str, &str)]) -> Vec<CreatableTopicConfig> {
+/// A topic config entry, by name and value.
+struct ConfigPair<'a> {
+    name: &'a str,
+    value: &'a str,
+}
+
+fn configs(pairs: &[ConfigPair<'_>]) -> Vec<CreatableTopicConfig> {
     pairs
         .iter()
-        .map(|(name, value)| CreatableTopicConfig {
+        .map(|ConfigPair { name, value }| CreatableTopicConfig {
             name: (*name).to_owned(),
             value: Some((*value).to_owned()),
             ..Default::default()
@@ -120,9 +126,18 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
                 .num_partitions(11)
                 .replication_factor(3)
                 .configs(configs(&[
-                    ("cleanup.policy", "compact"),
-                    ("compression.type", "producer"),
-                    ("segment.bytes", "104857600"),
+                    ConfigPair {
+                        name: "cleanup.policy",
+                        value: "compact",
+                    },
+                    ConfigPair {
+                        name: "compression.type",
+                        value: "producer",
+                    },
+                    ConfigPair {
+                        name: "segment.bytes",
+                        value: "104857600",
+                    },
                 ]))
                 .call(),
         ),
@@ -135,11 +150,26 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
                 .num_partitions(12)
                 .replication_factor(2)
                 .configs(configs(&[
-                    ("cleanup.policy", "compact"),
-                    ("compression.type", "uncompressed"),
-                    ("min.insync.replicas", "2"),
-                    ("segment.bytes", "104857600"),
-                    ("unclean.leader.election.enable", "false"),
+                    ConfigPair {
+                        name: "cleanup.policy",
+                        value: "compact",
+                    },
+                    ConfigPair {
+                        name: "compression.type",
+                        value: "uncompressed",
+                    },
+                    ConfigPair {
+                        name: "min.insync.replicas",
+                        value: "2",
+                    },
+                    ConfigPair {
+                        name: "segment.bytes",
+                        value: "104857600",
+                    },
+                    ConfigPair {
+                        name: "unclean.leader.election.enable",
+                        value: "false",
+                    },
                 ]))
                 .call(),
         ),
@@ -152,11 +182,26 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
                 .num_partitions(13)
                 .replication_factor(4)
                 .configs(configs(&[
-                    ("cleanup.policy", "delete"),
-                    ("compression.type", "producer"),
-                    ("min.insync.replicas", "3"),
-                    ("retention.ms", "-1"),
-                    ("segment.bytes", "104857600"),
+                    ConfigPair {
+                        name: "cleanup.policy",
+                        value: "delete",
+                    },
+                    ConfigPair {
+                        name: "compression.type",
+                        value: "producer",
+                    },
+                    ConfigPair {
+                        name: "min.insync.replicas",
+                        value: "3",
+                    },
+                    ConfigPair {
+                        name: "retention.ms",
+                        value: "-1",
+                    },
+                    ConfigPair {
+                        name: "segment.bytes",
+                        value: "104857600",
+                    },
                 ]))
                 .call(),
         ),
@@ -168,7 +213,10 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
                 .name(STATE_TOPIC)
                 .num_partitions(14)
                 .replication_factor(5)
-                .configs(configs(&[("cleanup.policy", "compact")]))
+                .configs(configs(&[ConfigPair {
+                    name: "cleanup.policy",
+                    value: "compact",
+                }]))
                 .call(),
         ),
         ("no default supplied", &config, "orders", topic().call()),
@@ -215,8 +263,14 @@ fn the_dead_letter_topic_is_created_as_kafka_creates_it() {
             == topic()
                 .name("dlq.orders")
                 .configs(configs(&[
-                    ("errors.deadletterqueue.group.enable", "true"),
-                    ("message.timestamp.type", "CreateTime"),
+                    ConfigPair {
+                        name: "errors.deadletterqueue.group.enable",
+                        value: "true"
+                    },
+                    ConfigPair {
+                        name: "message.timestamp.type",
+                        value: "CreateTime"
+                    },
                 ]))
                 .call()
     );

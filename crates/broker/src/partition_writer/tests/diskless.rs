@@ -31,11 +31,22 @@ fn seeded_log(path: &std::path::Path) -> Arc<Mutex<Log>> {
     log
 }
 
-fn trim_wal(failures: usize) -> (Arc<GatedWal>, oneshot::Receiver<()>, oneshot::Sender<()>) {
+/// A gated WAL and the channel ends that keep its gate open while a test runs.
+struct TrimWal {
+    wal: Arc<GatedWal>,
+    _sync_started_rx: oneshot::Receiver<()>,
+    _release_sync_tx: oneshot::Sender<()>,
+}
+
+fn trim_wal(failures: usize) -> TrimWal {
     let (started_tx, started_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let wal = Arc::new(GatedWal::new(started_tx, release_rx).fail_trim_times(failures));
-    (wal, started_rx, release_tx)
+    TrimWal {
+        wal,
+        _sync_started_rx: started_rx,
+        _release_sync_tx: release_tx,
+    }
 }
 
 fn check_trim_frontiers(wal: &GatedWal, log: &Mutex<Log>) {
@@ -54,23 +65,34 @@ fn check_trim_frontiers(wal: &GatedWal, log: &Mutex<Log>) {
 async fn a_reservation_refused_during_a_controller_election_answers_not_leader() {
     /// Builds the refusal of the controller for one case.
     type Refusal = fn() -> RaftError;
-    // (what, the refusal of the controller)
-    let cases: [(&str, Refusal); 4] = [
-        ("no controller leader is known", || RaftError::NotLeader {
-            current_leader: None,
-        }),
-        ("the controller leader moved", || RaftError::NotLeader {
-            current_leader: Some(krabka_raft::NodeId(2)),
-        }),
-        ("a controller election is in progress", || {
-            RaftError::LeaderUnknown
-        }),
-        (
-            "the new controller leader has not committed its epoch",
-            || RaftError::UncommittedTail,
-        ),
+    /// One case: what the controller reports, and the refusal it gives.
+    struct RefusalCase {
+        what: &'static str,
+        refusal: Refusal,
+    }
+    let cases = [
+        RefusalCase {
+            what: "no controller leader is known",
+            refusal: || RaftError::NotLeader {
+                current_leader: None,
+            },
+        },
+        RefusalCase {
+            what: "the controller leader moved",
+            refusal: || RaftError::NotLeader {
+                current_leader: Some(krabka_raft::NodeId(2)),
+            },
+        },
+        RefusalCase {
+            what: "a controller election is in progress",
+            refusal: || RaftError::LeaderUnknown,
+        },
+        RefusalCase {
+            what: "the new controller leader has not committed its epoch",
+            refusal: || RaftError::UncommittedTail,
+        },
     ];
-    for (what, refusal) in cases {
+    for RefusalCase { what, refusal } in cases {
         let dir = tempdir().expect("tempdir");
         let log = open_default_log(dir.path());
         let controller = Arc::new(
@@ -188,7 +210,11 @@ async fn diskless_writer_keeps_wal_and_local_trim_frontiers_equal() {
     let dir = tempdir().expect("tempdir");
     let log = seeded_log(dir.path());
 
-    let (gated_wal, _sync_started_rx, _release_sync_tx) = trim_wal(0);
+    let TrimWal {
+        wal: gated_wal,
+        _sync_started_rx,
+        _release_sync_tx,
+    } = trim_wal(0);
     let wal: SharedWal = gated_wal.clone();
     let (tx, rx) = mpsc::channel(1);
     let writer = spawn_writer(dir.path(), log.clone(), rx, WriterOptions {
@@ -216,7 +242,11 @@ async fn diskless_trim_retry_finishes_after_wal_failure() {
     let dir = tempdir().expect("tempdir");
     let log = seeded_log(dir.path());
 
-    let (gated_wal, _sync_started_rx, _release_sync_tx) = trim_wal(1);
+    let TrimWal {
+        wal: gated_wal,
+        _sync_started_rx,
+        _release_sync_tx,
+    } = trim_wal(1);
     let wal: SharedWal = gated_wal.clone();
     let (tx, rx) = mpsc::channel(2);
     let writer = spawn_writer(dir.path(), log.clone(), rx, WriterOptions {

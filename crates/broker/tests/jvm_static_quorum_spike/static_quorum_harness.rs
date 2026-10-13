@@ -90,6 +90,12 @@ pub(crate) struct MixedQuorum {
     controllers: Vec<SocketAddr>,
 }
 
+/// The two started Krabka voters and the directories that back them.
+pub(crate) struct StartedPair {
+    brokers: [krabka_broker::BrokerHandle; 2],
+    dirs: [tempfile::TempDir; 2],
+}
+
 impl MixedQuorum {
     pub(crate) async fn start(
         cluster_id: Uuid,
@@ -100,7 +106,8 @@ impl MixedQuorum {
         [tempfile::TempDir; 2],
     ) {
         let endpoints = Self::allocate().await;
-        let (brokers, dirs) = endpoints.start_pair(cluster_id, election_timeout).await;
+        let StartedPair { brokers, dirs } =
+            endpoints.start_pair(cluster_id, election_timeout).await;
         (endpoints.ports, brokers, dirs)
     }
 
@@ -117,7 +124,7 @@ impl MixedQuorum {
         &self,
         cluster_id: Uuid,
         election_timeout: Option<krabka_units::Time>,
-    ) -> ([krabka_broker::BrokerHandle; 2], [tempfile::TempDir; 2]) {
+    ) -> StartedPair {
         let dirs: [tempfile::TempDir; 2] = std::array::from_fn(|_| tempfile::tempdir().unwrap());
         let voters: Vec<_> = self
             .controllers
@@ -154,7 +161,7 @@ impl MixedQuorum {
             first.await.unwrap().expect("krabka voter 1 start"),
             second.await.unwrap().expect("krabka voter 2 start"),
         ];
-        (brokers, dirs)
+        StartedPair { brokers, dirs }
     }
 }
 

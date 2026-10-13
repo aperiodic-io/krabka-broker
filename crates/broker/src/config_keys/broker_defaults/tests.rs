@@ -8,9 +8,21 @@ use {
 
 const NODE: NodeId = NodeId(1);
 
-fn image(records: &[(NodeId, &str, &str)]) -> MetadataImage {
+/// A broker config as stored: the node it is set for, its name and its value.
+struct StoredConfig<'a> {
+    node_id: NodeId,
+    name: &'a str,
+    value: &'a str,
+}
+
+fn image(records: &[StoredConfig<'_>]) -> MetadataImage {
     let mut image = MetadataImage::new(Uuid::nil());
-    for (node_id, name, value) in records {
+    for StoredConfig {
+        node_id,
+        name,
+        value,
+    } in records
+    {
         image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
             node_id: *node_id,
             config_name: (*name).to_owned(),
@@ -20,7 +32,7 @@ fn image(records: &[(NodeId, &str, &str)]) -> MetadataImage {
     image
 }
 
-fn defaults(records: &[(NodeId, &str, &str)]) -> BrokerLogDefaults {
+fn defaults(records: &[StoredConfig<'_>]) -> BrokerLogDefaults {
     BrokerLogDefaults::resolve(&image(records), NODE, &LogConfig::default(), (None, None))
 }
 
@@ -56,25 +68,45 @@ fn a_node_override_beats_the_cluster_default_beats_the_static_base() {
         ("static only", vec![], 1_048_588),
         (
             "cluster default",
-            vec![(cluster, "message.max.bytes", "2097152")],
+            vec![StoredConfig {
+                node_id: cluster,
+                name: "message.max.bytes",
+                value: "2097152",
+            }],
             2_097_152,
         ),
         (
             "node override alone",
-            vec![(NODE, "message.max.bytes", "4194304")],
+            vec![StoredConfig {
+                node_id: NODE,
+                name: "message.max.bytes",
+                value: "4194304",
+            }],
             4_194_304,
         ),
         (
             "node override over cluster default",
             vec![
-                (cluster, "message.max.bytes", "2097152"),
-                (NODE, "message.max.bytes", "4194304"),
+                StoredConfig {
+                    node_id: cluster,
+                    name: "message.max.bytes",
+                    value: "2097152",
+                },
+                StoredConfig {
+                    node_id: NODE,
+                    name: "message.max.bytes",
+                    value: "4194304",
+                },
             ],
             4_194_304,
         ),
         (
             "another node's override is not this node's",
-            vec![(NodeId(2), "message.max.bytes", "4194304")],
+            vec![StoredConfig {
+                node_id: NodeId(2),
+                name: "message.max.bytes",
+                value: "4194304",
+            }],
             1_048_588,
         ),
     ];
@@ -92,25 +124,41 @@ fn a_node_override_beats_the_cluster_default_beats_the_static_base() {
 fn each_produce_checked_default_follows_its_broker_key() {
     let cluster = DEFAULT_BROKER_CONFIG_NODE_ID;
     let resolved = defaults(&[
-        (cluster, "log.message.timestamp.type", "LogAppendTime"),
-        (cluster, "log.message.timestamp.before.max.ms", "1000"),
-        (
-            cluster,
-            "log.message.timestamp.after.max.ms",
-            "9223372036854775807",
-        ),
-        (cluster, "log.cleanup.policy", "compact"),
-        (cluster, "compression.type", "zstd"),
+        StoredConfig {
+            node_id: cluster,
+            name: "log.message.timestamp.type",
+            value: "LogAppendTime",
+        },
+        StoredConfig {
+            node_id: cluster,
+            name: "log.message.timestamp.before.max.ms",
+            value: "1000",
+        },
+        StoredConfig {
+            node_id: cluster,
+            name: "log.message.timestamp.after.max.ms",
+            value: "9223372036854775807",
+        },
+        StoredConfig {
+            node_id: cluster,
+            name: "log.cleanup.policy",
+            value: "compact",
+        },
+        StoredConfig {
+            node_id: cluster,
+            name: "compression.type",
+            value: "zstd",
+        },
     ]);
     check!(resolved.message_timestamp_type == TimestampType::LogAppendTime);
     check!(resolved.message_timestamp_before_max_ms == Some(1_000));
     // `Long.MAX_VALUE` spells no bound, over the static one-hour window too.
     let with_static = BrokerLogDefaults::resolve(
-        &image(&[(
-            cluster,
-            "log.message.timestamp.after.max.ms",
-            "9223372036854775807",
-        )]),
+        &image(&[StoredConfig {
+            node_id: cluster,
+            name: "log.message.timestamp.after.max.ms",
+            value: "9223372036854775807",
+        }]),
         NODE,
         &LogConfig::default(),
         (None, Some(3_600_000)),
@@ -126,8 +174,16 @@ fn the_partition_base_carries_the_dynamic_defaults() {
     let cluster = DEFAULT_BROKER_CONFIG_NODE_ID;
     let base = LogConfig::default();
     let image = image(&[
-        (cluster, "log.segment.bytes", "2097152"),
-        (NODE, "message.max.bytes", "8192"),
+        StoredConfig {
+            node_id: cluster,
+            name: "log.segment.bytes",
+            value: "2097152",
+        },
+        StoredConfig {
+            node_id: NODE,
+            name: "message.max.bytes",
+            value: "8192",
+        },
     ]);
     let layered = dynamic_log_base(&image, NODE, &base);
     check!(layered.segment_size == bytes(2_097_152));

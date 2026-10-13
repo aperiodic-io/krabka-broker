@@ -19,8 +19,16 @@ pub(super) async fn wait_for_controller_leader(ctrl: &krabka_raft::ControllerHan
     .expect("controller should elect itself");
 }
 
+/// A running controller and the data directory that it needs to stay alive.
+pub(super) struct StartedController {
+    /// The controller's data directory, removed when this value drops.
+    pub(super) dir: tempfile::TempDir,
+    /// The controller.
+    pub(super) controller: krabka_raft::ControllerHandle,
+}
+
 /// A fresh bootstrapped single-node controller, already elected.
-pub(super) async fn start_controller() -> (tempfile::TempDir, krabka_raft::ControllerHandle) {
+pub(super) async fn start_controller() -> StartedController {
     let dir = tempfile::TempDir::new().unwrap();
     let cfg = krabka_raft::ControllerConfig {
         bootstrap_mode: krabka_raft::BootstrapMode::Bootstrap,
@@ -30,5 +38,8 @@ pub(super) async fn start_controller() -> (tempfile::TempDir, krabka_raft::Contr
         .await
         .expect("controller");
     wait_for_controller_leader(&ctrl).await;
-    (dir, ctrl)
+    StartedController {
+        dir,
+        controller: ctrl,
+    }
 }

@@ -162,11 +162,13 @@ pub(crate) fn remove_optional_counted(io: &dyn LogIo, path: &Path) -> Result<boo
 mod tests {
     use {super::*, crate::io::FileIo, assert2::check, tempfile::tempdir};
 
-    fn segment_files(
-        base: Offset,
-        extensions: &[&str],
-        contents: &[u8],
-    ) -> (tempfile::TempDir, Vec<std::path::PathBuf>) {
+    /// A temporary directory and the segment files written into it.
+    struct SegmentFiles {
+        dir: tempfile::TempDir,
+        paths: Vec<std::path::PathBuf>,
+    }
+
+    fn segment_files(base: Offset, extensions: &[&str], contents: &[u8]) -> SegmentFiles {
         let dir = tempdir().unwrap();
         let paths = extensions
             .iter()
@@ -178,13 +180,13 @@ mod tests {
         for path in &paths {
             std::fs::write(path, contents).unwrap();
         }
-        (dir, paths)
+        SegmentFiles { dir, paths }
     }
 
     #[test]
     fn delete_segment_files_removes_required_and_optional_sidecars() {
         let base = Offset(7);
-        let (dir, paths) = segment_files(
+        let SegmentFiles { dir, paths } = segment_files(
             base,
             &[
                 "log",
@@ -205,7 +207,7 @@ mod tests {
     #[test]
     fn delete_segment_files_accepts_missing_optional_sidecars() {
         let base = Offset(8);
-        let (dir, _paths) = segment_files(base, &["log", "index", "timeindex"], &[]);
+        let SegmentFiles { dir, .. } = segment_files(base, &["log", "index", "timeindex"], &[]);
 
         delete_segment_files(&FileIo, dir.path(), base).unwrap();
     }
@@ -226,7 +228,7 @@ mod tests {
         }
 
         let base = Offset(9);
-        let (dir, live) =
+        let SegmentFiles { dir, paths: live } =
             segment_files(base, &["log", "index", "timeindex", "stampindex"], b"bytes");
 
         let error = delete_segment_files(&NoUnlink, dir.path(), base)

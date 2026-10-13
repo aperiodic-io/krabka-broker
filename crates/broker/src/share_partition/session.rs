@@ -94,10 +94,26 @@ pub(crate) struct ClosedShareSession {
     pub(crate) partitions: HashSet<SharePartitionKey>,
 }
 
+/// The group and member that own a session.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct SessionKey {
+    group: String,
+    member: String,
+}
+
+impl SessionKey {
+    fn new(group: &str, member: &str) -> Self {
+        Self {
+            group: group.to_string(),
+            member: member.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Inner {
-    sessions: HashMap<(String, String), ShareSession>,
-    connections: HashMap<String, (String, String)>,
+    sessions: HashMap<SessionKey, ShareSession>,
+    connections: HashMap<String, SessionKey>,
 }
 
 /// The share partitions of one `ShareFetch`: the ones it names, in request
@@ -141,7 +157,7 @@ impl ShareSessionCache {
         partitions: FetchPartitions<'_>,
         has_acknowledgements: bool,
     ) -> Result<ShareFetchSessionUpdate, i16> {
-        let key = (group.to_string(), member.to_string());
+        let key = SessionKey::new(group, member);
         let mut inner = self.inner.lock().expect("share-session mutex poisoned");
 
         if epoch == FINAL_EPOCH {
@@ -224,7 +240,7 @@ impl ShareSessionCache {
         member: &str,
         rows: &[ResponseRow],
     ) -> Vec<bool> {
-        let key = (group.to_string(), member.to_string());
+        let key = SessionKey::new(group, member);
         let mut inner = self.inner.lock().expect("share-session mutex poisoned");
         let Some(session) = inner.sessions.get_mut(&key) else {
             return vec![true; rows.len()];
@@ -256,7 +272,7 @@ impl ShareSessionCache {
         if epoch == INITIAL_EPOCH {
             return Err(codes::INVALID_SHARE_SESSION_EPOCH);
         }
-        let key = (group.to_string(), member.to_string());
+        let key = SessionKey::new(group, member);
         let mut inner = self.inner.lock().expect("share-session mutex poisoned");
         if epoch == FINAL_EPOCH {
             return remove_session(&mut inner, &key)
@@ -285,14 +301,14 @@ impl ShareSessionCache {
         }
         let session = inner.sessions.remove(&key)?;
         Some(ClosedShareSession {
-            group: key.0,
-            member: key.1,
+            group: key.group,
+            member: key.member,
             partitions: session.partitions.iter().map(|p| p.key).collect(),
         })
     }
 }
 
-fn remove_session(inner: &mut Inner, key: &(String, String)) -> Option<ShareSession> {
+fn remove_session(inner: &mut Inner, key: &SessionKey) -> Option<ShareSession> {
     let session = inner.sessions.remove(key)?;
     if inner.connections.get(&session.connection_id) == Some(key) {
         inner.connections.remove(&session.connection_id);
@@ -303,7 +319,7 @@ fn remove_session(inner: &mut Inner, key: &(String, String)) -> Option<ShareSess
 /// Find a session and validate its epoch while the caller holds the cache lock.
 fn session_at_epoch<'a>(
     inner: &'a mut Inner,
-    key: &(String, String),
+    key: &SessionKey,
     epoch: i32,
 ) -> Result<&'a mut ShareSession, i16> {
     let session = inner

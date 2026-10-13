@@ -164,6 +164,12 @@ struct Model {
     targets: BTreeMap<String, LogLevel>,
 }
 
+/// An `EnvFilter` spec split into the model and the directives it only carries.
+struct ParsedSpec {
+    model: Model,
+    carried: Vec<String>,
+}
+
 impl Model {
     /// Split an `EnvFilter` spec into the parts this module edits and the
     /// ones it only carries.
@@ -171,7 +177,7 @@ impl Model {
     /// A carried directive is a span or field directive, which is not a
     /// logger, or text `EnvFilter` itself rejects, which it drops with a
     /// warning either way.
-    fn parse(spec: &str) -> (Self, Vec<String>) {
+    fn parse(spec: &str) -> ParsedSpec {
         let mut model = Self {
             root: LogLevel::Fatal,
             targets: BTreeMap::new(),
@@ -180,7 +186,7 @@ impl Model {
         for directive in spec.split(',').map(str::trim).filter(|d| !d.is_empty()) {
             model.absorb(directive, &mut carried);
         }
-        (model, carried)
+        ParsedSpec { model, carried }
     }
 
     /// Fold one directive into the model, or hand it to `carried` verbatim.
@@ -303,7 +309,7 @@ impl LogLevelController {
     /// are listed before anything has logged through them.
     #[must_use]
     pub fn new(spec: &str) -> (Self, LogLevelFilter) {
-        let (model, carried) = Model::parse(spec);
+        let ParsedSpec { model, carried } = Model::parse(spec);
         let known = model.targets.keys().cloned().collect();
         let shared = Arc::new(Shared {
             filter: RwLock::new(EnvFilter::new(model.render())),

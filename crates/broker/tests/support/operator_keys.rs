@@ -90,6 +90,14 @@ pub struct OperatorSaslSetup<'a> {
     pub users: &'a [(&'a str, &'a str)],
 }
 
+/// A running broker, a client connected to it, and the configuration it booted
+/// with.
+pub struct OperatorBroker {
+    pub broker: BrokerHandle,
+    pub client: Client,
+    pub config: BrokerConfig,
+}
+
 /// Boot one broker on `dir` that trusts `keys` and takes `approvers` as its
 /// break-glass approver set.
 ///
@@ -108,7 +116,7 @@ pub async fn start_with_operator_keys(
     dir: &std::path::Path,
     #[builder(default)] keys: &'_ [&'_ OperatorKey],
     #[builder(default)] approvers: &'_ [&'_ str],
-) -> (BrokerHandle, Client, BrokerConfig) {
+) -> OperatorBroker {
     let setup = OperatorKeysSetup { keys, approvers };
     let config = operator_config()
         .dir(dir)
@@ -123,15 +131,16 @@ pub async fn start_with_operator_keys(
         "client build",
     )
     .await;
-    (broker, client, config)
+    OperatorBroker {
+        broker,
+        client,
+        config,
+    }
 }
 
 /// [`start_with_operator_keys`] with the single-key, single-approver shape the
 /// freeze cases want.
-pub async fn start_with_operator_key(
-    dir: &std::path::Path,
-    key: &OperatorKey,
-) -> (BrokerHandle, Client, BrokerConfig) {
+pub async fn start_with_operator_key(dir: &std::path::Path, key: &OperatorKey) -> OperatorBroker {
     start_with_operator_keys()
         .dir(dir)
         .keys(&[key])

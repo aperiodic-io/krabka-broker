@@ -65,8 +65,11 @@ fn image_at(level: i16) -> MetadataImage {
     image
 }
 
-fn expected(error_code: i16, message: &str) -> (i16, Option<String>) {
-    (error_code, Some(message.to_owned()))
+fn expected(error_code: i16, message: &str) -> Unregistration {
+    Unregistration {
+        error_code,
+        message: Some(message.to_owned()),
+    }
 }
 
 /// Trunk's checks in trunk's order: a voter is refused before the

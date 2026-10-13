@@ -119,8 +119,23 @@ mod tests {
     /// The topic name every case below records under.
     fn topic(name: &str) -> Arc<str> { Arc::from(name) }
 
-    fn assert_topic_counters(cases: &[(&str, &Family<TopicLabel, Counter>, &TopicLabel, u64)]) {
-        for (family_name, family, label, want) in cases {
+    /// One counter family, the topic label to read in it and the count that
+    /// label must hold.
+    struct TopicCounterCase<'a> {
+        family_name: &'a str,
+        family: &'a Family<TopicLabel, Counter>,
+        label: &'a TopicLabel,
+        want: u64,
+    }
+
+    fn assert_topic_counters(cases: &[TopicCounterCase<'_>]) {
+        for TopicCounterCase {
+            family_name,
+            family,
+            label,
+            want,
+        } in cases
+        {
             let got = family.get_or_create(label).get();
             assert!(got == *want, "{family_name} for {:?}", label.topic);
         }
@@ -230,10 +245,30 @@ mod tests {
         // `get_or_create` at read time but its value is 0, which is
         // what `rate(failed_fetch{topic="t-bad"}[1m])` should compute.
         let cases = [
-            ("failed_produce", &m.topic_failed_produce_requests, &good, 2),
-            ("failed_produce", &m.topic_failed_produce_requests, &bad, 1),
-            ("failed_fetch", &m.topic_failed_fetch_requests, &good, 1),
-            ("failed_fetch", &m.topic_failed_fetch_requests, &bad, 0),
+            TopicCounterCase {
+                family_name: "failed_produce",
+                family: &m.topic_failed_produce_requests,
+                label: &good,
+                want: 2,
+            },
+            TopicCounterCase {
+                family_name: "failed_produce",
+                family: &m.topic_failed_produce_requests,
+                label: &bad,
+                want: 1,
+            },
+            TopicCounterCase {
+                family_name: "failed_fetch",
+                family: &m.topic_failed_fetch_requests,
+                label: &good,
+                want: 1,
+            },
+            TopicCounterCase {
+                family_name: "failed_fetch",
+                family: &m.topic_failed_fetch_requests,
+                label: &bad,
+                want: 0,
+            },
         ];
         assert_topic_counters(&cases);
     }
@@ -284,30 +319,30 @@ mod tests {
             topic: "payments".into(),
         };
         let cases = [
-            (
-                "produce_conversions",
-                &m.produce_message_conversions,
-                &orders,
-                2,
-            ),
-            (
-                "produce_conversions",
-                &m.produce_message_conversions,
-                &payments,
-                1,
-            ),
-            (
-                "fetch_conversions",
-                &m.fetch_message_conversions,
-                &orders,
-                1,
-            ),
-            (
-                "fetch_conversions",
-                &m.fetch_message_conversions,
-                &payments,
-                2,
-            ),
+            TopicCounterCase {
+                family_name: "produce_conversions",
+                family: &m.produce_message_conversions,
+                label: &orders,
+                want: 2,
+            },
+            TopicCounterCase {
+                family_name: "produce_conversions",
+                family: &m.produce_message_conversions,
+                label: &payments,
+                want: 1,
+            },
+            TopicCounterCase {
+                family_name: "fetch_conversions",
+                family: &m.fetch_message_conversions,
+                label: &orders,
+                want: 1,
+            },
+            TopicCounterCase {
+                family_name: "fetch_conversions",
+                family: &m.fetch_message_conversions,
+                label: &payments,
+                want: 2,
+            },
         ];
         assert_topic_counters(&cases);
     }

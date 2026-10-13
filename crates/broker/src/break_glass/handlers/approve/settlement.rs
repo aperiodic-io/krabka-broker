@@ -83,8 +83,7 @@ pub(super) async fn settle(
         .await
         .map_err(|error| {
             tracing::warn!(error = %error, "ApproveBreakGlass: submit_change failed");
-            let (code, message) = submit_error(&error);
-            Refusal::new(code, message)
+            submit_error(&error)
         })?;
     Ok(updated)
 }

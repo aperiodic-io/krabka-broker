@@ -64,7 +64,7 @@ pub use self::{
     },
 };
 use {
-    self::{listing::list_archive, partition::verify_partition},
+    self::{listing::list_archive, partition::verify_partition, report::VerifiedPartition},
     crate::{
         storage_manager::parse_partition_dir_name,
         worm::{
@@ -217,7 +217,7 @@ pub async fn verify_archive(
     request: &VerifyRequest,
     trusted: &TrustedManifestKeys,
 ) -> Result<ArchiveVerifyReport, WormError> {
-    let (report, _) = verify_archive_inner(store, request, trusted).await?;
+    let AuthenticatedArchive { report, .. } = verify_archive_inner(store, request, trusted).await?;
     Ok(report)
 }
 
@@ -238,15 +238,14 @@ pub async fn authenticate_archive(
 ) -> Result<AuthenticatedArchive, WormError> {
     let mut request = request.clone();
     request.depth = VerifyDepth::Deep;
-    let (report, objects) = verify_archive_inner(store, &request, trusted).await?;
-    Ok(AuthenticatedArchive { report, objects })
+    verify_archive_inner(store, &request, trusted).await
 }
 
 async fn verify_archive_inner(
     store: &Arc<dyn ObjectStore>,
     request: &VerifyRequest,
     trusted: &TrustedManifestKeys,
-) -> Result<(ArchiveVerifyReport, BTreeMap<String, ObjectEntry>), WormError> {
+) -> Result<AuthenticatedArchive, WormError> {
     let mut listing = list_archive(store, request.prefix.as_deref()).await?;
     let global_orphan_objects = listing
         .iter()
@@ -276,8 +275,10 @@ async fn verify_archive_inner(
     let mut partitions = Vec::new();
     let mut objects = BTreeMap::new();
     for (dir, entries) in &listing {
-        if let Some((report, verified)) =
-            verify_partition(store, dir, entries, request, trusted).await?
+        if let Some(VerifiedPartition {
+            report,
+            objects: verified,
+        }) = verify_partition(store, dir, entries, request, trusted).await?
         {
             partitions.push(report);
             objects.extend(verified);
@@ -286,13 +287,13 @@ async fn verify_archive_inner(
     // The listing is a `BTreeMap` keyed by directory, so the partitions are
     // already in directory order. Sorting again states the guarantee locally.
     partitions.sort_by(|a, b| a.partition_dir.cmp(&b.partition_dir));
-    Ok((
-        ArchiveVerifyReport {
+    Ok(AuthenticatedArchive {
+        report: ArchiveVerifyReport {
             partitions,
             global_orphan_objects,
         },
         objects,
-    ))
+    })
 }
 
 fn capture_namespace(key: &str, prefix: Option<&str>) -> bool {

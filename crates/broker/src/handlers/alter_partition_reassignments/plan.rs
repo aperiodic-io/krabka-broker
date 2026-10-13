@@ -30,7 +30,22 @@ use {
 };
 
 /// Per-row rejection: a Kafka wire error code and a readable message.
-type RowError = (i16, String);
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct RowError {
+    pub(super) code: i16,
+    pub(super) message: String,
+}
+
+/// The cancel triple [`krabka_verified::reassignment_plan_admission`] takes.
+#[derive(Clone, Copy)]
+struct PlanMode {
+    /// Whether this is a cancel.
+    cancel: bool,
+    /// Whether an approved break-glass proposal covers the cancel.
+    approved: bool,
+    /// Whether a reassignment is in progress.
+    in_progress: bool,
+}
 
 /// Process one (topic, partition, `target_opt`) row from an
 /// `AlterPartitionReassignments` request.
@@ -44,7 +59,7 @@ type RowError = (i16, String);
 /// The return values are:
 ///   - `Ok(Some(PartitionRecord))`: submit this record
 ///   - `Ok(None)`: do nothing, because the row changes nothing
-///   - `Err((wire_code, message))`: reject this row
+///   - `Err(RowError)`: reject this row with its wire code and message
 pub(crate) fn process_one_partition(
     image: &MetadataImage,
     topic: &str,
@@ -93,7 +108,10 @@ fn unknown_partition(image: &MetadataImage, topic: &str, partition: i32) -> RowE
     } else {
         format!("Unable to find partition {topic}:{partition}.")
     };
-    (UNKNOWN_TOPIC_OR_PARTITION, message)
+    RowError {
+        code: UNKNOWN_TOPIC_OR_PARTITION,
+        message,
+    }
 }
 
 /// Kafka's `validateManualPartitionAssignment` for a reassignment target.
@@ -102,10 +120,10 @@ fn unknown_partition(image: &MetadataImage, topic: &str, partition: i32) -> RowE
 /// the lowest broker id decides which one the row reports.
 fn validate_target(target: &[i32], image: &MetadataImage) -> Result<Vec<NodeId>, RowError> {
     if target.is_empty() {
-        return Err((
-            INVALID_REPLICA_ASSIGNMENT,
-            "The manual partition assignment includes an empty replica list.".into(),
-        ));
+        return Err(RowError {
+            code: INVALID_REPLICA_ASSIGNMENT,
+            message: "The manual partition assignment includes an empty replica list.".into(),
+        });
     }
     let mut sorted = target.to_vec();
     sorted.sort_unstable();
@@ -113,19 +131,21 @@ fn validate_target(target: &[i32], image: &MetadataImage) -> Result<Vec<NodeId>,
     for id in sorted {
         let registered = u64::try_from(id).is_ok_and(|node| image.broker(NodeId(node)).is_some());
         if !registered {
-            return Err((
-                INVALID_REPLICA_ASSIGNMENT,
-                format!(
+            return Err(RowError {
+                code: INVALID_REPLICA_ASSIGNMENT,
+                message: format!(
                     "The manual partition assignment includes broker {id}, but no such broker \
                      is registered."
                 ),
-            ));
+            });
         }
         if previous == Some(id) {
-            return Err((
-                INVALID_REPLICA_ASSIGNMENT,
-                format!("The manual partition assignment includes the broker {id} more than once."),
-            ));
+            return Err(RowError {
+                code: INVALID_REPLICA_ASSIGNMENT,
+                message: format!(
+                    "The manual partition assignment includes the broker {id} more than once."
+                ),
+            });
         }
         previous = Some(id);
     }
@@ -133,7 +153,10 @@ fn validate_target(target: &[i32], image: &MetadataImage) -> Result<Vec<NodeId>,
         .iter()
         .map(|&id| u64::try_from(id).map(NodeId))
         .collect::<Result<_, _>>()
-        .map_err(|_| (INVALID_REPLICA_ASSIGNMENT, "negative broker id".into()))
+        .map_err(|_| RowError {
+            code: INVALID_REPLICA_ASSIGNMENT,
+            message: "negative broker id".into(),
+        })
 }
 
 /// Kafka's `validatePartitionReplicationFactorUnchanged`: with KIP-860's
@@ -160,10 +183,10 @@ fn validate_replication_factor_unchanged(
     if current == target_len {
         Ok(())
     } else {
-        Err((
-            INVALID_REPLICATION_FACTOR,
-            format!("The replication factor is changed from {current} to {target_len}"),
-        ))
+        Err(RowError {
+            code: INVALID_REPLICATION_FACTOR,
+            message: format!("The replication factor is changed from {current} to {target_len}"),
+        })
     }
 }
 
@@ -181,10 +204,16 @@ fn cancel_path(
     // would make "does this need an approval" depend on state that a
     // concurrent reassignment can change between the check and the append.
     if !approved {
-        return Err((POLICY_VIOLATION, CANCEL_NEEDS_APPROVAL.into()));
+        return Err(RowError {
+            code: POLICY_VIOLATION,
+            message: CANCEL_NEEDS_APPROVAL.into(),
+        });
     }
     if !reassignment_in_progress(pr) {
-        return Err((NO_REASSIGNMENT_IN_PROGRESS, NO_REASSIGNMENT_MESSAGE.into()));
+        return Err(RowError {
+            code: NO_REASSIGNMENT_IN_PROGRESS,
+            message: NO_REASSIGNMENT_MESSAGE.into(),
+        });
     }
     // `PartitionReassignmentRevert`: drop every adding replica from the
     // replica list and from the ISR, and keep the removing ones.
@@ -205,20 +234,20 @@ fn cancel_path(
         // remaining replica in the ISR, which is an unclean election, so the
         // topic has to allow one.
         let Some(&first) = replicas.first() else {
-            return Err((
-                INVALID_REPLICA_ASSIGNMENT,
-                "Invalid replica assignment: addingReplicas contains all replicas.".into(),
-            ));
+            return Err(RowError {
+                code: INVALID_REPLICA_ASSIGNMENT,
+                message: "Invalid replica assignment: addingReplicas contains all replicas.".into(),
+            });
         };
         if !unclean_enabled {
-            return Err((
-                INVALID_REPLICA_ASSIGNMENT,
-                format!(
+            return Err(RowError {
+                code: INVALID_REPLICA_ASSIGNMENT,
+                message: format!(
                     "Unable to revert partition assignment for {}:{} because it would require \
                      an unclean leader election.",
                     pr.topic, pr.partition
                 ),
-            ));
+            });
         }
         isr.push(first);
     }
@@ -228,7 +257,11 @@ fn cancel_path(
         adding: vec![],
         removing: vec![],
     };
-    build(pr, change, (true, approved, true))
+    build(pr, change, PlanMode {
+        cancel: true,
+        approved,
+        in_progress: true,
+    })
 }
 
 fn start_path(
@@ -272,7 +305,11 @@ fn start_path(
         },
     }
     .complete_if_ready();
-    build(pr, change, (false, false, false))
+    build(pr, change, PlanMode {
+        cancel: false,
+        approved: false,
+        in_progress: false,
+    })
 }
 
 /// The replica state a row asks for, before the leader is chosen.
@@ -311,16 +348,16 @@ impl PartitionChange {
 fn build(
     pr: &PartitionRecord,
     change: PartitionChange,
-    mode: (bool, bool, bool),
+    mode: PlanMode,
 ) -> Result<Option<PartitionRecord>, RowError> {
     let leader = if change.isr.contains(&pr.leader) {
         pr.leader
     } else {
         let Some(&leader) = change.replicas.iter().find(|n| change.isr.contains(n)) else {
-            return Err((
-                ELIGIBLE_LEADERS_NOT_AVAILABLE,
-                "no eligible leader for the reassignment".into(),
-            ));
+            return Err(RowError {
+                code: ELIGIBLE_LEADERS_NOT_AVAILABLE,
+                message: "no eligible leader for the reassignment".into(),
+            });
         };
         leader
     };
@@ -337,12 +374,21 @@ fn build(
     let bump_leader_epoch =
         leader != pr.leader || !pr.replicas.iter().all(|n| change.replicas.contains(n));
     let (partition_epoch, leader_epoch) =
-        next_partition_change(pr.partition_epoch, pr.leader_epoch, bump_leader_epoch).ok_or((
-            INVALID_REQUEST,
-            "partition metadata epoch is exhausted".into(),
-        ))?;
-    if !krabka_verified::reassignment_plan_admission(mode, (true, true), (true, true)) {
-        return Err((INVALID_REQUEST, "reassignment admission failed".into()));
+        next_partition_change(pr.partition_epoch, pr.leader_epoch, bump_leader_epoch).ok_or(
+            RowError {
+                code: INVALID_REQUEST,
+                message: "partition metadata epoch is exhausted".into(),
+            },
+        )?;
+    if !krabka_verified::reassignment_plan_admission(
+        (mode.cancel, mode.approved, mode.in_progress),
+        (true, true),
+        (true, true),
+    ) {
+        return Err(RowError {
+            code: INVALID_REQUEST,
+            message: "reassignment admission failed".into(),
+        });
     }
     let directories = remap_directories(&pr.replicas, &pr.directories, &change.replicas);
     Ok(Some(PartitionRecord {
@@ -428,6 +474,10 @@ mod tests {
         }
     }
 
+    fn reverted_leader_record() -> PartitionRecord {
+        record().isr(&[NodeId(1)]).leader_epoch(6).call()
+    }
+
     const FOUR_REPLICAS: &[NodeId] = &[NodeId(1), NodeId(2), NodeId(3), NodeId(4)];
 
     /// Independent completed-removal expectation shared by start and cancel rows.
@@ -460,35 +510,45 @@ mod tests {
         }
     }
 
+    /// The in-flight assignment whose ISR holds only the adding replica.
+    fn adding_isr_assignment() -> ReassignmentSetup<'static> {
+        ReassignmentSetup {
+            isr: vec![NodeId(3)],
+            adding: vec![NodeId(3)],
+            leader: NodeId(3),
+            ..Default::default()
+        }
+    }
+
     /// A start row: label, partition state, target, the KIP-860 flag, and the
     /// planned record.
-    type StartCase<'a> = (
-        &'a str,
-        State<'a>,
-        &'a [ReplicaBrokerId],
-        ReplicationFactorPolicy,
-        Option<PartitionRecord>,
-    );
+    struct StartCase<'a> {
+        label: &'a str,
+        state: State<'a>,
+        target: &'a [ReplicaBrokerId],
+        policy: ReplicationFactorPolicy,
+        expected: Option<PartitionRecord>,
+    }
 
     /// A cancel row: label, partition state, the topic's
     /// `unclean.leader.election.enable`, and the planned outcome.
-    type CancelCase<'a> = (
-        &'a str,
-        State<'a>,
-        UncleanElection,
-        Result<Option<PartitionRecord>, RowError>,
-    );
+    struct CancelCase<'a> {
+        label: &'a str,
+        state: State<'a>,
+        unclean: UncleanElection,
+        expected: Result<Option<PartitionRecord>, RowError>,
+    }
 
     /// A rejected row: label, topic, partition, target, the KIP-860 flag, and
     /// the row error.
-    type RejectCase<'a> = (
-        &'a str,
-        &'a str,
-        krabka_ids::PartitionIndex,
-        Option<&'a [ReplicaBrokerId]>,
-        ReplicationFactorPolicy,
-        RowError,
-    );
+    struct RejectCase<'a> {
+        label: &'a str,
+        topic: &'a str,
+        partition: krabka_ids::PartitionIndex,
+        target: Option<&'a [ReplicaBrokerId]>,
+        allow_rf: ReplicationFactorPolicy,
+        expected: RowError,
+    }
 
     /// Kafka's replica arithmetic for a start: the target order, a reorder, a
     /// new target over an in-flight reassignment, and a completion in the same
@@ -497,28 +557,28 @@ mod tests {
     #[test]
     fn a_start_writes_kafkas_replica_list() {
         let cases: [StartCase<'_>; 11] = [
-            (
-                "a reorder writes the new order",
-                ReassignmentSetup {
+            StartCase {
+                label: "a reorder writes the new order",
+                state: ReassignmentSetup {
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(3), ReplicaBrokerId(2), ReplicaBrokerId(1)],
-                ReplicationFactorPolicy::Maintain,
-                Some(
+                target: &[ReplicaBrokerId(3), ReplicaBrokerId(2), ReplicaBrokerId(1)],
+                policy: ReplicationFactorPolicy::Maintain,
+                expected: Some(
                     record()
                         .replicas(&[NodeId(3), NodeId(2), NodeId(1)])
                         .leader_epoch(5)
                         .call(),
                 ),
-            ),
-            (
-                "the target comes first, then the removing replicas",
-                ReassignmentSetup {
+            },
+            StartCase {
+                label: "the target comes first, then the removing replicas",
+                state: ReassignmentSetup {
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(3), ReplicaBrokerId(4), ReplicaBrokerId(1)],
-                ReplicationFactorPolicy::Maintain,
-                Some(
+                target: &[ReplicaBrokerId(3), ReplicaBrokerId(4), ReplicaBrokerId(1)],
+                policy: ReplicationFactorPolicy::Maintain,
+                expected: Some(
                     record()
                         .replicas(&[NodeId(3), NodeId(4), NodeId(1), NodeId(2)])
                         .adding(&[NodeId(4)])
@@ -526,18 +586,18 @@ mod tests {
                         .leader_epoch(5)
                         .call(),
                 ),
-            ),
-            (
-                "a new target over an in-flight reassignment keeps every replica",
-                ReassignmentSetup {
+            },
+            StartCase {
+                label: "a new target over an in-flight reassignment keeps every replica",
+                state: ReassignmentSetup {
                     replicas: vec![NodeId(1), NodeId(2), NodeId(3), NodeId(4)],
                     adding: vec![NodeId(4)],
                     removing: vec![NodeId(2), NodeId(3)],
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(5), ReplicaBrokerId(6)],
-                ReplicationFactorPolicy::PermitChange,
-                Some(
+                target: &[ReplicaBrokerId(5), ReplicaBrokerId(6)],
+                policy: ReplicationFactorPolicy::PermitChange,
+                expected: Some(
                     record()
                         .replicas(&[
                             NodeId(5),
@@ -552,24 +612,24 @@ mod tests {
                         .leader_epoch(5)
                         .call(),
                 ),
-            ),
-            (
-                "a pure removal completes at once and bumps the leader epoch",
-                ReassignmentSetup {
+            },
+            StartCase {
+                label: "a pure removal completes at once and bumps the leader epoch",
+                state: ReassignmentSetup {
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(1), ReplicaBrokerId(2)],
-                ReplicationFactorPolicy::PermitChange,
-                Some(completed_two_replica_record()),
-            ),
-            (
-                "the adding and removing lists are sorted",
-                ReassignmentSetup {
+                target: &[ReplicaBrokerId(1), ReplicaBrokerId(2)],
+                policy: ReplicationFactorPolicy::PermitChange,
+                expected: Some(completed_two_replica_record()),
+            },
+            StartCase {
+                label: "the adding and removing lists are sorted",
+                state: ReassignmentSetup {
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(5), ReplicaBrokerId(4), ReplicaBrokerId(1)],
-                ReplicationFactorPolicy::Maintain,
-                Some(
+                target: &[ReplicaBrokerId(5), ReplicaBrokerId(4), ReplicaBrokerId(1)],
+                policy: ReplicationFactorPolicy::Maintain,
+                expected: Some(
                     record()
                         .replicas(&[NodeId(5), NodeId(4), NodeId(1), NodeId(2), NodeId(3)])
                         .adding(&[NodeId(4), NodeId(5)])
@@ -577,18 +637,18 @@ mod tests {
                         .leader_epoch(5)
                         .call(),
                 ),
-            ),
-            (
-                "a leader only in the old removing set stays in the union",
-                ReassignmentSetup {
+            },
+            StartCase {
+                label: "a leader only in the old removing set stays in the union",
+                state: ReassignmentSetup {
                     replicas: vec![NodeId(1), NodeId(2), NodeId(3), NodeId(4)],
                     adding: vec![NodeId(4)],
                     removing: vec![NodeId(1), NodeId(2), NodeId(3)],
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(5)],
-                ReplicationFactorPolicy::PermitChange,
-                Some(
+                target: &[ReplicaBrokerId(5)],
+                policy: ReplicationFactorPolicy::PermitChange,
+                expected: Some(
                     record()
                         .replicas(&[NodeId(5), NodeId(1), NodeId(2), NodeId(3), NodeId(4)])
                         .adding(&[NodeId(5)])
@@ -596,32 +656,32 @@ mod tests {
                         .leader_epoch(5)
                         .call(),
                 ),
-            ),
-            (
-                "an addition waits for the new replica to join the ISR",
-                ReassignmentSetup {
+            },
+            StartCase {
+                label: "an addition waits for the new replica to join the ISR",
+                state: ReassignmentSetup {
                     replicas: vec![NodeId(1), NodeId(2)],
                     isr: vec![NodeId(1), NodeId(2)],
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(1), ReplicaBrokerId(2), ReplicaBrokerId(3)],
-                ReplicationFactorPolicy::PermitChange,
-                Some(
+                target: &[ReplicaBrokerId(1), ReplicaBrokerId(2), ReplicaBrokerId(3)],
+                policy: ReplicationFactorPolicy::PermitChange,
+                expected: Some(
                     record()
                         .isr(&[NodeId(1), NodeId(2)])
                         .adding(&[NodeId(3)])
                         .leader_epoch(5)
                         .call(),
                 ),
-            ),
-            (
-                "a completion that removes the leader elects the first target in the ISR",
-                ReassignmentSetup {
+            },
+            StartCase {
+                label: "a completion that removes the leader elects the first target in the ISR",
+                state: ReassignmentSetup {
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(2), ReplicaBrokerId(3)],
-                ReplicationFactorPolicy::PermitChange,
-                Some(
+                target: &[ReplicaBrokerId(2), ReplicaBrokerId(3)],
+                policy: ReplicationFactorPolicy::PermitChange,
+                expected: Some(
                     record()
                         .leader(2)
                         .replicas(&[NodeId(2), NodeId(3)])
@@ -629,35 +689,35 @@ mod tests {
                         .leader_epoch(6)
                         .call(),
                 ),
-            ),
-            (
-                "an empty difference keeps the in-flight adding list and can complete",
-                ReassignmentSetup {
+            },
+            StartCase {
+                label: "an empty difference keeps the in-flight adding list and can complete",
+                state: ReassignmentSetup {
                     replicas: vec![NodeId(1), NodeId(2), NodeId(3), NodeId(4)],
                     isr: vec![NodeId(1), NodeId(3), NodeId(4)],
                     adding: vec![NodeId(4)],
                     removing: vec![NodeId(2)],
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(1), ReplicaBrokerId(3), ReplicaBrokerId(4)],
-                ReplicationFactorPolicy::Maintain,
-                Some(
+                target: &[ReplicaBrokerId(1), ReplicaBrokerId(3), ReplicaBrokerId(4)],
+                policy: ReplicationFactorPolicy::Maintain,
+                expected: Some(
                     record()
                         .replicas(&[NodeId(1), NodeId(3), NodeId(4)])
                         .isr(&[NodeId(1), NodeId(3), NodeId(4)])
                         .leader_epoch(6)
                         .call(),
                 ),
-            ),
-            (
-                "a decrease waits while the ISR lacks a target replica",
-                ReassignmentSetup {
+            },
+            StartCase {
+                label: "a decrease waits while the ISR lacks a target replica",
+                state: ReassignmentSetup {
                     isr: vec![NodeId(1), NodeId(2)],
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(1), ReplicaBrokerId(3)],
-                ReplicationFactorPolicy::PermitChange,
-                Some(
+                target: &[ReplicaBrokerId(1), ReplicaBrokerId(3)],
+                policy: ReplicationFactorPolicy::PermitChange,
+                expected: Some(
                     record()
                         .replicas(&[NodeId(1), NodeId(3), NodeId(2)])
                         .isr(&[NodeId(1), NodeId(2)])
@@ -665,18 +725,25 @@ mod tests {
                         .leader_epoch(5)
                         .call(),
                 ),
-            ),
-            (
-                "the current order is already the target",
-                ReassignmentSetup {
+            },
+            StartCase {
+                label: "the current order is already the target",
+                state: ReassignmentSetup {
                     ..Default::default()
                 },
-                &[ReplicaBrokerId(1), ReplicaBrokerId(2), ReplicaBrokerId(3)],
-                ReplicationFactorPolicy::Maintain,
-                None,
-            ),
+                target: &[ReplicaBrokerId(1), ReplicaBrokerId(2), ReplicaBrokerId(3)],
+                policy: ReplicationFactorPolicy::Maintain,
+                expected: None,
+            },
         ];
-        for (label, assignment, target, allow_rf, expected) in cases {
+        for StartCase {
+            label,
+            state: assignment,
+            target,
+            policy: allow_rf,
+            expected,
+        } in cases
+        {
             let image = img_with().assignment(assignment).partition_epoch(11).call();
             let planned = process_one_partition(
                 &image,
@@ -698,70 +765,69 @@ mod tests {
         let unclean_message = "Unable to revert partition assignment for foo:0 because it would \
                                require an unclean leader election.";
         let cases: [CancelCase<'_>; 6] = [
-            (
-                "a leader in the adding set moves to the reverted ISR",
-                added_leader_assignment(),
-                UncleanElection::Forbidden,
-                Ok(Some(record().isr(&[NodeId(1)]).leader_epoch(6).call())),
-            ),
-            (
-                "a leader outside the reverted ISR is replaced",
-                ReassignmentSetup {
+            CancelCase {
+                label: "a leader in the adding set moves to the reverted ISR",
+                state: added_leader_assignment(),
+                unclean: UncleanElection::Forbidden,
+                expected: Ok(Some(reverted_leader_record())),
+            },
+            CancelCase {
+                label: "a leader outside the reverted ISR is replaced",
+                state: ReassignmentSetup {
                     removing: vec![NodeId(3)],
                     leader: NodeId(2),
                     ..added_leader_assignment()
                 },
-                UncleanElection::Forbidden,
-                Ok(Some(record().isr(&[NodeId(1)]).leader_epoch(6).call())),
-            ),
-            (
-                "only removing replicas keeps the leader epoch",
-                ReassignmentSetup {
+                unclean: UncleanElection::Forbidden,
+                expected: Ok(Some(reverted_leader_record())),
+            },
+            CancelCase {
+                label: "only removing replicas keeps the leader epoch",
+                state: ReassignmentSetup {
                     removing: vec![NodeId(3)],
                     ..Default::default()
                 },
-                UncleanElection::Forbidden,
-                Ok(Some(record().leader_epoch(5).call())),
-            ),
-            (
-                "a dropped adding replica bumps the leader epoch",
-                ReassignmentSetup {
+                unclean: UncleanElection::Forbidden,
+                expected: Ok(Some(record().leader_epoch(5).call())),
+            },
+            CancelCase {
+                label: "a dropped adding replica bumps the leader epoch",
+                state: ReassignmentSetup {
                     adding: vec![NodeId(3)],
                     ..Default::default()
                 },
-                UncleanElection::Forbidden,
-                Ok(Some(completed_two_replica_record())),
-            ),
-            (
-                "an ISR of adding replicas needs unclean election",
-                ReassignmentSetup {
-                    isr: vec![NodeId(3)],
-                    adding: vec![NodeId(3)],
-                    leader: NodeId(3),
-                    ..Default::default()
-                },
-                UncleanElection::Forbidden,
-                Err((INVALID_REPLICA_ASSIGNMENT, unclean_message.into())),
-            ),
-            (
-                "an ISR of adding replicas reverts uncleanly when the topic allows it",
-                ReassignmentSetup {
-                    isr: vec![NodeId(3)],
-                    adding: vec![NodeId(3)],
-                    leader: NodeId(3),
-                    ..Default::default()
-                },
-                UncleanElection::Allowed,
-                Ok(Some(
+                unclean: UncleanElection::Forbidden,
+                expected: Ok(Some(completed_two_replica_record())),
+            },
+            CancelCase {
+                label: "an ISR of adding replicas needs unclean election",
+                state: adding_isr_assignment(),
+                unclean: UncleanElection::Forbidden,
+                expected: Err(RowError {
+                    code: INVALID_REPLICA_ASSIGNMENT,
+                    message: unclean_message.into(),
+                }),
+            },
+            CancelCase {
+                label: "an ISR of adding replicas reverts uncleanly when the topic allows it",
+                state: adding_isr_assignment(),
+                unclean: UncleanElection::Allowed,
+                expected: Ok(Some(
                     record()
                         .replicas(&[NodeId(1), NodeId(2)])
                         .isr(&[NodeId(1)])
                         .leader_epoch(6)
                         .call(),
                 )),
-            ),
+            },
         ];
-        for (label, assignment, unclean, expected) in cases {
+        for CancelCase {
+            label,
+            state: assignment,
+            unclean,
+            expected,
+        } in cases
+        {
             let mut image = img_with().assignment(assignment).partition_epoch(11).call();
             if matches!(unclean, UncleanElection::Allowed) {
                 image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
@@ -783,109 +849,127 @@ mod tests {
     #[test]
     fn a_rejected_row_answers_kafkas_code_and_message() {
         let cases: [RejectCase<'_>; 9] = [
-            (
-                "an unknown topic",
-                "bar",
-                krabka_ids::PartitionIndex(0),
-                Some(&[ReplicaBrokerId(1)]),
-                ReplicationFactorPolicy::PermitChange,
-                (
-                    UNKNOWN_TOPIC_OR_PARTITION,
-                    "Unable to find a topic named bar.".into(),
-                ),
-            ),
-            (
-                "an unknown partition",
-                "foo",
-                krabka_ids::PartitionIndex(1),
-                Some(&[ReplicaBrokerId(1)]),
-                ReplicationFactorPolicy::PermitChange,
-                (
-                    UNKNOWN_TOPIC_OR_PARTITION,
-                    "Unable to find partition foo:1.".into(),
-                ),
-            ),
-            (
-                "an empty target",
-                "foo",
-                krabka_ids::PartitionIndex(0),
-                Some(&[]),
-                ReplicationFactorPolicy::PermitChange,
-                (
-                    INVALID_REPLICA_ASSIGNMENT,
-                    "The manual partition assignment includes an empty replica list.".into(),
-                ),
-            ),
-            (
-                "a duplicate replica",
-                "foo",
-                krabka_ids::PartitionIndex(0),
-                Some(&[ReplicaBrokerId(1), ReplicaBrokerId(1)]),
-                ReplicationFactorPolicy::PermitChange,
-                (
-                    INVALID_REPLICA_ASSIGNMENT,
-                    "The manual partition assignment includes the broker 1 more than once.".into(),
-                ),
-            ),
-            (
-                "an unregistered broker",
-                "foo",
-                krabka_ids::PartitionIndex(0),
-                Some(&[ReplicaBrokerId(99)]),
-                ReplicationFactorPolicy::PermitChange,
-                (
-                    INVALID_REPLICA_ASSIGNMENT,
-                    "The manual partition assignment includes broker 99, but no such broker is \
-                     registered."
+            RejectCase {
+                label: "an unknown topic",
+                topic: "bar",
+                partition: krabka_ids::PartitionIndex(0),
+                target: Some(&[ReplicaBrokerId(1)]),
+                allow_rf: ReplicationFactorPolicy::PermitChange,
+                expected: RowError {
+                    code: UNKNOWN_TOPIC_OR_PARTITION,
+                    message: "Unable to find a topic named bar.".into(),
+                },
+            },
+            RejectCase {
+                label: "an unknown partition",
+                topic: "foo",
+                partition: krabka_ids::PartitionIndex(1),
+                target: Some(&[ReplicaBrokerId(1)]),
+                allow_rf: ReplicationFactorPolicy::PermitChange,
+                expected: RowError {
+                    code: UNKNOWN_TOPIC_OR_PARTITION,
+                    message: "Unable to find partition foo:1.".into(),
+                },
+            },
+            RejectCase {
+                label: "an empty target",
+                topic: "foo",
+                partition: krabka_ids::PartitionIndex(0),
+                target: Some(&[]),
+                allow_rf: ReplicationFactorPolicy::PermitChange,
+                expected: RowError {
+                    code: INVALID_REPLICA_ASSIGNMENT,
+                    message: "The manual partition assignment includes an empty replica list."
                         .into(),
-                ),
-            ),
-            (
-                "a negative broker id",
-                "foo",
-                krabka_ids::PartitionIndex(0),
-                Some(&[ReplicaBrokerId(-1)]),
-                ReplicationFactorPolicy::PermitChange,
-                (
-                    INVALID_REPLICA_ASSIGNMENT,
-                    "The manual partition assignment includes broker -1, but no such broker is \
+                },
+            },
+            RejectCase {
+                label: "a duplicate replica",
+                topic: "foo",
+                partition: krabka_ids::PartitionIndex(0),
+                target: Some(&[ReplicaBrokerId(1), ReplicaBrokerId(1)]),
+                allow_rf: ReplicationFactorPolicy::PermitChange,
+                expected: RowError {
+                    code: INVALID_REPLICA_ASSIGNMENT,
+                    message:
+                        "The manual partition assignment includes the broker 1 more than once."
+                            .into(),
+                },
+            },
+            RejectCase {
+                label: "an unregistered broker",
+                topic: "foo",
+                partition: krabka_ids::PartitionIndex(0),
+                target: Some(&[ReplicaBrokerId(99)]),
+                allow_rf: ReplicationFactorPolicy::PermitChange,
+                expected: RowError {
+                    code: INVALID_REPLICA_ASSIGNMENT,
+                    message:
+                        "The manual partition assignment includes broker 99, but no such broker is \
                      registered."
-                        .into(),
-                ),
-            ),
-            (
-                "the lowest broker id decides between two faults",
-                "foo",
-                krabka_ids::PartitionIndex(0),
-                Some(&[ReplicaBrokerId(99), ReplicaBrokerId(1), ReplicaBrokerId(1)]),
-                ReplicationFactorPolicy::PermitChange,
-                (
-                    INVALID_REPLICA_ASSIGNMENT,
-                    "The manual partition assignment includes the broker 1 more than once.".into(),
-                ),
-            ),
-            (
-                "a replication factor change without the flag",
-                "foo",
-                krabka_ids::PartitionIndex(0),
-                Some(&[ReplicaBrokerId(1), ReplicaBrokerId(2)]),
-                ReplicationFactorPolicy::Maintain,
-                (
-                    INVALID_REPLICATION_FACTOR,
-                    "The replication factor is changed from 3 to 2".into(),
-                ),
-            ),
-            (
-                "a cancel with nothing in progress",
-                "foo",
-                krabka_ids::PartitionIndex(0),
-                None,
-                ReplicationFactorPolicy::PermitChange,
-                (NO_REASSIGNMENT_IN_PROGRESS, NO_REASSIGNMENT_MESSAGE.into()),
-            ),
+                            .into(),
+                },
+            },
+            RejectCase {
+                label: "a negative broker id",
+                topic: "foo",
+                partition: krabka_ids::PartitionIndex(0),
+                target: Some(&[ReplicaBrokerId(-1)]),
+                allow_rf: ReplicationFactorPolicy::PermitChange,
+                expected: RowError {
+                    code: INVALID_REPLICA_ASSIGNMENT,
+                    message:
+                        "The manual partition assignment includes broker -1, but no such broker is \
+                     registered."
+                            .into(),
+                },
+            },
+            RejectCase {
+                label: "the lowest broker id decides between two faults",
+                topic: "foo",
+                partition: krabka_ids::PartitionIndex(0),
+                target: Some(&[ReplicaBrokerId(99), ReplicaBrokerId(1), ReplicaBrokerId(1)]),
+                allow_rf: ReplicationFactorPolicy::PermitChange,
+                expected: RowError {
+                    code: INVALID_REPLICA_ASSIGNMENT,
+                    message:
+                        "The manual partition assignment includes the broker 1 more than once."
+                            .into(),
+                },
+            },
+            RejectCase {
+                label: "a replication factor change without the flag",
+                topic: "foo",
+                partition: krabka_ids::PartitionIndex(0),
+                target: Some(&[ReplicaBrokerId(1), ReplicaBrokerId(2)]),
+                allow_rf: ReplicationFactorPolicy::Maintain,
+                expected: RowError {
+                    code: INVALID_REPLICATION_FACTOR,
+                    message: "The replication factor is changed from 3 to 2".into(),
+                },
+            },
+            RejectCase {
+                label: "a cancel with nothing in progress",
+                topic: "foo",
+                partition: krabka_ids::PartitionIndex(0),
+                target: None,
+                allow_rf: ReplicationFactorPolicy::PermitChange,
+                expected: RowError {
+                    code: NO_REASSIGNMENT_IN_PROGRESS,
+                    message: NO_REASSIGNMENT_MESSAGE.into(),
+                },
+            },
         ];
         let image = img_with().call();
-        for (label, topic, partition, target, allow_rf, expected) in cases {
+        for RejectCase {
+            label,
+            topic,
+            partition,
+            target,
+            allow_rf,
+            expected,
+        } in cases
+        {
             let planned = process_one_partition(
                 &image,
                 topic,
@@ -927,10 +1011,10 @@ mod tests {
 
         assert!(
             error
-                == (
-                    INVALID_REPLICATION_FACTOR,
-                    "The replication factor is changed from 3 to 2".to_string()
-                )
+                == RowError {
+                    code: INVALID_REPLICATION_FACTOR,
+                    message: "The replication factor is changed from 3 to 2".to_string()
+                }
         );
     }
 
@@ -939,7 +1023,7 @@ mod tests {
         let image = img_with().partition_epoch(i32::MAX).call();
         let error = process_one_partition(&image, "foo", 0, Some(&[1, 4]), true, true)
             .expect_err("exhausted epoch must fail closed");
-        assert!(error.0 == INVALID_REQUEST);
+        assert!(error.code == INVALID_REQUEST);
     }
 
     #[test]
@@ -968,7 +1052,7 @@ mod tests {
             for _ in 0..2 {
                 let error = process_one_partition(&image, "foo", 0, target, true, true)
                     .expect_err("exhausted leader epoch must fail closed");
-                check!(error.0 == INVALID_REQUEST, "case {label}");
+                check!(error.code == INVALID_REQUEST, "case {label}");
                 check!(
                     image.partition("foo", 0).unwrap().leader == leader,
                     "case {label}"
@@ -990,8 +1074,8 @@ mod tests {
         ];
         for (label, img) in cases {
             let err = process_one_partition(&img, "foo", 0, None, true, false).unwrap_err();
-            check!(err.0 == POLICY_VIOLATION, "case {label}");
-            check!(err.1 == CANCEL_NEEDS_APPROVAL, "case {label}");
+            check!(err.code == POLICY_VIOLATION, "case {label}");
+            check!(err.message == CANCEL_NEEDS_APPROVAL, "case {label}");
         }
     }
 
@@ -1000,7 +1084,7 @@ mod tests {
         // The gate never masks a request that names nothing.
         let img = MetadataImage::new(Uuid::nil());
         let err = process_one_partition(&img, "foo", 0, None, true, false).unwrap_err();
-        check!(err.0 == UNKNOWN_TOPIC_OR_PARTITION);
+        check!(err.code == UNKNOWN_TOPIC_OR_PARTITION);
     }
 
     #[test]

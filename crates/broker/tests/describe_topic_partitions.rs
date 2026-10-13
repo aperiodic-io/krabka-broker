@@ -47,13 +47,14 @@ fn describe_topics_request(
     }
 }
 
-async fn described_topic(
-    name: &str,
-    partitions: i32,
-) -> (
-    support::InProcess,
-    krabka_protocol::owned::describe_topic_partitions_response::DescribeTopicPartitionsResponse,
-) {
+/// A started broker and the `DescribeTopicPartitions` response for its topic.
+struct DescribedTopic {
+    p: support::InProcess,
+    response:
+        krabka_protocol::owned::describe_topic_partitions_response::DescribeTopicPartitionsResponse,
+}
+
+async fn described_topic(name: &str, partitions: i32) -> DescribedTopic {
     let p = support::start().await;
     create_topic(
         &p,
@@ -68,7 +69,7 @@ async fn described_topic(
         .send(describe_topics_request(&[name], 2000, None))
         .await
         .expect("DescribeTopicPartitions");
-    (p, response)
+    DescribedTopic { p, response }
 }
 
 // Bit positions (subset; cross-check'd with the KIP-430 unit tests).
@@ -180,7 +181,7 @@ async fn unknown_topic_in_named_request_returns_error_row() {
 /// regress.
 #[tokio::test]
 async fn elr_lists_are_empty_not_null_for_jvm_3_8_admin_compatibility() {
-    let (p, resp) = Box::pin(described_topic("t", 1)).await;
+    let DescribedTopic { p, response: resp } = Box::pin(described_topic("t", 1)).await;
 
     assert!(resp.topics.len() == 1);
     assert!(resp.topics[0].partitions.len() == 1);
@@ -320,7 +321,7 @@ async fn a_feature_downgrade_empties_the_reported_elr() {
 
 #[tokio::test]
 async fn topic_authorized_operations_populated_for_super_user() {
-    let (p, resp) = Box::pin(described_topic("t", 1)).await;
+    let DescribedTopic { p, response: resp } = Box::pin(described_topic("t", 1)).await;
 
     assert!(resp.topics.len() == 1);
     let row = &resp.topics[0];

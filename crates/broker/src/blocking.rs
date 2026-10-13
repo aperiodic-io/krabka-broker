@@ -255,7 +255,7 @@ mod tests {
 
     /// A runtime that counts the threads it starts. A current-thread runtime
     /// starts no worker, so there the count is the blocking-pool threads.
-    fn counting_runtime(multi_thread: bool) -> (tokio::runtime::Runtime, Arc<AtomicUsize>) {
+    fn counting_runtime(multi_thread: bool) -> CountingRuntime {
         let started = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&started);
         let mut builder = if multi_thread {
@@ -271,12 +271,18 @@ mod tests {
             })
             .build()
             .expect("build a runtime");
-        (runtime, started)
+        CountingRuntime { runtime, started }
+    }
+
+    /// A runtime, and the number of threads it has started.
+    struct CountingRuntime {
+        runtime: tokio::runtime::Runtime,
+        started: Arc<AtomicUsize>,
     }
 
     /// Which thread ran the work, and where the seam put it.
-    fn placement_of(multi_thread: bool, inline: bool) -> (Placement, ThreadId, ThreadId) {
-        let (runtime, _) = counting_runtime(multi_thread);
+    fn placement_of(multi_thread: bool, inline: bool) -> ObservedPlacement {
+        let CountingRuntime { runtime, .. } = counting_runtime(multi_thread);
         let _guard = inline.then(inline_blocking_on_this_thread);
         runtime.block_on(async {
             let caller = std::thread::current().id();
@@ -284,8 +290,20 @@ mod tests {
             let worker = run_blocking(|| std::thread::current().id())
                 .await
                 .expect("the work returns");
-            (placement, caller, worker)
+            ObservedPlacement {
+                placement,
+                caller,
+                worker,
+            }
         })
+    }
+
+    /// Where the seam put the work, and the thread that asked and the thread
+    /// that ran it.
+    struct ObservedPlacement {
+        placement: Placement,
+        caller: ThreadId,
+        worker: ThreadId,
     }
 
     /// The seam keeps the two native placements, and the forced-inline guard
@@ -299,7 +317,11 @@ mod tests {
             (true, true, Placement::Inline, true),
         ];
         for (multi_thread, inline, want, on_caller) in cases {
-            let (placement, caller, worker) = placement_of(multi_thread, inline);
+            let ObservedPlacement {
+                placement,
+                caller,
+                worker,
+            } = placement_of(multi_thread, inline);
             check!(
                 placement == want,
                 "multi_thread={multi_thread} inline={inline}"
@@ -319,7 +341,7 @@ mod tests {
     /// the property the WASI build needs: its runtime cannot start one.
     #[test]
     fn inline_work_starts_no_blocking_thread() {
-        let (runtime, started) = counting_runtime(false);
+        let CountingRuntime { runtime, started } = counting_runtime(false);
         let guard = inline_blocking_on_this_thread();
         let values = runtime.block_on(async {
             let ran = run_blocking(|| 1).await.expect("run_blocking");
@@ -343,7 +365,7 @@ mod tests {
     /// task that asked for the work.
     #[test]
     fn an_inline_panic_is_an_error_not_an_unwind() {
-        let (runtime, _) = counting_runtime(false);
+        let CountingRuntime { runtime, .. } = counting_runtime(false);
         let _guard = inline_blocking_on_this_thread();
         let outcomes = runtime.block_on(async {
             [
@@ -362,11 +384,17 @@ mod tests {
     /// with the message the callers already log.
     #[test]
     fn a_native_panic_keeps_its_shape() {
-        let (current_thread, _) = counting_runtime(false);
+        let CountingRuntime {
+            runtime: current_thread,
+            ..
+        } = counting_runtime(false);
         let pooled = current_thread.block_on(run_blocking(panics));
         check!(let Err(BlockingError::Join(_)) = pooled);
 
-        let (multi_thread, _) = counting_runtime(true);
+        let CountingRuntime {
+            runtime: multi_thread,
+            ..
+        } = counting_runtime(true);
         let in_place = multi_thread.block_on(run_blocking_catching(panics));
         let error = in_place.expect_err("the panic is caught");
         check!(error.to_string() == "block_in_place panic");

@@ -13,7 +13,9 @@
 //! the leader it forwards a rejected `submit_change` to.
 
 use crate::{
-    host_port::parse_host_port, metadata_source::MetadataSource, network::client::InterBrokerClient,
+    host_port::{HostPort, parse_host_port},
+    metadata_source::MetadataSource,
+    network::client::InterBrokerClient,
 };
 
 /// The listener name a controller advertises for the RPCs its peers address
@@ -28,12 +30,15 @@ pub(crate) const CONTROLLER_LISTENER_NAME: &str = "CONTROLLER";
 /// something other than the literal `CONTROLLER` still be reachable. The
 /// controller-registration decoder accepts any non-empty unique name, so the
 /// literal is a convention rather than a guarantee.
-fn controller_endpoint(endpoints: &[krabka_metadata::VoterEndpoint]) -> Option<(String, u16)> {
+fn controller_endpoint(endpoints: &[krabka_metadata::VoterEndpoint]) -> Option<HostPort> {
     endpoints
         .iter()
         .find(|endpoint| endpoint.name.eq_ignore_ascii_case(CONTROLLER_LISTENER_NAME))
         .or_else(|| endpoints.first())
-        .map(|endpoint| (endpoint.host.clone(), endpoint.port))
+        .map(|endpoint| HostPort {
+            host: endpoint.host.clone(),
+            port: endpoint.port,
+        })
 }
 
 /// Where to address a controller-listener RPC aimed at controller `leader`.
@@ -69,6 +74,15 @@ pub(crate) fn leader_endpoint(
                 .find(|(node_id, _)| *node_id == leader)
                 .and_then(|(_, endpoint)| parse_host_port(endpoint))
         })
+        .map(|HostPort { host, port }| (host, port))
+}
+
+/// The controller leader that a request is addressed to, the image that
+/// named it, and the endpoint to dial.
+pub(crate) struct LeaderEndpoint {
+    pub(crate) leader_id: krabka_raft::NodeId,
+    pub(crate) image: std::sync::Arc<krabka_metadata::MetadataImage>,
+    pub(crate) endpoint: HostPort,
 }
 
 /// Resolve the current controller leader and the image used to build a request
@@ -77,21 +91,17 @@ pub(crate) fn leader_endpoint(
 pub(crate) fn current_leader_endpoint(
     controller: &dyn MetadataSource,
     static_voters: &[(krabka_raft::NodeId, String)],
-) -> Result<
-    (
-        krabka_raft::NodeId,
-        std::sync::Arc<krabka_metadata::MetadataImage>,
-        String,
-        u16,
-    ),
-    String,
-> {
+) -> Result<LeaderEndpoint, String> {
     let leader = *controller.watch_leader().borrow();
     let leader = leader.ok_or_else(|| "no controller leader".to_string())?;
     let image = controller.current_image();
     let (host, port) = leader_endpoint(&image, static_voters, leader)
         .ok_or_else(|| "controller leader has no known controller endpoint".to_string())?;
-    Ok((leader, image, host, port))
+    Ok(LeaderEndpoint {
+        leader_id: leader,
+        image,
+        endpoint: HostPort { host, port },
+    })
 }
 
 /// The id that the `index`th bootstrap server stands under, counted down from
@@ -124,7 +134,7 @@ pub(crate) fn quorum_targets(
         .iter()
         .filter_map(|voter| {
             controller_endpoint(&voter.endpoints)
-                .map(|(host, port)| (voter.id, format!("{host}:{port}")))
+                .map(|HostPort { host, port }| (voter.id, format!("{host}:{port}")))
         })
         .collect();
     for (id, endpoint) in static_voters {
@@ -165,15 +175,34 @@ pub(crate) struct ControllerDialer {
 mod tests {
     use {super::*, crate::test_support::voter_image, assert2::assert};
 
-    fn endpoints(named: &[(&str, &str, u16)]) -> Vec<krabka_metadata::VoterEndpoint> {
+    /// A listener a voter advertises.
+    #[derive(Debug)]
+    struct NamedEndpoint<'a> {
+        name: &'a str,
+        host: &'a str,
+        port: u16,
+    }
+
+    fn endpoints(named: &[NamedEndpoint<'_>]) -> Vec<krabka_metadata::VoterEndpoint> {
         named
             .iter()
-            .map(|&(name, host, port)| krabka_metadata::VoterEndpoint {
-                name: name.to_string(),
-                host: host.to_string(),
-                port,
+            .map(|endpoint| krabka_metadata::VoterEndpoint {
+                name: endpoint.name.to_string(),
+                host: endpoint.host.to_string(),
+                port: endpoint.port,
             })
             .collect()
+    }
+
+    fn named(name: &'static str, host: &'static str, port: u16) -> NamedEndpoint<'static> {
+        NamedEndpoint { name, host, port }
+    }
+
+    fn host_port(host: &str, port: u16) -> HostPort {
+        HostPort {
+            host: host.to_owned(),
+            port,
+        }
     }
 
     /// These RPCs go to the leader's controller listener, so that is the
@@ -185,33 +214,40 @@ mod tests {
     fn controller_endpoint_prefers_the_controller_listener_and_falls_back() {
         let cases = [
             (
-                &[
-                    ("BROKER", "broker-host", 9_092u16),
-                    ("CONTROLLER", "ctrl-host", 9_093),
-                ][..],
-                Some(("ctrl-host".to_string(), 9_093)),
+                vec![
+                    named("BROKER", "broker-host", 9_092),
+                    named("CONTROLLER", "ctrl-host", 9_093),
+                ],
+                Some(host_port("ctrl-host", 9_093)),
             ),
             // Named in another case: Kafka listener names are case-insensitive.
             (
-                &[("controller", "ctrl-host", 9_093)][..],
-                Some(("ctrl-host".to_string(), 9_093)),
+                vec![named("controller", "ctrl-host", 9_093)],
+                Some(host_port("ctrl-host", 9_093)),
             ),
             // A custom name: the only endpoint there is, so it is the one.
             (
-                &[("CTRL", "ctrl-host", 9_093)][..],
-                Some(("ctrl-host".to_string(), 9_093)),
+                vec![named("CTRL", "ctrl-host", 9_093)],
+                Some(host_port("ctrl-host", 9_093)),
             ),
-            (&[][..], None),
+            (vec![], None),
         ];
-        for (named, want) in cases {
-            assert!(controller_endpoint(&endpoints(named)) == want, "{named:?}");
+        for (advertised, want) in cases {
+            assert!(
+                controller_endpoint(&endpoints(&advertised)) == want,
+                "{advertised:?}"
+            );
         }
     }
 
     fn image_with_voter(node: u64, host: &str, port: u16) -> krabka_metadata::MetadataImage {
         voter_image()
-            .node(node)
-            .endpoints(endpoints(&[("CONTROLLER", host, port)]))
+            .node(krabka_ids::NodeId(node))
+            .endpoints(endpoints(&[NamedEndpoint {
+                name: "CONTROLLER",
+                host,
+                port,
+            }]))
             .call()
     }
 
@@ -256,17 +292,22 @@ mod tests {
     /// set they are the whole list.
     #[test]
     fn quorum_targets_put_voters_before_bootstrap_servers() {
+        struct Target<'a> {
+            id: u64,
+            endpoint: &'a str,
+        }
+        let target = |id, endpoint| Target { id, endpoint };
         let node = krabka_raft::NodeId;
-        let owned = |targets: &[(u64, &str)]| -> Vec<(krabka_raft::NodeId, String)> {
+        let owned = |targets: &[Target<'_>]| -> Vec<_> {
             targets
                 .iter()
-                .map(|&(id, endpoint)| (node(id), endpoint.to_owned()))
+                .map(|target| (node(target.id), target.endpoint.to_owned()))
                 .collect()
         };
         let empty = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
         let dynamic = image_with_voter(3001, "ducker12", 9_592);
         let bootstrap = ["ducker12:9592".to_owned(), "ducker13:9592".to_owned()];
-        let static_voters = owned(&[(1, "static-one:9193"), (2, "static-two:9293")]);
+        let static_voters = owned(&[target(1, "static-one:9193"), target(2, "static-two:9293")]);
         // (what, image, static voters, bootstrap servers, targets)
         let cases = [
             ("nothing configured", &empty, vec![], &[][..], vec![]),
@@ -275,21 +316,27 @@ mod tests {
                 &empty,
                 vec![],
                 &bootstrap[..],
-                owned(&[(u64::MAX, "ducker12:9592"), (u64::MAX - 1, "ducker13:9592")]),
+                owned(&[
+                    target(u64::MAX, "ducker12:9592"),
+                    target(u64::MAX - 1, "ducker13:9592"),
+                ]),
             ),
             (
                 "the voter set takes over the bootstrap server it is reached on",
                 &dynamic,
                 vec![],
                 &bootstrap[..],
-                owned(&[(3001, "ducker12:9592"), (u64::MAX - 1, "ducker13:9592")]),
+                owned(&[
+                    target(3001, "ducker12:9592"),
+                    target(u64::MAX - 1, "ducker13:9592"),
+                ]),
             ),
             (
                 "configured voters the voter set does not name",
                 &image_with_voter(1, "voter-one", 9_093),
                 static_voters.clone(),
                 &[][..],
-                owned(&[(1, "voter-one:9093"), (2, "static-two:9293")]),
+                owned(&[target(1, "voter-one:9093"), target(2, "static-two:9293")]),
             ),
             (
                 "a static quorum with no voter set",

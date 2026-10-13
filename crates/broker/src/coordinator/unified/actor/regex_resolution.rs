@@ -264,8 +264,8 @@ pub(crate) fn apply_regex_result(
     resolved: Resolutions,
     input: &ReconcileInput,
 ) -> PendingRecords {
-    let mut resolved: Vec<(String, ResolvedRegularExpression)> = resolved.into_iter().collect();
-    resolved.sort_by(|a, b| a.0.cmp(&b.0));
+    let resolved: std::collections::BTreeMap<String, ResolvedRegularExpression> =
+        resolved.into_iter().collect();
     let mut bump = false;
     let mut records = Vec::new();
     for (regex, resolution) in resolved {
@@ -366,19 +366,40 @@ mod tests {
     const NOW_MS: i64 = 1_000_000;
     const REFRESH_INTERVAL: Duration = Duration::from_mins(10);
 
-    fn table(entries: &[(&'static str, &[&'static str])]) -> Table {
+    /// The topics a pattern selects.
+    #[derive(Clone, Copy)]
+    struct TableEntry<'a> {
+        regex: &'static str,
+        topics: &'a [&'static str],
+    }
+
+    fn table(entries: &[TableEntry<'_>]) -> Table {
         Table {
             topics: entries
                 .iter()
-                .map(|(regex, topics)| (*regex, topics.to_vec()))
+                .map(|entry| (entry.regex, entry.topics.to_vec()))
                 .collect(),
             ..Table::default()
         }
     }
 
+    fn entry<'a>(regex: &'static str, topics: &'a [&'static str]) -> TableEntry<'a> {
+        TableEntry { regex, topics }
+    }
+
     /// What [`run`] found: the heartbeat's regex update, its tombstones, and
     /// the records of the resolution's own batch when it resolved.
-    type Ran = (RegexUpdate, Vec<RegexRecord>, Option<PendingRecords>);
+    struct Ran {
+        update: RegexUpdate,
+        tombstones: Vec<RegexRecord>,
+        result: Option<PendingRecords>,
+    }
+
+    /// A member's old and new pattern.
+    struct PatternChange<'a> {
+        old: Option<&'a str>,
+        new: Option<&'a str>,
+    }
 
     /// A heartbeat of `member_id` that changes its pattern from `old_regex` to
     /// `new_regex`: Kafka's `maybeUpdateRegularExpressions`, the member's new
@@ -386,7 +407,10 @@ mod tests {
     fn run(
         state: &mut GroupState,
         member_id: &str,
-        (old_regex, new_regex): (Option<&str>, Option<&str>),
+        PatternChange {
+            old: old_regex,
+            new: new_regex,
+        }: PatternChange<'_>,
         resolver: &Table,
         now_ms: i64,
         refresh_version: i64,
@@ -414,7 +438,11 @@ mod tests {
         state.add_or_update_member(m);
         let result = resolutions
             .map(|resolved| apply_regex_result(state, resolved, &ReconcileInput::default()));
-        (update, records, result)
+        Ran {
+            update,
+            tombstones: records,
+            result,
+        }
     }
 
     fn written(topics: &[&str], version: i64, timestamp_ms: i64) -> RegularExpressionValue {
@@ -433,30 +461,54 @@ mod tests {
     /// has none. Each row compares the whole batch.
     #[test]
     fn a_new_pattern_is_resolved_and_written_in_its_own_batch() {
-        // (what the pattern selects, the resolution's batch)
-        let rows: [(&[&str], PendingRecords); 2] = [
-            (&["a1", "a2"], PendingRecords {
-                resolved_regexes: vec![(
-                    "a.*".to_owned(),
-                    Some(written(&["a1", "a2"], 100, NOW_MS)),
-                )],
-                group_metadata: Some(GroupMetadataValue {
-                    epoch: 2,
-                    metadata_hash: 0,
-                }),
-                ..PendingRecords::default()
-            }),
-            (&[], PendingRecords {
-                resolved_regexes: vec![("a.*".to_owned(), Some(written(&[], 100, NOW_MS)))],
-                ..PendingRecords::default()
-            }),
+        struct Row {
+            /// What the pattern selects.
+            selects: &'static [&'static str],
+            /// The resolution's batch.
+            batch: PendingRecords,
+        }
+        let rows = [
+            Row {
+                selects: &["a1", "a2"],
+                batch: PendingRecords {
+                    resolved_regexes: vec![(
+                        "a.*".to_owned(),
+                        Some(written(&["a1", "a2"], 100, NOW_MS)),
+                    )],
+                    group_metadata: Some(GroupMetadataValue {
+                        epoch: 2,
+                        metadata_hash: 0,
+                    }),
+                    ..PendingRecords::default()
+                },
+            },
+            Row {
+                selects: &[],
+                batch: PendingRecords {
+                    resolved_regexes: vec![("a.*".to_owned(), Some(written(&[], 100, NOW_MS)))],
+                    ..PendingRecords::default()
+                },
+            },
         ];
-        for (selects, batch) in rows {
+        for Row { selects, batch } in rows {
             let mut state = group(&[]);
-            let resolver = table(&[("a.*", selects)]);
+            let resolver = table(&[entry("a.*", selects)]);
 
-            let (update, tombstones, result) =
-                run(&mut state, "m1", (None, Some("a.*")), &resolver, NOW_MS, -1);
+            let Ran {
+                update,
+                tombstones,
+                result,
+            } = run(
+                &mut state,
+                "m1",
+                PatternChange {
+                    old: None,
+                    new: Some("a.*"),
+                },
+                &resolver,
+                NOW_MS,
+                -1,
+            );
 
             check!(update == RegexUpdate::Updated, "{selects:?}");
             check!(tombstones.is_empty(), "{selects:?}");
@@ -601,12 +653,15 @@ mod tests {
         for row in rows {
             let mut state = group(&[("m1", Some("a.*")), ("m2", row.old)]);
             state.set_resolved_regex("a.*".into(), resolution(&["a1"], 5, NOW_MS - row.since_ms));
-            let resolver = table(&[("a.*", &["a1"]), ("b.*", &["b1"])]);
+            let resolver = table(&[entry("a.*", &["a1"]), entry("b.*", &["b1"])]);
 
-            let (update, _, _) = run(
+            let Ran { update, .. } = run(
                 &mut state,
                 "m2",
-                (row.old, row.new),
+                PatternChange {
+                    old: row.old,
+                    new: row.new,
+                },
                 &resolver,
                 NOW_MS,
                 row.refresh_version,
@@ -626,18 +681,38 @@ mod tests {
     /// finds other topics bumps it.
     #[test]
     fn a_refresh_that_changes_the_topics_bumps_the_group_epoch() {
-        // (what the resolver selects now, the group epoch after)
-        let rows: [(&[&str], Option<i32>); 3] =
-            [(&["a1"], None), (&["a1", "a2"], Some(2)), (&[], Some(2))];
-        for (selects, epoch) in rows {
+        struct Row {
+            /// What the resolver selects now.
+            selects: &'static [&'static str],
+            /// The group epoch after.
+            epoch: Option<i32>,
+        }
+        let rows = [
+            Row {
+                selects: &["a1"],
+                epoch: None,
+            },
+            Row {
+                selects: &["a1", "a2"],
+                epoch: Some(2),
+            },
+            Row {
+                selects: &[],
+                epoch: Some(2),
+            },
+        ];
+        for Row { selects, epoch } in rows {
             let mut state = group(&[("m1", Some("a.*"))]);
             state.set_resolved_regex("a.*".into(), resolution(&["a1"], 5, NOW_MS - 60_000));
-            let resolver = table(&[("a.*", selects)]);
+            let resolver = table(&[entry("a.*", selects)]);
 
-            let (update, _, result) = run(
+            let Ran { update, result, .. } = run(
                 &mut state,
                 "m1",
-                (Some("a.*"), Some("a.*")),
+                PatternChange {
+                    old: Some("a.*"),
+                    new: Some("a.*"),
+                },
                 &resolver,
                 NOW_MS,
                 6,
@@ -667,19 +742,42 @@ mod tests {
     /// pattern does not.
     #[test]
     fn the_last_member_to_leave_a_pattern_tombstones_its_resolution() {
-        // (the other member's pattern, tombstones)
-        let rows: [(Option<&str>, Vec<RegexRecord>); 2] = [
-            (None, vec![("a.*".to_owned(), None)]),
-            (Some("a.*"), vec![]),
+        struct Row {
+            /// The other member's pattern.
+            other: Option<&'static str>,
+            tombstones: Vec<RegexRecord>,
+        }
+        let rows = [
+            Row {
+                other: None,
+                tombstones: vec![("a.*".to_owned(), None)],
+            },
+            Row {
+                other: Some("a.*"),
+                tombstones: vec![],
+            },
         ];
-        for (other, tombstones) in rows {
+        for Row { other, tombstones } in rows {
             let mut state = group(&[("m1", Some("a.*")), ("m2", other)]);
             state.set_resolved_regex("a.*".into(), resolution(&["a1"], 5, NOW_MS));
             let resolver = table(&[]);
 
             // m1 changes from `a.*` to no pattern.
-            let (update, records, _) =
-                run(&mut state, "m1", (Some("a.*"), None), &resolver, NOW_MS, -1);
+            let Ran {
+                update,
+                tombstones: records,
+                ..
+            } = run(
+                &mut state,
+                "m1",
+                PatternChange {
+                    old: Some("a.*"),
+                    new: None,
+                },
+                &resolver,
+                NOW_MS,
+                -1,
+            );
 
             check!(update == RegexUpdate::UpdatedAndResolved);
             check!(records == tombstones, "{other:?}");

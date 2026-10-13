@@ -134,7 +134,7 @@ pub struct AuthenticatedSnapshot {
 
 /// The KIP-368 session ceiling a mechanism reports and records: the earlier of
 /// the credential's own lifetime and the listener's
-/// `connections.max.reauth.ms`, as `(expires_at_ms, session_lifetime_ms)`.
+/// `connections.max.reauth.ms`.
 ///
 /// `credential_expires_at_ms` is `None` for every credential that carries no
 /// expiry of its own — PLAIN, SCRAM and GSSAPI — which leaves the cap as the
@@ -146,12 +146,26 @@ pub(super) fn session_expiry(
     now_ms: i64,
     credential_expires_at_ms: Option<i64>,
     max_reauth: Option<krabka_units::Time>,
-) -> (Option<i64>, i64) {
-    sasl_session_expiry(
+) -> SessionExpiry {
+    let (expires_at_ms, session_lifetime_ms) = sasl_session_expiry(
         now_ms,
         credential_expires_at_ms,
         max_reauth.map(krabka_units::convert::TimeExt::millis_i64),
-    )
+    );
+    SessionExpiry {
+        expires_at_ms,
+        session_lifetime_ms,
+    }
+}
+
+/// The instant a session ends and the window the client is told to
+/// re-authenticate within.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SessionExpiry {
+    /// The instant the session ends, or `None` when nothing bounds it.
+    pub(super) expires_at_ms: Option<i64>,
+    /// The window advertised to the client in `SaslAuthenticateResponse`.
+    pub(super) session_lifetime_ms: i64,
 }
 
 /// Enters a KIP-368 re-authentication: a `Reauthenticating` connection runs
@@ -464,24 +478,41 @@ mod tests {
                 pending_token_expiry_ms: None,
             }
         }
-        // (state, [SaslHandshake, ApiVersions, SaslAuthenticate, Produce, Metadata])
-        let cases: [(&str, ConnectionAuth, [bool; 5]); 4] = [
-            ("anonymous", ConnectionAuth::Anonymous, [
-                true, true, false, false, false,
-            ]),
-            ("negotiating", negotiating(), [
-                false, false, true, false, false,
-            ]),
-            ("reauthenticating", reauthenticating(), [
-                false, false, true, false, false,
-            ]),
-            (
-                "reauth bad mechanism",
-                ConnectionAuth::ReauthBadMechanism,
-                [false; 5],
-            ),
+        /// A state and whether it admits each of `SaslHandshake`, `ApiVersions`,
+        /// `SaslAuthenticate`, `Produce` and `Metadata`.
+        struct GateCase<'a> {
+            name: &'a str,
+            auth: ConnectionAuth,
+            expected: [bool; 5],
+        }
+        let cases: [GateCase; 4] = [
+            GateCase {
+                name: "anonymous",
+                auth: ConnectionAuth::Anonymous,
+                expected: [true, true, false, false, false],
+            },
+            GateCase {
+                name: "negotiating",
+                auth: negotiating(),
+                expected: [false, false, true, false, false],
+            },
+            GateCase {
+                name: "reauthenticating",
+                auth: reauthenticating(),
+                expected: [false, false, true, false, false],
+            },
+            GateCase {
+                name: "reauth bad mechanism",
+                auth: ConnectionAuth::ReauthBadMechanism,
+                expected: [false; 5],
+            },
         ];
-        for (name, auth, expected) in cases {
+        for GateCase {
+            name,
+            auth,
+            expected,
+        } in cases
+        {
             let got = [17, 18, 36, 0, 3].map(|api_key| auth.allows_request(api_key));
             assert!(got == expected, "{name}");
         }
@@ -813,6 +844,13 @@ mod tests {
         }
     }
 
+    fn expiry(expires_at_ms: Option<i64>, session_lifetime_ms: i64) -> SessionExpiry {
+        SessionExpiry {
+            expires_at_ms,
+            session_lifetime_ms,
+        }
+    }
+
     /// KIP-368 ceiling arithmetic. The window the broker advertises and the
     /// instant it enforces have to agree, the earlier of the two ceilings has
     /// to win in both directions, a `connections.max.reauth.ms` that is not
@@ -823,48 +861,53 @@ mod tests {
     fn session_expiry_takes_the_earlier_ceiling_and_never_reports_a_negative_window() {
         let now = 1_000_000_i64;
         let cases = [
-            ("no credential lifetime and no cap", None, None, (None, 0)),
+            (
+                "no credential lifetime and no cap",
+                None,
+                None,
+                expiry(None, 0),
+            ),
             (
                 "the cap is the only ceiling",
                 None,
                 Some(krabka_units::millis(30_000)),
-                (Some(now + 30_000), 30_000),
+                expiry(Some(now + 30_000), 30_000),
             ),
             (
                 "a zero cap arms no deadline",
                 None,
                 Some(krabka_units::millis(0)),
-                (None, 0),
+                expiry(None, 0),
             ),
             (
                 "a negative cap arms no deadline",
                 None,
                 Some(-krabka_units::millis(1)),
-                (None, 0),
+                expiry(None, 0),
             ),
             (
                 "the credential is the only ceiling",
                 Some(now + 5_000),
                 None,
-                (Some(now + 5_000), 5_000),
+                expiry(Some(now + 5_000), 5_000),
             ),
             (
                 "a credential shorter than the cap wins",
                 Some(now + 5_000),
                 Some(krabka_units::millis(30_000)),
-                (Some(now + 5_000), 5_000),
+                expiry(Some(now + 5_000), 5_000),
             ),
             (
                 "a cap shorter than the credential wins",
                 Some(now + 60_000),
                 Some(krabka_units::millis(30_000)),
-                (Some(now + 30_000), 30_000),
+                expiry(Some(now + 30_000), 30_000),
             ),
             (
                 "an already-expired credential reports no window",
                 Some(now - 5_000),
                 Some(krabka_units::millis(30_000)),
-                (Some(now - 5_000), 0),
+                expiry(Some(now - 5_000), 0),
             ),
         ];
         for (case, credential, cap, want) in cases {
@@ -873,7 +916,7 @@ mod tests {
 
         check!(
             session_expiry(i64::MAX - 1, None, Some(krabka_units::millis(30_000)))
-                == (Some(i64::MAX), 1)
+                == expiry(Some(i64::MAX), 1)
         );
 
         // A saturated cap still respects an earlier credential deadline.
@@ -882,7 +925,7 @@ mod tests {
                 i64::MAX - 1,
                 Some(i64::MAX - 1),
                 Some(krabka_units::millis(30_000)),
-            ) == (Some(i64::MAX - 1), 0)
+            ) == expiry(Some(i64::MAX - 1), 0)
         );
     }
 

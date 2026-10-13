@@ -66,10 +66,17 @@ fn feature_record(name: &str, level: i16) -> MetadataRecord {
     })
 }
 
+/// A feature and the level it is finalized at.
+#[derive(Clone, Copy)]
+struct FeatureLevel<'a> {
+    name: &'a str,
+    level: i16,
+}
+
 /// An image finalized at `levels`.
-fn image(levels: &[(&str, i16)]) -> krabka_metadata::MetadataImage {
+fn image(levels: &[FeatureLevel<'_>]) -> krabka_metadata::MetadataImage {
     let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-    for &(name, level) in levels {
+    for &FeatureLevel { name, level } in levels {
         image.apply(&feature_record(name, level));
     }
     image
@@ -101,13 +108,19 @@ fn rows_validate_as_kafkas_update_feature() {
     let cases = [
         (
             "empty request",
-            image(&[(mv, 25)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 25,
+            }]),
             vec![],
             Ok(plan(vec![], &[])),
         ),
         (
             "a repeated name keeps its last row",
-            image(&[(mv, 25)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 25,
+            }]),
             vec![
                 named_update(group, 9, UPGRADE),
                 named_update(group, 1, UPGRADE),
@@ -116,7 +129,10 @@ fn rows_validate_as_kafkas_update_feature() {
         ),
         (
             "unknown feature above level 0",
-            image(&[(mv, 25)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 25,
+            }]),
             vec![named_update("no.such.feature", 1, UPGRADE)],
             Err(invalid(
                 "no.such.feature",
@@ -126,7 +142,10 @@ fn rows_validate_as_kafkas_update_feature() {
         ),
         (
             "unknown feature at level 0",
-            image(&[(mv, 25)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 25,
+            }]),
             vec![named_update("no.such.feature", 0, SAFE)],
             Err(invalid(
                 "no.such.feature",
@@ -136,13 +155,19 @@ fn rows_validate_as_kafkas_update_feature() {
         ),
         (
             "level 0 downgrade of a feature that is not finalized",
-            image(&[(mv, 25)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 25,
+            }]),
             vec![named_update(share, 0, SAFE)],
             Ok(plan(vec![feature_record(share, 0)], &[share])),
         ),
         (
             "an unknown upgrade type",
-            image(&[(mv, 25)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 25,
+            }]),
             vec![named_update(group, 1, 0)],
             Err(invalid(
                 group,
@@ -152,7 +177,10 @@ fn rows_validate_as_kafkas_update_feature() {
         ),
         (
             "a negative level",
-            image(&[(mv, 25)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 25,
+            }]),
             vec![named_update(group, -1, UPGRADE)],
             Err(invalid(
                 group,
@@ -162,7 +190,10 @@ fn rows_validate_as_kafkas_update_feature() {
         ),
         (
             "a level above the local range",
-            image(&[(mv, 25)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 25,
+            }]),
             vec![named_update(share, 9, UPGRADE)],
             Err(invalid(
                 share,
@@ -172,7 +203,16 @@ fn rows_validate_as_kafkas_update_feature() {
         ),
         (
             "a downgrade without a downgrade type",
-            image(&[(mv, 25), (group, 1)]),
+            image(&[
+                FeatureLevel {
+                    name: mv,
+                    level: 25,
+                },
+                FeatureLevel {
+                    name: group,
+                    level: 1,
+                },
+            ]),
             vec![named_update(group, 0, UPGRADE)],
             Err(invalid(
                 group,
@@ -183,13 +223,19 @@ fn rows_validate_as_kafkas_update_feature() {
         ),
         (
             "a downgrade type that raises the level",
-            image(&[(mv, 25)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 25,
+            }]),
             vec![named_update(group, 1, SAFE)],
             Err(invalid(group, 1, "Can't downgrade to a newer version.")),
         ),
         (
             "dependencies read the levels the request proposes",
-            image(&[(mv, 22)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 22,
+            }]),
             vec![metadata_update(23, UPGRADE), elr_update(1, UPGRADE)],
             Ok(UpdatePlan {
                 enables_elr: true,
@@ -200,7 +246,10 @@ fn rows_validate_as_kafkas_update_feature() {
         ),
         (
             "an unmet dependency",
-            image(&[(mv, 22)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 22,
+            }]),
             vec![elr_update(1, UPGRADE)],
             Err(invalid(
                 elr,
@@ -245,7 +294,10 @@ fn an_unstable_metadata_version_needs_unstable_feature_versions() {
         (trunk, 31, accepted(31)),
         (trunk, 33, accepted(33)),
     ] {
-        let image = image(&[(mv, 30)]);
+        let image = image(&[FeatureLevel {
+            name: mv,
+            level: 30,
+        }]);
         let request = validate_only(vec![metadata_update(level, UPGRADE)]);
         assert!(
             plan_updates(&request, &image, local) == expected,
@@ -266,7 +318,16 @@ fn version_zero_allow_downgrade_is_read_as_upgrade() {
         }],
         ..Default::default()
     };
-    let image = image(&[("metadata.version", 25), ("group.version", 1)]);
+    let image = image(&[
+        FeatureLevel {
+            name: "metadata.version",
+            level: 25,
+        },
+        FeatureLevel {
+            name: "group.version",
+            level: 1,
+        },
+    ]);
     assert!(
         plan_updates(&request, &image, LOCAL)
             == Err(invalid(
@@ -282,7 +343,10 @@ fn version_zero_allow_downgrade_is_read_as_upgrade() {
 /// the valid rows ahead of it write nothing.
 #[test]
 fn the_first_failure_in_map_order_fails_the_whole_request() {
-    let image = image(&[("metadata.version", 25)]);
+    let image = image(&[FeatureLevel {
+        name: "metadata.version",
+        level: 25,
+    }]);
     let request = validate_only(vec![
         named_update("share.version", 9, UPGRADE),
         named_update("group.version", 9, UPGRADE),
@@ -353,7 +417,10 @@ fn metadata_version_downgrades_follow_did_metadata_change() {
         ),
     ];
     for (current, target, upgrade_type, expected) in cases {
-        let image = image(&[("metadata.version", current)]);
+        let image = image(&[FeatureLevel {
+            name: "metadata.version",
+            level: current,
+        }]);
         let request = validate_only(vec![metadata_update(target, upgrade_type)]);
         assert!(
             plan_updates(&request, &image, LOCAL) == expected,
@@ -395,7 +462,10 @@ fn kraft_version_rows_follow_kafka() {
         ),
     ];
     for (case, updates, expected) in cases {
-        let image = image(&[("metadata.version", 25)]);
+        let image = image(&[FeatureLevel {
+            name: "metadata.version",
+            level: 25,
+        }]);
         assert!(
             plan_updates(&validate_only(updates), &image, LOCAL) == expected,
             "{case}"
@@ -407,7 +477,10 @@ fn kraft_version_rows_follow_kafka() {
 /// `elr_level` when one is given and a published ELR on topic `orders` when
 /// `published` is.
 fn elr_image(elr_level: Option<i16>, published: bool) -> krabka_metadata::MetadataImage {
-    let mut image = image(&[("metadata.version", 30)]);
+    let mut image = image(&[FeatureLevel {
+        name: "metadata.version",
+        level: 30,
+    }]);
     if let Some(level) = elr_level {
         image.apply(&feature_record(ELR_VERSION, level));
     }
@@ -552,7 +625,7 @@ fn enabling_elr_writes_kafkas_safety_config_records() {
 fn krabka_version_finalizes_as_kafka_finalizes_a_non_metadata_feature() {
     let kv = krabka_metadata::krabka_version::KRABKA_VERSION_FEATURE;
     let mv = "metadata.version";
-    let with_broker = |levels: &[(&str, i16)], range: Option<(i16, i16)>| {
+    let with_broker = |levels: &[FeatureLevel<'_>], range| {
         let image = image(levels);
         let mut features = krabka_metadata::supported_feature_ranges();
         match range {
@@ -564,31 +637,55 @@ fn krabka_version_finalizes_as_kafka_finalizes_a_non_metadata_feature() {
     let cases = [
         (
             "finalize level 1 on an unfinalized cluster",
-            image(&[(mv, 30)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 30,
+            }]),
             named_update(kv, 1, UPGRADE),
             Ok(plan(vec![feature_record(kv, 1)], &[kv])),
         ),
         (
             "finalize level 1 with a broker that supports it",
-            with_broker(&[(mv, 30)], Some((0, 1))),
+            with_broker(
+                &[FeatureLevel {
+                    name: mv,
+                    level: 30,
+                }],
+                Some((0, 1)),
+            ),
             named_update(kv, 1, UPGRADE),
             Ok(plan(vec![feature_record(kv, 1)], &[kv])),
         ),
         (
             "a broker that advertises a narrower range",
-            with_broker(&[(mv, 30)], Some((0, 0))),
+            with_broker(
+                &[FeatureLevel {
+                    name: mv,
+                    level: 30,
+                }],
+                Some((0, 0)),
+            ),
             named_update(kv, 1, UPGRADE),
             Err(invalid(kv, 1, "Broker 2 does not support this feature.")),
         ),
         (
             "a broker that does not register the feature",
-            with_broker(&[(mv, 30)], None),
+            with_broker(
+                &[FeatureLevel {
+                    name: mv,
+                    level: 30,
+                }],
+                None,
+            ),
             named_update(kv, 1, UPGRADE),
             Err(invalid(kv, 1, "Broker 2 does not support this feature.")),
         ),
         (
             "a level above the local controller's range",
-            image(&[(mv, 30)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 30,
+            }]),
             named_update(kv, 2, UPGRADE),
             Err(invalid(
                 kv,
@@ -598,13 +695,25 @@ fn krabka_version_finalizes_as_kafka_finalizes_a_non_metadata_feature() {
         ),
         (
             "re-finalizing the current level",
-            image(&[(mv, 30), (kv, 1)]),
+            image(&[
+                FeatureLevel {
+                    name: mv,
+                    level: 30,
+                },
+                FeatureLevel { name: kv, level: 1 },
+            ]),
             named_update(kv, 1, UPGRADE),
             Ok(plan(vec![feature_record(kv, 1)], &[kv])),
         ),
         (
             "a downgrade without a downgrade type",
-            image(&[(mv, 30), (kv, 1)]),
+            image(&[
+                FeatureLevel {
+                    name: mv,
+                    level: 30,
+                },
+                FeatureLevel { name: kv, level: 1 },
+            ]),
             named_update(kv, 0, UPGRADE),
             Err(invalid(
                 kv,
@@ -615,25 +724,49 @@ fn krabka_version_finalizes_as_kafka_finalizes_a_non_metadata_feature() {
         ),
         (
             "a safe downgrade",
-            image(&[(mv, 30), (kv, 1)]),
+            image(&[
+                FeatureLevel {
+                    name: mv,
+                    level: 30,
+                },
+                FeatureLevel { name: kv, level: 1 },
+            ]),
             named_update(kv, 0, SAFE),
             Ok(plan(vec![feature_record(kv, 0)], &[kv])),
         ),
         (
             "an unsafe downgrade",
-            image(&[(mv, 30), (kv, 1)]),
+            image(&[
+                FeatureLevel {
+                    name: mv,
+                    level: 30,
+                },
+                FeatureLevel { name: kv, level: 1 },
+            ]),
             named_update(kv, 0, UNSAFE),
             Ok(plan(vec![feature_record(kv, 0)], &[kv])),
         ),
         (
             "a downgrade a narrower broker still supports",
-            with_broker(&[(mv, 30), (kv, 1)], Some((0, 0))),
+            with_broker(
+                &[
+                    FeatureLevel {
+                        name: mv,
+                        level: 30,
+                    },
+                    FeatureLevel { name: kv, level: 1 },
+                ],
+                Some((0, 0)),
+            ),
             named_update(kv, 0, SAFE),
             Ok(plan(vec![feature_record(kv, 0)], &[kv])),
         ),
         (
             "a downgrade type that raises the level",
-            image(&[(mv, 30)]),
+            image(&[FeatureLevel {
+                name: mv,
+                level: 30,
+            }]),
             named_update(kv, 1, SAFE),
             Err(invalid(kv, 1, "Can't downgrade to a newer version.")),
         ),

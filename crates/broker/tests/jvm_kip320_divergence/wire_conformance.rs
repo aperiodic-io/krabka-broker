@@ -24,11 +24,17 @@ use {
     tempfile::TempDir,
 };
 
+/// A running broker and the directory that backs it.
+struct StartedBroker {
+    broker: BrokerHandle,
+    dir: TempDir,
+}
+
 /// Single-broker Krabka config bound on `0.0.0.0:<client_port>`, advertised as
 /// `host.docker.internal:<client_port>`. Mirrors `start_host_broker` but
 /// parameterized on the port so the wire-conformance test can pick a port that
 /// doesn't collide with the rest of the JVM suite.
-async fn start_host_broker_on(client_port: u16, controller_port: u16) -> (BrokerHandle, TempDir) {
+async fn start_host_broker_on(client_port: u16, controller_port: u16) -> StartedBroker {
     support::init_tracing();
     let dir = TempDir::new().expect("tempdir");
     let config = BrokerConfig {
@@ -54,7 +60,10 @@ async fn start_host_broker_on(client_port: u16, controller_port: u16) -> (Broker
             .call()
     };
     let handle = Broker::start(config).await.expect("start broker");
-    (handle, dir)
+    StartedBroker {
+        broker: handle,
+        dir,
+    }
 }
 
 /// The small Java helper that proves the official JVM client decodes Krabka's
@@ -155,7 +164,8 @@ async fn kip320_wire_conformance_offset_for_leader_epoch() {
     let bootstrap = format!("host.docker.internal:{client_port}");
 
     docker_rm(&container);
-    let (broker, _dir) = start_host_broker_on(client_port, controller_port).await;
+    let StartedBroker { broker, dir: _dir } =
+        start_host_broker_on(client_port, controller_port).await;
 
     // 1. Create topic (1 partition, RF=1).
     let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE, &[

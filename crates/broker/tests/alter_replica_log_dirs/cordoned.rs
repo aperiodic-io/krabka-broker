@@ -12,7 +12,10 @@ use {
     crate::{
         harness::start_two_dir_broker,
         two_dir_topic::start,
-        wire::{CLIENT_ID, alter_replica_log_dirs, describe_log_dirs_at, set_broker_config},
+        wire::{
+            CLIENT_ID, ConfigAlterOutcome, alter_replica_log_dirs, describe_log_dirs_at,
+            set_broker_config,
+        },
     },
     assert2::{assert, check},
     krabka_protocol::{
@@ -29,9 +32,25 @@ use {
     },
 };
 
-/// `(log_dir, is_cordoned)` for every directory `DescribeLogDirs` reports at
-/// `version`, canonicalized so a symbolic-link temp root compares equal.
-async fn cordoned_flags(addr: SocketAddr, version: i16) -> Vec<(std::path::PathBuf, bool)> {
+/// One directory `DescribeLogDirs` reports, and whether it is cordoned.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct DirFlag {
+    log_dir: std::path::PathBuf,
+    is_cordoned: bool,
+}
+
+impl DirFlag {
+    fn new(log_dir: std::path::PathBuf, is_cordoned: bool) -> Self {
+        Self {
+            log_dir,
+            is_cordoned,
+        }
+    }
+}
+
+/// The flag of every directory `DescribeLogDirs` reports at `version`,
+/// canonicalized so a symbolic-link temp root compares equal.
+async fn cordoned_flags(addr: SocketAddr, version: i16) -> Vec<DirFlag> {
     let mut flags: Vec<_> = describe_log_dirs_at(addr, version)
         .await
         .results
@@ -39,7 +58,7 @@ async fn cordoned_flags(addr: SocketAddr, version: i16) -> Vec<(std::path::PathB
         .map(|result| {
             let dir = std::fs::canonicalize(&result.log_dir)
                 .unwrap_or_else(|_| std::path::PathBuf::from(&result.log_dir));
-            (dir, result.is_cordoned)
+            DirFlag::new(dir, result.is_cordoned)
         })
         .collect();
     flags.sort();
@@ -49,7 +68,7 @@ async fn cordoned_flags(addr: SocketAddr, version: i16) -> Vec<(std::path::PathB
 /// Wait until `DescribeLogDirs` v5 reports `want`. The dynamic config reaches
 /// the broker's cordoned set through the metadata image, so the flag follows
 /// the committed alter by an image publication.
-async fn wait_for_flags(addr: SocketAddr, want: &[(std::path::PathBuf, bool)]) {
+async fn wait_for_flags(addr: SocketAddr, want: &[DirFlag]) {
     let mut want = want.to_vec();
     want.sort();
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -98,20 +117,40 @@ async fn a_cordoned_dir_is_flagged_and_refuses_replica_moves() {
     // what a `cordoned.log.dirs` entry must match.
     let configured = extra.path().display().to_string();
 
-    wait_for_flags(addr, &[(first.clone(), false), (second.clone(), false)]).await;
-    assert!(set_broker_config(addr, 1, "cordoned.log.dirs", &configured).await == (0, None));
-    wait_for_flags(addr, &[(first.clone(), false), (second.clone(), true)]).await;
+    wait_for_flags(addr, &[
+        DirFlag::new(first.clone(), false),
+        DirFlag::new(second.clone(), false),
+    ])
+    .await;
+    assert!(
+        set_broker_config(addr, 1, "cordoned.log.dirs", &configured).await
+            == ConfigAlterOutcome::accepted()
+    );
+    wait_for_flags(addr, &[
+        DirFlag::new(first.clone(), false),
+        DirFlag::new(second.clone(), true),
+    ])
+    .await;
 
     let v4 = cordoned_flags(addr, 4).await;
-    let mut uncordoned = vec![(first.clone(), false), (second.clone(), false)];
+    let mut uncordoned = vec![
+        DirFlag::new(first.clone(), false),
+        DirFlag::new(second.clone(), false),
+    ];
     uncordoned.sort();
     check!(v4 == uncordoned);
 
     let refused = alter_replica_log_dirs(addr, Path::new(&extra_str), "t", vec![0]).await;
     check!(refused == move_result("t", 39));
 
-    assert!(set_broker_config(addr, 1, "cordoned.log.dirs", "").await == (0, None));
-    wait_for_flags(addr, &[(first, false), (second, false)]).await;
+    assert!(
+        set_broker_config(addr, 1, "cordoned.log.dirs", "").await == ConfigAlterOutcome::accepted()
+    );
+    wait_for_flags(addr, &[
+        DirFlag::new(first, false),
+        DirFlag::new(second, false),
+    ])
+    .await;
     let accepted = alter_replica_log_dirs(addr, Path::new(&extra_str), "t", vec![0]).await;
     check!(accepted == move_result("t", 0));
 
@@ -127,14 +166,14 @@ async fn an_unknown_cordoned_dir_is_refused() {
     let refused = set_broker_config(addr, 1, "cordoned.log.dirs", "/nope").await;
     check!(
         refused
-            == (
-                42,
-                Some(
+            == ConfigAlterOutcome {
+                error_code: 42,
+                error_message: Some(
                     "requirement failed: All entries in cordoned.log.dirs must be present in \
                      log.dirs or log.dir. Missing entries : /nope"
                         .to_owned()
-                )
-            )
+                ),
+            }
     );
     handle.shutdown().await;
 }

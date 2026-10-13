@@ -8,12 +8,14 @@ use {
         ProducerBatchMetadata,
         io::FileIo,
         log::test_support::{
-            NO_LIMIT, append_samples, append_transaction, check_contiguous_exports, commit_marker,
-            install_stamps, rolling_test_log, sample_batch, sample_batch_with_epoch, test_log,
-            tiny_segments, transaction_fields, transactional_batch,
+            NO_LIMIT, TempLog, TransactionFields, append_samples, append_transaction,
+            check_contiguous_exports, commit_marker, install_stamps, rolling_test_log,
+            sample_batch, sample_batch_with_epoch, test_log, tiny_segments, transaction_fields,
+            transactional_batch,
         },
         log_start_offset_checkpoint::write,
         name::producer_snapshot_path,
+        producer_snapshot::LoadedSnapshot,
         test_support::open_log,
     },
     assert2::{assert, check},
@@ -23,7 +25,7 @@ use {
 
 #[test]
 fn open_empty_dir_creates_first_segment() {
-    let (_dir, log) = test_log();
+    let TempLog { dir: _dir, log } = test_log();
     assert2::assert!(log.log_start_offset() == Offset(0));
     assert2::assert!(log.log_end_offset() == Offset(0));
     log.close();
@@ -31,7 +33,7 @@ fn open_empty_dir_creates_first_segment() {
 
 #[test]
 fn open_creates_log_file() {
-    let (dir, log) = test_log();
+    let TempLog { dir, log } = test_log();
     drop(log);
     let log_path = dir.path().join("00000000000000000000.log");
     assert2::assert!(log_path.exists());
@@ -182,7 +184,13 @@ fn snapshot_recovery_preserves_open_and_completed_transaction_fields() {
     check!(completed.last_sequence == 11);
     check!(completed.current_txn_first_offset == None);
     check!(completed.coordinator_epoch == 17);
-    check!(transaction_fields(&reopened, ProducerId(77)) == (17, None));
+    check!(
+        transaction_fields(&reopened, ProducerId(77))
+            == TransactionFields {
+                coordinator_epoch: 17,
+                first_offset: None,
+            }
+    );
 }
 
 #[test]
@@ -212,7 +220,10 @@ fn recovery_recreates_missing_producer_snapshot_at_segment_boundary() {
         local_start: 0,
         log_end: 4,
     };
-    let (_, boundary_state) = producer_snapshot::reload(dir.path(), range)
+    let LoadedSnapshot {
+        state: boundary_state,
+        ..
+    } = producer_snapshot::reload(dir.path(), range)
         .unwrap()
         .unwrap();
     let boundary = boundary_state.get(&ProducerId(42)).unwrap();
@@ -230,10 +241,18 @@ fn recovery_recreates_missing_producer_snapshot_at_segment_boundary() {
 #[test]
 fn producer_tail_accepts_zero_and_rejects_negative_identity_fields() {
     assert2::assert!(
-        Log::data_producer_tail(ProducerId(0), 0, 1, Offset(10)).unwrap() == Some((1, Offset(11)))
+        Log::data_producer_tail(ProducerId(0), 0, 1, Offset(10)).unwrap()
+            == Some(ProducerTail {
+                last_sequence: 1,
+                last_offset: Offset(11)
+            })
     );
     assert2::assert!(
-        Log::data_producer_tail(ProducerId(1), 5, 1, Offset(10)).unwrap() == Some((6, Offset(11)))
+        Log::data_producer_tail(ProducerId(1), 5, 1, Offset(10)).unwrap()
+            == Some(ProducerTail {
+                last_sequence: 6,
+                last_offset: Offset(11)
+            })
     );
     assert2::assert!(Log::data_producer_tail(ProducerId(-2), 0, 0, Offset(10)).unwrap() == None);
     assert2::assert!(Log::data_producer_tail(ProducerId(1), -2, 0, Offset(10)).unwrap() == None);
@@ -243,7 +262,10 @@ fn producer_tail_accepts_zero_and_rejects_negative_identity_fields() {
 fn producer_tail_wraps_sequence_at_signed_maximum() {
     assert2::assert!(
         Log::data_producer_tail(ProducerId(1), i32::MAX - 1, 2, Offset(10)).unwrap()
-            == Some((0, Offset(12)))
+            == Some(ProducerTail {
+                last_sequence: 0,
+                last_offset: Offset(12)
+            })
     );
 }
 
@@ -253,7 +275,10 @@ fn recovered_batch_offsets_require_checked_progress() {
     batch.base_offset = 10;
     assert2::assert!(
         Log::recovered_batch_offsets(Offset(10), Offset(13), &batch).unwrap()
-            == (Offset(12), Offset(13))
+            == RecoveredBatchOffsets {
+                last: Offset(12),
+                advanced_to: Offset(13)
+            }
     );
 
     batch.last_offset_delta = -1;
@@ -358,7 +383,11 @@ fn zero_producer_id_and_only_transactional_ranges_survive_recovery() {
     assert2::assert!(reopened.lso() == Offset(0));
     assert2::assert!(reopened.pending_stamp_ranges.len() == 1);
     assert2::assert!(
-        reopened.pending_stamp_ranges.get(&ProducerId(0)) == Some(&vec![(Offset(0), Offset(1))])
+        reopened.pending_stamp_ranges.get(&ProducerId(0))
+            == Some(&vec![OffsetRange {
+                first: Offset(0),
+                last: Offset(1)
+            }])
     );
 }
 
@@ -367,7 +396,7 @@ fn reopen_rebuilds_pending_transactions_and_lso() {
     let dir = tempfile::tempdir().unwrap();
     {
         let mut log = open_log(dir.path());
-        append_transaction(&mut log, (1000, 4), &["a", "b"]);
+        append_transaction(&mut log, 1000, 4, &["a", "b"]);
         assert2::assert!(log.pending_transaction_start(ProducerId(1000)) == Some(Offset(0)));
         assert2::assert!(log.lso() == Offset(0));
     }
@@ -381,7 +410,13 @@ fn reopen_rebuilds_pending_transactions_and_lso() {
     check!(reopened.stamp_for_offset(Offset(0)) == Some(30));
     check!(reopened.stamp_for_offset(Offset(1)) == Some(30));
     check!(reopened.stamp_for_offset(Offset(2)) == None);
-    assert2::assert!(transaction_fields(&reopened, ProducerId(1000)) == (17, None));
+    assert2::assert!(
+        transaction_fields(&reopened, ProducerId(1000))
+            == TransactionFields {
+                coordinator_epoch: 17,
+                first_offset: None,
+            }
+    );
     assert2::assert!(
         reopened
             .pending_transaction_start(ProducerId(1000))
@@ -390,13 +425,23 @@ fn reopen_rebuilds_pending_transactions_and_lso() {
     let log_end = reopened.log_end_offset();
     assert2::assert!(reopened.last_stable_offset(log_end) == log_end);
 
-    append_transaction(&mut reopened, (1000, 4), &["next"]);
-    assert2::assert!(transaction_fields(&reopened, ProducerId(1000)) == (17, Some(Offset(3))));
+    append_transaction(&mut reopened, 1000, 4, &["next"]);
+    assert2::assert!(
+        transaction_fields(&reopened, ProducerId(1000))
+            == TransactionFields {
+                coordinator_epoch: 17,
+                first_offset: Some(Offset(3)),
+            }
+    );
     drop(reopened);
 
     let recovered_again = open_log(dir.path());
     assert2::assert!(
-        transaction_fields(&recovered_again, ProducerId(1000)) == (17, Some(Offset(3)))
+        transaction_fields(&recovered_again, ProducerId(1000))
+            == TransactionFields {
+                coordinator_epoch: 17,
+                first_offset: Some(Offset(3)),
+            }
     );
 }
 
@@ -593,7 +638,7 @@ fn snapshot_offsets(dir: &Path) -> Vec<i64> {
     producer_snapshot::list(dir)
         .unwrap()
         .into_iter()
-        .map(|(offset, _)| offset.0)
+        .map(|snapshot| snapshot.offset.0)
         .collect()
 }
 
@@ -655,7 +700,7 @@ fn a_reload_takes_a_snapshot_at_the_log_end() {
         ("a log with records takes one at its end", 3, None, vec![6]),
         ("a log trimmed to its end takes none", 3, Some(6), vec![]),
     ] {
-        let (dir, mut log) = test_log();
+        let TempLog { dir, mut log } = test_log();
         for _ in 0..batches {
             log.append(&mut sample_batch(2)).unwrap();
         }
@@ -747,7 +792,7 @@ fn reopen_retains_the_snapshot_batch_and_the_replayed_tail() {
 /// the last one, oldest first, and a new producer epoch clears them.
 #[test]
 fn appends_retain_four_earlier_batches_until_the_epoch_moves() {
-    let (_dir, mut log) = test_log();
+    let TempLog { dir: _dir, mut log } = test_log();
     let append = |log: &mut Log, epoch: i16, sequence: i32| {
         let mut batch = sample_batch(1);
         batch.producer_id = 7;

@@ -201,6 +201,14 @@ enum Artifact {
     Index(IndexType),
 }
 
+/// Identifies a partition while [`inventory`] accumulates it: the topic id and
+/// the partition index, without the topic name that [`PartitionAccum`] holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PartitionIdentity {
+    topic_id: Uuid,
+    partition: i32,
+}
+
 /// Segments accumulated so far for one partition, keyed by segment id so an
 /// artifact found later for a segment already seen joins the same entry.
 #[derive(Debug, Default)]
@@ -236,7 +244,7 @@ fn absorb(
     object: ObjectMeta,
     root: &Path,
     args: &RestoreArgs,
-    accum: &mut HashMap<(Uuid, i32), PartitionAccum>,
+    accum: &mut HashMap<PartitionIdentity, PartitionAccum>,
     unrecognized: &mut UnrecognizedKeys,
 ) {
     // Collected to owned `String`s immediately, so the parsed pieces
@@ -281,7 +289,10 @@ fn absorb(
     };
 
     let partition_accum = accum
-        .entry((dir.topic_id, dir.partition))
+        .entry(PartitionIdentity {
+            topic_id: dir.topic_id,
+            partition: dir.partition,
+        })
         .or_insert_with(|| PartitionAccum {
             topic: dir.topic.clone(),
             segments: HashMap::new(),
@@ -330,7 +341,7 @@ pub async fn inventory(
     let root = store.root().unwrap_or(Path::ROOT);
 
     let mut unrecognized = UnrecognizedKeys::default();
-    let mut accum: HashMap<(Uuid, i32), PartitionAccum> = HashMap::new();
+    let mut accum: HashMap<PartitionIdentity, PartitionAccum> = HashMap::new();
 
     let mut listing = store.ops().list_stream(store.root());
     while let Some(object) = listing.try_next().await? {
@@ -346,12 +357,16 @@ pub async fn inventory(
 
     let mut partitions: Vec<PartitionInventory> = accum
         .into_iter()
-        .map(|((topic_id, partition), partition_accum)| {
+        .map(|(key, partition_accum)| {
             let mut segments: Vec<SegmentInventory> =
                 partition_accum.segments.into_values().collect();
             segments.sort_by_key(|segment| segment.base_offset);
             PartitionInventory {
-                partition: TopicIdPartition::new(topic_id, partition_accum.topic, partition),
+                partition: TopicIdPartition::new(
+                    key.topic_id,
+                    partition_accum.topic,
+                    key.partition,
+                ),
                 segments,
             }
         })

@@ -119,7 +119,10 @@ async fn reap_expired_offsets(
     let Some(condition) = expiration_condition(group) else {
         return ReapOutcome::default();
     };
-    let (expired, all_expired) = expired_offsets(group, &condition, now_ms, retention_ms);
+    let ExpiredOffsets {
+        keys: expired,
+        all_expired,
+    } = expired_offsets(group, &condition, now_ms, retention_ms);
     // Once the sweep has taken the expired offsets the group keeps none, and
     // an empty group that keeps no offsets and no open transaction is a dead
     // group. Kafka's `GroupMetadataManager.cleanupGroupMetadata` transitions
@@ -249,8 +252,16 @@ fn expiration_condition(group: &CoordinatorGroup) -> Option<ExpirationCondition>
     }
 }
 
-/// The offsets `condition` expires, sorted, and whether the group is left with
-/// no offset and no open transaction afterwards.
+/// The offsets an expiration condition expires, and whether the group is left
+/// with no offset and no open transaction afterwards.
+#[derive(Debug, PartialEq, Eq)]
+struct ExpiredOffsets {
+    /// The expired `(topic, partition)` offsets, sorted.
+    keys: Vec<(String, i32)>,
+    all_expired: bool,
+}
+
+/// The offsets `condition` expires.
 ///
 /// An offset of a subscribed topic stays, as does one that an open
 /// transaction has written or reserved (`hasPendingTransactionalOffsets`).
@@ -259,7 +270,7 @@ fn expired_offsets(
     condition: &ExpirationCondition,
     now_ms: i64,
     retention_ms: i64,
-) -> (Vec<(String, i32)>, bool) {
+) -> ExpiredOffsets {
     let open_transactions = group.unresolved_txn_keys();
     let mut expired: Vec<(String, i32)> = group
         .committed_offsets
@@ -274,7 +285,10 @@ fn expired_offsets(
     expired.sort_unstable();
     let all_expired =
         expired.len() == group.committed_offsets.len() && open_transactions.is_empty();
-    (expired, all_expired)
+    ExpiredOffsets {
+        keys: expired,
+        all_expired,
+    }
 }
 
 /// Appends [`tombstone_batch`] to the partition of `group_id`.
@@ -396,15 +410,28 @@ mod tests {
         GroupKind::Consumer(group)
     }
 
-    fn offsets(commits: &[(&str, i64)]) -> HashMap<(String, i32), OffsetEntry> {
+    /// An offset committed to partition 0 of `topic` at `commit_timestamp_ms`.
+    struct Commit<'a> {
+        topic: &'a str,
+        commit_timestamp_ms: i64,
+    }
+
+    fn commit(topic: &str, commit_timestamp_ms: i64) -> Commit<'_> {
+        Commit {
+            topic,
+            commit_timestamp_ms,
+        }
+    }
+
+    fn offsets(commits: &[Commit<'_>]) -> HashMap<(String, i32), OffsetEntry> {
         commits
             .iter()
-            .map(|(topic, commit_timestamp_ms)| {
-                (((*topic).to_string(), 0), OffsetEntry {
+            .map(|commit| {
+                ((commit.topic.to_string(), 0), OffsetEntry {
                     offset: Offset(7),
                     leader_epoch: -1,
                     metadata: String::new(),
-                    commit_timestamp_ms: *commit_timestamp_ms,
+                    commit_timestamp_ms: commit.commit_timestamp_ms,
                     expire_timestamp_ms: None,
                     topic_id: None,
                 })
@@ -425,98 +452,159 @@ mod tests {
     /// transaction left, or `None` when the group has no expiration condition.
     #[test]
     fn cleanup_expires_only_unsubscribed_offsets_per_group_kind() {
+        /// The offsets a case is to expire, and whether the group is left
+        /// with none.
+        struct WantedExpiry {
+            topics: Vec<&'static str>,
+            all_expired: bool,
+        }
+        struct Row {
+            label: &'static str,
+            kind: GroupKind,
+            commits: Vec<Commit<'static>>,
+            /// The transactional keys still open.
+            open: Vec<&'static str>,
+            empty_since_ms: Option<i64>,
+            want: Option<WantedExpiry>,
+        }
+
         let stable = ClassicGroupState::Stable;
+
         let rows = vec![
-            (
-                "stable consumer group keeps its subscribed topic",
-                classic(stable, Some("consumer"), &[&["a"], &["a"]]),
-                vec![("a", OLD_MS), ("b", OLD_MS), ("c", FRESH_MS)],
-                vec![],
-                None,
-                Some((vec!["b"], false)),
-            ),
-            (
-                "rebalancing classic group expires nothing",
-                classic(ClassicGroupState::PreparingRebalance, Some("consumer"), &[
+            Row {
+                label: "stable consumer group keeps its subscribed topic",
+                kind: classic(stable, Some("consumer"), &[&["a"], &["a"]]),
+                commits: vec![
+                    commit("a", OLD_MS),
+                    commit("b", OLD_MS),
+                    commit("c", FRESH_MS),
+                ],
+                open: vec![],
+                empty_since_ms: None,
+                want: Some(WantedExpiry {
+                    topics: vec!["b"],
+                    all_expired: false,
+                }),
+            },
+            Row {
+                label: "rebalancing classic group expires nothing",
+                kind: classic(ClassicGroupState::PreparingRebalance, Some("consumer"), &[
                     &["a"],
                 ]),
-                vec![("b", OLD_MS)],
-                vec![],
-                None,
-                None,
-            ),
-            (
-                "stable group off the consumer protocol expires nothing",
-                classic(stable, Some("connect"), &[&["a"]]),
-                vec![("b", OLD_MS)],
-                vec![],
-                None,
-                None,
-            ),
-            (
-                "simple group measures from the commit",
-                classic(ClassicGroupState::Empty, None, &[]),
-                vec![("a", OLD_MS), ("b", FRESH_MS)],
-                vec![],
-                None,
-                Some((vec!["a"], false)),
-            ),
-            (
-                "empty joined group measures from the moment it emptied",
-                classic(ClassicGroupState::Empty, Some("consumer"), &[]),
-                vec![("a", OLD_MS - RETENTION_MS)],
-                vec![],
-                Some(FRESH_MS),
-                Some((vec![], false)),
-            ),
-            (
-                "empty joined group loses every offset",
-                classic(ClassicGroupState::Empty, Some("consumer"), &[]),
-                vec![("a", OLD_MS), ("b", OLD_MS)],
-                vec![],
-                Some(OLD_MS),
-                Some((vec!["a", "b"], true)),
-            ),
-            (
-                "offset committed after the group emptied still expires from the emptying",
-                classic(ClassicGroupState::Empty, Some("consumer"), &[]),
-                vec![("a", FRESH_MS)],
-                vec![],
-                Some(OLD_MS),
-                Some((vec!["a"], true)),
-            ),
-            (
-                "open transaction keeps its offset and the group",
-                classic(ClassicGroupState::Empty, Some("consumer"), &[]),
-                vec![("a", OLD_MS), ("b", OLD_MS)],
-                vec!["b"],
-                Some(OLD_MS),
-                Some((vec!["a"], false)),
-            ),
-            (
-                "consumer group keeps its subscribed topic",
-                consumer(&[&["a"]]),
-                vec![("a", OLD_MS), ("b", OLD_MS)],
-                vec![],
-                None,
-                Some((vec!["b"], false)),
-            ),
-            (
-                "live consumer group whose offsets all expired",
-                consumer(&[&["a"]]),
-                vec![("b", OLD_MS)],
-                vec![],
-                None,
-                Some((vec!["b"], true)),
-            ),
+                commits: vec![commit("b", OLD_MS)],
+                open: vec![],
+                empty_since_ms: None,
+                want: None,
+            },
+            Row {
+                label: "stable group off the consumer protocol expires nothing",
+                kind: classic(stable, Some("connect"), &[&["a"]]),
+                commits: vec![commit("b", OLD_MS)],
+                open: vec![],
+                empty_since_ms: None,
+                want: None,
+            },
+            Row {
+                label: "simple group measures from the commit",
+                kind: classic(ClassicGroupState::Empty, None, &[]),
+                commits: vec![commit("a", OLD_MS), commit("b", FRESH_MS)],
+                open: vec![],
+                empty_since_ms: None,
+                want: Some(WantedExpiry {
+                    topics: vec!["a"],
+                    all_expired: false,
+                }),
+            },
+            Row {
+                label: "empty joined group measures from the moment it emptied",
+                kind: classic(ClassicGroupState::Empty, Some("consumer"), &[]),
+                commits: vec![commit("a", OLD_MS - RETENTION_MS)],
+                open: vec![],
+                empty_since_ms: Some(FRESH_MS),
+                want: Some(WantedExpiry {
+                    topics: vec![],
+                    all_expired: false,
+                }),
+            },
+            Row {
+                label: "empty joined group loses every offset",
+                kind: classic(ClassicGroupState::Empty, Some("consumer"), &[]),
+                commits: vec![commit("a", OLD_MS), commit("b", OLD_MS)],
+                open: vec![],
+                empty_since_ms: Some(OLD_MS),
+                want: Some(WantedExpiry {
+                    topics: vec!["a", "b"],
+                    all_expired: true,
+                }),
+            },
+            Row {
+                label: "offset committed after the group emptied still expires from the emptying",
+                kind: classic(ClassicGroupState::Empty, Some("consumer"), &[]),
+                commits: vec![commit("a", FRESH_MS)],
+                open: vec![],
+                empty_since_ms: Some(OLD_MS),
+                want: Some(WantedExpiry {
+                    topics: vec!["a"],
+                    all_expired: true,
+                }),
+            },
+            Row {
+                label: "open transaction keeps its offset and the group",
+                kind: classic(ClassicGroupState::Empty, Some("consumer"), &[]),
+                commits: vec![commit("a", OLD_MS), commit("b", OLD_MS)],
+                open: vec!["b"],
+                empty_since_ms: Some(OLD_MS),
+                want: Some(WantedExpiry {
+                    topics: vec!["a"],
+                    all_expired: false,
+                }),
+            },
+            Row {
+                label: "consumer group keeps its subscribed topic",
+                kind: consumer(&[&["a"]]),
+                commits: vec![commit("a", OLD_MS), commit("b", OLD_MS)],
+                open: vec![],
+                empty_since_ms: None,
+                want: Some(WantedExpiry {
+                    topics: vec!["b"],
+                    all_expired: false,
+                }),
+            },
+            Row {
+                label: "live consumer group whose offsets all expired",
+                kind: consumer(&[&["a"]]),
+                commits: vec![commit("b", OLD_MS)],
+                open: vec![],
+                empty_since_ms: None,
+                want: Some(WantedExpiry {
+                    topics: vec!["b"],
+                    all_expired: true,
+                }),
+            },
         ];
-        for (label, kind, commits, open, empty_since_ms, want) in rows {
+        for Row {
+            label,
+            kind,
+            commits,
+            open,
+            empty_since_ms,
+            want,
+        } in rows
+        {
             let mut group = CoordinatorGroup::seeded("g", kind, offsets(&commits));
             group.empty_since_ms = empty_since_ms;
             group.add_pending_txn_offsets(1, 1, keys(&open));
             let got = expiration_condition(&group)
                 .map(|condition| expired_offsets(&group, &condition, NOW_MS, RETENTION_MS));
-            let want = want.map(|(topics, all_expired)| (keys(&topics), all_expired));
+            let want = want.map(
+                |WantedExpiry {
+                     topics,
+                     all_expired,
+                 }| ExpiredOffsets {
+                    keys: keys(&topics),
+                    all_expired,
+                },
+            );
             check!(got == want, "{label}");
         }
     }
@@ -531,7 +619,7 @@ mod tests {
         let mut group = CoordinatorGroup::seeded(
             "g",
             classic(ClassicGroupState::Stable, Some("consumer"), &[&["a"]]),
-            offsets(&[("a", OLD_MS), ("b", OLD_MS)]),
+            offsets(&[commit("a", OLD_MS), commit("b", OLD_MS)]),
         );
         let log: &InMemoryOffsetsLog = &log;
 

@@ -81,8 +81,10 @@ context_handler! {
         // Kafka's `GroupCoordinatorService` checks the request before it
         // schedules the write on the coordinator, so a refused request changes
         // no group and never gets NOT_COORDINATOR.
-        if let Some((error_code, message)) =
-            validation::request_error(&req, broker.config.features.unstable_api_versions)
+        if let Some(validation::RequestError {
+            code: error_code,
+            message,
+        }) = validation::request_error(&req, broker.config.features.unstable_api_versions)
         {
             return Ok(reply(error_code, Some(message)));
         }
@@ -157,6 +159,7 @@ mod tests {
                 group_heartbeat_test_support::{
                     check_group_read_denied, streams_request, topic_with_partitions,
                 },
+                test_support::StartedBroker,
             },
             task_util::ask,
             test_support::{
@@ -227,7 +230,11 @@ mod tests {
         };
 
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        let (broker_handle, _dir, broker) = configured_streams_broker(|cfg| {
+        let ConfiguredBroker {
+            handle: broker_handle,
+            dir: _dir,
+            broker,
+        } = configured_streams_broker(|cfg| {
             cfg.streams_group.enable = true;
             cfg.default_replication_factor = 1;
         })
@@ -430,7 +437,10 @@ mod tests {
     #[tokio::test]
     async fn handle_refuses_a_required_topic_denied_for_describe() {
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        let (broker_handle, _dir) = start_broker_with_grants().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker_with_grants().await;
         let broker = broker_handle.broker_arc_for_test();
         set_streams_version(&broker, 1).await;
         let peer = peer();
@@ -469,7 +479,10 @@ mod tests {
         use krabka_protocol::owned::common::streams_group_heartbeat_request::topic_info::TopicInfo;
 
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        let (broker_handle, _dir) = start_broker_with_grants().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker_with_grants().await;
         let broker = broker_handle.broker_arc_for_test();
         set_streams_version(&broker, 1).await;
         create_source_topic(&broker, "in").await;
@@ -700,9 +713,16 @@ mod tests {
 
     crate::test_support::context_helper!(client_id = "streams-client");
 
+    /// A started streams broker, its directory and a shared reference to it.
+    struct ConfiguredBroker {
+        handle: BrokerHandle,
+        dir: tempfile::TempDir,
+        broker: Arc<Broker>,
+    }
+
     async fn configured_streams_broker(
         configure: impl FnOnce(&mut BrokerConfig),
-    ) -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
+    ) -> ConfiguredBroker {
         let (handle, directory) = start_group_broker_with(|cfg| {
             cfg.authorizer = Arc::new(AllowAllAuthorizer);
             configure(cfg);
@@ -710,7 +730,11 @@ mod tests {
         .await;
         let broker = handle.broker_arc_for_test();
         set_streams_version(&broker, 1).await;
-        (handle, directory, broker)
+        ConfiguredBroker {
+            handle,
+            dir: directory,
+            broker,
+        }
     }
 
     async fn check_protocol_disabled(enabled: bool, level: i16, group_id: &str) {
@@ -737,12 +761,13 @@ mod tests {
     /// caller's principal (see [`crate::test_support::GrantsInPrincipalName`]),
     /// for the tests that drive a specific ACL gate rather than allow
     /// everything.
-    async fn start_broker_with_grants() -> (BrokerHandle, tempfile::TempDir) {
-        start_group_broker_with(|cfg| {
+    async fn start_broker_with_grants() -> StartedBroker {
+        let (broker, dir) = start_group_broker_with(|cfg| {
             cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
             cfg.streams_group.enable = true;
         })
-        .await
+        .await;
+        StartedBroker { broker, dir }
     }
 
     /// Writes a `streams.version` `FeatureLevelRecord` at `level` and waits
@@ -762,7 +787,11 @@ mod tests {
         use crate::coordinator::unified::streams::actor::response::error_resp;
 
         const LAG: i64 = 4_321;
-        let (broker_handle, _dir, broker) = configured_streams_broker(|cfg| {
+        let ConfiguredBroker {
+            handle: broker_handle,
+            dir: _dir,
+            broker,
+        } = configured_streams_broker(|cfg| {
             cfg.streams_group.acceptable_recovery_lag = LAG;
         })
         .await;
@@ -821,7 +850,11 @@ mod tests {
             krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status,
         };
 
-        let (broker_handle, _dir, broker) = configured_streams_broker(|cfg| {
+        let ConfiguredBroker {
+            handle: broker_handle,
+            dir: _dir,
+            broker,
+        } = configured_streams_broker(|cfg| {
             cfg.streams_group.rack_aware_assignment_tags = vec!["zone".into()];
         })
         .await;

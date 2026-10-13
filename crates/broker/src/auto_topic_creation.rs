@@ -85,98 +85,105 @@ const REQUEST_TIMEOUT_MS: i32 = 30_000;
 /// `DefaultAutoTopicCreationManager`.
 const ERROR_CACHE_CAPACITY: usize = 1_000;
 
+/// One of Kafka's `Errors` entries: the code, `Errors.name()` and
+/// `Errors.message()`.
+struct KafkaError {
+    code: i16,
+    name: &'static str,
+    message: &'static str,
+}
+
 /// Kafka's `Errors` entries for the codes that a `CreateTopics` answer can
 /// carry: the code, `Errors.name()` and `Errors.message()`, from `Errors.java`
 /// of Kafka 4.3.1. The first entry is the fallback of `Errors.forCode` for a
 /// code that is not in the table.
-const CREATE_TOPICS_ERRORS: [(i16, &str, &str); 15] = [
-    (
-        codes::UNKNOWN_SERVER_ERROR,
-        "UNKNOWN_SERVER_ERROR",
-        "The server experienced an unexpected error when processing the request.",
-    ),
-    (
-        codes::REQUEST_TIMED_OUT,
-        "REQUEST_TIMED_OUT",
-        "The request timed out.",
-    ),
-    (
-        codes::INVALID_TOPIC_EXCEPTION,
-        "INVALID_TOPIC_EXCEPTION",
-        "The request attempted to perform an operation on an invalid topic.",
-    ),
-    (
-        codes::TOPIC_AUTHORIZATION_FAILED,
-        "TOPIC_AUTHORIZATION_FAILED",
-        "Topic authorization failed.",
-    ),
-    (
-        codes::CLUSTER_AUTHORIZATION_FAILED,
-        "CLUSTER_AUTHORIZATION_FAILED",
-        "Cluster authorization failed.",
-    ),
-    (
-        codes::UNSUPPORTED_VERSION,
-        "UNSUPPORTED_VERSION",
-        "The version of API is not supported.",
-    ),
-    (
-        codes::TOPIC_ALREADY_EXISTS,
-        "TOPIC_ALREADY_EXISTS",
-        "Topic with this name already exists.",
-    ),
-    (
-        codes::INVALID_PARTITIONS,
-        "INVALID_PARTITIONS",
-        "Number of partitions is below 1.",
-    ),
-    (
-        codes::INVALID_REPLICATION_FACTOR,
-        "INVALID_REPLICATION_FACTOR",
-        "Replication factor is below 1 or larger than the number of available brokers.",
-    ),
-    (
-        codes::INVALID_REPLICA_ASSIGNMENT,
-        "INVALID_REPLICA_ASSIGNMENT",
-        "Replica assignment is invalid.",
-    ),
-    (
-        codes::INVALID_CONFIG,
-        "INVALID_CONFIG",
-        "Configuration is invalid.",
-    ),
-    (
-        codes::NOT_CONTROLLER,
-        "NOT_CONTROLLER",
-        "This is not the correct controller for this cluster.",
-    ),
-    (
-        codes::INVALID_REQUEST,
-        "INVALID_REQUEST",
-        "This most likely occurs because of a request being malformed by the client library or \
+const CREATE_TOPICS_ERRORS: [KafkaError; 15] = [
+    KafkaError {
+        code: codes::UNKNOWN_SERVER_ERROR,
+        name: "UNKNOWN_SERVER_ERROR",
+        message: "The server experienced an unexpected error when processing the request.",
+    },
+    KafkaError {
+        code: codes::REQUEST_TIMED_OUT,
+        name: "REQUEST_TIMED_OUT",
+        message: "The request timed out.",
+    },
+    KafkaError {
+        code: codes::INVALID_TOPIC_EXCEPTION,
+        name: "INVALID_TOPIC_EXCEPTION",
+        message: "The request attempted to perform an operation on an invalid topic.",
+    },
+    KafkaError {
+        code: codes::TOPIC_AUTHORIZATION_FAILED,
+        name: "TOPIC_AUTHORIZATION_FAILED",
+        message: "Topic authorization failed.",
+    },
+    KafkaError {
+        code: codes::CLUSTER_AUTHORIZATION_FAILED,
+        name: "CLUSTER_AUTHORIZATION_FAILED",
+        message: "Cluster authorization failed.",
+    },
+    KafkaError {
+        code: codes::UNSUPPORTED_VERSION,
+        name: "UNSUPPORTED_VERSION",
+        message: "The version of API is not supported.",
+    },
+    KafkaError {
+        code: codes::TOPIC_ALREADY_EXISTS,
+        name: "TOPIC_ALREADY_EXISTS",
+        message: "Topic with this name already exists.",
+    },
+    KafkaError {
+        code: codes::INVALID_PARTITIONS,
+        name: "INVALID_PARTITIONS",
+        message: "Number of partitions is below 1.",
+    },
+    KafkaError {
+        code: codes::INVALID_REPLICATION_FACTOR,
+        name: "INVALID_REPLICATION_FACTOR",
+        message: "Replication factor is below 1 or larger than the number of available brokers.",
+    },
+    KafkaError {
+        code: codes::INVALID_REPLICA_ASSIGNMENT,
+        name: "INVALID_REPLICA_ASSIGNMENT",
+        message: "Replica assignment is invalid.",
+    },
+    KafkaError {
+        code: codes::INVALID_CONFIG,
+        name: "INVALID_CONFIG",
+        message: "Configuration is invalid.",
+    },
+    KafkaError {
+        code: codes::NOT_CONTROLLER,
+        name: "NOT_CONTROLLER",
+        message: "This is not the correct controller for this cluster.",
+    },
+    KafkaError {
+        code: codes::INVALID_REQUEST,
+        name: "INVALID_REQUEST",
+        message: "This most likely occurs because of a request being malformed by the client library or \
          the message was sent to an incompatible broker. See the broker logs for more details.",
-    ),
-    (
-        codes::POLICY_VIOLATION,
-        "POLICY_VIOLATION",
-        "Request parameters do not satisfy the configured policy.",
-    ),
-    (
-        codes::THROTTLING_QUOTA_EXCEEDED,
-        "THROTTLING_QUOTA_EXCEEDED",
-        "The throttling quota has been exceeded.",
-    ),
+    },
+    KafkaError {
+        code: codes::POLICY_VIOLATION,
+        name: "POLICY_VIOLATION",
+        message: "Request parameters do not satisfy the configured policy.",
+    },
+    KafkaError {
+        code: codes::THROTTLING_QUOTA_EXCEEDED,
+        name: "THROTTLING_QUOTA_EXCEEDED",
+        message: "The throttling quota has been exceeded.",
+    },
 ];
 
 /// Kafka's `Errors.forCode(code)`: the name and the default message of
 /// `code`, or those of `UNKNOWN_SERVER_ERROR` for a code that is not in
 /// [`CREATE_TOPICS_ERRORS`].
-fn kafka_error(code: i16) -> (&'static str, &'static str) {
-    let &(_, name, message) = CREATE_TOPICS_ERRORS
+fn kafka_error(code: i16) -> &'static KafkaError {
+    CREATE_TOPICS_ERRORS
         .iter()
-        .find(|(known, ..)| *known == code)
-        .unwrap_or(&CREATE_TOPICS_ERRORS[0]);
-    (name, message)
+        .find(|known| known.code == code)
+        .unwrap_or(&CREATE_TOPICS_ERRORS[0])
 }
 
 /// The broker's auto topic creation.
@@ -434,7 +441,7 @@ impl AutoTopicCreation {
                         .error_message
                         .clone()
                         .filter(|message| !message.is_empty())
-                        .unwrap_or_else(|| kafka_error(topic.error_code).1.to_owned());
+                        .unwrap_or_else(|| kafka_error(topic.error_code).message.to_owned());
                     tracing::debug!(
                         topic = %topic.name,
                         "Cached topic creation error for {}: {message}",
@@ -505,7 +512,7 @@ fn log_failed_rows(response: &CreateTopicsResponse) {
         .iter()
         .filter(|topic| topic.error_code != codes::NONE)
     {
-        let (error_name, _) = kafka_error(topic.error_code);
+        let error_name = kafka_error(topic.error_code).name;
         tracing::warn!(
             topic = %topic.name,
             "Auto topic creation failed for {} with error '{error_name}': {}",
@@ -617,10 +624,18 @@ struct ExpiringErrorCache {
 struct ErrorCacheInner {
     /// Topic name -> its current entry.
     by_topic: HashMap<String, ErrorEntry>,
-    /// (expiry time, sequence number, topic name), earliest expiry first.
-    expiry_queue: BinaryHeap<Reverse<(i64, u64, String)>>,
+    /// earliest expiry first.
+    expiry_queue: BinaryHeap<Reverse<ExpiryEntry>>,
     /// The sequence number of the next entry.
     next_sequence: u64,
+}
+
+/// When a cached error expires, ordered by expiry time, then by sequence.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ExpiryEntry {
+    expires_at_ms: i64,
+    sequence: u64,
+    topic: String,
 }
 
 #[derive(Debug)]
@@ -659,14 +674,19 @@ impl ExpiringErrorCache {
             expires_at_ms,
             sequence,
         });
-        inner
-            .expiry_queue
-            .push(Reverse((expires_at_ms, sequence, topic.to_owned())));
-        while let Some(Reverse((earliest_ms, ..))) = inner.expiry_queue.peek() {
-            if *earliest_ms > now_ms && inner.by_topic.len() <= self.capacity {
+        inner.expiry_queue.push(Reverse(ExpiryEntry {
+            expires_at_ms,
+            sequence,
+            topic: topic.to_owned(),
+        }));
+        while let Some(Reverse(earliest)) = inner.expiry_queue.peek() {
+            if earliest.expires_at_ms > now_ms && inner.by_topic.len() <= self.capacity {
                 break;
             }
-            let Some(Reverse((_, sequence, topic))) = inner.expiry_queue.pop() else {
+            let Some(Reverse(ExpiryEntry {
+                sequence, topic, ..
+            })) = inner.expiry_queue.pop()
+            else {
                 break;
             };
             if inner

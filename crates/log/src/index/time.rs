@@ -17,6 +17,15 @@ type TimeEntryRaw = super::IndexEntryRaw<I64<BigEndian>>;
 
 const _: [(); TIME_ENTRY_SIZE] = [(); std::mem::size_of::<TimeEntryRaw>()];
 
+/// One entry of a [`TimeIndex`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeIndexEntry {
+    /// The running maximum timestamp as of the batch the entry indexes.
+    pub timestamp: i64,
+    /// The last offset of that batch, relative to the segment's base offset.
+    pub relative_offset: u32,
+}
+
 #[derive(Debug)]
 pub struct TimeIndex {
     file: File,
@@ -66,7 +75,8 @@ impl TimeIndex {
             IoTarget::TimeIndex,
             raw.as_bytes(),
             &mut self.entries,
-            (timestamp, relative_offset),
+            timestamp,
+            relative_offset,
         )
     }
 
@@ -77,7 +87,7 @@ impl TimeIndex {
         krabka_verified::log_index::time_index_scan_start(&self.entries, target_timestamp)
     }
 
-    #[instrument(level = "debug", skip(self), fields(entries = tracing::field::Empty), err)]
+    #[tracing::instrument(level = "debug", skip(self), fields(entries = tracing::field::Empty), err)]
     pub fn truncate_by_relative_offset(&mut self, max_rel_exclusive: u32) -> Result<(), LogError> {
         super::truncate_index(
             &mut self.file,
@@ -87,22 +97,31 @@ impl TimeIndex {
         )
     }
 
-    /// Newest `(timestamp, relative_offset)` entry, or `None` when the index
-    /// holds none.
+    /// Newest entry, or `None` when the index holds none.
     ///
     /// The entry's timestamp is the running maximum as of the batch it
     /// indexes, so it is the floor a reopened segment restores its
     /// `max_timestamp` from.
     #[must_use]
-    pub fn last_entry(&self) -> Option<(i64, u32)> { self.entries.last().copied() }
+    pub fn last_entry(&self) -> Option<TimeIndexEntry> {
+        self.entries
+            .last()
+            .map(|&(timestamp, relative_offset)| TimeIndexEntry {
+                timestamp,
+                relative_offset,
+            })
+    }
 }
 
 #[cfg(test)]
 mod time_tests {
     use {
         super::*,
+        crate::{
+            index::{IndexFixture, IndexSeed},
+            test_support::TempPath,
+        },
         assert2::check,
-        std::{fs::OpenOptions, io::Write},
     };
 
     seed_index_fixture!(TimeIndex, i64);
@@ -111,8 +130,11 @@ mod time_tests {
     /// bound and the same file-length obligation.
     #[test]
     fn time_index_truncation_drops_entries_at_the_bound_and_shortens_the_file() {
-        let (_dir, path, mut idx) =
-            super::super::index_fixture("00000000000000000000.timeindex", TimeIndex::open);
+        let IndexFixture {
+            dir: _dir,
+            path,
+            index: mut idx,
+        } = super::super::index_fixture("00000000000000000000.timeindex", TimeIndex::open);
         for i in 0..5u32 {
             idx.append(1_000 + i64::from(i), i * 10).unwrap();
         }
@@ -145,22 +167,29 @@ mod time_tests {
     /// order.
     #[test]
     fn maybe_append_takes_only_strictly_newer_timestamps() {
+        let seed = |key, coordinate| IndexSeed { key, coordinate };
         for (label, existing, appended, want) in [
             ("no timestamp on an empty index", vec![], (-1, 0), vec![]),
             ("first timestamp", vec![], (0, 0), vec![(0, 0)]),
             (
                 "same timestamp, later offset",
-                vec![(100, 5)],
+                vec![seed(100, 5)],
                 (100, 9),
                 vec![(100, 5)],
             ),
-            ("older timestamp", vec![(100, 5)], (99, 9), vec![(100, 5)]),
-            ("newer timestamp", vec![(100, 5)], (101, 9), vec![
+            ("older timestamp", vec![seed(100, 5)], (99, 9), vec![(
+                100, 5,
+            )]),
+            ("newer timestamp", vec![seed(100, 5)], (101, 9), vec![
                 (100, 5),
                 (101, 9),
             ]),
         ] {
-            let (_dir, path, mut idx) = populated_index("0.timeindex", &existing);
+            let IndexFixture {
+                dir: _dir,
+                path,
+                index: mut idx,
+            } = populated_index("0.timeindex", &existing);
             idx.maybe_append(appended.0, appended.1).unwrap();
             check!(idx.entries == want, "case {label}");
             let reopened = TimeIndex::open(&path).unwrap();
@@ -170,10 +199,23 @@ mod time_tests {
 
     #[test]
     fn append_and_choose_scan_start() {
-        let (_dir, _path, idx) = populated_index("00000000000000000000.timeindex", &[
-            (1_000_000, 0),
-            (2_000_000, 100),
-            (3_000_000, 200),
+        let IndexFixture {
+            dir: _dir,
+            path: _path,
+            index: idx,
+        } = populated_index("00000000000000000000.timeindex", &[
+            IndexSeed {
+                key: 1_000_000,
+                coordinate: 0,
+            },
+            IndexSeed {
+                key: 2_000_000,
+                coordinate: 100,
+            },
+            IndexSeed {
+                key: 3_000_000,
+                coordinate: 200,
+            },
         ]);
         for (name, ts, want) in [
             ("before first", 0, 0),
@@ -188,25 +230,49 @@ mod time_tests {
 
     #[test]
     fn persists_across_reopen() {
-        let (_dir, path) = written_index("00000000000000000000.timeindex", &[(1, 0), (2, 50)]);
+        let TempPath { dir: _dir, path } = written_index("00000000000000000000.timeindex", &[
+            IndexSeed {
+                key: 1,
+                coordinate: 0,
+            },
+            IndexSeed {
+                key: 2,
+                coordinate: 50,
+            },
+        ]);
         let idx = TimeIndex::open(&path).unwrap();
         assert2::assert!(idx.entry_count() == 2);
     }
 
     #[test]
     fn ignores_trailing_zero_padding() {
-        let (_dir, path) = written_index("00000000000000000000.timeindex", &[
-            (1_000, 0),
-            (2_000, 100),
+        let TempPath { dir: _dir, path } = written_index("00000000000000000000.timeindex", &[
+            IndexSeed {
+                key: 1_000,
+                coordinate: 0,
+            },
+            IndexSeed {
+                key: 2_000,
+                coordinate: 100,
+            },
         ]);
-        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
-        f.write_all(&[0u8; TIME_ENTRY_SIZE * 2]).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        std::io::Write::write_all(&mut f, &[0u8; TIME_ENTRY_SIZE * 2]).unwrap();
         f.sync_data().unwrap();
         drop(f);
 
         let idx = TimeIndex::open(&path).unwrap();
         assert2::assert!(idx.entry_count() == 2);
-        assert2::assert!(idx.last_entry() == Some((2_000, 100)));
+        assert2::assert!(
+            idx.last_entry()
+                == Some(TimeIndexEntry {
+                    timestamp: 2_000,
+                    relative_offset: 100
+                })
+        );
         assert2::assert!(idx.scan_start(2_500) == 100);
     }
 }

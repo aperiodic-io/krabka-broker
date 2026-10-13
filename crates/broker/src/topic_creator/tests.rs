@@ -355,6 +355,15 @@ struct Script {
     create_topics_max: i16,
 }
 
+/// An Envelope's embedded request with the principal and client address that
+/// it carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Forwarded {
+    request: ForwardedRequest,
+    principal: ForwardedPrincipal,
+    address: IpAddr,
+}
+
 /// What one `CreateTopics` request looked like on the wire of the scripted
 /// controller.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,7 +372,7 @@ struct Received {
     client_id: Option<String>,
     /// The embedded request of an Envelope, with its principal and client
     /// address. `None` for a plain `CreateTopics`.
-    forwarded: Option<(ForwardedRequest, ForwardedPrincipal, IpAddr)>,
+    forwarded: Option<Forwarded>,
 }
 
 struct State {
@@ -478,7 +487,11 @@ impl FakeController {
                     let reply = envelope_answer(answer, &forwarded);
                     state.received.push(Received {
                         client_id,
-                        forwarded: Some((forwarded, principal, address)),
+                        forwarded: Some(Forwarded {
+                            request: forwarded,
+                            principal,
+                            address,
+                        }),
                     });
                     reply
                 } else {
@@ -557,13 +570,13 @@ fn envelope_answer(answer: Answer, forwarded: &ForwardedRequest) -> MockReply {
 
 /// The embedded request that `identity("alice")` and `request("scripted")`
 /// make at `version`.
-fn forwarded_scripted(version: i16) -> (ForwardedRequest, ForwardedPrincipal, IpAddr) {
+fn forwarded_scripted(version: i16) -> Forwarded {
     let mut body = BytesMut::new();
     request("scripted")
         .encode(&mut body, version)
         .expect("encode the request");
-    (
-        ForwardedRequest {
+    Forwarded {
+        request: ForwardedRequest {
             api_key: create_topics_request::API_KEY,
             api_version: version,
             correlation_id: 42,
@@ -571,12 +584,12 @@ fn forwarded_scripted(version: i16) -> (ForwardedRequest, ForwardedPrincipal, Ip
             body: body.freeze(),
             body_flexible: create_topics_request::is_flexible(version),
         },
-        ForwardedPrincipal {
+        principal: ForwardedPrincipal {
             name: "alice".to_owned(),
             token_authenticated: false,
         },
-        IpAddr::from([127, 0, 0, 1]),
-    )
+        address: IpAddr::from([127, 0, 0, 1]),
+    }
 }
 
 /// [`scripted_created_row`] as a response at `version` carries it. The topic
@@ -607,7 +620,13 @@ fn created_row_at(version: i16) -> CreatableTopicResult {
 async fn a_request_goes_again_after_a_disconnect_or_not_controller() {
     /// The case, the sender, the scripted answers, the highest version the
     /// controller advertises, and what the controller received.
-    type Case<'a> = (&'a str, Sender<'a>, &'a [Answer], i16, Vec<Received>);
+    struct Case<'a> {
+        name: &'a str,
+        sender: Sender<'a>,
+        answers: &'a [Answer],
+        create_topics_max: i16,
+        want: Vec<Received>,
+    }
     const LATEST: i16 = create_topics_request::LATEST_STABLE_VERSION;
     let plain = || Received {
         client_id: Some("7".to_owned()),
@@ -618,60 +637,67 @@ async fn a_request_goes_again_after_a_disconnect_or_not_controller() {
         forwarded: Some(forwarded_scripted(version)),
     };
     let cases: [Case<'_>; 7] = [
-        (
-            "plain, answered at once",
-            Sender::Broker,
-            &[],
-            LATEST,
-            vec![plain()],
-        ),
-        (
-            "plain, after NOT_CONTROLLER",
-            Sender::Broker,
-            &[Answer::NotController],
-            LATEST,
-            vec![plain(), plain()],
-        ),
-        (
-            "plain, after a disconnect",
-            Sender::Broker,
-            &[Answer::Close],
-            LATEST,
-            vec![plain(), plain()],
-        ),
-        (
-            "enveloped, after NOT_CONTROLLER on the envelope",
-            Sender::Principal("alice"),
-            &[Answer::NotController],
-            LATEST,
-            vec![enveloped(LATEST), enveloped(LATEST)],
-        ),
-        (
-            "enveloped, after NOT_CONTROLLER inside the envelope",
-            Sender::Principal("alice"),
-            &[Answer::EmbeddedNotController],
-            LATEST,
-            vec![enveloped(LATEST), enveloped(LATEST)],
-        ),
-        (
-            "enveloped, after a disconnect",
-            Sender::Principal("alice"),
-            &[Answer::Close],
-            LATEST,
-            vec![enveloped(LATEST), enveloped(LATEST)],
-        ),
+        Case {
+            name: "plain, answered at once",
+            sender: Sender::Broker,
+            answers: &[],
+            create_topics_max: LATEST,
+            want: vec![plain()],
+        },
+        Case {
+            name: "plain, after NOT_CONTROLLER",
+            sender: Sender::Broker,
+            answers: &[Answer::NotController],
+            create_topics_max: LATEST,
+            want: vec![plain(), plain()],
+        },
+        Case {
+            name: "plain, after a disconnect",
+            sender: Sender::Broker,
+            answers: &[Answer::Close],
+            create_topics_max: LATEST,
+            want: vec![plain(), plain()],
+        },
+        Case {
+            name: "enveloped, after NOT_CONTROLLER on the envelope",
+            sender: Sender::Principal("alice"),
+            answers: &[Answer::NotController],
+            create_topics_max: LATEST,
+            want: vec![enveloped(LATEST), enveloped(LATEST)],
+        },
+        Case {
+            name: "enveloped, after NOT_CONTROLLER inside the envelope",
+            sender: Sender::Principal("alice"),
+            answers: &[Answer::EmbeddedNotController],
+            create_topics_max: LATEST,
+            want: vec![enveloped(LATEST), enveloped(LATEST)],
+        },
+        Case {
+            name: "enveloped, after a disconnect",
+            sender: Sender::Principal("alice"),
+            answers: &[Answer::Close],
+            create_topics_max: LATEST,
+            want: vec![enveloped(LATEST), enveloped(LATEST)],
+        },
         // Below v5 neither the embedded request nor its response carries a
         // tagged-fields section in its header.
-        (
-            "enveloped, to a controller that stops at v4",
-            Sender::Principal("alice"),
-            &[],
-            4,
-            vec![enveloped(4)],
-        ),
+        Case {
+            name: "enveloped, to a controller that stops at v4",
+            sender: Sender::Principal("alice"),
+            answers: &[],
+            create_topics_max: 4,
+            want: vec![enveloped(4)],
+        },
     ];
 
-    for (case, sender, answers, create_topics_max, want) in cases {
+    for Case {
+        name,
+        sender,
+        answers,
+        create_topics_max,
+        want,
+    } in cases
+    {
         let controller = FakeController::start(Script {
             answers: answers.iter().copied().collect(),
             create_topics_max,
@@ -688,10 +714,10 @@ async fn a_request_goes_again_after_a_disconnect_or_not_controller() {
 
         check!(
             got == Ok(response(created_row_at(create_topics_max))),
-            "case: {case}"
+            "case: {name}"
         );
-        check!(controller.connections() == want.len(), "case: {case}");
-        check!(controller.received() == want, "case: {case}");
+        check!(controller.connections() == want.len(), "case: {name}");
+        check!(controller.received() == want, "case: {name}");
     }
 }
 
@@ -700,6 +726,7 @@ async fn a_request_goes_again_after_a_disconnect_or_not_controller() {
 #[test]
 fn the_create_topics_version_is_the_highest_that_both_sides_support() {
     let latest = create_topics_request::LATEST_STABLE_VERSION;
+    let range = |min, max| AdvertisedRange { min, max };
     let unsupported = || {
         Err(TopicCreatorError::Protocol(format!(
             "The controller does not support CREATE_TOPICS at a version in {}..={latest}",
@@ -707,13 +734,13 @@ fn the_create_topics_version_is_the_highest_that_both_sides_support() {
         )))
     };
     let cases = [
-        ("the same range", Some((0, latest)), Ok(latest)),
+        ("the same range", Some(range(0, latest)), Ok(latest)),
         (
             "a controller ahead of this codec",
-            Some((0, latest + 2)),
+            Some(range(0, latest + 2)),
             Ok(latest),
         ),
-        ("a controller behind this codec", Some((0, 4)), Ok(4)),
+        ("a controller behind this codec", Some(range(0, 4)), Ok(4)),
         (
             "a controller that does not advertise it",
             None,
@@ -721,12 +748,12 @@ fn the_create_topics_version_is_the_highest_that_both_sides_support() {
         ),
         (
             "a controller below this codec's minimum",
-            Some((0, create_topics_request::MIN_VERSION - 1)),
+            Some(range(0, create_topics_request::MIN_VERSION - 1)),
             unsupported(),
         ),
         (
             "a controller above this codec's maximum",
-            Some((latest + 1, latest + 2)),
+            Some(range(latest + 1, latest + 2)),
             unsupported(),
         ),
     ];
@@ -788,7 +815,7 @@ fn a_forwarded_identity_is_the_identity_of_the_request() {
 fn an_embedded_response_with_another_correlation_id_is_refused() {
     let forwarded = ForwardedRequest {
         correlation_id: 41,
-        ..forwarded_scripted(create_topics_request::LATEST_STABLE_VERSION).0
+        ..forwarded_scripted(create_topics_request::LATEST_STABLE_VERSION).request
     };
     let mut body = BytesMut::new();
     response(scripted_created_row("scripted"))

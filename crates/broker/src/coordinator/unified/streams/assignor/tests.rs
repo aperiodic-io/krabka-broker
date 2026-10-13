@@ -7,15 +7,77 @@
 
 use {super::*, assert2::assert, std::collections::HashMap};
 
-/// A member built from `(subtopology, partitions)` lists for each role, and
-/// `(subtopology, partition, offset sum)` reported offsets.
+/// The partitions of one subtopology that a member holds in a role.
+struct TaskPartitions {
+    subtopology: &'static str,
+    partitions: &'static [i32],
+}
+
+/// The partitions a member is expected to be assigned in a role.
+struct MemberTasks {
+    member: &'static str,
+    partitions: &'static [i32],
+}
+
+/// The offset sum that a member reported for one task.
+struct ReportedOffset {
+    subtopology: &'static str,
+    partition: i32,
+    offset_sum: i64,
+}
+
+/// A member built from the `TaskPartitions` of each role and its
+/// `ReportedOffset`s.
 struct M {
     id: &'static str,
     process: &'static str,
-    active: &'static [(&'static str, &'static [i32])],
-    standby: &'static [(&'static str, &'static [i32])],
-    warmup: &'static [(&'static str, &'static [i32])],
-    offsets: &'static [(&'static str, i32, i64)],
+    active: &'static [TaskPartitions],
+    standby: &'static [TaskPartitions],
+    warmup: &'static [TaskPartitions],
+    offsets: &'static [ReportedOffset],
+}
+
+macro_rules! task {
+    ($subtopology:literal, $partitions:expr) => {
+        TaskPartitions {
+            subtopology: $subtopology,
+            partitions: $partitions,
+        }
+    };
+}
+
+macro_rules! member_tasks {
+    ($member:literal, $partitions:expr) => {
+        MemberTasks {
+            member: $member,
+            partitions: $partitions,
+        }
+    };
+}
+
+macro_rules! reported {
+    ($partition:literal, $sum:literal) => {
+        ReportedOffset {
+            subtopology: "s",
+            partition: $partition,
+            offset_sum: $sum,
+        }
+    };
+}
+
+macro_rules! first_two_active {
+    () => {
+        &[
+            member_tasks!("member1", &[0]),
+            member_tasks!("member2", &[1]),
+        ]
+    };
+}
+
+macro_rules! s_active {
+    ($id:literal, $process:literal, $partitions:expr) => {
+        m_active($id, $process, &[task!("s", $partitions)])
+    };
 }
 
 const fn m(id: &'static str, process: &'static str) -> M {
@@ -29,21 +91,17 @@ const fn m(id: &'static str, process: &'static str) -> M {
     }
 }
 
-const fn m_active(
-    id: &'static str,
-    process: &'static str,
-    active: &'static [(&'static str, &'static [i32])],
-) -> M {
+const fn m_active(id: &'static str, process: &'static str, active: &'static [TaskPartitions]) -> M {
     M {
         active,
         ..m(id, process)
     }
 }
 
-fn role(tasks: &[(&str, &[i32])]) -> BTreeMap<String, Vec<i32>> {
+fn role(tasks: &[TaskPartitions]) -> BTreeMap<String, Vec<i32>> {
     tasks
         .iter()
-        .map(|(sub, parts)| ((*sub).to_owned(), parts.to_vec()))
+        .map(|entry| (entry.subtopology.to_owned(), entry.partitions.to_vec()))
         .collect()
 }
 
@@ -57,16 +115,29 @@ fn member(spec: &M) -> AssignorMember {
         task_offsets: spec
             .offsets
             .iter()
-            .map(|(sub, part, sum)| (((*sub).to_owned(), *part), *sum))
+            .map(|reported| {
+                (
+                    (reported.subtopology.to_owned(), reported.partition),
+                    reported.offset_sum,
+                )
+            })
             .collect(),
     }
 }
 
 /// `member -> subtopology "s" -> partitions`.
-fn roles(entries: &[(&str, &[i32])]) -> HashMap<String, BTreeMap<String, Vec<i32>>> {
+fn roles(entries: &[MemberTasks]) -> HashMap<String, BTreeMap<String, Vec<i32>>> {
     entries
         .iter()
-        .map(|(member, parts)| ((*member).to_owned(), role(&[("s", parts)])))
+        .map(|entry| {
+            (
+                entry.member.to_owned(),
+                role(&[TaskPartitions {
+                    subtopology: "s",
+                    partitions: entry.partitions,
+                }]),
+            )
+        })
         .collect()
 }
 
@@ -76,8 +147,8 @@ struct Row {
     partitions: i32,
     stateful: bool,
     standby_replicas: i32,
-    active: &'static [(&'static str, &'static [i32])],
-    standby: &'static [(&'static str, &'static [i32])],
+    active: &'static [MemberTasks],
+    standby: &'static [MemberTasks],
 }
 
 /// Rows about active placement.
@@ -100,72 +171,82 @@ fn active_rows() -> Vec<Row> {
             partitions: 4,
             stateful: false,
             standby_replicas: 0,
-            active: &[("A", &[0, 2]), ("B", &[1, 3])],
+            active: &[member_tasks!("A", &[0, 2]), member_tasks!("B", &[1, 3])],
             standby: &[],
         },
         Row {
             // A current owner keeps only its quota; the rest move at once.
             name: "sticky within quota",
-            members: vec![m_active("A", "p1", &[("s", &[0, 1, 2, 3])]), m("B", "p2")],
+            members: vec![s_active!("A", "p1", &[0, 1, 2, 3]), m("B", "p2")],
             partitions: 4,
             stateful: true,
             standby_replicas: 0,
-            active: &[("A", &[0, 1]), ("B", &[2, 3])],
+            active: &[member_tasks!("A", &[0, 1]), member_tasks!("B", &[2, 3])],
             standby: &[],
         },
         Row {
             name: "shouldAssignTasksToClientWithPreviousStandbyTasks",
             members: vec![
                 M {
-                    standby: &[("s", &[2])],
+                    standby: &[task!("s", &[2])],
                     ..m("member1", "process1")
                 },
                 M {
-                    standby: &[("s", &[1])],
+                    standby: &[task!("s", &[1])],
                     ..m("member2", "process2")
                 },
                 M {
-                    standby: &[("s", &[0])],
+                    standby: &[task!("s", &[0])],
                     ..m("member3", "process3")
                 },
             ],
             partitions: 3,
             stateful: false,
             standby_replicas: 0,
-            active: &[("member1", &[2]), ("member2", &[1]), ("member3", &[0])],
+            active: &[
+                member_tasks!("member1", &[2]),
+                member_tasks!("member2", &[1]),
+                member_tasks!("member3", &[0]),
+            ],
             standby: &[],
         },
         Row {
             name: "shouldAssignTasksToClientWithPreviousWarmupTasks",
             members: vec![
-                m_active("member1", "process1", &[("s", &[0, 1, 2])]),
-                m_active("member2", "process2", &[("s", &[3, 4, 5])]),
+                s_active!("member1", "process1", &[0, 1, 2]),
+                s_active!("member2", "process2", &[3, 4, 5]),
                 M {
-                    active: &[("s", &[6, 7])],
-                    warmup: &[("s", &[8])],
+                    active: &[task!("s", &[6, 7])],
+                    warmup: &[task!("s", &[8])],
                     ..m("member3", "process3")
                 },
-                m_active("member4", "process4", &[("s", &[9])]),
+                s_active!("member4", "process4", &[9]),
             ],
             partitions: 12,
             stateful: true,
             standby_replicas: 0,
             active: &[
-                ("member1", &[0, 1, 2]),
-                ("member2", &[3, 4, 5]),
-                ("member3", &[6, 7, 8]),
-                ("member4", &[9, 10, 11]),
+                member_tasks!("member1", &[0, 1, 2]),
+                member_tasks!("member2", &[3, 4, 5]),
+                member_tasks!("member3", &[6, 7, 8]),
+                member_tasks!("member4", &[9, 10, 11]),
             ],
             standby: &[],
         },
+    ]
+}
+
+/// Active rows about stateful placement.
+fn active_rows_stateful() -> Vec<Row> {
+    vec![
         Row {
             name: "shouldAssignStandbyTaskToClientWithPreviousWarmupTaskOverLessLoadedClient",
             members: vec![
-                m_active("member1", "process1", &[("s", &[0])]),
-                m_active("member2", "process2", &[("s", &[1])]),
+                s_active!("member1", "process1", &[0]),
+                s_active!("member2", "process2", &[1]),
                 M {
-                    active: &[("s", &[2])],
-                    warmup: &[("s", &[1])],
+                    active: &[task!("s", &[2])],
+                    warmup: &[task!("s", &[1])],
                     ..m("member3", "process3")
                 },
                 m("member4", "process4"),
@@ -173,40 +254,51 @@ fn active_rows() -> Vec<Row> {
             partitions: 3,
             stateful: true,
             standby_replicas: 1,
-            active: &[("member1", &[0]), ("member2", &[1]), ("member3", &[2])],
-            standby: &[("member2", &[0]), ("member3", &[1]), ("member4", &[2])],
+            active: &[
+                member_tasks!("member1", &[0]),
+                member_tasks!("member2", &[1]),
+                member_tasks!("member3", &[2]),
+            ],
+            standby: &[
+                member_tasks!("member2", &[0]),
+                member_tasks!("member3", &[1]),
+                member_tasks!("member4", &[2]),
+            ],
         },
         Row {
             name: "shouldPreferMoreCaughtUpCandidateRegardlessOfPrevStandbyOrPrevWarmupRole",
             members: vec![
-                m_active("member1", "process1", &[("s", &[0])]),
-                m_active("member2", "process2", &[("s", &[1])]),
+                s_active!("member1", "process1", &[0]),
+                s_active!("member2", "process2", &[1]),
                 M {
-                    standby: &[("s", &[0])],
-                    offsets: &[("s", 0, 100)],
+                    standby: &[task!("s", &[0])],
+                    offsets: &[reported!(0, 100)],
                     ..m("member3", "process3")
                 },
                 M {
-                    warmup: &[("s", &[0])],
-                    offsets: &[("s", 0, 10)],
+                    warmup: &[task!("s", &[0])],
+                    offsets: &[reported!(0, 10)],
                     ..m("member4", "process4")
                 },
                 M {
-                    standby: &[("s", &[1])],
-                    offsets: &[("s", 1, 10)],
+                    standby: &[task!("s", &[1])],
+                    offsets: &[reported!(1, 10)],
                     ..m("member5", "process5")
                 },
                 M {
-                    warmup: &[("s", &[1])],
-                    offsets: &[("s", 1, 100)],
+                    warmup: &[task!("s", &[1])],
+                    offsets: &[reported!(1, 100)],
                     ..m("member6", "process6")
                 },
             ],
             partitions: 2,
             stateful: true,
             standby_replicas: 1,
-            active: &[("member1", &[0]), ("member2", &[1])],
-            standby: &[("member3", &[0]), ("member6", &[1])],
+            active: first_two_active!(),
+            standby: &[
+                member_tasks!("member3", &[0]),
+                member_tasks!("member6", &[1]),
+            ],
         },
     ]
 }
@@ -219,37 +311,57 @@ fn standby_rows() -> Vec<Row> {
             name: "shouldAssignStandbyToPreviousStandbyThatDoesNotHoldTheActiveTask",
             members: vec![
                 M {
-                    standby: &[("s", &[2])],
+                    standby: &[task!("s", &[2])],
                     ..m("member1", "process1")
                 },
                 M {
-                    active: &[("s", &[0])],
-                    standby: &[("s", &[2])],
+                    active: &[task!("s", &[0])],
+                    standby: &[task!("s", &[2])],
                     ..m("member2", "process2")
                 },
-                m_active("member3", "process3", &[("s", &[1])]),
+                s_active!("member3", "process3", &[1]),
                 m("member4", "process4"),
             ],
             partitions: 3,
             stateful: true,
             standby_replicas: 1,
-            active: &[("member1", &[2]), ("member2", &[0]), ("member3", &[1])],
-            standby: &[("member1", &[0]), ("member2", &[2]), ("member4", &[1])],
+            active: &[
+                member_tasks!("member1", &[2]),
+                member_tasks!("member2", &[0]),
+                member_tasks!("member3", &[1]),
+            ],
+            standby: &[
+                member_tasks!("member1", &[0]),
+                member_tasks!("member2", &[2]),
+                member_tasks!("member4", &[1]),
+            ],
         },
         Row {
             name: "shouldRankCurrentOwnersAheadOfReportedTaskOffsetsAndMostCaughtUpFirst",
             members: vec![
-                m_active("member1", "process1", &[("s", &[0])]),
+                s_active!("member1", "process1", &[0]),
                 M {
-                    standby: &[("s", &[0, 1])],
+                    standby: &[task!("s", &[0, 1])],
                     ..m("member2", "process2")
                 },
                 M {
-                    offsets: &[("s", 0, 1_000_000), ("s", 1, 1_000_000), ("s", 2, 100)],
+                    offsets: &[
+                        ReportedOffset {
+                            subtopology: "s",
+                            partition: 0,
+                            offset_sum: 1_000_000,
+                        },
+                        ReportedOffset {
+                            subtopology: "s",
+                            partition: 1,
+                            offset_sum: 1_000_000,
+                        },
+                        reported!(2, 100),
+                    ],
                     ..m("member3", "process3")
                 },
                 M {
-                    offsets: &[("s", 2, 50)],
+                    offsets: &[reported!(2, 50)],
                     ..m("member4", "process4")
                 },
             ],
@@ -257,10 +369,10 @@ fn standby_rows() -> Vec<Row> {
             stateful: true,
             standby_replicas: 0,
             active: &[
-                ("member1", &[0]),
-                ("member2", &[1]),
-                ("member3", &[2]),
-                ("member4", &[3]),
+                member_tasks!("member1", &[0]),
+                member_tasks!("member2", &[1]),
+                member_tasks!("member3", &[2]),
+                member_tasks!("member4", &[3]),
             ],
             standby: &[],
         },
@@ -268,37 +380,46 @@ fn standby_rows() -> Vec<Row> {
             name: "shouldAssignStandbysAwayFromProcessHoldingStateOnColdStart",
             members: vec![
                 M {
-                    offsets: &[("s", 0, 100)],
+                    offsets: &[reported!(0, 100)],
                     ..m("member1", "process1")
                 },
                 M {
-                    offsets: &[("s", 1, 100)],
+                    offsets: &[reported!(1, 100)],
                     ..m("member2", "process2")
                 },
             ],
             partitions: 2,
             stateful: true,
             standby_replicas: 1,
-            active: &[("member1", &[0]), ("member2", &[1])],
-            standby: &[("member1", &[1]), ("member2", &[0])],
+            active: first_two_active!(),
+            standby: &[
+                member_tasks!("member1", &[1]),
+                member_tasks!("member2", &[0]),
+            ],
         },
+    ]
+}
+
+/// Standby rows about cold starts.
+fn standby_rows_cold_start() -> Vec<Row> {
+    vec![
         Row {
             name: "shouldAssignTasksToProcessesReportingTaskOffsetsOnColdStartWithMultipleMembersPerProcess",
             members: vec![
                 M {
-                    offsets: &[("s", 0, 100), ("s", 1, 100)],
+                    offsets: &[reported!(0, 100), reported!(1, 100)],
                     ..m("member1_1", "process1")
                 },
                 M {
-                    offsets: &[("s", 0, 100), ("s", 1, 100)],
+                    offsets: &[reported!(0, 100), reported!(1, 100)],
                     ..m("member1_2", "process1")
                 },
                 M {
-                    offsets: &[("s", 2, 100), ("s", 3, 100)],
+                    offsets: &[reported!(2, 100), reported!(3, 100)],
                     ..m("member2_1", "process2")
                 },
                 M {
-                    offsets: &[("s", 2, 100), ("s", 3, 100)],
+                    offsets: &[reported!(2, 100), reported!(3, 100)],
                     ..m("member2_2", "process2")
                 },
             ],
@@ -306,10 +427,10 @@ fn standby_rows() -> Vec<Row> {
             stateful: true,
             standby_replicas: 0,
             active: &[
-                ("member1_1", &[0]),
-                ("member1_2", &[1]),
-                ("member2_1", &[2]),
-                ("member2_2", &[3]),
+                member_tasks!("member1_1", &[0]),
+                member_tasks!("member1_2", &[1]),
+                member_tasks!("member2_1", &[2]),
+                member_tasks!("member2_2", &[3]),
             ],
             standby: &[],
         },
@@ -320,29 +441,29 @@ fn standby_rows() -> Vec<Row> {
             partitions: 2,
             stateful: true,
             standby_replicas: 1,
-            active: &[("A", &[0]), ("B", &[1])],
-            standby: &[("A", &[1]), ("B", &[0])],
+            active: &[member_tasks!("A", &[0]), member_tasks!("B", &[1])],
+            standby: &[member_tasks!("A", &[1]), member_tasks!("B", &[0])],
         },
         Row {
             // The owner of task 0 left; m2 held its standby and takes it.
             name: "orphan active goes to its previous standby",
             members: vec![
                 M {
-                    active: &[("s", &[1])],
-                    standby: &[("s", &[0])],
+                    active: &[task!("s", &[1])],
+                    standby: &[task!("s", &[0])],
                     ..m("m2", "p2")
                 },
                 M {
-                    active: &[("s", &[2])],
-                    standby: &[("s", &[1])],
+                    active: &[task!("s", &[2])],
+                    standby: &[task!("s", &[1])],
                     ..m("m3", "p3")
                 },
             ],
             partitions: 3,
             stateful: true,
             standby_replicas: 1,
-            active: &[("m2", &[0, 1]), ("m3", &[2])],
-            standby: &[("m2", &[2]), ("m3", &[0, 1])],
+            active: &[member_tasks!("m2", &[0, 1]), member_tasks!("m3", &[2])],
+            standby: &[member_tasks!("m2", &[2]), member_tasks!("m3", &[0, 1])],
         },
         Row {
             // Two members of one process: a standby never shares a process
@@ -352,7 +473,7 @@ fn standby_rows() -> Vec<Row> {
             partitions: 2,
             stateful: true,
             standby_replicas: 1,
-            active: &[("A", &[0]), ("B", &[1])],
+            active: &[member_tasks!("A", &[0]), member_tasks!("B", &[1])],
             standby: &[],
         },
     ]
@@ -360,7 +481,12 @@ fn standby_rows() -> Vec<Row> {
 
 #[test]
 fn assign_matches_kafka_sticky_task_assignor() {
-    for row in active_rows().into_iter().chain(standby_rows()) {
+    let rows = active_rows()
+        .into_iter()
+        .chain(active_rows_stateful())
+        .chain(standby_rows())
+        .chain(standby_rows_cold_start());
+    for row in rows {
         let members: Vec<AssignorMember> = row.members.iter().map(member).collect();
         let input = AssignorInput {
             tasks: maplit::btreemap! {"s".to_owned() => (0..row.partitions).collect()},
@@ -389,8 +515,8 @@ fn range_assigns_each_member_a_task_of_every_subtopology() {
     // member ends with one active and one standby task of each subtopology.
     let members = [
         member(&m_active("member1", "process1", &[
-            ("s1", &[0, 1]),
-            ("s2", &[0, 1]),
+            task!("s1", &[0, 1]),
+            task!("s2", &[0, 1]),
         ])),
         member(&m("member2", "process2")),
     ];
@@ -406,12 +532,12 @@ fn range_assigns_each_member_a_task_of_every_subtopology() {
         assign(&members, &input)
             == StreamsAssignment {
                 active: maplit::hashmap! {
-                    "member1".to_owned() => role(&[("s1", &[0]), ("s2", &[0])]),
-                    "member2".to_owned() => role(&[("s1", &[1]), ("s2", &[1])]),
+                    "member1".to_owned() => role(&[TaskPartitions { subtopology: "s1", partitions: &[0] }, TaskPartitions { subtopology: "s2", partitions: &[0] }]),
+                    "member2".to_owned() => role(&[TaskPartitions { subtopology: "s1", partitions: &[1] }, TaskPartitions { subtopology: "s2", partitions: &[1] }]),
                 },
                 standby: maplit::hashmap! {
-                    "member1".to_owned() => role(&[("s1", &[1]), ("s2", &[1])]),
-                    "member2".to_owned() => role(&[("s1", &[0]), ("s2", &[0])]),
+                    "member1".to_owned() => role(&[TaskPartitions { subtopology: "s1", partitions: &[1] }, TaskPartitions { subtopology: "s2", partitions: &[1] }]),
+                    "member2".to_owned() => role(&[TaskPartitions { subtopology: "s1", partitions: &[0] }, TaskPartitions { subtopology: "s2", partitions: &[0] }]),
                 },
             }
     );

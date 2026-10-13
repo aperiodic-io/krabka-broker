@@ -10,8 +10,8 @@ use {
         error::RemoteStorageError,
         metadata::RemoteLogSegmentMetadata,
         storage_manager::{
-            ArtifactBody, IndexType, RemoteStorageManager, partition_dir_name, remote_operation,
-            segment_file_name, segment_suffixes,
+            ArtifactBody, IndexType, RemoteStorageManager, SegmentArtifact, partition_dir_name,
+            remote_operation, segment_file_name, segment_suffixes,
         },
     },
     std::{fs, path::PathBuf},
@@ -71,7 +71,7 @@ impl RemoteStorageManager for LocalTieredStorage {
             let dir = self.partition_dir(metadata);
             fs::create_dir_all(&dir)?;
 
-            for (suffix, body) in data.artifacts() {
+            for SegmentArtifact { suffix, body } in data.artifacts() {
                 let path = self.segment_path(metadata, suffix);
                 match body {
                     ArtifactBody::File(source) => {
@@ -154,34 +154,46 @@ mod tests {
         assert2::{assert, check},
     };
 
-    type LocalFixture = (
-        tempfile::TempDir,
-        tempfile::TempDir,
-        LocalTieredStorage,
-        RemoteLogSegmentMetadata,
-    );
+    /// A local tiered store, the directories around it, and one segment's metadata.
+    struct LocalFixture {
+        remote: tempfile::TempDir,
+        source: tempfile::TempDir,
+        store: LocalTieredStorage,
+        metadata: RemoteLogSegmentMetadata,
+    }
 
     fn local_store() -> LocalFixture {
         let remote = tempfile::tempdir().unwrap();
         let source = tempfile::tempdir().unwrap();
         let store = LocalTieredStorage::new(remote.path());
-        (remote, source, store, metadata(uuid::Uuid::from_u128(10)))
+        LocalFixture {
+            remote,
+            source,
+            store,
+            metadata: metadata(uuid::Uuid::from_u128(10)),
+        }
     }
 
     fn copied_store(with_transaction_index: TransactionIndex) -> LocalFixture {
-        let (remote, source, store, metadata) = local_store();
-        store
+        let fixture = local_store();
+        fixture
+            .store
             .copy_log_segment_data(
-                &metadata,
-                &sample_data(source.path(), with_transaction_index),
+                &fixture.metadata,
+                &sample_data(fixture.source.path(), with_transaction_index),
             )
             .unwrap();
-        (remote, source, store, metadata)
+        fixture
     }
 
     #[test]
     fn copy_then_fetch_full_segment() {
-        let (_remote, src, rsm, md) = local_store();
+        let LocalFixture {
+            remote: _remote,
+            source: src,
+            store: rsm,
+            metadata: md,
+        } = local_store();
         assert!(
             rsm.copy_log_segment_data(
                 &md,
@@ -196,7 +208,12 @@ mod tests {
 
     #[test]
     fn fetch_partial_byte_ranges() {
-        let (_remote, _src, rsm, md) = copied_store(TransactionIndex::Omitted);
+        let LocalFixture {
+            remote: _remote,
+            source: _src,
+            store: rsm,
+            metadata: md,
+        } = copied_store(TransactionIndex::Omitted);
         for (start, end, want) in [
             // Inclusive [2, 5] -> "2345".
             (2, Some(5), b"2345".as_ref()),
@@ -216,7 +233,12 @@ mod tests {
 
     #[test]
     fn fetch_single_byte_range_start_equals_end() {
-        let (_remote, _src, rsm, md) = copied_store(TransactionIndex::Omitted);
+        let LocalFixture {
+            remote: _remote,
+            source: _src,
+            store: rsm,
+            metadata: md,
+        } = copied_store(TransactionIndex::Omitted);
         // Inclusive [3, 3] is a valid single-byte range -> "3". (The guard is
         // `end < start`, not `<=`/`==`, so an equal start/end must succeed.)
         assert!(rsm.fetch_log_segment(&md, 3, Some(3)).unwrap() == b"3");
@@ -224,13 +246,18 @@ mod tests {
 
     #[test]
     fn fetch_each_index_type() {
-        let (_remote, _src, rsm, md) = copied_store(TransactionIndex::Present);
+        let LocalFixture {
+            remote: _remote,
+            source: _src,
+            store: rsm,
+            metadata: md,
+        } = copied_store(TransactionIndex::Present);
         check_sample_indexes(&rsm, &md);
     }
 
     #[test]
     fn copied_files_use_kafka_local_tiered_storage_layout() {
-        let (remote, _src, _rsm, _md) = copied_store(TransactionIndex::Present);
+        let LocalFixture { remote, .. } = copied_store(TransactionIndex::Present);
 
         let partition = remote.path().join("orders-0-AAAAAAAAAAAAAAAAAAAAAQ");
         for suffix in [
@@ -254,7 +281,12 @@ mod tests {
 
     #[test]
     fn missing_optional_txn_index_is_not_found() {
-        let (_remote, _src, rsm, md) = copied_store(TransactionIndex::Omitted);
+        let LocalFixture {
+            remote: _remote,
+            source: _src,
+            store: rsm,
+            metadata: md,
+        } = copied_store(TransactionIndex::Omitted);
         let err = rsm.fetch_index(&md, IndexType::Transaction).unwrap_err();
         assert!(matches!(err, RemoteStorageError::SegmentNotFound(_)));
     }
@@ -270,7 +302,12 @@ mod tests {
 
     #[test]
     fn delete_is_idempotent_and_removes_data() {
-        let (_remote, _src, rsm, md) = copied_store(TransactionIndex::Present);
+        let LocalFixture {
+            remote: _remote,
+            source: _src,
+            store: rsm,
+            metadata: md,
+        } = copied_store(TransactionIndex::Present);
         rsm.delete_log_segment_data(&md).unwrap();
         // Second delete is a no-op.
         rsm.delete_log_segment_data(&md).unwrap();

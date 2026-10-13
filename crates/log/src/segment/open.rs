@@ -384,7 +384,7 @@ mod tests {
         assert2::assert!(seg.offset_index.entry_count() == 1);
         assert2::assert!(seg.time_index.entry_count() == 1);
         assert2::assert!(u64::from(seg.offset_index.lookup(999)) < valid_size);
-        assert2::assert!(seg.time_index.last_entry().unwrap().1 < 999);
+        assert2::assert!(seg.time_index.last_entry().unwrap().relative_offset < 999);
         drop(seg);
 
         // Recovery is idempotent once the file and both indexes share the
@@ -420,7 +420,12 @@ mod tests {
         let seg = Segment::open_active(dir.path(), Offset(0), true).unwrap();
 
         assert2::assert!(seg.time_index.entry_count() == 1);
-        assert2::assert!(seg.time_index.last_entry() == Some((300, 1)));
+        assert2::assert!(
+            seg.time_index
+                .last_entry()
+                .map(|entry| (entry.timestamp, entry.relative_offset))
+                == Some((300, 1))
+        );
     }
 
     #[test]

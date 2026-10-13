@@ -48,6 +48,29 @@ pub(super) enum DedupOutcome {
     },
 }
 
+/// The code and message of a produce row that failed a check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RowError {
+    /// The row's error code.
+    pub(super) code: i16,
+    /// The row's error message, when Kafka sets one.
+    pub(super) message: Option<String>,
+}
+
+/// A producer id with the epoch its batches carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ProducerIdAndEpoch {
+    pub(super) producer_id: krabka_log::ProducerId,
+    pub(super) producer_epoch: i16,
+}
+
+/// A partition named by its topic name and index.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PartitionName<'a> {
+    pub(super) topic_name: &'a str,
+    pub(super) partition_index: i32,
+}
+
 /// The request fields the KIP-890 transaction check needs.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct TransactionRequest<'a> {
@@ -137,11 +160,14 @@ pub(super) async fn verify_transactional_produce(
     batch: &PreparedBatch,
     partition: &Partition,
     request: TransactionRequest<'_>,
-) -> Result<Verification, (i16, Option<String>)> {
+) -> Result<Verification, RowError> {
     let is_transactional = batch.attributes.is_transactional();
     if batch.producer_id < 0 {
         return if is_transactional {
-            Err((codes::INVALID_PRODUCER_ID_MAPPING, None))
+            Err(RowError {
+                code: codes::INVALID_PRODUCER_ID_MAPPING,
+                message: None,
+            })
         } else {
             Ok(Verification::Settled(None))
         };
@@ -168,11 +194,9 @@ pub(super) async fn verify_transactional_produce(
             (now_ms(), request.producer_id_expiration_ms),
         )
         .await
-        .map_err(|refusal| {
-            (
-                codes::from_broker_error(&BrokerError::TransactionAppend(refusal)),
-                None,
-            )
+        .map_err(|refusal| RowError {
+            code: codes::from_broker_error(&BrokerError::TransactionAppend(refusal)),
+            message: None,
         })?;
     if guard == krabka_log::VerificationGuard::SENTINEL || request.transactional_id.is_none() {
         // Kafka skips the coordinator call without a transactional id, and
@@ -194,7 +218,8 @@ pub(super) async fn verify_transactional_produce(
 
 /// Ask the coordinator of the request's `transactional_id` about every
 /// partition of the request that starts a transaction for one producer, in
-/// one `AddPartitionsToTxn` call, and return its answer per partition.
+/// one `AddPartitionsToTxn` call, and return its answer code per partition,
+/// in the order of `partitions`.
 ///
 /// This is Kafka's `ReplicaManager.maybeSendPartitionsToTransactionCoordinator`
 /// with `AddPartitionsToTxnManager.addOrVerifyTransaction`. At transaction
@@ -207,13 +232,16 @@ pub(super) async fn verify_with_coordinator(
     coordinator: &std::sync::Arc<TxnCoordinator>,
     image: &krabka_metadata::MetadataImage,
     request: TransactionRequest<'_>,
-    (producer_id, producer_epoch): (krabka_log::ProducerId, i16),
+    ProducerIdAndEpoch {
+        producer_id,
+        producer_epoch,
+    }: ProducerIdAndEpoch,
     partitions: Vec<TopicPartition>,
-) -> Vec<(TopicPartition, i16)> {
+) -> Vec<i16> {
     let Some(transactional_id) = request.transactional_id else {
         return partitions
             .into_iter()
-            .map(|partition| (partition, codes::INVALID_TXN_STATE))
+            .map(|_| codes::INVALID_TXN_STATE)
             .collect();
     };
     let supports_epoch_bump = request.version >= FIRST_ADD_PARTITION_PRODUCE_VERSION;
@@ -239,7 +267,7 @@ pub(super) async fn verify_with_coordinator(
             tokio::time::sleep(CONCURRENT_TRANSACTIONS_BACKOFF).await;
             continue;
         }
-        return answers;
+        return answers.into_iter().map(|(_, code)| code).collect();
     }
 }
 
@@ -252,7 +280,7 @@ pub(super) async fn verify_with_coordinator(
 /// then turns a coordinator that cannot answer into `NOT_ENOUGH_REPLICAS`, and
 /// so is `CONCURRENT_TRANSACTIONS` below v12. Those two translations carry
 /// the custom error message that `postVerificationCallback` sets.
-pub(super) fn produce_verification_code(code: i16, version: i16) -> (i16, Option<String>) {
+pub(super) fn produce_verification_code(code: i16, version: i16) -> RowError {
     let code = match code {
         codes::PRODUCER_FENCED => codes::INVALID_PRODUCER_EPOCH,
         codes::CLUSTER_AUTHORIZATION_FAILED => codes::INVALID_TXN_STATE,
@@ -272,20 +300,23 @@ pub(super) fn produce_verification_code(code: i16, version: i16) -> (i16, Option
         _ => None,
     };
     if let Some(underlying) = underlying {
-        return (
-            codes::NOT_ENOUGH_REPLICAS,
-            Some(format!(
+        return RowError {
+            code: codes::NOT_ENOUGH_REPLICAS,
+            message: Some(format!(
                 "Unable to verify the partition has been added to the transaction. Underlying error: {underlying}"
             )),
-        );
+        };
     }
     if code == codes::INVALID_TXN_STATE {
-        return (
+        return RowError {
             code,
-            Some("Partition was not added to the transaction".to_owned()),
-        );
+            message: Some("Partition was not added to the transaction".to_owned()),
+        };
     }
-    (code, None)
+    RowError {
+        code,
+        message: None,
+    }
 }
 
 /// The idempotent-producer dedup gate: Kafka's
@@ -304,7 +335,10 @@ pub(super) async fn handle_duplicate(
     batch: &PreparedBatch,
     producer_state: &ProducerState,
     partition: &Partition,
-    (topic_name, partition_index): (&str, i32),
+    PartitionName {
+        topic_name,
+        partition_index,
+    }: PartitionName<'_>,
     acks: i16,
     unstable: UnstableApiVersions,
 ) -> DedupOutcome {
@@ -395,7 +429,7 @@ pub(super) async fn handle_duplicate(
 #[cfg(test)]
 mod tests {
     use {
-        super::{PreparedBatch, verify_transactional_produce},
+        super::{PreparedBatch, RowError, verify_transactional_produce},
         crate::{
             codes,
             handlers::produce::{
@@ -463,7 +497,13 @@ mod tests {
                 },
             )
             .await;
-            check!(refused == Err((codes::INVALID_PRODUCER_ID_MAPPING, None)));
+            check!(
+                refused
+                    == Err(RowError {
+                        code: codes::INVALID_PRODUCER_ID_MAPPING,
+                        message: None
+                    })
+            );
         }
     }
 
@@ -538,84 +578,62 @@ mod tests {
         };
         let not_added = Some("Partition was not added to the transaction".to_owned());
         let cases = [
-            (codes::NONE, 11, (codes::NONE, None)),
-            (
-                codes::PRODUCER_FENCED,
-                11,
-                (codes::INVALID_PRODUCER_EPOCH, None),
-            ),
-            (
-                codes::INVALID_PRODUCER_EPOCH,
-                12,
-                (codes::INVALID_PRODUCER_EPOCH, None),
-            ),
-            (
-                codes::TRANSACTION_ABORTABLE,
-                10,
-                (codes::INVALID_TXN_STATE, not_added.clone()),
-            ),
-            (
-                codes::TRANSACTION_ABORTABLE,
-                11,
-                (codes::TRANSACTION_ABORTABLE, None),
-            ),
-            (
-                codes::INVALID_TXN_STATE,
-                12,
-                (codes::INVALID_TXN_STATE, not_added.clone()),
-            ),
-            (
-                codes::CLUSTER_AUTHORIZATION_FAILED,
-                11,
-                (codes::INVALID_TXN_STATE, not_added),
-            ),
-            (
-                codes::NETWORK_EXCEPTION,
-                12,
-                (
-                    codes::NOT_ENOUGH_REPLICAS,
-                    not_verified("NETWORK_EXCEPTION"),
-                ),
-            ),
-            (
-                codes::NOT_COORDINATOR,
-                11,
-                (codes::NOT_ENOUGH_REPLICAS, not_verified("NOT_COORDINATOR")),
-            ),
-            (
-                codes::COORDINATOR_NOT_AVAILABLE,
-                11,
-                (
-                    codes::NOT_ENOUGH_REPLICAS,
-                    not_verified("COORDINATOR_NOT_AVAILABLE"),
-                ),
-            ),
-            (
-                codes::COORDINATOR_LOAD_IN_PROGRESS,
-                11,
-                (
-                    codes::NOT_ENOUGH_REPLICAS,
-                    not_verified("COORDINATOR_LOAD_IN_PROGRESS"),
-                ),
-            ),
-            (
-                codes::CONCURRENT_TRANSACTIONS,
-                11,
-                (
-                    codes::NOT_ENOUGH_REPLICAS,
-                    not_verified("CONCURRENT_TRANSACTIONS"),
-                ),
-            ),
-            (
-                codes::CONCURRENT_TRANSACTIONS,
-                12,
-                (codes::CONCURRENT_TRANSACTIONS, None),
-            ),
-            (
-                codes::INVALID_PRODUCER_ID_MAPPING,
-                12,
-                (codes::INVALID_PRODUCER_ID_MAPPING, None),
-            ),
+            (codes::NONE, 11, RowError {
+                code: codes::NONE,
+                message: None,
+            }),
+            (codes::PRODUCER_FENCED, 11, RowError {
+                code: codes::INVALID_PRODUCER_EPOCH,
+                message: None,
+            }),
+            (codes::INVALID_PRODUCER_EPOCH, 12, RowError {
+                code: codes::INVALID_PRODUCER_EPOCH,
+                message: None,
+            }),
+            (codes::TRANSACTION_ABORTABLE, 10, RowError {
+                code: codes::INVALID_TXN_STATE,
+                message: not_added.clone(),
+            }),
+            (codes::TRANSACTION_ABORTABLE, 11, RowError {
+                code: codes::TRANSACTION_ABORTABLE,
+                message: None,
+            }),
+            (codes::INVALID_TXN_STATE, 12, RowError {
+                code: codes::INVALID_TXN_STATE,
+                message: not_added.clone(),
+            }),
+            (codes::CLUSTER_AUTHORIZATION_FAILED, 11, RowError {
+                code: codes::INVALID_TXN_STATE,
+                message: not_added,
+            }),
+            (codes::NETWORK_EXCEPTION, 12, RowError {
+                code: codes::NOT_ENOUGH_REPLICAS,
+                message: not_verified("NETWORK_EXCEPTION"),
+            }),
+            (codes::NOT_COORDINATOR, 11, RowError {
+                code: codes::NOT_ENOUGH_REPLICAS,
+                message: not_verified("NOT_COORDINATOR"),
+            }),
+            (codes::COORDINATOR_NOT_AVAILABLE, 11, RowError {
+                code: codes::NOT_ENOUGH_REPLICAS,
+                message: not_verified("COORDINATOR_NOT_AVAILABLE"),
+            }),
+            (codes::COORDINATOR_LOAD_IN_PROGRESS, 11, RowError {
+                code: codes::NOT_ENOUGH_REPLICAS,
+                message: not_verified("COORDINATOR_LOAD_IN_PROGRESS"),
+            }),
+            (codes::CONCURRENT_TRANSACTIONS, 11, RowError {
+                code: codes::NOT_ENOUGH_REPLICAS,
+                message: not_verified("CONCURRENT_TRANSACTIONS"),
+            }),
+            (codes::CONCURRENT_TRANSACTIONS, 12, RowError {
+                code: codes::CONCURRENT_TRANSACTIONS,
+                message: None,
+            }),
+            (codes::INVALID_PRODUCER_ID_MAPPING, 12, RowError {
+                code: codes::INVALID_PRODUCER_ID_MAPPING,
+                message: None,
+            }),
         ];
         for (answer, version, want) in cases {
             check!(

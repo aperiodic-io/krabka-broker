@@ -494,12 +494,17 @@ mod tests {
     fn api_versions_response_runs_kafka_request_checks() {
         use krabka_protocol::owned::api_versions_request::ApiVersionsRequest;
 
+        /// The answer a request must get, and the version it is encoded at.
+        struct Answer {
+            version: i16,
+            response: ApiVersionsResponse,
+        }
         struct Row {
             label: &'static str,
             unstable: UnstableApiVersions,
             version: i16,
             request: Option<ApiVersionsRequest>,
-            expected: Option<(i16, ApiVersionsResponse)>,
+            expected: Option<Answer>,
         }
         let request = |name: &str, software_version: &str, cluster_id: Option<&str>, node_id| {
             Some(ApiVersionsRequest {
@@ -511,23 +516,29 @@ mod tests {
             })
         };
         let unsupported = |max_version| {
-            Some((0, ApiVersionsResponse {
-                error_code: API_VERSIONS_UNSUPPORTED_VERSION,
-                api_keys: vec![ApiVersionEntry {
-                    api_key: 18,
-                    min_version: 0,
-                    max_version,
+            Some(Answer {
+                version: 0,
+                response: ApiVersionsResponse {
+                    error_code: API_VERSIONS_UNSUPPORTED_VERSION,
+                    api_keys: vec![ApiVersionEntry {
+                        api_key: 18,
+                        min_version: 0,
+                        max_version,
+                        ..Default::default()
+                    }],
                     ..Default::default()
-                }],
-                ..Default::default()
-            }))
+                },
+            })
         };
         let (strict, trunk) = (UnstableApiVersions::Disabled, UnstableApiVersions::Enabled);
         let invalid = |version| {
-            Some((version, ApiVersionsResponse {
-                error_code: API_VERSIONS_INVALID_REQUEST,
-                ..Default::default()
-            }))
+            Some(Answer {
+                version,
+                response: ApiVersionsResponse {
+                    error_code: API_VERSIONS_INVALID_REQUEST,
+                    ..Default::default()
+                },
+            })
         };
         let rows = [
             Row {
@@ -638,12 +649,16 @@ mod tests {
                 ..view(&image, -1)
             };
             let answer = super::api_versions_response(row.version, &body, view).expect("answer");
-            let (version, expected) = row.expected.unwrap_or_else(|| {
+            let Answer {
+                version,
+                response: expected,
+            } = row.expected.unwrap_or_else(|| {
                 let full = super::api_versions_response_body(row.version, view);
-                (
-                    row.version,
-                    ApiVersionsResponse::decode(&mut &full[..], row.version).expect("full"),
-                )
+                Answer {
+                    version: row.version,
+                    response: ApiVersionsResponse::decode(&mut &full[..], row.version)
+                        .expect("full"),
+                }
             });
             let mut cur = &answer[..];
             let decoded = ApiVersionsResponse::decode(&mut cur, version).expect("decode");

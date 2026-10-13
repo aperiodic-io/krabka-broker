@@ -29,6 +29,7 @@ use {
             types::{Epoch, NodeId, ReplicaKey},
         },
         snapshot::SnapshotReader,
+        voter_requests::ListenerAddress,
     },
     bytes::Bytes,
     krabka_protocol::owned::{
@@ -53,23 +54,51 @@ const INVALID_VOTER_KEY: i16 = 125;
 /// endpoint, the convention of `controller_endpoint_addr`.
 const CONTROLLER_LISTENER_NAME: &str = "CONTROLLER";
 
+/// A topic that a quorum request names, with the partition indexes it asks
+/// about.
+struct RequestedTopic<'a> {
+    name: &'a str,
+    partitions: Vec<i32>,
+}
+
+/// The leader id and epoch that a `BeginQuorumEpoch` or `EndQuorumEpoch` request
+/// carries, raw off the wire.
+struct RequestedLeader {
+    id: i32,
+    epoch: i32,
+}
+
+/// The leader and epoch of a `BeginQuorumEpoch` or `EndQuorumEpoch` request that
+/// passed the request checks.
+struct EpochRequestLeader {
+    id: NodeId,
+    epoch: Epoch,
+}
+
+/// The error codes that answer a `BeginQuorumEpoch` or `EndQuorumEpoch` request
+/// that failed a check.
+struct EpochRequestRefusal {
+    top_level: i16,
+    partition: i16,
+}
+
 /// Kafka's `hasValidTopicPartition` for the quorum RPCs: one topic, named
 /// `__cluster_metadata`, with one partition, index 0.
 fn names_only_the_metadata_partition<'a>(
-    mut topics: impl ExactSizeIterator<Item = (&'a str, Vec<i32>)>,
+    mut topics: impl ExactSizeIterator<Item = RequestedTopic<'a>>,
 ) -> bool {
     topics.len() == 1
-        && topics.next().is_some_and(|(name, partitions)| {
-            name == wire::METADATA_TOPIC && partitions == [wire::METADATA_PARTITION]
+        && topics.next().is_some_and(|topic| {
+            topic.name == wire::METADATA_TOPIC && topic.partitions == [wire::METADATA_PARTITION]
         })
 }
 
 /// The shared wire shape of Begin/EndQuorumEpoch, before their distinct transitions.
 trait QuorumEpochRequest {
     fn cluster_id(&self) -> Option<&str>;
-    fn topics(&self) -> impl ExactSizeIterator<Item = (&str, Vec<i32>)>;
-    fn leader(&self) -> Option<(i32, i32)>;
-    fn endpoints(&self) -> impl Iterator<Item = (&str, &str, u16)>;
+    fn topics(&self) -> impl ExactSizeIterator<Item = RequestedTopic<'_>>;
+    fn leader(&self) -> Option<RequestedLeader>;
+    fn endpoints(&self) -> impl Iterator<Item = ListenerAddress<'_>>;
 }
 
 macro_rules! quorum_epoch_request {
@@ -77,35 +106,36 @@ macro_rules! quorum_epoch_request {
         impl QuorumEpochRequest for $request {
             fn cluster_id(&self) -> Option<&str> { self.cluster_id.as_deref() }
 
-            fn topics(&self) -> impl ExactSizeIterator<Item = (&str, Vec<i32>)> {
-                self.topics.iter().map(|topic| {
-                    (
-                        topic.topic_name.as_str(),
-                        topic
-                            .partitions
-                            .iter()
-                            .map(|partition| partition.partition_index)
-                            .collect(),
-                    )
+            fn topics(&self) -> impl ExactSizeIterator<Item = RequestedTopic<'_>> {
+                self.topics.iter().map(|topic| RequestedTopic {
+                    name: topic.topic_name.as_str(),
+                    partitions: topic
+                        .partitions
+                        .iter()
+                        .map(|partition| partition.partition_index)
+                        .collect(),
                 })
             }
 
-            fn leader(&self) -> Option<(i32, i32)> {
+            fn leader(&self) -> Option<RequestedLeader> {
                 self.topics
                     .first()?
                     .partitions
                     .first()
-                    .map(|partition| (partition.leader_id, partition.leader_epoch))
+                    .map(|partition| RequestedLeader {
+                        id: partition.leader_id,
+                        epoch: partition.leader_epoch,
+                    })
             }
 
-            fn endpoints(&self) -> impl Iterator<Item = (&str, &str, u16)> {
-                self.leader_endpoints.iter().map(|endpoint| {
-                    (
-                        endpoint.name.as_str(),
-                        endpoint.host.as_str(),
-                        endpoint.port,
-                    )
-                })
+            fn endpoints(&self) -> impl Iterator<Item = ListenerAddress<'_>> {
+                self.leader_endpoints
+                    .iter()
+                    .map(|endpoint| ListenerAddress {
+                        name: endpoint.name.as_str(),
+                        host: endpoint.host.as_str(),
+                        port: endpoint.port,
+                    })
             }
         }
     };
@@ -127,7 +157,10 @@ impl Engine {
                     .find(|endpoint| endpoint.name.eq_ignore_ascii_case(CONTROLLER_LISTENER_NAME))
                     .or_else(|| voter.endpoints.first())
             })
-            .map(|endpoint| (endpoint.host.clone(), endpoint.port));
+            .map(|endpoint| wire::LeaderEndpoint {
+                host: endpoint.host.clone(),
+                port: endpoint.port,
+            });
         wire::QuorumLeader {
             leader_id: state.leader_id,
             epoch: state.leader_epoch,
@@ -145,14 +178,14 @@ impl Engine {
     fn remember_request_leader_endpoints<'a>(
         &self,
         leader_id: NodeId,
-        endpoints: impl Iterator<Item = (&'a str, &'a str, u16)>,
+        endpoints: impl Iterator<Item = ListenerAddress<'a>>,
     ) {
         let endpoints: Vec<_> = endpoints.collect();
         let chosen = endpoints
             .iter()
-            .find(|(name, _, _)| name.eq_ignore_ascii_case(CONTROLLER_LISTENER_NAME))
+            .find(|endpoint| endpoint.name.eq_ignore_ascii_case(CONTROLLER_LISTENER_NAME))
             .or_else(|| endpoints.first());
-        if let Some((_, host, port)) = chosen {
+        if let Some(ListenerAddress { host, port, .. }) = chosen {
             self.peers
                 .remember_leader_endpoint(leader_id, format!("{host}:{port}"));
         }
@@ -251,11 +284,9 @@ impl Engine {
         if !self.has_valid_cluster_id(request.cluster_id.as_deref()) {
             return refuse(self, INCONSISTENT_CLUSTER_ID, 0);
         }
-        if !names_only_the_metadata_partition(request.topics.iter().map(|topic| {
-            (
-                topic.topic_name.as_str(),
-                topic.partitions.iter().map(|p| p.partition_index).collect(),
-            )
+        if !names_only_the_metadata_partition(request.topics.iter().map(|topic| RequestedTopic {
+            name: topic.topic_name.as_str(),
+            partitions: topic.partitions.iter().map(|p| p.partition_index).collect(),
         })) {
             return refuse(self, INVALID_REQUEST, 0);
         }
@@ -335,25 +366,37 @@ impl Engine {
     fn quorum_epoch_request_leader(
         &self,
         request: &impl QuorumEpochRequest,
-    ) -> Result<(NodeId, Epoch), (i16, i16)> {
+    ) -> Result<EpochRequestLeader, EpochRequestRefusal> {
         if !self.has_valid_cluster_id(request.cluster_id()) {
-            return Err((INCONSISTENT_CLUSTER_ID, 0));
+            return Err(EpochRequestRefusal {
+                top_level: INCONSISTENT_CLUSTER_ID,
+                partition: 0,
+            });
         }
         if !names_only_the_metadata_partition(request.topics()) {
-            return Err((INVALID_REQUEST, 0));
+            return Err(EpochRequestRefusal {
+                top_level: INVALID_REQUEST,
+                partition: 0,
+            });
         }
-        let (leader, epoch) = request
+        let RequestedLeader { id: leader, epoch } = request
             .leader()
             .expect("one metadata partition validated above");
         if let Some(error) = self.voter_only_request_error(leader, epoch) {
-            return Err((0, error));
+            return Err(EpochRequestRefusal {
+                top_level: 0,
+                partition: error,
+            });
         }
         let (Ok(leader), Ok(epoch)) = (u64::try_from(leader), Epoch::try_from(epoch)) else {
-            return Err((0, INVALID_REQUEST));
+            return Err(EpochRequestRefusal {
+                top_level: 0,
+                partition: INVALID_REQUEST,
+            });
         };
         let leader = NodeId(leader);
         self.remember_request_leader_endpoints(leader, request.endpoints());
-        Ok((leader, epoch))
+        Ok(EpochRequestLeader { id: leader, epoch })
     }
 
     /// Answers a `BeginQuorumEpoch` request. `None` means the body did not
@@ -412,8 +455,11 @@ impl Engine {
     {
         let request = wire::decode_request::<Request>(body, version)?;
         let (top, partition) = match self.quorum_epoch_request_leader(&request) {
-            Ok((leader, epoch)) => (0, transition(self, &request, leader, epoch)),
-            Err(errors) => errors,
+            Ok(EpochRequestLeader { id, epoch }) => (0, transition(self, &request, id, epoch)),
+            Err(EpochRequestRefusal {
+                top_level,
+                partition,
+            }) => (top_level, partition),
         };
         Some(encode(top, partition, &self.quorum_leader(), version))
     }
@@ -502,12 +548,12 @@ impl Engine {
                 index: wire::METADATA_PARTITION,
                 error_code: 0,
                 current_leader: true,
-                chunk: Some((
+                chunk: Some(wire::SnapshotChunk {
                     snapshot_id,
                     size,
-                    partition.position,
-                    Bytes::copy_from_slice(chunk),
-                )),
+                    position: partition.position,
+                    bytes: Bytes::copy_from_slice(chunk),
+                }),
             }),
             &self.quorum_leader(),
             version,

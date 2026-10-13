@@ -243,13 +243,18 @@ mod tests {
     const ALICE: &str = "User:alice";
 
     /// A signer and the raw public key that goes with it.
-    fn fresh_signer(key_id: &str) -> (FileEd25519Signer, Vec<u8>) {
+    struct TestSigner {
+        signer: FileEd25519Signer,
+        public: Vec<u8>,
+    }
+
+    fn fresh_signer(key_id: &str) -> TestSigner {
         let rng = ring::rand::SystemRandom::new();
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).expect("generate pkcs8");
         let signer = FileEd25519Signer::from_pkcs8_bytes(pkcs8.as_ref(), key_id.to_owned())
             .expect("parse pkcs8");
         let public = signer.public_key();
-        (signer, public)
+        TestSigner { signer, public }
     }
 
     /// A trust set holding one key bound to one principal.
@@ -286,17 +291,28 @@ mod tests {
         entry
     }
 
-    fn signed_fixture() -> (TempDir, OperatorKeys, DescribedTopicFreeze) {
+    /// A trust set, its directory, and a registry entry that the trust set proves.
+    struct SignedFixture {
+        dir: TempDir,
+        keys: OperatorKeys,
+        entry: DescribedTopicFreeze,
+    }
+
+    fn signed_fixture() -> SignedFixture {
         let dir = TempDir::new().expect("tempdir");
-        let (signer, public) = fresh_signer("alice-yubi");
+        let TestSigner { signer, public } = fresh_signer("alice-yubi");
         let keys = trust_set(&dir, "alice-yubi", ALICE, &public);
         let entry = signed_entry(&signer, "alice-yubi", "orders");
-        (dir, keys, entry)
+        SignedFixture { dir, keys, entry }
     }
 
     #[test]
     fn a_signature_that_the_local_key_makes_verifies_locally() {
-        let (_dir, keys, entry) = signed_fixture();
+        let SignedFixture {
+            dir: _dir,
+            keys,
+            entry,
+        } = signed_fixture();
 
         let outcome = verify_registry(CLUSTER, &keys, std::slice::from_ref(&entry));
 
@@ -326,8 +342,8 @@ mod tests {
     #[test]
     fn an_entry_the_local_trust_set_cannot_prove_is_reported() {
         let dir = TempDir::new().expect("tempdir");
-        let (signer, public) = fresh_signer("alice-yubi");
-        let (other, _) = fresh_signer("mallory-yubi");
+        let TestSigner { signer, public } = fresh_signer("alice-yubi");
+        let TestSigner { signer: other, .. } = fresh_signer("mallory-yubi");
         let keys = trust_set(&dir, "alice-yubi", ALICE, &public);
 
         let unsigned = DescribedTopicFreeze {
@@ -342,7 +358,7 @@ mod tests {
         let mut another_author = signed_entry(&signer, "alice-yubi", "orders");
         another_author.set_by = "User:bob".to_owned();
 
-        let cases: [(&'static str, DescribedTopicFreeze, Unproved); 5] = [
+        let cases = [
             ("no signature at all", unsigned, Unproved::Unsigned),
             (
                 "a key_id the trust set does not hold",
@@ -380,7 +396,11 @@ mod tests {
     /// one cluster does not verify in another.
     #[test]
     fn a_signature_made_for_another_cluster_does_not_verify() {
-        let (_dir, keys, entry) = signed_fixture();
+        let SignedFixture {
+            dir: _dir,
+            keys,
+            entry,
+        } = signed_fixture();
 
         let outcome = verify_registry("another-cluster", &keys, &[entry]);
 
@@ -391,7 +411,7 @@ mod tests {
     #[test]
     fn a_trust_file_reads_the_operator_keys_block_of_a_broker_file() {
         let dir = TempDir::new().expect("tempdir");
-        let (_, public) = fresh_signer("alice-yubi");
+        let TestSigner { public, .. } = fresh_signer("alice-yubi");
         let public_path = dir.path().join("alice.pub");
         std::fs::write(&public_path, &public).expect("write public key");
         let file = dir.path().join("broker.toml");
@@ -435,7 +455,7 @@ mod tests {
         )
         .expect("write file");
 
-        let cases: [(&'static str, PathBuf); 5] = [
+        let cases = [
             ("a file that is not there", missing),
             ("a file that is not TOML", not_toml),
             ("a file with no [[operator_keys]]", no_block),

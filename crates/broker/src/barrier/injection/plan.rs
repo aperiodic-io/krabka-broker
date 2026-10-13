@@ -120,17 +120,43 @@ mod tests {
 
     #[test]
     fn the_backoff_doubles_and_stops_at_the_maximum() {
-        let cases: &[(u32, i64)] = &[
-            (0, 100),
-            (1, 200),
-            (2, 400),
-            (3, 800),
-            (4, 1000),
-            (30, 1000),
+        struct Case {
+            attempt: u32,
+            expected_ms: i64,
+        }
+        let cases: &[Case] = &[
+            Case {
+                attempt: 0,
+                expected_ms: 100,
+            },
+            Case {
+                attempt: 1,
+                expected_ms: 200,
+            },
+            Case {
+                attempt: 2,
+                expected_ms: 400,
+            },
+            Case {
+                attempt: 3,
+                expected_ms: 800,
+            },
+            Case {
+                attempt: 4,
+                expected_ms: 1000,
+            },
+            Case {
+                attempt: 30,
+                expected_ms: 1000,
+            },
         ];
-        for (attempt, expected) in cases {
+        for Case {
+            attempt,
+            expected_ms,
+        } in cases
+        {
             check!(
-                backoff_for(*attempt, millis(100), millis(1000)).millis_i64() == *expected,
+                backoff_for(*attempt, millis(100), millis(1000)).millis_i64() == *expected_ms,
                 "attempt {attempt}"
             );
         }

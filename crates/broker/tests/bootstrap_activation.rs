@@ -76,7 +76,23 @@ enum Quorum {
 }
 
 /// One node of a case: its node id and its roles.
-type NodeSpec = (NodeId, &'static [NodeRole]);
+struct NodeSpec {
+    id: NodeId,
+    roles: &'static [NodeRole],
+}
+
+/// A controller's node id and the address of its controller listener.
+struct ControllerAddress {
+    id: NodeId,
+    addr: SocketAddr,
+}
+
+/// A node that finished starting, and the directory that backs it.
+struct StartedNode {
+    id: NodeId,
+    handle: BrokerHandle,
+    dir: TempDir,
+}
 
 const CONTROLLER: &[NodeRole] = &[NodeRole::Controller];
 const BROKER: &[NodeRole] = &[NodeRole::Broker];
@@ -123,7 +139,7 @@ struct MinimumInsyncReplicas(i32);
 struct ActivationSetup<'a> {
     #[default(Quorum::Dynamic)]
     quorum: Quorum,
-    controllers: &'a [(NodeId, SocketAddr)],
+    controllers: &'a [ControllerAddress],
     #[default(MinimumInsyncReplicas(1))]
     min_insync_replicas: MinimumInsyncReplicas,
 }
@@ -153,14 +169,14 @@ fn config(node: &Node, setup: ActivationSetup<'_>) -> BrokerConfig {
             config.bootstrap_servers = setup
                 .controllers
                 .iter()
-                .map(|(_, addr)| addr.to_string())
+                .map(|controller| controller.addr.to_string())
                 .collect();
         }
         Quorum::Static => {
             config.controller_quorum_voters = setup
                 .controllers
                 .iter()
-                .map(|(id, addr)| (*id, addr.to_string()))
+                .map(|controller| (controller.id, controller.addr.to_string()))
                 .collect();
         }
     }
@@ -173,10 +189,10 @@ fn config(node: &Node, setup: ActivationSetup<'_>) -> BrokerConfig {
 async fn start_all(
     nodes: Vec<Node>,
     #[builder(default = Quorum :: Dynamic)] quorum: Quorum,
-    #[builder(default)] controllers: &'_ [(NodeId, SocketAddr)],
+    #[builder(default)] controllers: &'_ [ControllerAddress],
     #[builder(into, default = MinimumInsyncReplicas (1))]
     min_insync_replicas: MinimumInsyncReplicas,
-) -> Vec<(NodeId, BrokerHandle, TempDir)> {
+) -> Vec<StartedNode> {
     let setup = ActivationSetup {
         quorum,
         controllers,
@@ -192,7 +208,11 @@ async fn start_all(
         .await
         .unwrap_or_else(|_| panic!("node {id} did not finish starting in {DEADLINE:?}"))
         .unwrap_or_else(|error| panic!("node {id} failed to start: {error}"));
-        (id, handle, node.dir)
+        StartedNode {
+            id,
+            handle,
+            dir: node.dir,
+        }
     }))
     .await
 }
@@ -241,7 +261,12 @@ async fn committed_batches(controller: SocketAddr) -> Vec<Batch> {
 /// What the committed log says about the bootstrap records: whether the
 /// first metadata batch follows the leader's control batch, that batch, and
 /// every batch that finalizes a feature level.
-type Seeding = (bool, Option<Batch>, Vec<Vec<MetadataRecord>>);
+#[derive(Debug, PartialEq)]
+struct Seeding {
+    follows_control_batch: bool,
+    first_metadata_batch: Option<Batch>,
+    finalizing: Vec<Vec<MetadataRecord>>,
+}
 
 fn seeding(batches: &[Batch]) -> Seeding {
     let leading_controls = batches
@@ -261,11 +286,11 @@ fn seeding(batches: &[Batch]) -> Seeding {
             _ => None,
         })
         .collect();
-    (
-        leading_controls > 0,
-        batches.get(leading_controls).cloned(),
+    Seeding {
+        follows_control_batch: leading_controls > 0,
+        first_metadata_batch: batches.get(leading_controls).cloned(),
         finalizing,
-    )
+    }
 }
 
 /// `DescribeConfigs` of the cluster-level `min.insync.replicas` through the
@@ -334,6 +359,17 @@ enum EligibleLeaderReplicas {
     Disabled,
 }
 
+const TWO_BROKERS: &[NodeSpec] = &[
+    NodeSpec {
+        id: NodeId(1),
+        roles: BROKER,
+    },
+    NodeSpec {
+        id: NodeId(2),
+        roles: BROKER,
+    },
+];
+
 struct Case {
     what: &'static str,
     quorum: Quorum,
@@ -358,8 +394,11 @@ async fn the_active_controller_writes_the_bootstrap_records_once() {
         Case {
             what: "a dynamic quorum of a standalone controller and two brokers",
             quorum: Quorum::Dynamic,
-            controllers: &[(NodeId(3001), CONTROLLER)],
-            brokers: &[(NodeId(1), BROKER), (NodeId(2), BROKER)],
+            controllers: &[NodeSpec {
+                id: NodeId(3001),
+                roles: CONTROLLER,
+            }],
+            brokers: TWO_BROKERS,
             eligible_leader_replicas: EligibleLeaderReplicas::Enabled,
             min_insync_replicas: MinimumInsyncReplicas(2),
         },
@@ -367,18 +406,30 @@ async fn the_active_controller_writes_the_bootstrap_records_once() {
             what: "a static quorum of three isolated controllers and two brokers",
             quorum: Quorum::Static,
             controllers: &[
-                (NodeId(3001), CONTROLLER),
-                (NodeId(3002), CONTROLLER),
-                (NodeId(3003), CONTROLLER),
+                NodeSpec {
+                    id: NodeId(3001),
+                    roles: CONTROLLER,
+                },
+                NodeSpec {
+                    id: NodeId(3002),
+                    roles: CONTROLLER,
+                },
+                NodeSpec {
+                    id: NodeId(3003),
+                    roles: CONTROLLER,
+                },
             ],
-            brokers: &[(NodeId(1), BROKER), (NodeId(2), BROKER)],
+            brokers: TWO_BROKERS,
             eligible_leader_replicas: EligibleLeaderReplicas::Enabled,
             min_insync_replicas: MinimumInsyncReplicas(1),
         },
         Case {
             what: "one combined node",
             quorum: Quorum::Static,
-            controllers: &[(NodeId(1), COMBINED)],
+            controllers: &[NodeSpec {
+                id: NodeId(1),
+                roles: COMBINED,
+            }],
             brokers: &[],
             eligible_leader_replicas: EligibleLeaderReplicas::Enabled,
             min_insync_replicas: MinimumInsyncReplicas(2),
@@ -386,7 +437,10 @@ async fn the_active_controller_writes_the_bootstrap_records_once() {
         Case {
             what: "one combined node formatted without ELR",
             quorum: Quorum::Static,
-            controllers: &[(NodeId(1), COMBINED)],
+            controllers: &[NodeSpec {
+                id: NodeId(1),
+                roles: COMBINED,
+            }],
             brokers: &[],
             eligible_leader_replicas: EligibleLeaderReplicas::Disabled,
             min_insync_replicas: MinimumInsyncReplicas(2),
@@ -446,7 +500,7 @@ async fn run_case(case: Case) {
         .zip(clients.into_iter().zip(controller_listeners))
         .zip(client_addrs.into_iter().zip(controller_addrs))
         .map(
-            |((&(id, roles), (client, controller)), (client_addr, controller_addr))| {
+            |((&NodeSpec { id, roles }, (client, controller)), (client_addr, controller_addr))| {
                 let dir = TempDir::new().expect("tempdir");
                 let log_dir = dir.path().join("log");
                 Node {
@@ -462,9 +516,12 @@ async fn run_case(case: Case) {
             },
         )
         .collect();
-    let controllers: Vec<(NodeId, SocketAddr)> = nodes[..controller_specs.len()]
+    let controllers: Vec<ControllerAddress> = nodes[..controller_specs.len()]
         .iter()
-        .map(|node| (node.id, node.controller_addr))
+        .map(|node| ControllerAddress {
+            id: node.id,
+            addr: node.controller_addr,
+        })
         .collect();
     for (index, node) in nodes.iter().enumerate() {
         let mut flags = match quorum {
@@ -490,7 +547,7 @@ async fn run_case(case: Case) {
         .call()
         .await;
     let leader_id = started_controllers[0]
-        .1
+        .handle
         .wait_until_controller_leader()
         .await;
     let started_brokers = start_all()
@@ -502,13 +559,13 @@ async fn run_case(case: Case) {
         .await;
     let leader = started_controllers
         .iter()
-        .find(|(id, ..)| *id == leader_id)
-        .map(|(_, handle, _)| handle)
+        .find(|node| node.id == leader_id)
+        .map(|node| &node.handle)
         .expect("the leader is one of the controllers");
     let broker_role_count = controller_specs
         .iter()
         .chain(broker_specs)
-        .filter(|(_, roles)| roles.contains(&NodeRole::Broker))
+        .filter(|node| node.roles.contains(&NodeRole::Broker))
         .count();
     leader
         .wait_until_brokers_registered(broker_role_count)
@@ -517,16 +574,18 @@ async fn run_case(case: Case) {
     let committed = committed_batches(leader.controller_addr()).await;
     check!(
         seeding(&committed)
-            == (true, Some(Batch::Metadata(activation.clone())), vec![
-                activation
-            ]),
+            == Seeding {
+                follows_control_batch: true,
+                first_metadata_batch: Some(Batch::Metadata(activation.clone())),
+                finalizing: vec![activation],
+            },
         "{what}: {committed:#?}"
     );
     // The wait fails the test when a node's image does not take the feature
     // levels and the cluster-level `min.insync.replicas` of the activation.
     let expected_min_isr = cluster_min_isr.map(|value| value.to_string());
-    for (_, handle, _) in started_controllers.iter().chain(&started_brokers) {
-        handle
+    for node in started_controllers.iter().chain(&started_brokers) {
+        node.handle
             .wait_for_image(|image| {
                 *image.finalized_features() == expected_levels
                     && image
@@ -539,7 +598,7 @@ async fn run_case(case: Case) {
     let broker = started_brokers
         .iter()
         .chain(&started_controllers)
-        .map(|(_, handle, _)| handle)
+        .map(|node| &node.handle)
         .find(|handle| handle.listen_addr().port() != 0)
         .expect("a node with the broker role");
     check!(
@@ -548,7 +607,7 @@ async fn run_case(case: Case) {
         "{what}"
     );
 
-    for (_, handle, dir) in started_brokers.into_iter().chain(started_controllers) {
+    for StartedNode { handle, dir, .. } in started_brokers.into_iter().chain(started_controllers) {
         handle.shutdown().await;
         drop(dir);
     }

@@ -67,6 +67,13 @@
 
 use {super::Scope, std::fmt::Write as _};
 
+/// A value read from the chars of a pattern, and the number of chars it takes.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Consumed<T> {
+    pub(super) value: T,
+    pub(super) len: usize,
+}
+
 /// A backslash escape, as [`read_escape`] reads it.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Escape {
@@ -141,39 +148,57 @@ fn quote(chars: &[char], mut at: usize, out: &mut Vec<char>) -> usize {
 ///
 /// An escape Java's `Pattern.compile` refuses, such as `\x` without digits, is
 /// [`Escape::Other`] with the length of the backslash and the char after it.
-pub(super) fn read_escape(chars: &[char], at: usize, in_class: bool) -> (Escape, usize) {
+pub(super) fn read_escape(chars: &[char], at: usize, in_class: bool) -> Consumed<Escape> {
     let rest = &chars[at + 1..];
     let Some(&kind) = rest.first() else {
-        return (Escape::Other, 1);
+        return Consumed {
+            value: Escape::Other,
+            len: 1,
+        };
     };
     let after = &rest[1..];
+    let taking = |value, len| Some(Consumed { value, len });
     let read = match kind {
-        't' => Some((Escape::Char(0x09), 2)),
-        'n' => Some((Escape::Char(0x0A), 2)),
-        'r' => Some((Escape::Char(0x0D), 2)),
-        'f' => Some((Escape::Char(0x0C), 2)),
-        'a' => Some((Escape::Char(0x07), 2)),
-        'e' => Some((Escape::Char(0x1B), 2)),
-        'x' => hex_escape(after).map(|(code, len)| (Escape::Char(code), 2 + len)),
+        't' => taking(Escape::Char(0x09), 2),
+        'n' => taking(Escape::Char(0x0A), 2),
+        'r' => taking(Escape::Char(0x0D), 2),
+        'f' => taking(Escape::Char(0x0C), 2),
+        'a' => taking(Escape::Char(0x07), 2),
+        'e' => taking(Escape::Char(0x1B), 2),
+        'x' => hex_escape(after).map(|Consumed { value, len }| Consumed {
+            value: Escape::Char(value),
+            len: 2 + len,
+        }),
         'u' => after
             .get(..4)
             .and_then(parse_hex)
-            .map(|code| (Escape::Char(code), 6)),
-        '0' => octal_escape(after).map(|(code, len)| (Escape::Char(code), 2 + len)),
+            .and_then(|code| taking(Escape::Char(code), 6)),
+        '0' => octal_escape(after).map(|Consumed { value, len }| Consumed {
+            value: Escape::Char(value),
+            len: 2 + len,
+        }),
         'c' => after
             .first()
-            .map(|&control| (Escape::Char(u32::from(control) ^ 64), 3)),
-        'p' | 'P' => property_name(after).map(|(name, len)| {
+            .and_then(|&control| taking(Escape::Char(u32::from(control) ^ 64), 3)),
+        'p' | 'P' => property_name(after).map(|Consumed { value: name, len }| {
             let negated = kind == 'P';
-            (Escape::Property { name, negated }, 2 + len)
+            Consumed {
+                value: Escape::Property { name, negated },
+                len: 2 + len,
+            }
         }),
-        'k' if !in_class => delimited(after, '<', '>').map(|len| (Escape::BackRef, 2 + len)),
-        'N' => delimited(after, '{', '}').map(|len| (Escape::Named, 2 + len)),
-        '1'..='9' if !in_class => Some((Escape::BackRef, 2)),
-        other if !other.is_ascii_alphanumeric() => Some((Escape::Char(u32::from(other)), 2)),
+        'k' if !in_class => {
+            delimited(after, '<', '>').and_then(|len| taking(Escape::BackRef, 2 + len))
+        }
+        'N' => delimited(after, '{', '}').and_then(|len| taking(Escape::Named, 2 + len)),
+        '1'..='9' if !in_class => taking(Escape::BackRef, 2),
+        other if !other.is_ascii_alphanumeric() => taking(Escape::Char(u32::from(other)), 2),
         _ => None,
     };
-    read.unwrap_or((Escape::Other, 2))
+    read.unwrap_or(Consumed {
+        value: Escape::Other,
+        len: 2,
+    })
 }
 
 /// The number `digits` spell in base 16, or `None` for a char that is not an
@@ -186,39 +211,52 @@ fn parse_hex(digits: &[char]) -> Option<u32> {
 }
 
 /// `hh` or `{h...h}`, after `\x`, and the chars it takes.
-fn hex_escape(after: &[char]) -> Option<(u32, usize)> {
+fn hex_escape(after: &[char]) -> Option<Consumed<u32>> {
     if after.first() == Some(&'{') {
         let close = after.iter().position(|&c| c == '}')?;
         let digits = &after[1..close];
         if digits.is_empty() {
             return None;
         }
-        Some((parse_hex(digits)?, close + 1))
+        Some(Consumed {
+            value: parse_hex(digits)?,
+            len: close + 1,
+        })
     } else {
-        Some((parse_hex(after.get(..2)?)?, 2))
+        Some(Consumed {
+            value: parse_hex(after.get(..2)?)?,
+            len: 2,
+        })
     }
 }
 
 /// One to three octal digits after `\0`, and the chars they take: the third
 /// digit only when the first is at most 3, as Java's `Pattern.o` reads it.
-fn octal_escape(after: &[char]) -> Option<(u32, usize)> {
+fn octal_escape(after: &[char]) -> Option<Consumed<u32>> {
     let digit = |at: usize| after.get(at).and_then(|c| c.to_digit(8));
     let first = digit(0)?;
+    let taking = |value, len| Consumed { value, len };
     Some(match (digit(1), digit(2)) {
-        (Some(second), Some(third)) if first <= 3 => (first * 64 + second * 8 + third, 3),
-        (Some(second), _) => (first * 8 + second, 2),
-        _ => (first, 1),
+        (Some(second), Some(third)) if first <= 3 => taking(first * 64 + second * 8 + third, 3),
+        (Some(second), _) => taking(first * 8 + second, 2),
+        _ => taking(first, 1),
     })
 }
 
 /// The name in `{name}`, or the one char, after `\p` or `\P`, and the chars
 /// it takes.
-fn property_name(after: &[char]) -> Option<(String, usize)> {
+fn property_name(after: &[char]) -> Option<Consumed<String>> {
     if after.first() == Some(&'{') {
         let close = after.iter().position(|&c| c == '}')?;
-        (close > 1).then(|| (after[1..close].iter().collect(), close + 1))
+        (close > 1).then(|| Consumed {
+            value: after[1..close].iter().collect(),
+            len: close + 1,
+        })
     } else {
-        after.first().map(|&c| (c.to_string(), 1))
+        after.first().map(|&c| Consumed {
+            value: c.to_string(),
+            len: 1,
+        })
     }
 }
 
@@ -257,13 +295,19 @@ pub(super) fn ignorable_len(rest: &[char], unix_lines: bool) -> usize {
 /// The code and the length of the char at `chars[at]`, where it is a member of
 /// a class or the end of a range in one: a plain char, or an escape that stands
 /// for one char.
-pub(super) fn read_member(chars: &[char], at: usize) -> Option<(u32, usize)> {
+pub(super) fn read_member(chars: &[char], at: usize) -> Option<Consumed<u32>> {
     let &c = chars.get(at)?;
     if c != '\\' {
-        return Some((u32::from(c), 1));
+        return Some(Consumed {
+            value: u32::from(c),
+            len: 1,
+        });
     }
     match read_escape(chars, at, true) {
-        (Escape::Char(code), len) => Some((code, len)),
+        Consumed {
+            value: Escape::Char(code),
+            len,
+        } => Some(Consumed { value: code, len }),
         _ => None,
     }
 }
@@ -460,7 +504,7 @@ pub(super) fn property_class(
 mod tests {
     use {super::*, assert2::check};
 
-    fn escape(text: &str, in_class: bool) -> (Escape, usize) {
+    fn escape(text: &str, in_class: bool) -> Consumed<Escape> {
         let chars: Vec<char> = text.chars().collect();
         read_escape(&chars, 0, in_class)
     }
@@ -507,7 +551,14 @@ mod tests {
             ("\\", false, Escape::Other, 1),
         ];
         for (text, in_class, expected, len) in cases {
-            check!(escape(text, in_class) == (expected, len), "{text:?}");
+            check!(
+                escape(text, in_class)
+                    == Consumed {
+                        value: expected,
+                        len
+                    },
+                "{text:?}"
+            );
         }
     }
 

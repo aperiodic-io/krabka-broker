@@ -221,6 +221,12 @@ pub(crate) mod test_support {
         pub stored_data: bool,
     }
 
+    /// A coordinator and the metadata image it runs over.
+    pub(crate) struct StateFixture {
+        pub coordinator: Arc<ShareCoordinator>,
+        pub image: krabka_metadata::MetadataImage,
+    }
+
     /// A led coordinator with partition state at epoch 17 and start offset 90.
     #[bon::builder]
     pub(crate) async fn initialized_state(
@@ -229,7 +235,7 @@ pub(crate) mod test_support {
         #[builder(into, default = PartitionCount (1))] partitions: PartitionCount,
         #[builder(into, default)] partition: PartitionIndex,
         #[builder(default)] stored_data: bool,
-    ) -> (Arc<ShareCoordinator>, krabka_metadata::MetadataImage) {
+    ) -> StateFixture {
         let setup = StateFixtureSetup {
             topic,
             partitions,
@@ -266,7 +272,7 @@ pub(crate) mod test_support {
                 .await
                 .expect("write state");
         }
-        (coordinator, image)
+        StateFixture { coordinator, image }
     }
 
     pub(crate) async fn retain_leadership(coordinator: &Arc<ShareCoordinator>, led: bool) {
@@ -372,7 +378,10 @@ pub(crate) mod test_support {
         ($rows:expr, $topic:expr,($partitions:expr, $partition:expr), $serve:ident) => {
             for (index, (led, req, expected)) in $rows.into_iter().enumerate() {
                 let dir = tempfile::TempDir::new().expect("tempdir");
-                let (coordinator, image) = super::super::test_support::initialized_state()
+                let $crate::share_coordinator::handlers::test_support::StateFixture {
+                    coordinator,
+                    image,
+                } = super::super::test_support::initialized_state()
                     .log_dir(dir.path())
                     .topic($topic)
                     .partitions($partitions)

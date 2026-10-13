@@ -6,7 +6,7 @@ use {
     crate::{
         support::{
             self,
-            configs::{alter_topic_config, topic_config},
+            configs::{ConfigMutationOutcome, alter_topic_config, topic_config},
         },
         wire::{
             MAX_MESSAGE_BYTES, accepted, create_topic, orders_fixture, produce_batch_of_wire_len,
@@ -78,7 +78,13 @@ async fn an_incremental_alter_raises_the_cap_for_the_next_produce() {
     check!(produce_batch_of_wire_len(&p.client, "orders", topic, CAP + 1).await == too_large());
 
     let raised = (CAP + 1).to_string();
-    check!(set_max_message_bytes(&p.client, "orders", &raised).await == (codes::NONE, None));
+    check!(
+        set_max_message_bytes(&p.client, "orders", &raised).await
+            == ConfigMutationOutcome {
+                error_code: codes::NONE,
+                error_message: None,
+            }
+    );
     check!(describe_max_message_bytes(&p.client, "orders").await.value == Some(raised));
     check!(produce_batch_of_wire_len(&p.client, "orders", topic, CAP + 1).await == accepted(0, 0));
 
@@ -107,7 +113,10 @@ async fn the_alter_path_rejects_the_values_kafka_rejects() {
         ("2147483648", codes::INVALID_CONFIG),
         ("plenty", codes::INVALID_CONFIG),
     ] {
-        let (error_code, error_message) = set_max_message_bytes(&p.client, "orders", value).await;
+        let ConfigMutationOutcome {
+            error_code,
+            error_message,
+        } = set_max_message_bytes(&p.client, "orders", value).await;
         check!(
             error_code == expected,
             "max.message.bytes={value} answered {error_code}"
@@ -127,7 +136,7 @@ async fn describe_max_message_bytes(client: &Client, topic: &str) -> DescribeCon
 }
 
 /// Drive `kafka-configs --alter --add-config max.message.bytes=<value>`.
-async fn set_max_message_bytes(client: &Client, topic: &str, value: &str) -> (i16, Option<String>) {
+async fn set_max_message_bytes(client: &Client, topic: &str, value: &str) -> ConfigMutationOutcome {
     alter_topic_config()
         .client(client)
         .topic(topic)

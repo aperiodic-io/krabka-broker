@@ -4,7 +4,9 @@
 
 use {
     crate::{
-        harness::{alice_password, metadata_probe, start_scram_alice, wrong_scram_password},
+        harness::{
+            RetainedBroker, alice_password, metadata_probe, start_scram_alice, wrong_scram_password,
+        },
         kafka_wire::{
             ScramAuthenticationSetup, sasl_authenticate_on, sasl_handshake_on,
             sasl_scram_authenticate_on,
@@ -31,7 +33,11 @@ use {
 /// request succeeds.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_scram_sha512_happy_path() {
-    let (_log_dir, handle, addr) = scram_fixture(SaslMechanism::ScramSha512).await;
+    let RetainedBroker {
+        log_dir: _log_dir,
+        handle,
+        addr,
+    } = scram_fixture(SaslMechanism::ScramSha512).await;
     let result =
         drive_sasl_scram_session(addr, "alice", &alice_password(), SaslMechanism::ScramSha512)
             .await;
@@ -48,7 +54,11 @@ async fn sasl_scram_sha512_happy_path() {
 /// returns no bytes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_scram_sha512_wrong_password_closes_connection() {
-    let (_log_dir, handle, addr) = scram_fixture(SaslMechanism::ScramSha512).await;
+    let RetainedBroker {
+        log_dir: _log_dir,
+        handle,
+        addr,
+    } = scram_fixture(SaslMechanism::ScramSha512).await;
     let result = drive_sasl_scram_session(
         addr,
         "alice",
@@ -71,7 +81,11 @@ async fn sasl_scram_sha512_wrong_password_closes_connection() {
 /// SHA-512 code by accident.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_scram_sha256_happy_path() {
-    let (_log_dir, handle, addr) = scram_fixture(SaslMechanism::ScramSha256).await;
+    let RetainedBroker {
+        log_dir: _log_dir,
+        handle,
+        addr,
+    } = scram_fixture(SaslMechanism::ScramSha256).await;
     let result =
         drive_sasl_scram_session(addr, "alice", &alice_password(), SaslMechanism::ScramSha256)
             .await;
@@ -83,7 +97,11 @@ async fn sasl_scram_sha256_happy_path() {
 /// the same as in the SHA-512 variant.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_scram_sha256_wrong_password_closes_connection() {
-    let (_log_dir, handle, addr) = scram_fixture(SaslMechanism::ScramSha256).await;
+    let RetainedBroker {
+        log_dir: _log_dir,
+        handle,
+        addr,
+    } = scram_fixture(SaslMechanism::ScramSha256).await;
     let result = drive_sasl_scram_session(
         addr,
         "alice",
@@ -217,11 +235,13 @@ async fn scram_reauth_after_the_window_elapsed_keeps_serving_round_after_round()
     .await;
 }
 
-async fn scram_fixture(
-    mechanism: SaslMechanism,
-) -> (tempfile::TempDir, krabka_broker::BrokerHandle, SocketAddr) {
+async fn scram_fixture(mechanism: SaslMechanism) -> RetainedBroker {
     let log_dir = tempfile::tempdir().unwrap();
     let handle = start_scram_alice(log_dir.path().to_path_buf(), mechanism).await;
     let addr = handle.listen_addr();
-    (log_dir, handle, addr)
+    RetainedBroker {
+        log_dir,
+        handle,
+        addr,
+    }
 }

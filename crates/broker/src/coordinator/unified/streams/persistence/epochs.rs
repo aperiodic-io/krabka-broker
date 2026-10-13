@@ -211,13 +211,33 @@ mod tests {
         assert2::assert,
     };
 
+    /// The bytes that follow the head of a `StreamsGroupMetadataValue`.
+    struct TrailerRow {
+        row: &'static str,
+        value: StreamsGroupMetadataValue,
+        trailer: &'static [u8],
+    }
+
+    /// A last-assignment configuration parameter, as text.
+    struct ConfigText {
+        key: &'static str,
+        value: &'static str,
+    }
+
+    /// A value and Kafka's bytes for it.
+    struct GoldenRow {
+        case: &'static str,
+        value: StreamsGroupTargetAssignmentMetadataValue,
+        bytes: &'static [u8],
+    }
+
     /// Kafka 4.3.1's generated writer puts a tagged field only when it is not
     /// its default, in tag order. Each row is the whole value: version, epoch,
     /// hash, then the trailer.
     #[test]
     fn group_metadata_bytes_match_kafka_schema() {
         const HEAD: &[u8] = b"\x00\x00\x00\x00\x00\x07\x01\x02\x03\x04\x05\x06\x07\x08";
-        let value = |validated, configs: Option<&[(&str, &str)]>| StreamsGroupMetadataValue {
+        let value = |validated, configs: Option<&[ConfigText]>| StreamsGroupMetadataValue {
             description: DescriptionEpochs::default(),
             epoch: 7,
             metadata_hash: 0x0102_0304_0506_0708,
@@ -225,34 +245,53 @@ mod tests {
             last_assignment_configs: configs.map(|configs| {
                 configs
                     .iter()
-                    .map(|(key, value)| LastAssignmentConfig {
-                        key: (*key).into(),
-                        value: (*value).into(),
+                    .map(|config| LastAssignmentConfig {
+                        key: config.key.into(),
+                        value: config.value.into(),
                     })
                     .collect()
             }),
         };
-        let rows: [(&str, StreamsGroupMetadataValue, &[u8]); 4] = [
-            (
-                "both tagged fields at their defaults",
-                value(-1, None),
-                b"\x00",
-            ),
-            (
-                "Kafka's bump record: a validated epoch and num.standby.replicas",
-                value(0, Some(&[("num.standby.replicas", "0")])),
-                b"\x02\x00\x04\x00\x00\x00\x00\x01\x19\x02\x15num.standby.replicas\x020\x00",
-            ),
-            (
-                "an empty configuration list is not null",
-                value(-1, Some(&[])),
-                b"\x01\x01\x01\x01",
-            ),
-            (
-                "two configurations",
-                value(3, Some(&[("a", "1"), ("b", "22")])),
-                b"\x02\x00\x04\x00\x00\x00\x03\x01\x0c\x03\x02a\x021\x00\x02b\x0322\x00",
-            ),
+        let rows: [TrailerRow; 4] = [
+            TrailerRow {
+                row: "both tagged fields at their defaults",
+                value: value(-1, None),
+                trailer: b"\x00",
+            },
+            TrailerRow {
+                row: "Kafka's bump record: a validated epoch and num.standby.replicas",
+                value: value(
+                    0,
+                    Some(&[ConfigText {
+                        key: "num.standby.replicas",
+                        value: "0",
+                    }]),
+                ),
+                trailer:
+                    b"\x02\x00\x04\x00\x00\x00\x00\x01\x19\x02\x15num.standby.replicas\x020\x00",
+            },
+            TrailerRow {
+                row: "an empty configuration list is not null",
+                value: value(-1, Some(&[])),
+                trailer: b"\x01\x01\x01\x01",
+            },
+            TrailerRow {
+                row: "two configurations",
+                value: value(
+                    3,
+                    Some(&[
+                        ConfigText {
+                            key: "a",
+                            value: "1",
+                        },
+                        ConfigText {
+                            key: "b",
+                            value: "22",
+                        },
+                    ]),
+                ),
+                trailer: b"\x02\x00\x04\x00\x00\x00\x03\x01\x0c\x03\x02a\x021\x00\x02b\x0322\x00",
+            },
         ];
         check_metadata_trailers(HEAD, rows);
     }
@@ -272,36 +311,39 @@ mod tests {
             last_assignment_configs: None,
             description: DescriptionEpochs { stored, failed },
         };
-        let rows: [(&str, StreamsGroupMetadataValue, &[u8]); 4] = [
-            (
-                "4.3.1: no description epoch",
-                value(-1, -1),
-                b"\x01\x00\x04\x00\x00\x00\x04",
-            ),
-            (
-                "trunk: a stored description",
-                value(4, -1),
-                b"\x02\x00\x04\x00\x00\x00\x04\x02\x04\x00\x00\x00\x04",
-            ),
-            (
-                "trunk: an uncertain store and a failed epoch",
-                value(-2, 3),
-                b"\x03\x00\x04\x00\x00\x00\x04\x02\x04\xff\xff\xff\xfe\x03\x04\x00\x00\x00\x03",
-            ),
-            (
-                "trunk: a failed epoch alone",
-                value(-1, 0),
-                b"\x02\x00\x04\x00\x00\x00\x04\x03\x04\x00\x00\x00\x00",
-            ),
+        let rows: [TrailerRow; 4] = [
+            TrailerRow {
+                row: "4.3.1: no description epoch",
+                value: value(-1, -1),
+                trailer: b"\x01\x00\x04\x00\x00\x00\x04",
+            },
+            TrailerRow {
+                row: "trunk: a stored description",
+                value: value(4, -1),
+                trailer: b"\x02\x00\x04\x00\x00\x00\x04\x02\x04\x00\x00\x00\x04",
+            },
+            TrailerRow {
+                row: "trunk: an uncertain store and a failed epoch",
+                value: value(-2, 3),
+                trailer:
+                    b"\x03\x00\x04\x00\x00\x00\x04\x02\x04\xff\xff\xff\xfe\x03\x04\x00\x00\x00\x03",
+            },
+            TrailerRow {
+                row: "trunk: a failed epoch alone",
+                value: value(-1, 0),
+                trailer: b"\x02\x00\x04\x00\x00\x00\x04\x03\x04\x00\x00\x00\x00",
+            },
         ];
         check_metadata_trailers(HEAD, rows);
     }
 
-    fn check_metadata_trailers(
-        head: &[u8],
-        rows: impl IntoIterator<Item = (&'static str, StreamsGroupMetadataValue, &'static [u8])>,
-    ) {
-        for (row, value, trailer) in rows {
+    fn check_metadata_trailers(head: &[u8], rows: impl IntoIterator<Item = TrailerRow>) {
+        for TrailerRow {
+            row,
+            value,
+            trailer,
+        } in rows
+        {
             let bytes = value.encode();
             assert!(bytes[..] == [head, trailer].concat()[..], "{row}");
             assert!(
@@ -344,26 +386,25 @@ mod tests {
     /// the default 0.
     #[test]
     fn target_assignment_metadata_bytes_match_kafka_schema() {
-        // (case, value, Kafka's bytes)
-        let rows: [(&str, StreamsGroupTargetAssignmentMetadataValue, &[u8]); 2] = [
-            (
-                "the time is unknown",
-                StreamsGroupTargetAssignmentMetadataValue {
+        let rows: [GoldenRow; 2] = [
+            GoldenRow {
+                case: "the time is unknown",
+                value: StreamsGroupTargetAssignmentMetadataValue {
                     assignment_epoch: 12,
                     assignment_timestamp_ms: 0,
                 },
-                b"\x00\x00\x00\x00\x00\x0c\x00",
-            ),
-            (
-                "an assignment that finished at 2026-10-07T00:00:00Z",
-                StreamsGroupTargetAssignmentMetadataValue {
+                bytes: b"\x00\x00\x00\x00\x00\x0c\x00",
+            },
+            GoldenRow {
+                case: "an assignment that finished at 2026-10-07T00:00:00Z",
+                value: StreamsGroupTargetAssignmentMetadataValue {
                     assignment_epoch: 12,
                     assignment_timestamp_ms: 1_791_331_200_000,
                 },
-                b"\x00\x00\x00\x00\x00\x0c\x01\x00\x08\x00\x00\x01\xa1\x13\xa8\xec\x00",
-            ),
+                bytes: b"\x00\x00\x00\x00\x00\x0c\x01\x00\x08\x00\x00\x01\xa1\x13\xa8\xec\x00",
+            },
         ];
-        for (case, value, bytes) in rows {
+        for GoldenRow { case, value, bytes } in rows {
             assert!(&value.encode()[..] == bytes, "{case}");
             assert!(
                 StreamsGroupTargetAssignmentMetadataValue::decode(bytes).unwrap() == value,

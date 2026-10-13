@@ -86,7 +86,8 @@ pub(super) struct FetchPreparation {
 
 pub(super) fn prepare_fetch(
     broker: &Broker,
-    (request, version): (&FetchRequest, i16),
+    request: &FetchRequest,
+    version: i16,
     context: &RequestContext<'_>,
 ) -> Result<FetchPreparation, i16> {
     let effective_replica_id = if request.replica_id >= 0 {
@@ -189,11 +190,18 @@ fn group_cached_into_effective_topics(
     use std::collections::HashMap;
     /// A topic's whole identity: the KIP-516 id, and the name that older
     /// versions key on.
-    type TopicIdentity = (WireUuid, String);
+    #[derive(Clone, PartialEq, Eq, Hash)]
+    struct TopicIdentity {
+        topic_id: WireUuid,
+        topic_name: String,
+    }
     let mut order: Vec<TopicIdentity> = Vec::new();
     let mut by_topic: HashMap<TopicIdentity, EffectiveTopic> = HashMap::new();
     for (k, s) in cached {
-        let identity = (k.topic_id, k.topic_name.clone());
+        let identity = TopicIdentity {
+            topic_id: k.topic_id,
+            topic_name: k.topic_name.clone(),
+        };
         let entry = by_topic
             .entry(identity.clone())
             .or_insert_with(|| EffectiveTopic {
@@ -242,6 +250,20 @@ mod tests {
     /// back as its own topic, under its own id.
     #[test]
     fn nameless_cached_topics_do_not_collapse_into_one() {
+        /// A partition and the offset the session cached for it.
+        #[derive(Debug, PartialEq, Eq)]
+        struct PartitionOffset {
+            partition: i32,
+            fetch_offset: i64,
+        }
+
+        /// A topic's id and its partitions.
+        #[derive(Debug, PartialEq, Eq)]
+        struct IdShape {
+            topic_id: WireUuid,
+            partitions: Vec<PartitionOffset>,
+        }
+
         let cached = vec![
             (key(1, "", 0), state(10)),
             (key(2, "", 0), state(20)),
@@ -250,25 +272,44 @@ mod tests {
 
         let grouped = group_cached_into_effective_topics(&cached);
 
-        let shape: Vec<(WireUuid, Vec<(i32, i64)>)> = grouped
+        let shape: Vec<IdShape> = grouped
             .iter()
-            .map(|topic| {
-                (
-                    topic.topic_id,
-                    topic
-                        .partitions
-                        .iter()
-                        .map(|partition| (partition.partition, partition.fetch_offset))
-                        .collect(),
-                )
+            .map(|topic| IdShape {
+                topic_id: topic.topic_id,
+                partitions: topic
+                    .partitions
+                    .iter()
+                    .map(|partition| PartitionOffset {
+                        partition: partition.partition,
+                        fetch_offset: partition.fetch_offset,
+                    })
+                    .collect(),
             })
             .collect();
         assert!(
             shape
                 == vec![
-                    (WireUuid([1; 16]), vec![(0, 10)]),
-                    (WireUuid([2; 16]), vec![(0, 20)]),
-                    (WireUuid([3; 16]), vec![(0, 30)]),
+                    IdShape {
+                        topic_id: WireUuid([1; 16]),
+                        partitions: vec![PartitionOffset {
+                            partition: 0,
+                            fetch_offset: 10
+                        }]
+                    },
+                    IdShape {
+                        topic_id: WireUuid([2; 16]),
+                        partitions: vec![PartitionOffset {
+                            partition: 0,
+                            fetch_offset: 20
+                        }]
+                    },
+                    IdShape {
+                        topic_id: WireUuid([3; 16]),
+                        partitions: vec![PartitionOffset {
+                            partition: 0,
+                            fetch_offset: 30
+                        }]
+                    },
                 ]
         );
     }
@@ -276,6 +317,13 @@ mod tests {
     /// One topic's partitions still group together, in first-seen order.
     #[test]
     fn one_topic_s_partitions_group_under_it() {
+        /// A topic's name and the partition indexes it groups.
+        #[derive(Debug, PartialEq, Eq)]
+        struct NameShape {
+            topic: String,
+            partitions: Vec<i32>,
+        }
+
         let cached = vec![
             (key(1, "orders", 2), state(10)),
             (key(2, "", 0), state(20)),
@@ -284,19 +332,29 @@ mod tests {
 
         let grouped = group_cached_into_effective_topics(&cached);
 
-        let shape: Vec<(String, Vec<i32>)> = grouped
+        let shape: Vec<NameShape> = grouped
             .iter()
-            .map(|topic| {
-                (
-                    topic.topic.clone(),
-                    topic
-                        .partitions
-                        .iter()
-                        .map(|partition| partition.partition)
-                        .collect(),
-                )
+            .map(|topic| NameShape {
+                topic: topic.topic.clone(),
+                partitions: topic
+                    .partitions
+                    .iter()
+                    .map(|partition| partition.partition)
+                    .collect(),
             })
             .collect();
-        assert!(shape == vec![("orders".to_owned(), vec![2, 0]), (String::new(), vec![0]),]);
+        assert!(
+            shape
+                == vec![
+                    NameShape {
+                        topic: "orders".to_owned(),
+                        partitions: vec![2, 0]
+                    },
+                    NameShape {
+                        topic: String::new(),
+                        partitions: vec![0]
+                    },
+                ]
+        );
     }
 }

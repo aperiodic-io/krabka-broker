@@ -70,11 +70,31 @@ const CORRELATION_ID: i32 = 0x0102_0304;
 /// Response-body sizes. 1 KiB is the order of a real Metadata or admin
 /// response; 64 KiB and 1 MiB are there to show where the copy starts to
 /// dominate, and whether any traffic on this path actually reaches them.
-const BODY_SIZES: [(&str, usize); 3] =
-    [("1KiB", 1024), ("64KiB", 64 * 1024), ("1MiB", 1024 * 1024)];
+const BODY_SIZES: [BodySize; 3] = [
+    BodySize {
+        label: "1KiB",
+        size: 1024,
+    },
+    BodySize {
+        label: "64KiB",
+        size: 64 * 1024,
+    },
+    BodySize {
+        label: "1MiB",
+        size: 1024 * 1024,
+    },
+];
+
+/// One response-body size the framing sweep covers, with its report label.
+struct BodySize {
+    label: &'static str,
+    size: usize,
+}
 
 mod support;
-use support::{BoundedResource, LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP, bounded_resource};
+use support::{
+    BatchShape, BoundedResource, LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP, bounded_resource,
+};
 
 // ---------------------------------------------------------------------------
 // Deferral 1: response framing.
@@ -352,7 +372,7 @@ fn replication_runtime() -> Runtime {
 fn bench_response_framing(c: &mut Criterion) {
     let mut group = c.benchmark_group("broker/response_framing");
 
-    for (label, size) in BODY_SIZES {
+    for BodySize { label, size } in BODY_SIZES {
         let payload = body(PatternedPayloadLength(size));
         group.throughput(Throughput::Bytes(size as u64));
         for (case, framing) in [("copy", Framing::Copy), ("chained", Framing::Chained)] {
@@ -369,7 +389,12 @@ fn bench_replication(c: &mut Criterion) {
     let runtime = replication_runtime();
     let mut group = c.benchmark_group("broker/replication");
 
-    for (shape, records, payload) in SHAPES {
+    for BatchShape {
+        label: shape,
+        records,
+        payload,
+    } in SHAPES
+    {
         let template = make_batch(records, payload);
         group.throughput(Throughput::Bytes(template.encoded_len() as u64));
         group.bench_function(format!("{shape}/encoded_len"), |b| {
@@ -417,7 +442,7 @@ fn bench_ratio(_c: &mut Criterion) {
         "{:<10} {:>12} {:>12} {:>12} {:>10}",
         "body", "copy", "chained", "saved", "saved %"
     );
-    for (label, size) in BODY_SIZES {
+    for BodySize { label, size } in BODY_SIZES {
         let payload = body(PatternedPayloadLength(size));
         let copy = fastest(|iters| timed_sends(&payload, Framing::Copy, iters));
         let chained = fastest(|iters| timed_sends(&payload, Framing::Chained, iters));
@@ -438,7 +463,12 @@ fn bench_ratio(_c: &mut Criterion) {
         "{:<14} {:>14} {:>18} {:>22}",
         "shape", "encoded_len", "replicate_batch", "encoded_len/replicate"
     );
-    for (shape, records, payload) in SHAPES {
+    for BatchShape {
+        label: shape,
+        records,
+        payload,
+    } in SHAPES
+    {
         let template = make_batch(records, payload);
         let walk = fastest(|iters| timed_encoded_len(&template, iters));
         let replicate = fastest(|iters| timed_replicates(&runtime, &template, iters));

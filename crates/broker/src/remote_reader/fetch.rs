@@ -298,8 +298,8 @@ mod tests {
         crate::{
             remote_log_manager::test_support::local_backends,
             remote_reader::test_support::{
-                caching_sparse_remote_segment_reader, empty_reader, not_ready_reader,
-                sparse_fixture_batch_bytes, sparse_fixture_second_batch_len,
+                CachingReader, ReaderWithDir, caching_sparse_remote_segment_reader, empty_reader,
+                not_ready_reader, sparse_fixture_batch_bytes, sparse_fixture_second_batch_len,
                 sparse_remote_segment_reader, tp,
             },
         },
@@ -314,7 +314,10 @@ mod tests {
     // then 14 to 16. Each case is `(offset, budget, the batches returned)`.
     #[tokio::test]
     async fn fetch_raw_returns_the_segment_bytes_from_the_batch_that_holds_the_offset() {
-        let (reader, _remote_dir) = sparse_remote_segment_reader();
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = sparse_remote_segment_reader();
         let [first, second] = sparse_fixture_batch_bytes();
         let both = Bytes::from([first.clone(), second.clone()].concat());
         let cases = [
@@ -341,53 +344,77 @@ mod tests {
 
     // The header walk under the raw read: which whole batches a read holds
     // from an offset on, and what to read again when the cap cut the first
-    // of them. Each case is `(label, the bytes read, offset, scan)`.
+    // of them.
     #[test]
     fn the_raw_scan_keeps_whole_batches_from_the_offset() {
+        /// A label, the bytes read, the offset asked for and the scan they
+        /// must give.
+        struct ScanCase<'a> {
+            label: &'a str,
+            data: Vec<u8>,
+            offset: i64,
+            want: RawScan,
+        }
         let [first, second] = sparse_fixture_batch_bytes();
         let both = [first.to_vec(), second.to_vec()].concat();
         let (one, two) = (first.len(), both.len());
-        let cases: [(&str, Vec<u8>, i64, RawScan); 7] = [
-            ("both batches", both.clone(), 10, RawScan::Batches(0..two)),
-            (
-                "from the second",
-                both.clone(),
-                14,
-                RawScan::Batches(one..two),
-            ),
-            ("past the read", both.clone(), 17, RawScan::Missing),
-            (
-                "a cut second batch ends the run",
-                both[..two - 1].to_vec(),
-                10,
-                RawScan::Batches(0..one),
-            ),
-            (
-                "a cut first batch is read again whole",
-                both[..one - 1].to_vec(),
-                10,
-                RawScan::Truncated {
+        let cases: [ScanCase<'_>; 7] = [
+            ScanCase {
+                label: "both batches",
+                data: both.clone(),
+                offset: 10,
+                want: RawScan::Batches(0..two),
+            },
+            ScanCase {
+                label: "from the second",
+                data: both.clone(),
+                offset: 14,
+                want: RawScan::Batches(one..two),
+            },
+            ScanCase {
+                label: "past the read",
+                data: both.clone(),
+                offset: 17,
+                want: RawScan::Missing,
+            },
+            ScanCase {
+                label: "a cut second batch ends the run",
+                data: both[..two - 1].to_vec(),
+                offset: 10,
+                want: RawScan::Batches(0..one),
+            },
+            ScanCase {
+                label: "a cut first batch is read again whole",
+                data: both[..one - 1].to_vec(),
+                offset: 10,
+                want: RawScan::Truncated {
                     at: 0,
                     len: Some(one),
                 },
-            ),
-            (
-                "a cut wanted batch after a skipped one",
-                both[..one + 20].to_vec(),
-                14,
-                RawScan::Truncated {
+            },
+            ScanCase {
+                label: "a cut wanted batch after a skipped one",
+                data: both[..one + 20].to_vec(),
+                offset: 14,
+                want: RawScan::Truncated {
                     at: one,
                     len: Some(two - one),
                 },
-            ),
-            (
-                "a cut before the length field",
-                both[..one + 4].to_vec(),
-                14,
-                RawScan::Truncated { at: one, len: None },
-            ),
+            },
+            ScanCase {
+                label: "a cut before the length field",
+                data: both[..one + 4].to_vec(),
+                offset: 14,
+                want: RawScan::Truncated { at: one, len: None },
+            },
         ];
-        for (label, data, offset, want) in cases {
+        for ScanCase {
+            label,
+            data,
+            offset,
+            want,
+        } in cases
+        {
             check!(whole_batches_from(&data, offset) == want, "{label}");
         }
     }
@@ -399,7 +426,11 @@ mod tests {
     /// segments are all remote.
     #[tokio::test]
     async fn two_fetches_of_one_segment_download_its_offset_index_once() {
-        let (reader, _dirs, index_fetches) = caching_sparse_remote_segment_reader();
+        let CachingReader {
+            reader,
+            dirs: _dirs,
+            index_fetches,
+        } = caching_sparse_remote_segment_reader();
 
         for offset in [10, 12] {
             reader
@@ -422,7 +453,11 @@ mod tests {
     /// from holding the budget against live ones.
     #[tokio::test]
     async fn dropping_a_segment_from_the_cache_makes_the_next_read_download_again() {
-        let (reader, _dirs, index_fetches) = caching_sparse_remote_segment_reader();
+        let CachingReader {
+            reader,
+            dirs: _dirs,
+            index_fetches,
+        } = caching_sparse_remote_segment_reader();
         let segment_id = reader
             .rlmm
             .list_remote_log_segments(&tp())
@@ -476,7 +511,10 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_batch_uses_offset_relative_to_remote_segment_start() {
-        let (reader, _remote_dir) = sparse_remote_segment_reader();
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = sparse_remote_segment_reader();
 
         let got = reader
             .fetch_batch(&tp(), LeaderEpoch(0), 12, 4096)
@@ -498,7 +536,10 @@ mod tests {
     /// not from the indexed one before it.
     #[tokio::test]
     async fn fetch_batch_budget_counts_from_the_covering_batch() {
-        let (reader, _remote_dir) = sparse_remote_segment_reader();
+        let ReaderWithDir {
+            reader,
+            dir: _remote_dir,
+        } = sparse_remote_segment_reader();
 
         let got = reader
             .fetch_batch(&tp(), LeaderEpoch(0), 14, sparse_fixture_second_batch_len())
@@ -553,7 +594,10 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_batch_propagates_not_ready() {
-        let (_remote_dir, reader) = not_ready_reader();
+        let ReaderWithDir {
+            dir: _remote_dir,
+            reader,
+        } = not_ready_reader();
         let err = reader
             .fetch_batch(&tp(), LeaderEpoch(0), 0, 4096)
             .await

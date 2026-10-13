@@ -168,6 +168,15 @@ pub fn next_member_state(
     }
 }
 
+/// What reconciling one role leaves: the tasks that stay or are assigned, the
+/// tasks to revoke, the tasks to assign, and whether a task was held back.
+struct RoleDifference {
+    assigned: TaskMap,
+    revoke: TaskMap,
+    assign: TaskMap,
+    held_back: bool,
+}
+
 /// Kafka's `computeAssignmentDifference` for one role: the assigned tasks
 /// (current and target), the tasks to revoke (current and not target), the
 /// tasks to assign (target and not assigned, less the unreleased ones), and
@@ -176,7 +185,7 @@ fn role_difference(
     current: &TaskMap,
     target: &TaskMap,
     unreleased: impl Fn(&(String, i32)) -> bool,
-) -> (TaskMap, TaskMap, TaskMap, bool) {
+) -> RoleDifference {
     let mut assigned = TaskMap::new();
     let mut revoke = TaskMap::new();
     let mut assign = TaskMap::new();
@@ -205,12 +214,12 @@ fn role_difference(
             assign.entry(task.0).or_default().push(task.1);
         }
     }
-    (
-        normalize_task_map(assigned),
-        normalize_task_map(revoke),
-        normalize_task_map(assign),
+    RoleDifference {
+        assigned: normalize_task_map(assigned),
+        revoke: normalize_task_map(revoke),
+        assign: normalize_task_map(assign),
         held_back,
-    )
+    }
 }
 
 fn merge(mut a: TaskMap, b: TaskMap) -> TaskMap {
@@ -230,29 +239,27 @@ fn compute_next_assignment(
     owned: Option<&RoleTasks>,
 ) -> StreamsMemberState {
     let process = member.process_id.as_str();
-    let (active, active_revoke, active_assign, active_held) =
-        role_difference(&member.active, &target.active, |task| {
-            owners.active_unreleased(task, process)
-        });
-    let (standby, standby_revoke, standby_assign, standby_held) =
-        role_difference(&member.standby, &target.standby, |task| {
-            owners.standby_or_warmup_unreleased(task, process)
-        });
-    let (warmup, warmup_revoke, warmup_assign, warmup_held) =
-        role_difference(&member.warmup, &target.warmup, |task| {
-            owners.standby_or_warmup_unreleased(task, process)
-        });
+    let active = role_difference(&member.active, &target.active, |task| {
+        owners.active_unreleased(task, process)
+    });
+    let standby = role_difference(&member.standby, &target.standby, |task| {
+        owners.standby_or_warmup_unreleased(task, process)
+    });
+    let warmup = role_difference(&member.warmup, &target.warmup, |task| {
+        owners.standby_or_warmup_unreleased(task, process)
+    });
+    let held_back = active.held_back || standby.held_back || warmup.held_back;
     let revoke = RoleTasks {
-        active: active_revoke,
-        standby: standby_revoke,
-        warmup: warmup_revoke,
+        active: active.revoke,
+        standby: standby.revoke,
+        warmup: warmup.revoke,
     };
     let assign = RoleTasks {
-        active: active_assign,
-        standby: standby_assign,
-        warmup: warmup_assign,
+        active: active.assign,
+        standby: standby.assign,
+        warmup: warmup.assign,
     };
-    let held_back = active_held || standby_held || warmup_held;
+    let (active, standby, warmup) = (active.assigned, standby.assigned, warmup.assigned);
 
     let mut next = member.clone();
     next.previous_member_epoch = member.member_epoch;
@@ -315,11 +322,17 @@ mod tests {
         }
     }
 
-    fn epochs_of(epochs: &[(i32, i32)]) -> BTreeMap<(String, i32), i32> {
+    fn epochs_of(epochs: &[PartitionEpoch]) -> BTreeMap<(String, i32), i32> {
         epochs
             .iter()
-            .map(|(partition, epoch)| (("0".to_owned(), *partition), *epoch))
+            .map(|entry| (("0".to_owned(), entry.partition), entry.epoch))
             .collect()
+    }
+
+    /// The epoch at which a partition of subtopology `0` was assigned.
+    struct PartitionEpoch {
+        partition: i32,
+        epoch: i32,
     }
 
     /// One reconciliation step of `m1` toward the target `0:[1, 2]` at epoch
@@ -330,13 +343,13 @@ mod tests {
         epoch: i32,
         active: &'static [i32],
         pending: &'static [i32],
-        epochs: &'static [(i32, i32)],
+        epochs: &'static [PartitionEpoch],
         owned: Option<&'static [i32]>,
         expected_state: StreamsMemberAssignmentState,
         expected_epoch: i32,
         expected_active: &'static [i32],
         expected_pending: &'static [i32],
-        expected_epochs: &'static [(i32, i32)],
+        expected_epochs: &'static [PartitionEpoch],
     }
 
     /// Kafka's `CurrentAssignmentBuilder` keeps the epoch at which each
@@ -355,13 +368,31 @@ mod tests {
                 epoch: 3,
                 active: &[0, 1],
                 pending: &[],
-                epochs: &[(0, 2), (1, 3)],
+                epochs: &[
+                    PartitionEpoch {
+                        partition: 0,
+                        epoch: 2,
+                    },
+                    PartitionEpoch {
+                        partition: 1,
+                        epoch: 3,
+                    },
+                ],
                 owned: None,
                 expected_state: UnrevokedTasks,
                 expected_epoch: 3,
                 expected_active: &[1],
                 expected_pending: &[0],
-                expected_epochs: &[(0, 2), (1, 3)],
+                expected_epochs: &[
+                    PartitionEpoch {
+                        partition: 0,
+                        epoch: 2,
+                    },
+                    PartitionEpoch {
+                        partition: 1,
+                        epoch: 3,
+                    },
+                ],
             },
             Step {
                 case: "task 0 revoked: task 2 joins at the target epoch",
@@ -369,13 +400,31 @@ mod tests {
                 epoch: 3,
                 active: &[1],
                 pending: &[0],
-                epochs: &[(0, 2), (1, 3)],
+                epochs: &[
+                    PartitionEpoch {
+                        partition: 0,
+                        epoch: 2,
+                    },
+                    PartitionEpoch {
+                        partition: 1,
+                        epoch: 3,
+                    },
+                ],
                 owned: Some(&[1]),
                 expected_state: Stable,
                 expected_epoch: 5,
                 expected_active: &[1, 2],
                 expected_pending: &[],
-                expected_epochs: &[(1, 3), (2, 5)],
+                expected_epochs: &[
+                    PartitionEpoch {
+                        partition: 1,
+                        epoch: 3,
+                    },
+                    PartitionEpoch {
+                        partition: 2,
+                        epoch: 5,
+                    },
+                ],
             },
             Step {
                 case: "a member with no tasks gets the target at its epoch",
@@ -389,7 +438,16 @@ mod tests {
                 expected_epoch: 5,
                 expected_active: &[1, 2],
                 expected_pending: &[],
-                expected_epochs: &[(1, 5), (2, 5)],
+                expected_epochs: &[
+                    PartitionEpoch {
+                        partition: 1,
+                        epoch: 5,
+                    },
+                    PartitionEpoch {
+                        partition: 2,
+                        epoch: 5,
+                    },
+                ],
             },
         ];
         let target = RoleTasks {

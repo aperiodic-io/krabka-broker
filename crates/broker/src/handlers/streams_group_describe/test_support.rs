@@ -180,10 +180,16 @@ pub(super) async fn describe_at(
     .await
 }
 
-pub(super) fn task_map(entries: &[(&str, Vec<i32>)]) -> BTreeMap<String, Vec<i32>> {
+/// The partitions of one subtopology that a task map holds.
+pub(super) struct SubtopologyTasks<'a> {
+    pub(super) subtopology_id: &'a str,
+    pub(super) partitions: Vec<i32>,
+}
+
+pub(super) fn task_map(entries: &[SubtopologyTasks<'_>]) -> BTreeMap<String, Vec<i32>> {
     entries
         .iter()
-        .map(|(subtopology_id, partitions)| ((*subtopology_id).into(), partitions.clone()))
+        .map(|entry| (entry.subtopology_id.into(), entry.partitions.clone()))
         .collect()
 }
 
@@ -226,11 +232,26 @@ pub(super) fn describe_member() -> StreamsDescribeMember {
         client_tags: vec![("zone".into(), "z1".into())],
         task_offsets: [(("sub-a".to_string(), 0), 5)].into(),
         task_end_offsets: [(("sub-a".to_string(), 0), 10)].into(),
-        active: task_map(&[("sub-a", vec![0, 2])]),
-        standby: task_map(&[("sub-a", vec![1])]),
-        warmup: task_map(&[("sub-b", vec![3, 4])]),
-        target_active: task_map(&[("sub-a", vec![0])]),
-        target_standby: task_map(&[("sub-a", vec![1, 2])]),
+        active: task_map(&[SubtopologyTasks {
+            subtopology_id: "sub-a",
+            partitions: vec![0, 2],
+        }]),
+        standby: task_map(&[SubtopologyTasks {
+            subtopology_id: "sub-a",
+            partitions: vec![1],
+        }]),
+        warmup: task_map(&[SubtopologyTasks {
+            subtopology_id: "sub-b",
+            partitions: vec![3, 4],
+        }]),
+        target_active: task_map(&[SubtopologyTasks {
+            subtopology_id: "sub-a",
+            partitions: vec![0],
+        }]),
+        target_standby: task_map(&[SubtopologyTasks {
+            subtopology_id: "sub-a",
+            partitions: vec![1, 2],
+        }]),
         target_warmup: task_map(&[]),
     }
 }

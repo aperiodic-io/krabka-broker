@@ -9,6 +9,21 @@ use {
     std::path::{Path, PathBuf},
 };
 
+/// A partition directory found on disk, named by its topic and partition.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DiscoveredPartition {
+    pub topic: String,
+    pub partition: i32,
+}
+
+/// A partition directory found on disk, with the log directory that holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocatedPartition {
+    pub topic: String,
+    pub partition: i32,
+    pub owning_dir: PathBuf,
+}
+
 /// Builds the future-log directory path for a (topic, partition) in `log_dir`.
 ///
 /// `AlterReplicaLogDirs` and KIP-113 use it. The future log collects copied
@@ -19,17 +34,17 @@ pub fn future_partition_dir(log_dir: &Path, topic: &str, partition: i32) -> Path
     log_dir.join(format!("{topic}-{partition}{FUTURE_SUFFIX}"))
 }
 
-/// Parses a `<topic>-<partition>-future` directory name back to
-/// `(topic, partition)`.
+/// Parses a `<topic>-<partition>-future` directory name back to its
+/// [`DiscoveredPartition`].
 ///
 /// It strips the [`FUTURE_SUFFIX`], then calls [`parse_partition_dir`], so
 /// that the topic-name handling stays in one place. It returns `None` when the
 /// name does not carry the suffix, and when the remainder after the strip is
 /// not a valid partition directory.
 #[must_use]
-pub fn parse_future_partition_dir(name: &str) -> Option<(String, i32)> {
+pub fn parse_future_partition_dir(name: &str) -> Option<DiscoveredPartition> {
     let base = name.strip_suffix(FUTURE_SUFFIX)?;
-    parse_partition_dir(base)
+    parse_partition_dir(base).map(|(topic, partition)| DiscoveredPartition { topic, partition })
 }
 
 /// The topic of the metadata partition, `__cluster_metadata-0`. Its
@@ -40,15 +55,17 @@ const METADATA_TOPIC: &str = "__cluster_metadata";
 /// [`parse_partition_dir`] for a directory the broker hosts: a partition
 /// directory of any topic but `__cluster_metadata`, which Kafka's
 /// `LogManager.loadLogs` skips too.
-fn parse_hosted_partition_dir(name: &str) -> Option<(String, i32)> {
-    parse_partition_dir(name).filter(|(topic, _)| topic != METADATA_TOPIC)
+fn parse_hosted_partition_dir(name: &str) -> Option<DiscoveredPartition> {
+    parse_partition_dir(name)
+        .filter(|(topic, _)| topic != METADATA_TOPIC)
+        .map(|(topic, partition)| DiscoveredPartition { topic, partition })
 }
 
-/// Walks `log_dir` and returns every `(topic, partition)` whose directory
+/// Walks `log_dir` and returns every [`DiscoveredPartition`] whose directory
 /// exists. Broker startup uses it to refill the metadata image and the
 /// partition registry from what the last run left on disk. The metadata
 /// partition `__cluster_metadata-0` is not one of them.
-pub fn scan(log_dir: &Path) -> Result<Vec<(String, i32)>, BrokerError> {
+pub fn scan(log_dir: &Path) -> Result<Vec<DiscoveredPartition>, BrokerError> {
     if !log_dir.exists() {
         std::fs::create_dir_all(log_dir)?;
         return Ok(Vec::new());
@@ -56,13 +73,13 @@ pub fn scan(log_dir: &Path) -> Result<Vec<(String, i32)>, BrokerError> {
     scan_existing(log_dir, parse_hosted_partition_dir)
 }
 
-/// Walks `log_dir` and returns every `(topic, partition)` that has a
+/// Walks `log_dir` and returns every [`DiscoveredPartition`] that has a
 /// future-log directory, `<topic>-<partition>-future`.
 ///
 /// `DescribeLogDirs` uses it to report KIP-113 moves that are still running,
 /// with `is_future_key=true`. Broker startup uses it to resume a move that a
 /// crash interrupted.
-pub fn scan_future(log_dir: &Path) -> Result<Vec<(String, i32)>, BrokerError> {
+pub fn scan_future(log_dir: &Path) -> Result<Vec<DiscoveredPartition>, BrokerError> {
     if !log_dir.exists() {
         return Ok(Vec::new());
     }
@@ -71,8 +88,8 @@ pub fn scan_future(log_dir: &Path) -> Result<Vec<(String, i32)>, BrokerError> {
 
 fn scan_existing(
     log_dir: &Path,
-    parse_dir_name: fn(&str) -> Option<(String, i32)>,
-) -> Result<Vec<(String, i32)>, BrokerError> {
+    parse_dir_name: fn(&str) -> Option<DiscoveredPartition>,
+) -> Result<Vec<DiscoveredPartition>, BrokerError> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(log_dir)? {
         let entry = entry?;
@@ -82,8 +99,8 @@ fn scan_existing(
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        if let Some((topic, partition)) = parse_dir_name(&name) {
-            out.push((topic, partition));
+        if let Some(partition) = parse_dir_name(&name) {
+            out.push(partition);
         }
     }
     out.sort();
@@ -165,20 +182,20 @@ fn partition_dir_in(log_dirs: &[PathBuf], topic: &str, partition: i32) -> Option
 }
 
 /// Scans every directory in `log_dirs` and returns each discovered
-/// `(topic, partition, owning_dir)`.
+/// [`LocatedPartition`].
 ///
 /// When the same partition appears in more than one directory, which is a
 /// misconfiguration, the first occurrence wins and this function logs a
 /// warning. It sorts the results by `(topic, partition)`.
-pub fn scan_all(log_dirs: &[PathBuf]) -> Result<Vec<(String, i32, PathBuf)>, BrokerError> {
+pub fn scan_all(log_dirs: &[PathBuf]) -> Result<Vec<LocatedPartition>, BrokerError> {
     use std::collections::HashMap;
-    let mut seen: HashMap<(String, i32), PathBuf> = HashMap::new();
+    let mut seen: HashMap<DiscoveredPartition, PathBuf> = HashMap::new();
     for dir in log_dirs {
-        for (topic, partition) in scan(dir)? {
-            match seen.entry((topic.clone(), partition)) {
+        for found in scan(dir)? {
+            match seen.entry(found.clone()) {
                 std::collections::hash_map::Entry::Occupied(existing) => {
                     tracing::warn!(
-                        topic = %topic, partition,
+                        topic = %found.topic, partition = found.partition,
                         first = %existing.get().display(),
                         duplicate = %dir.display(),
                         "partition present in multiple log dirs; ignoring duplicate"
@@ -190,9 +207,15 @@ pub fn scan_all(log_dirs: &[PathBuf]) -> Result<Vec<(String, i32, PathBuf)>, Bro
             }
         }
     }
-    let mut out: Vec<(String, i32, PathBuf)> =
-        seen.into_iter().map(|((t, p), dir)| (t, p, dir)).collect();
-    out.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
+    let mut out: Vec<LocatedPartition> = seen
+        .into_iter()
+        .map(|(found, owning_dir)| LocatedPartition {
+            topic: found.topic,
+            partition: found.partition,
+            owning_dir,
+        })
+        .collect();
+    out.sort_by(|a, b| (&a.topic, a.partition).cmp(&(&b.topic, b.partition)));
     Ok(out)
 }
 
@@ -204,6 +227,21 @@ mod tests {
         assert2::{assert, check},
         tempfile::tempdir,
     };
+
+    fn discovered(topic: &str, partition: i32) -> DiscoveredPartition {
+        DiscoveredPartition {
+            topic: topic.to_owned(),
+            partition,
+        }
+    }
+
+    fn located(topic: &str, partition: i32, owning_dir: &Path) -> LocatedPartition {
+        LocatedPartition {
+            topic: topic.to_owned(),
+            partition,
+            owning_dir: owning_dir.to_path_buf(),
+        }
+    }
 
     fn partition_dirs(names: &[&str]) -> tempfile::TempDir {
         let dir = tempdir().unwrap();
@@ -234,7 +272,13 @@ mod tests {
         std::fs::create_dir(dir.path().join("__cluster_metadata-0")).expect("mkdir metadata");
         let mut out = scan(dir.path()).expect("scan ok");
         out.sort();
-        assert!(out == vec![("bar".into(), 0), ("foo".into(), 0), ("foo".into(), 1),]);
+        assert!(
+            out == vec![
+                discovered("bar", 0),
+                discovered("foo", 0),
+                discovered("foo", 1),
+            ]
+        );
     }
 
     #[test]
@@ -302,12 +346,7 @@ mod tests {
         let b = partition_dirs(&["bar-1"]);
         let dirs = vec![a.path().to_path_buf(), b.path().to_path_buf()];
         let out = scan_all(&dirs).expect("scan_all ok");
-        assert!(
-            out == vec![
-                ("bar".to_string(), 1, b.path().to_path_buf()),
-                ("foo".to_string(), 0, a.path().to_path_buf()),
-            ]
-        );
+        assert!(out == vec![located("bar", 1, b.path()), located("foo", 0, a.path())]);
     }
 
     #[test]
@@ -319,7 +358,7 @@ mod tests {
             .to_str()
             .expect("file name is utf-8");
         assert!(name == "foo-7-future");
-        assert!(parse_future_partition_dir(name) == Some(("foo".to_string(), 7)));
+        assert!(parse_future_partition_dir(name) == Some(discovered("foo", 7)));
     }
 
     #[test]
@@ -334,7 +373,7 @@ mod tests {
     fn scan_does_not_pick_up_future_dirs() {
         let dir = partition_dirs(&["foo-0", "foo-1-future"]);
         let out = scan(dir.path()).expect("scan ok");
-        assert!(out == vec![("foo".into(), 0)]);
+        assert!(out == vec![discovered("foo", 0)]);
     }
 
     #[test]
@@ -343,7 +382,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("bar-3-future")).unwrap();
         let mut out = scan_future(dir.path()).expect("scan_future ok");
         out.sort();
-        assert!(out == vec![("bar".into(), 3), ("foo".into(), 1)]);
+        assert!(out == vec![discovered("bar", 3), discovered("foo", 1)]);
     }
 
     #[test]
@@ -367,6 +406,6 @@ mod tests {
         let second = partition_dirs(&["foo-0"]);
         let search_dirs = [first.path().to_path_buf(), second.path().to_path_buf()];
         let results = scan_all(&search_dirs).expect("scan_all ok");
-        assert!(results == vec![("foo".to_string(), 0, first.path().to_path_buf())]);
+        assert!(results == vec![located("foo", 0, first.path())]);
     }
 }

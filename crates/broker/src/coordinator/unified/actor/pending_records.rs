@@ -533,42 +533,79 @@ mod tests {
     /// panic in the actor that writes it.
     #[test]
     fn a_record_string_over_32767_bytes_does_not_encode() {
-        type Field = (&'static str, fn(&mut PendingRecords, String));
+        struct Field {
+            what: &'static str,
+            set: fn(&mut PendingRecords, String),
+        }
         let fields: [Field; 11] = [
-            ("member id of a member record", |p, s| {
-                p.member_metadata[0].0 = s;
-            }),
-            ("member id of a target assignment", |p, s| {
-                p.target_per_member[0].0 = s;
-            }),
-            ("member id of a current assignment", |p, s| {
-                p.current_per_member[0].0 = s;
-            }),
-            ("regular expression", |p, s| p.resolved_regexes[0].0 = s),
-            ("classic protocol type", |p, s| {
-                p.classic_group_metadata.as_mut().unwrap().protocol_type = s;
-            }),
-            ("classic protocol name", |p, s| {
-                p.classic_group_metadata.as_mut().unwrap().protocol_name = Some(s);
-            }),
-            ("classic leader", |p, s| {
-                p.classic_group_metadata.as_mut().unwrap().leader = Some(s);
-            }),
-            ("classic member id", |p, s| {
-                p.classic_group_metadata.as_mut().unwrap().members[0].member_id = s;
-            }),
-            ("classic instance id", |p, s| {
-                p.classic_group_metadata.as_mut().unwrap().members[0].group_instance_id = Some(s);
-            }),
-            ("classic client id", |p, s| {
-                p.classic_group_metadata.as_mut().unwrap().members[0].client_id = s;
-            }),
-            ("classic client host", |p, s| {
-                p.classic_group_metadata.as_mut().unwrap().members[0].client_host = s;
-            }),
+            Field {
+                what: "member id of a member record",
+                set: |p, s| {
+                    p.member_metadata[0].0 = s;
+                },
+            },
+            Field {
+                what: "member id of a target assignment",
+                set: |p, s| {
+                    p.target_per_member[0].0 = s;
+                },
+            },
+            Field {
+                what: "member id of a current assignment",
+                set: |p, s| {
+                    p.current_per_member[0].0 = s;
+                },
+            },
+            Field {
+                what: "regular expression",
+                set: |p, s| p.resolved_regexes[0].0 = s,
+            },
+            Field {
+                what: "classic protocol type",
+                set: |p, s| {
+                    p.classic_group_metadata.as_mut().unwrap().protocol_type = s;
+                },
+            },
+            Field {
+                what: "classic protocol name",
+                set: |p, s| {
+                    p.classic_group_metadata.as_mut().unwrap().protocol_name = Some(s);
+                },
+            },
+            Field {
+                what: "classic leader",
+                set: |p, s| {
+                    p.classic_group_metadata.as_mut().unwrap().leader = Some(s);
+                },
+            },
+            Field {
+                what: "classic member id",
+                set: |p, s| {
+                    p.classic_group_metadata.as_mut().unwrap().members[0].member_id = s;
+                },
+            },
+            Field {
+                what: "classic instance id",
+                set: |p, s| {
+                    p.classic_group_metadata.as_mut().unwrap().members[0].group_instance_id =
+                        Some(s);
+                },
+            },
+            Field {
+                what: "classic client id",
+                set: |p, s| {
+                    p.classic_group_metadata.as_mut().unwrap().members[0].client_id = s;
+                },
+            },
+            Field {
+                what: "classic client host",
+                set: |p, s| {
+                    p.classic_group_metadata.as_mut().unwrap().members[0].client_host = s;
+                },
+            },
         ];
         let limit = MAX_STRING_BYTES;
-        for (name, set) in fields {
+        for Field { what: name, set } in fields {
             for (length, encodes) in [(limit, true), (limit + 1, false)] {
                 let mut pending = every_record();
                 set(&mut pending, "a".repeat(length));

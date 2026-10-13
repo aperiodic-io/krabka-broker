@@ -28,8 +28,9 @@ use {
     super::{metadata_hash::required_topics, status},
     crate::{
         codes,
-        coordinator::unified::streams::persistence::{
-            StoredSubtopology, StoredTopicInfo, StreamsGroupTopologyValue,
+        coordinator::unified::streams::{
+            persistence::{StoredSubtopology, StoredTopicInfo, StreamsGroupTopologyValue},
+            state::TopologyStatus,
         },
     },
     krabka_metadata::MetadataImage,
@@ -67,9 +68,9 @@ pub struct ConfiguredTopology {
     pub subtopologies: Option<BTreeMap<String, ConfiguredSubtopology>>,
     /// The internal topics that the metadata image does not hold, by name.
     pub internal_topics_to_create: BTreeMap<String, ConfiguredInternalTopic>,
-    /// The `(status code, status detail)` that keeps the group `NotReady`:
-    /// Kafka's `topicConfigurationException`.
-    pub status: Option<(i8, String)>,
+    /// The status code and detail that keep the group `NotReady`: Kafka's
+    /// `topicConfigurationException`.
+    pub status: Option<TopologyStatus>,
 }
 
 impl ConfiguredTopology {
@@ -155,15 +156,16 @@ pub fn configure_topics(
         .map(copartition_groups)
         .collect::<Result<Vec<_>, _>>()?;
     match configure(topology, image, &copartition_groups) {
-        Ok((subtopologies, internal_topics_to_create)) => {
-            let status = (!internal_topics_to_create.is_empty()).then(|| {
-                (
-                    status::MISSING_INTERNAL_TOPICS,
-                    format!(
-                        "Internal topics are missing: {}",
-                        summarize_topics(internal_topics_to_create.keys())
-                    ),
-                )
+        Ok(Configured {
+            subtopologies,
+            internal_topics_to_create,
+        }) => {
+            let status = (!internal_topics_to_create.is_empty()).then(|| TopologyStatus {
+                code: status::MISSING_INTERNAL_TOPICS,
+                detail: format!(
+                    "Internal topics are missing: {}",
+                    summarize_topics(internal_topics_to_create.keys())
+                ),
             });
             Ok(ConfiguredTopology {
                 topology_epoch: topology.epoch,
@@ -176,16 +178,18 @@ pub fn configure_topics(
             topology_epoch: topology.epoch,
             subtopologies: None,
             internal_topics_to_create: BTreeMap::new(),
-            status: Some((code, detail)),
+            status: Some(TopologyStatus { code, detail }),
         }),
         Err(Stop::Error(error)) => Err(error),
     }
 }
 
-type Configured = (
-    BTreeMap<String, ConfiguredSubtopology>,
-    BTreeMap<String, ConfiguredInternalTopic>,
-);
+/// The subtopologies of a topology, sized, and the internal topics that the
+/// image does not hold.
+struct Configured {
+    subtopologies: BTreeMap<String, ConfiguredSubtopology>,
+    internal_topics_to_create: BTreeMap<String, ConfiguredInternalTopic>,
+}
 
 fn configure(
     topology: &StreamsGroupTopologyValue,
@@ -209,7 +213,10 @@ fn configure(
         }
     }
     let internal_topics_to_create = missing_internal_topics(&subtopologies, topology, image)?;
-    Ok((subtopologies, internal_topics_to_create))
+    Ok(Configured {
+        subtopologies,
+        internal_topics_to_create,
+    })
 }
 
 /// Kafka's `throwOnMissingSourceTopics`.
@@ -243,11 +250,11 @@ fn decide_partition_counts(
 ) -> Result<BTreeMap<String, i32>, Stop> {
     let mut decided = repartition_topic_partition_counts(topology, image)?;
 
-    let (fixed, flexible): (Vec<&StoredTopicInfo>, Vec<&StoredTopicInfo>) = topology
+    let (fixed, flexible) = topology
         .subtopologies
         .iter()
         .flat_map(|subtopology| subtopology.repartition_source_topics.iter())
-        .partition(|topic| topic.partitions != 0);
+        .partition::<Vec<&StoredTopicInfo>, _>(|topic| topic.partitions != 0);
     let fixed: BTreeSet<&str> = fixed.into_iter().map(|topic| topic.name.as_str()).collect();
     let flexible: BTreeSet<&str> = flexible
         .into_iter()
@@ -682,12 +689,14 @@ mod tests {
         assert2::check,
     };
 
-    type Row = (
-        &'static str,
-        StreamsGroupTopologyValue,
-        MetadataImage,
-        Result<ConfiguredTopology, ConfigureTopicsError>,
-    );
+    /// A row: its label, the topology and image to configure, and the whole
+    /// configured topology or error it gives.
+    struct Row {
+        name: &'static str,
+        topology: StreamsGroupTopologyValue,
+        image: MetadataImage,
+        expected: Result<ConfiguredTopology, ConfigureTopicsError>,
+    }
 
     fn info(name: &str, partitions: i32) -> StoredTopicInfo {
         StoredTopicInfo {
@@ -698,13 +707,23 @@ mod tests {
         }
     }
 
-    fn internal(name: &str, partitions: i32) -> (String, ConfiguredInternalTopic) {
-        (name.to_string(), ConfiguredInternalTopic {
+    fn internal(name: &str, partitions: i32) -> ConfiguredInternalTopic {
+        ConfiguredInternalTopic {
             name: name.into(),
             partitions,
             replication_factor: None,
             configs: BTreeMap::new(),
-        })
+        }
+    }
+
+    /// `topics` by name.
+    fn by_name(
+        topics: impl IntoIterator<Item = ConfiguredInternalTopic>,
+    ) -> BTreeMap<String, ConfiguredInternalTopic> {
+        topics
+            .into_iter()
+            .map(|topic| (topic.name.clone(), topic))
+            .collect()
     }
 
     fn names(topics: &[&str]) -> BTreeSet<String> {
@@ -748,7 +767,10 @@ mod tests {
             topology_epoch: 1,
             subtopologies: None,
             internal_topics_to_create: BTreeMap::new(),
-            status: Some((code, detail.into())),
+            status: Some(TopologyStatus {
+                code,
+                detail: detail.into(),
+            }),
         }
     }
 
@@ -780,26 +802,23 @@ mod tests {
                     configured_subtopology()
                         .number_of_tasks(3)
                         .source_topics(names(&["customers"]))
-                        .repartition_source_topics(BTreeMap::from([internal("rp", 3)]))
-                        .state_changelog_topics(BTreeMap::from([internal("store-changelog", 3)]))
+                        .repartition_source_topics(by_name([internal("rp", 3)]))
+                        .state_changelog_topics(by_name([internal("store-changelog", 3)]))
                         .call(),
                 ),
             ])),
-            internal_topics_to_create: BTreeMap::from([
-                internal("rp", 3),
-                internal("store-changelog", 3),
-            ]),
-            status: Some((
-                status::MISSING_INTERNAL_TOPICS,
-                "Internal topics are missing: rp, store-changelog".into(),
-            )),
+            internal_topics_to_create: by_name([internal("rp", 3), internal("store-changelog", 3)]),
+            status: Some(TopologyStatus {
+                code: status::MISSING_INTERNAL_TOPICS,
+                detail: "Internal topics are missing: rp, store-changelog".into(),
+            }),
         };
-        (
-            "copartition coerces the flexible repartition topic",
-            topology(vec![s0, s1]),
-            image_with(&[("orders", 1, 6), ("customers", 2, 3)]),
-            Ok(expected),
-        )
+        Row {
+            name: "copartition coerces the flexible repartition topic",
+            topology: topology(vec![s0, s1]),
+            image: image_with(&[("orders", 1, 6), ("customers", 2, 3)]),
+            expected: Ok(expected),
+        }
     }
 
     /// Subtopology 1 reads `rp` from the 4-partition subtopology 0 and `other`
@@ -827,19 +846,19 @@ mod tests {
                     configured_subtopology()
                         .number_of_tasks(8)
                         .source_topics(names(&["other"]))
-                        .repartition_source_topics(BTreeMap::from([internal("rp", 4)]))
+                        .repartition_source_topics(by_name([internal("rp", 4)]))
                         .call(),
                 ),
             ])),
             internal_topics_to_create: BTreeMap::new(),
             status: None,
         };
-        (
-            "a flexible repartition topic takes its writer's partition count",
-            topology(vec![s0, s1]),
-            image_with(&[("in", 1, 4), ("other", 2, 8), ("rp", 3, 4)]),
-            Ok(expected),
-        )
+        Row {
+            name: "a flexible repartition topic takes its writer's partition count",
+            topology: topology(vec![s0, s1]),
+            image: image_with(&[("in", 1, 4), ("other", 2, 8), ("rp", 3, 4)]),
+            expected: Ok(expected),
+        }
     }
 
     /// The rows that stop with a status.
@@ -863,43 +882,43 @@ mod tests {
         missing.state_changelog_topics = vec![info("store-changelog", 0)];
 
         vec![
-            (
-                "fixed repartition topics disagree",
-                topology(fixed.to_vec()),
-                image_with(&[("in", 1, 2)]),
-                Ok(status_only(
+            Row {
+                name: "fixed repartition topics disagree",
+                topology: topology(fixed.to_vec()),
+                image: image_with(&[("in", 1, 2)]),
+                expected: Ok(status_only(
                     status::INCORRECTLY_PARTITIONED_TOPICS,
                     "Following topics do not have the same number of partitions: [{rp1=2, rp2=3}]",
                 )),
-            ),
-            (
-                "external copartitioned topics disagree",
-                topology(vec![external]),
-                image_with(&[("a", 1, 2), ("b", 2, 3)]),
-                Ok(status_only(
+            },
+            Row {
+                name: "external copartitioned topics disagree",
+                topology: topology(vec![external]),
+                image: image_with(&[("a", 1, 2), ("b", 2, 3)]),
+                expected: Ok(status_only(
                     status::INCORRECTLY_PARTITIONED_TOPICS,
                     "Following topics do not have the same number of partitions: [{a=2, b=3}]",
                 )),
-            ),
-            (
-                "an existing changelog topic has another partition count",
-                topology(vec![stateful]),
-                image_with(&[("in", 1, 2), ("store-changelog", 2, 5)]),
-                Ok(status_only(
+            },
+            Row {
+                name: "an existing changelog topic has another partition count",
+                topology: topology(vec![stateful]),
+                image: image_with(&[("in", 1, 2), ("store-changelog", 2, 5)]),
+                expected: Ok(status_only(
                     status::INCORRECTLY_PARTITIONED_TOPICS,
                     "Existing topic store-changelog has different number of partitions: \
                      expected 2, found 5",
                 )),
-            ),
-            (
-                "missing source topics stop before any internal topic",
-                topology(vec![missing]),
-                image_with(&[("c", 1, 1)]),
-                Ok(status_only(
+            },
+            Row {
+                name: "missing source topics stop before any internal topic",
+                topology: topology(vec![missing]),
+                image: image_with(&[("c", 1, 1)]),
+                expected: Ok(status_only(
                     status::MISSING_SOURCE_TOPICS,
                     "Source topics a, b, d and 1 additional topics are missing.",
                 )),
-            ),
+            },
         ]
     }
 
@@ -920,44 +939,44 @@ mod tests {
         invalid_name.state_changelog_topics = vec![info("bad/name", 0)];
 
         vec![
-            (
-                "a repartition source topic is never written",
-                topology(vec![never_written]),
-                image_with(&[("in", 1, 1)]),
-                Err(ConfigureTopicsError::InvalidTopology(
+            Row {
+                name: "a repartition source topic is never written",
+                topology: topology(vec![never_written]),
+                image: image_with(&[("in", 1, 1)]),
+                expected: Err(ConfigureTopicsError::InvalidTopology(
                     "Failed to compute number of partitions for all repartition topics, because \
                      a repartition source topic is never used as a sink topic."
                         .into(),
                 )),
-            ),
-            (
-                "repartition topics loop",
-                topology(looped.to_vec()),
-                image_with(&[]),
-                Err(ConfigureTopicsError::InvalidTopology(
+            },
+            Row {
+                name: "repartition topics loop",
+                topology: topology(looped.to_vec()),
+                image: image_with(&[]),
+                expected: Err(ConfigureTopicsError::InvalidTopology(
                     "Failed to compute number of partitions for all repartition topics. There \
                      may be loops in the topology that cannot be resolved."
                         .into(),
                 )),
-            ),
-            (
-                "a subtopology has no source topics",
-                topology(vec![sub("0")]),
-                image_with(&[]),
-                Err(ConfigureTopicsError::InvalidTopology(
+            },
+            Row {
+                name: "a subtopology has no source topics",
+                topology: topology(vec![sub("0")]),
+                image: image_with(&[]),
+                expected: Err(ConfigureTopicsError::InvalidTopology(
                     "No source topics found for subtopology 0".into(),
                 )),
-            ),
-            (
-                "an internal topic name is invalid",
-                topology(vec![invalid_name]),
-                image_with(&[("in", 1, 1)]),
-                Err(ConfigureTopicsError::InvalidTopic(
+            },
+            Row {
+                name: "an internal topic name is invalid",
+                topology: topology(vec![invalid_name]),
+                image: image_with(&[("in", 1, 1)]),
+                expected: Err(ConfigureTopicsError::InvalidTopic(
                     krabka_log::topic_name::validate_topic_name("bad/name")
                         .unwrap_err()
                         .to_string(),
                 )),
-            ),
+            },
         ]
     }
 
@@ -969,7 +988,13 @@ mod tests {
             .into_iter()
             .chain(status_rows())
             .chain(error_rows());
-        for (name, topology, image, expected) in rows {
+        for Row {
+            name,
+            topology,
+            image,
+            expected,
+        } in rows
+        {
             check!(configure_topics(&topology, &image) == expected, "{name}");
         }
     }

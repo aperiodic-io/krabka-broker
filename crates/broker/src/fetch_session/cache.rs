@@ -168,8 +168,8 @@ mod tests {
         crate::fetch_session::{
             SessionDecision,
             test_support::{
-                NAME_FETCH_VERSION, SessionAllocationSetup, allocate_session, allocated_cache,
-                forgotten_topic, incremental_req, req, session_key, topic,
+                AllocatedCache, NAME_FETCH_VERSION, SessionAllocationSetup, allocate_session,
+                allocated_cache, forgotten_topic, incremental_req, req, session_key, topic,
             },
         },
         assert2::assert,
@@ -280,7 +280,7 @@ mod tests {
         assert!(cache.total_partitions_cached() == 5);
     }
 
-    fn two_partition_cache() -> (FetchSessionCache, FetchSessionId) {
+    fn two_partition_cache() -> AllocatedCache {
         let setup = two_partition_session()
             .principal("a")
             .partition_ids([0, 1])
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn counters_track_merge_forget_and_close() {
-        let (cache, id) = two_partition_cache();
+        let AllocatedCache { cache, id } = two_partition_cache();
         assert!(cache.len() == 1);
         assert!(cache.total_partitions_cached() == 2);
 
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn counters_track_large_incremental_add_delta() {
-        let (cache, id) = two_partition_cache();
+        let AllocatedCache { cache, id } = two_partition_cache();
 
         let r = incremental_req!(
             id,

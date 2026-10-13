@@ -100,50 +100,81 @@ krabka_macros::directory_tree_fixture!(
 /// bad id with its usage error, exit 2, before anything is written.
 #[test]
 fn the_cluster_id_is_written_and_printed_in_kafka_form() {
-    // (what, --cluster-id, the id written, or None for a refused one)
-    let cases: &[(&str, &str, Option<&str>)] = &[
-        ("Kafka form", CLUSTER_ID, Some(CLUSTER_ID)),
-        ("hyphenated form", CLUSTER_ID_HYPHENATED, Some(CLUSTER_ID)),
-        (
-            "upper-case hyphenated form",
-            "01020304-0506-0708-090A-0B0C0D0E0F10",
-            Some(CLUSTER_ID),
-        ),
-        (
-            "Kafka form with canonical padding",
-            "AQIDBAUGBwgJCgsMDQ4PEA==",
-            Some(CLUSTER_ID),
-        ),
-        (
-            "unused low bits set in the last character",
-            "AQIDBAUGBwgJCgsMDQ4PEB",
-            Some(CLUSTER_ID),
-        ),
-        (
-            "the reserved zero id",
-            "AAAAAAAAAAAAAAAAAAAAAA",
-            Some("AAAAAAAAAAAAAAAAAAAAAA"),
-        ),
-        (
-            "the reserved one id",
-            "AAAAAAAAAAAAAAAAAAAAAQ",
-            Some("AAAAAAAAAAAAAAAAAAAAAQ"),
-        ),
-        ("too short", "AQIDBAUGBwgJCgsMDQ4P", None),
-        ("too long", "AQIDBAUGBwgJCgsMDQ4PEBES", None),
-        (
-            "outside the url-safe alphabet",
-            "AQIDBAUGBwgJCgsMDQ4P+A",
-            None,
-        ),
-        (
-            "hyphenated but not hex",
-            "01020304-0506-0708-090a-0b0c0d0e0fzz",
-            None,
-        ),
-        ("unhyphenated hex", "0102030405060708090a0b0c0d0e0f10", None),
+    /// What it is, `--cluster-id`, and the id written, or `None` for a refused
+    /// one.
+    struct Case<'a> {
+        what: &'a str,
+        input: &'a str,
+        written: Option<&'a str>,
+    }
+    let cases: &[Case] = &[
+        Case {
+            what: "Kafka form",
+            input: CLUSTER_ID,
+            written: Some(CLUSTER_ID),
+        },
+        Case {
+            what: "hyphenated form",
+            input: CLUSTER_ID_HYPHENATED,
+            written: Some(CLUSTER_ID),
+        },
+        Case {
+            what: "upper-case hyphenated form",
+            input: "01020304-0506-0708-090A-0B0C0D0E0F10",
+            written: Some(CLUSTER_ID),
+        },
+        Case {
+            what: "Kafka form with canonical padding",
+            input: "AQIDBAUGBwgJCgsMDQ4PEA==",
+            written: Some(CLUSTER_ID),
+        },
+        Case {
+            what: "unused low bits set in the last character",
+            input: "AQIDBAUGBwgJCgsMDQ4PEB",
+            written: Some(CLUSTER_ID),
+        },
+        Case {
+            what: "the reserved zero id",
+            input: "AAAAAAAAAAAAAAAAAAAAAA",
+            written: Some("AAAAAAAAAAAAAAAAAAAAAA"),
+        },
+        Case {
+            what: "the reserved one id",
+            input: "AAAAAAAAAAAAAAAAAAAAAQ",
+            written: Some("AAAAAAAAAAAAAAAAAAAAAQ"),
+        },
+        Case {
+            what: "too short",
+            input: "AQIDBAUGBwgJCgsMDQ4P",
+            written: None,
+        },
+        Case {
+            what: "too long",
+            input: "AQIDBAUGBwgJCgsMDQ4PEBES",
+            written: None,
+        },
+        Case {
+            what: "outside the url-safe alphabet",
+            input: "AQIDBAUGBwgJCgsMDQ4P+A",
+            written: None,
+        },
+        Case {
+            what: "hyphenated but not hex",
+            input: "01020304-0506-0708-090a-0b0c0d0e0fzz",
+            written: None,
+        },
+        Case {
+            what: "unhyphenated hex",
+            input: "0102030405060708090a0b0c0d0e0f10",
+            written: None,
+        },
     ];
-    for (what, input, written) in cases {
+    for Case {
+        what,
+        input,
+        written,
+    } in cases
+    {
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path().join("data");
         let out = krabka_format(
@@ -178,25 +209,36 @@ fn the_cluster_id_is_written_and_printed_in_kafka_form() {
 #[test]
 fn directory_ids_are_written_in_kafka_form() {
     const DIRECTORY_ID: &str = "AAAAAAAAAAAAAAAAAAAAZA";
-    let cases: &[(&str, &[&str])] = &[
-        ("--directory-id, Kafka form", &[
-            "--directory-id",
-            DIRECTORY_ID,
-        ]),
-        ("--directory-id, hyphenated form", &[
-            "--directory-id",
-            "00000000-0000-0000-0000-000000000064",
-        ]),
-        ("--initial-controllers, Kafka form", &[
-            "--initial-controllers",
-            "1@controller-1:9093:AAAAAAAAAAAAAAAAAAAAZA",
-        ]),
-        ("--initial-controllers, hyphenated form", &[
-            "--initial-controllers",
-            "1@controller-1:9093:00000000-0000-0000-0000-000000000064",
-        ]),
+    /// What it is, and the extra flags.
+    struct Case<'a> {
+        what: &'a str,
+        extra: &'a [&'a str],
+    }
+    let cases: &[Case] = &[
+        Case {
+            what: "--directory-id, Kafka form",
+            extra: &["--directory-id", DIRECTORY_ID],
+        },
+        Case {
+            what: "--directory-id, hyphenated form",
+            extra: &["--directory-id", "00000000-0000-0000-0000-000000000064"],
+        },
+        Case {
+            what: "--initial-controllers, Kafka form",
+            extra: &[
+                "--initial-controllers",
+                "1@controller-1:9093:AAAAAAAAAAAAAAAAAAAAZA",
+            ],
+        },
+        Case {
+            what: "--initial-controllers, hyphenated form",
+            extra: &[
+                "--initial-controllers",
+                "1@controller-1:9093:00000000-0000-0000-0000-000000000064",
+            ],
+        },
     ];
-    for (what, extra) in cases {
+    for Case { what, extra } in cases {
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path().join("data");
         let mut args = vec![
@@ -295,6 +337,12 @@ fn files_under(dir: &Path) -> Vec<String> {
 /// Spells the `--log-dir` flags for two directories.
 type Spelling = fn(&str, &str) -> Vec<String>;
 
+/// What it is, and how it spells the `--log-dir` flags.
+struct SpellingCase {
+    what: &'static str,
+    spell: Spelling,
+}
+
 /// Repeated and comma-separated `--log-dir` format every directory in one
 /// run, as `kafka-storage format` formats every entry of `log.dirs`. The set
 /// shares one cluster id, and each directory has its own id. Only the first
@@ -306,15 +354,17 @@ fn every_log_dir_is_formatted_in_one_run() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let seed_records = standalone_seed_records(tmp.path());
 
-    let spellings: [(&str, Spelling); 2] = [
-        ("repeated", |a, b| {
-            vec!["--log-dir".into(), a.into(), "--log-dir".into(), b.into()]
-        }),
-        ("comma-separated", |a, b| {
-            vec!["--log-dir".into(), format!("{a},{b}")]
-        }),
+    let spellings = [
+        SpellingCase {
+            what: "repeated",
+            spell: |a, b| vec!["--log-dir".into(), a.into(), "--log-dir".into(), b.into()],
+        },
+        SpellingCase {
+            what: "comma-separated",
+            spell: |a, b| vec!["--log-dir".into(), format!("{a},{b}")],
+        },
     ];
-    for (what, spell) in spellings {
+    for SpellingCase { what, spell } in spellings {
         let run = tmp.path().join(what);
         let (meta_dir, data_dir) = (run.join("meta"), run.join("data"));
         let mut args = spell(path_str(&meta_dir), path_str(&data_dir));
@@ -362,26 +412,65 @@ fn every_log_dir_is_formatted_in_one_run() {
 fn a_metadata_log_dir_is_formatted_with_the_log_dirs() {
     const VOTER: &str = "dynamic metadata voter directory";
     const DATA: &str = "data directory";
-    // (what, --metadata-log-dir, --log-dir entries, each directory in write
-    // order with its Kafka description)
-    type Case<'a> = (&'a str, &'a str, &'a [&'a str], &'a [(&'a str, &'a str)]);
+    /// A directory and its Kafka description.
+    struct Written<'a> {
+        dir: &'a str,
+        description: &'a str,
+    }
+    /// What it is, `--metadata-log-dir`, the `--log-dir` entries, and each
+    /// directory in write order with its Kafka description.
+    struct Case<'a> {
+        what: &'a str,
+        metadata: &'a str,
+        log_dirs: &'a [&'a str],
+        want: &'a [Written<'a>],
+    }
     let tmp = tempfile::tempdir().expect("tempdir");
     let seed_records = standalone_seed_records(tmp.path());
 
     let cases: &[Case] = &[
-        ("a separate metadata log directory", "m", &["a", "b"], &[
-            ("m", VOTER),
-            ("a", DATA),
-            ("b", DATA),
-        ]),
-        (
-            "a metadata log directory that is also a log directory",
-            "b",
-            &["a", "b"],
-            &[("b", VOTER), ("a", DATA)],
-        ),
+        Case {
+            what: "a separate metadata log directory",
+            metadata: "m",
+            log_dirs: &["a", "b"],
+            want: &[
+                Written {
+                    dir: "m",
+                    description: VOTER,
+                },
+                Written {
+                    dir: "a",
+                    description: DATA,
+                },
+                Written {
+                    dir: "b",
+                    description: DATA,
+                },
+            ],
+        },
+        Case {
+            what: "a metadata log directory that is also a log directory",
+            metadata: "b",
+            log_dirs: &["a", "b"],
+            want: &[
+                Written {
+                    dir: "b",
+                    description: VOTER,
+                },
+                Written {
+                    dir: "a",
+                    description: DATA,
+                },
+            ],
+        },
     ];
-    for (what, metadata, log_dirs, want) in cases {
+    for Case {
+        what,
+        metadata,
+        log_dirs,
+        want,
+    } in cases
+    {
         let run = tmp.path().join(what.replace(' ', "-"));
         let metadata_dir = run.join(metadata);
         let joined = log_dirs
@@ -402,7 +491,7 @@ fn a_metadata_log_dir_is_formatted_with_the_log_dirs() {
 
         let mut lines: Vec<String> = want
             .iter()
-            .map(|(dir, description)| {
+            .map(|Written { dir, description }| {
                 format!(
                     "Formatting {description} {} with metadata.version 4.3-IV0.",
                     run.join(dir).display()
@@ -416,11 +505,11 @@ fn a_metadata_log_dir_is_formatted_with_the_log_dirs() {
         ));
         assert2::assert!(stdout(&out).lines().collect::<Vec<_>>() == lines, "{what}");
 
-        let dirs: Vec<PathBuf> = want.iter().map(|(dir, _)| run.join(dir)).collect();
+        let dirs: Vec<PathBuf> = want.iter().map(|written| run.join(written.dir)).collect();
         let got: Vec<Formatted> = dirs.iter().map(|dir| formatted(dir)).collect();
         let expected: Vec<Formatted> = want
             .iter()
-            .map(|(_, description)| {
+            .map(|Written { description, .. }| {
                 if *description == VOTER {
                     metadata_directory(true, seed_records)
                 } else {
@@ -578,15 +667,34 @@ fn ignore_formatted_skips_the_formatted_and_formats_the_rest() {
 /// formatted, and only `--ignore-formatted` passes it.
 #[test]
 fn an_interrupted_run_can_be_run_again() {
-    // (the file the run stops after, exit of a plain rerun)
-    let cases: &[(&str, i32)] = &[
-        ("00000000000000000000-0000000000.checkpoint", 0),
-        ("bootstrap.records.bin", 0),
-        ("bootstrap.json", 0),
-        ("meta.properties.tmp", 0),
-        (META_PROPERTIES, 3),
+    /// The file the run stops after, and the exit of a plain rerun.
+    struct Case<'a> {
+        fault: &'a str,
+        rerun_exit: i32,
+    }
+    let cases: &[Case] = &[
+        Case {
+            fault: "00000000000000000000-0000000000.checkpoint",
+            rerun_exit: 0,
+        },
+        Case {
+            fault: "bootstrap.records.bin",
+            rerun_exit: 0,
+        },
+        Case {
+            fault: "bootstrap.json",
+            rerun_exit: 0,
+        },
+        Case {
+            fault: "meta.properties.tmp",
+            rerun_exit: 0,
+        },
+        Case {
+            fault: META_PROPERTIES,
+            rerun_exit: 3,
+        },
     ];
-    for (fault, rerun_exit) in cases {
+    for Case { fault, rerun_exit } in cases {
         let (_tmp, meta_dir, data_dir) = metadata_and_data_directories();
         let dirs = format!("{},{}", meta_dir.display(), data_dir.display());
         let mut args = vec!["--log-dir", &dirs, "--cluster-id", CLUSTER_ID];

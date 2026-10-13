@@ -190,7 +190,13 @@ const KRABKA_TOPIC_CONFIGS: &[&str] = &[
 /// The table is empty, and
 /// [`every_recorded_divergence_is_still_a_divergence`] is what keeps a row
 /// from outliving the gap it names.
-const DEFAULT_DIVERGENCES: &[(&str, &str)] = &[];
+const DEFAULT_DIVERGENCES: &[Divergence] = &[];
+
+/// A Kafka key and the default krabka reports for it.
+struct Divergence {
+    name: &'static str,
+    krabka_default: &'static str,
+}
 
 fn krabka_topic_keys() -> Vec<&'static str> {
     registry::keys_in(ConfigScope::Topic)
@@ -307,8 +313,8 @@ fn kafka_topic_key_types_and_defaults_match() {
         };
         let expected_default = DEFAULT_DIVERGENCES
             .iter()
-            .find(|(name, _)| *name == row.name)
-            .map_or(row.default, |(_, krabka_default)| Some(krabka_default));
+            .find(|divergence| divergence.name == row.name)
+            .map_or(row.default, |divergence| Some(divergence.krabka_default));
 
         check!(
             (krabka_row.config_type, krabka_row.default) == (row.config_type, expected_default),
@@ -323,7 +329,11 @@ fn kafka_topic_key_types_and_defaults_match() {
 /// difference that no longer exists.
 #[test]
 fn every_recorded_divergence_is_still_a_divergence() {
-    for (name, krabka_default) in DEFAULT_DIVERGENCES {
+    for Divergence {
+        name,
+        krabka_default,
+    } in DEFAULT_DIVERGENCES
+    {
         let kafka_default = kafka_rosters()
             .find(|row| row.name == *name)
             .unwrap_or_else(|| panic!("{name} is not a Kafka 4.3.1 topic config"))

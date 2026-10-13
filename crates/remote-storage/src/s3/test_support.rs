@@ -25,15 +25,24 @@ pub(super) fn rsm(prefix: Option<&str>) -> S3RemoteStorage {
     S3RemoteStorage::with_store(Arc::new(InMemory::new()), prefix.map(str::to_string))
 }
 
+/// A remote storage over a counting store, and the store.
+pub(super) struct CountingRsm {
+    pub(super) store: S3RemoteStorage,
+    pub(super) counter: Arc<FaultInjectingStore>,
+}
+
 /// [`rsm`] over a store that counts the requests reaching it, so a test can
 /// assert how many an operation issues rather than only what it leaves behind.
 /// The policy injects no faults; only the counters are of interest.
-pub(super) fn counting_rsm() -> (S3RemoteStorage, Arc<FaultInjectingStore>) {
+pub(super) fn counting_rsm() -> CountingRsm {
     let counter = Arc::new(FaultInjectingStore::new(
         Arc::new(InMemory::new()),
         FaultPolicy::none(),
     ));
-    (S3RemoteStorage::with_store(counter.clone(), None), counter)
+    CountingRsm {
+        store: S3RemoteStorage::with_store(counter.clone(), None),
+        counter,
+    }
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -70,10 +79,16 @@ impl SeededCopySetup {
 }
 
 /// A readable memory archive with a signing key whose directory stays alive with the fixture.
-pub(super) fn memory_worm_archive() -> (TempDir, S3RemoteStorage) {
+pub(super) fn memory_worm_archive() -> WormArchive {
     let keys = TempDir::new().unwrap();
     let store = worm_rsm(Arc::new(InMemory::new()), &keys, WormAccess::ReadWrite);
-    (keys, store)
+    WormArchive { keys, store }
+}
+
+/// A WORM remote storage and the directory holding its signing key.
+pub(super) struct WormArchive {
+    pub(super) keys: TempDir,
+    pub(super) store: S3RemoteStorage,
 }
 
 /// Copy one [`sample_data`] segment into `store` as `md` on the blocking

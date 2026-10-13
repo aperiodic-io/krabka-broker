@@ -15,9 +15,10 @@ use {
             produce::handle,
             test_support::{
                 AcknowledgementCode, AcknowledgementPartitionSetup, AcknowledgementSetup,
-                ShareSessionEpoch, TopicPartitionCount, acknowledge_batches_request,
-                acquired_share_records, create_topic as create_topic_from_test_support,
-                produce_partition_request, share_acknowledge_wire, share_fetch_wire,
+                OffsetRun, ShareSessionEpoch, StartedBroker, TopicPartitionCount,
+                acknowledge_batches_request, acquired_share_records,
+                create_topic as create_topic_from_test_support, produce_partition_request,
+                share_acknowledge_wire, share_fetch_wire,
             },
         },
         test_support::{
@@ -53,22 +54,24 @@ const RECORDS_PER_BATCH: i64 = 2;
 /// Produce v12 names the topic.
 const PRODUCE_VERSION: i16 = 12;
 
-async fn start() -> (BrokerHandle, tempfile::TempDir) { start_with_delivery_attempts(5).await }
+async fn start() -> StartedBroker { start_with_delivery_attempts(5).await }
 
-async fn start_with_delivery_attempts(attempts: i16) -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| {
+async fn start_with_delivery_attempts(attempts: i16) -> StartedBroker {
+    let (broker, dir) = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.share_group.max_delivery_attempts = attempts;
     })
-    .await
+    .await;
+    StartedBroker { broker, dir }
 }
 
-async fn start_with_fetch_cap(cap: i32) -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| {
+async fn start_with_fetch_cap(cap: i32) -> StartedBroker {
+    let (broker, dir) = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.fetch_max_bytes = ByteSize::from_bytes(u64::try_from(cap).expect("positive cap"));
     })
-    .await
+    .await;
+    StartedBroker { broker, dir }
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
@@ -211,8 +214,8 @@ fn partition(response: &ShareFetchResponse) -> PartitionData {
         .unwrap_or_default()
 }
 
-/// The `(first, last)` offsets of every acquired row.
-fn acquired(row: &PartitionData) -> Vec<(i64, i64)> { acquired_share_records(row) }
+/// The first and last offsets of every acquired row.
+fn acquired(row: &PartitionData) -> Vec<OffsetRun> { acquired_share_records(row) }
 
 /// The offsets of every record that the row carries.
 fn record_offsets(row: &PartitionData) -> Vec<i64> {
@@ -238,9 +241,16 @@ fn record_offsets(row: &PartitionData) -> Vec<i64> {
 /// fetch by another member acquired.
 #[derive(Debug, PartialEq, Eq)]
 struct Outcome {
-    acquired: Vec<(i64, i64)>,
+    acquired: Vec<OffsetRun>,
     records: Vec<i64>,
-    remainder: Vec<(i64, i64)>,
+    remainder: Vec<OffsetRun>,
+}
+
+/// A fraction of one batch size.
+#[derive(Clone, Copy)]
+struct BatchFraction {
+    numerator: i32,
+    denominator: i32,
 }
 
 /// One scenario: the record and byte limits of the first fetch, in batch
@@ -248,16 +258,16 @@ struct Outcome {
 struct Case {
     name: &'static str,
     max_records: i32,
-    /// The byte limit as `(numerator, denominator)` of one batch size.
-    max_bytes_in_batches: (i32, i32),
+    /// The byte limit as a fraction of one batch size.
+    max_bytes_in_batches: BatchFraction,
     expected: Outcome,
 }
 
 fn one_batch_outcome() -> Outcome {
     Outcome {
-        acquired: vec![(0, 1)],
+        acquired: vec![OffsetRun::new(0, 1)],
         records: vec![0, 1],
-        remainder: vec![(2, 7)],
+        remainder: vec![OffsetRun::new(2, 7)],
     }
 }
 
@@ -266,9 +276,12 @@ fn cases() -> Vec<Case> {
         Case {
             name: "all-batches-fit",
             max_records: 500,
-            max_bytes_in_batches: (4, 1),
+            max_bytes_in_batches: BatchFraction {
+                numerator: 4,
+                denominator: 1,
+            },
             expected: Outcome {
-                acquired: vec![(0, 7)],
+                acquired: vec![OffsetRun::new(0, 7)],
                 records: (0..=7).collect(),
                 remainder: Vec::new(),
             },
@@ -276,13 +289,19 @@ fn cases() -> Vec<Case> {
         Case {
             name: "one-batch-fits",
             max_records: 500,
-            max_bytes_in_batches: (1, 1),
+            max_bytes_in_batches: BatchFraction {
+                numerator: 1,
+                denominator: 1,
+            },
             expected: one_batch_outcome(),
         },
         Case {
             name: "less-than-one-batch",
             max_records: 500,
-            max_bytes_in_batches: (1, 2),
+            max_bytes_in_batches: BatchFraction {
+                numerator: 1,
+                denominator: 2,
+            },
             expected: one_batch_outcome(),
         },
         Case {
@@ -290,11 +309,14 @@ fn cases() -> Vec<Case> {
             // the end of the log batch holding the third record.
             name: "records-limit-below-bytes-limit",
             max_records: 3,
-            max_bytes_in_batches: (4, 1),
+            max_bytes_in_batches: BatchFraction {
+                numerator: 4,
+                denominator: 1,
+            },
             expected: Outcome {
-                acquired: vec![(0, 3)],
+                acquired: vec![OffsetRun::new(0, 3)],
                 records: (0..=3).collect(),
-                remainder: vec![(4, 7)],
+                remainder: vec![OffsetRun::new(4, 7)],
             },
         },
     ]
@@ -302,7 +324,7 @@ fn cases() -> Vec<Case> {
 
 #[tokio::test]
 async fn every_acquired_offset_has_its_record_in_the_response() {
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
 
     let mut actual = Vec::new();
     let mut expected = Vec::new();
@@ -325,7 +347,10 @@ async fn every_acquired_offset_has_its_record_in_the_response() {
         }
         produce_batches(&broker, &topic).await;
         let size = batch_size(&broker, &topic);
-        let (numerator, denominator) = case.max_bytes_in_batches;
+        let BatchFraction {
+            numerator,
+            denominator,
+        } = case.max_bytes_in_batches;
 
         let limited = share_fetch()
             .broker(&broker)
@@ -362,7 +387,7 @@ async fn every_acquired_offset_has_its_record_in_the_response() {
 /// first complete batch can exceed it so the member still makes progress.
 #[tokio::test]
 async fn broker_fetch_cap_limits_share_fetch_and_keeps_first_batch_progress() {
-    let (broker, _dir) = start_with_fetch_cap(1).await;
+    let StartedBroker { broker, dir: _dir } = start_with_fetch_cap(1).await;
     let topic = "broker-fetch-cap";
     let group = "broker-fetch-cap-group";
     let topic_id = create_topic(&broker, topic).await;
@@ -386,7 +411,7 @@ async fn broker_fetch_cap_limits_share_fetch_and_keeps_first_batch_progress() {
         .call()
         .await;
     let row = partition(&response);
-    assert!(acquired(&row) == vec![(0, 1)]);
+    assert!(acquired(&row) == vec![OffsetRun::new(0, 1)]);
     assert!(record_offsets(&row) == vec![0, 1]);
     broker.shutdown().await;
 }
@@ -400,7 +425,7 @@ const RELEASE: i8 = 2;
 /// past it, and the partition never delivers a later record.
 #[tokio::test]
 async fn a_record_at_the_delivery_limit_does_not_stall_the_partition() {
-    let (broker, _dir) = start_with_delivery_attempts(1).await;
+    let StartedBroker { broker, dir: _dir } = start_with_delivery_attempts(1).await;
     let topic_id = create_topic(&broker, "delivery-limit").await;
     initialize_share_state(&broker, "g", uuid::Uuid::from_bytes(topic_id.0), 0).await;
     let opened = share_fetch()
@@ -441,7 +466,7 @@ async fn a_record_at_the_delivery_limit_does_not_stall_the_partition() {
         (
             acquired(&partition(&first)),
             acquired(&partition(&after_release))
-        ) == (vec![(0, 7)], vec![(8, 15)])
+        ) == (vec![OffsetRun::new(0, 7)], vec![OffsetRun::new(8, 15)])
     );
     broker.shutdown().await;
 }
@@ -544,7 +569,7 @@ fn spread(response: &ShareFetchResponse) -> Spread {
 #[tokio::test]
 async fn only_the_first_partition_may_exceed_the_byte_budget() {
     const PARTITIONS: i32 = 3;
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
 
     // `(name, MaxBytes as (numerator, denominator) of one batch, expected)`.
     let cases = [
@@ -618,7 +643,10 @@ async fn release(
     member: &str,
     epoch: i32,
     topic_id: WireUuid,
-    (first_offset, last_offset): (i64, i64),
+    OffsetRun {
+        first_offset,
+        last_offset,
+    }: OffsetRun,
 ) {
     let version = krabka_protocol::owned::share_acknowledge_request::MAX_VERSION;
     let request = acknowledge_batches_request()
@@ -663,7 +691,7 @@ async fn release(
 /// batch once, with both acquired runs.
 #[tokio::test]
 async fn a_batch_acquired_over_two_passes_is_carried_once() {
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
     let topic_id = create_topic(&broker, "two-passes").await;
     initialize_share_state(&broker, "g", uuid::Uuid::from_bytes(topic_id.0), 0).await;
     for member in ["waiting", "other"] {
@@ -686,8 +714,8 @@ async fn a_batch_acquired_over_two_passes_is_carried_once() {
         .epoch(1)
         .call()
         .await;
-    assert!(acquired(&partition(&held)) == vec![(0, 1)]);
-    release(&broker, "g", "other", 2, topic_id, (0, 0)).await;
+    assert!(acquired(&partition(&held)) == vec![OffsetRun::new(0, 1)]);
+    release(&broker, "g", "other", 2, topic_id, OffsetRun::new(0, 0)).await;
 
     // The first pass acquires offset 0 and falls short of `MinBytes`. While
     // the request waits, `other` releases offset 1, which the last pass
@@ -698,10 +726,13 @@ async fn a_batch_acquired_over_two_passes_is_carried_once() {
     request.max_wait_ms = 1_000;
     let (response, ()) = tokio::join!(send_share_fetch(&broker, &request), async {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        release(&broker, "g", "other", 3, topic_id, (1, 1)).await;
+        release(&broker, "g", "other", 3, topic_id, OffsetRun::new(1, 1)).await;
     });
 
     let row = partition(&response);
-    assert!((acquired(&row), record_offsets(&row)) == (vec![(0, 0), (1, 1)], vec![0, 1]));
+    assert!(
+        (acquired(&row), record_offsets(&row))
+            == (vec![OffsetRun::new(0, 0), OffsetRun::new(1, 1)], vec![0, 1])
+    );
     broker.shutdown().await;
 }

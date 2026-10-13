@@ -45,7 +45,14 @@ pub struct TopicMetadata {
     /// for partitions whose replicas have no rack info. This is Kafka's
     /// `SubscribedTopicDescriber.racksForPartition`. The built-in uniform and
     /// range assignors do not read it, as in Kafka.
-    pub partition_racks: HashMap<(Uuid, i32), Vec<String>>,
+    pub partition_racks: HashMap<TopicIdPartition, Vec<String>>,
+}
+
+/// A partition named by its topic id and partition index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TopicIdPartition {
+    pub topic_id: Uuid,
+    pub partition: i32,
 }
 
 pub type Assignment = HashMap<String, HashMap<Uuid, Vec<i32>>>;
@@ -129,6 +136,12 @@ mod tests {
         std::collections::HashSet,
     };
 
+    struct Row<'a> {
+        name: &'static str,
+        members: Vec<SubscriptionShape<'a>>,
+        expected: SubscriptionType,
+    }
+
     fn names(list: &[&str]) -> HashSet<String> {
         list.iter().map(|name| (*name).to_owned()).collect()
     }
@@ -149,65 +162,74 @@ mod tests {
             topic_regex: Some(regex),
             regex_topic_names: resolved.to_vec(),
         };
-        let rows: Vec<(&str, Vec<SubscriptionShape<'_>>, SubscriptionType)> = vec![
-            ("no members", vec![], SubscriptionType::Homogeneous),
-            (
-                "no subscriptions",
-                vec![by_names(&none), by_names(&none)],
-                SubscriptionType::Homogeneous,
-            ),
-            (
-                "same names",
-                vec![by_names(&ab), by_names(&ab)],
-                SubscriptionType::Homogeneous,
-            ),
-            (
-                "different names",
-                vec![by_names(&ab), by_names(&a)],
-                SubscriptionType::Heterogeneous,
-            ),
-            (
+        let rows: Vec<Row<'_>> = vec![
+            Row {
+                name: "no members",
+                members: vec![],
+                expected: SubscriptionType::Homogeneous,
+            },
+            Row {
+                name: "no subscriptions",
+                members: vec![by_names(&none), by_names(&none)],
+                expected: SubscriptionType::Homogeneous,
+            },
+            Row {
+                name: "same names",
+                members: vec![by_names(&ab), by_names(&ab)],
+                expected: SubscriptionType::Homogeneous,
+            },
+            Row {
+                name: "different names",
+                members: vec![by_names(&ab), by_names(&a)],
+                expected: SubscriptionType::Heterogeneous,
+            },
+            Row {
                 // Kafka counts names, so a missing topic still splits the group.
-                "one member also names a missing topic",
-                vec![by_names(&ab), by_names(&missing)],
-                SubscriptionType::Heterogeneous,
-            ),
-            (
-                "one shared regex",
-                vec![
+                name: "one member also names a missing topic",
+                members: vec![by_names(&ab), by_names(&missing)],
+                expected: SubscriptionType::Heterogeneous,
+            },
+            Row {
+                name: "one shared regex",
+                members: vec![
                     by_regex(&none, "t.*", &["a", "b"]),
                     by_regex(&none, "t.*", &["a", "b"]),
                 ],
-                SubscriptionType::Homogeneous,
-            ),
-            (
-                "unresolved shared regex",
-                vec![by_regex(&none, "t.*", &[]), by_regex(&none, "t.*", &[])],
-                SubscriptionType::Homogeneous,
-            ),
-            (
-                "two regexes that resolve alike",
-                vec![
+                expected: SubscriptionType::Homogeneous,
+            },
+            Row {
+                name: "unresolved shared regex",
+                members: vec![by_regex(&none, "t.*", &[]), by_regex(&none, "t.*", &[])],
+                expected: SubscriptionType::Homogeneous,
+            },
+            Row {
+                name: "two regexes that resolve alike",
+                members: vec![
                     by_regex(&none, "t.*", &["a", "b"]),
                     by_regex(&none, "[ab]", &["a", "b"]),
                 ],
-                SubscriptionType::Heterogeneous,
-            ),
-            (
-                "regex and names that resolve alike",
-                vec![by_regex(&none, "t.*", &["a", "b"]), by_names(&ab)],
-                SubscriptionType::Heterogeneous,
-            ),
-            (
-                "shared regex plus a name",
-                vec![
+                expected: SubscriptionType::Heterogeneous,
+            },
+            Row {
+                name: "regex and names that resolve alike",
+                members: vec![by_regex(&none, "t.*", &["a", "b"]), by_names(&ab)],
+                expected: SubscriptionType::Heterogeneous,
+            },
+            Row {
+                name: "shared regex plus a name",
+                members: vec![
                     by_regex(&a, "t.*", &["a", "b"]),
                     by_regex(&none, "t.*", &["a", "b"]),
                 ],
-                SubscriptionType::Heterogeneous,
-            ),
+                expected: SubscriptionType::Heterogeneous,
+            },
         ];
-        for (name, members, expected) in rows {
+        for Row {
+            name,
+            members,
+            expected,
+        } in rows
+        {
             assert!(subscription_type(&members) == expected, "{name}");
         }
     }

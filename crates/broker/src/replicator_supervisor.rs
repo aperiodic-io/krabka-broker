@@ -86,7 +86,18 @@ struct WalFollowerSpec {
 
 /// Which fetcher a partition belongs to: its leader, and the fetcher id the
 /// partition hashes onto within that leader.
-type FetcherKey = (NodeId, usize);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct FetcherKey {
+    leader: NodeId,
+    fetcher_id: usize,
+}
+
+/// The host and port of a leader's listener, as a fetcher dials it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LeaderEndpoint {
+    host: String,
+    port: u16,
+}
 
 /// One running fetcher: the task, the token that stops it, the partitions it
 /// follows, and the endpoint it dialled.
@@ -98,7 +109,7 @@ struct FetcherTask {
     followed: FollowedPartitions,
     /// The leader endpoint this fetcher dialled. A leader that re-registers on
     /// a different address needs a new connection, which means a new fetcher.
-    endpoint: (String, u16),
+    endpoint: LeaderEndpoint,
 }
 
 #[derive(Debug)]
@@ -110,9 +121,12 @@ struct WalFollowerTask {
 fn resolve_leader_endpoint(
     broker: &krabka_metadata::BrokerRegistrationRecord,
     listener_name: &str,
-) -> (String, u16) {
+) -> LeaderEndpoint {
     let (host, port) = registered_listener_endpoint(broker, listener_name);
-    (host.to_owned(), port)
+    LeaderEndpoint {
+        host: host.to_owned(),
+        port,
+    }
 }
 
 pub(crate) struct ReplicatorSupervisor {
@@ -499,8 +513,20 @@ mod tests {
     #[test]
     fn resolve_leader_endpoint_prefers_matching_listener() {
         let broker = broker_record(NodeId(1));
-        assert!(resolve_leader_endpoint(&broker, "INTERNAL") == ("internal-host".into(), 19092));
-        assert!(resolve_leader_endpoint(&broker, "EXTERNAL") == ("legacy-host".into(), 9092));
+        assert!(
+            resolve_leader_endpoint(&broker, "INTERNAL")
+                == LeaderEndpoint {
+                    host: "internal-host".into(),
+                    port: 19092,
+                }
+        );
+        assert!(
+            resolve_leader_endpoint(&broker, "EXTERNAL")
+                == LeaderEndpoint {
+                    host: "legacy-host".into(),
+                    port: 9092,
+                }
+        );
     }
 
     #[tokio::test]

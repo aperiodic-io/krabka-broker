@@ -29,7 +29,6 @@ use {
         coordinator::unified::streams::config::StreamsGroupConfig,
         file_config::FileConfig,
         handlers::describe_configs::test_support::set_topic_config,
-        test_support::string_pairs,
         throttle::{FOLLOWER_THROTTLED_RATE_KEY, LEADER_THROTTLED_RATE_KEY},
     },
     assert2::{assert, check},
@@ -140,10 +139,35 @@ fn with_topic(image: &MetadataImage, resource_type: i8, name: &str) -> MetadataI
     image
 }
 
+/// The node that serves a describe and the static settings it runs with.
+struct ServingConfig<'a> {
+    node: krabka_metadata::NodeId,
+    static_broker: StaticBrokerConfigs<'a>,
+}
+
+/// A broker resource that serves a 30 second idle window beside the
+/// per-listener `overrides`.
+fn idle_window_serving<'a>(
+    resource_name: &str,
+    overrides: &'a std::collections::BTreeMap<String, krabka_units::Time>,
+) -> ServingConfig<'a> {
+    ServingConfig {
+        node: serving_node_for(RESOURCE_TYPE_BROKER, resource_name),
+        static_broker: StaticBrokerConfigs {
+            connections_max_idle: Some(krabka_units::secs(30)),
+            connections_max_idle_overrides: overrides,
+            ..untuned()
+        },
+    }
+}
+
 /// Describe one resource with the supplied node and static settings,
 /// while every logger runs at `info`.
 fn describe_at(
-    (serving_node, static_broker): (krabka_metadata::NodeId, StaticBrokerConfigs<'_>),
+    ServingConfig {
+        node: serving_node,
+        static_broker,
+    }: ServingConfig<'_>,
     image: &MetadataImage,
     resource_type: i8,
     resource_name: &str,
@@ -185,14 +209,14 @@ fn resource_request(
 fn settings_for<'a>(
     (resource_type, resource_name): (i8, &str),
     settings: &'a std::collections::BTreeMap<&'static str, String>,
-) -> (krabka_metadata::NodeId, StaticBrokerConfigs<'a>) {
-    (
-        serving_node_for(resource_type, resource_name),
-        StaticBrokerConfigs {
+) -> ServingConfig<'a> {
+    ServingConfig {
+        node: serving_node_for(resource_type, resource_name),
+        static_broker: StaticBrokerConfigs {
             settings,
             ..untuned()
         },
-    )
+    }
 }
 
 /// Describe one resource the way a client reaches it.
@@ -210,7 +234,10 @@ fn describe(
     // missing or invalid name drive [`describe_at`] directly.
     let image = &with_topic(image, resource_type, resource_name);
     describe_at(
-        (serving_node_for(resource_type, resource_name), untuned()),
+        ServingConfig {
+            node: serving_node_for(resource_type, resource_name),
+            static_broker: untuned(),
+        },
         image,
         resource_type,
         resource_name,
@@ -313,29 +340,59 @@ pub(super) fn entry_named<'a>(
         .unwrap_or_else(|| panic!("no `{name}` entry in {:?}", result.configs))
 }
 
-type ExpectedSynonymChain = (Option<String>, i8, Vec<DescribeConfigsSynonym>);
-
-fn expected_default_chain(key: &str, default: &str) -> ExpectedSynonymChain {
-    (Some(default.to_owned()), CONFIG_SOURCE_DEFAULT, vec![
-        synonym(key, default, CONFIG_SOURCE_DEFAULT),
-    ])
+/// The value, the source and the synonyms of one entry.
+#[derive(Debug, PartialEq, Eq)]
+struct SynonymChain {
+    value: Option<String>,
+    config_source: i8,
+    synonyms: Vec<DescribeConfigsSynonym>,
 }
 
-fn expected_named_static_chain(key: &str, value: &str, default: &str) -> ExpectedSynonymChain {
-    (Some(value.to_owned()), CONFIG_SOURCE_STATIC_BROKER, vec![
-        synonym(key, value, CONFIG_SOURCE_STATIC_BROKER),
-        synonym(key, default, CONFIG_SOURCE_DEFAULT),
-    ])
+impl SynonymChain {
+    /// The chain `entry` reports.
+    fn of(entry: &DescribeConfigsResourceResult) -> Self {
+        Self {
+            value: entry.value.clone(),
+            config_source: entry.config_source,
+            synonyms: entry.synonyms.clone(),
+        }
+    }
+}
+
+fn expected_default_chain(key: &str, default: &str) -> SynonymChain {
+    SynonymChain {
+        value: Some(default.to_owned()),
+        config_source: CONFIG_SOURCE_DEFAULT,
+        synonyms: vec![synonym(key, default, CONFIG_SOURCE_DEFAULT)],
+    }
+}
+
+fn expected_named_static_chain(key: &str, value: &str, default: &str) -> SynonymChain {
+    SynonymChain {
+        value: Some(value.to_owned()),
+        config_source: CONFIG_SOURCE_STATIC_BROKER,
+        synonyms: vec![
+            synonym(key, value, CONFIG_SOURCE_STATIC_BROKER),
+            synonym(key, default, CONFIG_SOURCE_DEFAULT),
+        ],
+    }
 }
 
 pub(super) use crate::handlers::describe_configs::test_support::synonym;
 
+/// A config key and the value it is set to.
+#[derive(Debug, Clone, Copy)]
+struct ConfigPair<'a> {
+    name: &'a str,
+    value: &'a str,
+}
+
 fn image_with_broker_config(
     node_id: krabka_metadata::NodeId,
-    pairs: &[(&str, &str)],
+    pairs: &[ConfigPair<'_>],
 ) -> MetadataImage {
     let mut image = MetadataImage::new(Uuid::nil());
-    for (name, value) in pairs {
+    for ConfigPair { name, value } in pairs {
         image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
             node_id,
             config_name: (*name).to_owned(),
@@ -356,10 +413,10 @@ fn image_with_broker_config(
 /// for `retention.ms` over `log.retention.ms`.
 #[test]
 fn a_topic_reports_its_override_above_the_cluster_default_with_the_whole_chain() {
-    let mut image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[(
-        config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
-        "true",
-    )]);
+    let mut image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[ConfigPair {
+        name: config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
+        value: "true",
+    }]);
     set_topic_config().image(&mut image).call();
 
     let result = describe_topic(
@@ -449,10 +506,10 @@ fn a_topic_override_stays_at_the_head_of_the_chain_above_the_cluster_default() {
     // key, the cluster default drops to a synonym and the source says
     // DYNAMIC_TOPIC_CONFIG. An operator reads the override and the value it
     // displaced in one response.
-    let mut image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[(
-        config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
-        "true",
-    )]);
+    let mut image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[ConfigPair {
+        name: config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
+        value: "true",
+    }]);
     set_topic_config()
         .image(&mut image)
         .key(config_keys::UNCLEAN_LEADER_ELECTION_ENABLE)
@@ -623,10 +680,10 @@ fn the_fixed_data_path_key_is_read_only_and_typed() {
 
 #[test]
 fn a_broker_reports_its_per_node_override_above_the_cluster_default() {
-    let mut image = image_with_broker_config(krabka_metadata::NodeId(2), &[(
-        LEADER_THROTTLED_RATE_KEY,
-        "1024",
-    )]);
+    let mut image = image_with_broker_config(krabka_metadata::NodeId(2), &[ConfigPair {
+        name: LEADER_THROTTLED_RATE_KEY,
+        value: "1024",
+    }]);
     image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
         node_id: DEFAULT_BROKER_CONFIG_NODE_ID,
         config_name: LEADER_THROTTLED_RATE_KEY.to_owned(),
@@ -696,10 +753,10 @@ fn the_cluster_default_resource_reports_the_defaults_and_no_node_id() {
     // An empty resource name is Kafka's cluster-wide default broker
     // resource. It holds no per-node layer, and no node runs it, so the
     // static `node.id` entry a numeric name carries has no place in it.
-    let image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[(
-        LEADER_THROTTLED_RATE_KEY,
-        "1024",
-    )]);
+    let image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[ConfigPair {
+        name: LEADER_THROTTLED_RATE_KEY,
+        value: "1024",
+    }]);
 
     let result = describe(&image, RESOURCE_TYPE_BROKER, "", None, EVERYTHING);
 
@@ -778,61 +835,66 @@ fn a_broker_that_overrides_nothing_still_reports_its_static_configuration() {
     assert!(
         static_view(&result)
             == expected_plain_configs(&[
-                (
-                    config_keys::AUTO_CREATE_TOPICS_ENABLE,
-                    "true",
-                    CONFIG_SOURCE_DEFAULT,
-                    ConfigType::Boolean
-                ),
-                (
-                    config_keys::CONNECTIONS_MAX_IDLE_MS,
-                    "600000",
-                    CONFIG_SOURCE_DEFAULT,
-                    ConfigType::Long
-                ),
-                (
-                    config_keys::DEFAULT_REPLICATION_FACTOR,
-                    "1",
-                    CONFIG_SOURCE_DEFAULT,
-                    ConfigType::Int
-                ),
-                (
-                    config_keys::DELETE_TOPIC_ENABLE,
-                    "true",
-                    CONFIG_SOURCE_DEFAULT,
-                    ConfigType::Boolean
-                ),
-                (NODE_ID, "7", CONFIG_SOURCE_STATIC_BROKER, ConfigType::Int),
-                (
-                    config_keys::NUM_PARTITIONS,
-                    "1",
-                    CONFIG_SOURCE_DEFAULT,
-                    ConfigType::Int
-                ),
-                (
-                    config_keys::OFFSETS_RETENTION_CHECK_INTERVAL_MS,
-                    "600000",
-                    CONFIG_SOURCE_DEFAULT,
-                    ConfigType::Long
-                ),
-                (
-                    config_keys::OFFSETS_RETENTION_MINUTES,
-                    "10080",
-                    CONFIG_SOURCE_DEFAULT,
-                    ConfigType::Int
-                ),
-                (
-                    config_keys::TRANSACTION_REMOVE_EXPIRED_CLEANUP_INTERVAL_MS,
-                    "3600000",
-                    CONFIG_SOURCE_DEFAULT,
-                    ConfigType::Int
-                ),
-                (
-                    config_keys::TRANSACTIONAL_ID_EXPIRATION_MS,
-                    "604800000",
-                    CONFIG_SOURCE_DEFAULT,
-                    ConfigType::Int
-                )
+                PlainConfig {
+                    name: config_keys::AUTO_CREATE_TOPICS_ENABLE,
+                    value: "true",
+                    source: CONFIG_SOURCE_DEFAULT,
+                    kind: ConfigType::Boolean
+                },
+                PlainConfig {
+                    name: config_keys::CONNECTIONS_MAX_IDLE_MS,
+                    value: "600000",
+                    source: CONFIG_SOURCE_DEFAULT,
+                    kind: ConfigType::Long
+                },
+                PlainConfig {
+                    name: config_keys::DEFAULT_REPLICATION_FACTOR,
+                    value: "1",
+                    source: CONFIG_SOURCE_DEFAULT,
+                    kind: ConfigType::Int
+                },
+                PlainConfig {
+                    name: config_keys::DELETE_TOPIC_ENABLE,
+                    value: "true",
+                    source: CONFIG_SOURCE_DEFAULT,
+                    kind: ConfigType::Boolean
+                },
+                PlainConfig {
+                    name: NODE_ID,
+                    value: "7",
+                    source: CONFIG_SOURCE_STATIC_BROKER,
+                    kind: ConfigType::Int
+                },
+                PlainConfig {
+                    name: config_keys::NUM_PARTITIONS,
+                    value: "1",
+                    source: CONFIG_SOURCE_DEFAULT,
+                    kind: ConfigType::Int
+                },
+                PlainConfig {
+                    name: config_keys::OFFSETS_RETENTION_CHECK_INTERVAL_MS,
+                    value: "600000",
+                    source: CONFIG_SOURCE_DEFAULT,
+                    kind: ConfigType::Long
+                },
+                PlainConfig {
+                    name: config_keys::OFFSETS_RETENTION_MINUTES,
+                    value: "10080",
+                    source: CONFIG_SOURCE_DEFAULT,
+                    kind: ConfigType::Int
+                },
+                PlainConfig {
+                    name: config_keys::TRANSACTION_REMOVE_EXPIRED_CLEANUP_INTERVAL_MS,
+                    value: "3600000",
+                    source: CONFIG_SOURCE_DEFAULT,
+                    kind: ConfigType::Int
+                },
+                PlainConfig {
+                    name: config_keys::TRANSACTIONAL_ID_EXPIRATION_MS,
+                    value: "604800000",
+                    source: CONFIG_SOURCE_DEFAULT,
+                    kind: ConfigType::Int
+                }
             ])
     );
 }
@@ -842,10 +904,10 @@ fn a_broker_that_overrides_nothing_still_reports_its_static_configuration() {
 /// resource.
 #[test]
 fn the_static_expiry_keys_belong_to_a_named_broker_alone() {
-    let image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[(
-        LEADER_THROTTLED_RATE_KEY,
-        "1024",
-    )]);
+    let image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[ConfigPair {
+        name: LEADER_THROTTLED_RATE_KEY,
+        value: "1024",
+    }]);
 
     for (label, resource_name, expected) in [
         ("a named node reports both static expiry keys", "1", vec![
@@ -877,8 +939,14 @@ fn the_static_expiry_keys_belong_to_a_named_broker_alone() {
 #[test]
 fn the_key_filter_decides_what_a_broker_resource_reports() {
     let image = image_with_broker_config(krabka_metadata::NodeId(2), &[
-        (LEADER_THROTTLED_RATE_KEY, "1024"),
-        (FOLLOWER_THROTTLED_RATE_KEY, "512"),
+        ConfigPair {
+            name: LEADER_THROTTLED_RATE_KEY,
+            value: "1024",
+        },
+        ConfigPair {
+            name: FOLLOWER_THROTTLED_RATE_KEY,
+            value: "512",
+        },
     ]);
 
     for (label, filter, expected) in [
@@ -933,10 +1001,10 @@ fn an_empty_key_filter_asks_for_everything_the_way_a_null_filter_does() {
     // in `ConfigHelperUtils.toDescribeConfigsResult`, so an empty list asks for
     // every key rather than for none. One closure carries the filter into every
     // resource type, so every type it reaches is checked here.
-    let mut image = image_with_broker_config(krabka_metadata::NodeId(2), &[(
-        LEADER_THROTTLED_RATE_KEY,
-        "1024",
-    )]);
+    let mut image = image_with_broker_config(krabka_metadata::NodeId(2), &[ConfigPair {
+        name: LEADER_THROTTLED_RATE_KEY,
+        value: "1024",
+    }]);
     set_topic_config().image(&mut image).call();
     seed_metrics_subscription(&mut image);
     image.apply(&MetadataRecord::V1GroupConfig(
@@ -981,7 +1049,10 @@ fn every_key_an_alter_can_store_on_a_broker_comes_back_with_its_value() {
         if row.read_only {
             continue;
         }
-        let image = image_with_broker_config(krabka_metadata::NodeId(1), &[(row.name, "1")]);
+        let image = image_with_broker_config(krabka_metadata::NodeId(1), &[ConfigPair {
+            name: row.name,
+            value: "1",
+        }]);
         let result = describe(
             &image,
             RESOURCE_TYPE_BROKER,
@@ -1003,7 +1074,10 @@ fn a_controller_managed_broker_key_is_read_only_wherever_it_is_reported() {
     // the alter paths refuse the key by the second, and `kafka-configs` must
     // say so by the first.
     for key in config_keys::CONTROLLER_MANAGED_BROKER_CONFIGS {
-        let image = image_with_broker_config(krabka_metadata::NodeId(1), &[(key, "true")]);
+        let image = image_with_broker_config(krabka_metadata::NodeId(1), &[ConfigPair {
+            name: key,
+            value: "true",
+        }]);
         let result = describe(
             &image,
             RESOURCE_TYPE_BROKER,
@@ -1029,13 +1103,16 @@ fn a_controller_managed_broker_key_is_read_only_wherever_it_is_reported() {
 /// static configuration as another broker's.
 #[test]
 fn a_broker_resource_that_names_another_node_is_refused() {
-    let image = image_with_broker_config(krabka_metadata::NodeId(2), &[(
-        LEADER_THROTTLED_RATE_KEY,
-        "1024",
-    )]);
+    let image = image_with_broker_config(krabka_metadata::NodeId(2), &[ConfigPair {
+        name: LEADER_THROTTLED_RATE_KEY,
+        value: "1024",
+    }]);
 
     let result = describe_at(
-        (krabka_metadata::NodeId(1), untuned()),
+        ServingConfig {
+            node: krabka_metadata::NodeId(1),
+            static_broker: untuned(),
+        },
         &image,
         RESOURCE_TYPE_BROKER,
         "2",
@@ -1061,13 +1138,16 @@ fn a_broker_resource_that_names_another_node_is_refused() {
 /// refuses it.
 #[test]
 fn the_cluster_default_broker_resource_is_served_by_any_node() {
-    let image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[(
-        LEADER_THROTTLED_RATE_KEY,
-        "1024",
-    )]);
+    let image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[ConfigPair {
+        name: LEADER_THROTTLED_RATE_KEY,
+        value: "1024",
+    }]);
 
     let result = describe_at(
-        (krabka_metadata::NodeId(9), untuned()),
+        ServingConfig {
+            node: krabka_metadata::NodeId(9),
+            static_broker: untuned(),
+        },
         &image,
         RESOURCE_TYPE_BROKER,
         "",
@@ -1138,7 +1218,10 @@ fn a_resource_name_kafka_refuses_is_refused_with_kafkas_error() {
     ];
     for (resource_type, name, error_code, message) in cases {
         let result = describe_at(
-            (krabka_metadata::NodeId(1), untuned()),
+            ServingConfig {
+                node: krabka_metadata::NodeId(1),
+                static_broker: untuned(),
+            },
             &image,
             resource_type,
             name,
@@ -1158,7 +1241,10 @@ fn a_resource_name_kafka_refuses_is_refused_with_kafkas_error() {
         );
     }
     let found = describe_at(
-        (krabka_metadata::NodeId(1), untuned()),
+        ServingConfig {
+            node: krabka_metadata::NodeId(1),
+            static_broker: untuned(),
+        },
         &image,
         RESOURCE_TYPE_TOPIC,
         "orders",
@@ -1469,14 +1555,14 @@ fn an_untuned_broker_reports_both_retention_keys_at_their_default() {
 #[test]
 fn a_retuned_retention_knob_reports_the_static_layer_above_the_default() {
     let result = describe_at(
-        (
-            serving_node_for(RESOURCE_TYPE_BROKER, "1"),
-            StaticBrokerConfigs {
+        ServingConfig {
+            node: serving_node_for(RESOURCE_TYPE_BROKER, "1"),
+            static_broker: StaticBrokerConfigs {
                 offsets_retention: Some(krabka_units::minutes(60)),
                 offsets_retention_check_interval: None,
                 ..untuned()
             },
-        ),
+        },
         &MetadataImage::new(Uuid::nil()),
         RESOURCE_TYPE_BROKER,
         "1",
@@ -1524,7 +1610,10 @@ fn a_retuned_retention_knob_reports_the_static_layer_above_the_default() {
 fn a_knob_set_to_its_own_default_still_reports_the_static_source() {
     let described = |static_broker| {
         describe_at(
-            (serving_node_for(RESOURCE_TYPE_BROKER, "1"), static_broker),
+            ServingConfig {
+                node: serving_node_for(RESOURCE_TYPE_BROKER, "1"),
+                static_broker,
+            },
             &MetadataImage::new(Uuid::nil()),
             RESOURCE_TYPE_BROKER,
             "1",
@@ -1637,14 +1726,7 @@ fn idle_window_is_reported_only_for_a_named_broker(resource_name: &str, named: b
     let overrides = std::iter::once(("EXTERNAL".to_owned(), krabka_units::secs(5))).collect();
 
     let result = describe_at(
-        (
-            serving_node_for(RESOURCE_TYPE_BROKER, resource_name),
-            StaticBrokerConfigs {
-                connections_max_idle: Some(krabka_units::secs(30)),
-                connections_max_idle_overrides: &overrides,
-                ..untuned()
-            },
-        ),
+        idle_window_serving(resource_name, &overrides),
         &MetadataImage::new(Uuid::nil()),
         RESOURCE_TYPE_BROKER,
         resource_name,
@@ -1703,7 +1785,7 @@ fn idle_window_is_reported_only_for_a_named_broker(resource_name: &str, named: b
 }
 
 /// A topic with a stored config map, for the synonym-chain rows below.
-fn image_with_topic(overrides: &[(&str, &str)], cluster: &[(&str, &str)]) -> MetadataImage {
+fn image_with_topic(overrides: &[ConfigPair<'_>], cluster: &[ConfigPair<'_>]) -> MetadataImage {
     let mut image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, cluster);
     image.apply(&MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
         name: "t".into(),
@@ -1713,7 +1795,10 @@ fn image_with_topic(overrides: &[(&str, &str)], cluster: &[(&str, &str)]) -> Met
     }));
     image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
         topic: "t".into(),
-        overrides: string_pairs(overrides),
+        overrides: overrides
+            .iter()
+            .map(|pair| (pair.name.to_owned(), pair.value.to_owned()))
+            .collect(),
     }));
     image
 }
@@ -1726,7 +1811,10 @@ fn a_topic_key_reports_its_broker_synonyms_under_the_broker_names() {
     let cases = [
         (
             vec![],
-            vec![("min.insync.replicas", "2")],
+            vec![ConfigPair {
+                name: "min.insync.replicas",
+                value: "2",
+            }],
             "min.insync.replicas",
             "2",
             CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER,
@@ -1740,7 +1828,10 @@ fn a_topic_key_reports_its_broker_synonyms_under_the_broker_names() {
             ],
         ),
         (
-            vec![("retention.ms", "1000")],
+            vec![ConfigPair {
+                name: "retention.ms",
+                value: "1000",
+            }],
             vec![],
             "retention.ms",
             "1000",
@@ -1772,7 +1863,10 @@ fn a_topic_key_reports_its_broker_synonyms_under_the_broker_names() {
         ),
         (
             vec![],
-            vec![("log.cleanup.policy", "compact")],
+            vec![ConfigPair {
+                name: "log.cleanup.policy",
+                value: "compact",
+            }],
             "cleanup.policy",
             "compact",
             CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER,
@@ -1803,10 +1897,10 @@ fn a_topic_key_reports_its_broker_synonyms_under_the_broker_names() {
 /// topic-default broker key it runs with.
 #[test]
 fn a_broker_reports_its_topic_default_keys_typed() {
-    let image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[(
-        "min.insync.replicas",
-        "2",
-    )]);
+    let image = image_with_broker_config(DEFAULT_BROKER_CONFIG_NODE_ID, &[ConfigPair {
+        name: "min.insync.replicas",
+        value: "2",
+    }]);
     let cluster = describe(&image, RESOURCE_TYPE_BROKER, "", None, EVERYTHING);
     let entry = entry_named(&cluster, "min.insync.replicas");
     check!(
@@ -1850,58 +1944,91 @@ fn a_broker_reports_its_topic_default_keys_typed() {
 /// Kafka does not define both read back read-only.
 #[test]
 fn a_stored_kafka_config_key_comes_back_typed_and_disclosed() {
-    // The key, its stored value, and the value, sensitivity, wire type and
-    // read-only flag the entry carries.
-    type Case = (
-        &'static str,
-        &'static str,
-        Option<&'static str>,
-        bool,
-        i8,
-        bool,
-    );
-    let cases: [Case; 7] = [
-        ("num.io.threads", "8", Some("8"), false, 3, false),
-        ("max.connections", "100", Some("100"), false, 3, false),
-        (
-            "follower.fetch.last.tiered.offset.enable",
-            "true",
-            Some("true"),
-            false,
-            1,
-            false,
-        ),
-        (
-            "listener.name.external.ssl.keystore.location",
-            "/keys/external.jks",
-            Some("/keys/external.jks"),
-            false,
-            2,
-            true,
-        ),
-        (
-            "listener.name.external.ssl.keystore.password",
-            "hunter2",
-            None,
-            true,
-            9,
-            true,
-        ),
+    /// The key, its stored value, and the value, sensitivity, wire type and
+    /// read-only flag the entry carries.
+    struct StoredKeyCase {
+        name: &'static str,
+        stored: &'static str,
+        value: Option<&'static str>,
+        sensitive: bool,
+        wire_type: i8,
+        read_only: bool,
+    }
+
+    let cases: [StoredKeyCase; 7] = [
+        StoredKeyCase {
+            name: "num.io.threads",
+            stored: "8",
+            value: Some("8"),
+            sensitive: false,
+            wire_type: 3,
+            read_only: false,
+        },
+        StoredKeyCase {
+            name: "max.connections",
+            stored: "100",
+            value: Some("100"),
+            sensitive: false,
+            wire_type: 3,
+            read_only: false,
+        },
+        StoredKeyCase {
+            name: "follower.fetch.last.tiered.offset.enable",
+            stored: "true",
+            value: Some("true"),
+            sensitive: false,
+            wire_type: 1,
+            read_only: false,
+        },
+        StoredKeyCase {
+            name: "listener.name.external.ssl.keystore.location",
+            stored: "/keys/external.jks",
+            value: Some("/keys/external.jks"),
+            sensitive: false,
+            wire_type: 2,
+            read_only: true,
+        },
+        StoredKeyCase {
+            name: "listener.name.external.ssl.keystore.password",
+            stored: "hunter2",
+            value: None,
+            sensitive: true,
+            wire_type: 9,
+            read_only: true,
+        },
         // The mechanism-prefixed JAAS config is typed by the key it ends in.
-        (
-            "listener.name.external.plain.sasl.jaas.config",
-            "secret",
-            None,
-            true,
-            9,
-            true,
-        ),
+        StoredKeyCase {
+            name: "listener.name.external.plain.sasl.jaas.config",
+            stored: "secret",
+            value: None,
+            sensitive: true,
+            wire_type: 9,
+            read_only: true,
+        },
         // A name `KafkaConfig` does not define: untyped, so withheld.
-        ("plugin.custom.key", "x", None, true, 0, true),
+        StoredKeyCase {
+            name: "plugin.custom.key",
+            stored: "x",
+            value: None,
+            sensitive: true,
+            wire_type: 0,
+            read_only: true,
+        },
     ];
-    for (name, stored, value, sensitive, wire_type, read_only) in cases {
+    for StoredKeyCase {
+        name,
+        stored,
+        value,
+        sensitive,
+        wire_type,
+        read_only,
+    } in cases
+    {
         for (resource_name, node) in [("", DEFAULT_BROKER_CONFIG_NODE_ID), ("1", SERVING_NODE)] {
-            let image = image_with_broker_config(node, &[(name, stored)]);
+            let image = image_with_broker_config(node, &[ConfigPair {
+                name,
+                value: stored,
+            }]);
             let result = describe(
                 &image,
                 RESOURCE_TYPE_BROKER,
@@ -1999,7 +2126,7 @@ fn a_named_broker_reports_the_static_values_it_holds() {
             entry.synonyms.clone(),
         ) == (Some("/data/a,/data/b"), CONFIG_SOURCE_STATIC_BROKER, vec![
             synonym("log.dirs", "/data/a,/data/b", CONFIG_SOURCE_STATIC_BROKER)
-        ],)
+        ])
     );
     let entry = entry_named(&result, "message.max.bytes");
     check!(
@@ -2010,7 +2137,7 @@ fn a_named_broker_reports_the_static_values_it_holds() {
         ) == (Some("2097152"), CONFIG_SOURCE_STATIC_BROKER, vec![
             synonym("message.max.bytes", "2097152", CONFIG_SOURCE_STATIC_BROKER),
             synonym("message.max.bytes", "1048588", CONFIG_SOURCE_DEFAULT),
-        ],)
+        ])
     );
     let entry = entry_named(&result, "broker.rack");
     check!(
@@ -2067,14 +2194,7 @@ fn a_named_broker_reports_an_authentication_limit_the_operator_named() {
 
         for (key, want) in [(sasl, want_sasl), (delay, want_delay)] {
             let entry = entry_named(&result, key);
-            check!(
-                (
-                    entry.value.clone(),
-                    entry.config_source,
-                    entry.synonyms.clone(),
-                ) == want,
-                "{label}: {key}"
-            );
+            check!(SynonymChain::of(entry) == want, "{label}: {key}");
             check!(
                 entry.read_only && entry.config_type == ConfigType::Int.wire(),
                 "{label}: {key} is a read-only INT"
@@ -2113,36 +2233,36 @@ fn a_topic_reports_the_static_synonyms_the_broker_was_started_with() {
 
     let chain = |key: &str| {
         let entry = entry_named(&result, key);
-        (
-            entry.value.clone(),
-            entry.config_source,
-            entry.synonyms.clone(),
-        )
+        SynonymChain::of(entry)
     };
     check!(
         chain("max.message.bytes")
-            == (
-                Some("2097152".to_owned()),
-                CONFIG_SOURCE_STATIC_BROKER,
-                vec![
+            == SynonymChain {
+                value: Some("2097152".to_owned()),
+                config_source: CONFIG_SOURCE_STATIC_BROKER,
+                synonyms: vec![
                     synonym("message.max.bytes", "2097152", CONFIG_SOURCE_STATIC_BROKER),
                     synonym("message.max.bytes", "1048588", CONFIG_SOURCE_DEFAULT),
-                ],
-            )
+                ]
+            }
     );
     check!(
         chain("min.insync.replicas")
-            == (Some("1".to_owned()), CONFIG_SOURCE_STATIC_BROKER, vec![
-                synonym("min.insync.replicas", "1", CONFIG_SOURCE_STATIC_BROKER),
-                synonym("min.insync.replicas", "1", CONFIG_SOURCE_DEFAULT),
-            ],)
+            == SynonymChain {
+                value: Some("1".to_owned()),
+                config_source: CONFIG_SOURCE_STATIC_BROKER,
+                synonyms: vec![
+                    synonym("min.insync.replicas", "1", CONFIG_SOURCE_STATIC_BROKER),
+                    synonym("min.insync.replicas", "1", CONFIG_SOURCE_DEFAULT),
+                ]
+            }
     );
     check!(
         chain("segment.bytes")
-            == (
-                Some("1048576".to_owned()),
-                CONFIG_SOURCE_DYNAMIC_TOPIC,
-                vec![
+            == SynonymChain {
+                value: Some("1048576".to_owned()),
+                config_source: CONFIG_SOURCE_DYNAMIC_TOPIC,
+                synonyms: vec![
                     synonym("segment.bytes", "1048576", CONFIG_SOURCE_DYNAMIC_TOPIC),
                     synonym(
                         "log.segment.bytes",
@@ -2150,8 +2270,8 @@ fn a_topic_reports_the_static_synonyms_the_broker_was_started_with() {
                         CONFIG_SOURCE_STATIC_BROKER
                     ),
                     synonym("log.segment.bytes", "1073741824", CONFIG_SOURCE_DEFAULT),
-                ],
-            )
+                ]
+            }
     );
 
     // The KIP-525 list `CreateTopics` v5+ carries is the same computation.
@@ -2187,33 +2307,58 @@ fn a_topic_reports_the_static_synonyms_the_broker_was_started_with() {
 /// seven days through the `log.roll.hours` default.
 #[test]
 fn a_topic_and_a_named_broker_report_the_log_roll_ms_the_node_runs() {
-    /// The value, the source and the synonyms of one entry.
-    type Chain = (Option<String>, i8, Vec<DescribeConfigsSynonym>);
-    let cases: [(&str, &str, Chain, Chain); 2] = [
-        (
-            "not named",
-            "broker_id = 1\n",
-            (Some("604800000".to_owned()), CONFIG_SOURCE_DEFAULT, vec![
-                synonym("log.roll.hours", "168", CONFIG_SOURCE_DEFAULT),
-            ]),
-            (None, CONFIG_SOURCE_DEFAULT, vec![]),
-        ),
-        (
-            "named",
-            "[server_properties]\n\"log.roll.ms\" = \"3000\"\n",
-            (Some("3000".to_owned()), CONFIG_SOURCE_STATIC_BROKER, vec![
-                synonym("log.roll.ms", "3000", CONFIG_SOURCE_STATIC_BROKER),
-                synonym("log.roll.hours", "168", CONFIG_SOURCE_DEFAULT),
-            ]),
-            (Some("3000".to_owned()), CONFIG_SOURCE_STATIC_BROKER, vec![
-                synonym("log.roll.ms", "3000", CONFIG_SOURCE_STATIC_BROKER),
-            ]),
-        ),
+    /// A case label, the runtime config, and the chains of the topic's `segment.ms`
+    /// and the named broker's `log.roll.ms`.
+    struct LogRollCase {
+        label: &'static str,
+        src: &'static str,
+        topic_chain: SynonymChain,
+        broker_chain: SynonymChain,
+    }
+
+    let cases: [LogRollCase; 2] = [
+        LogRollCase {
+            label: "not named",
+            src: "broker_id = 1\n",
+            topic_chain: SynonymChain {
+                value: Some("604800000".to_owned()),
+                config_source: CONFIG_SOURCE_DEFAULT,
+                synonyms: vec![synonym("log.roll.hours", "168", CONFIG_SOURCE_DEFAULT)],
+            },
+            broker_chain: SynonymChain {
+                value: None,
+                config_source: CONFIG_SOURCE_DEFAULT,
+                synonyms: vec![],
+            },
+        },
+        LogRollCase {
+            label: "named",
+            src: "[server_properties]\n\"log.roll.ms\" = \"3000\"\n",
+            topic_chain: SynonymChain {
+                value: Some("3000".to_owned()),
+                config_source: CONFIG_SOURCE_STATIC_BROKER,
+                synonyms: vec![
+                    synonym("log.roll.ms", "3000", CONFIG_SOURCE_STATIC_BROKER),
+                    synonym("log.roll.hours", "168", CONFIG_SOURCE_DEFAULT),
+                ],
+            },
+            broker_chain: SynonymChain {
+                value: Some("3000".to_owned()),
+                config_source: CONFIG_SOURCE_STATIC_BROKER,
+                synonyms: vec![synonym("log.roll.ms", "3000", CONFIG_SOURCE_STATIC_BROKER)],
+            },
+        },
     ];
     let image = MetadataImage::new(Uuid::nil());
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
-    for (label, src, topic_chain, broker_chain) in cases {
+    for LogRollCase {
+        label,
+        src,
+        topic_chain,
+        broker_chain,
+    } in cases
+    {
         let file: FileConfig = toml::from_str(src).expect("parse");
         let mut config = BrokerConfig::default();
         file.apply_to(&mut config).expect("apply");
@@ -2228,11 +2373,7 @@ fn a_topic_and_a_named_broker_report_the_log_roll_ms_the_node_runs() {
                 EVERYTHING,
             );
             let entry = entry_named(&result, key);
-            (
-                entry.value.clone(),
-                entry.config_source,
-                entry.synonyms.clone(),
-            )
+            SynonymChain::of(entry)
         };
         actual.push((
             label,
@@ -2295,7 +2436,10 @@ fn a_topic_reports_the_computing_nodes_own_min_insync_replicas() {
         ),
     ] {
         let described = describe_at(
-            (node, untuned()),
+            ServingConfig {
+                node,
+                static_broker: untuned(),
+            },
             &image,
             RESOURCE_TYPE_TOPIC,
             "orders",
@@ -2365,11 +2509,7 @@ fn a_group_and_a_named_broker_report_the_values_the_coordinators_run_with() {
     let broker = described(RESOURCE_TYPE_BROKER, "1");
     let chain = |result: &DescribeConfigsResult, key: &str| {
         let entry = entry_named(result, key);
-        (
-            entry.value.clone(),
-            entry.config_source,
-            entry.synonyms.clone(),
-        )
+        SynonymChain::of(entry)
     };
     let named = expected_named_static_chain;
     let untouched = expected_default_chain;
@@ -2396,23 +2536,27 @@ fn a_group_and_a_named_broker_report_the_values_the_coordinators_run_with() {
     // The group's override is above the value the coordinator runs.
     check!(
         chain(&group, "share.record.lock.duration.ms")
-            == (Some("20000".to_owned()), CONFIG_SOURCE_DYNAMIC_GROUP, vec![
-                synonym(
-                    "share.record.lock.duration.ms",
-                    "20000",
-                    CONFIG_SOURCE_DYNAMIC_GROUP
-                ),
-                synonym(
-                    "group.share.record.lock.duration.ms",
-                    "45000",
-                    CONFIG_SOURCE_STATIC_BROKER
-                ),
-                synonym(
-                    "group.share.record.lock.duration.ms",
-                    "30000",
-                    CONFIG_SOURCE_DEFAULT
-                ),
-            ],)
+            == SynonymChain {
+                value: Some("20000".to_owned()),
+                config_source: CONFIG_SOURCE_DYNAMIC_GROUP,
+                synonyms: vec![
+                    synonym(
+                        "share.record.lock.duration.ms",
+                        "20000",
+                        CONFIG_SOURCE_DYNAMIC_GROUP
+                    ),
+                    synonym(
+                        "group.share.record.lock.duration.ms",
+                        "45000",
+                        CONFIG_SOURCE_STATIC_BROKER
+                    ),
+                    synonym(
+                        "group.share.record.lock.duration.ms",
+                        "30000",
+                        CONFIG_SOURCE_DEFAULT
+                    ),
+                ]
+            }
     );
 
     // The broker resource names the same keys and agrees with the group.
@@ -2522,81 +2666,177 @@ fn a_named_broker_reports_the_static_layer_of_the_partition_verification_key() {
     const RUNTIME_FALSE: &str = "[runtime]\ntransaction_partition_verification_enable = false\n";
     const PROPERTY_FALSE: &str =
         "[server_properties]\n\"transaction.partition.verification.enable\" = \"false\"\n";
-    /// The dynamic values by node, then the chain: a value and its source,
-    /// the head first.
-    type Layers = (
-        Vec<(krabka_metadata::NodeId, &'static str)>,
-        Vec<(&'static str, i8)>,
-    );
-    let default = ("true", CONFIG_SOURCE_DEFAULT);
-    let static_false = ("false", CONFIG_SOURCE_STATIC_BROKER);
-    let cases: [(&str, &str, Layers); 8] = [
-        ("nothing named", "broker_id = 0\n", (vec![], vec![default])),
-        (
-            "runtime table at Kafka's default",
-            "[runtime]\ntransaction_partition_verification_enable = true\n",
-            (vec![], vec![("true", CONFIG_SOURCE_STATIC_BROKER), default]),
-        ),
-        (
-            "runtime table off",
-            RUNTIME_FALSE,
-            (vec![], vec![static_false, default]),
-        ),
-        (
-            "server property off",
-            PROPERTY_FALSE,
-            (vec![], vec![static_false, default]),
-        ),
-        (
-            "cluster-wide dynamic over static",
-            RUNTIME_FALSE,
-            (vec![(DEFAULT_BROKER_CONFIG_NODE_ID, "true")], vec![
-                ("true", CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER),
-                static_false,
-                default,
-            ]),
-        ),
-        (
-            "per-broker dynamic over static",
-            PROPERTY_FALSE,
-            (vec![(SERVING_NODE, "true")], vec![
-                ("true", CONFIG_SOURCE_DYNAMIC_BROKER),
-                static_false,
-                default,
-            ]),
-        ),
-        (
-            "per-broker dynamic over cluster-wide and static",
-            RUNTIME_FALSE,
-            (
-                vec![
-                    (DEFAULT_BROKER_CONFIG_NODE_ID, "true"),
-                    (SERVING_NODE, "false"),
+    /// A value stored dynamically for a node.
+    struct DynamicValue {
+        node: krabka_metadata::NodeId,
+        value: &'static str,
+    }
+
+    /// One link of the chain: a value and its source.
+    #[derive(Clone, Copy)]
+    struct ChainEntry {
+        value: &'static str,
+        source: i8,
+    }
+
+    /// The dynamic values by node, then the chain, the head first.
+    struct Layers {
+        dynamic: Vec<DynamicValue>,
+        chain: Vec<ChainEntry>,
+    }
+
+    /// A case label, the node's runtime config, and the layers the entry reports.
+    struct LayerCase {
+        label: &'static str,
+        source: &'static str,
+        layers: Layers,
+    }
+
+    let default = ChainEntry {
+        value: "true",
+        source: CONFIG_SOURCE_DEFAULT,
+    };
+    let static_false = ChainEntry {
+        value: "false",
+        source: CONFIG_SOURCE_STATIC_BROKER,
+    };
+    let cases: [LayerCase; 8] = [
+        LayerCase {
+            label: "nothing named",
+            source: "broker_id = 0\n",
+            layers: Layers {
+                dynamic: vec![],
+                chain: vec![default],
+            },
+        },
+        LayerCase {
+            label: "runtime table at Kafka's default",
+            source: "[runtime]\ntransaction_partition_verification_enable = true\n",
+            layers: Layers {
+                dynamic: vec![],
+                chain: vec![
+                    ChainEntry {
+                        value: "true",
+                        source: CONFIG_SOURCE_STATIC_BROKER,
+                    },
+                    default,
                 ],
-                vec![
-                    ("false", CONFIG_SOURCE_DYNAMIC_BROKER),
-                    ("true", CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER),
+            },
+        },
+        LayerCase {
+            label: "runtime table off",
+            source: RUNTIME_FALSE,
+            layers: Layers {
+                dynamic: vec![],
+                chain: vec![static_false, default],
+            },
+        },
+        LayerCase {
+            label: "server property off",
+            source: PROPERTY_FALSE,
+            layers: Layers {
+                dynamic: vec![],
+                chain: vec![static_false, default],
+            },
+        },
+        LayerCase {
+            label: "cluster-wide dynamic over static",
+            source: RUNTIME_FALSE,
+            layers: Layers {
+                dynamic: vec![DynamicValue {
+                    node: DEFAULT_BROKER_CONFIG_NODE_ID,
+                    value: "true",
+                }],
+                chain: vec![
+                    ChainEntry {
+                        value: "true",
+                        source: CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER,
+                    },
                     static_false,
                     default,
                 ],
-            ),
-        ),
-        (
-            "dynamic over the default",
-            "broker_id = 0\n",
-            (vec![(SERVING_NODE, "false")], vec![
-                ("false", CONFIG_SOURCE_DYNAMIC_BROKER),
-                default,
-            ]),
-        ),
+            },
+        },
+        LayerCase {
+            label: "per-broker dynamic over static",
+            source: PROPERTY_FALSE,
+            layers: Layers {
+                dynamic: vec![DynamicValue {
+                    node: SERVING_NODE,
+                    value: "true",
+                }],
+                chain: vec![
+                    ChainEntry {
+                        value: "true",
+                        source: CONFIG_SOURCE_DYNAMIC_BROKER,
+                    },
+                    static_false,
+                    default,
+                ],
+            },
+        },
+        LayerCase {
+            label: "per-broker dynamic over cluster-wide and static",
+            source: RUNTIME_FALSE,
+            layers: Layers {
+                dynamic: vec![
+                    DynamicValue {
+                        node: DEFAULT_BROKER_CONFIG_NODE_ID,
+                        value: "true",
+                    },
+                    DynamicValue {
+                        node: SERVING_NODE,
+                        value: "false",
+                    },
+                ],
+                chain: vec![
+                    ChainEntry {
+                        value: "false",
+                        source: CONFIG_SOURCE_DYNAMIC_BROKER,
+                    },
+                    ChainEntry {
+                        value: "true",
+                        source: CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER,
+                    },
+                    static_false,
+                    default,
+                ],
+            },
+        },
+        LayerCase {
+            label: "dynamic over the default",
+            source: "broker_id = 0\n",
+            layers: Layers {
+                dynamic: vec![DynamicValue {
+                    node: SERVING_NODE,
+                    value: "false",
+                }],
+                chain: vec![
+                    ChainEntry {
+                        value: "false",
+                        source: CONFIG_SOURCE_DYNAMIC_BROKER,
+                    },
+                    default,
+                ],
+            },
+        },
     ];
-    for (label, source, (dynamic, chain)) in cases {
+    for LayerCase {
+        label,
+        source,
+        layers: Layers { dynamic, chain },
+    } in cases
+    {
         let file: FileConfig = toml::from_str(source).expect("parse the file");
         let mut config = BrokerConfig::default();
         file.apply_to(&mut config).expect("apply the file");
         let settings = static_settings(&config);
         let mut image = MetadataImage::new(Uuid::nil());
-        for (node_id, value) in dynamic {
+        for DynamicValue {
+            node: node_id,
+            value,
+        } in dynamic
+        {
             image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
                 node_id,
                 config_name: KEY.to_owned(),
@@ -2614,10 +2854,13 @@ fn a_named_broker_reports_the_static_layer_of_the_partition_verification_key() {
         );
 
         let entry = entry_named(&described, KEY);
-        let (head_value, head_source) = chain[0];
+        let ChainEntry {
+            value: head_value,
+            source: head_source,
+        } = chain[0];
         let synonyms: Vec<DescribeConfigsSynonym> = chain
             .iter()
-            .map(|(value, source)| synonym(KEY, value, *source))
+            .map(|entry| synonym(KEY, entry.value, entry.source))
             .collect();
         check!(
             (entry.value.as_deref(), entry.config_source, &entry.synonyms)
@@ -2704,18 +2947,32 @@ pub(super) fn expected_config_entry(
     })
 }
 
-fn expected_plain_configs(
-    rows: &[(&str, &str, i8, ConfigType)],
-) -> Vec<DescribeConfigsResourceResult> {
+/// A plain broker config the entry must report: its name, value, source and type.
+#[derive(Clone, Copy)]
+struct PlainConfig<'a> {
+    name: &'a str,
+    value: &'a str,
+    source: i8,
+    kind: ConfigType,
+}
+
+fn expected_plain_configs(rows: &[PlainConfig<'_>]) -> Vec<DescribeConfigsResourceResult> {
     rows.iter()
-        .map(|&(name, value, source, kind)| {
-            expected_config_entry()
-                .name(name)
-                .maybe_value(Some(Some(value)))
-                .mutability(ConfigMutability::ReadOnly)
-                .source(source)
-                .config_type(kind.wire())
-                .call()
-        })
+        .map(
+            |&PlainConfig {
+                 name,
+                 value,
+                 source,
+                 kind,
+             }| {
+                expected_config_entry()
+                    .name(name)
+                    .maybe_value(Some(Some(value)))
+                    .mutability(ConfigMutability::ReadOnly)
+                    .source(source)
+                    .config_type(kind.wire())
+                    .call()
+            },
+        )
         .collect()
 }

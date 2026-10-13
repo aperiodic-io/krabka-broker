@@ -4,7 +4,10 @@
 //! request bodies that the SASL rounds send.
 
 use {
-    super::{BrokerRaftHandshake, frame::read_kafka_request},
+    super::{
+        BrokerRaftHandshake,
+        frame::{KafkaRequest, read_kafka_request},
+    },
     crate::{SslPrincipalMapper, authorizer::AllowAllAuthorizer},
     krabka_protocol::{
         Encode,
@@ -109,7 +112,7 @@ pub(super) fn request_frame(
 
 pub(super) async fn read_request_from_frame(
     frame: Vec<u8>,
-) -> Result<(i16, i16, i32, Vec<u8>), RaftHandshakeError> {
+) -> Result<KafkaRequest, RaftHandshakeError> {
     let (mut client, mut server) = tokio::io::duplex(4096);
     client.write_all(&frame).await.expect("write request frame");
     read_kafka_request(&mut server, 4096).await

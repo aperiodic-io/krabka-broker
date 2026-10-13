@@ -8,6 +8,7 @@ use {
         timing::election_timeout_ms,
     },
     crate::kraft::{
+        snapshot_fetch::SnapshotId,
         transport::{Command, api_key, wire},
         types::{Epoch, LogView, NodeId},
     },
@@ -93,16 +94,10 @@ impl Engine {
     #[tracing::instrument(level = "debug", skip_all, fields(node = self.me.0, epoch))]
     pub fn broadcast_begin_quorum_epoch(&self, epoch: Epoch) {
         let state = self.core.quorum_state();
-        let leader_endpoints: Vec<(String, String, u16)> = state
+        let leader_endpoints = state
             .voters
             .get(self.me)
-            .map(|voter| {
-                voter
-                    .endpoints
-                    .iter()
-                    .map(|endpoint| (endpoint.name.clone(), endpoint.host.clone(), endpoint.port))
-                    .collect()
-            })
+            .map(|voter| voter.endpoints.clone())
             .unwrap_or_default();
         for peer in self.other_voters() {
             let body = wire::PeerRequest::BeginQuorumEpoch {
@@ -135,13 +130,11 @@ impl Engine {
             leader_epoch: epoch,
             preferred_candidates: preferred_successors
                 .iter()
-                .map(|&id| {
-                    (
-                        id,
-                        voters
-                            .get(id)
-                            .map_or(uuid::Uuid::nil(), |voter| voter.directory_id),
-                    )
+                .map(|&id| wire::PreferredCandidate {
+                    id,
+                    directory_id: voters
+                        .get(id)
+                        .map_or(uuid::Uuid::nil(), |voter| voter.directory_id),
                 })
                 .collect(),
         }
@@ -202,7 +195,7 @@ impl Engine {
     }
 
     /// (Follower side) request a byte range of `snapshot_id` from `leader_id`.
-    pub fn send_fetch_snapshot(&self, leader_id: NodeId, snapshot_id: (i64, i32), position: i64) {
+    pub fn send_fetch_snapshot(&self, leader_id: NodeId, snapshot_id: SnapshotId, position: i64) {
         if leader_id == self.me {
             return;
         }

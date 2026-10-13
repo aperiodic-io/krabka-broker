@@ -7,7 +7,7 @@
 //! Keeping them out of the module root leaves the request flow readable.
 
 use {
-    super::{handle as init_producer_id_handle, *},
+    super::{handle as init_producer_id_handle, identity::ProducerIdentity, *},
     crate::{
         api_catalog::UnstableApiVersions,
         authorizer::SimpleAclAuthorizer,
@@ -42,7 +42,7 @@ async fn persist_ongoing(
     coordinator: &TxnCoordinator,
     cell: &Arc<tokio::sync::Mutex<TxnEntry>>,
     expectation: &str,
-) -> (krabka_log::ProducerId, i16) {
+) -> ProducerIdentity {
     let (producer_id, producer_epoch, snapshot) = {
         let mut entry = cell.lock().await;
         entry.state = TxnState::Ongoing;
@@ -52,7 +52,10 @@ async fn persist_ongoing(
         .put(snapshot, TxnVersion::Verified)
         .await
         .expect(expectation);
-    (producer_id, producer_epoch)
+    ProducerIdentity {
+        id: producer_id,
+        epoch: producer_epoch,
+    }
 }
 
 /// Waits for the controller, and checks the cluster finalized `TV_2`, the
@@ -196,7 +199,10 @@ async fn handler_refuses_a_timeout_kafka_refuses_and_stores_the_rest_as_sent() {
         .txn_coordinator
         .get(tids[2])
         .expect("2PC transaction entry");
-    let (ongoing_pid, ongoing_epoch) = persist_ongoing(
+    let ProducerIdentity {
+        id: ongoing_pid,
+        epoch: ongoing_epoch,
+    } = persist_ongoing(
         &broker.txn_coordinator,
         &ongoing,
         "persist ongoing 2PC transaction",
@@ -396,7 +402,10 @@ async fn keep_prepared_txn_without_enable_2pc_preserves_finite_timeout() {
         .txn_coordinator
         .get(tid)
         .expect("finite-timeout transaction entry");
-    let (finite_pid, finite_epoch) = persist_ongoing(
+    let ProducerIdentity {
+        id: finite_pid,
+        epoch: finite_epoch,
+    } = persist_ongoing(
         &broker.txn_coordinator,
         &finite,
         "persist finite ongoing transaction",

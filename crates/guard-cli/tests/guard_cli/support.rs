@@ -72,11 +72,18 @@ pub(super) fn mint_key(dir: &Path, key_id: &str, principal: &str) -> Key {
     }
 }
 
+/// A booted broker, the directory it lives in, and its bootstrap address.
+struct RunningBroker {
+    handle: BrokerHandle,
+    dir: tempfile::TempDir,
+    bootstrap: String,
+}
+
 /// Boot a single-node broker that trusts `key` and lists this connection's
 /// principal as its one break-glass approver.
 ///
 /// The `TempDir` is returned so the log directory outlives the broker.
-async fn broker(dir: tempfile::TempDir, key: &Key) -> (BrokerHandle, tempfile::TempDir, String) {
+async fn broker(dir: tempfile::TempDir, key: &Key) -> RunningBroker {
     let mut config = BrokerConfig::for_tests(dir.path().join("data"));
     config.operator_keys = OperatorKeys::load(&[OperatorKeyEntry {
         key_id: KEY_ID.to_owned(),
@@ -87,14 +94,22 @@ async fn broker(dir: tempfile::TempDir, key: &Key) -> (BrokerHandle, tempfile::T
     config.break_glass.approvers = vec![PRINCIPAL.to_owned()];
     let handle = Broker::start(config).await.expect("broker starts");
     let bootstrap = handle.listen_addr().to_string();
-    (handle, dir, bootstrap)
+    RunningBroker {
+        handle,
+        dir,
+        bootstrap,
+    }
 }
 
 /// A broker, a key, and the directory both live in.
 pub(super) async fn cluster() -> (BrokerHandle, tempfile::TempDir, String, Key) {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let key = mint_key(dir.path(), KEY_ID, PRINCIPAL);
-    let (handle, dir, bootstrap) = broker(dir, &key).await;
+    let RunningBroker {
+        handle,
+        dir,
+        bootstrap,
+    } = broker(dir, &key).await;
     (handle, dir, bootstrap, key)
 }
 

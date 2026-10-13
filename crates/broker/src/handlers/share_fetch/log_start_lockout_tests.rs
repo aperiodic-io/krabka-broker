@@ -24,7 +24,8 @@ use {
         handlers::{
             delete_records::handle,
             test_support::{
-                RecordCount, create_topic as create_topic_from_test_support,
+                OffsetRun, RecordCount, StartedBroker,
+                create_topic as create_topic_from_test_support,
                 produce_records as produce_records_from_test_support, share_fetch_partition_rows,
                 share_fetch_topics, share_fetch_wire,
             },
@@ -45,15 +46,34 @@ use {
     std::sync::Arc,
 };
 
-/// One partition row of a multi-partition `ShareFetch`: its
-/// `(partition_index, error_code, acquired ranges)`.
-type PartitionOutcome = (i32, i16, Vec<(i64, i64)>);
+/// One partition row of a multi-partition `ShareFetch`: its partition index,
+/// error code and acquired ranges.
+#[derive(Debug, PartialEq, Eq)]
+struct PartitionOutcome {
+    partition_index: i32,
+    error_code: i16,
+    acquired: Vec<OffsetRun>,
+}
+
+/// A partition that answers `NONE` and acquires the one run of offsets.
+fn acquired_run(partition_index: i32, first_offset: i64, last_offset: i64) -> PartitionOutcome {
+    PartitionOutcome {
+        partition_index,
+        error_code: codes::NONE,
+        acquired: vec![OffsetRun {
+            first_offset,
+            last_offset,
+        }],
+    }
+}
 
 /// `DeleteRecords` v2, matching the other handler tests.
 const DELETE_RECORDS_VERSION: i16 = 2;
 
-async fn start() -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await
+async fn start() -> StartedBroker {
+    let (broker, dir) =
+        start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
+    StartedBroker { broker, dir }
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str, num_partitions: i32) -> WireUuid {
@@ -234,7 +254,7 @@ struct Row {
     /// place after repairing the SPSO, so any record already readable at or
     /// above the new log start is handed out on this same pass -- not on a
     /// later fetch.
-    expected_acquired: Vec<(i64, i64)>,
+    expected_acquired: Vec<OffsetRun>,
     /// The SPSO right after the lockout fetch.
     expected_spso: i64,
     /// What a follow-up fetch acquires: empty whenever the lockout fetch
@@ -242,7 +262,7 @@ struct Row {
     /// retry means there is usually nothing left), and still empty for the
     /// "acquired stays locked" row, whose lock the lockout fetch cannot and
     /// must not touch.
-    expected_next_acquired: Vec<(i64, i64)>,
+    expected_next_acquired: Vec<OffsetRun>,
 }
 
 /// The table from issue #948: nothing in flight, `Available` records below
@@ -250,7 +270,7 @@ struct Row {
 /// locked until the lock ends), and a log start at the SPSO (no change).
 #[tokio::test]
 async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
 
     let rows = [
         Row {
@@ -260,7 +280,10 @@ async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
             expected_error: codes::NONE,
             // The lockout fetch repairs the SPSO and retries in place, so it
             // already hands out [3,4] itself.
-            expected_acquired: vec![(3, 4)],
+            expected_acquired: vec![OffsetRun {
+                first_offset: 3,
+                last_offset: 4,
+            }],
             expected_spso: 3,
             expected_next_acquired: vec![],
         },
@@ -273,7 +296,10 @@ async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
             // SPSO from following the log start; offset 2, which was
             // Available, is archived. Offsets [3,4] are unaffected by either
             // and are handed out on this same lockout fetch, in place.
-            expected_acquired: vec![(3, 4)],
+            expected_acquired: vec![OffsetRun {
+                first_offset: 3,
+                last_offset: 4,
+            }],
             expected_spso: 0,
             // The [0,1] lock is still held, and [3,4] were already handed
             // out above, so nothing new is left for a follow-up fetch.
@@ -284,7 +310,10 @@ async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
             prime_max_records: 0,
             new_log_start: 0,
             expected_error: codes::NONE,
-            expected_acquired: vec![(0, 4)],
+            expected_acquired: vec![OffsetRun {
+                first_offset: 0,
+                last_offset: 4,
+            }],
             expected_spso: 0,
             expected_next_acquired: vec![],
         },
@@ -365,7 +394,7 @@ async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
 /// closes the connection.
 #[tokio::test]
 async fn an_unreadable_partition_fails_alone() {
-    let (broker, dir) = start().await;
+    let StartedBroker { broker, dir } = start().await;
     let topic = "unreadable-and-healthy";
     let group = "g-unreadable-and-healthy";
     let topic_id = primed_pair(&broker, topic, group).await;
@@ -387,8 +416,12 @@ async fn an_unreadable_partition_fails_alone() {
     assert!(
         by_partition
             == vec![
-                (0, codes::CORRUPT_MESSAGE, vec![]),
-                (1, codes::NONE, vec![(0, 4)]),
+                PartitionOutcome {
+                    partition_index: 0,
+                    error_code: codes::CORRUPT_MESSAGE,
+                    acquired: vec![],
+                },
+                acquired_run(1, 0, 4),
             ]
     );
     broker.shutdown().await;
@@ -399,7 +432,7 @@ async fn an_unreadable_partition_fails_alone() {
 /// SPSO: the recovery is per-partition, not per-request.
 #[tokio::test]
 async fn a_healthy_partition_in_the_same_request_is_unaffected() {
-    let (broker, _dir) = start().await;
+    let StartedBroker { broker, dir: _dir } = start().await;
     let topic = "lockout-and-healthy";
     let group = "g-lockout-and-healthy";
     let topic_id = primed_pair(&broker, topic, group).await;
@@ -412,13 +445,7 @@ async fn a_healthy_partition_in_the_same_request_is_unaffected() {
     // order.
     let by_partition = fetch_incremental_pair(&broker, group, topic_id).await;
 
-    assert!(
-        by_partition
-            == vec![
-                (0, codes::NONE, vec![(3, 4)]),
-                (1, codes::NONE, vec![(0, 4)]),
-            ]
-    );
+    assert!(by_partition == vec![acquired_run(0, 3, 4), acquired_run(1, 0, 4)]);
     broker.shutdown().await;
 }
 
@@ -461,7 +488,10 @@ async fn a_member_that_does_not_acknowledge_gets_no_more_than_the_record_lock_li
         (per_fetch, end_offset)
             == (
                 vec![
-                    (codes::NONE, vec![(0, 99)]),
+                    (codes::NONE, vec![OffsetRun {
+                        first_offset: 0,
+                        last_offset: 99
+                    }]),
                     (codes::NONE, vec![]),
                     (codes::NONE, vec![]),
                 ],
@@ -495,9 +525,13 @@ async fn primed_pair(broker: &BrokerHandle, topic: &str, group: &str) -> WireUui
 fn sorted_partition_outcomes(rows: &[PartitionData]) -> Vec<PartitionOutcome> {
     let mut outcomes: Vec<_> = rows
         .iter()
-        .map(|row| (row.partition_index, row.error_code, acquired(row)))
+        .map(|row| PartitionOutcome {
+            partition_index: row.partition_index,
+            error_code: row.error_code,
+            acquired: acquired(row),
+        })
         .collect();
-    outcomes.sort_unstable();
+    outcomes.sort_unstable_by_key(|outcome| outcome.partition_index);
     outcomes
 }
 

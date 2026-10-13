@@ -50,10 +50,16 @@ pub fn topic_configs_md() -> String {
     out
 }
 
+/// The KIP, or the protocol-guide section, that defines an API key. It renders
+/// into a markdown link.
+struct ApiSpec {
+    label: &'static str,
+    url: &'static str,
+}
+
 /// Canonical specification for an API key.
 ///
-/// This is the KIP, or the protocol-guide section, that defines the API key. It
-/// is a `(label, url)` pair that renders into a markdown link.
+/// This is the KIP, or the protocol-guide section, that defines the API key.
 ///
 /// The Kafka wire protocol is not an IETF RFC standard. The
 /// [Apache Kafka protocol guide](https://kafka.apache.org/protocol) specifies
@@ -61,53 +67,53 @@ pub fn topic_configs_md() -> String {
 /// function maps each API key to the KIP that defines it where we know that KIP
 /// confidently. For the other API keys, it falls back to the API-keys section
 /// of the protocol guide.
-fn api_spec(api_key: i16) -> (&'static str, &'static str) {
+fn api_spec(api_key: i16) -> ApiSpec {
     // The general protocol-guide fallback for APIs without a single defining
     // KIP (the original Kafka 0.x core RPCs and a handful of admin RPCs).
-    const PROTOCOL_GUIDE: (&str, &str) = (
-        "Protocol guide",
-        "https://kafka.apache.org/43/design/protocol/",
-    );
-    const KIP_848: (&str, &str) = (
-        "KIP-848",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol",
-    );
-    const KIP_932: (&str, &str) = (
-        "KIP-932",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka",
-    );
-    const KIP_1071: (&str, &str) = (
-        "KIP-1071",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-1071%3A+Streams+Rebalance+Protocol",
-    );
-    const KIP_595: (&str, &str) = (
-        "KIP-595",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-595%3A+A+Raft+Protocol+for+the+Metadata+Quorum",
-    );
-    const KIP_630: (&str, &str) = (
-        "KIP-630",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-630%3A+Kafka+Raft+Snapshot",
-    );
-    const KIP_853: (&str, &str) = (
-        "KIP-853",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-853%3A+KRaft+Controller+Membership+Changes",
-    );
-    const KIP_98: (&str, &str) = (
-        "KIP-98",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging",
-    );
-    const KIP_500: (&str, &str) = (
-        "KIP-500",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-500%3A+Replace+ZooKeeper+with+a+Self-Managed+Metadata+Quorum",
-    );
-    const KIP_631: (&str, &str) = (
-        "KIP-631",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-631%3A+The+Quorum-based+Kafka+Controller",
-    );
-    const KIP_714: (&str, &str) = (
-        "KIP-714",
-        "https://cwiki.apache.org/confluence/display/KAFKA/KIP-714%3A+Client+metrics+and+observability",
-    );
+    const PROTOCOL_GUIDE: ApiSpec = ApiSpec {
+        label: "Protocol guide",
+        url: "https://kafka.apache.org/43/design/protocol/",
+    };
+    const KIP_848: ApiSpec = ApiSpec {
+        label: "KIP-848",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol",
+    };
+    const KIP_932: ApiSpec = ApiSpec {
+        label: "KIP-932",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka",
+    };
+    const KIP_1071: ApiSpec = ApiSpec {
+        label: "KIP-1071",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-1071%3A+Streams+Rebalance+Protocol",
+    };
+    const KIP_595: ApiSpec = ApiSpec {
+        label: "KIP-595",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-595%3A+A+Raft+Protocol+for+the+Metadata+Quorum",
+    };
+    const KIP_630: ApiSpec = ApiSpec {
+        label: "KIP-630",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-630%3A+Kafka+Raft+Snapshot",
+    };
+    const KIP_853: ApiSpec = ApiSpec {
+        label: "KIP-853",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-853%3A+KRaft+Controller+Membership+Changes",
+    };
+    const KIP_98: ApiSpec = ApiSpec {
+        label: "KIP-98",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging",
+    };
+    const KIP_500: ApiSpec = ApiSpec {
+        label: "KIP-500",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-500%3A+Replace+ZooKeeper+with+a+Self-Managed+Metadata+Quorum",
+    };
+    const KIP_631: ApiSpec = ApiSpec {
+        label: "KIP-631",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-631%3A+The+Quorum-based+Kafka+Controller",
+    };
+    const KIP_714: ApiSpec = ApiSpec {
+        label: "KIP-714",
+        url: "https://cwiki.apache.org/confluence/display/KAFKA/KIP-714%3A+Client+metrics+and+observability",
+    };
 
     // Only the KIP-specific arms are enumerated; every API key without a single
     // confidently-known defining KIP (the core 0.x RPCs, delegation tokens,
@@ -169,7 +175,7 @@ pub fn protocol_apis_md() -> String {
     apis.sort_by_key(|a| a.api_key);
     for a in apis {
         let name: &'static str = ApiKey::from_i16(a.api_key).map_or("?", <&'static str>::from);
-        let (label, url) = api_spec(a.api_key);
+        let ApiSpec { label, url } = api_spec(a.api_key);
         let _ = writeln!(
             out,
             "| {} | {} | {} | {} | [{}]({}) |",

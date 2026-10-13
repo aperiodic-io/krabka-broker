@@ -9,8 +9,11 @@
 use {
     super::test_support::*,
     crate::support::configs::{
-        ConfigOperation, describe_resource, incremental_config, incremental_request,
-        incremental_resource,
+        ConfigOperation, incremental_config, incremental_request, incremental_resource,
+    },
+    krabka_protocol::owned::{
+        describe_configs_request::{DescribeConfigsRequest, DescribeConfigsResource},
+        describe_configs_response::DescribeConfigsResult,
     },
     std::net::SocketAddr,
 };
@@ -49,28 +52,20 @@ pub async fn drive_incremental_alter_configs_plaintext(
 }
 
 /// Drive `DescribeConfigs` (`api_key=32`, version=1) over a SASL/PLAIN connection.
-/// Returns `Vec<(per-resource error_code, Vec<(name, value)>)>`.
+/// Returns the decoded per-resource results.
 #[allow(dead_code)]
 pub async fn drive_describe_configs(
     addr: SocketAddr,
     user: &str,
     pass: &str,
-    resources: Vec<(i8, String)>,
-) -> Vec<(i16, Vec<(String, String)>)> {
+    resources: Vec<DescribeConfigsResource>,
+) -> Vec<DescribeConfigsResult> {
     const VERSION: i16 = 1;
 
-    use krabka_protocol::owned::{
-        describe_configs_request::DescribeConfigsRequest,
-        describe_configs_response::DescribeConfigsResponse,
-    };
+    use krabka_protocol::owned::describe_configs_response::DescribeConfigsResponse;
 
     let req = DescribeConfigsRequest {
-        resources: resources
-            .into_iter()
-            .map(|(resource_type, resource_name)| {
-                describe_resource(resource_type, resource_name, None)
-            })
-            .collect(),
+        resources,
         include_synonyms: false,
         include_documentation: false,
         ..Default::default()
@@ -100,16 +95,6 @@ pub async fn drive_describe_configs(
         DescribeConfigsResponse::decode(&mut cur, VERSION).expect("decode DescribeConfigsResponse");
 
     resp.results
-        .into_iter()
-        .map(|r| {
-            let configs = r
-                .configs
-                .into_iter()
-                .map(|c| (c.name, c.value.unwrap_or_default()))
-                .collect();
-            (r.error_code, configs)
-        })
-        .collect()
 }
 
 async fn incremental_alter_configs_on(stream: &mut TcpStream, resources: ConfigResources) -> i16 {

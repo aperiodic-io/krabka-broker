@@ -3,7 +3,7 @@
 use {
     crate::{
         divergence::DivergenceReport,
-        oracle::{ORACLE_IMAGE, OracleBroker, krabka_api_versions, start_krabka},
+        oracle::{KrabkaBroker, ORACLE_IMAGE, OracleBroker, krabka_api_versions, start_krabka},
         parse::{advertised, parse_single_broker},
         support::{JvmListeners, api_versions::supported_client_apis, manifest_dir},
     },
@@ -41,14 +41,23 @@ fn regenerating() -> bool {
 /// `api_catalog::INTER_BROKER_ONLY_APIS`.
 fn catalog_sorted_by_key() -> Vec<ApiVersion> { supported_client_apis() }
 
+/// The stock broker's decoded table, with the container that serves it.
+struct OracleTable {
+    oracle: OracleBroker,
+    table: Vec<ApiVersion>,
+}
+
 /// Decode the stock broker's table, retaining its container until the case ends.
-fn kafka_advertised_table() -> (OracleBroker, Vec<ApiVersion>) {
+fn kafka_advertised_table() -> OracleTable {
     let oracle = OracleBroker::start();
     let output = oracle.api_versions();
     eprintln!("KRABKA[test] {ORACLE_IMAGE} api-versions:\n{output}");
     let kafka =
         advertised(&parse_single_broker(&output).unwrap_or_else(|e| panic!("{e}\n{output}")));
-    (oracle, kafka)
+    OracleTable {
+        oracle,
+        table: kafka,
+    }
 }
 
 /// The API keys one advertised table names.
@@ -57,7 +66,10 @@ fn key_set(apis: &[ApiVersion]) -> BTreeSet<i16> { apis.iter().map(|api| api.api
 /// Read krabka's advertised table the way a client does: through the JVM tool.
 async fn krabka_advertised_table() -> Vec<ApiVersion> {
     let listeners = JvmListeners::allocate();
-    let (broker, _dir) = start_krabka(&listeners).await;
+    let KrabkaBroker {
+        handle: broker,
+        dir: _dir,
+    } = start_krabka(&listeners).await;
     let output = krabka_api_versions(&listeners);
     broker.shutdown().await;
     eprintln!("KRABKA[test] krabka api-versions:\n{output}");
@@ -93,7 +105,10 @@ async fn krabka_advertises_exactly_the_api_catalog() {
 async fn divergence_from_real_kafka_matches_the_expectation() {
     let krabka = krabka_advertised_table().await;
 
-    let (_oracle, kafka) = kafka_advertised_table();
+    let OracleTable {
+        oracle: _oracle,
+        table: kafka,
+    } = kafka_advertised_table();
 
     let observed = DivergenceReport::build(ORACLE_IMAGE, &krabka, &kafka);
     // Every key on either side has a canonical name in krabka-protocol's
@@ -140,7 +155,10 @@ async fn divergence_from_real_kafka_matches_the_expectation() {
 async fn the_client_listener_prints_the_same_api_key_set_as_kafka() {
     let krabka = krabka_advertised_table().await;
 
-    let (_oracle, kafka) = kafka_advertised_table();
+    let OracleTable {
+        oracle: _oracle,
+        table: kafka,
+    } = kafka_advertised_table();
 
     let ours = key_set(&krabka);
     let theirs = key_set(&kafka);

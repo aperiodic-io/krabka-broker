@@ -6,7 +6,8 @@
 use {
     super::{
         super::checks::{check_limit, check_scope, live_entry, prepare, record_of},
-        ALICE, ALICE_KEY, PROPOSAL, alice_key_configuration, freeze_request, image,
+        ALICE, ALICE_KEY, AliceKeyConfiguration, PROPOSAL, alice_key_configuration, freeze_request,
+        image,
     },
     crate::{
         codes,
@@ -85,7 +86,9 @@ fn a_freeze_that_replaces_a_live_entry_does_not_meet_the_ceiling(
     scope: &str,
     expected: Option<i16>,
 ) {
-    let (_dir, config, _) = alice_key_configuration();
+    let AliceKeyConfiguration {
+        dir: _dir, config, ..
+    } = alice_key_configuration();
     let config = BrokerConfig {
         freeze: FreezeConfig {
             max_entries: 1,
@@ -181,7 +184,9 @@ fn an_unsigned_record_takes_the_brokers_clock() {
 
 #[test]
 fn a_pattern_type_byte_that_names_no_scope_kind_is_an_invalid_request() {
-    let (_dir, config, _) = alice_key_configuration();
+    let AliceKeyConfiguration {
+        dir: _dir, config, ..
+    } = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
 
     for (label, byte, expected) in [

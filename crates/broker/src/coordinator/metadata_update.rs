@@ -94,22 +94,37 @@ pub fn regex_resolution_may_change(previous: &MetadataImage, next: &MetadataImag
         || acl_fingerprint(previous) != acl_fingerprint(next)
 }
 
-/// The number of ACLs of `image`, and a hash that does not depend on their
+/// The number of ACLs of an image, and a hash that does not depend on their
 /// order, so that two images hold the same ACLs when both agree.
-fn acl_fingerprint(image: &MetadataImage) -> (usize, u64) {
+#[derive(PartialEq, Eq)]
+struct AclFingerprint {
+    count: usize,
+    hash_sum: u64,
+}
+
+fn acl_fingerprint(image: &MetadataImage) -> AclFingerprint {
     use std::hash::{DefaultHasher, Hash, Hasher};
 
-    image.all_acls().fold((0, 0_u64), |(count, sum), acl| {
-        let mut hasher = DefaultHasher::new();
-        acl.resource_type.hash(&mut hasher);
-        acl.resource_name.hash(&mut hasher);
-        acl.pattern_type.hash(&mut hasher);
-        acl.principal.hash(&mut hasher);
-        acl.host.hash(&mut hasher);
-        acl.operation.hash(&mut hasher);
-        acl.permission_type.hash(&mut hasher);
-        (count + 1, sum.wrapping_add(hasher.finish()))
-    })
+    image.all_acls().fold(
+        AclFingerprint {
+            count: 0,
+            hash_sum: 0,
+        },
+        |fingerprint, acl| {
+            let mut hasher = DefaultHasher::new();
+            acl.resource_type.hash(&mut hasher);
+            acl.resource_name.hash(&mut hasher);
+            acl.pattern_type.hash(&mut hasher);
+            acl.principal.hash(&mut hasher);
+            acl.host.hash(&mut hasher);
+            acl.operation.hash(&mut hasher);
+            acl.permission_type.hash(&mut hasher);
+            AclFingerprint {
+                count: fingerprint.count + 1,
+                hash_sum: fingerprint.hash_sum.wrapping_add(hasher.finish()),
+            }
+        },
+    )
 }
 
 /// Sends `topics` to every group actor that `owned` accepts.

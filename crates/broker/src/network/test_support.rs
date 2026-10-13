@@ -62,8 +62,8 @@ pub(crate) fn assert_authentication_event(
     event: &krabka_audit::AuditEvent,
     outcome: krabka_audit::AuditOutcome,
     mechanism: &str,
-    principal: (&str, &str),
-    source: (&str, u16),
+    principal: krabka_audit::AuditPrincipal,
+    source: krabka_audit::AuditEndpoint,
     reason: Option<String>,
 ) {
     let krabka_audit::AuditEvent::Authentication { time_ms, .. } = event else {
@@ -74,14 +74,8 @@ pub(crate) fn assert_authentication_event(
             == &krabka_audit::AuditEvent::Authentication {
                 outcome,
                 mechanism: mechanism.to_owned(),
-                principal: krabka_audit::AuditPrincipal {
-                    name: principal.0.to_owned(),
-                    auth_method: principal.1.to_owned()
-                },
-                source: krabka_audit::AuditEndpoint {
-                    ip: source.0.to_owned(),
-                    port: source.1
-                },
+                principal,
+                source,
                 reason,
                 time_ms: *time_ms,
             }

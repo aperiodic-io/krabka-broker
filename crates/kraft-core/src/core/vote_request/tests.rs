@@ -10,7 +10,15 @@ use {
     assert2::check,
 };
 
-fn dynamic_machine() -> (QuorumStateMachine, uuid::Uuid, uuid::Uuid, uuid::Uuid) {
+/// A dynamic-quorum machine for voter 1 with the ids it was built from.
+struct DynamicMachine {
+    machine: QuorumStateMachine,
+    cluster_id: uuid::Uuid,
+    voter_directory_id: uuid::Uuid,
+    candidate_directory_id: uuid::Uuid,
+}
+
+fn dynamic_machine() -> DynamicMachine {
     let cluster_id = uuid::Uuid::from_u128(1);
     let voter_directory_id = uuid::Uuid::from_u128(11);
     let candidate_directory_id = uuid::Uuid::from_u128(22);
@@ -30,12 +38,12 @@ fn dynamic_machine() -> (QuorumStateMachine, uuid::Uuid, uuid::Uuid, uuid::Uuid)
     ]);
     let mut state = QuorumState::bootstrap(cluster_id, voters);
     state.kraft_version = 1;
-    (
-        QuorumStateMachine::new(NodeId(1), state, TEST_ELECTION_TIMEOUT),
+    DynamicMachine {
+        machine: QuorumStateMachine::new(NodeId(1), state, TEST_ELECTION_TIMEOUT),
         cluster_id,
         voter_directory_id,
         candidate_directory_id,
-    )
+    }
 }
 
 /// A replica that is not a voter denies every vote request, whoever the
@@ -233,20 +241,30 @@ fn vote_event(
 /// `(1, 5)` and behind at `(1, 4)`.
 const OUR_LOG: FakeLog = FakeLog::new(5, 1);
 
-/// What `m` answers a Vote or pre-vote of `epoch` from node 2, as (granted,
-/// epoch in the reply).
+/// A machine's reply to a Vote or pre-vote request.
+#[derive(Debug, PartialEq, Eq)]
+struct VoteAnswer {
+    granted: bool,
+    /// The epoch in the reply.
+    epoch: u32,
+}
+
+/// What `m` answers a Vote or pre-vote of `epoch` from node 2.
 fn vote_answer(
     m: &mut QuorumStateMachine,
     epoch: u32,
     pre_vote: bool,
     up_to_date: bool,
-) -> (bool, u32) {
+) -> VoteAnswer {
     let last_offset = if up_to_date { 5 } else { 4 };
     let actions = receive_vote(m, vote_event(NodeId(2), epoch, pre_vote, 1, last_offset));
     actions
         .iter()
         .find_map(|action| match action {
-            Action::ReplyVote { epoch, granted, .. } => Some((*granted, *epoch)),
+            Action::ReplyVote { epoch, granted, .. } => Some(VoteAnswer {
+                granted: *granted,
+                epoch: *epoch,
+            }),
             _ => None,
         })
         .expect("a vote request is answered")
@@ -308,6 +326,17 @@ fn leader_of_three() -> QuorumStateMachine {
 /// replica grants a binding vote.
 #[test]
 fn each_state_grants_pre_votes_and_votes_by_its_own_rule() {
+    struct Case {
+        label: &'static str,
+        build: Build,
+        /// The machine's epoch.
+        epoch: u32,
+        /// Whether a pre-vote is granted when the candidate is up to date.
+        pre_vote_granted: bool,
+        /// Whether a vote is granted when the candidate is up to date.
+        vote_granted: bool,
+    }
+
     let unattached = three_voter_machine;
     let candidate = || {
         let mut m = leader_of_three();
@@ -332,42 +361,83 @@ fn each_state_grants_pre_votes_and_votes_by_its_own_rule() {
         assert2::assert!(matches!(m.role(), Role::Resigned));
         m
     };
-    // (state, machine, its epoch, pre-vote granted when up to date, vote granted
-    // when up to date)
-    let cases: Vec<(&str, Build, u32, bool, bool)> = vec![
-        ("leader", Box::new(leader_of_three), 1, false, false),
-        (
-            "follower not yet fetched",
-            Box::new(|| follower_of_three(false)),
-            4,
-            true,
-            false,
-        ),
-        (
-            "follower that has fetched",
-            Box::new(|| follower_of_three(true)),
-            4,
-            false,
-            false,
-        ),
-        ("candidate", Box::new(candidate), 2, true, false),
-        ("resigned leader", Box::new(resigned), 1, true, false),
-        ("unattached", Box::new(unattached), 0, true, true),
+    let cases = vec![
+        Case {
+            label: "leader",
+            build: Box::new(leader_of_three),
+            epoch: 1,
+            pre_vote_granted: false,
+            vote_granted: false,
+        },
+        Case {
+            label: "follower not yet fetched",
+            build: Box::new(|| follower_of_three(false)),
+            epoch: 4,
+            pre_vote_granted: true,
+            vote_granted: false,
+        },
+        Case {
+            label: "follower that has fetched",
+            build: Box::new(|| follower_of_three(true)),
+            epoch: 4,
+            pre_vote_granted: false,
+            vote_granted: false,
+        },
+        Case {
+            label: "candidate",
+            build: Box::new(candidate),
+            epoch: 2,
+            pre_vote_granted: true,
+            vote_granted: false,
+        },
+        Case {
+            label: "resigned leader",
+            build: Box::new(resigned),
+            epoch: 1,
+            pre_vote_granted: true,
+            vote_granted: false,
+        },
+        Case {
+            label: "unattached",
+            build: Box::new(unattached),
+            epoch: 0,
+            pre_vote_granted: true,
+            vote_granted: true,
+        },
     ];
-    for (label, build, epoch, pre_vote_granted, vote_granted) in cases {
+    for Case {
+        label,
+        build,
+        epoch,
+        pre_vote_granted,
+        vote_granted,
+    } in cases
+    {
         let mut m = build();
         check!(
-            vote_answer(&mut m, epoch, true, true) == (pre_vote_granted, epoch),
+            vote_answer(&mut m, epoch, true, true)
+                == VoteAnswer {
+                    granted: pre_vote_granted,
+                    epoch,
+                },
             "{label}: pre-vote"
         );
         let mut m = build();
         check!(
-            vote_answer(&mut m, epoch, false, true) == (vote_granted, epoch),
+            vote_answer(&mut m, epoch, false, true)
+                == VoteAnswer {
+                    granted: vote_granted,
+                    epoch,
+                },
             "{label}: vote"
         );
         let mut m = build();
         check!(
-            vote_answer(&mut m, epoch, true, false) == (false, epoch),
+            vote_answer(&mut m, epoch, true, false)
+                == VoteAnswer {
+                    granted: false,
+                    epoch,
+                },
             "{label}: pre-vote with a log that is behind"
         );
     }
@@ -378,18 +448,29 @@ fn each_state_grants_pre_votes_and_votes_by_its_own_rule() {
 /// election proceeds without waiting for a check-quorum or fetch timeout.
 #[test]
 fn a_pre_vote_from_a_higher_epoch_steps_down_a_stale_leader_or_follower() {
-    let cases: Vec<(&str, Build)> = vec![
-        ("leader", Box::new(leader_of_three)),
-        (
-            "follower that has fetched",
-            Box::new(|| follower_of_three(true)),
-        ),
+    struct Case {
+        label: &'static str,
+        build: Build,
+    }
+    let cases = vec![
+        Case {
+            label: "leader",
+            build: Box::new(leader_of_three),
+        },
+        Case {
+            label: "follower that has fetched",
+            build: Box::new(|| follower_of_three(true)),
+        },
     ];
-    for (label, build) in cases {
+    for Case { label, build } in cases {
         let mut m = build();
         let epoch = m.quorum_state().leader_epoch + 3;
         check!(
-            vote_answer(&mut m, epoch, true, true) == (true, epoch),
+            vote_answer(&mut m, epoch, true, true)
+                == VoteAnswer {
+                    granted: true,
+                    epoch,
+                },
             "{label}: grants at the new epoch"
         );
         check!(
@@ -409,9 +490,19 @@ fn a_pre_vote_from_a_higher_epoch_steps_down_a_stale_leader_or_follower() {
 #[test]
 fn a_vote_is_granted_again_only_to_the_candidate_it_went_to() {
     let mut m = three_voter_machine();
-    check!(vote_answer(&mut m, 1, false, true) == (true, 1));
     check!(
-        vote_answer(&mut m, 1, false, false) == (true, 1),
+        vote_answer(&mut m, 1, false, true)
+            == VoteAnswer {
+                granted: true,
+                epoch: 1,
+            }
+    );
+    check!(
+        vote_answer(&mut m, 1, false, false)
+            == VoteAnswer {
+                granted: true,
+                epoch: 1,
+            },
         "same candidate"
     );
     let actions = receive_vote(&mut m, vote_event(NodeId(3), 1, false, 1, 5));
@@ -443,21 +534,39 @@ fn grants_vote_to(m: &mut QuorumStateMachine, candidate: NodeId, epoch: u32) -> 
 /// leaders could hold that epoch.
 #[test]
 fn a_vote_survives_following_the_leader_of_its_epoch() {
+    struct Case {
+        label: &'static str,
+        event: Event,
+    }
+
     let end_epoch = SuccessorRank {
         position: 1,
         successors: 1,
     };
-    let cases: Vec<(&str, Event)> = vec![
-        ("the leader resigns", Event::ReceiveEndQuorumEpoch {
-            leader_id: NodeId(3),
-            leader_epoch: 4,
-            successor_rank: end_epoch,
-        }),
-        ("the fetch times out", Event::FetchTimeout),
+    let cases = vec![
+        Case {
+            label: "the leader resigns",
+            event: Event::ReceiveEndQuorumEpoch {
+                leader_id: NodeId(3),
+                leader_epoch: 4,
+                successor_rank: end_epoch,
+            },
+        },
+        Case {
+            label: "the fetch times out",
+            event: Event::FetchTimeout,
+        },
     ];
-    for (label, event) in cases {
+    for Case { label, event } in cases {
         let mut m = three_voter_machine();
-        check!(vote_answer(&mut m, 4, false, true) == (true, 4), "{label}");
+        check!(
+            vote_answer(&mut m, 4, false, true)
+                == VoteAnswer {
+                    granted: true,
+                    epoch: 4,
+                },
+            "{label}"
+        );
         m.on_event(
             Event::ReceiveBeginQuorumEpoch {
                 leader_id: NodeId(3),
@@ -493,7 +602,13 @@ fn a_vote_survives_following_the_leader_of_its_epoch() {
 #[test]
 fn a_vote_does_not_outlive_its_epoch() {
     let mut m = three_voter_machine();
-    check!(vote_answer(&mut m, 4, false, true) == (true, 4));
+    check!(
+        vote_answer(&mut m, 4, false, true)
+            == VoteAnswer {
+                granted: true,
+                epoch: 4,
+            }
+    );
     m.on_event(
         Event::ReceiveBeginQuorumEpoch {
             leader_id: NodeId(3),
@@ -530,7 +645,14 @@ fn a_prospective_replica_that_followed_a_leader_grants_no_binding_vote_in_that_e
         ) == (true, None, None)
     );
     check!(!grants_vote_to(&mut m, NodeId(2), 4), "binding vote");
-    check!(vote_answer(&mut m, 4, true, true) == (true, 4), "pre-vote");
+    check!(
+        vote_answer(&mut m, 4, true, true)
+            == VoteAnswer {
+                granted: true,
+                epoch: 4,
+            },
+        "pre-vote"
+    );
 }
 
 /// The belief is not lost when the election timer starts the round again.
@@ -642,7 +764,12 @@ fn zero_target_is_valid_for_voter_zero() {
 
 #[test]
 fn stale_target_directory_is_ignored_before_epoch_mutation() {
-    let (mut m, cluster_id, _voter_directory_id, candidate_directory_id) = dynamic_machine();
+    let DynamicMachine {
+        machine: mut m,
+        cluster_id,
+        candidate_directory_id,
+        ..
+    } = dynamic_machine();
     let actions = receive_vote(
         &mut m,
         VoteRequest {
@@ -660,7 +787,12 @@ fn stale_target_directory_is_ignored_before_epoch_mutation() {
 
 #[test]
 fn stale_candidate_directory_is_denied_before_epoch_mutation() {
-    let (mut m, cluster_id, voter_directory_id, _candidate_directory_id) = dynamic_machine();
+    let DynamicMachine {
+        machine: mut m,
+        cluster_id,
+        voter_directory_id,
+        ..
+    } = dynamic_machine();
     let actions = receive_vote(
         &mut m,
         VoteRequest {
@@ -678,7 +810,12 @@ fn stale_candidate_directory_is_denied_before_epoch_mutation() {
 
 #[test]
 fn foreign_cluster_is_denied_before_epoch_mutation() {
-    let (mut m, _cluster_id, voter_directory_id, candidate_directory_id) = dynamic_machine();
+    let DynamicMachine {
+        machine: mut m,
+        voter_directory_id,
+        candidate_directory_id,
+        ..
+    } = dynamic_machine();
     let actions = receive_vote(
         &mut m,
         VoteRequest {

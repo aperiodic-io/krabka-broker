@@ -179,16 +179,20 @@ mod tests {
         role: InstalledRole,
     }
 
+    /// A hosted partition with the image and registry that name it, and the
+    /// directory that holds its log.
+    struct HostedFixture {
+        dir: tempfile::TempDir,
+        image: MetadataImage,
+        partitions: PartitionRegistry,
+        partition: Arc<Partition>,
+    }
+
     #[bon::builder]
     async fn hosted_fixture(
         #[builder(into, default = krabka_audit :: NodeId (1))] image_leader: krabka_audit::NodeId,
         #[builder(default)] role: InstalledRole,
-    ) -> (
-        tempfile::TempDir,
-        MetadataImage,
-        PartitionRegistry,
-        Arc<Partition>,
-    ) {
+    ) -> HostedFixture {
         let setup = HostedPartitionSetup { image_leader, role };
         let dir = tempfile::tempdir().expect("tempdir");
         let image = image_with_topic("orders", setup.image_leader.0);
@@ -202,7 +206,12 @@ mod tests {
             krabka_ids::PartitionIndex(0),
             partition.clone(),
         );
-        (dir, image, partitions, partition)
+        HostedFixture {
+            dir,
+            image,
+            partitions,
+            partition,
+        }
     }
 
     /// Keep the borrowed context and its log-directory registry in each caller's scope.
@@ -253,7 +262,12 @@ mod tests {
 
     #[tokio::test]
     async fn following_locally_is_not_leader_or_follower_unless_debugging() {
-        let (_dir, image, partitions, _partition) = hosted_fixture().image_leader(2).call().await;
+        let HostedFixture {
+            dir: _dir,
+            image,
+            partitions,
+            ..
+        } = hosted_fixture().image_leader(2).call().await;
         partition_context!((log_dir_status, ctx), &partitions, &image);
 
         let refused = resolve_leadership("orders", 0, -1, -1, ctx).map(|_| ());
@@ -265,8 +279,12 @@ mod tests {
 
     #[tokio::test]
     async fn leading_locally_resolves_and_an_offline_log_dir_is_reported() {
-        let (_dir, image, partitions, partition) =
-            hosted_fixture().role(InstalledRole::Leader).call().await;
+        let HostedFixture {
+            image,
+            partitions,
+            partition,
+            dir: _dir,
+        } = hosted_fixture().role(InstalledRole::Leader).call().await;
         partition_context!((log_dir_status, ctx), &partitions, &image);
         let resolved = resolve_leadership("orders", 0, -1, -1, ctx);
         assert!(resolved.is_ok());
@@ -283,7 +301,12 @@ mod tests {
         // `current_leader` atomic still names the old leader, and a request
         // arriving in that window must not be served from the not-yet-caught-up
         // local log.
-        let (_dir, image, partitions, partition) = hosted_fixture().call().await;
+        let HostedFixture {
+            image,
+            partitions,
+            partition,
+            dir: _dir,
+        } = hosted_fixture().call().await;
         partition_context!((log_dir_status, ctx), &partitions, &image);
 
         let got = resolve_leadership("orders", 0, -1, -1, ctx).map(|_| ());

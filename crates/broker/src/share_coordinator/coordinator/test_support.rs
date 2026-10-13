@@ -197,16 +197,26 @@ pub(crate) fn set_clock(clock: &ManualWallClock, ms: u64) {
     clock.reanchor(UNIX_EPOCH + Duration::from_millis(NOW_MS.unsigned_abs() + ms));
 }
 
+/// A coordinator, the partitions it runs over, and the manual clock that
+/// drives it.
+pub(crate) struct ConfiguredCoordinator {
+    pub coord: ShareCoordinator,
+    pub registry: Arc<PartitionRegistry>,
+    pub clock: Arc<ManualWallClock>,
+}
+
+/// A coordinator and the partitions it runs over.
+pub(super) struct CoordinatorWithRegistry {
+    pub coord: ShareCoordinator,
+    pub registry: Arc<PartitionRegistry>,
+}
+
 /// A coordinator with `config` over all of its state partitions, open
 /// locally, and the manual clock that drives it.
 pub(crate) fn configured_coordinator(
     dir: &Path,
     config: ShareCoordinatorConfig,
-) -> (
-    ShareCoordinator,
-    Arc<PartitionRegistry>,
-    Arc<ManualWallClock>,
-) {
+) -> ConfiguredCoordinator {
     let reg = open_state_partitions(dir, config.state_topic_num_partitions);
     let clock = manual_clock();
     let coord = ShareCoordinator::with_wall_clock(
@@ -215,15 +225,21 @@ pub(crate) fn configured_coordinator(
         config,
         Arc::clone(&clock) as Arc<dyn qubit_clock::WallClock>,
     );
-    (coord, reg, clock)
+    ConfiguredCoordinator {
+        coord,
+        registry: reg,
+        clock,
+    }
 }
 
 /// A coordinator that leads every state partition it touches.
 ///
 /// All 50 `__share_group_state` partitions are open locally.
-pub(super) fn coordinator(dir: &Path) -> (ShareCoordinator, Arc<PartitionRegistry>) {
-    let (coord, reg, _clock) = configured_coordinator(dir, ShareCoordinatorConfig::default());
-    (coord, reg)
+pub(super) fn coordinator(dir: &Path) -> CoordinatorWithRegistry {
+    let ConfiguredCoordinator {
+        coord, registry, ..
+    } = configured_coordinator(dir, ShareCoordinatorConfig::default());
+    CoordinatorWithRegistry { coord, registry }
 }
 
 pub(super) async fn lead_all(coord: &ShareCoordinator) {
@@ -238,6 +254,13 @@ pub(crate) enum Logged {
     Tombstone,
 }
 
+/// A decoded record of a state partition log, and its offset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LoggedRecord {
+    pub offset: Offset,
+    pub logged: Logged,
+}
+
 /// Decoded records appended after the caller's previous log-length snapshot.
 pub(crate) fn logged_since(
     coordinator: &ShareCoordinator,
@@ -247,7 +270,7 @@ pub(crate) fn logged_since(
     logged_records(coordinator, state_partition)
         .into_iter()
         .skip(before)
-        .map(|(_, logged)| logged)
+        .map(|record| record.logged)
         .collect()
 }
 
@@ -255,7 +278,7 @@ pub(crate) fn logged_since(
 pub(crate) fn logged_records(
     coord: &ShareCoordinator,
     state_partition: PartitionIndex,
-) -> Vec<(Offset, Logged)> {
+) -> Vec<LoggedRecord> {
     let part = coord
         .partitions
         .get(bootstrap::TOPIC, state_partition)
@@ -281,10 +304,10 @@ pub(crate) fn logged_records(
                         Logged::Update(ShareUpdateValue::decode(value).expect("update"))
                     }
                 };
-                records.push((
-                    Offset(batch.base_offset + i64::from(rec.offset_delta)),
+                records.push(LoggedRecord {
+                    offset: Offset(batch.base_offset + i64::from(rec.offset_delta)),
                     logged,
-                ));
+                });
             }
             offset = Offset(batch.base_offset + i64::from(batch.last_offset_delta) + 1);
         }

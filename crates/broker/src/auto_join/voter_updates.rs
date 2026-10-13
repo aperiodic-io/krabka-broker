@@ -348,9 +348,14 @@ mod tests {
             .expect("returns immediately on overflow");
     }
 
-    async fn spawn_mock_update_server(
-        response_code: i16,
-    ) -> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
+    /// A mock `UpdateRaftVoter` server: where it listens and how many valid
+    /// requests it has answered.
+    struct MockUpdateServer {
+        addr: std::net::SocketAddr,
+        count: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    async fn spawn_mock_update_server(response_code: i16) -> MockUpdateServer {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
@@ -360,17 +365,19 @@ mod tests {
 
         tokio::spawn(async move {
             use {
-                crate::auto_join::test_support::{negotiate_versions, read_frame, write_response},
+                crate::auto_join::test_support::{
+                    AdvertisedApi, negotiate_versions, read_frame, write_response,
+                },
                 krabka_protocol::owned::{
                     update_raft_voter_request as req,
                     update_raft_voter_response::UpdateRaftVoterResponse,
                 },
             };
             while let Ok((mut socket, _)) = listener.accept().await {
-                if negotiate_versions(&mut socket, &[(
-                    krabka_ids::ApiKey(req::API_KEY),
-                    krabka_ids::ApiVersion(req::MAX_VERSION),
-                )])
+                if negotiate_versions(&mut socket, &[AdvertisedApi {
+                    api_key: krabka_ids::ApiKey(req::API_KEY),
+                    max_version: krabka_ids::ApiVersion(req::MAX_VERSION),
+                }])
                 .await
                 .is_ok()
                     && let Ok(frame) = read_frame(&mut socket).await
@@ -394,12 +401,12 @@ mod tests {
             }
         });
 
-        (addr, count)
+        MockUpdateServer { addr, count }
     }
 
     #[tokio::test]
     async fn run_voter_updates_advertises_to_leader_and_records_success() {
-        let (addr, count) = spawn_mock_update_server(codes::NONE).await;
+        let MockUpdateServer { addr, count } = spawn_mock_update_server(codes::NONE).await;
 
         let params = voter_update_params(addr, Some(NodeId(1)));
 
@@ -410,7 +417,8 @@ mod tests {
 
     #[tokio::test]
     async fn run_voter_updates_retries_on_error_response() {
-        let (addr, count) = spawn_mock_update_server(codes::UNKNOWN_SERVER_ERROR).await;
+        let MockUpdateServer { addr, count } =
+            spawn_mock_update_server(codes::UNKNOWN_SERVER_ERROR).await;
 
         let params = voter_update_params(addr, Some(NodeId(1)));
 
@@ -421,7 +429,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_voter_updates_does_not_advertise_when_leader_is_none() {
-        let (addr, count) = spawn_mock_update_server(codes::NONE).await;
+        let MockUpdateServer { addr, count } = spawn_mock_update_server(codes::NONE).await;
 
         let params = voter_update_params(addr, None);
 

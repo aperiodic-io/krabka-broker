@@ -53,14 +53,18 @@ pub fn render_sectioned_field_table(schema: &Value) -> String {
     // Partition top-level properties: object-with-`properties` ones become
     // their own section; everything else (scalars, arrays, refless objects)
     // lands in the shared "General" table.
-    let mut general: Vec<(&String, &Value)> = Vec::new();
-    let mut sections: Vec<(&String, &Value, &Value)> = Vec::new();
+    let mut general: Vec<TopLevelField<'_>> = Vec::new();
+    let mut sections: Vec<SectionField<'_>> = Vec::new();
     for (name, field) in props {
         let resolved = effective_schema(schema, field);
         if resolved.get("properties").is_some() {
-            sections.push((name, field, resolved));
+            sections.push(SectionField {
+                name,
+                field,
+                resolved,
+            });
         } else {
-            general.push((name, field));
+            general.push(TopLevelField { name, field });
         }
     }
 
@@ -69,7 +73,7 @@ pub fn render_sectioned_field_table(schema: &Value) -> String {
     if !general.is_empty() {
         let mut body = String::from("## General\n\n");
         body.push_str(&field_table_header());
-        for (name, field) in general {
+        for TopLevelField { name, field } in general {
             let resolved = effective_schema(schema, field);
             let req = required.contains(&name.as_str());
             write_field_row(schema, name, field, resolved, req, &mut body);
@@ -77,7 +81,12 @@ pub fn render_sectioned_field_table(schema: &Value) -> String {
         parts.push(body);
     }
 
-    for (name, field, resolved) in sections {
+    for SectionField {
+        name,
+        field,
+        resolved,
+    } in sections
+    {
         let mut body = format!("## {name}\n\n");
         if let Some(desc) = field
             .get("description")
@@ -97,6 +106,20 @@ pub fn render_sectioned_field_table(schema: &Value) -> String {
     }
 
     parts.join("\n\n---\n\n")
+}
+
+/// A top-level property of the schema.
+struct TopLevelField<'a> {
+    name: &'a String,
+    field: &'a Value,
+}
+
+/// A top-level property that is an object with `properties`, and so renders as
+/// its own section. `resolved` is the schema that `field` refers to.
+struct SectionField<'a> {
+    name: &'a String,
+    field: &'a Value,
+    resolved: &'a Value,
 }
 
 /// The shared 5-column field-table header.

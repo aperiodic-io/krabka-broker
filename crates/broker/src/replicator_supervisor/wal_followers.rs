@@ -5,7 +5,10 @@
 #[cfg(test)]
 use krabka_raft::NodeId;
 use {
-    super::{ReplicatorSupervisor, WalFollowerSpec, WalFollowerTask, resolve_leader_endpoint},
+    super::{
+        LeaderEndpoint, ReplicatorSupervisor, WalFollowerSpec, WalFollowerTask,
+        resolve_leader_endpoint,
+    },
     crate::{
         config_keys::resolve_diskless,
         wal::quorum::{
@@ -127,8 +130,10 @@ impl ReplicatorSupervisor {
                 );
                 continue;
             };
-            let (leader_host, leader_port) =
-                resolve_leader_endpoint(broker, &self.inter_broker_listener_name);
+            let LeaderEndpoint {
+                host: leader_host,
+                port: leader_port,
+            } = resolve_leader_endpoint(broker, &self.inter_broker_listener_name);
             let token = self.shutdown.child_token();
             self.wal_task_targets.insert(shard, spec.clone());
             let handle = tokio::spawn(run(Config {
@@ -173,22 +178,26 @@ mod tests {
         uuid::Uuid,
     };
 
+    /// A supervisor, a shard and the placements that name the shard.
+    struct WalFollowerFixture {
+        supervisor: ReplicatorSupervisor,
+        shard: ShardId,
+        placements: HashMap<ShardId, WalPlacement>,
+    }
+
     /// A three-voter epoch-seven placement, retaining the original discarded fixture guards.
-    fn wal_follower_fixture(
-        image: &MetadataImage,
-        topic_id: Uuid,
-    ) -> (
-        ReplicatorSupervisor,
-        ShardId,
-        HashMap<ShardId, WalPlacement>,
-    ) {
+    fn wal_follower_fixture(image: &MetadataImage, topic_id: Uuid) -> WalFollowerFixture {
         let (supervisor, _, _, _) = supervisor_fixture(image.clone());
         let shard = ShardId {
             topic_id,
             partition: PartitionIndex(0),
         };
         let placements = maplit::hashmap! {shard => WalPlacement { voters: vec![NodeId(1), NodeId(2), NodeId(3)], leader_epoch: 7 }};
-        (supervisor, shard, placements)
+        WalFollowerFixture {
+            supervisor,
+            shard,
+            placements,
+        }
     }
 
     #[test]
@@ -213,7 +222,11 @@ mod tests {
                 overrides,
             }),
         ]);
-        let (supervisor, shard, complete) = wal_follower_fixture(&image, topic_id);
+        let WalFollowerFixture {
+            supervisor,
+            shard,
+            placements: complete,
+        } = wal_follower_fixture(&image, topic_id);
 
         let desired = supervisor.desired_wal_followers(&image, &complete);
 
@@ -254,7 +267,11 @@ mod tests {
             ])
         };
         let image = image_at_epoch(7);
-        let (supervisor, shard, placements) = wal_follower_fixture(&image, topic_id);
+        let WalFollowerFixture {
+            supervisor,
+            shard,
+            placements,
+        } = wal_follower_fixture(&image, topic_id);
         let target = WalFollowerSpec {
             topic: "diskless".into(),
             leader: NodeId(1),

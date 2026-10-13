@@ -153,34 +153,57 @@ mod tests {
 
     #[test]
     fn a_change_to_any_signed_field_changes_the_bytes() {
+        struct Case {
+            label: &'static str,
+            changed: BreakGlassProposalRecord,
+        }
+
         let baseline = approval_signing_bytes(&proposal());
-        let cases: [(&'static str, BreakGlassProposalRecord); 6] = [
-            ("another proposal id", BreakGlassProposalRecord {
-                proposal_id: Uuid::from_u128(1),
-                ..proposal()
-            }),
-            ("another action", BreakGlassProposalRecord {
-                action: BreakGlassAction::DeleteRecords,
-                ..proposal()
-            }),
-            ("another target", BreakGlassProposalRecord {
-                target: "orders".to_owned(),
-                ..proposal()
-            }),
-            ("another proposer", BreakGlassProposalRecord {
-                proposer: "User:mallory".to_owned(),
-                ..proposal()
-            }),
-            ("another creation time", BreakGlassProposalRecord {
-                created_at_ms: 1_770_000_000_001,
-                ..proposal()
-            }),
-            ("a later expiry", BreakGlassProposalRecord {
-                expires_at_ms: 1_780_000_000_000,
-                ..proposal()
-            }),
+        let cases: [Case; 6] = [
+            Case {
+                label: "another proposal id",
+                changed: BreakGlassProposalRecord {
+                    proposal_id: Uuid::from_u128(1),
+                    ..proposal()
+                },
+            },
+            Case {
+                label: "another action",
+                changed: BreakGlassProposalRecord {
+                    action: BreakGlassAction::DeleteRecords,
+                    ..proposal()
+                },
+            },
+            Case {
+                label: "another target",
+                changed: BreakGlassProposalRecord {
+                    target: "orders".to_owned(),
+                    ..proposal()
+                },
+            },
+            Case {
+                label: "another proposer",
+                changed: BreakGlassProposalRecord {
+                    proposer: "User:mallory".to_owned(),
+                    ..proposal()
+                },
+            },
+            Case {
+                label: "another creation time",
+                changed: BreakGlassProposalRecord {
+                    created_at_ms: 1_770_000_000_001,
+                    ..proposal()
+                },
+            },
+            Case {
+                label: "a later expiry",
+                changed: BreakGlassProposalRecord {
+                    expires_at_ms: 1_780_000_000_000,
+                    ..proposal()
+                },
+            },
         ];
-        for (label, changed) in cases {
+        for Case { label, changed } in cases {
             check!(approval_signing_bytes(&changed) != baseline, "case {label}");
         }
     }

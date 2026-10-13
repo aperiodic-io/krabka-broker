@@ -289,6 +289,14 @@ mod tests {
         .await
     }
 
+    /// A request version and filters, and the producer ids it keeps.
+    struct FilterCase<'a> {
+        version: i16,
+        duration_filter: i64,
+        pattern: Option<&'a str>,
+        expected_pids: &'a [i64],
+    }
+
     /// Seed one transaction and exercise the filters through their actual wire
     /// versions. This also protects the producer-id filter from being inverted.
     #[tokio::test]
@@ -329,18 +337,44 @@ mod tests {
             "pid filter must keep the matching entry, got {pids:?}"
         );
 
-        let cases: [(i16, i64, Option<&str>, &[i64]); 4] = [
+        let cases: [FilterCase<'_>; 4] = [
             // v0 omits both newer fields, even when the in-memory request sets
             // DurationFilter.
-            (0, i64::MAX, None, &[100]),
+            FilterCase {
+                version: 0,
+                duration_filter: i64::MAX,
+                pattern: None,
+                expected_pids: &[100],
+            },
             // v1 carries DurationFilter and this transaction is not old enough
             // to exceed the maximum threshold.
-            (1, i64::MAX, None, &[]),
+            FilterCase {
+                version: 1,
+                duration_filter: i64::MAX,
+                pattern: None,
+                expected_pids: &[],
+            },
             // v2 carries TransactionalIdPattern and uses full-string matching.
-            (2, -1, Some("txn-list-.*"), &[100]),
-            (2, -1, Some("list"), &[]),
+            FilterCase {
+                version: 2,
+                duration_filter: -1,
+                pattern: Some("txn-list-.*"),
+                expected_pids: &[100],
+            },
+            FilterCase {
+                version: 2,
+                duration_filter: -1,
+                pattern: Some("list"),
+                expected_pids: &[],
+            },
         ];
-        for (version, duration_filter, pattern, expected_pids) in cases {
+        for FilterCase {
+            version,
+            duration_filter,
+            pattern,
+            expected_pids,
+        } in cases
+        {
             let req = ListTransactionsRequest {
                 producer_id_filters: vec![100],
                 duration_filter,

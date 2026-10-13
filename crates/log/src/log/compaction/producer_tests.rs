@@ -57,6 +57,15 @@ fn header_and_whole(
     .collect()
 }
 
+/// A case name, its batches, whether the producers expire first, and the
+/// kept batches.
+struct ProducerCase<'a> {
+    name: &'static str,
+    batches: &'a [RecordBatch],
+    expired: bool,
+    want: Vec<Kept>,
+}
+
 /// Kafka's cleaner keeps the last record of each producer in the producer
 /// state of the log. That record is the last data batch of the producer at
 /// its epoch, or a marker at its epoch when a marker at a new epoch has
@@ -82,50 +91,55 @@ fn compaction_keeps_the_last_record_of_each_producer_in_the_log() {
         record(None, false, ("a", "a-2"), 0),
         record(None, false, ("c", "c-3"), 0),
     ];
-    // (case, batches, whether the producers expire first, the kept batches)
-    let cases: Vec<(&str, &Vec<RecordBatch>, bool, Vec<Kept>)> = vec![
-        (
-            "the last batch of an idempotent producer",
-            &superseded,
-            false,
-            header_and_whole(&superseded, 1, 2..5),
-        ),
-        (
-            "an expired idempotent producer",
-            &superseded,
-            true,
-            whole_batches(&superseded, 2..5),
-        ),
-        (
-            "the last batch at the new epoch of a producer",
-            &new_epoch,
-            false,
-            header_and_whole(&new_epoch, 1, 2..5),
-        ),
+    let cases = vec![
+        ProducerCase {
+            name: "the last batch of an idempotent producer",
+            batches: &superseded,
+            expired: false,
+            want: header_and_whole(&superseded, 1, 2..5),
+        },
+        ProducerCase {
+            name: "an expired idempotent producer",
+            batches: &superseded,
+            expired: true,
+            want: whole_batches(&superseded, 2..5),
+        },
+        ProducerCase {
+            name: "the last batch at the new epoch of a producer",
+            batches: &new_epoch,
+            expired: false,
+            want: header_and_whole(&new_epoch, 1, 2..5),
+        },
         // The data batch is the last record of the producer, so every pass
         // meets a batch of the transaction and the marker stays.
-        (
-            "a commit marker at the epoch of the transaction",
-            &same_epoch_commit,
-            false,
-            header_and_whole(&same_epoch_commit, 0, 1..4),
-        ),
+        ProducerCase {
+            name: "a commit marker at the epoch of the transaction",
+            batches: &same_epoch_commit,
+            expired: false,
+            want: header_and_whole(&same_epoch_commit, 0, 1..4),
+        },
         // The marker is the last record of the producer: it holds the epoch
         // that fences the producer.
-        (
-            "a commit marker at the next epoch",
-            &next_epoch_commit,
-            false,
-            header_and_whole(&next_epoch_commit, 1, 2..4),
-        ),
-        (
-            "a commit marker of an expired producer",
-            &next_epoch_commit,
-            true,
-            whole_batches(&next_epoch_commit, 2..4),
-        ),
+        ProducerCase {
+            name: "a commit marker at the next epoch",
+            batches: &next_epoch_commit,
+            expired: false,
+            want: header_and_whole(&next_epoch_commit, 1, 2..4),
+        },
+        ProducerCase {
+            name: "a commit marker of an expired producer",
+            batches: &next_epoch_commit,
+            expired: true,
+            want: whole_batches(&next_epoch_commit, 2..4),
+        },
     ];
-    for (name, batches, expired, want) in cases {
+    for ProducerCase {
+        name,
+        batches,
+        expired,
+        want,
+    } in cases
+    {
         for path in [Path::Leader, Path::Follower, Path::Verbatim] {
             let dir = tempdir().unwrap();
             // One batch for each segment, and no delete retention, so that the

@@ -1,6 +1,8 @@
 use {
     super::*,
-    crate::log::test_support::{commit_marker, sample_batch, test_log, transactional_batch},
+    crate::log::test_support::{
+        TempLog, commit_marker, sample_batch, test_log, transactional_batch,
+    },
     assert2::assert,
     krabka_ids::Offset,
 };
@@ -29,8 +31,8 @@ enum Start {
     OpenAtEpoch3,
 }
 
-fn log_at(start: Start) -> (tempfile::TempDir, Log) {
-    let (dir, mut log) = test_log();
+fn log_at(start: Start) -> TempLog {
+    let TempLog { dir, mut log } = test_log();
     if matches!(start, Start::CommittedAtEpoch3 | Start::OpenAtEpoch3) {
         let mut data = transactional_batch(PID, 3, &["a", "b"]);
         data.base_sequence = 0;
@@ -44,7 +46,7 @@ fn log_at(start: Start) -> (tempfile::TempDir, Log) {
     if matches!(start, Start::CommittedAtEpoch3) {
         log.append(&mut commit_marker(PID, 3)).unwrap();
     }
-    (dir, log)
+    TempLog { dir, log }
 }
 
 /// Kafka's `UnifiedLog.maybeStartTransactionVerification`: a stale epoch is
@@ -70,7 +72,7 @@ fn a_verification_starts_only_outside_an_open_transaction() {
         ),
     ];
     for (name, start, epoch, want_guard) in cases {
-        let (_dir, mut log) = log_at(start);
+        let TempLog { dir: _dir, mut log } = log_at(start);
         let first = log.maybe_start_transaction_verification(batch(epoch, 2, true), false, CLOCK);
         let again = log.maybe_start_transaction_verification(batch(epoch, 2, true), false, CLOCK);
         assert!(first == again, "{name}");
@@ -144,7 +146,7 @@ fn an_append_needs_an_open_transaction_or_the_current_guard() {
         ),
     ];
     for (name, start, appended, presented, want) in cases {
-        let (_dir, mut log) = log_at(start);
+        let TempLog { dir: _dir, mut log } = log_at(start);
         let guard = match presented {
             Presented::Sentinel => VerificationGuard::SENTINEL,
             Presented::StartedGuard => log
@@ -205,7 +207,7 @@ fn a_verified_first_batch_keeps_the_verified_sequence() {
         ),
     ];
     for (name, supports_epoch_bump, verified_sequence, appended_sequence, want) in cases {
-        let (_dir, mut log) = log_at(Start::Empty);
+        let TempLog { dir: _dir, mut log } = log_at(Start::Empty);
         let guard = log
             .maybe_start_transaction_verification(
                 batch(0, verified_sequence, true),
@@ -224,7 +226,7 @@ fn a_verified_first_batch_keeps_the_verified_sequence() {
 /// older than the expiration window is dropped when another one starts.
 #[test]
 fn an_append_and_the_expiration_window_clear_the_guard() {
-    let (_dir, mut log) = log_at(Start::Empty);
+    let TempLog { dir: _dir, mut log } = log_at(Start::Empty);
     let guard = log
         .maybe_start_transaction_verification(batch(0, 0, true), false, CLOCK)
         .unwrap();
@@ -257,7 +259,7 @@ fn an_append_and_the_expiration_window_clear_the_guard() {
 #[test]
 fn a_truncation_and_a_reset_clear_the_verification_state() {
     for name in ["truncate", "reset"] {
-        let (_dir, mut log) = log_at(Start::Empty);
+        let TempLog { dir: _dir, mut log } = log_at(Start::Empty);
         log.append(&mut sample_batch(2)).unwrap();
         let guard = log
             .maybe_start_transaction_verification(batch(0, 5, true), true, CLOCK)
@@ -288,7 +290,7 @@ fn verification_guard_verifies_semantics() {
 
 #[test]
 fn verification_state_updates_lowest_sequence_and_epoch() {
-    let (_dir, mut log) = log_at(Start::Empty);
+    let TempLog { dir: _dir, mut log } = log_at(Start::Empty);
     let guard = log
         .maybe_start_transaction_verification(batch(0, 10, true), false, CLOCK)
         .unwrap();
@@ -319,7 +321,7 @@ fn verification_state_updates_lowest_sequence_and_epoch() {
 
 #[test]
 fn check_transactional_append_validates_producer_id_zero() {
-    let (_dir, log) = log_at(Start::Empty);
+    let TempLog { dir: _dir, log } = log_at(Start::Empty);
     let mut b = batch(0, 0, true);
     b.producer_id = ProducerId(0);
     // Producer 0 without verification guard must be refused
@@ -335,7 +337,7 @@ fn check_transactional_append_validates_producer_id_zero() {
 
 #[test]
 fn clear_verification_after_append_preserves_guard_only_for_epoch_bump_control() {
-    let (_dir, mut log) = log_at(Start::Empty);
+    let TempLog { dir: _dir, mut log } = log_at(Start::Empty);
     // Start verification with supports_epoch_bump = true
     let _guard = log
         .maybe_start_transaction_verification(batch(0, 0, true), true, CLOCK)

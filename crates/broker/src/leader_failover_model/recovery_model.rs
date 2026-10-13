@@ -47,7 +47,11 @@ use {
 /// what KFC-9's `require` gate tests.
 ///
 /// [`ElectionBasis::loses_data`]: crate::unclean_recovery::Election
-type Outcome = Option<(NodeId, bool)>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Outcome {
+    leader: NodeId,
+    loses_data: bool,
+}
 
 impl RecoveryModel {
     /// The election this configuration must produce for `responses`, stated
@@ -57,7 +61,7 @@ impl RecoveryModel {
     /// leader replica that answered then wins outright, however short its log,
     /// and only when none did does the most complete surviving log win and the
     /// election report itself as data-losing.
-    fn expected(&self, responses: &[ReplicaLogInfo]) -> Outcome {
+    fn expected(&self, responses: &[ReplicaLogInfo]) -> Option<Outcome> {
         let electable: Vec<ReplicaLogInfo> = responses
             .iter()
             .copied()
@@ -69,8 +73,16 @@ impl RecoveryModel {
             .filter(|r| self.eligible.contains(&wire_id(r.broker_id)))
             .collect();
         most_complete(&from_elr)
-            .map(|leader| (leader, false))
-            .or_else(|| most_complete(&electable).map(|leader| (leader, true)))
+            .map(|leader| Outcome {
+                leader,
+                loses_data: false,
+            })
+            .or_else(|| {
+                most_complete(&electable).map(|leader| Outcome {
+                    leader,
+                    loses_data: true,
+                })
+            })
     }
 }
 
@@ -91,12 +103,14 @@ fn most_complete(candidates: &[ReplicaLogInfo]) -> Option<NodeId> {
 
 /// The election `select_leader` actually returns, in the same reduced form
 /// [`RecoveryModel::expected`] states.
-fn actual(model: &RecoveryModel, responses: &[ReplicaLogInfo]) -> Outcome {
+fn actual(model: &RecoveryModel, responses: &[ReplicaLogInfo]) -> Option<Outcome> {
     // `RecoveryModel` has no ISR of its own -- it states the ELR-over-longest-log
     // ranking. An empty in-sync set skips `select_leader`'s first rung, which is
     // what keeps this model checking exactly the property it was written for.
-    select_leader(responses, &[], &model.eligible, &model.witnesses)
-        .map(|election| (election.leader, election.basis.loses_data()))
+    select_leader(responses, &[], &model.eligible, &model.witnesses).map(|election| Outcome {
+        leader: election.leader,
+        loses_data: election.basis.loses_data(),
+    })
 }
 
 impl Model for RecoveryModel {
@@ -174,7 +188,7 @@ impl Model for RecoveryModel {
             // may reach one -- ELR membership does not override the role.
             Property::always("no_rule_elects_a_witness", |model, s: &RecoveryState| {
                 actual(model, &infos_of(s))
-                    .is_none_or(|(leader, _)| !model.witnesses.contains(&leader))
+                    .is_none_or(|elected| !model.witnesses.contains(&elected.leader))
             }),
             // The real has_newer_leader matches its specification.
             Property::always("has_newer_leader_matches", |_, s: &RecoveryState| {
@@ -202,7 +216,7 @@ impl Model for RecoveryModel {
                 "the_elr_rule_outranks_a_longer_log",
                 |model, s: &RecoveryState| {
                     let infos = infos_of(s);
-                    let Some((leader, loses_data)) = actual(model, &infos) else {
+                    let Some(Outcome { leader, loses_data }) = actual(model, &infos) else {
                         return false;
                     };
                     let electable: Vec<ReplicaLogInfo> = infos

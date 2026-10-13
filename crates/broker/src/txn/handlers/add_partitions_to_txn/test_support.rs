@@ -8,19 +8,63 @@ use {
         broker::{Broker, BrokerHandle},
         coordinator::test_support::single_replica_partition,
         test_support::{configure_single_partition_transactions, start_broker_no_audit_with},
-        txn::{state::TxnEntry, version::resolve_txn_version},
+        txn::{
+            state::{TopicPartition, TxnEntry},
+            version::resolve_txn_version,
+        },
     },
+    krabka_ids::PartitionIndex,
     krabka_protocol::owned::common::{
-        add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
+        add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic as RequestTopic,
         add_partitions_to_txn_response::{
             add_partitions_to_txn_partition_result::AddPartitionsToTxnPartitionResult,
             add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
         },
     },
+    std::collections::HashSet,
 };
 
-pub(super) fn topic(name: &str, partitions: &[i32]) -> AddPartitionsToTxnTopic {
-    AddPartitionsToTxnTopic {
+/// One partition row of a response, in a static test table.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PartitionCode {
+    pub(super) partition: i32,
+    pub(super) code: i16,
+}
+
+/// A topic and the partitions a request names, in a static test table.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct TopicSpec {
+    pub(super) name: &'static str,
+    pub(super) partitions: &'static [i32],
+}
+
+/// A topic and the partition rows a response answers for it, in a static test
+/// table.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct TopicRows {
+    pub(super) name: &'static str,
+    pub(super) rows: &'static [PartitionCode],
+}
+
+/// A topic partition, in a static test table.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PartitionSpec {
+    pub(super) topic: &'static str,
+    pub(super) partition: i32,
+}
+
+impl PartitionSpec {
+    /// The transaction-state form of this partition.
+    pub(super) fn to_topic_partition(self) -> TopicPartition {
+        TopicPartition {
+            topic: self.topic.to_owned(),
+            partition: PartitionIndex(self.partition),
+        }
+    }
+}
+
+pub(super) fn topic(name: &str, partitions: &[i32]) -> RequestTopic {
+    RequestTopic {
         name: name.into(),
         partitions: partitions.to_vec(),
         ..Default::default()
@@ -29,15 +73,15 @@ pub(super) fn topic(name: &str, partitions: &[i32]) -> AddPartitionsToTxnTopic {
 
 /// Builds a fully pinned expected topic-result row. Every field is
 /// explicit, so that whole-value comparisons kill field-drop mutants.
-pub(super) fn topic_result(name: &str, rows: &[(i32, i16)]) -> AddPartitionsToTxnTopicResult {
+pub(super) fn topic_result(name: &str, rows: &[PartitionCode]) -> AddPartitionsToTxnTopicResult {
     AddPartitionsToTxnTopicResult {
         name: name.into(),
         results_by_partition: rows
             .iter()
             .map(
-                |&(partition_index, partition_error_code)| AddPartitionsToTxnPartitionResult {
-                    partition_index,
-                    partition_error_code,
+                |&PartitionCode { partition, code }| AddPartitionsToTxnPartitionResult {
+                    partition_index: partition,
+                    partition_error_code: code,
                     unknown_tagged_fields: krabka_protocol::UnknownTaggedFields(vec![]),
                 },
             )
@@ -74,6 +118,12 @@ pub(in crate::txn::handlers) async fn seed_topic(broker: &Broker, topic: &str, p
         .unwrap_or_else(|error| panic!("seed topic {topic}: {error}"));
 }
 
+/// A started broker and the data directory that must outlive it.
+pub(in crate::txn::handlers) struct CoordinatorBroker {
+    pub(in crate::txn::handlers) handle: BrokerHandle,
+    pub(in crate::txn::handlers) dir: tempfile::TempDir,
+}
+
 /// A broker that coordinates every transactional id, with topics `a` and `b`
 /// of one partition each, both led by this broker.
 ///
@@ -82,7 +132,7 @@ pub(in crate::txn::handlers) async fn seed_topic(broker: &Broker, topic: &str, p
 /// so [`seed_transaction`] and the handler both see a coordinator.
 pub(in crate::txn::handlers) async fn start_coordinator(
     authorizer: std::sync::Arc<dyn Authorizer>,
-) -> (BrokerHandle, tempfile::TempDir) {
+) -> CoordinatorBroker {
     let (handle, dir) = start_broker_no_audit_with(|cfg| {
         configure_single_partition_transactions(cfg, authorizer);
     })
@@ -93,7 +143,7 @@ pub(in crate::txn::handlers) async fn start_coordinator(
     handle.wait_until_transaction_coordinator_ready().await;
     seed_topic(&broker, "a", 1).await;
     seed_topic(&broker, "b", 1).await;
-    (handle, dir)
+    CoordinatorBroker { handle, dir }
 }
 
 /// Opens an empty transaction for `tid` under `producer_id` at producer epoch
@@ -120,11 +170,8 @@ pub(in crate::txn::handlers) async fn seed_transaction(
         .expect("seed the open transaction");
 }
 
-/// The `(topic, partition)` pairs `tid`'s transaction holds.
-pub(super) async fn enlisted(
-    broker: &Broker,
-    tid: &str,
-) -> std::collections::BTreeSet<(String, i32)> {
+/// The partitions `tid`'s transaction holds.
+pub(super) async fn enlisted(broker: &Broker, tid: &str) -> HashSet<TopicPartition> {
     broker
         .txn_coordinator
         .get(tid)
@@ -132,7 +179,13 @@ pub(super) async fn enlisted(
         .lock()
         .await
         .partitions
+        .clone()
+}
+
+/// The set of partitions a static test table names.
+pub(super) fn partition_set(specs: &[PartitionSpec]) -> HashSet<TopicPartition> {
+    specs
         .iter()
-        .map(|tp| (tp.topic.clone(), tp.partition.get()))
+        .map(|&spec| spec.to_topic_partition())
         .collect()
 }

@@ -7,7 +7,8 @@
 use {
     super::{
         super::checks::{FreezeEnv, check_signature, is_signed, prepare, record_of},
-        ALICE, ALICE_KEY, ALICE_NAME, PROPOSAL, alice_key_configuration, freeze_request, sign,
+        ALICE, ALICE_KEY, ALICE_NAME, AliceKeyConfiguration, PROPOSAL, alice_key_configuration,
+        freeze_request, sign,
     },
     crate::{
         break_glass::handlers::principal_name,
@@ -89,7 +90,9 @@ fn a_signature_is_named_by_either_half_of_the_pair() {
 /// exists to avoid.
 #[test]
 fn the_freeze_path_names_the_author_the_way_the_break_glass_path_does() {
-    let (_dir, config, _) = alice_key_configuration();
+    let AliceKeyConfiguration {
+        dir: _dir, config, ..
+    } = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
 
     // What the listener actually authenticated, and what each path makes of it.
@@ -117,7 +120,11 @@ fn the_freeze_path_names_the_author_the_way_the_break_glass_path_does() {
 
 #[test]
 fn an_unsigned_freeze_is_accepted_by_default_and_refused_under_require_signature() {
-    let (_dir, base, _) = alice_key_configuration();
+    let AliceKeyConfiguration {
+        dir: _dir,
+        config: base,
+        ..
+    } = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[]);
 
     for (label, requirement, expected) in [
@@ -150,7 +157,11 @@ fn an_unsigned_freeze_is_accepted_by_default_and_refused_under_require_signature
 
 #[test]
 fn an_unsigned_thaw_is_refused_whatever_require_signature_says() {
-    let (_dir, base, _) = alice_key_configuration();
+    let AliceKeyConfiguration {
+        dir: _dir,
+        config: base,
+        ..
+    } = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[("orders", PatternType::Literal)]);
 
     for requirement in [
@@ -182,7 +193,11 @@ fn an_unsigned_thaw_is_refused_whatever_require_signature_says() {
 
 #[test]
 fn a_signed_freeze_verifies_and_a_tampered_one_answers_one_code() {
-    let (_dir, config, alice) = alice_key_configuration();
+    let AliceKeyConfiguration {
+        dir: _dir,
+        config,
+        pair: alice,
+    } = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
     let good = TopicFreezeRecord {
         key_id: ALICE_KEY.to_owned(),

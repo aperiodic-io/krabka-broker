@@ -10,7 +10,7 @@ mod java_case;
 mod java_fold;
 
 use {
-    self::java_fold::Escape,
+    self::java_fold::{Consumed, Escape},
     crate::{
         codes::{INVALID_CONFIG, INVALID_REQUEST},
         config_keys::parse::{check_valid_list, int_value, java_trim, list_value, parse_int},
@@ -337,7 +337,7 @@ impl Translator<'_> {
     /// The escape at `at`.
     fn escape(&mut self) -> Option<()> {
         let in_class = self.in_class();
-        let (escape, len) = java_fold::read_escape(self.chars, self.at, in_class);
+        let Consumed { value: escape, len } = java_fold::read_escape(self.chars, self.at, in_class);
         match escape {
             // `fancy_regex` reads `\N{name}` as `\N` and the text of the name,
             // and the rewrite has no table of Unicode names to write the char.
@@ -462,7 +462,10 @@ impl Translator<'_> {
             at += self.ignored_len(at);
             match chars.get(at) {
                 Some('\\') => match java_fold::read_escape(chars, at, false) {
-                    (Escape::Char(_), len) => at += len,
+                    Consumed {
+                        value: Escape::Char(_),
+                        len,
+                    } => at += len,
                     _ => break,
                 },
                 Some(&c) if !is_meta(&[c]) && !matches!(c, '(' | ')' | '[') => at += 1,
@@ -522,7 +525,7 @@ impl Translator<'_> {
         }
         let end = dash + 1 + self.ignored_len(dash + 1);
         match java_fold::read_member(self.chars, end) {
-            Some((code, len)) => RangeEnd::To { end, code, len },
+            Some(Consumed { value: code, len }) => RangeEnd::To { end, code, len },
             // The end is an escape for more than one char, or none Java
             // reads: `[a-\w]` is `Illegal character range`, and `[a-\p{L}]`
             // is `Illegal/unsupported escape sequence`.
@@ -578,7 +581,7 @@ impl Translator<'_> {
         if group.scoped {
             self.outer.push(self.scope);
         }
-        for &(flag, on) in &group.changes {
+        for &FlagChange { flag, on } in &group.changes {
             self.scope.set(flag, on);
         }
         let translation = group.translation();
@@ -752,9 +755,15 @@ fn java_flag_group(rest: &[char]) -> Option<FlagGroup> {
                 } else {
                     on.push(c);
                 }
-                changes.push((c, !clearing));
+                changes.push(FlagChange {
+                    flag: c,
+                    on: !clearing,
+                });
             }
-            'i' | 'u' | 'd' | 'x' | 'U' => changes.push((c, !clearing)),
+            'i' | 'u' | 'd' | 'x' | 'U' => changes.push(FlagChange {
+                flag: c,
+                on: !clearing,
+            }),
             'c' => {}
             '-' if !clearing => clearing = true,
             ')' | ':' => {
@@ -784,7 +793,15 @@ struct FlagGroup {
     scoped: bool,
     /// The flags [`Scope`] follows that it sets (`true`) or clears (`false`),
     /// in the order Java applies them.
-    changes: Vec<(char, bool)>,
+    changes: Vec<FlagChange>,
+}
+
+/// A flag that a Java inline flag group sets or clears.
+#[derive(Clone, Copy)]
+struct FlagChange {
+    flag: char,
+    /// Whether the group turns the flag on.
+    on: bool,
 }
 
 impl FlagGroup {
@@ -817,8 +834,21 @@ mod tests {
         )
     }
 
-    fn check_client_id_patterns(cases: &[(&str, &str, bool)]) {
-        for &(pattern, input, expected) in cases {
+    /// A client id pattern, an input, and whether the whole input matches.
+    #[derive(Clone, Copy)]
+    struct PatternCase {
+        pattern: &'static str,
+        input: &'static str,
+        expected: bool,
+    }
+
+    fn check_client_id_patterns(cases: &[PatternCase]) {
+        for &PatternCase {
+            pattern,
+            input,
+            expected,
+        } in cases
+        {
             let rules = parse_match_rules(&format!("client_id={pattern}")).unwrap();
             check!(
                 rules[0].pattern.is_match(input).unwrap() == expected,
@@ -1008,22 +1038,86 @@ mod tests {
     fn match_patterns_read_ascii_classes_and_a_dot_that_stops_at_a_terminator() {
         // (pattern, input, whole input matches)
         let cases = [
-            ("\\w+", "app_1", true),
-            ("\\w+", "appé", false),
-            ("(?U)\\w+", "appé", true),
-            ("\\d+", "١٢٣", false),
-            ("app\\s1", "app\u{a0}1", false),
-            ("app.1", "app\r1", false),
-            ("app.1", "app\u{2028}1", false),
-            ("(?s)app.1", "app\r1", true),
-            ("(?d)app.1", "app\r1", true),
-            ("[.]", "\r", false),
-            ("[a&b]", "&", true),
-            ("[a&b]", "b", true),
-            ("[a&b]", "c", false),
-            ("(?iu)[a&b]", "&", true),
-            ("a{2}", "aa", true),
-            ("a{2}", "a", false),
+            PatternCase {
+                pattern: "\\w+",
+                input: "app_1",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "\\w+",
+                input: "appé",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?U)\\w+",
+                input: "appé",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "\\d+",
+                input: "١٢٣",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "app\\s1",
+                input: "app\u{a0}1",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "app.1",
+                input: "app\r1",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "app.1",
+                input: "app\u{2028}1",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?s)app.1",
+                input: "app\r1",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?d)app.1",
+                input: "app\r1",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "[.]",
+                input: "\r",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "[a&b]",
+                input: "&",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "[a&b]",
+                input: "b",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "[a&b]",
+                input: "c",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)[a&b]",
+                input: "&",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "a{2}",
+                input: "aa",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "a{2}",
+                input: "a",
+                expected: false,
+            },
         ];
         check_client_id_patterns(&cases);
     }
@@ -1036,31 +1130,119 @@ mod tests {
     fn match_patterns_fold_ascii_case_unless_unicode_case_is_on() {
         // (pattern, input, whole input matches)
         let cases = [
-            ("(?i)app-", "APP-", true),
-            ("(?i)service-.*", "SERVICE-1", true),
-            ("(?i)service-.*", "\u{17f}ervice-1", false),
-            ("(?iu)service-.*", "\u{17f}ervice-1", true),
-            ("(?i)k", "\u{212a}", false),
-            ("(?i)[a-c]+", "AbC", true),
-            ("(?i)[^a]", "A", false),
-            ("(?i)\\p{Lower}+", "aBc", true),
-            ("(?i)(?<Id>app)-\\d", "APP-1", true),
-            ("app(?i)-x", "app-X", true),
-            ("app(?i)-x", "APP-X", false),
+            PatternCase {
+                pattern: "(?i)app-",
+                input: "APP-",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?i)service-.*",
+                input: "SERVICE-1",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?i)service-.*",
+                input: "\u{17f}ervice-1",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)service-.*",
+                input: "\u{17f}ervice-1",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?i)k",
+                input: "\u{212a}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?i)[a-c]+",
+                input: "AbC",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?i)[^a]",
+                input: "A",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?i)\\p{Lower}+",
+                input: "aBc",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?i)(?<Id>app)-\\d",
+                input: "APP-1",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "app(?i)-x",
+                input: "app-X",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "app(?i)-x",
+                input: "APP-X",
+                expected: false,
+            },
             // A quoted member takes part in a range, a `]` first in a class may
             // start one, `\p{Lower}` and `\w` stay ASCII under `(?iu)`, and a
             // backreference folds ASCII case.
-            ("(?i)[\\Qa\\E-c]", "B", true),
-            ("(?i)[\\Qa\\E-c]", "X", false),
-            ("(?i)[]-c]", "A", true),
-            ("(?i)[]-c]", "X", false),
-            ("(?iu)\\p{Lower}", "\u{17f}", false),
-            ("(?iu)\\p{Lower}", "A", true),
-            ("(?iu)\\w", "\u{17f}", false),
-            ("(?i)(a)\\1", "aA", true),
-            ("(?i)(a)\\1", "ab", false),
-            ("(?i)(\\d+)-\\1", "12-12", true),
-            ("(?i)(\\d+)-\\1", "12-13", false),
+            PatternCase {
+                pattern: "(?i)[\\Qa\\E-c]",
+                input: "B",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?i)[\\Qa\\E-c]",
+                input: "X",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?i)[]-c]",
+                input: "A",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?i)[]-c]",
+                input: "X",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)\\p{Lower}",
+                input: "\u{17f}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)\\p{Lower}",
+                input: "A",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?iu)\\w",
+                input: "\u{17f}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?i)(a)\\1",
+                input: "aA",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?i)(a)\\1",
+                input: "ab",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?i)(\\d+)-\\1",
+                input: "12-12",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?i)(\\d+)-\\1",
+                input: "12-13",
+                expected: false,
+            },
         ];
         check_client_id_patterns(&cases);
     }
@@ -1075,30 +1257,126 @@ mod tests {
     fn match_patterns_fold_unicode_case_as_java_does() {
         // (pattern, input, whole input matches)
         let cases = [
-            ("(?iu)[\\w]", "\u{17f}", false),
-            ("(?iu)[\\w-]", "\u{212a}", false),
-            ("(?iu)[\\w-]", "-", true),
-            ("(?iu)[\\W]", "\u{17f}", true),
-            ("(?iu)[\\p{Lower}]", "\u{17f}", false),
-            ("(?iu)[\\p{Upper}]", "\u{212a}", false),
-            ("(?iu)[a-z]", "\u{212a}", true),
-            ("(?iu)[A-Z]", "\u{212a}", false),
-            ("(?iu)[A-K]", "\u{212a}", false),
-            ("(?iu)[A-c]", "\u{212a}", false),
-            ("(?iu)[A-Z]", "\u{17f}", true),
-            ("(?iu)[a-z]", "\u{130}", true),
-            ("(?iu)[A-Z]", "\u{130}", false),
-            ("(?iu)[a-z&&[^k]]", "\u{212a}", false),
-            ("(?iu)i", "\u{130}", true),
-            ("(?iu)[i]", "\u{131}", true),
-            ("(?iu)service-.*", "\u{17f}ervice-1", true),
-            ("(?iu)[\\x{391}-\\x{3a9}]", "\u{3c2}", true),
-            ("\\p{Alpha}", "\u{e9}", false),
-            ("\\p{Alnum}+", "a1", true),
-            ("\\p{Punct}", "\u{a1}", false),
-            ("[\\p{Digit}]", "\u{663}", false),
-            ("(?U)\\p{Alpha}", "\u{e9}", true),
-            ("(?U)\\p{Digit}", "\u{663}", true),
+            PatternCase {
+                pattern: "(?iu)[\\w]",
+                input: "\u{17f}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)[\\w-]",
+                input: "\u{212a}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)[\\w-]",
+                input: "-",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?iu)[\\W]",
+                input: "\u{17f}",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?iu)[\\p{Lower}]",
+                input: "\u{17f}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)[\\p{Upper}]",
+                input: "\u{212a}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)[a-z]",
+                input: "\u{212a}",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?iu)[A-Z]",
+                input: "\u{212a}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)[A-K]",
+                input: "\u{212a}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)[A-c]",
+                input: "\u{212a}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)[A-Z]",
+                input: "\u{17f}",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?iu)[a-z]",
+                input: "\u{130}",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?iu)[A-Z]",
+                input: "\u{130}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)[a-z&&[^k]]",
+                input: "\u{212a}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?iu)i",
+                input: "\u{130}",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?iu)[i]",
+                input: "\u{131}",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?iu)service-.*",
+                input: "\u{17f}ervice-1",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?iu)[\\x{391}-\\x{3a9}]",
+                input: "\u{3c2}",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "\\p{Alpha}",
+                input: "\u{e9}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "\\p{Alnum}+",
+                input: "a1",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "\\p{Punct}",
+                input: "\u{a1}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "[\\p{Digit}]",
+                input: "\u{663}",
+                expected: false,
+            },
+            PatternCase {
+                pattern: "(?U)\\p{Alpha}",
+                input: "\u{e9}",
+                expected: true,
+            },
+            PatternCase {
+                pattern: "(?U)\\p{Digit}",
+                input: "\u{663}",
+                expected: true,
+            },
         ];
         check_client_id_patterns(&cases);
     }
@@ -1108,33 +1386,188 @@ mod tests {
     /// inputs the compiled pattern must and must not fully match.
     #[test]
     fn java_inline_flags_mean_what_they_mean_in_java() {
-        type Case = (&'static str, Option<&'static [(&'static str, bool)]>);
+        /// An input and whether the compiled pattern fully matches it.
+        struct Input {
+            text: &'static str,
+            matches: bool,
+        }
+        /// A pattern, and the inputs it must and must not match, or `None` for
+        /// a pattern Java refuses.
+        struct Case {
+            pattern: &'static str,
+            inputs: Option<&'static [Input]>,
+        }
         let cases: [Case; 18] = [
-            ("(?d)^foo$", Some(&[("foo", true), ("xfoo", false)])),
-            ("(?i-d)foo", Some(&[("FOO", true)])),
-            ("(?U)\\w+", Some(&[("é", true), ("a b", false)])),
+            Case {
+                pattern: "(?d)^foo$",
+                inputs: Some(&[
+                    Input {
+                        text: "foo",
+                        matches: true,
+                    },
+                    Input {
+                        text: "xfoo",
+                        matches: false,
+                    },
+                ]),
+            },
+            Case {
+                pattern: "(?i-d)foo",
+                inputs: Some(&[Input {
+                    text: "FOO",
+                    matches: true,
+                }]),
+            },
+            Case {
+                pattern: "(?U)\\w+",
+                inputs: Some(&[
+                    Input {
+                        text: "é",
+                        matches: true,
+                    },
+                    Input {
+                        text: "a b",
+                        matches: false,
+                    },
+                ]),
+            },
             // `U` swapped greediness would make the atomic group take both.
-            ("(?U)(?>a+?)a", Some(&[("aa", true)])),
-            ("(?iu)é", Some(&[("É", true), ("e", false)])),
-            ("(?-i)A", Some(&[("A", true), ("a", false)])),
-            ("(?i)(?-i)A", Some(&[("A", true), ("a", false)])),
-            ("(?i:abc)d", Some(&[("ABCd", true), ("ABCD", false)])),
-            ("(?-:a)b", Some(&[("ab", true)])),
-            ("(?)a", Some(&[("a", true)])),
-            ("(?c)a", Some(&[("a", true)])),
-            ("(?ix)A b", Some(&[("ab", true), ("a b", false)])),
-            ("(?x)\\Q a#\\E", Some(&[(" a#", true), ("a", false)])),
-            ("(?q)a", None),
-            ("(?i--x)a", None),
-            ("(?-i-x)a", None),
-            ("(?i", None),
-            ("a(?d)*", None),
+            Case {
+                pattern: "(?U)(?>a+?)a",
+                inputs: Some(&[Input {
+                    text: "aa",
+                    matches: true,
+                }]),
+            },
+            Case {
+                pattern: "(?iu)é",
+                inputs: Some(&[
+                    Input {
+                        text: "É",
+                        matches: true,
+                    },
+                    Input {
+                        text: "e",
+                        matches: false,
+                    },
+                ]),
+            },
+            Case {
+                pattern: "(?-i)A",
+                inputs: Some(&[
+                    Input {
+                        text: "A",
+                        matches: true,
+                    },
+                    Input {
+                        text: "a",
+                        matches: false,
+                    },
+                ]),
+            },
+            Case {
+                pattern: "(?i)(?-i)A",
+                inputs: Some(&[
+                    Input {
+                        text: "A",
+                        matches: true,
+                    },
+                    Input {
+                        text: "a",
+                        matches: false,
+                    },
+                ]),
+            },
+            Case {
+                pattern: "(?i:abc)d",
+                inputs: Some(&[
+                    Input {
+                        text: "ABCd",
+                        matches: true,
+                    },
+                    Input {
+                        text: "ABCD",
+                        matches: false,
+                    },
+                ]),
+            },
+            Case {
+                pattern: "(?-:a)b",
+                inputs: Some(&[Input {
+                    text: "ab",
+                    matches: true,
+                }]),
+            },
+            Case {
+                pattern: "(?)a",
+                inputs: Some(&[Input {
+                    text: "a",
+                    matches: true,
+                }]),
+            },
+            Case {
+                pattern: "(?c)a",
+                inputs: Some(&[Input {
+                    text: "a",
+                    matches: true,
+                }]),
+            },
+            Case {
+                pattern: "(?ix)A b",
+                inputs: Some(&[
+                    Input {
+                        text: "ab",
+                        matches: true,
+                    },
+                    Input {
+                        text: "a b",
+                        matches: false,
+                    },
+                ]),
+            },
+            Case {
+                pattern: "(?x)\\Q a#\\E",
+                inputs: Some(&[
+                    Input {
+                        text: " a#",
+                        matches: true,
+                    },
+                    Input {
+                        text: "a",
+                        matches: false,
+                    },
+                ]),
+            },
+            Case {
+                pattern: "(?q)a",
+                inputs: None,
+            },
+            Case {
+                pattern: "(?i--x)a",
+                inputs: None,
+            },
+            Case {
+                pattern: "(?-i-x)a",
+                inputs: None,
+            },
+            Case {
+                pattern: "(?i",
+                inputs: None,
+            },
+            Case {
+                pattern: "a(?d)*",
+                inputs: None,
+            },
         ];
-        for (pattern, expected) in cases {
+        for Case { pattern, inputs } in cases {
             let entry = format!("client_id={pattern}");
-            match (parse_match_rules(&entry), expected) {
+            match (parse_match_rules(&entry), inputs) {
                 (Ok(rules), Some(inputs)) => {
-                    for &(input, matches) in inputs {
+                    for &Input {
+                        text: input,
+                        matches,
+                    } in inputs
+                    {
                         check!(
                             rules[0].pattern.is_match(input).unwrap() == matches,
                             "{pattern} on {input:?}"
@@ -1150,7 +1583,7 @@ mod tests {
                     );
                 }
                 (result, _) => {
-                    check!(result.is_ok() == expected.is_some(), "{pattern}");
+                    check!(result.is_ok() == inputs.is_some(), "{pattern}");
                 }
             }
         }

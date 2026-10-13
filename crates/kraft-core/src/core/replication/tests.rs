@@ -2,7 +2,8 @@ use {
     super::*,
     crate::{
         core::test_support::{
-            CellLog, FakeLog, RunsLog, machine, three_voter_machine, voters, win_election,
+            CellLog, EpochRun, FakeLog, MachineLogAndActions, RunsLog, machine,
+            three_voter_machine, voters, win_election,
         },
         event::Event,
     },
@@ -201,7 +202,16 @@ fn a_fetch_is_valid_only_at_an_epoch_the_leader_holds_to_that_offset() {
             diverging: diverging(6, 200),
         },
     ];
-    let log = RunsLog::new(&[(4, 120), (6, 80)]);
+    let log = RunsLog::new(&[
+        EpochRun {
+            epoch: 4,
+            count: 120,
+        },
+        EpochRun {
+            epoch: 6,
+            count: 80,
+        },
+    ]);
     for case in cases {
         let mut m = three_voter_leader(&log);
         let actions = m.on_event(
@@ -242,14 +252,26 @@ fn a_fetch_is_valid_only_at_an_epoch_the_leader_holds_to_that_offset() {
 #[test]
 fn a_fetch_at_an_epoch_the_leader_lacks_does_not_raise_the_high_watermark() {
     let mut m = three_voter_machine();
-    let at_promotion = RunsLog::new(&[(4, 120)]);
+    let at_promotion = RunsLog::new(&[EpochRun {
+        epoch: 4,
+        count: 120,
+    }]);
     win_election(
         &mut m,
         &at_promotion,
         &[NodeId(2), NodeId(3)],
         SimInstant(2000),
     );
-    let log = RunsLog::new(&[(4, 120), (6, 80)]);
+    let log = RunsLog::new(&[
+        EpochRun {
+            epoch: 4,
+            count: 120,
+        },
+        EpochRun {
+            epoch: 6,
+            count: 80,
+        },
+    ]);
     let actions = m.on_event(
         Event::ReceiveFetch {
             from: NodeId(2),
@@ -312,7 +334,16 @@ fn a_follower_truncates_to_where_both_logs_still_hold_the_epoch() {
             truncate_to: 130,
         },
     ];
-    let log = RunsLog::new(&[(4, 110), (5, 20)]);
+    let log = RunsLog::new(&[
+        EpochRun {
+            epoch: 4,
+            count: 110,
+        },
+        EpochRun {
+            epoch: 5,
+            count: 20,
+        },
+    ]);
     for case in cases {
         let mut m = three_voter_machine();
         m.on_event(
@@ -365,7 +396,7 @@ fn armed_check_quorum(actions: &[Action]) -> Option<SimInstant> {
     })
 }
 
-fn elect_empty_log(voter_ids: &[NodeId]) -> (QuorumStateMachine, FakeLog, Vec<Action>) {
+fn elect_empty_log(voter_ids: &[NodeId]) -> MachineLogAndActions {
     let mut m = machine(NodeId(1), voter_ids);
     let log = FakeLog::new(0, 0);
     let peers: Vec<NodeId> = voter_ids
@@ -374,7 +405,11 @@ fn elect_empty_log(voter_ids: &[NodeId]) -> (QuorumStateMachine, FakeLog, Vec<Ac
         .filter(|&id| id != NodeId(1))
         .collect();
     let actions = win_election(&mut m, &log, &peers, SimInstant(2000));
-    (m, log, actions)
+    MachineLogAndActions {
+        machine: m,
+        log,
+        actions,
+    }
 }
 
 /// A new leader arms the check-quorum window at 1.5x the fetch timeout, which
@@ -398,7 +433,11 @@ fn promotion_arms_the_check_quorum_window_unless_the_leader_is_alone() {
         ),
         ("sole voter", &[NodeId(1)][..], None),
     ] {
-        let (m, _log, actions) = elect_empty_log(voter_ids);
+        let MachineLogAndActions {
+            machine: m,
+            actions,
+            ..
+        } = elect_empty_log(voter_ids);
         assert2::assert!(m.role().is_leader(), "case {name}");
         assert2::check!(armed_check_quorum(&actions) == want, "case {name}");
     }
@@ -442,7 +481,11 @@ fn only_a_majority_of_followers_re_arms_the_check_quorum_window() {
             vec![None],
         ),
     ] {
-        let (mut m, log, _actions) = elect_empty_log(voter_ids);
+        let MachineLogAndActions {
+            machine: mut m,
+            log,
+            ..
+        } = elect_empty_log(voter_ids);
         let got: Vec<Option<SimInstant>> = fetchers
             .iter()
             .map(|&from| {
@@ -488,7 +531,7 @@ fn a_snapshot_fetch_is_check_quorum_contact() {
 /// quorum over a truncation round would cost a whole election for nothing.
 #[test]
 fn a_diverging_fetch_still_counts_as_contact() {
-    let log = RunsLog::new(&[(1, 5)]);
+    let log = RunsLog::new(&[EpochRun { epoch: 1, count: 5 }]);
     let mut m = three_voter_leader(&log);
     // Follower 2 claims epoch 1 out to offset 9; our epoch 1 ends at 5.
     let actions = m.on_event(

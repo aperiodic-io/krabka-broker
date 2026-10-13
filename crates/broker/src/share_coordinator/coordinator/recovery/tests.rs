@@ -18,8 +18,8 @@ use {
                 ShareStateError, Term, message,
                 persist::AppendError,
                 test_support::{
-                    batch, coordinator, image_with_topic, lead_all, open_state_partition,
-                    open_state_partitions, share_write,
+                    CoordinatorWithRegistry, batch, coordinator, image_with_topic, lead_all,
+                    open_state_partition, open_state_partitions, share_write,
                 },
             },
             partitioner::partition_for_share_key,
@@ -400,26 +400,35 @@ async fn state_records_are_stored_in_the_configured_codec_and_recover() {
 // be `base_offset + 1`, and a second batch appended after it must also be
 // replayed (only reachable when the cursor advances by
 // `last_offset_delta + 1`).
-async fn led_state_partition(
-    log_dir: &std::path::Path,
-    topic_id: uuid::Uuid,
-) -> (ShareCoordinator, Arc<PartitionRegistry>, Arc<Partition>) {
-    let (coord, reg) = coordinator(log_dir);
+/// A coordinator that leads a state partition, and the partitions it runs over.
+struct LedStatePartition {
+    coord: ShareCoordinator,
+    part: Arc<Partition>,
+}
+
+async fn led_state_partition(log_dir: &std::path::Path, topic_id: uuid::Uuid) -> LedStatePartition {
+    let CoordinatorWithRegistry {
+        coord,
+        registry: reg,
+    } = coordinator(log_dir);
     lead_all(&coord).await;
     let state_partition = coord.state_partition_for("g", &topic_id, 0);
     let part = reg
         .get(bootstrap::TOPIC, state_partition)
         .expect("state partition open");
-    (coord, reg, part)
+    LedStatePartition { coord, part }
 }
 
 #[tokio::test]
 async fn replay_uses_per_record_and_inter_batch_offsets() {
     let dir = tempdir().unwrap();
     let tid = uuid::Uuid::from_bytes([11; 16]);
-    let (coord, _reg, part) = led_state_partition(dir.path(), tid).await;
+    let LedStatePartition { coord, part } = led_state_partition(dir.path(), tid).await;
 
-    let (snap_key, upd_key) = state_keys(tid);
+    let StateKeys {
+        snapshot: snap_key,
+        update: upd_key,
+    } = state_keys(tid);
 
     // Batch A (base_offset 0): an UPDATE at delta 0, then a SNAPSHOT at
     // delta 1 (last_offset_delta = 1). The snapshot's rec_offset is
@@ -470,9 +479,12 @@ async fn replay_uses_per_record_and_inter_batch_offsets() {
 async fn replay_snapshot_offset_is_base_plus_delta() {
     let scratch = tempdir().unwrap();
     let topic_id = uuid::Uuid::from_bytes([12; 16]);
-    let (coord, _reg, part) = led_state_partition(scratch.path(), topic_id).await;
+    let LedStatePartition { coord, part } = led_state_partition(scratch.path(), topic_id).await;
 
-    let (snap_key, upd_key) = state_keys(topic_id);
+    let StateKeys {
+        snapshot: snap_key,
+        update: upd_key,
+    } = state_keys(topic_id);
     append_update_then_snapshot(&part, &snap_key, upd_key).await;
 
     coord.reload_all_partitions_for_test().await;
@@ -537,6 +549,13 @@ enum Broker {
     B,
 }
 
+/// The start offset and batches of a state that a read finds.
+#[derive(Debug, PartialEq)]
+struct ReadState {
+    start_offset: i64,
+    batches: Vec<StateBatch>,
+}
+
 #[derive(Debug)]
 enum Step {
     /// Install `leader` at `epoch` on the shared partition, as the metadata
@@ -557,11 +576,11 @@ enum Step {
         start: i64,
         expected: Result<(), i16>,
     },
-    /// Read the state: `Ok(Some((start_offset, batches)))`, `Ok(None)` for no
-    /// state, or the error code.
+    /// Read the state: `Ok(Some(..))`, `Ok(None)` for no state, or the error
+    /// code.
     Read {
         on: Broker,
-        expected: Result<Option<(i64, Vec<StateBatch>)>, i16>,
+        expected: Result<Option<ReadState>, i16>,
     },
 }
 
@@ -611,7 +630,10 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
         },
         Step::Read {
             on: Broker::A,
-            expected: Ok(Some((20, vec![batch(Offset(20)..=Offset(29))]))),
+            expected: Ok(Some(ReadState {
+                start_offset: 20,
+                batches: vec![batch(Offset(20)..=Offset(29))],
+            })),
         },
         // Leadership moves to B. B has not run its load yet.
         Step::Refresh {
@@ -648,7 +670,10 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
         Step::AwaitActive { on: Broker::B },
         Step::Read {
             on: Broker::B,
-            expected: Ok(Some((20, vec![batch(Offset(20)..=Offset(29))]))),
+            expected: Ok(Some(ReadState {
+                start_offset: 20,
+                batches: vec![batch(Offset(20)..=Offset(29))],
+            })),
         },
         Step::Write {
             on: Broker::B,
@@ -671,7 +696,10 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
         },
         Step::Read {
             on: Broker::A,
-            expected: Ok(Some((30, vec![batch(Offset(30)..=Offset(39))]))),
+            expected: Ok(Some(ReadState {
+                start_offset: 30,
+                batches: vec![batch(Offset(30)..=Offset(39))],
+            })),
         },
         Step::Read {
             on: Broker::B,
@@ -745,7 +773,12 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
                 let read = on(broker)
                     .read(&data_image, "g", topic_id, 0, 0)
                     .await
-                    .map(|st| Some((st.start_offset.0, st.state_batches)))
+                    .map(|st| {
+                        Some(ReadState {
+                            start_offset: st.start_offset.0,
+                            batches: st.state_batches,
+                        })
+                    })
                     .map_err(ShareStateError::code);
                 assert!(read == expected, "step {index}");
             }
@@ -753,17 +786,26 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
     }
 }
 
+/// A coordinator, and the state partition that holds the key of a topic.
+struct CoordinatorForTopic {
+    coordinator: Arc<ShareCoordinator>,
+    state_partition: PartitionIndex,
+}
+
 fn coordinator_for_topic(
     registry: &Arc<PartitionRegistry>,
     topic_id: uuid::Uuid,
-) -> (Arc<ShareCoordinator>, PartitionIndex) {
+) -> CoordinatorForTopic {
     let coordinator = Arc::new(ShareCoordinator::new(
         krabka_audit::NodeId(1),
         Arc::clone(registry),
         ShareCoordinatorConfig::default(),
     ));
     let state_partition = coordinator.state_partition_for("g", &topic_id, 0);
-    (coordinator, state_partition)
+    CoordinatorForTopic {
+        coordinator,
+        state_partition,
+    }
 }
 
 async fn check_empty_active_partition(
@@ -785,7 +827,10 @@ async fn led_partition_without_a_local_log_loads_once_the_log_opens() {
     let dir = tempdir().unwrap();
     let registry = Arc::new(PartitionRegistry::new());
     let topic_id = uuid::Uuid::from_bytes([46; 16]);
-    let (coordinator, state_partition) = coordinator_for_topic(&registry, topic_id);
+    let CoordinatorForTopic {
+        coordinator,
+        state_partition,
+    } = coordinator_for_topic(&registry, topic_id);
     let image = state_partition_image(state_partition.get(), 1, 0);
 
     refresh_and_wait(&coordinator, &image).await;
@@ -807,7 +852,10 @@ async fn failed_load_serves_nothing_and_the_next_refresh_loads_again() {
     let dir = tempdir().unwrap();
     let registry = Arc::new(PartitionRegistry::new());
     let topic_id = uuid::Uuid::from_bytes([47; 16]);
-    let (coordinator, state_partition) = coordinator_for_topic(&registry, topic_id);
+    let CoordinatorForTopic {
+        coordinator,
+        state_partition,
+    } = coordinator_for_topic(&registry, topic_id);
     open_state_partition(&registry, dir.path(), state_partition.get());
     let image = state_partition_image(state_partition.get(), 1, 0);
 
@@ -829,7 +877,13 @@ async fn failed_load_serves_nothing_and_the_next_refresh_loads_again() {
     check_empty_active_partition(&coordinator, &image, state_partition, topic_id).await;
 }
 
-fn state_keys(topic_id: uuid::Uuid) -> (bytes::Bytes, bytes::Bytes) {
+/// The snapshot and update keys of a topic's partition 0.
+struct StateKeys {
+    snapshot: bytes::Bytes,
+    update: bytes::Bytes,
+}
+
+fn state_keys(topic_id: uuid::Uuid) -> StateKeys {
     let key = |record_type| {
         encode_state_key(&ShareStateKey {
             record_type,
@@ -839,7 +893,10 @@ fn state_keys(topic_id: uuid::Uuid) -> (bytes::Bytes, bytes::Bytes) {
         })
         .unwrap()
     };
-    (key(KEY_SHARE_SNAPSHOT), key(KEY_SHARE_UPDATE))
+    StateKeys {
+        snapshot: key(KEY_SHARE_SNAPSHOT),
+        update: key(KEY_SHARE_UPDATE),
+    }
 }
 
 /// An update at delta zero followed by the same persisted snapshot at delta one.
@@ -894,6 +951,12 @@ type Loaded = HashMap<ShareStateKey3, SharePartitionState>;
 /// unsupported value version and a corrupt value fail the load.
 #[tokio::test]
 async fn replay_skips_unknown_record_types_and_fails_on_bad_records() {
+    struct Case {
+        name: &'static str,
+        odd: RecordBatch,
+        expected: Option<Loaded>,
+    }
+
     use crate::txn::marker::{MarkerType, build_marker_batch};
 
     let topic_id = uuid::Uuid::from_bytes([48; 16]);
@@ -947,78 +1010,83 @@ async fn replay_skips_unknown_record_types_and_fails_on_bad_records() {
         ),
     ]);
 
-    let cases: Vec<(&str, RecordBatch, Option<Loaded>)> = vec![
-        (
-            "unknown type 2 with a value",
-            data(Some(key_of(2, 2)), Some(snapshot(20).encode())),
-            Some(both_snapshots.clone()),
-        ),
-        (
-            "unknown type as a tombstone",
-            data(Some(Bytes::from_static(&[0x7f, 0xff])), None),
-            Some(both_snapshots.clone()),
-        ),
-        (
-            "unknown type with a key body that does not decode",
-            data(
+    let cases: Vec<Case> = vec![
+        Case {
+            name: "unknown type 2 with a value",
+            odd: data(Some(key_of(2, 2)), Some(snapshot(20).encode())),
+            expected: Some(both_snapshots.clone()),
+        },
+        Case {
+            name: "unknown type as a tombstone",
+            odd: data(Some(Bytes::from_static(&[0x7f, 0xff])), None),
+            expected: Some(both_snapshots.clone()),
+        },
+        Case {
+            name: "unknown type with a key body that does not decode",
+            odd: data(
                 Some(Bytes::from_static(&[0x00, 0x05, 0x7f])),
                 Some(Bytes::new()),
             ),
-            Some(both_snapshots.clone()),
-        ),
-        (
-            "transaction marker",
-            build_marker_batch(
+            expected: Some(both_snapshots.clone()),
+        },
+        Case {
+            name: "transaction marker",
+            odd: build_marker_batch(
                 krabka_log::ProducerId(7),
                 0,
                 Offset(0),
                 MarkerType::Commit,
                 0,
             ),
-            Some(both_snapshots.clone()),
-        ),
-        (
-            "snapshot with an unsupported value version",
-            data(
+            expected: Some(both_snapshots.clone()),
+        },
+        Case {
+            name: "snapshot with an unsupported value version",
+            odd: data(
                 Some(key_of(KEY_SHARE_SNAPSHOT, 2)),
                 Some(unsupported_version),
             ),
-            None,
-        ),
-        (
-            "snapshot with a corrupt value",
-            data(
+            expected: None,
+        },
+        Case {
+            name: "snapshot with a corrupt value",
+            odd: data(
                 Some(key_of(KEY_SHARE_SNAPSHOT, 2)),
                 Some(truncated_snapshot),
             ),
-            None,
-        ),
-        (
-            "update with a corrupt value",
-            data(Some(key_of(KEY_SHARE_UPDATE, 2)), Some(truncated_update)),
-            None,
-        ),
-        (
-            "known type whose key does not decode",
-            data(
+            expected: None,
+        },
+        Case {
+            name: "update with a corrupt value",
+            odd: data(Some(key_of(KEY_SHARE_UPDATE, 2)), Some(truncated_update)),
+            expected: None,
+        },
+        Case {
+            name: "known type whose key does not decode",
+            odd: data(
                 Some(Bytes::from_static(&[0x00, 0x01, 0x00, 0x05, b'g'])),
                 None,
             ),
-            None,
-        ),
-        (
-            "key shorter than its record type",
-            data(Some(Bytes::from_static(&[0x00])), Some(update.encode())),
-            None,
-        ),
-        (
-            "record without a key",
-            data(None, Some(update.encode())),
-            None,
-        ),
+            expected: None,
+        },
+        Case {
+            name: "key shorter than its record type",
+            odd: data(Some(Bytes::from_static(&[0x00])), Some(update.encode())),
+            expected: None,
+        },
+        Case {
+            name: "record without a key",
+            odd: data(None, Some(update.encode())),
+            expected: None,
+        },
     ];
 
-    for (name, mut odd, expected) in cases {
+    for Case {
+        name,
+        mut odd,
+        expected,
+    } in cases
+    {
         let dir = tempdir().unwrap();
         let registry = PartitionRegistry::new();
         open_state_partition(&registry, dir.path(), 0);

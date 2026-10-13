@@ -8,6 +8,7 @@ use {
         node_log::SimNodeLog,
         timers::{election_timeout_ms_of, election_timeout_of},
     },
+    krabka_kraft_core::simulation_support::NodeFingerprint,
     krabka_raft::kraft::{
         QuorumStateMachine,
         role::Role,
@@ -103,7 +104,7 @@ impl<L: SimNodeLog> Sim<L> {
 
     /// A deterministic snapshot of every node's observable state, which detects
     /// the steady-state fixed point. It is ordered by node id, in a `BTreeMap`.
-    fn fingerprint(&self) -> Vec<(NodeId, &'static str, Epoch, usize, i64)> {
+    fn fingerprint(&self) -> Vec<NodeFingerprint> {
         self.nodes
             .values()
             .map(|n| {

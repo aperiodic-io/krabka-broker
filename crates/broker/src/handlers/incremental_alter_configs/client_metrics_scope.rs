@@ -79,12 +79,28 @@ pub(super) fn handle_client_metrics_scoped(
 #[cfg(test)]
 mod tests {
     use {
-        super::*, crate::handlers::incremental_alter_configs::RESOURCE_TYPE_CLIENT_METRICS,
-        assert2::check, krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig,
+        super::*,
+        crate::handlers::incremental_alter_configs::{
+            RESOURCE_TYPE_CLIENT_METRICS, test_support::Handled,
+        },
+        assert2::check,
+        krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig,
     };
 
     /// One alteration: key, operation and value.
-    type Op<'a> = (&'a str, i8, Option<&'a str>);
+    #[derive(Clone, Copy)]
+    struct Op<'a> {
+        key: &'a str,
+        operation: i8,
+        value: Option<&'a str>,
+    }
+
+    /// One accepted alteration and the records it stages.
+    struct AcceptedCase<'a> {
+        name: &'a str,
+        op: Op<'a>,
+        expected: Vec<MetadataRecord>,
+    }
 
     /// An image whose subscription `sub-a` holds `interval.ms=60000` and
     /// `metrics=a.`.
@@ -102,25 +118,34 @@ mod tests {
         img
     }
 
-    fn run(name: &str, ops: &[Op<'_>]) -> (AlterConfigsResourceResponse, Vec<MetadataRecord>) {
+    fn run(name: &str, ops: &[Op<'_>]) -> Handled {
         let resource = AlterConfigsResource {
             resource_type: RESOURCE_TYPE_CLIENT_METRICS,
             resource_name: name.into(),
             configs: ops
                 .iter()
-                .map(|&(key, config_operation, value)| AlterableConfig {
-                    name: key.into(),
-                    config_operation,
-                    value: value.map(Into::into),
-                    ..Default::default()
-                })
+                .map(
+                    |&Op {
+                         key,
+                         operation,
+                         value,
+                     }| AlterableConfig {
+                        name: key.into(),
+                        config_operation: operation,
+                        value: value.map(Into::into),
+                        ..Default::default()
+                    },
+                )
                 .collect(),
             ..Default::default()
         };
         let mut out = AlterConfigsResourceResponse::default();
         let mut to_submit = Vec::new();
         handle_client_metrics_scoped(&resource, &image_with_sub_a(), &mut out, &mut to_submit);
-        (out, to_submit)
+        Handled {
+            response: out,
+            records: to_submit,
+        }
     }
 
     fn refused(code: i16, message: &str) -> AlterConfigsResourceResponse {
@@ -243,8 +268,15 @@ mod tests {
             ),
         ];
         for (key, op, value, expected) in cases {
-            let (out, to_submit) = run("sub-a", &[(key, op, value)]);
-            check!(out == expected, "{key} op {op} = {value:?}");
+            let Handled {
+                response,
+                records: to_submit,
+            } = run("sub-a", &[Op {
+                key,
+                operation: op,
+                value,
+            }]);
+            check!(response == expected, "{key} op {op} = {value:?}");
             check!(to_submit.is_empty(), "{key} op {op} = {value:?}");
         }
     }
@@ -262,48 +294,71 @@ mod tests {
                 },
             )]
         };
-        let cases: Vec<(&str, Op<'_>, Vec<MetadataRecord>)> = vec![
-            (
-                "interval with spaces is trimmed before parsing",
-                ("interval.ms", OP_SET, Some(" 1000 ")),
-                record(maplit::btreemap! {
+        let cases: Vec<AcceptedCase<'_>> = vec![
+            AcceptedCase {
+                name: "interval with spaces is trimmed before parsing",
+                op: Op {
+                    key: "interval.ms",
+                    operation: OP_SET,
+                    value: Some(" 1000 "),
+                },
+                expected: record(maplit::btreemap! {
                     "interval.ms".to_string() => " 1000 ".to_string(),
                     "metrics".to_string() => "a.".to_string(),
                 }),
-            ),
-            (
-                "delete of a key with no value changes nothing",
-                ("bogus", OP_DELETE, None),
-                vec![],
-            ),
-            (
-                "delete of a set key drops it",
-                ("interval.ms", OP_DELETE, None),
-                record(maplit::btreemap! {"metrics".to_string() => "a.".to_string()}),
-            ),
-            (
-                "java lookahead pattern",
-                ("match", OP_SET, Some("client_id=(?!test).*")),
-                record(maplit::btreemap! {
+            },
+            AcceptedCase {
+                name: "delete of a key with no value changes nothing",
+                op: Op {
+                    key: "bogus",
+                    operation: OP_DELETE,
+                    value: None,
+                },
+                expected: vec![],
+            },
+            AcceptedCase {
+                name: "delete of a set key drops it",
+                op: Op {
+                    key: "interval.ms",
+                    operation: OP_DELETE,
+                    value: None,
+                },
+                expected: record(maplit::btreemap! {"metrics".to_string() => "a.".to_string()}),
+            },
+            AcceptedCase {
+                name: "java lookahead pattern",
+                op: Op {
+                    key: "match",
+                    operation: OP_SET,
+                    value: Some("client_id=(?!test).*"),
+                },
+                expected: record(maplit::btreemap! {
                     "interval.ms".to_string() => "60000".to_string(),
                     "match".to_string() => "client_id=(?!test).*".to_string(),
                     "metrics".to_string() => "a.".to_string(),
                 }),
-            ),
-            (
-                "java named group and backreference",
-                ("match", OP_SET, Some("client_id=(?<n>a)\\k<n>")),
-                record(maplit::btreemap! {
+            },
+            AcceptedCase {
+                name: "java named group and backreference",
+                op: Op {
+                    key: "match",
+                    operation: OP_SET,
+                    value: Some("client_id=(?<n>a)\\k<n>"),
+                },
+                expected: record(maplit::btreemap! {
                     "interval.ms".to_string() => "60000".to_string(),
                     "match".to_string() => "client_id=(?<n>a)\\k<n>".to_string(),
                     "metrics".to_string() => "a.".to_string(),
                 }),
-            ),
+            },
         ];
-        for (name, op, expected) in cases {
-            let (out, to_submit) = run("sub-a", &[op]);
+        for AcceptedCase { name, op, expected } in cases {
+            let Handled {
+                response,
+                records: to_submit,
+            } = run("sub-a", &[op]);
             check!(
-                out == AlterConfigsResourceResponse::default(),
+                response == AlterConfigsResourceResponse::default(),
                 "case {name}"
             );
             check!(to_submit == expected, "case {name}");
@@ -312,8 +367,15 @@ mod tests {
 
     #[test]
     fn empty_subscription_name_is_an_invalid_request() {
-        let (out, to_submit) = run("", &[("interval.ms", OP_SET, Some("60000"))]);
-        check!(out == refused(codes::INVALID_REQUEST, "Subscription name can't be empty"));
+        let Handled {
+            response,
+            records: to_submit,
+        } = run("", &[Op {
+            key: "interval.ms",
+            operation: OP_SET,
+            value: Some("60000"),
+        }]);
+        check!(response == refused(codes::INVALID_REQUEST, "Subscription name can't be empty"));
         check!(to_submit.is_empty());
     }
 }

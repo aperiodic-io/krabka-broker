@@ -118,9 +118,15 @@ fn seed(broker: &Broker, group_id: &str, group: Group) {
     }
 }
 
+/// What one row answered, and whether its group exists afterwards.
+struct Driven {
+    response: OffsetCommitResponse,
+    group_exists: bool,
+}
+
 /// Runs one row in a group of its own, and returns the response and whether
 /// the group exists afterwards.
-async fn drive(broker: &BrokerHandle, row: usize, case: Case) -> (OffsetCommitResponse, bool) {
+async fn drive(broker: &BrokerHandle, row: usize, case: Case) -> Driven {
     let shared = broker.broker_arc_for_test();
     let group_id = format!("group-validation-{row}");
     seed(&shared, &group_id, case.group);
@@ -144,7 +150,10 @@ async fn drive(broker: &BrokerHandle, row: usize, case: Case) -> (OffsetCommitRe
         &ctx,
     )
     .await;
-    (response, shared.group_coordinator.find(&group_id).is_some())
+    Driven {
+        response,
+        group_exists: shared.group_coordinator.find(&group_id).is_some(),
+    }
 }
 
 #[tokio::test]
@@ -215,8 +224,17 @@ async fn commit_is_fenced_by_kafka_group_rule() {
     let mut actual = Vec::new();
     let mut expected = Vec::new();
     for (row, case) in cases.into_iter().enumerate() {
-        let (response, exists) = drive(&broker, row, case).await;
-        actual.push((case.group, case.version, case.member_id, response, exists));
+        let Driven {
+            response,
+            group_exists,
+        } = drive(&broker, row, case).await;
+        actual.push((
+            case.group,
+            case.version,
+            case.member_id,
+            response,
+            group_exists,
+        ));
         let resp_parts = vec![OffsetCommitResponsePartition {
             partition_index: 0,
             error_code: case.error_code,

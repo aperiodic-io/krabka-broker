@@ -340,11 +340,21 @@ mod tests {
             .expect("ConsumerGroupDescribe handler")
     }
 
-    fn group_errors(response: &ConsumerGroupDescribeResponse) -> Vec<(&str, i16)> {
+    /// A described group's id and the error code it answers with.
+    #[derive(Debug, PartialEq, Eq)]
+    struct GroupError<'a> {
+        group_id: &'a str,
+        error_code: i16,
+    }
+
+    fn group_errors(response: &ConsumerGroupDescribeResponse) -> Vec<GroupError<'_>> {
         response
             .groups
             .iter()
-            .map(|group| (group.group_id.as_str(), group.error_code))
+            .map(|group| GroupError {
+                group_id: group.group_id.as_str(),
+                error_code: group.error_code,
+            })
             .collect()
     }
 
@@ -382,8 +392,17 @@ mod tests {
         image
     }
 
-    fn partitions(entries: &[(Uuid, &[i32])]) -> HashMap<Uuid, Vec<i32>> {
-        entries.iter().map(|(id, p)| (*id, p.to_vec())).collect()
+    /// The partitions of one topic, named by topic id.
+    struct TopicPartitionSet<'a> {
+        topic_id: Uuid,
+        partitions: &'a [i32],
+    }
+
+    fn partitions(entries: &[TopicPartitionSet<'_>]) -> HashMap<Uuid, Vec<i32>> {
+        entries
+            .iter()
+            .map(|entry| (entry.topic_id, entry.partitions.to_vec()))
+            .collect()
     }
 
     /// The same literal member identity appears in the input view and expected wire member.
@@ -470,13 +489,31 @@ mod tests {
             let mut native = view_member("m-a");
             native.instance_id = Some("instance-a".into());
             native.rack_id = Some("rack-1".into());
-            native.assigned_partitions = partitions(&[(PAYMENTS, &[1, 0])]);
-            native.target_partitions = partitions(&[(PAYMENTS, &[0, 1])]);
+            native.assigned_partitions = partitions(&[TopicPartitionSet {
+                topic_id: PAYMENTS,
+                partitions: &[1, 0],
+            }]);
+            native.target_partitions = partitions(&[TopicPartitionSet {
+                topic_id: PAYMENTS,
+                partitions: &[0, 1],
+            }]);
             let mut classic = view_member("m-b");
             classic.is_classic = true;
             classic.subscribed_topic_regex = Some("ord.*".into());
-            classic.assigned_partitions = partitions(&[(ORDERS, &[0]), (DELETED, &[0])]);
-            classic.target_partitions = partitions(&[(ORDERS, &[0])]);
+            classic.assigned_partitions = partitions(&[
+                TopicPartitionSet {
+                    topic_id: ORDERS,
+                    partitions: &[0],
+                },
+                TopicPartitionSet {
+                    topic_id: DELETED,
+                    partitions: &[0],
+                },
+            ]);
+            classic.target_partitions = partitions(&[TopicPartitionSet {
+                topic_id: ORDERS,
+                partitions: &[0],
+            }]);
             let mut v = view("Stable", vec![classic, native]);
             v.preferred_server_assignor = Some("range".into());
             v
@@ -497,9 +534,24 @@ mod tests {
         let reconciling = {
             let mut m = view_member("m-a");
             m.member_epoch = 4;
-            m.assigned_partitions = partitions(&[(ORDERS, &[2])]);
-            m.partitions_pending_revocation = partitions(&[(ORDERS, &[1]), (PAYMENTS, &[3])]);
-            m.target_partitions = partitions(&[(ORDERS, &[2])]);
+            m.assigned_partitions = partitions(&[TopicPartitionSet {
+                topic_id: ORDERS,
+                partitions: &[2],
+            }]);
+            m.partitions_pending_revocation = partitions(&[
+                TopicPartitionSet {
+                    topic_id: ORDERS,
+                    partitions: &[1],
+                },
+                TopicPartitionSet {
+                    topic_id: PAYMENTS,
+                    partitions: &[3],
+                },
+            ]);
+            m.target_partitions = partitions(&[TopicPartitionSet {
+                topic_id: ORDERS,
+                partitions: &[2],
+            }]);
             view("Reconciling", vec![m])
         };
         let reconciling_expected = {
@@ -737,8 +789,14 @@ mod tests {
         assert!(
             group_errors(&resp)
                 == vec![
-                    ("denied-group", codes::UNSUPPORTED_VERSION),
-                    ("also-denied", codes::UNSUPPORTED_VERSION),
+                    GroupError {
+                        group_id: "denied-group",
+                        error_code: codes::UNSUPPORTED_VERSION
+                    },
+                    GroupError {
+                        group_id: "also-denied",
+                        error_code: codes::UNSUPPORTED_VERSION
+                    },
                 ],
             "{resp:?}"
         );
@@ -785,8 +843,14 @@ mod tests {
         assert!(
             group_errors(&resp)
                 == vec![
-                    ("denied", codes::GROUP_AUTHORIZATION_FAILED),
-                    ("allowed", codes::GROUP_ID_NOT_FOUND),
+                    GroupError {
+                        group_id: "denied",
+                        error_code: codes::GROUP_AUTHORIZATION_FAILED
+                    },
+                    GroupError {
+                        group_id: "allowed",
+                        error_code: codes::GROUP_ID_NOT_FOUND
+                    },
                 ],
             "{resp:?}"
         );

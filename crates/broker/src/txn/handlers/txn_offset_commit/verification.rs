@@ -74,7 +74,8 @@ pub(super) async fn verify_producer(
     broker: &Broker,
     req: &TxnOffsetCommitRequest,
     version: i16,
-    (offsets_partition, format_txnv): (i32, TxnVersion),
+    offsets_partition: i32,
+    format_txnv: TxnVersion,
 ) -> Result<ProducerAppendCheck, i16> {
     let Some(partition) = broker
         .partitions

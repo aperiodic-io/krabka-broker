@@ -98,17 +98,25 @@ fn oracle_op_match(
     // Implication arrows as an explicit data table — deliberately a different
     // structure from production's `matches!`-based `implies`, so the cross-check
     // catches a regression in either form.
-    const ARROWS: &[(AclOperation, AclOperation)] = &[
-        (Read, Describe),
-        (Write, Describe),
-        (Delete, Describe),
-        (Alter, Describe),
-        (AlterConfigs, DescribeConfigs),
+    #[derive(PartialEq)]
+    struct Arrow {
+        stored: AclOperation,
+        implied: AclOperation,
+    }
+    const fn arrow(stored: AclOperation, implied: AclOperation) -> Arrow {
+        Arrow { stored, implied }
+    }
+    const ARROWS: &[Arrow] = &[
+        arrow(Read, Describe),
+        arrow(Write, Describe),
+        arrow(Delete, Describe),
+        arrow(Alter, Describe),
+        arrow(AlterConfigs, DescribeConfigs),
     ];
     if stored == requested || stored == All {
         return true;
     }
-    permission == PermissionType::Allow && ARROWS.contains(&(stored, requested))
+    permission == PermissionType::Allow && ARROWS.contains(&arrow(stored, requested))
 }
 
 // ----- builders -----

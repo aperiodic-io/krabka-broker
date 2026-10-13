@@ -46,16 +46,31 @@ fn parse_rfc3339_millis(s: &str) -> Result<i64, String> {
             "expected T between the date and the time, got {separator:?}"
         ));
     }
-    let (year, month, day) = parse_date(date)?;
-    let (time, offset_seconds) = split_zone(rest)?;
-    let (hour, minute, second, millis) = parse_time(time)?;
+    let CalendarDate { year, month, day } = parse_date(date)?;
+    let ZonedTime {
+        time,
+        offset_seconds,
+    } = split_zone(rest)?;
+    let ClockTime {
+        hour,
+        minute,
+        second,
+        millis,
+    } = parse_time(time)?;
 
     let days = days_from_civil(year, month, day);
     let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second - offset_seconds;
     Ok(seconds * 1_000 + millis)
 }
 
-fn parse_date(date: &str) -> Result<(i64, i64, i64), String> {
+/// A calendar date parsed from `YYYY-MM-DD`.
+struct CalendarDate {
+    year: i64,
+    month: i64,
+    day: i64,
+}
+
+fn parse_date(date: &str) -> Result<CalendarDate, String> {
     let bytes = date.as_bytes();
     if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
         return Err(format!("expected a YYYY-MM-DD date, got {date:?}"));
@@ -75,13 +90,24 @@ fn parse_date(date: &str) -> Result<(i64, i64, i64), String> {
             "day must be 01..{last:02} for {year:04}-{month:02}, got {day:02}"
         ));
     }
-    Ok((year, month, day))
+    Ok(CalendarDate { year, month, day })
+}
+
+/// A time of day with its zone designator split off.
+struct ZonedTime<'a> {
+    /// The time of day, without the zone designator.
+    time: &'a str,
+    /// The zone's offset from UTC, in seconds.
+    offset_seconds: i64,
 }
 
 /// Split the zone designator off the end and return the offset in seconds.
-fn split_zone(rest: &str) -> Result<(&str, i64), String> {
+fn split_zone(rest: &str) -> Result<ZonedTime<'_>, String> {
     if let Some(time) = rest.strip_suffix(['Z', 'z']) {
-        return Ok((time, 0));
+        return Ok(ZonedTime {
+            time,
+            offset_seconds: 0,
+        });
     }
     let split = rest
         .len()
@@ -108,10 +134,21 @@ fn split_zone(rest: &str) -> Result<(&str, i64), String> {
     if hours > 23 || minutes > 59 {
         return Err(format!("zone offset out of range: {zone:?}"));
     }
-    Ok((time, sign * (hours * 3_600 + minutes * 60)))
+    Ok(ZonedTime {
+        time,
+        offset_seconds: sign * (hours * 3_600 + minutes * 60),
+    })
 }
 
-fn parse_time(time: &str) -> Result<(i64, i64, i64, i64), String> {
+/// A time of day parsed from `HH:MM:SS[.fraction]`.
+struct ClockTime {
+    hour: i64,
+    minute: i64,
+    second: i64,
+    millis: i64,
+}
+
+fn parse_time(time: &str) -> Result<ClockTime, String> {
     let (hms, fraction) = match time.split_once('.') {
         Some((hms, fraction)) => (hms, Some(fraction)),
         None => (time, None),
@@ -145,7 +182,12 @@ fn parse_time(time: &str) -> Result<(i64, i64, i64, i64), String> {
             parse_digits(&padded[0..3], "fractional second")?
         }
     };
-    Ok((hour, minute, second, millis))
+    Ok(ClockTime {
+        hour,
+        minute,
+        second,
+        millis,
+    })
 }
 
 fn parse_digits(s: &str, field: &str) -> Result<i64, String> {

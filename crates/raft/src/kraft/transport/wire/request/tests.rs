@@ -26,20 +26,40 @@ fn raw_vote_request() -> VoteRequest {
 
 fn raw_vote_body(request: &VoteRequest) -> Bytes { encode_body(request, VOTE_VERSION) }
 
-fn candidate_vote(
-    cluster_id: Option<uuid::Uuid>,
-    directories: (uuid::Uuid, uuid::Uuid),
-) -> PeerRequest {
+/// The directory ids of the two replicas in a Vote.
+#[derive(Clone, Copy)]
+struct VoteDirectories {
+    voter: uuid::Uuid,
+    candidate: uuid::Uuid,
+}
+
+fn candidate_vote(cluster_id: Option<uuid::Uuid>, directories: VoteDirectories) -> PeerRequest {
     PeerRequest::Vote {
         cluster_id,
         voter_id: NodeId(9),
-        voter_directory_id: directories.0,
+        voter_directory_id: directories.voter,
         candidate_epoch: 3,
         candidate: NodeId(7),
-        candidate_directory_id: directories.1,
+        candidate_directory_id: directories.candidate,
         last_epoch: 2,
         last_offset: 42,
         pre_vote: true,
+    }
+}
+
+fn preferred_candidate(id: u64) -> PreferredCandidate {
+    PreferredCandidate {
+        id: NodeId(id),
+        directory_id: uuid::Uuid::from_u128(u128::from(id)),
+    }
+}
+
+fn end_request(preferred_candidates: Vec<PreferredCandidate>) -> PeerRequest {
+    PeerRequest::EndQuorumEpoch {
+        cluster_id: Some(uuid::Uuid::from_u128(9)),
+        leader_id: NodeId(1),
+        leader_epoch: 4,
+        preferred_candidates,
     }
 }
 
@@ -50,17 +70,21 @@ fn begin_request() -> PeerRequest {
         voter_directory_id: uuid::Uuid::from_u128(2),
         leader_id: NodeId(5),
         leader_epoch: 9,
-        leader_endpoints: vec![("CONTROLLER".into(), "c5".into(), 9093)],
+        leader_endpoints: vec![VoterEndpoint {
+            name: "CONTROLLER".into(),
+            host: "c5".into(),
+            port: 9093,
+        }],
     }
 }
 
 #[test]
 fn vote_request_round_trips() {
     let cluster_id = uuid::Uuid::from_u128(1);
-    let req = candidate_vote(
-        Some(cluster_id),
-        (uuid::Uuid::from_u128(2), uuid::Uuid::from_u128(3)),
-    );
+    let req = candidate_vote(Some(cluster_id), VoteDirectories {
+        voter: uuid::Uuid::from_u128(2),
+        candidate: uuid::Uuid::from_u128(3),
+    });
     let encoded = req.encode();
     assert2::assert!(decode_vote(&encoded) == Some(req));
 
@@ -174,7 +198,10 @@ fn vote_decode_rejects_trailing_bytes() {
 
 #[test]
 fn generic_request_decode_accepts_vote_request() {
-    let req = candidate_vote(None, (uuid::Uuid::nil(), uuid::Uuid::nil()));
+    let req = candidate_vote(None, VoteDirectories {
+        voter: uuid::Uuid::nil(),
+        candidate: uuid::Uuid::nil(),
+    });
     assert2::assert!(PeerRequest::decode(&req.encode()) == Some(req));
 }
 
@@ -182,7 +209,10 @@ fn generic_request_decode_accepts_vote_request() {
 fn encoded_vote_request_carries_target_voter_and_empty_cluster_id() {
     use krabka_protocol::Decode;
 
-    let req = candidate_vote(None, (uuid::Uuid::nil(), uuid::Uuid::nil()));
+    let req = candidate_vote(None, VoteDirectories {
+        voter: uuid::Uuid::nil(),
+        candidate: uuid::Uuid::nil(),
+    });
     let mut cur = &req.encode()[..];
     let raw = VoteRequest::decode(&mut cur, VOTE_VERSION).expect("decode vote request");
     let partition = &raw.topics[0].partitions[0];
@@ -203,15 +233,7 @@ fn encoded_vote_request_carries_target_voter_and_empty_cluster_id() {
 fn begin_end_round_trip() {
     let begin = begin_request();
     assert2::assert!(decode_begin(&begin.encode()) == Some(begin));
-    let end = PeerRequest::EndQuorumEpoch {
-        cluster_id: Some(uuid::Uuid::from_u128(9)),
-        leader_id: NodeId(1),
-        leader_epoch: 4,
-        preferred_candidates: vec![
-            (NodeId(3), uuid::Uuid::from_u128(3)),
-            (NodeId(2), uuid::Uuid::from_u128(2)),
-        ],
-    };
+    let end = end_request(vec![preferred_candidate(3), preferred_candidate(2)]);
     assert2::assert!(decode_end(&end.encode()) == Some(end));
 }
 
@@ -254,12 +276,7 @@ fn encoded_begin_and_end_requests_are_kafkas_singleton_requests() {
     };
     assert2::check!(raw_begin == expected_begin);
 
-    let end = PeerRequest::EndQuorumEpoch {
-        cluster_id: Some(uuid::Uuid::from_u128(9)),
-        leader_id: NodeId(1),
-        leader_epoch: 4,
-        preferred_candidates: vec![(NodeId(2), uuid::Uuid::from_u128(2))],
-    };
+    let end = end_request(vec![preferred_candidate(2)]);
     let expected_end = |version: i16| EndQuorumEpochRequest {
         cluster_id: Some("AAAAAAAAAAAAAAAAAAAACQ".into()),
         topics: vec![eqe::TopicData {

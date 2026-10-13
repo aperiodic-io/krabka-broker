@@ -13,8 +13,8 @@ use {
             share_renew,
         },
         support::share::{
-            ConsumptionSetup, ShareBrokerFixture, ShareFetchSetup, ShareRecordCount,
-            ShareSessionEpoch, ShareSessionSetup, permitted_topic_fixture,
+            ConsumptionSetup, ShareFetchSetup, ShareRecordCount, ShareSessionEpoch,
+            ShareSessionSetup, permitted_topic_fixture,
         },
     },
     assert2::assert,
@@ -25,8 +25,14 @@ use {
 /// expires, so the next fetch re-delivers at an incremented count.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lock_timeout_redelivers() {
-    let (_permit, broker, client, _dir, tid, member) =
-        Box::pin(lock_fixture(Duration::from_millis(200), None)).await;
+    let LockFixture {
+        permit: _permit,
+        broker,
+        client,
+        dir: _dir,
+        tid,
+        member,
+    } = Box::pin(lock_fixture(Duration::from_millis(200), None)).await;
     let session = ShareSessionSetup::joined(&member, tid);
 
     // Fetch but DO NOT acknowledge.
@@ -46,8 +52,14 @@ async fn lock_timeout_redelivers() {
 /// an Accept (poison pill). Later fetches acquire nothing and the SPSO advances.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delivery_limit_archives() {
-    let (_permit, broker, client, _dir, tid, member) =
-        Box::pin(lock_fixture(Duration::from_millis(150), Some(2))).await;
+    let LockFixture {
+        permit: _permit,
+        broker,
+        client,
+        dir: _dir,
+        tid,
+        member,
+    } = Box::pin(lock_fixture(Duration::from_millis(150), Some(2))).await;
     let session = ShareSessionSetup::joined(&member, tid);
 
     // Delivery 1 (no ack).
@@ -93,8 +105,14 @@ async fn delivery_limit_archives() {
 /// nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn renew_extends_lock_not_redelivered() {
-    let (_permit, _broker, client, _dir, tid, member) =
-        Box::pin(lock_fixture(Duration::from_millis(500), None)).await;
+    let LockFixture {
+        permit: _permit,
+        broker: _broker,
+        client,
+        dir: _dir,
+        tid,
+        member,
+    } = Box::pin(lock_fixture(Duration::from_millis(500), None)).await;
     // Acquire offset 0 (lock 500ms, delivery_count 1). Epoch is now 1.
     let (session, acquire_at) = acquire_initial_session(&client, &member, tid).await;
 
@@ -131,23 +149,30 @@ async fn renew_extends_lock_not_redelivered() {
 /// suppressed the redelivery, and that slack in the timing did not.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn no_renew_redelivers_after_lock_expiry() {
-    let (_permit, _broker, client, _dir, tid, member) =
-        Box::pin(lock_fixture(Duration::from_millis(500), None)).await;
-    let (session, _) = acquire_initial_session(&client, &member, tid).await;
+    let fixture = Box::pin(lock_fixture(Duration::from_millis(500), None)).await;
+    let (client, tid, member) = (&fixture.client, fixture.tid, &fixture.member);
+    let (session, _) = acquire_initial_session(client, member, tid).await;
 
     // Intentional calibrated timing: no renew — wait 800ms (well past the 500ms
     // lock + a sweeper tick) so the record is reverted to Available and
     // re-delivered. This sleep mirrors the renew test's timing to prove that
     // WITHOUT a renew the lock IS swept; it is NOT a flaky state-guess.
     tokio::time::sleep(Duration::from_millis(800)).await;
-    fetch_redelivered(&client, ShareFetchSetup::from(session)).await;
+    fetch_redelivered(client, ShareFetchSetup::from(session)).await;
+}
+
+/// A joined share-group member and the owners that keep its broker running.
+struct LockFixture {
+    permit: tokio::sync::OwnedSemaphorePermit,
+    broker: krabka_broker::BrokerHandle,
+    client: std::sync::Arc<krabka_client_core::Client>,
+    dir: tempfile::TempDir,
+    tid: uuid::Uuid,
+    member: String,
 }
 
 /// Hold the broker permit, materialize t, and join its single-record share group.
-async fn lock_fixture(
-    lock_duration: Duration,
-    max_delivery_attempts: Option<i16>,
-) -> ShareBrokerFixture {
+async fn lock_fixture(lock_duration: Duration, max_delivery_attempts: Option<i16>) -> LockFixture {
     let (permit, broker, client, dir, tid) = Box::pin(
         permitted_topic_fixture()
             .customize(Box::new(move |config| {
@@ -165,7 +190,14 @@ async fn lock_fixture(
     })
     .await;
 
-    (permit, broker, client, dir, tid, member)
+    LockFixture {
+        permit,
+        broker,
+        client,
+        dir,
+        tid,
+        member,
+    }
 }
 
 async fn acquire_initial_record(

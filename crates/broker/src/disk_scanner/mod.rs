@@ -9,7 +9,7 @@ pub mod scan;
 
 use {
     crate::{
-        log_dir,
+        log_dir::{self, LocatedPartition},
         metrics::{BrokerMetrics, PartitionLabel},
     },
     krabka_units::{Time, convert::TimeExt as _},
@@ -53,7 +53,12 @@ impl DiskScanner {
                 return;
             }
         };
-        for (topic, partition, owning_dir) in partitions {
+        for LocatedPartition {
+            topic,
+            partition,
+            owning_dir,
+        } in partitions
+        {
             let path = log_dir::partition_dir(&owning_dir, &topic, partition);
             match scan::sum_partition_dir(&path) {
                 Ok(bytes) => {

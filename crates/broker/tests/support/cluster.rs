@@ -100,6 +100,12 @@ fn static_voter_broker_config(
     cfg
 }
 
+/// A node's broker configuration and the directory behind it.
+struct NodeMeta {
+    config: BrokerConfig,
+    dir: TempDir,
+}
+
 /// Like [`start_n_node`], but it invokes `customize(i, &mut cfg)` on each
 /// broker's `BrokerConfig` before start. A test can then add per-broker
 /// overrides such as `rack` or `replica_selector` and still keep the race-free
@@ -143,7 +149,7 @@ pub async fn start_n_node_with(
         .collect::<std::io::Result<_>>()?;
 
     // The shared static voter set every node is configured with.
-    let voters: Vec<(u64, SocketAddr)> = (0..n_usize)
+    let voters: Vec<_> = (0..n_usize)
         .map(|i| (u64::try_from(i + 1).unwrap(), controller_addrs[i]))
         .collect();
 
@@ -155,7 +161,7 @@ pub async fn start_n_node_with(
     // `start().await` on the first broker would deadlock — it can never elect
     // alone. Spawn every broker's `start` and join them.
     let mut starts = Vec::with_capacity(n_usize);
-    let mut metas: Vec<(BrokerConfig, TempDir)> = Vec::with_capacity(n_usize);
+    let mut metas: Vec<NodeMeta> = Vec::with_capacity(n_usize);
     for (i, (data_listener, controller_listener)) in
         listener_pairs(client_listeners, controller_listeners)
     {
@@ -183,11 +189,11 @@ pub async fn start_n_node_with(
             )
             .await
         }));
-        metas.push((cfg, dir));
+        metas.push(NodeMeta { config: cfg, dir });
     }
 
-    let mut out: Vec<(BrokerHandle, BrokerConfig, TempDir)> = Vec::with_capacity(n_usize);
-    for (handle, (cfg, dir)) in starts.into_iter().zip(metas) {
+    let mut out = Vec::with_capacity(n_usize);
+    for (handle, NodeMeta { config: cfg, dir }) in starts.into_iter().zip(metas) {
         let broker = await_broker_start(handle).await?;
         out.push((broker, cfg, dir));
     }

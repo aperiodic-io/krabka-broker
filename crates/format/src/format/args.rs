@@ -11,7 +11,7 @@ use {
     super::{acl::parse_acl_spec, features::parse_feature_spec, scram::parse_scram_spec},
     crate::ids::{ClusterId, DirectoryId},
     clap::Args,
-    krabka_metadata::AclEntry,
+    krabka_metadata::{AclEntry, FeatureLevelRecord},
     krabka_security::SaslMechanism,
     std::path::PathBuf,
 };
@@ -58,7 +58,7 @@ pub struct FormatArgs {
     /// `--release-version` (which sets the base release) for every feature
     /// except `metadata.version`, where the two conflict.
     #[arg(long = "feature", value_parser = parse_feature_spec)]
-    pub(super) feature: Vec<(String, i16)>,
+    pub(super) feature: Vec<FeatureLevelRecord>,
     /// Accept feature levels past the latest production ones: Kafka trunk's
     /// `metadata.version` `4.4-IV0` to `4.4-IV2`, which a stock Kafka 4.3.1
     /// does not know. It is Kafka's internal `unstable.feature.versions.enable`,
@@ -244,29 +244,46 @@ mod tests {
     /// required `--log-dir`, and clap refuses it twice.
     #[test]
     fn metadata_log_dir_is_one_optional_path() {
-        type Parsed = Result<(Option<PathBuf>, Vec<PathBuf>), ErrorKind>;
+        /// The directories a command line names.
+        #[derive(Debug, PartialEq, Eq)]
+        struct Dirs {
+            metadata_log_dir: Option<PathBuf>,
+            log_dirs: Vec<PathBuf>,
+        }
+        type Parsed = Result<Dirs, ErrorKind>;
+        /// An argv after the program name, and what it parses to.
+        struct Case<'a> {
+            argv: &'a [&'a str],
+            want: Parsed,
+        }
         let path = PathBuf::from;
-        // (argv after the program name, the metadata log dir and the log dirs)
-        let cases: [(&[&str], Parsed); 6] = [
-            (&["--log-dir", "/a"], Ok((None, vec![path("/a")]))),
-            (
-                &["--metadata-log-dir", "/m", "--log-dir", "/a,/b"],
-                Ok((Some(path("/m")), vec![path("/a"), path("/b")])),
-            ),
-            (
-                &["--log-dir=/a", "--metadata-log-dir=/a"],
-                Ok((Some(path("/a")), vec![path("/a")])),
-            ),
-            (
-                &["--metadata-log-dir", "/m,/n", "--log-dir", "/a"],
-                Ok((Some(path("/m,/n")), vec![path("/a")])),
-            ),
-            (
-                &["--metadata-log-dir", "/m"],
-                Err(ErrorKind::MissingRequiredArgument),
-            ),
-            (
-                &[
+        let dirs = |metadata_log_dir, log_dirs| Dirs {
+            metadata_log_dir,
+            log_dirs,
+        };
+        let cases = [
+            Case {
+                argv: &["--log-dir", "/a"],
+                want: Ok(dirs(None, vec![path("/a")])),
+            },
+            Case {
+                argv: &["--metadata-log-dir", "/m", "--log-dir", "/a,/b"],
+                want: Ok(dirs(Some(path("/m")), vec![path("/a"), path("/b")])),
+            },
+            Case {
+                argv: &["--log-dir=/a", "--metadata-log-dir=/a"],
+                want: Ok(dirs(Some(path("/a")), vec![path("/a")])),
+            },
+            Case {
+                argv: &["--metadata-log-dir", "/m,/n", "--log-dir", "/a"],
+                want: Ok(dirs(Some(path("/m,/n")), vec![path("/a")])),
+            },
+            Case {
+                argv: &["--metadata-log-dir", "/m"],
+                want: Err(ErrorKind::MissingRequiredArgument),
+            },
+            Case {
+                argv: &[
                     "--metadata-log-dir",
                     "/m",
                     "--metadata-log-dir",
@@ -274,16 +291,16 @@ mod tests {
                     "--log-dir",
                     "/a",
                 ],
-                Err(ErrorKind::ArgumentConflict),
-            ),
+                want: Err(ErrorKind::ArgumentConflict),
+            },
         ];
-        for (argv, want) in cases {
+        for Case { argv, want } in cases {
             let got: Parsed = Cli::try_parse_from(
                 ["krabka-format", "--node-id", "1"]
                     .into_iter()
                     .chain(argv.iter().copied()),
             )
-            .map(|cli| (cli.args.metadata_log_dir, cli.args.log_dirs))
+            .map(|cli| dirs(cli.args.metadata_log_dir, cli.args.log_dirs))
             .map_err(|error| error.kind());
             check!(got == want, "{argv:?}");
         }
@@ -294,7 +311,7 @@ mod tests {
     #[test]
     fn parse_node_id_takes_kafkas_node_id_range() {
         // (input, the id, or the message)
-        let cases: [(&str, Result<u64, &str>); 9] = [
+        let cases = [
             ("7", Ok(7)),
             ("  7  ", Ok(7)),
             ("0", Ok(0)),
@@ -327,7 +344,7 @@ mod tests {
             ))
         };
         let usable = uuid::Uuid::from_u64_pair(1, 1);
-        let cases: [(String, Result<DirectoryId, String>); 5] = [
+        let cases = [
             (usable.to_string(), Ok(DirectoryId::from(usable))),
             (
                 DirectoryId::from(usable).to_string(),

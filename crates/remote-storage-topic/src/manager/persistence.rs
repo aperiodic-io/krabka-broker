@@ -17,6 +17,14 @@ use {
     tracing::instrument,
 };
 
+/// Startup state derived from a snapshot: the committed offsets and the
+/// consumer assignment that resumes after them.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct ResumePlan {
+    pub committed: Vec<i64>,
+    pub assignment: Vec<PartitionStart>,
+}
+
 impl TopicBasedRemoteLogMetadataManager {
     /// Capture the pump's committed offsets together with a cache export
     /// under a consistent lock, and write a snapshot.
@@ -69,7 +77,7 @@ impl TopicBasedRemoteLogMetadataManager {
     pub(super) fn resume_from_snapshot(
         snapshot: Option<&Snapshot>,
         n: usize,
-    ) -> Result<(Vec<i64>, Vec<PartitionStart>), SnapshotError> {
+    ) -> Result<ResumePlan, SnapshotError> {
         let mut committed = vec![-1i64; n];
         if let Some(snap) = snapshot {
             for (i, &off) in snap.committed_offsets.iter().take(n).enumerate() {
@@ -84,7 +92,10 @@ impl TopicBasedRemoteLogMetadataManager {
                     .expect("committed offsets were validated above"),
             })
             .collect();
-        Ok((committed, assignment))
+        Ok(ResumePlan {
+            committed,
+            assignment,
+        })
     }
 
     /// The one adapter from a stored committed offset to an inclusive
@@ -119,8 +130,8 @@ mod tests {
         crate::{
             log::{InProcessMetadataEventLog, MetadataEventLog},
             manager::test_support::{
-                finish, on_blocking, snapshot_test_dir, start_manager_in, start_seeded_manager_in,
-                started, tp, wait_ready,
+                finish, on_blocking, seed, snapshot_test_dir, start_manager_in,
+                start_seeded_manager_in, started, tp, wait_ready,
             },
             partitioning::metadata_partition_for,
             serde::MetadataEvent,
@@ -147,8 +158,15 @@ mod tests {
         let retry = TopicBasedRemoteLogMetadataManager::resume_from_snapshot(Some(&snapshot), 3)
             .expect("retry is deterministic");
         check!(first == retry);
-        check!(first.0 == vec![4, -1, -1]);
-        check!(first.1.iter().map(|p| p.start_offset).collect::<Vec<_>>() == vec![5, 0, 0]);
+        check!(first.committed == vec![4, -1, -1]);
+        check!(
+            first
+                .assignment
+                .iter()
+                .map(|p| p.start_offset)
+                .collect::<Vec<_>>()
+                == vec![5, 0, 0]
+        );
 
         for (committed, expected) in [(-1, 0), (4, 5), (i64::MAX - 1, i64::MAX)] {
             check!(
@@ -274,7 +292,7 @@ mod tests {
     async fn shutdown_flushes_a_snapshot_covering_applied_events() {
         let dir = snapshot_test_dir("mgr-snap");
         let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
-        let m = start_seeded_manager_in(log.clone(), dir.clone(), &[(10, 0, 99)]).await;
+        let m = start_seeded_manager_in(log.clone(), dir.clone(), &[seed(10, 0, 99)]).await;
 
         m.shutdown_and_flush().await;
 
@@ -302,9 +320,9 @@ mod tests {
         let pre_cache;
         {
             let m = start_seeded_manager_in(log.clone(), dir.clone(), &[
-                (10, 0, 99),
-                (11, 100, 199),
-                (12, 200, 299),
+                seed(10, 0, 99),
+                seed(11, 100, 199),
+                seed(12, 200, 299),
             ])
             .await;
             pre_cache = m.list_remote_log_segments(&tp()).unwrap();
@@ -325,9 +343,11 @@ mod tests {
 
         // The canonical resume computation resumes the orders partition at
         // committed + 1 (same path start() uses).
-        let (resumed_committed, assignment) =
-            TopicBasedRemoteLogMetadataManager::resume_from_snapshot(Some(&snap), 4)
-                .expect("valid snapshot cursor");
+        let ResumePlan {
+            committed: resumed_committed,
+            assignment,
+        } = TopicBasedRemoteLogMetadataManager::resume_from_snapshot(Some(&snap), 4)
+            .expect("valid snapshot cursor");
         let orders_start = assignment
             .iter()
             .find(|s| s.partition == p)

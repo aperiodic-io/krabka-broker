@@ -86,18 +86,25 @@ pub fn topic_hash<'a>(
     xxh3(&stream)
 }
 
+/// The hash of one topic, with the name that [`group_hash`] orders it by.
+#[derive(Debug, Clone, Copy)]
+pub struct NamedTopicHash<'a> {
+    pub name: &'a str,
+    pub hash: i64,
+}
+
 /// Kafka's `Utils.computeGroupHash`: the topic hashes in topic name order, or
 /// 0 for no topic.
 #[must_use]
-pub fn group_hash<'a>(topic_hashes: impl IntoIterator<Item = (&'a str, i64)>) -> i64 {
-    let mut sorted: Vec<(&str, i64)> = topic_hashes.into_iter().collect();
+pub fn group_hash<'a>(topic_hashes: impl IntoIterator<Item = NamedTopicHash<'a>>) -> i64 {
+    let mut sorted: Vec<NamedTopicHash<'_>> = topic_hashes.into_iter().collect();
     if sorted.is_empty() {
         return 0;
     }
-    sorted.sort_by(|(left, _), (right, _)| java_string_order(left, right));
+    sorted.sort_by(|left, right| java_string_order(left.name, right.name));
     let mut stream = Vec::with_capacity(sorted.len() * 8);
-    for (_, hash) in sorted {
-        stream.extend_from_slice(&hash.to_le_bytes());
+    for topic in sorted {
+        stream.extend_from_slice(&topic.hash.to_le_bytes());
     }
     xxh3(&stream)
 }
@@ -139,11 +146,9 @@ pub fn image_metadata_hash<'a>(
     image: &MetadataImage,
 ) -> i64 {
     let topics: std::collections::BTreeSet<&str> = topics.into_iter().collect();
-    group_hash(
-        topics
-            .into_iter()
-            .filter_map(|topic| image_topic_hash(topic, image).map(|hash| (topic, hash))),
-    )
+    group_hash(topics.into_iter().filter_map(|topic| {
+        image_topic_hash(topic, image).map(|hash| NamedTopicHash { name: topic, hash })
+    }))
 }
 
 #[cfg(test)]
@@ -172,7 +177,7 @@ mod tests {
     /// One group of the golden table: its topic hashes, by name.
     struct GroupCase {
         case: &'static str,
-        topics: Vec<(&'static str, i64)>,
+        topics: Vec<NamedTopicHash<'static>>,
         kafka: i64,
     }
 
@@ -251,22 +256,52 @@ mod tests {
             },
             GroupCase {
                 case: "one topic",
-                topics: vec![("foo", foo)],
+                topics: vec![NamedTopicHash {
+                    name: "foo",
+                    hash: foo,
+                }],
                 kafka: -3_651_539_661_068_893_492,
             },
             GroupCase {
                 case: "two topics, sorted by name",
-                topics: vec![("foo", foo), ("bar", bar)],
+                topics: vec![
+                    NamedTopicHash {
+                        name: "foo",
+                        hash: foo,
+                    },
+                    NamedTopicHash {
+                        name: "bar",
+                        hash: bar,
+                    },
+                ],
                 kafka: -556_879_919_459_959_918,
             },
             GroupCase {
                 case: "the same topics in the other order",
-                topics: vec![("bar", bar), ("foo", foo)],
+                topics: vec![
+                    NamedTopicHash {
+                        name: "bar",
+                        hash: bar,
+                    },
+                    NamedTopicHash {
+                        name: "foo",
+                        hash: foo,
+                    },
+                ],
                 kafka: -556_879_919_459_959_918,
             },
             GroupCase {
                 case: "UtilsTest's literal hashes",
-                topics: vec![("foo", 456), ("bar", 123)],
+                topics: vec![
+                    NamedTopicHash {
+                        name: "foo",
+                        hash: 456,
+                    },
+                    NamedTopicHash {
+                        name: "bar",
+                        hash: 123,
+                    },
+                ],
                 kafka: 1_482_712_172_080_382_793,
             },
         ];

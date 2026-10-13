@@ -111,7 +111,10 @@ pub(crate) async fn format_target_with_snapshot(
         authenticated_snapshot,
     )
     .await?;
-    let (extra, metadata) = seed_metadata_records(
+    let SeededMetadata {
+        records: extra,
+        report: metadata,
+    } = seed_metadata_records(
         inventory,
         node_id,
         args.archive.metadata_snapshot.clone(),
@@ -264,6 +267,19 @@ async fn read_metadata_snapshot(
         })
 }
 
+/// The records a restore seeds into the target formatter, with the report of what they restore.
+struct SeededMetadata {
+    records: Vec<MetadataRecord>,
+    report: MetadataRestoreReport,
+}
+
+/// How many partitions the archive holds for one topic, and the topic's id.
+#[derive(Debug, Clone, Copy)]
+struct TopicTally {
+    topic_id: Uuid,
+    partitions: i32,
+}
+
 /// Build the topic and partition records a restore seeds into the target formatter, from what the archive scan recovered.
 ///
 /// Every topic's [`MetadataRecord::V1Topic`] precedes every [`MetadataRecord::V1Partition`], which is the ordering `krabka_format::run_with_records`'s own doc requires: a `MetadataImage` derives a topic's partition count from the partition records that apply after it, so a partition can only follow its own topic.
@@ -274,16 +290,19 @@ fn seed_metadata_records(
     node_id: NodeId,
     snapshot: Option<std::path::PathBuf>,
     snapshot_records: Option<&[MetadataRecord]>,
-) -> Result<(Vec<MetadataRecord>, MetadataRestoreReport), RestoreError> {
+) -> Result<SeededMetadata, RestoreError> {
     let mut topic_order: Vec<&str> = Vec::new();
-    let mut topics: HashMap<&str, (Uuid, i32)> = HashMap::new();
+    let mut topics: HashMap<&str, TopicTally> = HashMap::new();
     for entry in &inventory.partitions {
         let topic = entry.partition.topic.as_str();
         let counted = topics.entry(topic).or_insert_with(|| {
             topic_order.push(topic);
-            (entry.partition.topic_id, 0)
+            TopicTally {
+                topic_id: entry.partition.topic_id,
+                partitions: 0,
+            }
         });
-        counted.1 += 1;
+        counted.partitions += 1;
     }
 
     let mut metadata = MetadataRestoreReport {
@@ -326,7 +345,11 @@ fn seed_metadata_records(
             }
             MetadataRecord::V1FeaturesEpoch(_) => feature_epoch.push(record.clone()),
             MetadataRecord::V1TopicConfig(config) => {
-                if let Some((archive_topic_id, _)) = topics.get(config.topic.as_str()) {
+                if let Some(TopicTally {
+                    topic_id: archive_topic_id,
+                    ..
+                }) = topics.get(config.topic.as_str())
+                {
                     match snapshot_topics.get(config.topic.as_str()) {
                         Some(snapshot_topic_id) if snapshot_topic_id == archive_topic_id => {
                             metadata.topic_configs += 1;
@@ -396,7 +419,10 @@ fn seed_metadata_records(
     records.append(&mut features);
     records.append(&mut feature_epoch);
     for topic in &topic_order {
-        let (topic_id, partitions) = topics
+        let TopicTally {
+            topic_id,
+            partitions,
+        } = topics
             .get(topic)
             .copied()
             .expect("every topic in topic_order was inserted into topics above");
@@ -430,7 +456,10 @@ fn seed_metadata_records(
     records.append(&mut scram);
     records.append(&mut acls);
     records.append(&mut quotas);
-    Ok((records, metadata))
+    Ok(SeededMetadata {
+        records,
+        report: metadata,
+    })
 }
 
 #[cfg(test)]
@@ -478,8 +507,10 @@ mod tests {
             unrecognized: UnrecognizedKeys::default(),
         };
 
-        let (records, metadata) =
-            seed_metadata_records(&inventory, NodeId(7), None, None).expect("seed metadata");
+        let SeededMetadata {
+            records,
+            report: metadata,
+        } = seed_metadata_records(&inventory, NodeId(7), None, None).expect("seed metadata");
 
         let partition_record = |topic: &str, partition: i32| {
             MetadataRecord::V1Partition(PartitionRecord {
@@ -699,7 +730,7 @@ mod tests {
         ];
         let snapshot = std::path::PathBuf::from("/backup/metadata.checkpoint");
 
-        let (records, report) = seed_metadata_records(
+        let SeededMetadata { records, report } = seed_metadata_records(
             &inventory,
             NodeId(7),
             Some(snapshot.clone()),
@@ -766,7 +797,7 @@ mod tests {
             level: 1,
         });
 
-        let (records, _) = seed_metadata_records(
+        let SeededMetadata { records, .. } = seed_metadata_records(
             &inventory,
             NodeId(7),
             None,

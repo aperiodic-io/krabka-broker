@@ -84,20 +84,33 @@ fn the_proof_holds_kafkas_bytes() {
 /// ignores unknown fields, so krabka's does too.
 #[test]
 fn decode_reads_only_version_zero_documents() {
-    let cases: &[(&str, Result<i64, ProofError>)] = &[
-        (GOLDEN, Ok(42)),
-        (r#"{"brokerEpoch":42,"version":0}"#, Ok(42)),
-        (r#"{"version":0,"brokerEpoch":42,"extra":true}"#, Ok(42)),
-        (
-            r#"{"version":1,"brokerEpoch":42}"#,
-            Err(ProofError::UnknownVersion { found: 1 }),
-        ),
-        (
-            r#"{"version":-1,"brokerEpoch":42}"#,
-            Err(ProofError::UnknownVersion { found: -1 }),
-        ),
+    struct Case {
+        text: &'static str,
+        want: Result<i64, ProofError>,
+    }
+    let cases: &[Case] = &[
+        Case {
+            text: GOLDEN,
+            want: Ok(42),
+        },
+        Case {
+            text: r#"{"brokerEpoch":42,"version":0}"#,
+            want: Ok(42),
+        },
+        Case {
+            text: r#"{"version":0,"brokerEpoch":42,"extra":true}"#,
+            want: Ok(42),
+        },
+        Case {
+            text: r#"{"version":1,"brokerEpoch":42}"#,
+            want: Err(ProofError::UnknownVersion { found: 1 }),
+        },
+        Case {
+            text: r#"{"version":-1,"brokerEpoch":42}"#,
+            want: Err(ProofError::UnknownVersion { found: -1 }),
+        },
     ];
-    for (text, want) in cases {
+    for Case { text, want } in cases {
         assert!(decode(text) == *want, "decode({text})");
     }
     assert!(FORMAT_VERSION == 0);

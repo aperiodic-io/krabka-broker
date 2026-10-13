@@ -247,13 +247,20 @@ enum Tail {
     Partial(usize),
 }
 
+/// What [`walk_batches`] found: the batches read and how the file ends.
+#[derive(Debug, PartialEq, Eq)]
+struct SegmentWalk {
+    batches: Vec<Batch>,
+    tail: Tail,
+}
+
 /// Walk `bytes` as a chain of v2 record batches.
 ///
 /// Returns the batches read and how the file ends. A batch counts as read only
 /// when its declared length fits and its CRC32C over `CRC_COVERAGE_START..`
 /// matches, so a batch whose bytes are present but damaged ends the walk the
 /// same way a short one does.
-fn walk_batches(bytes: &[u8]) -> (Vec<Batch>, Tail) {
+fn walk_batches(bytes: &[u8]) -> SegmentWalk {
     let mut batches = Vec::new();
     let mut at = 0usize;
     while at < bytes.len() {
@@ -294,7 +301,7 @@ fn walk_batches(bytes: &[u8]) -> (Vec<Batch>, Tail) {
     } else {
         Tail::Partial(bytes.len() - at)
     };
-    (batches, tail)
+    SegmentWalk { batches, tail }
 }
 
 /// The active segment of `topic`'s partition 0, under a formatted log dir.
@@ -344,7 +351,7 @@ fn tear_tail(segment: &Path) -> usize {
     use std::io::Write as _;
 
     let bytes = std::fs::read(segment).expect("read the segment");
-    let (batches, tail) = walk_batches(&bytes);
+    let SegmentWalk { batches, tail } = walk_batches(&bytes);
     assert!(
         tail == Tail::Boundary,
         "a kill left {} already torn; the tear below assumes a whole file",
@@ -380,7 +387,11 @@ fn tear_tail(segment: &Path) -> usize {
 /// there is nothing left to arrange.
 fn ensure_torn(segment: &Path) {
     let before = std::fs::read(segment).expect("read the segment");
-    if let (_, Tail::Partial(n)) = walk_batches(&before) {
+    if let SegmentWalk {
+        tail: Tail::Partial(n),
+        ..
+    } = walk_batches(&before)
+    {
         eprintln!(
             "{} was already torn by the kill: {n} trailing bytes",
             segment.display()
@@ -389,7 +400,7 @@ fn ensure_torn(segment: &Path) {
     }
     let torn_len = tear_tail(segment);
     let after = std::fs::read(segment).expect("read the torn segment");
-    let (_, tail) = walk_batches(&after);
+    let SegmentWalk { tail, .. } = walk_batches(&after);
     assert!(
         matches!(tail, Tail::Partial(_)),
         "the tear left no partial batch in a {torn_len}-byte segment"
@@ -510,7 +521,10 @@ fn torn_tail_is_a_partial_trailing_batch() {
     let whole = batch_bytes(0, 3);
     std::fs::write(&segment, &whole).expect("write a whole segment");
 
-    let (before, tail) = walk_batches(&whole);
+    let SegmentWalk {
+        batches: before,
+        tail,
+    } = walk_batches(&whole);
     check!(tail == Tail::Boundary);
     check!(before.len() == 1);
     check!(
@@ -526,7 +540,13 @@ fn torn_tail_is_a_partial_trailing_batch() {
     let torn_len = tear_tail(&segment);
     let torn = std::fs::read(&segment).expect("read the torn segment");
     check!(torn.len() == torn_len);
-    check!(walk_batches(&torn) == (before, Tail::Partial(whole.len() / 2)));
+    check!(
+        walk_batches(&torn)
+            == SegmentWalk {
+                batches: before,
+                tail: Tail::Partial(whole.len() / 2),
+            }
+    );
 }
 
 /// One well-formed empty v2 batch, for [`torn_tail_is_a_partial_trailing_batch`].
@@ -616,7 +636,7 @@ async fn produce_through_a_kill(
 /// partial batch in place shows up as a chain that stops short of the end.
 fn check_recovered_segment(segment: &Path, cycle: usize) {
     let bytes = std::fs::read(segment).expect("read the recovered segment");
-    let (batches, tail) = walk_batches(&bytes);
+    let SegmentWalk { batches, tail } = walk_batches(&bytes);
     let shown = segment.display();
     check!(
         tail == Tail::Boundary,

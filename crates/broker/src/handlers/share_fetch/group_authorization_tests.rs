@@ -16,7 +16,7 @@ use {
         authorizer::AuthorizationResult,
         broker::BrokerHandle,
         codes,
-        handlers::test_support::create_topic as create_topic_from_test_support,
+        handlers::test_support::{StartedBroker, create_topic as create_topic_from_test_support},
         share_partition::session::FetchPartitions,
         test_support::{
             decode_response, encode_request, peer, principal, request_context,
@@ -110,8 +110,10 @@ test_authorizer!(GrantsByName, (self, _source, request), {
     }
 });
 
-async fn start() -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(GrantsByName)).await
+async fn start() -> StartedBroker {
+    let (broker, dir) =
+        start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(GrantsByName)).await;
+    StartedBroker { broker, dir }
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
@@ -132,12 +134,20 @@ fn versions() -> [i16; 2] {
 }
 
 /// What one case sent and what it got back.
-type Outcome<T> = (i16, Grants, T);
+#[derive(Debug, PartialEq)]
+struct Outcome<T> {
+    version: i16,
+    grants: Grants,
+    response: T,
+}
 
 /// Shared topic, share state, runtime and peer; locals remain in each test scope.
 macro_rules! authorization_fixture {
     (($broker:ident, $dir:ident, $topic_id:ident, $shared:ident, $address:ident)) => {
-        let ($broker, $dir) = start().await;
+        let StartedBroker {
+            broker: $broker,
+            dir: $dir,
+        } = start().await;
         let $topic_id = create_topic(&$broker, "share-authorization").await;
         crate::test_support::initialize_share_state(
             &$broker,
@@ -190,7 +200,11 @@ async fn share_fetch_checks_group_read_before_topic_read() {
             )
             .await
             .expect("handle share fetch");
-            actual.push((version, grants, decode_response(&response, version)));
+            actual.push(Outcome {
+                version,
+                grants,
+                response: decode_response(&response, version),
+            });
 
             let response = if grants.group_read {
                 ShareFetchResponse {
@@ -215,7 +229,11 @@ async fn share_fetch_checks_group_read_before_topic_read() {
                 // `ShareFetchResponse.of(error, throttleTimeMs, empty, List.of(), 0)`.
                 expected_group_denial!(ShareFetchResponse)
             };
-            expected.push((version, grants, response));
+            expected.push(Outcome {
+                version,
+                grants,
+                response,
+            });
         }
     }
     broker.shutdown().await;
@@ -276,7 +294,11 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
             )
             .await
             .expect("handle share acknowledge");
-            actual.push((version, grants, decode_response(&response, version)));
+            actual.push(Outcome {
+                version,
+                grants,
+                response: decode_response(&response, version),
+            });
 
             let response = if grants.group_read {
                 ShareAcknowledgeResponse {
@@ -303,7 +325,11 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
                 // time and the error code, and nothing else.
                 expected_group_denial!(ShareAcknowledgeResponse)
             };
-            expected.push((version, grants, response));
+            expected.push(Outcome {
+                version,
+                grants,
+                response,
+            });
         }
     }
     broker.shutdown().await;

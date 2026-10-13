@@ -71,6 +71,14 @@ pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster(
     cluster
 }
 
+/// `N` started brokers, the configs they started from, and the directories
+/// that back them.
+pub(crate) struct StartedCluster<const N: usize> {
+    pub(crate) brokers: [krabka_broker::BrokerHandle; N],
+    pub(crate) configs: [BrokerConfig; N],
+    pub(crate) dirs: [tempfile::TempDir; N],
+}
+
 #[bon::builder]
 pub(crate) async fn start_sasl_cluster<const N: usize>(
     listeners: [JvmListeners; N],
@@ -78,11 +86,7 @@ pub(crate) async fn start_sasl_cluster<const N: usize>(
     #[builder(default = super :: sasl :: ADMIN_PASS)] admin_pass: &'_ str,
     #[builder(default)] extra_users: &'_ [(&'_ str, &'_ str)],
     adjust: impl Fn(&mut BrokerConfig),
-) -> (
-    [krabka_broker::BrokerHandle; N],
-    [BrokerConfig; N],
-    [tempfile::TempDir; N],
-) {
+) -> StartedCluster<N> {
     let setup = SaslClusterSetup {
         admin,
         admin_pass,
@@ -155,13 +159,13 @@ pub(crate) async fn start_sasl_cluster<const N: usize>(
     for start in starts {
         brokers.push(start.await.expect("broker start task"));
     }
-    (
-        brokers
+    StartedCluster {
+        brokers: brokers
             .try_into()
             .unwrap_or_else(|_| panic!("broker count")),
         configs,
         dirs,
-    )
+    }
 }
 
 #[bon::builder]
@@ -176,7 +180,11 @@ pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster_configured(
         admin_pass,
         extra_users,
     };
-    let ([h0, h1, h2], [cfg0, cfg1, cfg2], [dir0, dir1, dir2]) = start_sasl_cluster()
+    let StartedCluster {
+        brokers: [h0, h1, h2],
+        configs: [cfg0, cfg1, cfg2],
+        dirs: [dir0, dir1, dir2],
+    } = start_sasl_cluster()
         .listeners(super::ports::cluster_listeners())
         .admin(setup.admin)
         .admin_pass(setup.admin_pass)

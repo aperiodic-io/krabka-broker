@@ -9,6 +9,13 @@ pub(crate) fn now_millis,
 0
 );
 
+/// A producer's id and the epoch it holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProducerIdentity {
+    pub(crate) producer_id: ProducerId,
+    pub(crate) producer_epoch: i16,
+}
+
 /// Request version at and above which `AddPartitionsToTxn`, `AddOffsetsToTxn`
 /// and `EndTxn` carry `PRODUCER_FENCED` (90, KIP-360). Below it, Kafka's
 /// `KafkaApis` downgrades that answer to the legacy `INVALID_PRODUCER_EPOCH`
@@ -44,8 +51,11 @@ macro_rules! reaper_task {
         }
     };
 }
-use crate::codes::{INVALID_PRODUCER_EPOCH, PRODUCER_FENCED};
 pub(super) use reaper_task;
+use {
+    crate::codes::{INVALID_PRODUCER_EPOCH, PRODUCER_FENCED},
+    krabka_log::ProducerId,
+};
 
 /// Independent expected wire codes shared by the utility and response tests.
 #[cfg(test)]

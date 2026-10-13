@@ -124,12 +124,34 @@ pub fn reauth_config(
     config
 }
 
+/// A running broker and the address it listens on.
+pub struct ListeningBroker {
+    pub handle: krabka_broker::BrokerHandle,
+    pub addr: std::net::SocketAddr,
+}
+
+/// A running broker, the address it listens on, and the log directory that
+/// backs it.
+pub struct RetainedBroker {
+    pub log_dir: tempfile::TempDir,
+    pub handle: krabka_broker::BrokerHandle,
+    pub addr: std::net::SocketAddr,
+}
+
+/// A [`RetainedBroker`] with the first socket opened to it.
+pub struct BrokerSocket {
+    pub log_dir: tempfile::TempDir,
+    pub handle: krabka_broker::BrokerHandle,
+    pub addr: std::net::SocketAddr,
+    pub stream: TcpStream,
+}
+
 /// An authenticated SCRAM-admin fixture, enabling the mechanisms each case exercises.
 pub async fn start_scram_admin(
     log_dir: &std::path::Path,
     password: &str,
     mechanisms: Vec<krabka_security::SaslMechanism>,
-) -> (krabka_broker::BrokerHandle, std::net::SocketAddr) {
+) -> ListeningBroker {
     let mut config = sasl_plaintext_mechanisms(log_dir.to_path_buf(), mechanisms);
     config
         .plain_credentials
@@ -139,7 +161,10 @@ pub async fn start_scram_admin(
         .await
         .expect("broker must start");
     let addr = broker.listen_addr();
-    (broker, addr)
+    ListeningBroker {
+        handle: broker,
+        addr,
+    }
 }
 
 pub fn alice_plain_config(
@@ -187,31 +212,32 @@ pub async fn start_alice_plain(
 /// Keep the SCRAM provisioning broker's directory alive beside its handle.
 pub async fn scram_admin_fixture(
     mechanisms: Vec<krabka_security::SaslMechanism>,
-) -> (
-    tempfile::TempDir,
-    krabka_broker::BrokerHandle,
-    std::net::SocketAddr,
-) {
+) -> RetainedBroker {
     let dir = tempfile::tempdir().unwrap();
-    let (broker, addr) = start_scram_admin(dir.path(), &admin_plain_password(), mechanisms).await;
-    (dir, broker, addr)
+    let ListeningBroker {
+        handle: broker,
+        addr,
+    } = start_scram_admin(dir.path(), &admin_plain_password(), mechanisms).await;
+    RetainedBroker {
+        log_dir: dir,
+        handle: broker,
+        addr,
+    }
 }
 
 /// A PLAIN broker and its first socket, retaining the log directory beside the handle.
 ///
 /// # Panics
 /// Panics if the broker fixture or the TCP connection cannot be created.
-pub async fn alice_plain_socket(
-    password: String,
-) -> (
-    tempfile::TempDir,
-    krabka_broker::BrokerHandle,
-    std::net::SocketAddr,
-    TcpStream,
-) {
+pub async fn alice_plain_socket(password: String) -> BrokerSocket {
     let (dir, broker, addr) = start_alice_plain(password).await;
     let stream = TcpStream::connect(addr).await.unwrap();
-    (dir, broker, addr, stream)
+    BrokerSocket {
+        log_dir: dir,
+        handle: broker,
+        addr,
+        stream,
+    }
 }
 
 /// Provision Alice and Bob for the selected reauthentication mechanism.

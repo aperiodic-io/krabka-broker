@@ -149,7 +149,7 @@ mod tests {
         super::*,
         crate::{
             isr_maintenance::test_support::{
-                fake_source, fixture_partition, partition, set_replica_state, topic,
+                StaleFollower, fake_source, fixture_partition, partition, set_replica_state, topic,
             },
             metadata_source::MetadataSource,
             test_support::plaintext_controller_dialer,
@@ -180,10 +180,12 @@ mod tests {
             .topic("t")
             .call();
         part.current_leader.store(1, Ordering::Release);
-        set_replica_state(&part, partition().leader_epoch(10).call(), &[(
-            NodeId(2),
-            Duration::from_secs(30),
-        )])
+        set_replica_state(&part, partition().leader_epoch(10).call(), &[
+            StaleFollower {
+                node: NodeId(2),
+                caught_up_age: Duration::from_secs(30),
+            },
+        ])
         .await;
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&topic("t", uuid::Uuid::from_u128(1)));

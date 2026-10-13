@@ -38,6 +38,27 @@ enum ControllerAuthorization {
     Denied,
 }
 
+/// The protocol a controller listener speaks and the address it binds.
+#[derive(Clone, Copy)]
+struct ControllerListener {
+    protocol: ListenerProtocol,
+    addr: SocketAddr,
+}
+
+/// One member of the static controller voter set and its controller address.
+#[derive(Clone, Copy)]
+struct ControllerVoter {
+    id: NodeId,
+    addr: SocketAddr,
+}
+
+/// The SASL/PLAIN user name and password a broker presents and accepts.
+#[derive(Clone, Copy)]
+struct PlainCredentials<'a> {
+    user: &'a str,
+    password: &'a str,
+}
+
 /// Build a `SASL_PLAINTEXT` data-plane listener config for broker `i`
 /// (0-indexed) and parameterized `controller_listener_protocol`.
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -45,13 +66,19 @@ struct SaslBrokerSetup<'a> {
     slot: BrokerSlot,
     #[default(data_listen_addr())]
     data_addr: SocketAddr,
-    #[default((ListenerProtocol::SaslPlaintext, data_listen_addr()))]
-    controller: (ListenerProtocol, SocketAddr),
-    voters: &'a [(NodeId, SocketAddr)],
+    #[default(ControllerListener {
+        protocol: ListenerProtocol::SaslPlaintext,
+        addr: data_listen_addr(),
+    })]
+    controller: ControllerListener,
+    voters: &'a [ControllerVoter],
     #[default(BootstrapMode::Bootstrap)]
     mode: BootstrapMode,
-    #[default(("raft-user", "raft-password"))]
-    credentials: (&'a str, &'a str),
+    #[default(PlainCredentials {
+        user: "raft-user",
+        password: "raft-password",
+    })]
+    credentials: PlainCredentials<'a>,
 }
 
 #[bon::builder]
@@ -59,13 +86,12 @@ fn sasl_broker_config(
     log_dir: &std::path::Path,
     #[builder(into, default)] slot: BrokerSlot,
     #[builder(default = data_listen_addr ())] data_addr: SocketAddr,
-    #[builder(default = (ListenerProtocol :: SaslPlaintext , data_listen_addr ()))] controller: (
-        ListenerProtocol,
-        SocketAddr,
-    ),
-    #[builder(default)] voters: &'_ [(NodeId, SocketAddr)],
+    #[builder(default = ControllerListener { protocol : ListenerProtocol :: SaslPlaintext , addr : data_listen_addr () })]
+    controller: ControllerListener,
+    #[builder(default)] voters: &'_ [ControllerVoter],
     #[builder(default = BootstrapMode :: Bootstrap)] mode: BootstrapMode,
-    #[builder(default = ("raft-user" , "raft-password"))] credentials: (&'_ str, &'_ str),
+    #[builder(default = PlainCredentials { user : "raft-user" , password : "raft-password" })]
+    credentials: PlainCredentials<'_>,
 ) -> BrokerConfig {
     let setup = SaslBrokerSetup {
         slot,
@@ -83,15 +109,21 @@ fn sasl_broker_config(
         mode,
         credentials,
     } = setup;
-    let (ctrl, ctrl_addr) = controller;
-    let (plain_user, plain_pass) = credentials;
+    let ControllerListener {
+        protocol: ctrl,
+        addr: ctrl_addr,
+    } = controller;
+    let PlainCredentials {
+        user: plain_user,
+        password: plain_pass,
+    } = credentials;
     let mut cfg = node_config(NodeIndex(slot.0), log_dir);
     cfg.listen_addr = data_addr;
     cfg.advertised_listener = data_addr.to_string();
     cfg.controller_listen_addr = ctrl_addr;
     cfg.controller_quorum_voters = voters
         .iter()
-        .map(|(id, address)| (*id, address.to_string()))
+        .map(|ControllerVoter { id, addr }| (*id, addr.to_string()))
         .collect();
     cfg.bootstrap_mode = mode;
     cfg.listeners = vec![crate::support::listeners::listener(
@@ -111,6 +143,12 @@ fn sasl_broker_config(
     cfg
 }
 
+/// Two bound controller listeners and the addresses they are bound to.
+struct ReservedControllers {
+    addrs: [SocketAddr; 2],
+    listeners: [tokio::net::TcpListener; 2],
+}
+
 /// Bind two ephemeral loopback controller listeners and return them
 /// alongside their addresses. The caller hands the live listeners to
 /// `Broker::start_with_controller_listener`, which adopts them directly
@@ -122,12 +160,15 @@ fn sasl_broker_config(
 /// runner can claim the port, and `Broker::start` then fails with
 /// `AddrInUse`. This helper keeps the socket bound and hands it over,
 /// which removes that window.
-async fn reserve_ctrl_listeners() -> ([SocketAddr; 2], [tokio::net::TcpListener; 2]) {
+async fn reserve_ctrl_listeners() -> ReservedControllers {
     let l0 = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let l1 = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let a0 = l0.local_addr().unwrap();
     let a1 = l1.local_addr().unwrap();
-    ([a0, a1], [l0, l1])
+    ReservedControllers {
+        addrs: [a0, a1],
+        listeners: [l0, l1],
+    }
 }
 
 /// Data-plane bind address for these tests: `127.0.0.1:0` lets the OS
@@ -135,6 +176,14 @@ async fn reserve_ctrl_listeners() -> ([SocketAddr; 2], [tokio::net::TcpListener;
 /// gap to race on. Convergence here uses the controller listener. No
 /// test dials the data plane, so nothing reads the bound port back.
 fn data_listen_addr() -> SocketAddr { "127.0.0.1:0".parse().unwrap() }
+
+/// Two running brokers and the data directory behind each.
+struct TwoBrokers {
+    broker0: BrokerHandle,
+    broker1: BrokerHandle,
+    dir0: TempDir,
+    dir1: TempDir,
+}
 
 /// Boot two brokers with the supplied data-plane and controller listener
 /// configurations. This helper uses the deterministic bootstrap-then-join
@@ -145,27 +194,50 @@ async fn start_two_brokers_with_controller_protocol(
     ctrl: ListenerProtocol,
     plain_user: &str,
     plain_pass: &str,
-) -> (BrokerHandle, BrokerHandle, TempDir, TempDir) {
+) -> TwoBrokers {
     init_tracing();
-    let (ctrl_addrs, [ctrl_l0, ctrl_l1]) = reserve_ctrl_listeners().await;
-    let voters: Vec<(NodeId, SocketAddr)> =
-        vec![(NodeId(1), ctrl_addrs[0]), (NodeId(2), ctrl_addrs[1])];
+    let ReservedControllers {
+        addrs: ctrl_addrs,
+        listeners: [ctrl_l0, ctrl_l1],
+    } = reserve_ctrl_listeners().await;
+    let voters = [
+        ControllerVoter {
+            id: NodeId(1),
+            addr: ctrl_addrs[0],
+        },
+        ControllerVoter {
+            id: NodeId(2),
+            addr: ctrl_addrs[1],
+        },
+    ];
 
     let dir0 = TempDir::new().unwrap();
     let dir1 = TempDir::new().unwrap();
 
     let cfg0 = sasl_broker_config()
         .log_dir(dir0.path())
-        .controller((ctrl, ctrl_addrs[0]))
+        .controller(ControllerListener {
+            protocol: ctrl,
+            addr: ctrl_addrs[0],
+        })
         .voters(&voters)
-        .credentials((plain_user, plain_pass))
+        .credentials(PlainCredentials {
+            user: plain_user,
+            password: plain_pass,
+        })
         .call();
     let cfg1 = sasl_broker_config()
         .log_dir(dir1.path())
         .slot(1)
-        .controller((ctrl, ctrl_addrs[1]))
+        .controller(ControllerListener {
+            protocol: ctrl,
+            addr: ctrl_addrs[1],
+        })
         .voters(&voters)
-        .credentials((plain_user, plain_pass))
+        .credentials(PlainCredentials {
+            user: plain_user,
+            password: plain_pass,
+        })
         .call();
 
     // KIP-595 static-quorum bootstrap: both brokers boot with the same
@@ -180,18 +252,26 @@ async fn start_two_brokers_with_controller_protocol(
         .expect("start broker 0");
 
     let broker1 = join.await.expect("join spawn").expect("start broker 1");
-    (broker0, broker1, dir0, dir1)
+    TwoBrokers {
+        broker0,
+        broker1,
+        dir0,
+        dir1,
+    }
 }
 
 /// Independent single-voter clusters cannot merge when authentication or authorization fails.
 /// Start broker 1 then broker 2, retain both directories, and observe the original 3s window.
 async fn assert_disconnected_controllers(
-    credentials: [(&str, &str); 2],
+    credentials: [PlainCredentials<'_>; 2],
     authorization: ControllerAuthorization,
     failure: &str,
 ) {
     init_tracing();
-    let (ctrl_addrs, [ctrl_l1, ctrl_l2]) = reserve_ctrl_listeners().await;
+    let ReservedControllers {
+        addrs: ctrl_addrs,
+        listeners: [ctrl_l1, ctrl_l2],
+    } = reserve_ctrl_listeners().await;
     let dir1 = TempDir::new().unwrap();
     let dir2 = TempDir::new().unwrap();
     // A shared two-voter quorum would never elect with these failures and would
@@ -200,8 +280,14 @@ async fn assert_disconnected_controllers(
         let mut config = sasl_broker_config()
             .log_dir(dir.path())
             .slot(index)
-            .controller((ListenerProtocol::SaslPlaintext, ctrl_addrs[index]))
-            .voters(&[(NodeId(u64::try_from(index).unwrap() + 1), ctrl_addrs[index])])
+            .controller(ControllerListener {
+                protocol: ListenerProtocol::SaslPlaintext,
+                addr: ctrl_addrs[index],
+            })
+            .voters(&[ControllerVoter {
+                id: NodeId(u64::try_from(index).unwrap() + 1),
+                addr: ctrl_addrs[index],
+            }])
             .credentials(credentials[index])
             .call();
         if authorization == ControllerAuthorization::Denied {
@@ -241,7 +327,12 @@ async fn assert_disconnected_controllers(
 // `API_KEY_SUBMIT_CHANGE` hits the wire, and b1 accepts the registration.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn controller_listener_sasl_plaintext_two_broker_quorum() {
-    let (b1, b2, _d1, _d2) = Box::pin(start_two_brokers_with_controller_protocol(
+    let TwoBrokers {
+        broker0: b1,
+        broker1: b2,
+        dir0: _d1,
+        dir1: _d2,
+    } = Box::pin(start_two_brokers_with_controller_protocol(
         ListenerProtocol::SaslPlaintext,
         "broker",
         "secret",
@@ -259,10 +350,19 @@ async fn controller_listener_sasl_plaintext_two_broker_quorum() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn controller_listener_oauthbearer_two_broker_quorum() {
     init_tracing();
-    let (controller_addrs, [controller_0, controller_1]) = reserve_ctrl_listeners().await;
+    let ReservedControllers {
+        addrs: controller_addrs,
+        listeners: [controller_0, controller_1],
+    } = reserve_ctrl_listeners().await;
     let voters = vec![
-        (NodeId(1), controller_addrs[0]),
-        (NodeId(2), controller_addrs[1]),
+        ControllerVoter {
+            id: NodeId(1),
+            addr: controller_addrs[0],
+        },
+        ControllerVoter {
+            id: NodeId(2),
+            addr: controller_addrs[1],
+        },
     ];
     let dir0 = TempDir::new().unwrap();
     let dir1 = TempDir::new().unwrap();
@@ -272,16 +372,28 @@ async fn controller_listener_oauthbearer_two_broker_quorum() {
 
     let mut cfg0 = sasl_broker_config()
         .log_dir(dir0.path())
-        .controller((ListenerProtocol::SaslPlaintext, controller_addrs[0]))
+        .controller(ControllerListener {
+            protocol: ListenerProtocol::SaslPlaintext,
+            addr: controller_addrs[0],
+        })
         .voters(&voters)
-        .credentials(("unused", "unused"))
+        .credentials(PlainCredentials {
+            user: "unused",
+            password: "unused",
+        })
         .call();
     let mut cfg1 = sasl_broker_config()
         .log_dir(dir1.path())
         .slot(1)
-        .controller((ListenerProtocol::SaslPlaintext, controller_addrs[1]))
+        .controller(ControllerListener {
+            protocol: ListenerProtocol::SaslPlaintext,
+            addr: controller_addrs[1],
+        })
         .voters(&voters)
-        .credentials(("unused", "unused"))
+        .credentials(PlainCredentials {
+            user: "unused",
+            password: "unused",
+        })
         .call();
     for config in [&mut cfg0, &mut cfg1] {
         config.enabled_sasl_mechanisms = vec![SaslMechanism::OAuthBearer];
@@ -310,7 +422,16 @@ async fn controller_listener_oauthbearer_two_broker_quorum() {
 async fn controller_listener_sasl_plaintext_rejects_mismatched_creds() {
     // Neither broker has the other's password, so authentication fails both ways.
     Box::pin(assert_disconnected_controllers(
-        [("alice", "wonderland"), ("bob", "burgers")],
+        [
+            PlainCredentials {
+                user: "alice",
+                password: "wonderland",
+            },
+            PlainCredentials {
+                user: "bob",
+                password: "burgers",
+            },
+        ],
         ControllerAuthorization::Allowed,
         "mismatched creds must not converge",
     ))
@@ -329,7 +450,10 @@ async fn controller_listener_sasl_plaintext_rejects_mismatched_creds() {
 async fn controller_listener_sasl_denies_unauthorized_principal() {
     // Both credentials authenticate; the empty authorizers deny controller RPCs.
     Box::pin(assert_disconnected_controllers(
-        [("broker", "secret"), ("broker", "secret")],
+        [PlainCredentials {
+            user: "broker",
+            password: "secret",
+        }; 2],
         ControllerAuthorization::Denied,
         "unauthorized principal must not be able to drive controller RPCs",
     ))
@@ -342,8 +466,11 @@ async fn controller_listener_plaintext_legacy_path_unchanged() {
     // `AllowAllAuthorizer`: every peer is `ANONYMOUS` and every request is
     // allowed. Two brokers converge over the plaintext path.
     init_tracing();
-    let (ctrl_addrs, [ctrl_l1, ctrl_l2]) = reserve_ctrl_listeners().await;
-    let voters: Vec<(u64, SocketAddr)> = vec![(1, ctrl_addrs[0]), (2, ctrl_addrs[1])];
+    let ReservedControllers {
+        addrs: ctrl_addrs,
+        listeners: [ctrl_l1, ctrl_l2],
+    } = reserve_ctrl_listeners().await;
+    let voters = vec![(1, ctrl_addrs[0]), (2, ctrl_addrs[1])];
 
     let dir1 = TempDir::new().unwrap();
     let dir2 = TempDir::new().unwrap();

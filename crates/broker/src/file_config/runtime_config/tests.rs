@@ -91,6 +91,13 @@ streams_group_max_size = 19
 /// as `30`, changes a Kafka wire field by three orders of magnitude.
 #[test]
 fn runtime_millisecond_and_byte_keys_round_trip_through_quantities() {
+    /// A runtime key and the integer it carries on the wire.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Quantity {
+        key: &'static str,
+        value: i64,
+    }
+
     let cfg = configured(
         r#"
 [runtime]
@@ -130,78 +137,132 @@ replication_fetch_min = "1B"
     assert!(cfg.replication.fetch_min == bytes(1));
 
     // …and leave for the wire exactly the integers that came in.
-    let millis: [(&str, i64); 8] = [
-        ("heartbeat_interval", cfg.heartbeat_interval.millis_i64()),
-        ("heartbeat_timeout", cfg.heartbeat_timeout.millis_i64()),
-        (
-            "replica_lag_time_max",
-            cfg.replica_lag_time_max.millis_i64(),
-        ),
-        (
-            "transaction_max_timeout",
-            i64::from(cfg.transaction_max_timeout.millis_i32()),
-        ),
-        (
-            "producer_id_expiration",
-            cfg.producer_id_expiration.millis_i64(),
-        ),
-        (
-            "client_metrics_default_interval",
-            i64::from(cfg.client_metrics_default_interval.millis_i32()),
-        ),
-        (
-            "delegation_token_max_lifetime",
-            cfg.delegation_token_max_lifetime.millis_i64(),
-        ),
+    let millis: [Quantity; 8] = [
+        Quantity {
+            key: "heartbeat_interval",
+            value: cfg.heartbeat_interval.millis_i64(),
+        },
+        Quantity {
+            key: "heartbeat_timeout",
+            value: cfg.heartbeat_timeout.millis_i64(),
+        },
+        Quantity {
+            key: "replica_lag_time_max",
+            value: cfg.replica_lag_time_max.millis_i64(),
+        },
+        Quantity {
+            key: "transaction_max_timeout",
+            value: i64::from(cfg.transaction_max_timeout.millis_i32()),
+        },
+        Quantity {
+            key: "producer_id_expiration",
+            value: cfg.producer_id_expiration.millis_i64(),
+        },
+        Quantity {
+            key: "client_metrics_default_interval",
+            value: i64::from(cfg.client_metrics_default_interval.millis_i32()),
+        },
+        Quantity {
+            key: "delegation_token_max_lifetime",
+            value: cfg.delegation_token_max_lifetime.millis_i64(),
+        },
         // Truncating, exactly as `build_fetch_request` narrows it for the
         // `FetchRequest.max_wait_ms` wire field.
-        (
-            "replication_fetch_max_wait",
-            cfg.replication.fetch_max_wait.millis_i64_trunc(),
-        ),
+        Quantity {
+            key: "replication_fetch_max_wait",
+            value: cfg.replication.fetch_max_wait.millis_i64_trunc(),
+        },
     ];
     assert!(
         millis
             == [
-                ("heartbeat_interval", 3_000),
-                ("heartbeat_timeout", 9_000),
-                ("replica_lag_time_max", 30_000),
-                ("transaction_max_timeout", 900_000),
-                ("producer_id_expiration", 86_400_000),
-                ("client_metrics_default_interval", 300_000),
-                ("delegation_token_max_lifetime", 604_800_000),
-                ("replication_fetch_max_wait", 500),
+                Quantity {
+                    key: "heartbeat_interval",
+                    value: 3_000
+                },
+                Quantity {
+                    key: "heartbeat_timeout",
+                    value: 9_000
+                },
+                Quantity {
+                    key: "replica_lag_time_max",
+                    value: 30_000
+                },
+                Quantity {
+                    key: "transaction_max_timeout",
+                    value: 900_000
+                },
+                Quantity {
+                    key: "producer_id_expiration",
+                    value: 86_400_000
+                },
+                Quantity {
+                    key: "client_metrics_default_interval",
+                    value: 300_000
+                },
+                Quantity {
+                    key: "delegation_token_max_lifetime",
+                    value: 604_800_000
+                },
+                Quantity {
+                    key: "replication_fetch_max_wait",
+                    value: 500
+                },
             ]
     );
-    let sizes: [(&str, i64); 6] = [
-        ("socket_request_max", cfg.socket_request_max.bytes_i64()),
-        (
-            "client_metrics_telemetry_max",
-            i64::from(cfg.client_metrics_telemetry_max.bytes_i32()),
-        ),
-        ("observer_fetch_max", cfg.observer_fetch_max.bytes_i64()),
-        (
-            "fetch_max_bytes",
-            i64::from(cfg.fetch_max_bytes.bytes_i32()),
-        ),
-        (
-            "replication_fetch_max",
-            i64::from(cfg.replication.fetch_max.bytes_i32()),
-        ),
-        (
-            "replication_fetch_min",
-            i64::from(cfg.replication.fetch_min.bytes_i32()),
-        ),
+    let sizes: [Quantity; 6] = [
+        Quantity {
+            key: "socket_request_max",
+            value: cfg.socket_request_max.bytes_i64(),
+        },
+        Quantity {
+            key: "client_metrics_telemetry_max",
+            value: i64::from(cfg.client_metrics_telemetry_max.bytes_i32()),
+        },
+        Quantity {
+            key: "observer_fetch_max",
+            value: cfg.observer_fetch_max.bytes_i64(),
+        },
+        Quantity {
+            key: "fetch_max_bytes",
+            value: i64::from(cfg.fetch_max_bytes.bytes_i32()),
+        },
+        Quantity {
+            key: "replication_fetch_max",
+            value: i64::from(cfg.replication.fetch_max.bytes_i32()),
+        },
+        Quantity {
+            key: "replication_fetch_min",
+            value: i64::from(cfg.replication.fetch_min.bytes_i32()),
+        },
     ];
     assert!(
         sizes
             == [
-                ("socket_request_max", 104_857_600),
-                ("client_metrics_telemetry_max", 1_048_576),
-                ("observer_fetch_max", 1_048_576),
-                ("fetch_max_bytes", 58_720_256),
-                ("replication_fetch_max", 1_048_576),
-                ("replication_fetch_min", 1),
+                Quantity {
+                    key: "socket_request_max",
+                    value: 104_857_600
+                },
+                Quantity {
+                    key: "client_metrics_telemetry_max",
+                    value: 1_048_576
+                },
+                Quantity {
+                    key: "observer_fetch_max",
+                    value: 1_048_576
+                },
+                Quantity {
+                    key: "fetch_max_bytes",
+                    value: 58_720_256
+                },
+                Quantity {
+                    key: "replication_fetch_max",
+                    value: 1_048_576
+                },
+                Quantity {
+                    key: "replication_fetch_min",
+                    value: 1
+                },
             ]
     );
 }

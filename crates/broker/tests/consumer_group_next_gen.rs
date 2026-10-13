@@ -27,11 +27,14 @@ use {
     },
 };
 
-fn boot() -> std::pin::Pin<
-    Box<
-        impl std::future::Future<Output = (krabka_broker::BrokerHandle, String, tempfile::TempDir)>,
-    >,
-> {
+/// A running broker, its bootstrap address and the directory that backs it.
+struct BootedBroker {
+    broker: krabka_broker::BrokerHandle,
+    bootstrap: String,
+    dir: tempfile::TempDir,
+}
+
+fn boot() -> std::pin::Pin<Box<impl std::future::Future<Output = BootedBroker>>> {
     Box::pin(async {
         let dir = tempfile::TempDir::new().unwrap();
         let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
@@ -43,7 +46,11 @@ fn boot() -> std::pin::Pin<
                 .call(),
         )
         .await;
-        (started.broker, started.bootstrap, started.directory)
+        BootedBroker {
+            broker: started.broker,
+            bootstrap: started.bootstrap,
+            dir: started.directory,
+        }
     })
 }
 
@@ -81,7 +88,11 @@ fn heartbeat(group: &str, member_id: &str, epoch: i32) -> ConsumerGroupHeartbeat
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn single_member_full_lifecycle() {
-    let (_b, _d, client) = consumer_case("t1", 4, "c1").await;
+    let ConsumerCase {
+        broker: _b,
+        dir: _d,
+        client,
+    } = consumer_case("t1", 4, "c1").await;
 
     let mut req = heartbeat("g1", "", 0);
     req.subscribed_topic_names = Some(vec!["t1".into()]);
@@ -111,7 +122,11 @@ async fn single_member_full_lifecycle() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_members_split_partitions() {
-    let (_b, _d, client) = consumer_case("t2", 4, "c").await;
+    let ConsumerCase {
+        broker: _b,
+        dir: _d,
+        client,
+    } = consumer_case("t2", 4, "c").await;
 
     let mut a = heartbeat("g2", "", 0);
     a.subscribed_topic_names = Some(vec!["t2".into()]);
@@ -177,7 +192,11 @@ async fn two_members_split_partitions() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn classic_group_locked_against_next_gen() {
-    let (_b, _d, client) = consumer_case("t3", 2, "c").await;
+    let ConsumerCase {
+        broker: _b,
+        dir: _d,
+        client,
+    } = consumer_case("t3", 2, "c").await;
 
     // A live classic group that does not use the consumer embedded protocol.
     // Kafka's `validateOnlineUpgrade` refuses to upgrade it; an empty classic
@@ -236,7 +255,11 @@ async fn kill_switch_returns_unsupported_version() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn describe_after_join() {
-    let (_b, _d, client) = consumer_case("t5", 2, "c").await;
+    let ConsumerCase {
+        broker: _b,
+        dir: _d,
+        client,
+    } = consumer_case("t5", 2, "c").await;
 
     let mut req = heartbeat("g5", "", 0);
     req.subscribed_topic_names = Some(vec!["t5".into()]);
@@ -257,7 +280,11 @@ async fn describe_after_join() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_old_epoch_is_fenced() {
-    let (_b, _d, client) = consumer_case("t6", 2, "c").await;
+    let ConsumerCase {
+        broker: _b,
+        dir: _d,
+        client,
+    } = consumer_case("t6", 2, "c").await;
 
     // A joins; group_epoch goes 1→2, A's member_epoch = 2.
     let mut req = heartbeat("g6", "", 0);
@@ -303,7 +330,11 @@ async fn an_old_epoch_is_fenced() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn first_join_with_client_member_id_echoes_and_assigns() {
-    let (_b, _d, client) = consumer_case("tc", 2, "c").await;
+    let ConsumerCase {
+        broker: _b,
+        dir: _d,
+        client,
+    } = consumer_case("tc", 2, "c").await;
 
     // Client supplies its own member id (GA KIP-848 semantics).
     let mut req = heartbeat("gc", "client-generated-id", 0);
@@ -335,7 +366,11 @@ async fn first_join_with_client_member_id_echoes_and_assigns() {
 /// filter.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_groups_includes_next_gen_consumer_group() {
-    let (_b, _d, client) = consumer_case("tlist", 2, "c").await;
+    let ConsumerCase {
+        broker: _b,
+        dir: _d,
+        client,
+    } = consumer_case("tlist", 2, "c").await;
 
     // Join a next-gen consumer group so it is registered in the coordinator.
     let mut req = heartbeat("glist", "", 0);
@@ -424,7 +459,11 @@ async fn list_groups_includes_next_gen_consumer_group() {
 /// repository has no image carrying both a JDK and the 4.x client jars.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_invalid_subscribed_topic_regex_fails_the_heartbeat() {
-    let (_b, _d, client) = consumer_case("t-badregex", 1, "c-badregex").await;
+    let ConsumerCase {
+        broker: _b,
+        dir: _d,
+        client,
+    } = consumer_case("t-badregex", 1, "c-badregex").await;
 
     for pattern in ["(", "[a-", "a{2,1}"] {
         let mut req = heartbeat("g-badregex", "", 0);
@@ -465,7 +504,11 @@ async fn an_invalid_subscribed_topic_regex_fails_the_heartbeat() {
 /// neither for a periodic refresh nor for a session to time out.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_topic_created_after_the_member_joined_reaches_its_next_heartbeat() {
-    let (_b, bootstrap, _d) = boot().await;
+    let BootedBroker {
+        broker: _b,
+        bootstrap,
+        dir: _d,
+    } = boot().await;
     let client = connect_client(bootstrap.as_str(), Some("c-late")).await;
     let mut join = heartbeat("g-late", "", 0);
     join.subscribed_topic_names = Some(vec!["late".into()]);
@@ -523,7 +566,11 @@ async fn a_topic_created_after_the_member_joined_reaches_its_next_heartbeat() {
 /// group only.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_group_config_overrides_the_heartbeat_interval_of_its_group() {
-    let (broker, bootstrap, _dir) = boot().await;
+    let BootedBroker {
+        broker,
+        bootstrap,
+        dir: _dir,
+    } = boot().await;
     let client = Arc::new(connect_client(bootstrap.as_str(), Some("c")).await);
     broker
         .submit_metadata_record_for_test(krabka_metadata::MetadataRecord::V1GroupConfig(
@@ -554,21 +601,32 @@ async fn a_group_config_overrides_the_heartbeat_interval_of_its_group() {
     check!(intervals == [("g-tuned", 7_000), ("g-plain", 5_000)]);
 }
 
+/// A running broker, the directory that backs it and a client connected to it.
+struct ConsumerCase {
+    broker: krabka_broker::BrokerHandle,
+    dir: tempfile::TempDir,
+    client: Arc<Client>,
+}
+
 fn consumer_case(
     topic: &str,
     partitions: i32,
     client_id: &str,
-) -> std::pin::Pin<
-    Box<
-        impl std::future::Future<Output = (krabka_broker::BrokerHandle, tempfile::TempDir, Arc<Client>)>,
-    >,
-> {
+) -> std::pin::Pin<Box<impl std::future::Future<Output = ConsumerCase>>> {
     let topic = topic.to_owned();
     let client_id = client_id.to_owned();
     Box::pin(async move {
-        let (broker, bootstrap, dir) = boot().await;
+        let BootedBroker {
+            broker,
+            bootstrap,
+            dir,
+        } = boot().await;
         let client = Arc::new(connect_client(bootstrap.as_str(), Some(&client_id)).await);
         create_topic(&client, &topic, partitions).await;
-        (broker, dir, client)
+        ConsumerCase {
+            broker,
+            dir,
+            client,
+        }
     })
 }

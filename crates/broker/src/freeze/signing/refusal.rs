@@ -29,6 +29,13 @@ pub(crate) enum SignatureRefusal {
     SignatureDidNotVerify,
 }
 
+/// A [`SignatureRefusal`] as a response carries it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WireRefusal {
+    pub(crate) code: i16,
+    pub(crate) message: &'static str,
+}
+
 impl SignatureRefusal {
     /// The wire error code of every refusal.
     ///
@@ -63,5 +70,10 @@ impl SignatureRefusal {
     ///
     /// The code is [`Self::CODE`] for every variant, and the text is the only
     /// part that separates the six checks.
-    pub(crate) fn wire(self) -> (i16, &'static str) { (Self::CODE, self.message()) }
+    pub(crate) fn wire(self) -> WireRefusal {
+        WireRefusal {
+            code: Self::CODE,
+            message: self.message(),
+        }
+    }
 }

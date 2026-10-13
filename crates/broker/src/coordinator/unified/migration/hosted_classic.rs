@@ -54,6 +54,13 @@ fn validate_member<'a>(
     Ok(member)
 }
 
+/// A consumer-group member that uses the classic protocol, and its classic
+/// facade.
+struct HostedClassicMember<'a> {
+    member: &'a MemberState,
+    facade: &'a ClassicMemberFacade,
+}
+
 /// The checks that Kafka's `classicGroupHeartbeatToConsumerGroup` and
 /// `classicGroupSyncToConsumerGroup` share: the member exists and is not
 /// fenced (`validateConsumerGroupMember`), it uses the classic protocol
@@ -65,13 +72,13 @@ fn validate_classic_member<'a>(
     member_id: &str,
     instance_id: Option<&str>,
     generation_id: i32,
-) -> Result<(&'a MemberState, &'a ClassicMemberFacade), i16> {
+) -> Result<HostedClassicMember<'a>, i16> {
     let member = validate_member(state, member_id, instance_id)?;
     let facade = member.classic.as_ref().ok_or(codes::UNKNOWN_MEMBER_ID)?;
     if member.member_epoch != generation_id {
         return Err(codes::ILLEGAL_GENERATION);
     }
-    Ok((member, facade))
+    Ok(HostedClassicMember { member, facade })
 }
 
 /// Kafka's `classicGroupHeartbeatToConsumerGroup`.
@@ -95,7 +102,7 @@ pub(crate) fn serve_classic_heartbeat(
         request.group_instance_id.as_deref(),
         request.generation_id,
     ) {
-        Ok((member, _)) => (
+        Ok(HostedClassicMember { member, .. }) => (
             member.member_id.clone(),
             member.member_epoch < state.target.epoch
                 || member.assignment_state == MemberAssignmentState::UnrevokedPartitions
@@ -136,7 +143,7 @@ pub(crate) fn serve_classic_sync(
         error_code,
         ..SyncResult::default()
     };
-    let (member, facade) = match validate_classic_member(
+    let HostedClassicMember { member, facade } = match validate_classic_member(
         state,
         &request.member_id,
         request.group_instance_id.as_deref(),
@@ -396,6 +403,13 @@ mod tests {
     /// its first protocol, and echoes the request's protocol type and name.
     #[test]
     fn classic_sync_follows_kafka() {
+        struct SyncRow {
+            label: &'static str,
+            members: Vec<MemberState>,
+            request: SyncGroupRequest,
+            want: SyncResult,
+        }
+
         let assigned_v1 = consumer_assignment_blob(&[(TOPIC, vec![0])].into(), &image(), 1);
         let behind = |mut m: MemberState, state| {
             m.member_epoch = TARGET_EPOCH - 1;
@@ -406,109 +420,115 @@ mod tests {
             m.instance_id = Some("instance-1".into());
             m
         };
-        let rows: Vec<(&str, Vec<MemberState>, SyncGroupRequest, SyncResult)> = vec![
-            (
-                "a member at the target epoch",
-                vec![member("m", true)],
-                sync_request("m", TARGET_EPOCH),
-                SyncResult {
+        let rows: Vec<SyncRow> = vec![
+            SyncRow {
+                label: "a member at the target epoch",
+                members: vec![member("m", true)],
+                request: sync_request("m", TARGET_EPOCH),
+                want: SyncResult {
                     error_code: codes::NONE,
                     assignment: assigned_v1.clone(),
                     protocol_type: Some("consumer".into()),
                     protocol_name: Some("range".into()),
                 },
-            ),
-            (
-                "a request without protocol type and name",
-                vec![member("m", true)],
-                SyncGroupRequest {
+            },
+            SyncRow {
+                label: "a request without protocol type and name",
+                members: vec![member("m", true)],
+                request: SyncGroupRequest {
                     protocol_type: None,
                     protocol_name: None,
                     ..sync_request("m", TARGET_EPOCH)
                 },
-                SyncResult {
+                want: SyncResult {
                     error_code: codes::NONE,
                     assignment: assigned_v1.clone(),
                     protocol_type: None,
                     protocol_name: None,
                 },
-            ),
-            (
-                "a member revoking partitions after the target moved",
-                vec![behind(
+            },
+            SyncRow {
+                label: "a member revoking partitions after the target moved",
+                members: vec![behind(
                     member("m", true),
                     MemberAssignmentState::UnrevokedPartitions,
                 )],
-                sync_request("m", TARGET_EPOCH - 1),
-                SyncResult {
+                request: sync_request("m", TARGET_EPOCH - 1),
+                want: SyncResult {
                     error_code: codes::NONE,
                     assignment: assigned_v1,
                     protocol_type: Some("consumer".into()),
                     protocol_name: Some("range".into()),
                 },
-            ),
-            (
-                "an absent member",
-                vec![member("m", true)],
-                sync_request("nobody", TARGET_EPOCH),
-                refused(codes::UNKNOWN_MEMBER_ID),
-            ),
-            (
-                "a member of the consumer protocol",
-                vec![member("m", false)],
-                sync_request("m", TARGET_EPOCH),
-                refused(codes::UNKNOWN_MEMBER_ID),
-            ),
-            (
-                "an unknown instance id",
-                vec![member("m", true)],
-                SyncGroupRequest {
+            },
+            SyncRow {
+                label: "an absent member",
+                members: vec![member("m", true)],
+                request: sync_request("nobody", TARGET_EPOCH),
+                want: refused(codes::UNKNOWN_MEMBER_ID),
+            },
+            SyncRow {
+                label: "a member of the consumer protocol",
+                members: vec![member("m", false)],
+                request: sync_request("m", TARGET_EPOCH),
+                want: refused(codes::UNKNOWN_MEMBER_ID),
+            },
+            SyncRow {
+                label: "an unknown instance id",
+                members: vec![member("m", true)],
+                request: SyncGroupRequest {
                     group_instance_id: Some("instance-1".into()),
                     ..sync_request("m", TARGET_EPOCH)
                 },
-                refused(codes::UNKNOWN_MEMBER_ID),
-            ),
-            (
-                "an instance id another member holds",
-                vec![static_member(member("m", true))],
-                SyncGroupRequest {
+                want: refused(codes::UNKNOWN_MEMBER_ID),
+            },
+            SyncRow {
+                label: "an instance id another member holds",
+                members: vec![static_member(member("m", true))],
+                request: SyncGroupRequest {
                     group_instance_id: Some("instance-1".into()),
                     ..sync_request("other", TARGET_EPOCH)
                 },
-                refused(codes::FENCED_INSTANCE_ID),
-            ),
-            (
-                "a generation that is not the member epoch",
-                vec![member("m", true)],
-                sync_request("m", TARGET_EPOCH + 1),
-                refused(codes::ILLEGAL_GENERATION),
-            ),
-            (
-                "another protocol type",
-                vec![member("m", true)],
-                SyncGroupRequest {
+                want: refused(codes::FENCED_INSTANCE_ID),
+            },
+            SyncRow {
+                label: "a generation that is not the member epoch",
+                members: vec![member("m", true)],
+                request: sync_request("m", TARGET_EPOCH + 1),
+                want: refused(codes::ILLEGAL_GENERATION),
+            },
+            SyncRow {
+                label: "another protocol type",
+                members: vec![member("m", true)],
+                request: SyncGroupRequest {
                     protocol_type: Some("connect".into()),
                     ..sync_request("m", TARGET_EPOCH)
                 },
-                refused(codes::INCONSISTENT_GROUP_PROTOCOL),
-            ),
-            (
-                "a protocol other than the member's first",
-                vec![member("m", true)],
-                SyncGroupRequest {
+                want: refused(codes::INCONSISTENT_GROUP_PROTOCOL),
+            },
+            SyncRow {
+                label: "a protocol other than the member's first",
+                members: vec![member("m", true)],
+                request: SyncGroupRequest {
                     protocol_name: Some("roundrobin".into()),
                     ..sync_request("m", TARGET_EPOCH)
                 },
-                refused(codes::INCONSISTENT_GROUP_PROTOCOL),
-            ),
-            (
-                "a stable member that the target moved past",
-                vec![behind(member("m", true), MemberAssignmentState::Stable)],
-                sync_request("m", TARGET_EPOCH - 1),
-                refused(codes::REBALANCE_IN_PROGRESS),
-            ),
+                want: refused(codes::INCONSISTENT_GROUP_PROTOCOL),
+            },
+            SyncRow {
+                label: "a stable member that the target moved past",
+                members: vec![behind(member("m", true), MemberAssignmentState::Stable)],
+                request: sync_request("m", TARGET_EPOCH - 1),
+                want: refused(codes::REBALANCE_IN_PROGRESS),
+            },
         ];
-        for (label, members, request, want) in rows {
+        for SyncRow {
+            label,
+            members,
+            request,
+            want,
+        } in rows
+        {
             let state = group(members);
 
             check!(

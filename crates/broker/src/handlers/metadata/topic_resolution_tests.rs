@@ -90,11 +90,22 @@ enum Row {
     DeniedName,
 }
 
+/// A topic reference of a request: the name and the id it carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RequestedTopic {
+    name: Name,
+    id: Id,
+}
+
+impl RequestedTopic {
+    const fn new(name: Name, id: Id) -> Self { Self { name, id } }
+}
+
 /// One table row.
 #[derive(Debug, Clone)]
 struct Case {
     version: i16,
-    rows: Vec<(Name, Id)>,
+    rows: Vec<RequestedTopic>,
     expect: Expect,
 }
 
@@ -181,11 +192,11 @@ impl Fixture {
         }
     }
 
-    fn request(&self, rows: &[(Name, Id)]) -> MetadataRequest {
+    fn request(&self, rows: &[RequestedTopic]) -> MetadataRequest {
         MetadataRequest {
             topics: Some(
                 rows.iter()
-                    .map(|(name, id)| MetadataRequestTopic {
+                    .map(|RequestedTopic { name, id }| MetadataRequestTopic {
                         name: match name {
                             Name::A => Some(TOPIC_A.to_string()),
                             Name::Unknown => Some(UNKNOWN_NAME.to_string()),
@@ -339,75 +350,141 @@ async fn topic_ids_follow_kafka_version_rules() {
         // Versions 10 and 11 refuse a non-zero id or a null name.
         Case {
             version: 11,
-            rows: vec![(Name::A, Id::Zero)],
+            rows: vec![RequestedTopic {
+                name: Name::A,
+                id: Id::Zero,
+            }],
             expect: Rows(vec![Row::Described(Id::A)]),
         },
         Case {
             version: 11,
-            rows: vec![(Name::A, Id::A)],
+            rows: vec![RequestedTopic {
+                name: Name::A,
+                id: Id::A,
+            }],
             expect: Failed(codes::INVALID_REQUEST),
         },
         Case {
             version: 10,
-            rows: vec![(Name::Null, Id::Zero)],
+            rows: vec![RequestedTopic {
+                name: Name::Null,
+                id: Id::Zero,
+            }],
             expect: Failed(codes::INVALID_REQUEST),
         },
         Case {
             version: 11,
-            rows: vec![(Name::Null, Id::Unknown), (Name::A, Id::Zero)],
+            rows: vec![
+                RequestedTopic {
+                    name: Name::Null,
+                    id: Id::Unknown,
+                },
+                RequestedTopic {
+                    name: Name::A,
+                    id: Id::Zero,
+                },
+            ],
             expect: Failed(codes::INVALID_REQUEST),
         },
         // From version 12 on, the ids win and the names are ignored.
         Case {
             version: 12,
-            rows: [(Name::A, Id::B)].to_vec(),
+            rows: vec![RequestedTopic::new(Name::A, Id::B)],
             expect: Rows(vec![Row::Described(Id::B)]),
         },
         Case {
             version: 12,
-            rows: vec![(Name::A, Id::Zero), (Name::Null, Id::B)],
+            rows: vec![
+                RequestedTopic::new(Name::A, Id::Zero),
+                RequestedTopic::new(Name::Null, Id::B),
+            ],
             expect: Rows(vec![Row::Described(Id::B)]),
         },
         Case {
             version: 12,
-            rows: vec![(Name::A, Id::Unknown)],
+            rows: vec![RequestedTopic {
+                name: Name::A,
+                id: Id::Unknown,
+            }],
             expect: Rows(vec![Row::UnknownId]),
         },
         Case {
             version: 13,
             rows: vec![
-                (Name::Null, Id::Unknown),
-                (Name::Null, Id::A),
-                (Name::Null, Id::Zero),
+                RequestedTopic {
+                    name: Name::Null,
+                    id: Id::Unknown,
+                },
+                RequestedTopic {
+                    name: Name::Null,
+                    id: Id::A,
+                },
+                RequestedTopic {
+                    name: Name::Null,
+                    id: Id::Zero,
+                },
             ],
             expect: Rows(vec![Row::UnknownId, Row::Described(Id::A)]),
         },
         Case {
             version: 13,
-            rows: vec![(Name::Null, Id::A), (Name::Null, Id::A)],
+            rows: vec![
+                RequestedTopic {
+                    name: Name::Null,
+                    id: Id::A,
+                },
+                RequestedTopic {
+                    name: Name::Null,
+                    id: Id::A,
+                },
+            ],
             expect: Rows(vec![Row::Described(Id::A)]),
         },
         // A repeated name is described once (#640).
         Case {
             version: 12,
-            rows: vec![(Name::A, Id::Zero), (Name::A, Id::Zero)],
+            rows: vec![
+                RequestedTopic {
+                    name: Name::A,
+                    id: Id::Zero,
+                },
+                RequestedTopic {
+                    name: Name::A,
+                    id: Id::Zero,
+                },
+            ],
             expect: Rows(vec![Row::Described(Id::A)]),
         },
         // With only zero ids, the names are described, and a null name fails
         // the whole request.
         Case {
             version: 12,
-            rows: vec![(Name::Unknown, Id::Zero)],
+            rows: vec![RequestedTopic {
+                name: Name::Unknown,
+                id: Id::Zero,
+            }],
             expect: Rows(vec![Row::UnknownName]),
         },
         Case {
             version: 12,
-            rows: vec![(Name::Null, Id::Zero), (Name::A, Id::Zero)],
+            rows: vec![
+                RequestedTopic {
+                    name: Name::Null,
+                    id: Id::Zero,
+                },
+                RequestedTopic {
+                    name: Name::A,
+                    id: Id::Zero,
+                },
+            ],
             expect: Failed(codes::UNKNOWN_SERVER_ERROR),
         },
         Case {
             version: 13,
-            rows: vec![(Name::Null, Id::Zero)],
+            rows: vec![RequestedTopic {
+                name: Name::Null,
+                id: Id::Zero,
+            }],
             expect: Failed(codes::UNKNOWN_SERVER_ERROR),
         },
     ];
@@ -427,12 +504,24 @@ async fn a_denied_topic_row_follows_how_the_request_names_it() {
     let cases = vec![
         Case {
             version: 13,
-            rows: vec![(Name::Null, Id::A), (Name::Null, Id::Unknown)],
+            rows: vec![
+                RequestedTopic {
+                    name: Name::Null,
+                    id: Id::A,
+                },
+                RequestedTopic {
+                    name: Name::Null,
+                    id: Id::Unknown,
+                },
+            ],
             expect: Rows(vec![Row::UnknownId, Row::DeniedId]),
         },
         Case {
             version: 12,
-            rows: vec![(Name::A, Id::Zero)],
+            rows: vec![RequestedTopic {
+                name: Name::A,
+                id: Id::Zero,
+            }],
             expect: Rows(vec![Row::DeniedName]),
         },
     ];

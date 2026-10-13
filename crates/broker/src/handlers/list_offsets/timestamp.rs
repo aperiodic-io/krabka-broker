@@ -128,7 +128,11 @@ pub(crate) async fn resolve_timestamp_with_sources(
         }
     });
     lookup_timestamp(
-        (partition, tp.topic.as_str(), tp.partition),
+        LookedUpPartition {
+            partition,
+            topic_name: tp.topic.as_str(),
+            partition_index: tp.partition,
+        },
         timestamp,
         remote_timeout.saturating_sub(started.elapsed()),
         remote,
@@ -136,6 +140,14 @@ pub(crate) async fn resolve_timestamp_with_sources(
         minimum,
     )
     .await
+}
+
+/// The partition a timestamp lookup reads, with the names its log lines carry.
+#[derive(Clone, Copy)]
+struct LookedUpPartition<'a> {
+    partition: &'a Partition,
+    topic_name: &'a str,
+    partition_index: i32,
 }
 
 /// [`resolve_timestamp_offset`] with the remote tier's read handed in, so a test
@@ -147,7 +159,11 @@ pub(crate) async fn resolve_timestamp_with_sources(
 /// `wal_found` contributes an already resolved exact WAL candidate, so an
 /// earlier archived record can avoid reading unrelated later local batches.
 async fn lookup_timestamp<Read, Answer>(
-    (partition, topic_name, partition_index): (&Partition, &str, i32),
+    LookedUpPartition {
+        partition,
+        topic_name,
+        partition_index,
+    }: LookedUpPartition<'_>,
     timestamp: i64,
     remote_timeout: Duration,
     remote: Option<Read>,
@@ -213,7 +229,7 @@ mod tests {
         crate::{
             broker::{Broker, BrokerHandle},
             codes,
-            handlers::list_offsets::test_support::{list_one, remote_topic},
+            handlers::list_offsets::test_support::{ClientBroker, list_one, remote_topic},
             partition::{Partition, test_support::test_partition},
             remote_reader::RemoteReader,
         },
@@ -260,7 +276,11 @@ mod tests {
     }
 
     async fn remote_partition_topic(topic: &str) -> RemotePartitionTopic {
-        let (broker_handle, client, directories) = remote_topic(topic, vec![]).await;
+        let ClientBroker {
+            broker: broker_handle,
+            client,
+            dirs: directories,
+        } = remote_topic(topic, vec![]).await;
         let BrokerPartition { broker, partition } = broker_partition(&broker_handle, topic);
         RemotePartitionTopic {
             broker_handle,
@@ -341,7 +361,11 @@ mod tests {
             let had_remote = remote.is_some();
 
             let got = lookup_timestamp(
-                (&partition, "t", 0),
+                LookedUpPartition {
+                    partition: &partition,
+                    topic_name: "t",
+                    partition_index: 0,
+                },
                 500,
                 Duration::from_secs(5),
                 remote,

@@ -205,13 +205,10 @@ fn replay_partition(
                         continue;
                     };
 
-                    replay_value(
-                        &mut replayed,
-                        map_key,
-                        &key,
-                        value,
-                        (rec_offset, updates_per_snapshot),
-                    )?;
+                    replay_value(&mut replayed, map_key, &key, value, ReplayPosition {
+                        rec_offset,
+                        updates_per_snapshot,
+                    })?;
                 }
             }
             offset = Offset(batch.base_offset + i64::from(batch.last_offset_delta) + 1);
@@ -289,6 +286,13 @@ fn parse_loaded_key(
     }
 }
 
+/// Where a replayed record sits: its log offset, and the snapshot threshold.
+#[derive(Clone, Copy)]
+struct ReplayPosition {
+    rec_offset: Offset,
+    updates_per_snapshot: u32,
+}
+
 /// Folds one replayed record value into the state of `map_key`, as Kafka's
 /// `handleShareSnapshot` and `handleShareUpdate` do.
 ///
@@ -305,9 +309,12 @@ fn replay_value(
     map_key: ShareStateKey3,
     key: &ShareStateKey,
     value: &Bytes,
-    position: (Offset, u32),
+    position: ReplayPosition,
 ) -> Result<(), BrokerError> {
-    let (rec_offset, updates_per_snapshot) = position;
+    let ReplayPosition {
+        rec_offset,
+        updates_per_snapshot,
+    } = position;
     if key.record_type == KEY_SHARE_SNAPSHOT {
         let snap = ShareSnapshotValue::decode(value)?;
         match replayed.get_mut(&map_key) {

@@ -212,27 +212,31 @@ mod tests {
 
     #[test]
     fn a_refused_injection_returns_the_code_and_no_cut() {
-        let cases: Vec<(BarrierError, i16)> = vec![
-            (
-                BarrierError::InjectionInProgress {
+        struct Case {
+            error: BarrierError,
+            code: i16,
+        }
+        let cases: Vec<Case> = vec![
+            Case {
+                error: BarrierError::InjectionInProgress {
                     group: "orders-cut".to_owned(),
                 },
-                codes::BARRIER_INJECTION_IN_PROGRESS,
-            ),
-            (
-                BarrierError::NotCoordinator {
+                code: codes::BARRIER_INJECTION_IN_PROGRESS,
+            },
+            Case {
+                error: BarrierError::NotCoordinator {
                     group: "orders-cut".to_owned(),
                 },
-                codes::NOT_COORDINATOR,
-            ),
-            (
-                BarrierError::UnknownGroup {
+                code: codes::NOT_COORDINATOR,
+            },
+            Case {
+                error: BarrierError::UnknownGroup {
                     group: "orders-cut".to_owned(),
                 },
-                codes::RESOURCE_NOT_FOUND,
-            ),
+                code: codes::RESOURCE_NOT_FOUND,
+            },
         ];
-        for (error, code) in cases {
+        for Case { error, code } in cases {
             let expected = refused(code, Some(error.to_string()));
             check!(error_response(&error) == expected, "{error}");
         }

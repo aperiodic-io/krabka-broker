@@ -63,11 +63,28 @@ const DYNAMIC_DEFAULT_BROKER_CONFIG: i8 = 3;
 /// `ConfigSource.DEFAULT_CONFIG`, the source an untouched key reports.
 const DEFAULT_CONFIG: i8 = 5;
 
+/// A topic config key and the value it is set to.
+#[derive(Clone, Copy)]
+struct ConfigPair<'a> {
+    name: &'a str,
+    value: &'a str,
+}
+
+/// A topic config key and the value it is set to, which may be null.
+#[derive(Clone, Copy)]
+struct NullableConfig<'a> {
+    name: &'a str,
+    value: Option<&'a str>,
+}
+
 /// The cluster-level `min.insync.replicas` of the test broker. Its bootstrap
 /// records enable ELR, so its controller writes the static value, Kafka's
 /// default of 1, as the cluster default when it seeds the log, as Kafka's
 /// `ActivationRecordsGenerator.recordsForEmptyLog` does.
-const CLUSTER_MIN_INSYNC_REPLICAS: (&str, &str) = ("min.insync.replicas", "1");
+const CLUSTER_MIN_INSYNC_REPLICAS: ConfigPair<'static> = ConfigPair {
+    name: "min.insync.replicas",
+    value: "1",
+};
 
 /// The KIP-525 configs list a v5+ row carries for a topic created with
 /// `overrides` on a cluster whose only dynamic default is the cluster-level
@@ -80,20 +97,23 @@ const CLUSTER_MIN_INSYNC_REPLICAS: (&str, &str) = ("min.insync.replicas", "1");
 /// reads at `DYNAMIC_DEFAULT_BROKER_CONFIG`, every other key reads the
 /// built-in default at `DEFAULT_CONFIG`, a sensitive key's value is withheld,
 /// and the list is sorted by name.
-fn expected_configs(overrides: &[(&str, &str)]) -> Vec<CreatableTopicConfigs> {
+fn expected_configs(overrides: &[ConfigPair<'_>]) -> Vec<CreatableTopicConfigs> {
     use crate::config_keys::registry::{self, ConfigScope};
 
     let mut configs: Vec<CreatableTopicConfigs> = registry::keys_in(ConfigScope::Topic)
         .filter(|row| {
             serves_topic_key(row.name, UnstableApiVersions::Disabled)
-                && (!row.internal || overrides.iter().any(|(key, _)| *key == row.name))
+                && (!row.internal || overrides.iter().any(|pair| pair.name == row.name))
         })
         .map(|row| {
             let stored = overrides
                 .iter()
-                .find(|(key, _)| *key == row.name)
-                .map(|(_, value)| *value);
-            let (cluster_key, cluster_value) = CLUSTER_MIN_INSYNC_REPLICAS;
+                .find(|pair| pair.name == row.name)
+                .map(|pair| pair.value);
+            let ConfigPair {
+                name: cluster_key,
+                value: cluster_value,
+            } = CLUSTER_MIN_INSYNC_REPLICAS;
             let unset = if row.name == cluster_key {
                 (Some(cluster_value), DYNAMIC_DEFAULT_BROKER_CONFIG)
             } else {
@@ -183,7 +203,7 @@ struct CreatedTopicExpectation<'a> {
     name: &'a str,
     #[default(TopicPartitionCount(1))]
     partitions: TopicPartitionCount,
-    configs: &'a [(&'a str, &'a str)],
+    configs: &'a [ConfigPair<'a>],
 }
 
 fn check_created_topic_response(
@@ -237,12 +257,15 @@ fn topic_with_config(name: &str) -> CreatableTopic {
     }
 }
 
-fn topic_with_configs(name: &str, configs: &[(&str, &str)]) -> CreatableTopic {
+fn topic_with_configs(name: &str, configs: &[ConfigPair<'_>]) -> CreatableTopic {
     topic_with_nullable_configs(
         name,
         &configs
             .iter()
-            .map(|(key, value)| (*key, Some(*value)))
+            .map(|pair| NullableConfig {
+                name: pair.name,
+                value: Some(pair.value),
+            })
             .collect::<Vec<_>>(),
     )
 }
@@ -366,7 +389,14 @@ async fn minus_one_takes_the_broker_topic_creation_defaults() {
     const BAD_COUNT: &str = "Number of partitions was set to an invalid non-positive value.";
     /// (requested partitions, requested replication factor, error code,
     /// error message, created partitions, created replication factor)
-    type Row = (i32, i16, i16, Option<&'static str>, i32, i16);
+    struct DefaultsRow {
+        partitions: i32,
+        rf: i16,
+        error_code: i16,
+        error_message: Option<&'static str>,
+        created: i32,
+        created_rf: i16,
+    }
 
     let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
         cfg.num_partitions = 4;
@@ -387,39 +417,83 @@ async fn minus_one_takes_the_broker_topic_creation_defaults() {
             .expect("seed broker registration");
     }
 
-    let rows: [Row; 8] = [
-        (-1, -1, codes::NONE, None, 4, 2),
-        (-1, 3, codes::NONE, None, 4, 3),
-        (6, -1, codes::NONE, None, 6, 2),
-        (0, 1, codes::INVALID_PARTITIONS, Some(BAD_COUNT), -1, -1),
-        (-2, 1, codes::INVALID_PARTITIONS, Some(BAD_COUNT), -1, -1),
-        (
-            1,
-            0,
-            codes::INVALID_REPLICATION_FACTOR,
-            Some(BAD_RF),
-            -1,
-            -1,
-        ),
-        (
-            0,
-            0,
-            codes::INVALID_REPLICATION_FACTOR,
-            Some(BAD_RF),
-            -1,
-            -1,
-        ),
-        (
-            1,
-            -2,
-            codes::INVALID_REPLICATION_FACTOR,
-            Some(BAD_RF),
-            -1,
-            -1,
-        ),
+    let rows: [DefaultsRow; 8] = [
+        DefaultsRow {
+            partitions: -1,
+            rf: -1,
+            error_code: codes::NONE,
+            error_message: None,
+            created: 4,
+            created_rf: 2,
+        },
+        DefaultsRow {
+            partitions: -1,
+            rf: 3,
+            error_code: codes::NONE,
+            error_message: None,
+            created: 4,
+            created_rf: 3,
+        },
+        DefaultsRow {
+            partitions: 6,
+            rf: -1,
+            error_code: codes::NONE,
+            error_message: None,
+            created: 6,
+            created_rf: 2,
+        },
+        DefaultsRow {
+            partitions: 0,
+            rf: 1,
+            error_code: codes::INVALID_PARTITIONS,
+            error_message: Some(BAD_COUNT),
+            created: -1,
+            created_rf: -1,
+        },
+        DefaultsRow {
+            partitions: -2,
+            rf: 1,
+            error_code: codes::INVALID_PARTITIONS,
+            error_message: Some(BAD_COUNT),
+            created: -1,
+            created_rf: -1,
+        },
+        DefaultsRow {
+            partitions: 1,
+            rf: 0,
+            error_code: codes::INVALID_REPLICATION_FACTOR,
+            error_message: Some(BAD_RF),
+            created: -1,
+            created_rf: -1,
+        },
+        DefaultsRow {
+            partitions: 0,
+            rf: 0,
+            error_code: codes::INVALID_REPLICATION_FACTOR,
+            error_message: Some(BAD_RF),
+            created: -1,
+            created_rf: -1,
+        },
+        DefaultsRow {
+            partitions: 1,
+            rf: -2,
+            error_code: codes::INVALID_REPLICATION_FACTOR,
+            error_message: Some(BAD_RF),
+            created: -1,
+            created_rf: -1,
+        },
     ];
-    for (row, (partitions, rf, error_code, error_message, created, created_rf)) in
-        rows.into_iter().enumerate()
+    for (
+        row,
+        DefaultsRow {
+            partitions,
+            rf,
+            error_code,
+            error_message,
+            created,
+            created_rf,
+        },
+    ) in rows.into_iter().enumerate()
     {
         let name = format!("defaults-{row}");
         let resp = drive(
@@ -481,7 +555,10 @@ async fn handle_success_persists_topic_config_and_success_fields() {
                 .topic_id(resp.topics[0].topic_id)
                 .num_partitions(2)
                 .replication_factor(1)
-                .configs(expected_configs(&[("retention.ms", "60000")]))
+                .configs(expected_configs(&[ConfigPair {
+                    name: "retention.ms",
+                    value: "60000",
+                }]))
                 .call()
         ],
     });
@@ -503,9 +580,18 @@ async fn handle_success_persists_topic_config_and_success_fields() {
 async fn handle_creates_a_topic_whose_cleanup_policy_names_both_halves() {
     creation_fixture!((broker_handle, _dir, broker), (p, peer), allow_all, "admin");
     let req = request(vec![topic_with_configs("windowed-changelog", &[
-        ("cleanup.policy", "compact,delete"),
-        ("min.compaction.lag.ms", "0"),
-        ("message.timestamp.type", "CreateTime"),
+        ConfigPair {
+            name: "cleanup.policy",
+            value: "compact,delete",
+        },
+        ConfigPair {
+            name: "min.compaction.lag.ms",
+            value: "0",
+        },
+        ConfigPair {
+            name: "message.timestamp.type",
+            value: "CreateTime",
+        },
     ])]);
 
     let resp = drive_single_topic(&broker, &req, &test_context(&p, &peer)).await;
@@ -523,73 +609,139 @@ async fn handle_rejects_invalid_topic_configs_before_creating_the_topic() {
     /// One rejection case: the row's label, a config map that must never
     /// reach the metadata quorum, and the substrings the operator needs to
     /// see in the rejection.
-    type RejectedConfig<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a [&'a str]);
+    struct RejectedConfig<'a> {
+        label: &'a str,
+        configs: &'a [ConfigPair<'a>],
+        needles: &'a [&'a str],
+    }
 
     creation_fixture!((broker_handle, _dir, broker), (p, peer), allow_all, "admin");
 
     let cases: [RejectedConfig<'_>; 10] = [
-        ("unknown-key", &[("not.a.topic.config", "1000")], &[
-            "not.a.topic.config",
-        ]),
-        (
-            "compacted-and-tiered",
-            &[
-                ("cleanup.policy", "compact"),
-                ("remote.storage.enable", "true"),
+        RejectedConfig {
+            label: "unknown-key",
+            configs: &[ConfigPair {
+                name: "not.a.topic.config",
+                value: "1000",
+            }],
+            needles: &["not.a.topic.config"],
+        },
+        RejectedConfig {
+            label: "compacted-and-tiered",
+            configs: &[
+                ConfigPair {
+                    name: "cleanup.policy",
+                    value: "compact",
+                },
+                ConfigPair {
+                    name: "remote.storage.enable",
+                    value: "true",
+                },
             ],
-            &["Tiered Storage functionality is disabled in the broker"],
-        ),
-        (
-            "compact-and-delete-and-tiered",
-            &[
-                ("cleanup.policy", "compact,delete"),
-                ("remote.storage.enable", "true"),
+            needles: &["Tiered Storage functionality is disabled in the broker"],
+        },
+        RejectedConfig {
+            label: "compact-and-delete-and-tiered",
+            configs: &[
+                ConfigPair {
+                    name: "cleanup.policy",
+                    value: "compact,delete",
+                },
+                ConfigPair {
+                    name: "remote.storage.enable",
+                    value: "true",
+                },
             ],
-            &["Tiered Storage functionality is disabled in the broker"],
-        ),
-        ("bad-delivery-mode", &[("delivery.mode", "later")], &[
-            "delivery.mode",
-        ]),
-        ("bad-delivery-delay", &[("delivery.max.delay.ms", "-2")], &[
-            "-2",
-        ]),
-        (
-            "compacted-schedule",
-            &[
-                ("cleanup.policy", "compact"),
-                ("delivery.mode", "scheduled"),
+            needles: &["Tiered Storage functionality is disabled in the broker"],
+        },
+        RejectedConfig {
+            label: "bad-delivery-mode",
+            configs: &[ConfigPair {
+                name: "delivery.mode",
+                value: "later",
+            }],
+            needles: &["delivery.mode"],
+        },
+        RejectedConfig {
+            label: "bad-delivery-delay",
+            configs: &[ConfigPair {
+                name: "delivery.max.delay.ms",
+                value: "-2",
+            }],
+            needles: &["-2"],
+        },
+        RejectedConfig {
+            label: "compacted-schedule",
+            configs: &[
+                ConfigPair {
+                    name: "cleanup.policy",
+                    value: "compact",
+                },
+                ConfigPair {
+                    name: "delivery.mode",
+                    value: "scheduled",
+                },
             ],
-            &["cleanup.policy", "delivery.mode"],
-        ),
-        ("bad-diskless", &[("krabka.diskless", "yes")], &[
-            "krabka.diskless",
-        ]),
-        (
-            "diskless-and-tiered",
-            &[
-                ("krabka.diskless", "true"),
-                ("remote.storage.enable", "true"),
+            needles: &["cleanup.policy", "delivery.mode"],
+        },
+        RejectedConfig {
+            label: "bad-diskless",
+            configs: &[ConfigPair {
+                name: "krabka.diskless",
+                value: "yes",
+            }],
+            needles: &["krabka.diskless"],
+        },
+        RejectedConfig {
+            label: "diskless-and-tiered",
+            configs: &[
+                ConfigPair {
+                    name: "krabka.diskless",
+                    value: "true",
+                },
+                ConfigPair {
+                    name: "remote.storage.enable",
+                    value: "true",
+                },
             ],
-            &["krabka.diskless", "remote.storage.enable"],
-        ),
-        (
-            "diskless-and-scheduled",
-            &[("krabka.diskless", "true"), ("delivery.mode", "scheduled")],
-            &["krabka.diskless", "delivery.mode"],
-        ),
+            needles: &["krabka.diskless", "remote.storage.enable"],
+        },
+        RejectedConfig {
+            label: "diskless-and-scheduled",
+            configs: &[
+                ConfigPair {
+                    name: "krabka.diskless",
+                    value: "true",
+                },
+                ConfigPair {
+                    name: "delivery.mode",
+                    value: "scheduled",
+                },
+            ],
+            needles: &["krabka.diskless", "delivery.mode"],
+        },
         // `BrokerConfig::for_tests` configures no object store, and a diskless
         // topic without one could never flush or trim: the broker starts no
         // WAL index projection and no object flusher, so the local logs would
         // grow without bound behind a flag that advertises the opposite. This
         // is the one case here that the pure key/value validator cannot catch,
         // because it depends on the broker's own configuration.
-        ("diskless-without-an-object-tier", &[(DISKLESS, "true")], &[
-            DISKLESS,
-            "remote_storage_backend",
-        ]),
+        RejectedConfig {
+            label: "diskless-without-an-object-tier",
+            configs: &[ConfigPair {
+                name: DISKLESS,
+                value: "true",
+            }],
+            needles: &[DISKLESS, "remote_storage_backend"],
+        },
     ];
 
-    for (name, configs, needles) in cases {
+    for RejectedConfig {
+        label: name,
+        configs,
+        needles,
+    } in cases
+    {
         let request = request(vec![topic_with_configs(name, configs)]);
 
         let resp = drive(&broker, &request, &test_context(&p, &peer)).await;
@@ -618,18 +770,36 @@ async fn handle_rejects_invalid_topic_configs_before_creating_the_topic() {
 async fn handle_creates_a_scheduled_topic_and_persists_its_delivery_configs() {
     creation_fixture!((broker_handle, _dir, broker), (p, peer), allow_all, "admin");
     let req = request(vec![topic_with_configs("retries", &[
-        ("delivery.mode", "scheduled"),
-        ("delivery.max.delay.ms", "-1"),
-        ("delivery.schedule.monotonic", "true"),
+        ConfigPair {
+            name: "delivery.mode",
+            value: "scheduled",
+        },
+        ConfigPair {
+            name: "delivery.max.delay.ms",
+            value: "-1",
+        },
+        ConfigPair {
+            name: "delivery.schedule.monotonic",
+            value: "true",
+        },
     ])]);
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
     check_created_topic_response(&resp, CreatedTopicExpectation {
         configs: &[
-            ("delivery.mode", "scheduled"),
-            ("delivery.max.delay.ms", "-1"),
-            ("delivery.schedule.monotonic", "true"),
+            ConfigPair {
+                name: "delivery.mode",
+                value: "scheduled",
+            },
+            ConfigPair {
+                name: "delivery.max.delay.ms",
+                value: "-1",
+            },
+            ConfigPair {
+                name: "delivery.schedule.monotonic",
+                value: "true",
+            },
         ],
         ..Default::default()
     });
@@ -662,16 +832,19 @@ async fn handle_creates_a_diskless_topic_and_opens_its_partitions_on_the_wal_pat
     .await;
     let broker = broker_handle.broker_arc_for_test();
     request_identity!((p, peer), principal("admin"));
-    let req = request(vec![topic_with_configs("events", &[(
-        "krabka.diskless",
-        "true",
-    )])]);
+    let req = request(vec![topic_with_configs("events", &[ConfigPair {
+        name: "krabka.diskless",
+        value: "true",
+    }])]);
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
     check_created_topic_response(&resp, CreatedTopicExpectation {
         name: "events",
-        configs: &[("krabka.diskless", "true")],
+        configs: &[ConfigPair {
+            name: "krabka.diskless",
+            value: "true",
+        }],
         ..Default::default()
     });
 
@@ -698,10 +871,12 @@ async fn handle_rejects_diskless_topic_without_a_rack_safe_wal_quorum() {
         (broker_handle, _dir, broker),
         local_object_store(object_store)
     );
-    let req = request(vec![topic_with_configs("unplaceable-diskless", &[(
-        "krabka.diskless",
-        "true",
-    )])]);
+    let req = request(vec![topic_with_configs("unplaceable-diskless", &[
+        ConfigPair {
+            name: "krabka.diskless",
+            value: "true",
+        },
+    ])]);
 
     invalid_config_answer!((resp, message), broker, req);
     for needle in [
@@ -781,10 +956,10 @@ fn diskless_wal_validation_uses_the_local_registration_fallback() {
 #[tokio::test]
 async fn a_created_topic_with_the_key_off_stays_on_the_local_log_path() {
     creation_fixture!((broker_handle, _dir, broker), (p, peer), allow_all, "admin");
-    let req = request(vec![topic_with_configs("plain", &[(
-        "krabka.diskless",
-        "false",
-    )])]);
+    let req = request(vec![topic_with_configs("plain", &[ConfigPair {
+        name: "krabka.diskless",
+        value: "false",
+    }])]);
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
@@ -821,7 +996,10 @@ async fn duplicate_topic_reports_error_without_success_fields() {
 #[tokio::test]
 async fn validate_only_answers_the_verdict_and_commits_nothing() {
     /// One dry run: the topic name, and the row it has to answer with.
-    type DryRun<'a> = (&'a str, CreatableTopicResult);
+    struct DryRun<'a> {
+        name: &'a str,
+        expected: CreatableTopicResult,
+    }
 
     creation_fixture!((broker_handle, _dir, broker), (p, peer), allow_all, "admin");
     let committed = drive(
@@ -833,11 +1011,11 @@ async fn validate_only_answers_the_verdict_and_commits_nothing() {
     assert!(committed.topics[0].error_code == codes::NONE);
 
     let cases: [DryRun<'_>; 2] = [
-        (
-            // Kafka's `validateOnly` reports `TopicExistsException` for a name
-            // that is already taken, with the committing path's message.
-            "existing",
-            CreatableTopicResult {
+        // Kafka's `validateOnly` reports `TopicExistsException` for a name
+        // that is already taken, with the committing path's message.
+        DryRun {
+            name: "existing",
+            expected: CreatableTopicResult {
                 name: "existing".into(),
                 error_code: codes::TOPIC_ALREADY_EXISTS,
                 error_message: Some("Topic 'existing' already exists.".into()),
@@ -846,15 +1024,15 @@ async fn validate_only_answers_the_verdict_and_commits_nothing() {
                 configs: Some(Vec::new()),
                 ..Default::default()
             },
-        ),
-        (
-            // KIP-525 answers a dry run with the configuration the topic
-            // *would* be created with: Kafka builds the row in `createTopic`
-            // from `computeEffectiveTopicConfigs(creationConfigs)`, and
-            // `validateOnly` discards the records alone. The list is filled in
-            // below, against the same image the handler resolved it from.
-            "fresh",
-            CreatableTopicResult {
+        },
+        // KIP-525 answers a dry run with the configuration the topic
+        // *would* be created with: Kafka builds the row in `createTopic`
+        // from `computeEffectiveTopicConfigs(creationConfigs)`, and
+        // `validateOnly` discards the records alone. The list is filled in
+        // below, against the same image the handler resolved it from.
+        DryRun {
+            name: "fresh",
+            expected: CreatableTopicResult {
                 name: "fresh".into(),
                 error_code: codes::NONE,
                 error_message: None,
@@ -863,10 +1041,14 @@ async fn validate_only_answers_the_verdict_and_commits_nothing() {
                 configs: None,
                 ..Default::default()
             },
-        ),
+        },
     ];
 
-    for (name, expected_row) in cases {
+    for DryRun {
+        name,
+        expected: expected_row,
+    } in cases
+    {
         let req = CreateTopicsRequest {
             validate_only: true,
             ..request(vec![topic(name, 1, 1)])
@@ -1133,7 +1315,11 @@ fn tree(root: &std::path::Path) -> Vec<std::path::PathBuf> {
 #[tokio::test]
 async fn handle_refuses_invalid_and_colliding_topic_names() {
     /// One row: the requested name, and the error code and message it gets.
-    type NameCase = (String, i16, Option<String>);
+    struct NameCase {
+        name: String,
+        code: i16,
+        message: Option<String>,
+    }
 
     let (broker_handle, dir) = start_broker_no_audit_with(|cfg| {
         cfg.log_dir = cfg.log_dir.join("logs");
@@ -1158,56 +1344,69 @@ async fn handle_refuses_invalid_and_colliding_topic_names() {
         ))
     };
     let cases: Vec<NameCase> = vec![
-        (
-            String::new(),
-            codes::INVALID_TOPIC_EXCEPTION,
-            Some("Topic name is invalid: the empty string is not allowed".into()),
-        ),
-        (
-            ".".into(),
-            codes::INVALID_TOPIC_EXCEPTION,
-            Some("Topic name is invalid: '.' is not allowed".into()),
-        ),
-        (
-            "..".into(),
-            codes::INVALID_TOPIC_EXCEPTION,
-            Some("Topic name is invalid: '..' is not allowed".into()),
-        ),
-        (
-            too_long.clone(),
-            codes::INVALID_TOPIC_EXCEPTION,
-            Some(format!(
+        NameCase {
+            name: String::new(),
+            code: codes::INVALID_TOPIC_EXCEPTION,
+            message: Some("Topic name is invalid: the empty string is not allowed".into()),
+        },
+        NameCase {
+            name: ".".into(),
+            code: codes::INVALID_TOPIC_EXCEPTION,
+            message: Some("Topic name is invalid: '.' is not allowed".into()),
+        },
+        NameCase {
+            name: "..".into(),
+            code: codes::INVALID_TOPIC_EXCEPTION,
+            message: Some("Topic name is invalid: '..' is not allowed".into()),
+        },
+        NameCase {
+            name: too_long.clone(),
+            code: codes::INVALID_TOPIC_EXCEPTION,
+            message: Some(format!(
                 "Topic name is invalid: the length of '{too_long}' is longer than the max \
                  allowed length 249"
             )),
-        ),
-        ("a/b".into(), codes::INVALID_TOPIC_EXCEPTION, illegal("a/b")),
-        (
-            "../x".into(),
-            codes::INVALID_TOPIC_EXCEPTION,
-            illegal("../x"),
-        ),
-        (
-            absolute.clone(),
-            codes::INVALID_TOPIC_EXCEPTION,
-            illegal(&absolute),
-        ),
-        ("a b".into(), codes::INVALID_TOPIC_EXCEPTION, illegal("a b")),
-        (
-            "a.b".into(),
-            codes::INVALID_TOPIC_EXCEPTION,
-            Some("Topic 'a.b' collides with existing topic: a_b".into()),
-        ),
-        (
-            "__cluster_metadata".into(),
-            codes::INVALID_REQUEST,
-            Some("Creation of internal topic __cluster_metadata is prohibited.".into()),
-        ),
+        },
+        NameCase {
+            name: "a/b".into(),
+            code: codes::INVALID_TOPIC_EXCEPTION,
+            message: illegal("a/b"),
+        },
+        NameCase {
+            name: "../x".into(),
+            code: codes::INVALID_TOPIC_EXCEPTION,
+            message: illegal("../x"),
+        },
+        NameCase {
+            name: absolute.clone(),
+            code: codes::INVALID_TOPIC_EXCEPTION,
+            message: illegal(&absolute),
+        },
+        NameCase {
+            name: "a b".into(),
+            code: codes::INVALID_TOPIC_EXCEPTION,
+            message: illegal("a b"),
+        },
+        NameCase {
+            name: "a.b".into(),
+            code: codes::INVALID_TOPIC_EXCEPTION,
+            message: Some("Topic 'a.b' collides with existing topic: a_b".into()),
+        },
+        NameCase {
+            name: "__cluster_metadata".into(),
+            code: codes::INVALID_REQUEST,
+            message: Some("Creation of internal topic __cluster_metadata is prohibited.".into()),
+        },
     ];
 
     let before = tree(dir.path());
     for validate_only in [true, false] {
-        for (name, error_code, error_message) in &cases {
+        for NameCase {
+            name,
+            code: error_code,
+            message: error_message,
+        } in &cases
+        {
             let req = CreateTopicsRequest {
                 validate_only,
                 ..request(vec![topic(name, 1, 1)])
@@ -1397,18 +1596,33 @@ async fn automatic_placement_takes_fenced_brokers_last_and_shrinks_the_isr() {
     /// One row: the fenced brokers, the brokers in controlled shutdown, the
     /// replication factor, and either the brokers every replica list holds or
     /// the refusal message.
-    type Row = (
-        &'static [u64],
-        &'static [u64],
-        i16,
-        Result<&'static [u64], &'static str>,
-    );
-    let rows: [Row; 6] = [
-        (&[3], &[], 3, Ok(&[1, 2, 3])),
-        (&[2, 3], &[], 3, Ok(&[1, 2, 3])),
-        (&[2, 3], &[], 1, Ok(&[1])),
-        (&[2], &[3], 2, Ok(&[1, 2])),
-        (
+    struct FencedRow {
+        fenced: &'static [u64],
+        shutting_down: &'static [u64],
+        rf: i16,
+        outcome: Result<&'static [u64], &'static str>,
+    }
+
+    const fn row(
+        fenced: &'static [u64],
+        shutting_down: &'static [u64],
+        rf: i16,
+        outcome: Result<&'static [u64], &'static str>,
+    ) -> FencedRow {
+        FencedRow {
+            fenced,
+            shutting_down,
+            rf,
+            outcome,
+        }
+    }
+
+    let rows: [FencedRow; 6] = [
+        row(&[3], &[], 3, Ok(&[1, 2, 3])),
+        row(&[2, 3], &[], 3, Ok(&[1, 2, 3])),
+        row(&[2, 3], &[], 1, Ok(&[1])),
+        row(&[2], &[3], 2, Ok(&[1, 2])),
+        row(
             &[3],
             &[],
             4,
@@ -1418,7 +1632,7 @@ async fn automatic_placement_takes_fenced_brokers_last_and_shrinks_the_isr() {
                  all their log directories cordoned.",
             ),
         ),
-        (
+        row(
             &[],
             &[3],
             3,
@@ -1430,7 +1644,13 @@ async fn automatic_placement_takes_fenced_brokers_last_and_shrinks_the_isr() {
         ),
     ];
 
-    for (fenced, shutting_down, rf, outcome) in rows {
+    for FencedRow {
+        fenced,
+        shutting_down,
+        rf,
+        outcome,
+    } in rows
+    {
         broker_fixture!((broker_handle, _dir, broker), allow_all);
         for node_id in [2, 3] {
             seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
@@ -1634,9 +1854,15 @@ async fn handle_authorizes_create_per_topic_when_cluster_create_is_denied() {
         // Kafka answers the controller's rows first, then one row per
         // duplicated name ("b" appears twice but gets exactly one row), then
         // the protected topic and the topics denied `Create`.
-        let (created, denied): (Vec<&str>, Vec<&str>) = ["a", "app-x"]
-            .into_iter()
-            .partition(|name| case.created.contains(name));
+        let mut created = Vec::new();
+        let mut denied = Vec::new();
+        for name in ["a", "app-x"] {
+            if case.created.contains(&name) {
+                created.push(name);
+            } else {
+                denied.push(name);
+            }
+        }
         let topics = created
             .into_iter()
             .map(row)
@@ -1669,13 +1895,13 @@ async fn handle_authorizes_create_per_topic_when_cluster_create_is_denied() {
 // ── #730, #739, #740, #742: Kafka's check order, rows and messages ──
 
 /// A `CreatableTopic` whose configs may carry a null value.
-fn topic_with_nullable_configs(name: &str, configs: &[(&str, Option<&str>)]) -> CreatableTopic {
+fn topic_with_nullable_configs(name: &str, configs: &[NullableConfig<'_>]) -> CreatableTopic {
     CreatableTopic {
         configs: configs
             .iter()
-            .map(|(key, value)| CreatableTopicConfig {
-                name: (*key).into(),
-                value: value.map(str::to_owned),
+            .map(|config| CreatableTopicConfig {
+                name: config.name.into(),
+                value: config.value.map(str::to_owned),
                 ..Default::default()
             })
             .collect(),
@@ -1771,6 +1997,13 @@ fn error_row(name: &str, error_code: i16, message: &str) -> CreatableTopicResult
     }
 }
 
+/// The name of a requested topic and the row its response must carry, or
+/// `None` for a created topic.
+struct ExpectedRow {
+    name: &'static str,
+    row: Option<CreatableTopicResult>,
+}
+
 /// The request rows of one scenario, whether it is a dry run, the rows the
 /// response must carry (`None` for a created topic, whose id and configs are
 /// minted per create), and the topics that must exist afterwards.
@@ -1778,24 +2011,108 @@ struct CheckOrderCase {
     label: &'static str,
     topics: Vec<CreatableTopic>,
     validate_only: bool,
-    rows: Vec<(&'static str, Option<CreatableTopicResult>)>,
+    rows: Vec<ExpectedRow>,
     exist: &'static [&'static str],
 }
 
-/// Kafka's `ControllerApis.createTopics` and
-/// `ReplicationControlManager.createTopics` on a single broker that already
-/// holds topic `t`: duplicate names answer one `INVALID_REQUEST` row after the
-/// controller's rows, an existing topic answers `TOPIC_ALREADY_EXISTS` ahead
-/// of every other check, a null config answers `INVALID_CONFIG`, and a request
-/// for more than 10000 partitions answers `POLICY_VIOLATION` on every row.
-#[tokio::test]
-async fn rows_follow_kafkas_check_order_and_messages() {
+/// Kafka's `createTopics` check-order cases: see
+/// [`rows_follow_kafkas_check_order_and_messages`].
+fn check_order_cases() -> Vec<CheckOrderCase> {
     const EXISTS: &str = "Topic 't' already exists.";
+    let duplicate = |name| error_row(name, codes::INVALID_REQUEST, "Duplicate topic name.");
+    let exists = || Some(error_row("t", codes::TOPIC_ALREADY_EXISTS, EXISTS));
+    vec![
+        CheckOrderCase {
+            label: "a name twice creates nothing",
+            topics: vec![topic("n", 1, 1), topic("n", 1, 1)],
+            validate_only: false,
+            rows: vec![ExpectedRow {
+                name: "n",
+                row: Some(duplicate("n")),
+            }],
+            exist: &["t"],
+        },
+        CheckOrderCase {
+            label: "a name twice in a dry run",
+            topics: vec![topic("n", 1, 1), topic("n", 1, 1)],
+            validate_only: true,
+            rows: vec![ExpectedRow {
+                name: "n",
+                row: Some(duplicate("n")),
+            }],
+            exist: &["t"],
+        },
+        CheckOrderCase {
+            label: "a duplicate answers after the controller's rows",
+            topics: vec![topic("n", 1, 1), topic("u", 1, 1), topic("n", 1, 1)],
+            validate_only: false,
+            rows: vec![
+                ExpectedRow {
+                    name: "u",
+                    row: None,
+                },
+                ExpectedRow {
+                    name: "n",
+                    row: Some(duplicate("n")),
+                },
+            ],
+            exist: &["t", "u"],
+        },
+        CheckOrderCase {
+            label: "an existing topic with an invalid config",
+            topics: vec![topic_with_configs("t", &[ConfigPair {
+                name: "retention.ms",
+                value: "abc",
+            }])],
+            validate_only: false,
+            rows: vec![ExpectedRow {
+                name: "t",
+                row: exists(),
+            }],
+            exist: &["t"],
+        },
+        CheckOrderCase {
+            label: "an existing topic with no partitions",
+            topics: vec![topic("t", 0, 1)],
+            validate_only: false,
+            rows: vec![ExpectedRow {
+                name: "t",
+                row: exists(),
+            }],
+            exist: &["t"],
+        },
+        CheckOrderCase {
+            label: "an existing topic with an unplaceable replication factor",
+            topics: vec![topic("t", 1, 3)],
+            validate_only: false,
+            rows: vec![ExpectedRow {
+                name: "t",
+                row: exists(),
+            }],
+            exist: &["t"],
+        },
+        CheckOrderCase {
+            label: "an existing topic with an invalid config in a dry run",
+            topics: vec![topic_with_configs("t", &[ConfigPair {
+                name: "retention.ms",
+                value: "abc",
+            }])],
+            validate_only: true,
+            rows: vec![ExpectedRow {
+                name: "t",
+                row: exists(),
+            }],
+            exist: &["t"],
+        },
+    ]
+}
+
+/// The null-config, manual-assignment and partition-limit rows of
+/// [`check_order_cases`].
+fn check_order_limit_cases() -> Vec<CheckOrderCase> {
     // Kafka 4.3.1's text. Trunk rewords it, and krabka serves that only with
     // `unstable.api.versions.enable`: see `too_many_partitions_message_follows_the_unstable_flag`.
     const TOO_MANY: &str = "Excessively large number of partitions per request.";
-    let duplicate = |name| error_row(name, codes::INVALID_REQUEST, "Duplicate topic name.");
-    let exists = || Some(error_row("t", codes::TOPIC_ALREADY_EXISTS, EXISTS));
     let manual_rf_2 = CreatableTopic {
         assignments: vec![
             krabka_protocol::owned::create_topics_request::CreatableReplicaAssignment {
@@ -1806,108 +2123,74 @@ async fn rows_follow_kafkas_check_order_and_messages() {
         ],
         ..topic("m", -1, 2)
     };
-    let cases = vec![
-        CheckOrderCase {
-            label: "a name twice creates nothing",
-            topics: vec![topic("n", 1, 1), topic("n", 1, 1)],
-            validate_only: false,
-            rows: vec![("n", Some(duplicate("n")))],
-            exist: &["t"],
-        },
-        CheckOrderCase {
-            label: "a name twice in a dry run",
-            topics: vec![topic("n", 1, 1), topic("n", 1, 1)],
-            validate_only: true,
-            rows: vec![("n", Some(duplicate("n")))],
-            exist: &["t"],
-        },
-        CheckOrderCase {
-            label: "a duplicate answers after the controller's rows",
-            topics: vec![topic("n", 1, 1), topic("u", 1, 1), topic("n", 1, 1)],
-            validate_only: false,
-            rows: vec![("u", None), ("n", Some(duplicate("n")))],
-            exist: &["t", "u"],
-        },
-        CheckOrderCase {
-            label: "an existing topic with an invalid config",
-            topics: vec![topic_with_configs("t", &[("retention.ms", "abc")])],
-            validate_only: false,
-            rows: vec![("t", exists())],
-            exist: &["t"],
-        },
-        CheckOrderCase {
-            label: "an existing topic with no partitions",
-            topics: vec![topic("t", 0, 1)],
-            validate_only: false,
-            rows: vec![("t", exists())],
-            exist: &["t"],
-        },
-        CheckOrderCase {
-            label: "an existing topic with an unplaceable replication factor",
-            topics: vec![topic("t", 1, 3)],
-            validate_only: false,
-            rows: vec![("t", exists())],
-            exist: &["t"],
-        },
-        CheckOrderCase {
-            label: "an existing topic with an invalid config in a dry run",
-            topics: vec![topic_with_configs("t", &[("retention.ms", "abc")])],
-            validate_only: true,
-            rows: vec![("t", exists())],
-            exist: &["t"],
-        },
+    vec![
         CheckOrderCase {
             label: "a null config",
-            topics: vec![topic_with_nullable_configs("n", &[("retention.ms", None)])],
+            topics: vec![topic_with_nullable_configs("n", &[NullableConfig {
+                name: "retention.ms",
+                value: None,
+            }])],
             validate_only: false,
-            rows: vec![(
-                "n",
-                Some(error_row(
+            rows: vec![ExpectedRow {
+                name: "n",
+                row: Some(error_row(
                     "n",
                     codes::INVALID_CONFIG,
                     "Null value not supported for topic configs: retention.ms",
                 )),
-            )],
+            }],
             exist: &["t"],
         },
         CheckOrderCase {
             label: "two null configs in a dry run",
             topics: vec![topic_with_nullable_configs("n", &[
-                ("retention.ms", None),
-                ("segment.ms", Some("60000")),
-                ("cleanup.policy", None),
+                NullableConfig {
+                    name: "retention.ms",
+                    value: None,
+                },
+                NullableConfig {
+                    name: "segment.ms",
+                    value: Some("60000"),
+                },
+                NullableConfig {
+                    name: "cleanup.policy",
+                    value: None,
+                },
             ])],
             validate_only: true,
-            rows: vec![(
-                "n",
-                Some(error_row(
+            rows: vec![ExpectedRow {
+                name: "n",
+                row: Some(error_row(
                     "n",
                     codes::INVALID_CONFIG,
                     "Null value not supported for topic configs: retention.ms,cleanup.policy",
                 )),
-            )],
+            }],
             exist: &["t"],
         },
         CheckOrderCase {
             label: "a manual assignment with a replication factor",
             topics: vec![manual_rf_2],
             validate_only: false,
-            rows: vec![(
-                "m",
-                Some(error_row(
+            rows: vec![ExpectedRow {
+                name: "m",
+                row: Some(error_row(
                     "m",
                     codes::INVALID_REQUEST,
                     "A manual partition assignment was specified, but replication factor was not \
                      set to -1.",
                 )),
-            )],
+            }],
             exist: &["t"],
         },
         CheckOrderCase {
             label: "one topic above the partition limit",
             topics: vec![topic("a", 10_001, 1)],
             validate_only: false,
-            rows: vec![("a", Some(error_row("a", codes::POLICY_VIOLATION, TOO_MANY)))],
+            rows: vec![ExpectedRow {
+                name: "a",
+                row: Some(error_row("a", codes::POLICY_VIOLATION, TOO_MANY)),
+            }],
             exist: &["t"],
         },
         CheckOrderCase {
@@ -1920,14 +2203,38 @@ async fn rows_follow_kafkas_check_order_and_messages() {
             ],
             validate_only: false,
             rows: vec![
-                ("a", Some(error_row("a", codes::POLICY_VIOLATION, TOO_MANY))),
-                ("d", Some(error_row("d", codes::POLICY_VIOLATION, TOO_MANY))),
-                ("b", Some(error_row("b", codes::POLICY_VIOLATION, TOO_MANY))),
-                ("d", Some(error_row("d", codes::POLICY_VIOLATION, TOO_MANY))),
+                ExpectedRow {
+                    name: "a",
+                    row: Some(error_row("a", codes::POLICY_VIOLATION, TOO_MANY)),
+                },
+                ExpectedRow {
+                    name: "d",
+                    row: Some(error_row("d", codes::POLICY_VIOLATION, TOO_MANY)),
+                },
+                ExpectedRow {
+                    name: "b",
+                    row: Some(error_row("b", codes::POLICY_VIOLATION, TOO_MANY)),
+                },
+                ExpectedRow {
+                    name: "d",
+                    row: Some(error_row("d", codes::POLICY_VIOLATION, TOO_MANY)),
+                },
             ],
             exist: &["t"],
         },
-    ];
+    ]
+}
+
+/// Kafka's `ControllerApis.createTopics` and
+/// `ReplicationControlManager.createTopics` on a single broker that already
+/// holds topic `t`: duplicate names answer one `INVALID_REQUEST` row after the
+/// controller's rows, an existing topic answers `TOPIC_ALREADY_EXISTS` ahead
+/// of every other check, a null config answers `INVALID_CONFIG`, and a request
+/// for more than 10000 partitions answers `POLICY_VIOLATION` on every row.
+#[tokio::test]
+async fn rows_follow_kafkas_check_order_and_messages() {
+    let mut cases = check_order_cases();
+    cases.extend(check_order_limit_cases());
 
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
@@ -1953,7 +2260,7 @@ async fn rows_follow_kafkas_check_order_and_messages() {
             .rows
             .into_iter()
             .zip(&resp.topics)
-            .map(|((name, row), actual_row)| {
+            .map(|(ExpectedRow { name, row }, actual_row)| {
                 row.unwrap_or_else(|| CreatableTopicResult {
                     name: name.into(),
                     topic_id: actual_row.topic_id,
@@ -1998,8 +2305,14 @@ async fn a_config_value_over_short_max_value_answers_invalid_config() {
     let resp = drive(
         &broker,
         &request(vec![
-            topic_with_configs("fits", &[(key, &fits)]),
-            topic_with_configs("long", &[(key, &too_long)]),
+            topic_with_configs("fits", &[ConfigPair {
+                name: key,
+                value: &fits,
+            }]),
+            topic_with_configs("long", &[ConfigPair {
+                name: key,
+                value: &too_long,
+            }]),
         ]),
         &test_context(&principal("admin"), &peer()),
     )

@@ -10,10 +10,14 @@ use {
         broker::{
             Broker, BrokerHandle, DisklessRuntime,
             coordinators::{CoordinatorInputs, CoordinatorStartup, start_coordinators},
-            finish::{BrokerStorageStartup, finish_broker_startup},
+            finish::{
+                BrokerCoordinatorSet, BrokerMetadataHandles, BrokerStorageStartup,
+                finish_broker_startup,
+            },
             listeners::bind_ephemeral_data_plane_listener,
             metadata_phase::{MetadataControlPlane, MetadataPhase, start_metadata_phase},
-            runtime::start_broker_runtime,
+            replication::CoordinatorRefs,
+            runtime::{RuntimeDeps, StorageRefs, start_broker_runtime},
             storage::{StorageStartup, recover_storage_and_groups},
             transport::{StartupTransport, prepare_startup_transport},
         },
@@ -343,9 +347,21 @@ impl Broker {
             &controller,
             &inter_broker_client,
             tls_dynamic.as_ref(),
-            (&partitions, &producer_state, &log_dir_status, &log_dir_ids),
-            (&txn_coordinator, &share_coordinator),
-            (&diskless_runtime, metrics, Some(health.clone())),
+            StorageRefs {
+                partitions: &partitions,
+                producer_state: &producer_state,
+                log_dir_status: &log_dir_status,
+                log_dir_ids: &log_dir_ids,
+            },
+            CoordinatorRefs {
+                txn_coordinator: &txn_coordinator,
+                share_coordinator: &share_coordinator,
+            },
+            RuntimeDeps {
+                diskless_runtime: &diskless_runtime,
+                metrics,
+                health: Some(health.clone()),
+            },
         )
         .await?;
 
@@ -476,8 +492,12 @@ impl Broker {
         let handle = finish_broker_startup(
             config,
             data_plane_listeners,
-            (controller, partitions, controller_admin_router),
-            (
+            BrokerMetadataHandles {
+                controller,
+                partitions,
+                admin_router: controller_admin_router,
+            },
+            BrokerCoordinatorSet {
                 group_coordinator,
                 producer_ids,
                 producer_state,
@@ -486,8 +506,12 @@ impl Broker {
                 share_partition_leaders,
                 barrier_coordinator,
                 auto_topic_creation,
-            ),
-            (tls_dynamic, ktls_enabled, inter_broker_client),
+            },
+            StartupTransport {
+                tls_dynamic,
+                ktls_enabled,
+                inter_broker_client,
+            },
             runtime,
             BrokerStorageStartup {
                 log_dir_status,

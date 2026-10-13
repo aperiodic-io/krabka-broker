@@ -520,21 +520,39 @@ async fn automatic_growth_takes_fenced_brokers_last_and_words_refusals_like_the_
     /// One row: the fenced brokers, the brokers in controlled shutdown, and
     /// either how many replicas of each new partition are fenced, or the
     /// refusal message.
-    type Row = (&'static [u64], &'static [u64], Result<usize, &'static str>);
-    let rows: [Row; 3] = [
-        (&[4], &[], Ok(0)),
-        (&[3, 4], &[], Ok(1)),
-        (
-            &[],
-            &[3, 4],
-            Err(
+    struct GrowthRow {
+        fenced: &'static [u64],
+        shutting_down: &'static [u64],
+        outcome: Result<usize, &'static str>,
+    }
+
+    let rows: [GrowthRow; 3] = [
+        GrowthRow {
+            fenced: &[4],
+            shutting_down: &[],
+            outcome: Ok(0),
+        },
+        GrowthRow {
+            fenced: &[3, 4],
+            shutting_down: &[],
+            outcome: Ok(1),
+        },
+        GrowthRow {
+            fenced: &[],
+            shutting_down: &[3, 4],
+            outcome: Err(
                 "The target replication factor of 2 cannot be reached because only 1 broker(s) \
                  are registered or some brokers have all their log directories cordoned.",
             ),
-        ),
+        },
     ];
 
-    for (fenced, shutting_down, outcome) in rows {
+    for GrowthRow {
+        fenced,
+        shutting_down,
+        outcome,
+    } in rows
+    {
         let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         for node_id in [3, 4] {
             seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;

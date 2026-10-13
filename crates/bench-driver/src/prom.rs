@@ -62,14 +62,11 @@ impl PromClient {
         at_unix_s: Option<f64>,
     ) -> Result<Option<f64>> {
         let url = format!("{}/api/v1/query", self.base_url);
-        let mut params: Vec<(&str, String)> = vec![("query", query.to_owned())];
+        let mut request = self.http.get(&url).query(&[("query", query)]);
         if let Some(at) = at_unix_s {
-            params.push(("time", format!("{at}")));
+            request = request.query(&[("time", format!("{at}"))]);
         }
-        let body: PromResp = self
-            .http
-            .get(&url)
-            .query(&params)
+        let body: PromResp = request
             .send()
             .await
             .with_context(|| format!("GET {url} query={query}"))?
@@ -106,7 +103,7 @@ impl PromClient {
     }
 
     /// Runs a `PromQL` range query and sums across all returned series per
-    /// timestamp. Returns `(unix_seconds, value)` points on the step grid.
+    /// timestamp. Returns [`PromPoint`]s on the step grid.
     /// # Errors
     /// Returns an error when input data is invalid, required I/O fails, or the destination rejects the generated report or audit event.
     pub async fn query_range_sum(
@@ -115,7 +112,7 @@ impl PromClient {
         start_s: f64,
         end_s: f64,
         step_s: u64,
-    ) -> Result<Vec<(f64, f64)>> {
+    ) -> Result<Vec<PromPoint>> {
         let url = format!("{}/api/v1/query_range", self.base_url);
         let start = format!("{start_s}");
         let end = format!("{end_s}");
@@ -163,7 +160,10 @@ impl PromClient {
         }
         Ok(by_ts
             .into_iter()
-            .map(|(ts_ms, v)| (to_f64(ts_ms) / 1000.0, v))
+            .map(|(ts_ms, value)| PromPoint {
+                unix_s: to_f64(ts_ms) / 1000.0,
+                value,
+            })
             .collect())
     }
 
@@ -198,25 +198,25 @@ impl PromClient {
             .unwrap_or_default();
 
         let range_start_ms = nonnegative_f64_to_u64((start_s * 1000.0).round());
-        let mut by_ts: BTreeMap<u64, (f64, u64)> = BTreeMap::new();
-        for (ts, v) in cpu {
+        let mut by_ts: BTreeMap<u64, ResourcePoint> = BTreeMap::new();
+        for PromPoint { unix_s, value } in cpu {
             by_ts
-                .entry(nonnegative_f64_to_u64((ts * 1000.0).round()))
+                .entry(nonnegative_f64_to_u64((unix_s * 1000.0).round()))
                 .or_default()
-                .0 = v;
+                .cpu_cores = value;
         }
-        for (ts, v) in mem {
+        for PromPoint { unix_s, value } in mem {
             by_ts
-                .entry(nonnegative_f64_to_u64((ts * 1000.0).round()))
+                .entry(nonnegative_f64_to_u64((unix_s * 1000.0).round()))
                 .or_default()
-                .1 = nonnegative_f64_to_u64(v);
+                .mem_bytes = nonnegative_f64_to_u64(value);
         }
         Ok(by_ts
             .into_iter()
-            .map(|(ts_ms, (cpu_cores, mem))| BrokerSample {
+            .map(|(ts_ms, point)| BrokerSample {
                 t_offset_ms: TimeOffsetMs(ts_ms.saturating_sub(range_start_ms)),
-                cpu_cores,
-                mem_working_set: ByteSize::from_bytes(mem),
+                cpu_cores: point.cpu_cores,
+                mem_working_set: ByteSize::from_bytes(point.mem_bytes),
             })
             .collect())
     }
@@ -351,6 +351,22 @@ fn require_series(value: Option<f64>, what: &str, query: &str) -> Result<f64> {
 }
 
 // ── Prometheus HTTP API types (minimal) ─────────────────────────────────────
+
+/// One point of a `PromQL` range query result on the step grid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PromPoint {
+    /// The point's timestamp in seconds since the Unix epoch.
+    pub unix_s: f64,
+    /// The summed value across the returned series at `unix_s`.
+    pub value: f64,
+}
+
+/// The CPU and memory readings that share one timestamp.
+#[derive(Debug, Default)]
+struct ResourcePoint {
+    cpu_cores: f64,
+    mem_bytes: u64,
+}
 
 #[derive(Debug, Deserialize)]
 struct PromResp {

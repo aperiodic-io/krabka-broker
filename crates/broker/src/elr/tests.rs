@@ -272,7 +272,15 @@ async fn register_broker_3(broker: &Arc<Broker>, incarnation: u128) {
     assert!(response.error_code == codes::NONE, "{response:?}");
 }
 
-async fn start_orders() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
+/// A started controller broker that holds the seeded `orders` topic, and its
+/// data directory.
+struct Orders {
+    handle: BrokerHandle,
+    dir: tempfile::TempDir,
+    broker: Arc<Broker>,
+}
+
+async fn start_orders() -> Orders {
     let (handle, dir, broker) = started_controller_broker().await;
     broker
         .controller
@@ -280,7 +288,11 @@ async fn start_orders() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
         .await
         .expect("seed orders");
     activate_followers(&broker).await;
-    (handle, dir, broker)
+    Orders {
+        handle,
+        dir,
+        broker,
+    }
 }
 
 /// The issue's acceptance path: shrink the ISR below `min.insync.replicas`
@@ -288,7 +300,11 @@ async fn start_orders() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
 /// `min.insync.replicas` and the set clears.
 #[tokio::test]
 async fn an_isr_that_crosses_min_insync_replicas_moves_the_reported_elr() {
-    let (handle, _dir, broker) = start_orders().await;
+    let Orders {
+        handle,
+        dir: _dir,
+        broker,
+    } = start_orders().await;
 
     check_partition(&broker, row().call()).await;
 
@@ -328,14 +344,26 @@ async fn rejoin_follower_and_check_isr(broker: &Arc<Broker>) {
 /// eligible.
 #[tokio::test]
 async fn an_isr_that_stays_at_min_insync_replicas_reports_no_elr() {
-    let (handle, _dir, broker) = start_orders().await;
+    let Orders {
+        handle,
+        dir: _dir,
+        broker,
+    } = start_orders().await;
 
     rejoin_follower_and_check_isr(&broker).await;
 
     handle.shutdown().await;
 }
 
-async fn seed_returning_broker(min_isr: &str) -> (BrokerHandle, Arc<Broker>, tempfile::TempDir) {
+/// A started controller broker whose broker 3 is unavailable, and its data
+/// directory.
+struct ReturningBroker {
+    handle: BrokerHandle,
+    broker: Arc<Broker>,
+    dir: tempfile::TempDir,
+}
+
+async fn seed_returning_broker(min_isr: &str) -> ReturningBroker {
     let (handle, dir, broker) = started_controller_broker().await;
     let mut seed = seed_records_with_min_isr(min_isr);
     seed.push(registration_record(1));
@@ -345,7 +373,11 @@ async fn seed_returning_broker(min_isr: &str) -> (BrokerHandle, Arc<Broker>, tem
         .await
         .expect("seed orders");
     mark_broker_3_unavailable(&broker).await;
-    (handle, broker, dir)
+    ReturningBroker {
+        handle,
+        broker,
+        dir,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -355,7 +387,11 @@ enum InitialIsrCheck {
 }
 
 async fn assert_returning_broker_withdrawal(min_isr: &str, initial_check: InitialIsrCheck) {
-    let (handle, broker, _dir) = seed_returning_broker(min_isr).await;
+    let ReturningBroker {
+        handle,
+        broker,
+        dir: _dir,
+    } = seed_returning_broker(min_isr).await;
     if initial_check == InitialIsrCheck::Required {
         // Broker 3 is explicitly fenced so its returning incarnation is
         // deterministic even when coverage instrumentation delays the test.

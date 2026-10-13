@@ -107,26 +107,37 @@ fn update_metadata_health_metrics(metrics: &BrokerMetrics, controller: &dyn Meta
     metrics.set_metadata_load_error_count(controller.metadata_load_error_count());
 }
 
+/// What this broker holds locally: the partitions it hosts and the health of
+/// the directories they sit in. They travel together because one gauge pass
+/// samples both, and neither is reachable from the metadata image.
+pub(super) struct GaugeStorage {
+    pub(super) partitions: Arc<PartitionRegistry>,
+    pub(super) log_dir_status: LogDirRegistry,
+}
+
+/// The registry the gauge sample is written to and the health state the
+/// broker-state gauge reads; they travel together because every sample writes
+/// the first from the second.
+pub(super) struct GaugeObservability {
+    pub(super) metrics: BrokerMetrics,
+    pub(super) health: Option<HealthState>,
+}
+
 /// Spawns the timer that samples the broker's cluster gauges.
-///
-/// `storage` is what this broker holds locally: the partitions it hosts and
-/// the health of the directories they sit in. They travel together because
-/// one pass samples both, and neither is reachable from the metadata image.
-///
-/// `observability` is the registry the sample is written to and the health
-/// state the broker-state gauge reads; they travel together because every
-/// sample writes the first from the second.
 pub(super) fn spawn_broker_gauge_updater(
-    storage: (Arc<PartitionRegistry>, LogDirRegistry),
+    storage: GaugeStorage,
     controller: Arc<dyn MetadataSource>,
     liveness: Arc<ControllerLivenessState>,
     node_id: krabka_metadata::NodeId,
-    observability: (BrokerMetrics, Option<HealthState>),
+    observability: GaugeObservability,
     config: &BrokerConfig,
     shutdown: CancellationToken,
 ) {
-    let (partitions, log_dir_status) = storage;
-    let (metrics, health) = observability;
+    let GaugeStorage {
+        partitions,
+        log_dir_status,
+    } = storage;
+    let GaugeObservability { metrics, health } = observability;
     let poll_interval = config.gauge_poll_interval;
     let default_min_insync_replicas = config.default_min_insync_replicas;
     let static_voter_count = config.controller_quorum_voters.len();
@@ -352,18 +363,24 @@ mod tests {
                 partition_epoch: 0,
             },
         ));
-        let (metrics, mut config) = gauge_fixture();
+        let GaugeFixture {
+            metrics,
+            mut config,
+        } = gauge_fixture();
         config.default_min_insync_replicas = 2;
         let shutdown = CancellationToken::new();
         spawn_broker_gauge_updater(
-            (
-                Arc::new(PartitionRegistry::new()),
-                LogDirRegistry::default(),
-            ),
+            GaugeStorage {
+                partitions: Arc::new(PartitionRegistry::new()),
+                log_dir_status: LogDirRegistry::default(),
+            },
             Arc::new(fake_source(image, None)),
             Arc::new(ControllerLivenessState::new(secs(10))),
             node_id,
-            (metrics.clone(), None),
+            GaugeObservability {
+                metrics: metrics.clone(),
+                health: None,
+            },
             &config,
             shutdown.child_token(),
         );
@@ -384,11 +401,17 @@ mod tests {
         shutdown.cancel();
     }
 
-    fn gauge_fixture() -> (BrokerMetrics, BrokerConfig) {
+    /// The metric registry a gauge test reads, and the config of the node.
+    struct GaugeFixture {
+        metrics: BrokerMetrics,
+        config: BrokerConfig,
+    }
+
+    fn gauge_fixture() -> GaugeFixture {
         let metrics = BrokerMetrics::new();
         let mut config = BrokerConfig::for_tests(std::path::PathBuf::new());
         config.gauge_poll_interval = millis(1);
-        (metrics, config)
+        GaugeFixture { metrics, config }
     }
 
     /// A dir that goes offline under live traffic has to reach the scrape.
@@ -398,18 +421,24 @@ mod tests {
     async fn broker_gauge_publishes_the_offline_log_dir_count() {
         let dir = tempfile::tempdir().expect("log root");
         let log_dirs = LogDirRegistry::probe(&[dir.path().to_path_buf()]);
-        let (metrics, config) = gauge_fixture();
+        let GaugeFixture { metrics, config } = gauge_fixture();
         let shutdown = CancellationToken::new();
         let cancel_token = shutdown.child_token();
         spawn_broker_gauge_updater(
-            (Arc::new(PartitionRegistry::new()), log_dirs.clone()),
+            GaugeStorage {
+                partitions: Arc::new(PartitionRegistry::new()),
+                log_dir_status: log_dirs.clone(),
+            },
             Arc::new(fake_source(
                 krabka_metadata::MetadataImage::new(uuid::Uuid::nil()),
                 None,
             )),
             Arc::new(ControllerLivenessState::new(secs(10))),
             krabka_metadata::NodeId(1),
-            (metrics.clone(), None),
+            GaugeObservability {
+                metrics: metrics.clone(),
+                health: None,
+            },
             &config,
             cancel_token,
         );

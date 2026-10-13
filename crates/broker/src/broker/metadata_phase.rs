@@ -20,7 +20,7 @@ use {
         controller_endpoint::CONTROLLER_LISTENER_NAME,
         error::BrokerError,
         features::LATEST_PRODUCTION_METADATA_VERSION,
-        host_port::parse_host_port,
+        host_port::{HostPort, parse_host_port},
         incarnation::load_or_generate,
         metadata_observer::{MetadataObserver, ObserverConfig},
         metadata_source::{MetadataSource, ObserverSource, QuorumForwarder, or_fatal_fault},
@@ -426,7 +426,7 @@ fn publish_bound_controller_addr(config: &mut BrokerConfig, bound: std::net::Soc
         if *voter != node_id {
             continue;
         }
-        if let Some((host, 0)) = parse_host_port(endpoint) {
+        if let Some(HostPort { host, port: 0 }) = parse_host_port(endpoint) {
             *endpoint = format!("{host}:{}", bound.port());
         }
     }
@@ -524,17 +524,24 @@ mod tests {
         tracing::Level,
     };
 
+    /// A captured log event at warning level or above.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Warning {
+        level: Level,
+        message: String,
+    }
+
     // A node warns that its controller listener is PLAINTEXT only when it has
     // one, which only a node with the controller role binds.
     #[test]
     fn only_a_controller_warns_about_a_plaintext_controller_listener() {
         let client = Arc::new(InterBrokerClient::new(None, None));
-        let warning = (
-            Level::WARN,
-            "controller listener is PLAINTEXT: every peer is ANONYMOUS, and each controller RPC \
-             is authorized for that principal"
+        let warning = Warning {
+            level: Level::WARN,
+            message: "controller listener is PLAINTEXT: every peer is ANONYMOUS, and each \
+                      controller RPC is authorized for that principal"
                 .to_string(),
-        );
+        };
         let combined = vec![NodeRole::Broker, NodeRole::Controller];
         let cases = [
             (combined.clone(), ListenerProtocol::Plaintext, vec![
@@ -558,11 +565,14 @@ mod tests {
             tracing::dispatcher::with_default(&capture.dispatch(), || {
                 LogCapture::span().in_scope(|| prepare_raft_transport(&config, None, &client));
             });
-            let warned: Vec<(Level, String)> = capture
+            let warned: Vec<Warning> = capture
                 .events()
                 .into_iter()
                 .filter(|event| event.level <= Level::WARN)
-                .map(|event| (event.level, event.message))
+                .map(|event| Warning {
+                    level: event.level,
+                    message: event.message,
+                })
                 .collect();
             warned_rows.push((roles.clone(), protocol, warned));
             expected_rows.push((roles, protocol, expected));
@@ -697,7 +707,7 @@ mod tests {
 
             publish_bound_controller_addr(&mut config, bound);
 
-            let want: Vec<(NodeId, String)> = published
+            let want: Vec<_> = published
                 .iter()
                 .map(|&(id, endpoint)| (NodeId(id), endpoint.to_owned()))
                 .collect();

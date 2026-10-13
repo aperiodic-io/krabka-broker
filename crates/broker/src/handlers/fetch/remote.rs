@@ -608,17 +608,29 @@ mod tests {
     /// bounds, which on `tiered_partition` are the global log start, and the
     /// high watermark doubling as the last stable offset because the partition
     /// holds no transaction.
-    fn served_bounds(log_start: i64) -> (i64, i64, i64) {
-        (log_start, TIERED_HIGH_WATERMARK, TIERED_HIGH_WATERMARK)
+    fn served_bounds(log_start: i64) -> ServedBounds {
+        ServedBounds {
+            log_start_offset: log_start,
+            high_watermark: TIERED_HIGH_WATERMARK,
+            last_stable_offset: TIERED_HIGH_WATERMARK,
+        }
     }
 
-    /// The three bounds `out` reports, in [`served_bounds`] order.
-    fn bounds(out: &krabka_protocol::owned::fetch_response::PartitionData) -> (i64, i64, i64) {
-        (
-            out.log_start_offset,
-            out.high_watermark,
-            out.last_stable_offset,
-        )
+    /// The three bounds a row reports.
+    #[derive(Debug, PartialEq, Eq)]
+    struct ServedBounds {
+        log_start_offset: i64,
+        high_watermark: i64,
+        last_stable_offset: i64,
+    }
+
+    /// The three bounds `out` reports.
+    fn bounds(out: &krabka_protocol::owned::fetch_response::PartitionData) -> ServedBounds {
+        ServedBounds {
+            log_start_offset: out.log_start_offset,
+            high_watermark: out.high_watermark,
+            last_stable_offset: out.last_stable_offset,
+        }
     }
 
     /// A `PendingRead` for offset 0 that the local log has already answered

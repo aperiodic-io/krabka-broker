@@ -59,14 +59,27 @@ fn signing_fixture() -> SigningFixture {
     }
 }
 
-fn fresh_key(dir: &TempDir, name: &str) -> (Ed25519KeyPair, PathBuf) {
-    ed25519_public_key_file().dir(dir.path()).name(name).call()
+/// An operator key pair, and the file that holds its public half.
+struct FreshKey {
+    pair: Ed25519KeyPair,
+    path: PathBuf,
+}
+
+fn fresh_key(dir: &TempDir, name: &str) -> FreshKey {
+    let (pair, path) = ed25519_public_key_file().dir(dir.path()).name(name).call();
+    FreshKey { pair, path }
 }
 
 fn trust() -> Trust {
     let dir = TempDir::new().expect("tempdir");
-    let (alice, alice_path) = fresh_key(&dir, "alice.pub");
-    let (bob, bob_path) = fresh_key(&dir, "bob.pub");
+    let FreshKey {
+        pair: alice,
+        path: alice_path,
+    } = fresh_key(&dir, "alice.pub");
+    let FreshKey {
+        pair: bob,
+        path: bob_path,
+    } = fresh_key(&dir, "bob.pub");
     let keys = OperatorKeys::load(&[
         OperatorKeyEntry {
             key_id: ALICE_KEY.to_owned(),
@@ -114,6 +127,14 @@ fn signed(
         signature: pair.sign(&bytes).as_ref().to_vec(),
         ..record.clone()
     }
+}
+
+// `good` re-timestamped to `set_at_ms` and signed by `pair` for the test cluster.
+fn signed_at(pair: &Ed25519KeyPair, set_at_ms: i64, good: &TopicFreezeRecord) -> TopicFreezeRecord {
+    signed(pair, CLUSTER_ID, &TopicFreezeRecord {
+        set_at_ms,
+        ..good.clone()
+    })
 }
 
 fn check_against<'a>(trust: &'a Trust, principal: &'a str) -> FreezeSignatureCheck<'a> {

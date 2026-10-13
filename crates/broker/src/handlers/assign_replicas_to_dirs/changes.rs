@@ -331,6 +331,13 @@ mod tests {
     /// first partition gives a record, and each row carries Kafka's code.
     #[test]
     fn plan_answers_each_partition_with_kafkas_error_code() {
+        /// The error code the plan answers for one partition of a topic.
+        #[derive(Clone, Copy)]
+        struct PartitionAnswer {
+            partition_index: i32,
+            error_code: i16,
+        }
+
         let known = uuid::Uuid::from_u128(0x42);
         let elsewhere = uuid::Uuid::from_u128(0x43);
         let unknown = uuid::Uuid::from_u128(0x44);
@@ -371,15 +378,20 @@ mod tests {
             ..Default::default()
         };
 
-        let answer = |topic_id: uuid::Uuid, partitions: &[(i32, i16)]| RespTopicData {
+        let answer = |topic_id: uuid::Uuid, partitions: &[PartitionAnswer]| RespTopicData {
             topic_id: ProtocolUuid(topic_id.into_bytes()),
             partitions: partitions
                 .iter()
-                .map(|&(partition_index, error_code)| RespPartData {
-                    partition_index,
-                    error_code,
-                    ..Default::default()
-                })
+                .map(
+                    |&PartitionAnswer {
+                         partition_index,
+                         error_code,
+                     }| RespPartData {
+                        partition_index,
+                        error_code,
+                        ..Default::default()
+                    },
+                )
                 .collect(),
             ..Default::default()
         };
@@ -390,15 +402,33 @@ mod tests {
                     id: ProtocolUuid(DIR.into_bytes()),
                     topics: vec![
                         answer(known, &[
-                            (0, codes::NONE),
-                            (99, codes::UNKNOWN_TOPIC_OR_PARTITION),
+                            PartitionAnswer {
+                                partition_index: 0,
+                                error_code: codes::NONE,
+                            },
+                            PartitionAnswer {
+                                partition_index: 99,
+                                error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+                            },
                         ]),
-                        answer(elsewhere, &[(0, codes::NOT_LEADER_OR_FOLLOWER)]),
+                        answer(elsewhere, &[PartitionAnswer {
+                            partition_index: 0,
+                            error_code: codes::NOT_LEADER_OR_FOLLOWER,
+                        }]),
                         answer(unknown, &[
-                            (0, codes::UNKNOWN_TOPIC_ID),
-                            (1, codes::UNKNOWN_TOPIC_ID),
+                            PartitionAnswer {
+                                partition_index: 0,
+                                error_code: codes::UNKNOWN_TOPIC_ID,
+                            },
+                            PartitionAnswer {
+                                partition_index: 1,
+                                error_code: codes::UNKNOWN_TOPIC_ID,
+                            },
                         ]),
-                        answer(nil, &[(0, codes::UNKNOWN_TOPIC_ID)]),
+                        answer(nil, &[PartitionAnswer {
+                            partition_index: 0,
+                            error_code: codes::UNKNOWN_TOPIC_ID,
+                        }]),
                     ],
                     ..Default::default()
                 }],

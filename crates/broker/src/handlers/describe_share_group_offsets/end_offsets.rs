@@ -23,7 +23,18 @@ use {
 };
 
 /// A partition by topic name, as `ListOffsets` names it.
-pub(super) type TopicPartition = (String, i32);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct TopicPartition {
+    pub(super) topic: String,
+    pub(super) partition: i32,
+}
+
+/// An error code and Kafka's message for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ErrorAnswer {
+    pub(super) code: i16,
+    pub(super) message: &'static str,
+}
 
 /// The end offset of a partition, or the error code of the lookup.
 pub(super) type EndOffset = Result<i64, i16>;
@@ -68,12 +79,13 @@ impl LatestOffsets for NetworkLatestOffsets<'_> {
         partitions: &[TopicPartition],
     ) -> HashMap<TopicPartition, EndOffset> {
         let image = self.broker.controller.current_image();
-        let (by_leader, mut offsets) = group_by_leader(&image, partitions);
-        let answers = join_all(
-            by_leader
-                .into_iter()
-                .map(|(leader, partitions)| self.ask_leader(&image, leader, partitions)),
-        )
+        let Grouped {
+            by_leader,
+            leaderless: mut offsets,
+        } = group_by_leader(&image, partitions);
+        let answers = join_all(by_leader.into_iter().map(
+            |LeaderPartitions { leader, partitions }| self.ask_leader(&image, leader, partitions),
+        ))
         .await;
         offsets.extend(answers.into_iter().flatten());
         offsets
@@ -135,33 +147,50 @@ impl NetworkLatestOffsets<'_> {
     }
 }
 
+/// The partitions that one leader hosts.
+#[derive(Debug, PartialEq, Eq)]
+struct LeaderPartitions {
+    leader: NodeId,
+    partitions: Vec<TopicPartition>,
+}
+
 /// Partitions grouped by their leader, in the order each leader is first
 /// seen.
-type ByLeader = Vec<(NodeId, Vec<TopicPartition>)>;
+type ByLeader = Vec<LeaderPartitions>;
+
+/// The partitions grouped by leader, and the answers for the ones without.
+#[derive(Debug, PartialEq, Eq)]
+struct Grouped {
+    by_leader: ByLeader,
+    leaderless: HashMap<TopicPartition, EndOffset>,
+}
 
 /// `partitions` grouped by the leader the image names, and
 /// `LEADER_NOT_AVAILABLE` for each partition the image has no leader of, as
 /// `getPartitionLeaderEndpoint` answers it.
-fn group_by_leader(
-    image: &MetadataImage,
-    partitions: &[TopicPartition],
-) -> (ByLeader, HashMap<TopicPartition, EndOffset>) {
+fn group_by_leader(image: &MetadataImage, partitions: &[TopicPartition]) -> Grouped {
     let mut by_leader: ByLeader = Vec::new();
     let mut leaderless = HashMap::new();
     for partition in partitions {
-        let Some(record) = image.partition(&partition.0, partition.1) else {
+        let Some(record) = image.partition(&partition.topic, partition.partition) else {
             leaderless.insert(partition.clone(), Err(codes::LEADER_NOT_AVAILABLE));
             continue;
         };
         match by_leader
             .iter_mut()
-            .find(|(leader, _)| *leader == record.leader)
+            .find(|group| group.leader == record.leader)
         {
-            Some((_, led)) => led.push(partition.clone()),
-            None => by_leader.push((record.leader, vec![partition.clone()])),
+            Some(group) => group.partitions.push(partition.clone()),
+            None => by_leader.push(LeaderPartitions {
+                leader: record.leader,
+                partitions: vec![partition.clone()],
+            }),
         }
     }
-    (by_leader, leaderless)
+    Grouped {
+        by_leader,
+        leaderless,
+    }
 }
 
 /// The request `NetworkPartitionMetadataClient.createListOffsetsRequest`
@@ -170,7 +199,7 @@ fn group_by_leader(
 /// each topic in one topic entry.
 fn latest_offsets_request(partitions: &[TopicPartition]) -> ListOffsetsRequest {
     let mut topics: Vec<ListOffsetsTopic> = Vec::new();
-    for (topic, partition) in partitions {
+    for TopicPartition { topic, partition } in partitions {
         let row = ListOffsetsPartition {
             partition_index: *partition,
             current_leader_epoch: -1,
@@ -204,7 +233,7 @@ fn offsets_from(
 ) -> HashMap<TopicPartition, EndOffset> {
     partitions
         .iter()
-        .map(|(topic, partition)| {
+        .map(|TopicPartition { topic, partition }| {
             let row = response
                 .topics
                 .iter()
@@ -216,7 +245,13 @@ fn offsets_from(
                 Some(row) => Err(row.error_code),
                 None => Err(codes::UNKNOWN_TOPIC_OR_PARTITION),
             };
-            ((topic.clone(), *partition), offset)
+            (
+                TopicPartition {
+                    topic: topic.clone(),
+                    partition: *partition,
+                },
+                offset,
+            )
         })
         .collect()
 }
@@ -224,7 +259,7 @@ fn offsets_from(
 /// Kafka's `Errors.forCode(code).message()` for the codes a `ListOffsets`
 /// lookup of the end offset answers with. Kafka reads a code it does not
 /// know as `UNKNOWN_SERVER_ERROR`, and so does this.
-pub(super) fn lookup_error(code: i16) -> (i16, &'static str) {
+pub(super) fn lookup_error(code: i16) -> ErrorAnswer {
     let message = match code {
         codes::UNKNOWN_TOPIC_OR_PARTITION => "This server does not host this topic-partition.",
         codes::LEADER_NOT_AVAILABLE => {
@@ -256,9 +291,14 @@ pub(super) fn lookup_error(code: i16) -> (i16, &'static str) {
             "The leader high watermark has not caught up from a recent leader election so the \
              offsets cannot be guaranteed to be monotonically increasing."
         }
-        _ => return (codes::UNKNOWN_SERVER_ERROR, UNKNOWN_SERVER_ERROR_MESSAGE),
+        _ => {
+            return ErrorAnswer {
+                code: codes::UNKNOWN_SERVER_ERROR,
+                message: UNKNOWN_SERVER_ERROR_MESSAGE,
+            };
+        }
     };
-    (code, message)
+    ErrorAnswer { code, message }
 }
 
 /// Kafka's `Errors.UNKNOWN_SERVER_ERROR.message()`.
@@ -277,7 +317,12 @@ mod tests {
         },
     };
 
-    fn tp(topic: &str, partition: i32) -> TopicPartition { (topic.to_owned(), partition) }
+    fn tp(topic: &str, partition: i32) -> TopicPartition {
+        TopicPartition {
+            topic: topic.to_owned(),
+            partition,
+        }
+    }
 
     /// `NetworkPartitionMetadataClient.createListOffsetsRequest`: a consumer
     /// request at `LATEST_TIMESTAMP`, `read_uncommitted`, one entry per topic.
@@ -361,34 +406,37 @@ mod tests {
             )));
         }
         let grouped = group_by_leader(&image, &[tp("a", 0), tp("a", 1), tp("a", 2), tp("a", 3)]);
-        let expected = (
-            vec![
-                (NodeId(1), vec![tp("a", 0), tp("a", 2)]),
-                (NodeId(2), vec![tp("a", 1)]),
+        let expected = Grouped {
+            by_leader: vec![
+                LeaderPartitions {
+                    leader: NodeId(1),
+                    partitions: vec![tp("a", 0), tp("a", 2)],
+                },
+                LeaderPartitions {
+                    leader: NodeId(2),
+                    partitions: vec![tp("a", 1)],
+                },
             ],
-            HashMap::from([(tp("a", 3), Err(codes::LEADER_NOT_AVAILABLE))]),
-        );
+            leaderless: HashMap::from([(tp("a", 3), Err(codes::LEADER_NOT_AVAILABLE))]),
+        };
         assert!(grouped == expected);
     }
 
     #[test]
     fn an_unknown_code_reads_as_unknown_server_error() {
         let rows = [
-            (
-                codes::REQUEST_TIMED_OUT,
-                (codes::REQUEST_TIMED_OUT, "The request timed out."),
-            ),
-            (
-                codes::NETWORK_EXCEPTION,
-                (
-                    codes::NETWORK_EXCEPTION,
-                    "The server disconnected before a response was received.",
-                ),
-            ),
-            (
-                i16::MAX,
-                (codes::UNKNOWN_SERVER_ERROR, UNKNOWN_SERVER_ERROR_MESSAGE),
-            ),
+            (codes::REQUEST_TIMED_OUT, ErrorAnswer {
+                code: codes::REQUEST_TIMED_OUT,
+                message: "The request timed out.",
+            }),
+            (codes::NETWORK_EXCEPTION, ErrorAnswer {
+                code: codes::NETWORK_EXCEPTION,
+                message: "The server disconnected before a response was received.",
+            }),
+            (i16::MAX, ErrorAnswer {
+                code: codes::UNKNOWN_SERVER_ERROR,
+                message: UNKNOWN_SERVER_ERROR_MESSAGE,
+            }),
         ];
         for (code, expected) in rows {
             assert!(lookup_error(code) == expected, "{code}");

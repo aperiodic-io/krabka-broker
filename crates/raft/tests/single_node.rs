@@ -17,14 +17,21 @@ const FAST_ELECTION_TIMEOUT: Time = millis(200);
 
 krabka_macros::topic_record_fixture!(single_partition_topic);
 
-fn single_voter_config() -> (TempDir, ControllerConfig) {
+/// A single-voter controller configuration and the data directory it points
+/// at, which must outlive the controller.
+struct SingleVoterConfig {
+    dir: TempDir,
+    config: ControllerConfig,
+}
+
+fn single_voter_config() -> SingleVoterConfig {
     let dir = TempDir::new().unwrap();
     let mut config = ControllerConfig::for_tests(NodeId(1), dir.path().to_path_buf());
     config.election_timeout = FAST_ELECTION_TIMEOUT;
     // Pin the controller listen addr to a real loopback port so the network
     // factory has something to dial when initialize wants to seed members.
     config.controller_listen_addr = "127.0.0.1:0".parse().unwrap();
-    (dir, config)
+    SingleVoterConfig { dir, config }
 }
 
 async fn wait_for_leader(controller: &ControllerHandle) {
@@ -37,7 +44,7 @@ async fn wait_for_leader(controller: &ControllerHandle) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn single_voter_create_topic_round_trip() {
-    let (_dir, config) = single_voter_config();
+    let SingleVoterConfig { dir: _dir, config } = single_voter_config();
     let controller = Controller::start(config).await.expect("controller start");
     // Wait until openraft elects this single voter as leader.
     wait_for_leader(&controller).await;
@@ -52,7 +59,7 @@ async fn single_voter_create_topic_round_trip() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn single_voter_duplicate_topic_rejected() {
-    let (_dir, config) = single_voter_config();
+    let SingleVoterConfig { dir: _dir, config } = single_voter_config();
     let controller = Controller::start(config).await.unwrap();
     wait_for_leader(&controller).await;
 

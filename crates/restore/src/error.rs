@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn each_failure_class_maps_to_its_exit_code() {
-        let cases: Vec<(RestoreError, i32)> = vec![
+        let cases = vec![
             (
                 RestoreError::InvalidArgument("bad".into()),
                 EXIT_BAD_ARGUMENTS,

@@ -126,6 +126,7 @@ impl TopicElr {
                 .split(';')
                 .filter(|entry| !entry.is_empty())
                 .filter_map(parse_entry)
+                .map(|ParsedEntry { partition, elr }| (partition, elr))
                 .collect(),
         )
     }
@@ -214,7 +215,7 @@ pub(crate) fn wire_node_ids(nodes: impl IntoIterator<Item = NodeId>) -> Vec<i32>
 }
 
 /// Parse one `partition:ids:ids` entry. `None` drops the entry.
-fn parse_entry(entry: &str) -> Option<(i32, PartitionElr)> {
+fn parse_entry(entry: &str) -> Option<ParsedEntry> {
     let mut fields = entry.split(':');
     let partition: i32 = fields.next()?.parse().ok()?;
     let eligible_leader_replicas = parse_ids(fields.next()?)?;
@@ -224,10 +225,19 @@ fn parse_entry(entry: &str) -> Option<(i32, PartitionElr)> {
     if fields.next().is_some() {
         return None;
     }
-    Some((partition, PartitionElr {
-        eligible_leader_replicas,
-        last_known_elr,
-    }))
+    Some(ParsedEntry {
+        partition,
+        elr: PartitionElr {
+            eligible_leader_replicas,
+            last_known_elr,
+        },
+    })
+}
+
+/// The ELR state of one partition, as an entry names it.
+struct ParsedEntry {
+    partition: i32,
+    elr: PartitionElr,
 }
 
 /// Parse a possibly-empty comma-separated node-id list.

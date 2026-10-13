@@ -271,6 +271,14 @@ fn committed_offset(side: &Side<'_>, group: &str) -> Option<i64> {
         })
 }
 
+/// One `--reset-offsets` mode: its label, the arguments that select it and the
+/// offset it must land on.
+struct ResetMode {
+    label: &'static str,
+    arguments: &'static [&'static str],
+    expected: i64,
+}
+
 /// Every `--reset-offsets` mode, the arguments that select it, and the offset
 /// it must land on given the seeded shape.
 ///
@@ -279,55 +287,71 @@ fn committed_offset(side: &Side<'_>, group: &str) -> Option<i64> {
 /// with Kafka; the number says the pair agree on the *right* thing, and stops
 /// a case from passing on two brokers that are wrong in the same way -- which
 /// is exactly what would happen if the seeding above quietly produced nothing.
-const RESET_MODES: &[(&str, &[&str], i64)] = &[
-    ("--to-earliest", &["--to-earliest"], 0),
-    ("--to-latest", &["--to-latest"], RESET_RECORDS),
-    ("--to-current", &["--to-current"], RESET_CURRENT),
-    ("--to-offset", &["--to-offset", "2"], 2),
-    (
-        "--shift-by backwards",
-        &["--shift-by", "-1"],
-        RESET_CURRENT - 1,
-    ),
-    (
-        "--shift-by forwards",
-        &["--shift-by", "2"],
-        RESET_CURRENT + 2,
-    ),
+const RESET_MODES: &[ResetMode] = &[
+    ResetMode {
+        label: "--to-earliest",
+        arguments: &["--to-earliest"],
+        expected: 0,
+    },
+    ResetMode {
+        label: "--to-latest",
+        arguments: &["--to-latest"],
+        expected: RESET_RECORDS,
+    },
+    ResetMode {
+        label: "--to-current",
+        arguments: &["--to-current"],
+        expected: RESET_CURRENT,
+    },
+    ResetMode {
+        label: "--to-offset",
+        arguments: &["--to-offset", "2"],
+        expected: 2,
+    },
+    ResetMode {
+        label: "--shift-by backwards",
+        arguments: &["--shift-by", "-1"],
+        expected: RESET_CURRENT - 1,
+    },
+    ResetMode {
+        label: "--shift-by forwards",
+        arguments: &["--shift-by", "2"],
+        expected: RESET_CURRENT + 2,
+    },
     // Past the end of the log. Kafka clamps to the log end offset rather than
     // committing an offset no fetch could ever use, and says so on stderr.
-    (
-        "--shift-by past the end",
-        &["--shift-by", "100"],
-        RESET_RECORDS,
-    ),
+    ResetMode {
+        label: "--shift-by past the end",
+        arguments: &["--shift-by", "100"],
+        expected: RESET_RECORDS,
+    },
     // No record predates the epoch, so the first offset at or after it is the
     // first record.
-    (
-        "--to-datetime before the log",
-        &["--to-datetime", "1970-01-01T00:00:00.000"],
-        0,
-    ),
+    ResetMode {
+        label: "--to-datetime before the log",
+        arguments: &["--to-datetime", "1970-01-01T00:00:00.000"],
+        expected: 0,
+    },
     // No record follows it either, so there is no offset for the timestamp and
     // the tool falls back to the log end offset.
-    (
-        "--to-datetime after the log",
-        &["--to-datetime", "2999-01-01T00:00:00.000"],
-        RESET_RECORDS,
-    ),
+    ResetMode {
+        label: "--to-datetime after the log",
+        arguments: &["--to-datetime", "2999-01-01T00:00:00.000"],
+        expected: RESET_RECORDS,
+    },
     // `now`, which is after every record: the same fallback as above, reached
     // through the duration arithmetic instead of a literal.
-    (
-        "--by-duration zero",
-        &["--by-duration", "P0DT0H0M0S"],
-        RESET_RECORDS,
-    ),
+    ResetMode {
+        label: "--by-duration zero",
+        arguments: &["--by-duration", "P0DT0H0M0S"],
+        expected: RESET_RECORDS,
+    },
     // Ten years ago, which is before every record.
-    (
-        "--by-duration a decade",
-        &["--by-duration", "P3650DT0H0M0S"],
-        0,
-    ),
+    ResetMode {
+        label: "--by-duration a decade",
+        arguments: &["--by-duration", "P3650DT0H0M0S"],
+        expected: 0,
+    },
 ];
 
 /// The rows a mode must produce, given the group it was run for.
@@ -367,7 +391,12 @@ async fn reset_offsets_modes_match_apache_kafka() {
         }
     }
 
-    for (label, mode, expected) in RESET_MODES {
+    for ResetMode {
+        label,
+        arguments: mode,
+        expected,
+    } in RESET_MODES
+    {
         let mut answers = Vec::new();
         for side in [&oracle_side, &krabka_side] {
             let mut args = vec![

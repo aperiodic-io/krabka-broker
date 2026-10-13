@@ -5,13 +5,13 @@
 use {
     super::*,
     crate::{
-        BrokerHandle, codes,
+        codes,
         isr_maintenance::test_support::{fake_source, reg_at, topic},
         metadata_source::MetadataSource,
         network::{
             client::InterBrokerClient, request::parse_request, test_support::raw_request_frame,
         },
-        test_support::start_controller as start_test_support_controller,
+        test_support::start_controller,
     },
     assert2::assert,
     krabka_client_core::{MockBroker, MockReply},
@@ -147,7 +147,14 @@ struct Received {
     /// each connection.
     connections: usize,
     /// Each `AlterPartition`, with its version.
-    requests: Vec<(i16, AlterPartitionRequest)>,
+    requests: Vec<RecordedRequest>,
+}
+
+/// An `AlterPartition` a listener received, and the version it came at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordedRequest {
+    version: i16,
+    request: AlterPartitionRequest,
 }
 
 /// A Kafka listener that advertises `AlterPartition` up to `max_version`, or
@@ -202,7 +209,7 @@ impl ScriptedListener {
             let mut request_body = parsed.body;
             let request = AlterPartitionRequest::decode(&mut request_body, version)
                 .expect("an AlterPartition request");
-            recorded.requests.push((version, request));
+            recorded.requests.push(RecordedRequest { version, request });
             MockReply::Respond(encode_body(&answer, version, true))
         })
         .await;
@@ -330,7 +337,10 @@ async fn send_alter_partition_goes_only_to_the_controller_listener_of_the_active
             active_controller.received()
                 == Received {
                     connections: 1,
-                    requests: vec![(case.max_version, case.want_request)],
+                    requests: vec![RecordedRequest {
+                        version: case.max_version,
+                        request: case.want_request,
+                    }],
                 },
             "{}",
             case.name
@@ -466,12 +476,6 @@ async fn send_alter_partition_to_reports_transport_error_for_closed_port() {
     .await;
 
     assert!(let Err(AlterPartitionSendError::Transport(_)) = result);
-}
-
-/// Boots a single-node broker that leads the metadata quorum, and returns the
-/// address of its controller listener.
-async fn start_controller() -> (BrokerHandle, SocketAddr, tempfile::TempDir) {
-    start_test_support_controller().await
 }
 
 /// A krabka controller advertises `AlterPartition` on its controller listener

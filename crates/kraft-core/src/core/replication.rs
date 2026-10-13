@@ -167,26 +167,35 @@ impl QuorumStateMachine {
     /// leader validated, with node id order among equals. A voter that has not
     /// fetched in this term sorts last. Empty for a replica that does not lead.
     pub(super) fn preferred_successors(&self) -> Vec<NodeId> {
+        /// A voter and the offset it last fetched, or -1 if it has not fetched.
+        struct Successor {
+            fetch_offset: i64,
+            id: NodeId,
+        }
+
         let Role::Leader { replicas, .. } = &self.role else {
             return Vec::new();
         };
-        let mut voters: Vec<(i64, NodeId)> = self
+        let mut voters: Vec<Successor> = self
             .state
             .voters
             .ids()
             .into_iter()
             .filter(|id| *id != self.me)
-            .map(|id| {
-                (
-                    replicas
-                        .get(&id)
-                        .map_or(-1, |progress| progress.fetch_offset),
-                    id,
-                )
+            .map(|id| Successor {
+                fetch_offset: replicas
+                    .get(&id)
+                    .map_or(-1, |progress| progress.fetch_offset),
+                id,
             })
             .collect();
-        voters.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
-        voters.into_iter().map(|(_, id)| id).collect()
+        voters.sort_by(|left, right| {
+            right
+                .fetch_offset
+                .cmp(&left.fetch_offset)
+                .then(left.id.cmp(&right.id))
+        });
+        voters.into_iter().map(|voter| voter.id).collect()
     }
 
     /// Step down from the leadership of the current epoch.

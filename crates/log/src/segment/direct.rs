@@ -451,17 +451,27 @@ mod tests {
             .collect()
     }
 
+    /// One `write` call a writer made: where in the file, and how many bytes.
+    #[derive(Debug, PartialEq, Eq)]
+    struct WriteCall {
+        offset: u64,
+        len: usize,
+    }
+
     /// A `write` that checks the `O_DIRECT` rules on each call and then writes
     /// through `write_at`. It records each call's offset and length.
     fn checked_write(
         align: DioAlign,
-        calls: &std::cell::RefCell<Vec<(u64, usize)>>,
+        calls: &std::cell::RefCell<Vec<WriteCall>>,
     ) -> impl FnMut(&File, &[u8], u64) -> std::io::Result<usize> + '_ {
         move |file, buf, offset| {
             assert!(buf.as_ptr().addr() % align.mem == 0);
             assert!(offset % to_u64(align.block) == 0);
             assert!(buf.len() % align.block == 0);
-            calls.borrow_mut().push((offset, buf.len()));
+            calls.borrow_mut().push(WriteCall {
+                offset,
+                len: buf.len(),
+            });
             file.write_at(buf, offset)
         }
     }
@@ -488,17 +498,42 @@ mod tests {
 
     #[test]
     fn appends_of_assorted_sizes_write_aligned_blocks_from_the_tail_start() {
-        // Each case: block size, then the size of each append in turn.
-        let cases: &[(usize, &[usize])] = &[
-            (512, &[1, 10, 100]),
-            (512, &[511, 1, 1]),
-            (512, &[512, 512, 1024]),
-            (512, &[300, 300, 300, 300]),
-            (512, &[1500, 7, 2048, 513]),
-            (4096, &[1, 4095, 4097, 100]),
-            (4096, &[10_000, 3, 8192]),
+        /// A block size, then the size of each append in turn.
+        struct Case {
+            block: usize,
+            sizes: &'static [usize],
+        }
+        let cases = [
+            Case {
+                block: 512,
+                sizes: &[1, 10, 100],
+            },
+            Case {
+                block: 512,
+                sizes: &[511, 1, 1],
+            },
+            Case {
+                block: 512,
+                sizes: &[512, 512, 1024],
+            },
+            Case {
+                block: 512,
+                sizes: &[300, 300, 300, 300],
+            },
+            Case {
+                block: 512,
+                sizes: &[1500, 7, 2048, 513],
+            },
+            Case {
+                block: 4096,
+                sizes: &[1, 4095, 4097, 100],
+            },
+            Case {
+                block: 4096,
+                sizes: &[10_000, 3, 8192],
+            },
         ];
-        for &(block, sizes) in cases {
+        for Case { block, sizes } in cases {
             let align = DioAlign { mem: MEM, block };
             let mut writer = writer(block);
             check!(writer.block() == block);
@@ -514,10 +549,10 @@ mod tests {
 
                 let new_end = to_u64(logical.len());
                 let padded_end = new_end.div_ceil(to_u64(block)) * to_u64(block);
-                let expected_calls = vec![(
-                    tail_start,
-                    usize::try_from(padded_end - tail_start).unwrap(),
-                )];
+                let expected_calls = vec![WriteCall {
+                    offset: tail_start,
+                    len: usize::try_from(padded_end - tail_start).unwrap(),
+                }];
                 check!(
                     calls.into_inner() == expected_calls,
                     "block {block}, sizes {sizes:?}"
@@ -648,7 +683,19 @@ mod tests {
                 Ok(if first.replace(false) { n.min(700) } else { n })
             })
             .unwrap();
-        check!(*calls.borrow() == vec![(0, 1536), (512, 1024)]);
+        check!(
+            *calls.borrow()
+                == vec![
+                    WriteCall {
+                        offset: 0,
+                        len: 1536
+                    },
+                    WriteCall {
+                        offset: 512,
+                        len: 1024
+                    }
+                ]
+        );
         check!(file_contents(writer.file()) == padded(&bytes, block));
     }
 
@@ -677,7 +724,13 @@ mod tests {
         writer
             .append(&[&next], checked_write(align, &calls))
             .unwrap();
-        check!(calls.into_inner() == vec![(512, 1024)]);
+        check!(
+            calls.into_inner()
+                == vec![WriteCall {
+                    offset: 512,
+                    len: 1024
+                }]
+        );
         check!(writer.end() == 1100);
         check!(file_contents(writer.file()) == padded(&[&first[..900], &next[..]].concat(), block));
     }
@@ -769,8 +822,14 @@ mod tests {
         check!(buf.as_slice().as_ptr().addr() % 512 == 0);
     }
 
+    /// A [`TailCache`] and the bytes pushed into it, in order.
+    struct ThreeChunks {
+        cache: TailCache,
+        all: Vec<u8>,
+    }
+
     /// A window that starts at 1000 and holds chunks of 10, 20 and 30 bytes.
-    fn three_chunks(cap: usize) -> (TailCache, Vec<u8>) {
+    fn three_chunks(cap: usize) -> ThreeChunks {
         let mut cache = TailCache::new(cap, 1000);
         let mut all = Vec::new();
         for (seed, size) in [(1, 10), (2, 20), (3, 30)] {
@@ -778,7 +837,7 @@ mod tests {
             all.extend_from_slice(&bytes);
             cache.push(Bytes::from(bytes));
         }
-        (cache, all)
+        ThreeChunks { cache, all }
     }
 
     fn read(cache: &TailCache, pos: u64, len: usize) -> Option<Vec<u8>> {
@@ -796,26 +855,87 @@ mod tests {
 
     #[test]
     fn tail_cache_reads_across_chunk_boundaries() {
-        let (cache, all) = three_chunks(1 << 20);
+        /// A position, a length, and the expected window slice.
+        struct Case {
+            pos: u64,
+            len: usize,
+            range: Option<std::ops::Range<usize>>,
+        }
+        let ThreeChunks { cache, all } = three_chunks(1 << 20);
         check!((cache.start(), cache.end()) == (1000, 1060));
-        // Each case: the position, the length, and the expected window slice.
-        let cases: &[(u64, usize, Option<std::ops::Range<usize>>)] = &[
-            (1000, 60, Some(0..60)),
-            (1000, 10, Some(0..10)),
-            (1005, 10, Some(5..15)),
-            (1009, 30, Some(9..39)),
-            (1030, 30, Some(30..60)),
-            (1059, 1, Some(59..60)),
-            (1060, 0, Some(60..60)),
-            (1000, 0, Some(0..0)),
-            (999, 1, None),
-            (999, 0, None),
-            (1050, 11, None),
-            (1061, 0, None),
-            (2000, 5, None),
-            (u64::MAX, 1, None),
+        let cases = [
+            Case {
+                pos: 1000,
+                len: 60,
+                range: Some(0..60),
+            },
+            Case {
+                pos: 1000,
+                len: 10,
+                range: Some(0..10),
+            },
+            Case {
+                pos: 1005,
+                len: 10,
+                range: Some(5..15),
+            },
+            Case {
+                pos: 1009,
+                len: 30,
+                range: Some(9..39),
+            },
+            Case {
+                pos: 1030,
+                len: 30,
+                range: Some(30..60),
+            },
+            Case {
+                pos: 1059,
+                len: 1,
+                range: Some(59..60),
+            },
+            Case {
+                pos: 1060,
+                len: 0,
+                range: Some(60..60),
+            },
+            Case {
+                pos: 1000,
+                len: 0,
+                range: Some(0..0),
+            },
+            Case {
+                pos: 999,
+                len: 1,
+                range: None,
+            },
+            Case {
+                pos: 999,
+                len: 0,
+                range: None,
+            },
+            Case {
+                pos: 1050,
+                len: 11,
+                range: None,
+            },
+            Case {
+                pos: 1061,
+                len: 0,
+                range: None,
+            },
+            Case {
+                pos: 2000,
+                len: 5,
+                range: None,
+            },
+            Case {
+                pos: u64::MAX,
+                len: 1,
+                range: None,
+            },
         ];
-        for (pos, len, range) in cases.iter().cloned() {
+        for Case { pos, len, range } in cases {
             check!(
                 read(&cache, pos, len) == range.map(|range| all[range].to_vec()),
                 "pos {pos}, len {len}"
@@ -837,7 +957,7 @@ mod tests {
             (0, 1030),
         ];
         for (cap, start) in cases {
-            let (cache, all) = three_chunks(cap);
+            let ThreeChunks { cache, all } = three_chunks(cap);
             check!((cache.start(), cache.end()) == (start, 1060), "cap {cap}");
             check!(
                 read(&cache, start, 1060 - usize::try_from(start).unwrap())
@@ -853,7 +973,7 @@ mod tests {
     #[test]
     fn tail_cache_group_push_matches_single_pushes_and_detaches_survivors() {
         for cap in [1000, 60, 59, 50, 30, 29, 0] {
-            let (single, all) = three_chunks(cap);
+            let ThreeChunks { cache: single, all } = three_chunks(cap);
             let group = Bytes::from(all.clone());
             let mut grouped = TailCache::new(cap, 1000);
             grouped.push_group(&group, &[10, 30, 60]);
@@ -900,7 +1020,7 @@ mod tests {
             (900, 900, 900),
         ];
         for (end, start, new_end) in cases {
-            let (mut cache, all) = three_chunks(1 << 20);
+            let ThreeChunks { mut cache, all } = three_chunks(1 << 20);
             cache.truncate(end);
             check!(
                 (cache.start(), cache.end()) == (start, new_end),

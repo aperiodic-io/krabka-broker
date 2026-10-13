@@ -425,14 +425,35 @@ mod tests {
     /// rejects every controller peer, and no quorum ever forms.
     #[test]
     fn rejects_plain_controller_listener_without_credentials() {
-        // (controller protocol, credentials loaded, expected to be refused)
-        let cases: &[(ListenerProtocol, bool, bool)] = &[
-            (ListenerProtocol::SaslPlaintext, false, true),
-            (ListenerProtocol::SaslPlaintext, true, false),
-            (ListenerProtocol::Plaintext, false, false),
+        struct Case {
+            protocol: ListenerProtocol,
+            credentials: bool,
+            refused: bool,
+        }
+        let cases: &[Case] = &[
+            Case {
+                protocol: ListenerProtocol::SaslPlaintext,
+                credentials: false,
+                refused: true,
+            },
+            Case {
+                protocol: ListenerProtocol::SaslPlaintext,
+                credentials: true,
+                refused: false,
+            },
+            Case {
+                protocol: ListenerProtocol::Plaintext,
+                credentials: false,
+                refused: false,
+            },
         ];
 
-        for &(protocol, credentials, refused) in cases {
+        for &Case {
+            protocol,
+            credentials,
+            refused,
+        } in cases
+        {
             let config = BrokerConfig {
                 controller_listener_protocol: protocol,
                 enabled_sasl_mechanisms: vec![SaslMechanism::Plain],
@@ -462,28 +483,43 @@ mod tests {
     /// setting that asked for it. Every other target accepts the same
     /// configurations.
     /// A setting and the change that sets it.
-    type SetsOne = (&'static str, fn(&mut BrokerConfig));
+    struct SetsOne {
+        setting: &'static str,
+        set: fn(&mut BrokerConfig),
+    }
 
     #[test]
     fn the_wasm_platform_refuses_the_subsystems_it_cannot_run() {
         let cases: [SetsOne; 4] = [
-            ("metrics_listen_addr", |config| {
-                config.metrics_listen_addr = Some("127.0.0.1:9404".parse().unwrap());
-            }),
-            ("client_metrics_otlp_endpoint", |config| {
-                config.client_metrics_otlp_endpoint = Some("http://collector:4317".into());
-            }),
-            ("oauthbearer_jwks_endpoint", |config| {
-                config.oauthbearer_jwks_endpoint = Some("https://idp/jwks".into());
-            }),
+            SetsOne {
+                setting: "metrics_listen_addr",
+                set: |config| {
+                    config.metrics_listen_addr = Some("127.0.0.1:9404".parse().unwrap());
+                },
+            },
+            SetsOne {
+                setting: "client_metrics_otlp_endpoint",
+                set: |config| {
+                    config.client_metrics_otlp_endpoint = Some("http://collector:4317".into());
+                },
+            },
+            SetsOne {
+                setting: "oauthbearer_jwks_endpoint",
+                set: |config| {
+                    config.oauthbearer_jwks_endpoint = Some("https://idp/jwks".into());
+                },
+            },
             // The default metadata manager is the topic-backed one.
-            ("remote_storage_backend", |config| {
-                config.remote_storage_backend = Some(RemoteStorageBackend::Local {
-                    dir: "/tiered".into(),
-                });
-            }),
+            SetsOne {
+                setting: "remote_storage_backend",
+                set: |config| {
+                    config.remote_storage_backend = Some(RemoteStorageBackend::Local {
+                        dir: "/tiered".into(),
+                    });
+                },
+            },
         ];
-        for (setting, set) in cases {
+        for SetsOne { setting, set } in cases {
             let mut config = BrokerConfig::default();
             set(&mut config);
             let Err(BrokerError::InvalidRuntimeConfig(message)) = config.validate_platform(true)
@@ -561,19 +597,29 @@ mod tests {
     #[test]
     fn rejects_invalid_additional_runtime_relations() {
         let cases: &[RuntimeInvalidator] = &[
-            ("socket_request_max exceeds u32::MAX bytes", |c| {
-                c.socket_request_max = ByteSize::from_bytes(u64::from(u32::MAX) + 1);
-            }),
-            ("inter_broker_server_name must be nonempty", |c| {
-                c.inter_broker_server_name.clear();
-            }),
-            (
-                "transaction maximum timeout must be below i32::MAX milliseconds",
-                |c| c.transaction_max_timeout = Time::from_millis(i64::from(i32::MAX)),
-            ),
+            RuntimeInvalidator {
+                expected: "socket_request_max exceeds u32::MAX bytes",
+                invalidate: |c| {
+                    c.socket_request_max = ByteSize::from_bytes(u64::from(u32::MAX) + 1);
+                },
+            },
+            RuntimeInvalidator {
+                expected: "inter_broker_server_name must be nonempty",
+                invalidate: |c| {
+                    c.inter_broker_server_name.clear();
+                },
+            },
+            RuntimeInvalidator {
+                expected: "transaction maximum timeout must be below i32::MAX milliseconds",
+                invalidate: |c| c.transaction_max_timeout = Time::from_millis(i64::from(i32::MAX)),
+            },
         ];
 
-        for (expected, invalidate) in cases {
+        for RuntimeInvalidator {
+            expected,
+            invalidate,
+        } in cases
+        {
             let mut config = BrokerConfig::default();
             invalidate(&mut config);
             assert_invalid_runtime(&config, expected);

@@ -4,7 +4,7 @@
 use {
     super::{
         handle,
-        test_support::{expected_row, expected_topic, req_with_topics},
+        test_support::{RequestTopic, expected_row, expected_topic, req_with_topics},
     },
     crate::{
         authorizer::AllowAllAuthorizer,
@@ -86,13 +86,13 @@ fn whole(code: i16) -> OffsetDeleteResponse {
 /// each; `ghost` does not.
 /// An `OffsetDelete` case: name, broker, group id, request topics, and the
 /// whole expected response.
-type Case<'a> = (
-    &'a str,
-    &'a BrokerHandle,
-    &'a str,
-    &'a [(&'a str, &'a [i32])],
-    OffsetDeleteResponse,
-);
+struct Case<'a> {
+    name: &'a str,
+    broker: &'a BrokerHandle,
+    group_id: &'a str,
+    topics: &'a [RequestTopic<'a>],
+    want: OffsetDeleteResponse,
+}
 
 #[tokio::test]
 async fn offset_delete_matches_kafka_whole_responses() {
@@ -112,66 +112,97 @@ async fn offset_delete_matches_kafka_whole_responses() {
     }
 
     let rows: Vec<Case<'_>> = vec![
-        (
-            "group Delete denied: top-level only",
-            &denied,
-            "classic-g",
-            &[("t", &[0])],
-            whole(codes::GROUP_AUTHORIZATION_FAILED),
-        ),
-        (
-            "empty group id",
-            &allowed,
-            "",
-            &[("t", &[0])],
-            whole(codes::INVALID_GROUP_ID),
-        ),
-        (
-            "missing group: top-level only",
-            &allowed,
-            "ghost-g",
-            &[("t", &[0])],
-            whole(codes::GROUP_ID_NOT_FOUND),
-        ),
-        (
-            "non-empty group without the consumer protocol",
-            &allowed,
-            "connect-g",
-            &[("t", &[0])],
-            whole(codes::NON_EMPTY_GROUP),
-        ),
-        (
-            "undecodable metadata subscribes to every topic",
-            &allowed,
-            "garbled-g",
-            &[("u", &[0])],
-            OffsetDeleteResponse {
+        Case {
+            name: "group Delete denied: top-level only",
+            broker: &denied,
+            group_id: "classic-g",
+            topics: &[RequestTopic {
+                name: "t",
+                partitions: &[0],
+            }],
+            want: whole(codes::GROUP_AUTHORIZATION_FAILED),
+        },
+        Case {
+            name: "empty group id",
+            broker: &allowed,
+            group_id: "",
+            topics: &[RequestTopic {
+                name: "t",
+                partitions: &[0],
+            }],
+            want: whole(codes::INVALID_GROUP_ID),
+        },
+        Case {
+            name: "missing group: top-level only",
+            broker: &allowed,
+            group_id: "ghost-g",
+            topics: &[RequestTopic {
+                name: "t",
+                partitions: &[0],
+            }],
+            want: whole(codes::GROUP_ID_NOT_FOUND),
+        },
+        Case {
+            name: "non-empty group without the consumer protocol",
+            broker: &allowed,
+            group_id: "connect-g",
+            topics: &[RequestTopic {
+                name: "t",
+                partitions: &[0],
+            }],
+            want: whole(codes::NON_EMPTY_GROUP),
+        },
+        Case {
+            name: "undecodable metadata subscribes to every topic",
+            broker: &allowed,
+            group_id: "garbled-g",
+            topics: &[RequestTopic {
+                name: "u",
+                partitions: &[0],
+            }],
+            want: OffsetDeleteResponse {
                 topics: vec![expected_topic("u", vec![expected_row(
                     0,
                     codes::GROUP_SUBSCRIBED_TO_TOPIC,
                 )])],
                 ..whole(codes::NONE)
             },
-        ),
-        (
-            "KIP-848 group subscribed by regex",
-            &allowed,
-            "kip848-g",
-            &[("t", &[0])],
-            OffsetDeleteResponse {
+        },
+        Case {
+            name: "KIP-848 group subscribed by regex",
+            broker: &allowed,
+            group_id: "kip848-g",
+            topics: &[RequestTopic {
+                name: "t",
+                partitions: &[0],
+            }],
+            want: OffsetDeleteResponse {
                 topics: vec![expected_topic("t", vec![expected_row(
                     0,
                     codes::GROUP_SUBSCRIBED_TO_TOPIC,
                 )])],
                 ..whole(codes::NONE)
             },
-        ),
-        (
-            "existence before subscription, broker rows before the coordinator's",
-            &allowed,
-            "classic-g",
-            &[("t", &[0]), ("ghost", &[0]), ("u", &[0, 5])],
-            OffsetDeleteResponse {
+        },
+        Case {
+            name: "existence before subscription, broker rows before the coordinator's",
+            broker: &allowed,
+            group_id: "classic-g",
+            topics: &[
+                RequestTopic {
+                    name: "t",
+                    partitions: &[0],
+                },
+                RequestTopic {
+                    name: "ghost",
+                    partitions: &[0],
+                },
+                RequestTopic {
+                    name: "u",
+                    partitions: &[0, 5],
+                },
+            ],
+            want: OffsetDeleteResponse {
                 topics: vec![
                     expected_topic("ghost", vec![expected_row(
                         0,
@@ -185,7 +216,7 @@ async fn offset_delete_matches_kafka_whole_responses() {
                 ],
                 ..whole(codes::NONE)
             },
-        ),
+        },
     ];
 
     request_identity!(
@@ -195,7 +226,14 @@ async fn offset_delete_matches_kafka_whole_responses() {
     );
     let version = offset_delete_response::MAX_VERSION;
     let before_ms = now_ms();
-    for (name, broker, group_id, topics, want) in rows {
+    for Case {
+        name,
+        broker,
+        group_id,
+        topics,
+        want,
+    } in rows
+    {
         let req = krabka_protocol::owned::offset_delete_request::OffsetDeleteRequest {
             group_id: group_id.into(),
             ..req_with_topics(topics)

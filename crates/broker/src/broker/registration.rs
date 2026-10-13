@@ -15,7 +15,7 @@ use {
         elr::withdraw_elr_membership,
         error::BrokerError,
         host_port::{
-            advertised_host, local_host_name, parse_advertised_host_port, parse_host_port,
+            HostPort, advertised_host, local_host_name, parse_advertised_host_port, parse_host_port,
         },
         log_dir_id::LogDirIds,
         metadata_source::MetadataSource,
@@ -119,16 +119,14 @@ fn stretch_default_records(config: &BrokerConfig) -> Vec<krabka_metadata::Metada
 fn self_controller_registration_record(
     config: &BrokerConfig,
 ) -> krabka_metadata::ControllerRegistrationRecord {
-    let (host, port) = config
+    let HostPort { host, port } = config
         .controller_quorum_voters
         .iter()
         .find(|(node_id, _)| *node_id == config.node_id)
         .and_then(|(_, endpoint)| parse_host_port(endpoint))
-        .unwrap_or_else(|| {
-            (
-                advertised_host(config.controller_listen_addr.ip(), local_host_name),
-                config.controller_listen_addr.port(),
-            )
+        .unwrap_or_else(|| HostPort {
+            host: advertised_host(config.controller_listen_addr.ip(), local_host_name),
+            port: config.controller_listen_addr.port(),
         });
     krabka_metadata::ControllerRegistrationRecord {
         node_id: config.node_id,

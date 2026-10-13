@@ -8,7 +8,7 @@
 //! last leader in the ELR as well (`0:1,2,3:1`), and an unclean restart keeps
 //! it out (`0::1`).
 
-use {super::*, assert2::assert};
+use {super::*, crate::leader_election::test_support::TopicConfigOverride, assert2::assert};
 
 /// The image of a partition `t-0` with replicas `[1, 2, 3]`, led by broker 1
 /// alone in its record, and with `published` as its ELR state.
@@ -16,8 +16,8 @@ fn leaderless_image(published: &str) -> MetadataImage {
     img_with_partition()
         .isr(&[krabka_raft::NodeId(1)])
         .configs(&[
-            (MIN_INSYNC_REPLICAS, "2"),
-            (ELIGIBLE_LEADER_REPLICAS, published),
+            TopicConfigOverride::new(MIN_INSYNC_REPLICAS, "2"),
+            TopicConfigOverride::new(ELIGIBLE_LEADER_REPLICAS, published),
         ])
         .elr(ElrFinalization::Enabled)
         .call()

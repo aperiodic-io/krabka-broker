@@ -52,16 +52,20 @@ pub(super) async fn create_topic(
     assert!(response.topics[0].error_code == codes::NONE, "{response:?}");
 }
 
+/// A started broker, a client connected to it, and the directories that must
+/// outlive the broker.
+pub(super) struct ClientBroker<Dirs> {
+    pub(super) broker: BrokerHandle,
+    pub(super) client: krabka_client_core::Client,
+    pub(super) dirs: Dirs,
+}
+
 /// A topic whose remote-storage configuration has reached the local log.
 /// Keep both directories alive while a test fills or reads its remote tier.
 pub(super) async fn remote_topic(
     topic: &str,
     extra_configs: Vec<CreatableTopicConfig>,
-) -> (
-    BrokerHandle,
-    krabka_client_core::Client,
-    [tempfile::TempDir; 2],
-) {
+) -> ClientBroker<[tempfile::TempDir; 2]> {
     let remote_dir = tempfile::tempdir().expect("remote tempdir");
     let remote_path = remote_dir.path().to_path_buf();
     let (broker, directory) = start_broker_no_audit_with(move |config| {
@@ -87,7 +91,11 @@ pub(super) async fn remote_topic(
     })
     .await
     .expect("remote topic config propagated");
-    (broker, client, [directory, remote_dir])
+    ClientBroker {
+        broker,
+        client,
+        dirs: [directory, remote_dir],
+    }
 }
 
 pub(super) async fn list_one(

@@ -42,12 +42,18 @@ const TAG_LAST_PRODUCER_EPOCH: u32 = 4;
 /// Kafka's tagged-field default for the producer-id bookkeeping fields.
 const PRODUCER_ID_NONE: i64 = -1;
 
+/// A topic and its partition ids, in ascending order.
+struct TopicGroup<'a> {
+    topic: &'a str,
+    ids: Vec<i32>,
+}
+
 /// Group `partitions` into one entry per topic with ascending partition ids.
 ///
 /// The function orders the topics lexicographically. This order matters: the
 /// `HashSet` iteration order is nondeterministic, but replicas must produce
 /// identical snapshot bytes.
-fn group_partitions(partitions: &HashSet<TopicPartition>) -> Vec<(&str, Vec<i32>)> {
+fn group_partitions(partitions: &HashSet<TopicPartition>) -> Vec<TopicGroup<'_>> {
     let mut by_topic: BTreeMap<&str, Vec<i32>> = BTreeMap::new();
     for tp in partitions {
         by_topic
@@ -59,7 +65,7 @@ fn group_partitions(partitions: &HashSet<TopicPartition>) -> Vec<(&str, Vec<i32>
         .into_iter()
         .map(|(topic, mut ids)| {
             ids.sort_unstable();
-            (topic, ids)
+            TopicGroup { topic, ids }
         })
         .collect()
 }
@@ -92,7 +98,7 @@ pub(crate) fn encode_value(entry: &TxnEntry, txnv: TxnVersion, last_epoch_tag: b
         put_nullable_array_len(&mut buf, None, flexible);
     } else {
         put_nullable_array_len(&mut buf, Some(groups.len()), flexible);
-        for (topic, ids) in &groups {
+        for TopicGroup { topic, ids } in &groups {
             if flexible {
                 put_compact_string(&mut buf, topic);
             } else {
@@ -458,12 +464,18 @@ mod tests {
 
     #[test]
     fn encode_is_deterministic_across_hashset_orders() {
-        let make = |order: &[(&str, i32)]| {
+        /// A topic partition to insert, in the order a case inserts it.
+        struct Insert {
+            topic: &'static str,
+            partition: i32,
+        }
+        let insert = |topic, partition| Insert { topic, partition };
+        let make = |order: &[Insert]| {
             let mut partitions = HashSet::new();
-            for (t, p) in order {
+            for Insert { topic, partition } in order {
                 partitions.insert(TopicPartition {
-                    topic: (*t).into(),
-                    partition: PartitionIndex(*p),
+                    topic: (*topic).into(),
+                    partition: PartitionIndex(*partition),
                 });
             }
             TxnEntry {
@@ -484,8 +496,18 @@ mod tests {
             }
         };
 
-        let a = make(&[("b", 2), ("a", 1), ("b", 0), ("a", 3)]);
-        let b = make(&[("a", 3), ("b", 0), ("a", 1), ("b", 2)]);
+        let a = make(&[
+            insert("b", 2),
+            insert("a", 1),
+            insert("b", 0),
+            insert("a", 3),
+        ]);
+        let b = make(&[
+            insert("a", 3),
+            insert("b", 0),
+            insert("a", 1),
+            insert("b", 2),
+        ]);
         assert!(
             encode_value(&a, TxnVersion::Flexible, false)
                 == encode_value(&b, TxnVersion::Flexible, false)

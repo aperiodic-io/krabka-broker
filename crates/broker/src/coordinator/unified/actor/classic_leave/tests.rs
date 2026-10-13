@@ -174,7 +174,7 @@ fn consumer_classic_leave_resolves_batch_and_static_identities() {
         ..Default::default()
     };
 
-    let (responses, removed) = resolve_consumer_classic_leave(&group, &request, 3);
+    let ConsumerLeave { responses, removed } = resolve_consumer_classic_leave(&group, &request, 3);
     check!(
         responses
             .iter()
@@ -214,7 +214,7 @@ fn consumer_classic_leave_resolves_batch_and_static_identities() {
         member_id: "m1".into(),
         ..Default::default()
     };
-    let (responses, removed) = resolve_consumer_classic_leave(&group, &legacy, 2);
+    let ConsumerLeave { responses, removed } = resolve_consumer_classic_leave(&group, &legacy, 2);
     check!(responses.len() == 1);
     check!(responses[0].error_code == codes::NONE);
     check!(removed == vec!["m1".to_string()]);
@@ -337,41 +337,66 @@ async fn delete_answers_by_members_for_classic_and_consumer_groups() {
         EmptyClassic,
     }
 
-    /// `(delete result, group still described, type lock, seed cached,
-    /// consumer tombstones appended, classic tombstone appended)`.
-    type Outcome = (
-        Result<(), DeleteGroupError>,
-        bool,
-        Option<GroupType>,
-        bool,
-        bool,
-        bool,
-    );
+    /// Which tombstones a delete appended to the log.
+    #[derive(Debug, PartialEq)]
+    enum Tombstones {
+        None,
+        Consumer,
+        Classic,
+        Both,
+    }
 
-    let rows: [(Setup, Outcome); 3] = [
-        (
-            Setup::EmptyConsumer,
-            (Ok(()), false, None, false, true, false),
-        ),
-        (
-            Setup::ConsumerWithMember,
-            (
-                Err(DeleteGroupError::NonEmpty),
-                true,
-                Some(GroupType::NextGen),
-                true,
-                false,
-                false,
-            ),
-        ),
-        (
-            Setup::EmptyClassic,
-            (Ok(()), false, None, false, false, true),
-        ),
+    /// What a delete leaves behind.
+    #[derive(Debug, PartialEq)]
+    struct Outcome {
+        delete_result: Result<(), DeleteGroupError>,
+        group_still_described: bool,
+        type_lock: Option<GroupType>,
+        seed_cached: bool,
+        tombstones: Tombstones,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct Row {
+        setup: Setup,
+        outcome: Outcome,
+    }
+
+    let rows: [Row; 3] = [
+        Row {
+            setup: Setup::EmptyConsumer,
+            outcome: Outcome {
+                delete_result: Ok(()),
+                group_still_described: false,
+                type_lock: None,
+                seed_cached: false,
+                tombstones: Tombstones::Consumer,
+            },
+        },
+        Row {
+            setup: Setup::ConsumerWithMember,
+            outcome: Outcome {
+                delete_result: Err(DeleteGroupError::NonEmpty),
+                group_still_described: true,
+                type_lock: Some(GroupType::NextGen),
+                seed_cached: true,
+                tombstones: Tombstones::None,
+            },
+        },
+        Row {
+            setup: Setup::EmptyClassic,
+            outcome: Outcome {
+                delete_result: Ok(()),
+                group_still_described: false,
+                type_lock: None,
+                seed_cached: false,
+                tombstones: Tombstones::Classic,
+            },
+        },
     ];
     let mut actual = Vec::with_capacity(rows.len());
     let mut expected = Vec::with_capacity(rows.len());
-    for (setup, outcome) in rows {
+    for Row { setup, outcome } in rows {
         let (coord, log) = bidirectional_coordinator();
         match setup {
             Setup::EmptyConsumer | Setup::ConsumerWithMember => {
@@ -393,19 +418,26 @@ async fn delete_answers_by_members_for_classic_and_consumer_groups() {
 
         let result = coord.delete_group("g").await;
 
-        actual.push((
+        actual.push(Row {
             setup,
-            (
-                result,
-                coord.describe_group("g").await.is_some(),
-                coord.group_type("g"),
-                coord.cached_seed("g").is_some(),
-                log.has_next_gen_group_metadata_tombstone("g").await
-                    && log.has_next_gen_target_metadata_tombstone("g").await,
-                log.has_classic_group_metadata_tombstone("g").await,
-            ),
-        ));
-        expected.push((setup, outcome));
+            outcome: Outcome {
+                delete_result: result,
+                group_still_described: coord.describe_group("g").await.is_some(),
+                type_lock: coord.group_type("g"),
+                seed_cached: coord.cached_seed("g").is_some(),
+                tombstones: match (
+                    log.has_next_gen_group_metadata_tombstone("g").await
+                        && log.has_next_gen_target_metadata_tombstone("g").await,
+                    log.has_classic_group_metadata_tombstone("g").await,
+                ) {
+                    (false, false) => Tombstones::None,
+                    (true, false) => Tombstones::Consumer,
+                    (false, true) => Tombstones::Classic,
+                    (true, true) => Tombstones::Both,
+                },
+            },
+        });
+        expected.push(Row { setup, outcome });
     }
     check!(actual == expected);
 }

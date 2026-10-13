@@ -162,6 +162,14 @@ pub(super) struct FrameWaitPolicy {
     pub(super) failed_authentication_delay: std::time::Duration,
 }
 
+/// The size a frame may have and the byte budget that it is charged against.
+pub(super) struct FrameSizeLimit<'a> {
+    /// The largest frame the connection accepts.
+    pub(super) maximum: usize,
+    /// The broker-wide request byte budget, if the broker has one.
+    pub(super) budget: Option<&'a RequestByteBudget>,
+}
+
 /// Reads the next request frame, after honouring any KIP-219 mute window.
 ///
 /// `mute_until` is the deadline the previous response's throttle earned. Kafka
@@ -181,7 +189,7 @@ pub(super) async fn next_connection_frame<S>(
     auth: &ConnectionAuth,
     mute_until: Option<tokio::time::Instant>,
     policy: &FrameWaitPolicy,
-    (maximum, budget): (usize, Option<&RequestByteBudget>),
+    FrameSizeLimit { maximum, budget }: FrameSizeLimit<'_>,
 ) -> Option<RequestFrame>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -217,7 +225,10 @@ where
                 // exchange into a `SaslAuthenticationException`, so the
                 // failure is counted like any other and its close is delayed.
                 super::sasl::record_refused_authentication(
-                    (&policy.metrics, &policy.audit_log),
+                    super::sasl::AuthenticationSinks {
+                        metrics: &policy.metrics,
+                        audit_log: &policy.audit_log,
+                    },
                     auth,
                     &policy.peer,
                     "invalid receive size",
@@ -275,8 +286,14 @@ mod tests {
             &event,
             krabka_audit::AuditOutcome::Success,
             "SSL",
-            ("User:CN=test-client,OU=integration,O=krabka", "MTls"),
-            ("192.0.2.7", 9093),
+            krabka_audit::AuditPrincipal {
+                name: "User:CN=test-client,OU=integration,O=krabka".into(),
+                auth_method: "MTls".into(),
+            },
+            krabka_audit::AuditEndpoint {
+                ip: "192.0.2.7".into(),
+                port: 9093,
+            },
             None,
         );
     }

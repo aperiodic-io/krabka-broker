@@ -31,6 +31,7 @@ crate::sendfile_cfg! {
 mod test_support;
 mod timestamp_scan;
 
+pub(crate) use self::append::PlacedBatch;
 use crate::{
     index::{OFFSET_ENTRY_SIZE, OffsetIndex, TIME_ENTRY_SIZE, TimeIndex},
     io::LogIo,

@@ -316,11 +316,23 @@ mod tests {
         registry
     }
 
-    async fn led_orders_fixture() -> (tempfile::TempDir, PartitionRegistry, MetadataImage) {
+    /// A registry whose broker leads `orders`, with the directory that holds
+    /// its log and the image that names the leader.
+    struct LedOrders {
+        dir: tempfile::TempDir,
+        registry: PartitionRegistry,
+        image: MetadataImage,
+    }
+
+    async fn led_orders_fixture() -> LedOrders {
         let dir = tempdir().expect("tempdir");
         let registry = registry_with_leader(dir.path(), LOCAL, 3).await;
         let image = image(&topic_records("orders", 1, LOCAL));
-        (dir, registry, image)
+        LedOrders {
+            dir,
+            registry,
+            image,
+        }
     }
 
     async fn check_not_led_here(registry: &PartitionRegistry, image: &MetadataImage) {
@@ -334,27 +346,46 @@ mod tests {
     /// coordinator comes back with a fresh image.
     #[tokio::test]
     async fn a_stale_expected_leader_epoch_is_fenced() {
-        let (_dir, registry, image) = led_orders_fixture().await;
+        struct Case {
+            label: &'static str,
+            expected_epoch: i32,
+            code: i16,
+        }
+
+        let LedOrders {
+            dir: _dir,
+            registry,
+            image,
+        } = led_orders_fixture().await;
 
         let cases = [
-            (
-                "the epoch the coordinator saw is older",
-                2,
-                codes::FENCED_LEADER_EPOCH,
-            ),
-            (
-                "the epoch the coordinator saw is newer",
-                4,
-                codes::FENCED_LEADER_EPOCH,
-            ),
-            ("the epoch matches", 3, codes::NONE),
-            (
-                "the coordinator supplied a malformed epoch",
-                NO_EXPECTED_LEADER_EPOCH,
-                codes::FENCED_LEADER_EPOCH,
-            ),
+            Case {
+                label: "the epoch the coordinator saw is older",
+                expected_epoch: 2,
+                code: codes::FENCED_LEADER_EPOCH,
+            },
+            Case {
+                label: "the epoch the coordinator saw is newer",
+                expected_epoch: 4,
+                code: codes::FENCED_LEADER_EPOCH,
+            },
+            Case {
+                label: "the epoch matches",
+                expected_epoch: 3,
+                code: codes::NONE,
+            },
+            Case {
+                label: "the coordinator supplied a malformed epoch",
+                expected_epoch: NO_EXPECTED_LEADER_EPOCH,
+                code: codes::FENCED_LEADER_EPOCH,
+            },
         ];
-        for (case, expected_epoch, code) in cases {
+        for Case {
+            label: case,
+            expected_epoch,
+            code,
+        } in cases
+        {
             let written = mark(
                 &registry,
                 &image,
@@ -397,7 +428,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_led_partition_takes_the_marker_and_returns_its_offset() {
-        let (_dir, registry, image) = led_orders_fixture().await;
+        let LedOrders {
+            dir: _dir,
+            registry,
+            image,
+        } = led_orders_fixture().await;
         let written = mark_orders_zero(&registry, &image, 3).await;
         check!(written == row(PartitionIndex(0), codes::NONE, 0));
 
@@ -451,7 +486,11 @@ mod tests {
     /// group still cannot be written is an error row and appends nothing.
     #[tokio::test]
     async fn a_marker_that_cannot_be_encoded_is_an_error_row_and_appends_nothing() {
-        let (_dir, registry, image) = led_orders_fixture().await;
+        let LedOrders {
+            dir: _dir,
+            registry,
+            image,
+        } = led_orders_fixture().await;
         let marker = BarrierMarker {
             group: "g".repeat(MAX_STRING_BYTES + 1),
             ..marker()

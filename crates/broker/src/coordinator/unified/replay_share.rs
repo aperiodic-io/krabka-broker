@@ -341,15 +341,11 @@ mod tests {
                 ShareGroupTargetAssignmentMetadataValue, TopicPartitionsInfo,
             },
             test_support::{
-                check_replay_cases, proto_uuid, replay_fixtures, replay_tombstone_constructor,
-                share_member,
+                ReplayCase, ReplayFixtures, check_replay_cases, member_deletion_with_target_case,
+                proto_uuid, replay_fixtures, replay_tombstone_constructor, share_member,
             },
         },
     };
-
-    /// What a log leaves: the group that replay holds, or the message of
-    /// the exception that fails the load.
-    type Outcome = Result<Option<ShareGroupSeed>, String>;
 
     /// One record of the replayed log.
     #[derive(Clone)]
@@ -454,14 +450,17 @@ mod tests {
     fn share_records_replay_as_kafka() {
         let tombstone = replay_tombstone_constructor(key, Record::Tombstone);
         // Kafka's `ShareGroup.createGroupTombstoneRecords` for member `m`.
-        let (group, kafka_deletion) = replay_fixtures()
+        let ReplayFixtures {
+            expected_seed: group,
+            deletion: kafka_deletion,
+        } = replay_fixtures()
             .seed(ShareGroupSeed::new_group)
             .tombstone(tombstone)
             .call();
-        let rows: Vec<(&str, Vec<Record>, Outcome)> = vec![
-            (
-                "every record of a group",
-                vec![
+        let rows: Vec<ReplayCase<'_, Record, ShareGroupSeed>> = vec![
+            ReplayCase {
+                case: "every record of a group",
+                records: vec![
                     Record::Group(21),
                     Record::Member("m"),
                     Record::TargetEpoch(22),
@@ -469,7 +468,7 @@ mod tests {
                     Record::Current("m", 6),
                     Record::StateMetadata,
                 ],
-                group(&|seed| {
+                expected: group(&|seed| {
                     seed.group_epoch = 21;
                     seed.metadata_hash = 9;
                     seed.target_epoch = 22;
@@ -479,23 +478,23 @@ mod tests {
                     seed.current_per_member.insert("m".into(), current(6));
                     seed.state_partition_metadata = state_metadata();
                 }),
-            ),
-            (
-                "a current assignment creates the group and an uninitialized member",
-                vec![Record::Current("m", 6)],
-                group(&|seed| {
+            },
+            ReplayCase {
+                case: "a current assignment creates the group and an uninitialized member",
+                records: vec![Record::Current("m", 6)],
+                expected: group(&|seed| {
                     seed.members.insert("m".into(), uninitialized_member());
                     seed.current_per_member.insert("m".into(), current(6));
                 }),
-            ),
-            (
-                "the state partition metadata creates the group",
-                vec![Record::StateMetadata],
-                group(&|seed| seed.state_partition_metadata = state_metadata()),
-            ),
-            (
-                "Kafka's deletion order removes the whole group",
-                [
+            },
+            ReplayCase {
+                case: "the state partition metadata creates the group",
+                records: vec![Record::StateMetadata],
+                expected: group(&|seed| seed.state_partition_metadata = state_metadata()),
+            },
+            ReplayCase {
+                case: "Kafka's deletion order removes the whole group",
+                records: [
                     vec![
                         Record::Group(2),
                         Record::Member("m"),
@@ -507,51 +506,52 @@ mod tests {
                     kafka_deletion(),
                 ]
                 .concat(),
-                Ok(None),
-            ),
-            (
-                "tombstones of a group the log does not hold are ignored",
-                kafka_deletion(),
-                Ok(None),
-            ),
-            (
-                "a member tombstone before its current assignment tombstone",
-                vec![Record::Member("m"), tombstone("member", "m")],
-                Err(
+                expected: Ok(None),
+            },
+            ReplayCase {
+                case: "tombstones of a group the log does not hold are ignored",
+                records: kafka_deletion(),
+                expected: Ok(None),
+            },
+            ReplayCase {
+                case: "a member tombstone before its current assignment tombstone",
+                records: vec![Record::Member("m"), tombstone("member", "m")],
+                expected: Err(
                     "Received a tombstone record to delete member m with invalid leave group \
                      epoch."
                         .into(),
                 ),
-            ),
-            crate::coordinator::unified::test_support::member_deletion_with_target_case(
-                (Record::Member("m"), Record::Target("m")),
+            },
+            member_deletion_with_target_case(
+                Record::Member("m"),
+                Record::Target("m"),
                 tombstone,
                 "Received a tombstone record to delete member m but member exists in \
                      target assignment.",
             ),
-            (
-                "a group tombstone while a target is left",
-                vec![Record::Target("m"), tombstone("group", "")],
-                Err(
+            ReplayCase {
+                case: "a group tombstone while a target is left",
+                records: vec![Record::Target("m"), tombstone("group", "")],
+                expected: Err(
                     "Received a tombstone record to delete group g but the target assignment \
                      still has 1 members."
                         .into(),
                 ),
-            ),
-            (
-                "a group tombstone before the target metadata tombstone",
-                vec![Record::Group(2), tombstone("group", "")],
-                Err(
+            },
+            ReplayCase {
+                case: "a group tombstone before the target metadata tombstone",
+                records: vec![Record::Group(2), tombstone("group", "")],
+                expected: Err(
                     "Received a tombstone record to delete group g but target assignment \
                      epoch in invalid."
                         .into(),
                 ),
-            ),
-            (
-                "a share record for a consumer group",
-                vec![Record::ConsumerGroup, Record::Group(2)],
-                Err("Group g is not a share group.".into()),
-            ),
+            },
+            ReplayCase {
+                case: "a share record for a consumer group",
+                records: vec![Record::ConsumerGroup, Record::Group(2)],
+                expected: Err("Group g is not a share group.".into()),
+            },
         ];
         check_replay_cases(
             &rows,

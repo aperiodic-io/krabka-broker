@@ -93,28 +93,46 @@ mod tests {
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([51; 16]);
     const WIRE_TOPIC: ProtoUuid = ProtoUuid([51; 16]);
 
-    fn request(group_id: &str, partitions: &[(i32, i32)]) -> WriteShareGroupStateRequest {
+    /// A partition of a request, at a state epoch.
+    struct PartitionAt {
+        partition: i32,
+        state_epoch: i32,
+    }
+
+    fn at(partition: i32, state_epoch: i32) -> PartitionAt {
+        PartitionAt {
+            partition,
+            state_epoch,
+        }
+    }
+
+    fn request(group_id: &str, partitions: &[PartitionAt]) -> WriteShareGroupStateRequest {
         WriteShareGroupStateRequest {
             group_id: group_id.into(),
             topics: vec![WriteStateData {
                 topic_id: WIRE_TOPIC,
                 partitions: partitions
                     .iter()
-                    .map(|&(partition, state_epoch)| PartitionData {
-                        partition,
-                        state_epoch,
-                        leader_epoch: 3,
-                        start_offset: 101,
-                        delivery_complete_count: 9,
-                        state_batches: vec![WireStateBatch {
-                            first_offset: 101,
-                            last_offset: 105,
-                            delivery_state: 2,
-                            delivery_count: 3,
+                    .map(
+                        |&PartitionAt {
+                             partition,
+                             state_epoch,
+                         }| PartitionData {
+                            partition,
+                            state_epoch,
+                            leader_epoch: 3,
+                            start_offset: 101,
+                            delivery_complete_count: 9,
+                            state_batches: vec![WireStateBatch {
+                                first_offset: 101,
+                                last_offset: 105,
+                                delivery_state: 2,
+                                delivery_count: 3,
+                                ..Default::default()
+                            }],
                             ..Default::default()
-                        }],
-                        ..Default::default()
-                    })
+                        },
+                    )
                     .collect(),
                 ..Default::default()
             }],
@@ -148,13 +166,13 @@ mod tests {
         let rows = [
             (
                 true,
-                request("share-group", &[(4, 17)]),
+                request("share-group", &[at(4, 17)]),
                 response(vec![row(4, codes::NONE, None)]),
                 Some((17, 0, Offset(101), 9)),
             ),
             (
                 true,
-                request("share-group", &[(6, 17)]),
+                request("share-group", &[at(6, 17)]),
                 response(vec![row(
                     6,
                     codes::INVALID_REQUEST,
@@ -164,7 +182,7 @@ mod tests {
             ),
             (
                 true,
-                request("share-group", &[(4, 16)]),
+                request("share-group", &[at(4, 16)]),
                 response(vec![row(
                     4,
                     codes::FENCED_STATE_EPOCH,
@@ -176,7 +194,7 @@ mod tests {
             ),
             (
                 false,
-                request("share-group", &[(4, 17)]),
+                request("share-group", &[at(4, 17)]),
                 response(vec![row(
                     4,
                     codes::NOT_COORDINATOR,
@@ -186,7 +204,7 @@ mod tests {
             ),
             (
                 true,
-                request("", &[(4, 17)]),
+                request("", &[at(4, 17)]),
                 WriteShareGroupStateResponse::default(),
                 initial,
             ),
@@ -200,13 +218,14 @@ mod tests {
 
         for (index, (led, req, expected, summary)) in rows.into_iter().enumerate() {
             let dir = tempfile::TempDir::new().expect("tempdir");
-            let (coordinator, image) = super::super::test_support::initialized_state()
-                .log_dir(dir.path())
-                .topic(TOPIC)
-                .partitions(8)
-                .partition(4)
-                .call()
-                .await;
+            let super::super::test_support::StateFixture { coordinator, image } =
+                super::super::test_support::initialized_state()
+                    .log_dir(dir.path())
+                    .topic(TOPIC)
+                    .partitions(8)
+                    .partition(4)
+                    .call()
+                    .await;
             super::super::test_support::retain_leadership(&coordinator, led).await;
 
             let resp = write_state(&coordinator, &image, req).await;

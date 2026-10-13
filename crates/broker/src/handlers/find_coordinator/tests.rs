@@ -37,20 +37,30 @@ struct LookupSetup<'a> {
     keys: &'a [&'a str],
 }
 
+/// The response that a lookup at `version` must produce.
+struct VersionedResponse {
+    version: krabka_ids::ApiVersion,
+    response: FindCoordinatorResponse,
+}
+
 #[bon::builder]
 async fn check_lookup_versions(
     broker: &Broker,
     #[builder(default = "g")] key: &'_ str,
     #[builder(into, default)] key_type: LookupKeyType,
     #[builder(default = & ["g"])] keys: &'_ [&'_ str],
-    rows: Vec<(krabka_ids::ApiVersion, FindCoordinatorResponse)>,
+    rows: Vec<VersionedResponse>,
 ) {
     let setup = LookupSetup {
         key,
         key_type,
         keys,
     };
-    for (version, expected) in rows {
+    for VersionedResponse {
+        version,
+        response: expected,
+    } in rows
+    {
         let request = FindCoordinatorRequest {
             key: setup.key.into(),
             key_type: setup.key_type.0,
@@ -367,17 +377,20 @@ async fn denied_group_key_answers_kafka_row_shape_per_version() {
         start_broker_no_audit_with(|config| config.authorizer = std::sync::Arc::new(DenyAll)).await;
     let broker = broker_handle.broker_arc_for_test();
     let rows = vec![
-        (krabka_ids::ApiVersion(4), FindCoordinatorResponse {
-            coordinators: vec![row("g", codes::GROUP_AUTHORIZATION_FAILED, None)],
-            ..Default::default()
-        }),
-        (
-            krabka_ids::ApiVersion(3),
-            legacy_coordinator_error(
+        VersionedResponse {
+            version: krabka_ids::ApiVersion(4),
+            response: FindCoordinatorResponse {
+                coordinators: vec![row("g", codes::GROUP_AUTHORIZATION_FAILED, None)],
+                ..Default::default()
+            },
+        },
+        VersionedResponse {
+            version: krabka_ids::ApiVersion(3),
+            response: legacy_coordinator_error(
                 KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED),
                 Some("Group authorization failed.".into()),
             ),
-        ),
+        },
     ];
     check_lookup_versions()
         .broker(&broker)
@@ -433,20 +446,25 @@ async fn unknown_key_type_fails_the_whole_request() {
     let broker = broker_handle.broker_arc_for_test();
     let message = response::error_message(codes::INVALID_REQUEST);
     let rows = vec![
-        (
-            krabka_ids::ApiVersion(krabka_protocol::owned::find_coordinator_response::MAX_VERSION),
-            FindCoordinatorResponse {
+        VersionedResponse {
+            version: krabka_ids::ApiVersion(
+                krabka_protocol::owned::find_coordinator_response::MAX_VERSION,
+            ),
+            response: FindCoordinatorResponse {
                 coordinators: vec![
                     row("a", codes::INVALID_REQUEST, message.clone()),
                     row("b", codes::INVALID_REQUEST, message.clone()),
                 ],
                 ..Default::default()
             },
-        ),
-        (
-            krabka_ids::ApiVersion(3),
-            legacy_coordinator_error(KafkaErrorCode(codes::INVALID_REQUEST), message.clone()),
-        ),
+        },
+        VersionedResponse {
+            version: krabka_ids::ApiVersion(3),
+            response: legacy_coordinator_error(
+                KafkaErrorCode(codes::INVALID_REQUEST),
+                message.clone(),
+            ),
+        },
     ];
     check_lookup_versions()
         .broker(&broker)

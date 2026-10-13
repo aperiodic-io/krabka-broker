@@ -62,18 +62,28 @@ enum Long {
     Client,
 }
 
-/// Every id at each side of the bound: `(the long id, its length)`. The client id
-/// is a header field, which its `INT16` length bounds at 32767 bytes, so only the
-/// longest one can arrive.
-fn cases() -> impl Iterator<Item = (Long, usize)> {
+/// One case: which id is long, and how many bytes it has.
+#[derive(Debug, Clone, Copy)]
+struct Probe {
+    long: Long,
+    length: usize,
+}
+
+/// Every id at each side of the bound. The client id is a header field, which
+/// its `INT16` length bounds at 32767 bytes, so only the longest one can
+/// arrive.
+fn cases() -> impl Iterator<Item = Probe> {
     [Long::Group, Long::Member, Long::Instance]
         .into_iter()
         .flat_map(|long| {
             [LIMIT, LIMIT + 1]
                 .into_iter()
-                .map(move |length| (long, length))
+                .map(move |length| Probe { long, length })
         })
-        .chain([(Long::Client, LIMIT)])
+        .chain([Probe {
+            long: Long::Client,
+            length: LIMIT,
+        }])
 }
 
 /// The client id of the header of a request of `long` at `length`.
@@ -87,7 +97,7 @@ fn header_client_id(long: Long, length: usize) -> String {
 
 /// The group id, member id and instance id of case `case`, with the one that
 /// is `long` set to `length` bytes and the others short.
-fn ids(case: usize, long: Long, length: usize, member: &str) -> (String, String, String) {
+fn ids(case: usize, long: Long, length: usize, member: &str) -> RecordIds {
     let pick = |which: Long, short: String| {
         if which == long {
             "a".repeat(length)
@@ -95,11 +105,18 @@ fn ids(case: usize, long: Long, length: usize, member: &str) -> (String, String,
             short
         }
     };
-    (
-        pick(Long::Group, format!("record-strings-{case}")),
-        pick(Long::Member, member.to_owned()),
-        pick(Long::Instance, format!("instance-{case}")),
-    )
+    RecordIds {
+        group: pick(Long::Group, format!("record-strings-{case}")),
+        member: pick(Long::Member, member.to_owned()),
+        instance: pick(Long::Instance, format!("instance-{case}")),
+    }
+}
+
+/// The group id, member id and instance id of one case.
+struct RecordIds {
+    group: String,
+    member: String,
+    instance: String,
 }
 
 fn join_request(
@@ -255,8 +272,8 @@ macro_rules! long_identity_cases {
      ($label:ident, $client_id:ident, ($group_id:ident, $member_id:ident, $instance_id:ident)), $member:expr, { $($body:tt)* }) => {
         const $version: i16 = $api::MAX_VERSION;
         let $env = Env::start().await;
-        for ($case, ($long, $length)) in cases().enumerate() {
-            long_identity!(($label, $client_id, ($group_id, $member_id, $instance_id)), $case, $long, $length, $member);
+        for ($case, Probe { long: $long, length: $length }) in cases().enumerate() {
+            long_identity!(($label, $client_id, RecordIds { group: $group_id, member: $member_id, instance: $instance_id }), $case, $long, $length, $member);
             $($body)*
         }
         $env.stop().await;
@@ -313,12 +330,16 @@ async fn share_group_heartbeat_takes_32767_byte_ids_and_refuses_32768() {
     const VERSION: i16 = share_group_heartbeat_request::MAX_VERSION;
     let env = Env::start().await;
     // A share group has no instance id.
-    for (case, (long, length)) in cases()
-        .filter(|(long, _)| *long != Long::Instance)
+    for (case, Probe { long, length }) in cases()
+        .filter(|probe| probe.long != Long::Instance)
         .enumerate()
     {
         long_identity!(
-            (label, client_id, (group_id, member_id, _)),
+            (label, client_id, RecordIds {
+                group: group_id,
+                member: member_id,
+                ..
+            }),
             case,
             long,
             length,
@@ -413,12 +434,16 @@ async fn streams_group_heartbeat_takes_32767_byte_ids_and_refuses_32768() {
 async fn classic_join_takes_32767_byte_ids_and_refuses_32768() {
     const VERSION: i16 = join_group_request::MAX_VERSION;
     let env = Env::start().await;
-    for (case, (long, length)) in cases().enumerate() {
+    for (case, Probe { long, length }) in cases().enumerate() {
         let label = format!("{long:?} of {length} bytes");
         let client_id = header_client_id(long, length);
         // A static member with no member id yet, which is the join that
         // records the group and its member in one round.
-        let (group_id, member_id, instance_id) = ids(case, long, length, "");
+        let RecordIds {
+            group: group_id,
+            member: member_id,
+            instance: instance_id,
+        } = ids(case, long, length, "");
         let request = join_request(group_id.clone(), member_id, Some(instance_id));
 
         let result = tokio::time::timeout(

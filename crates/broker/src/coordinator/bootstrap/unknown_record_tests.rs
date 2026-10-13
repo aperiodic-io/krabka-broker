@@ -148,6 +148,13 @@ fn replay_around(odd: Record, framing: Framing) -> Option<ReplayView> {
 
 #[test]
 fn replay_skips_unknown_record_types_and_fails_on_bad_records() {
+    struct Case {
+        name: &'static str,
+        odd: Record,
+        framing: Framing,
+        expected: Option<ReplayView>,
+    }
+
     let record = |key: Option<Bytes>, value: Option<Bytes>| Record {
         key,
         value,
@@ -159,80 +166,86 @@ fn replay_skips_unknown_record_types_and_fails_on_bad_records() {
     let unsupported_version = Bytes::from(unsupported_version);
     let truncated = offset_value(12).slice(..6);
 
-    let cases: Vec<(&str, Record, Framing, Option<ReplayView>)> = vec![
-        (
+    let case = |name, odd, framing, expected| Case {
+        name,
+        odd,
+        framing,
+        expected,
+    };
+    let cases: Vec<Case> = vec![
+        case(
             "unknown type 9 with a value",
             record(Some(typed_key(9)), Some(offset_value(12))),
             Framing::Plain,
             Some(both_commits()),
         ),
-        (
+        case(
             "type 18, which Kafka 4.3.1 no longer defines",
             record(Some(typed_key(18)), Some(offset_value(12))),
             Framing::Plain,
             Some(both_commits()),
         ),
-        (
+        case(
             "unknown type 24 with an undecodable value",
             record(Some(typed_key(24)), Some(Bytes::from_static(b"\xff"))),
             Framing::Plain,
             Some(both_commits()),
         ),
-        (
+        case(
             "unknown type -1 with a key body that does not decode",
             record(Some(Bytes::from_static(b"\xff\xff\x7f")), None),
             Framing::Plain,
             Some(both_commits()),
         ),
-        (
+        case(
             "unknown type 9 as a tombstone",
             record(Some(typed_key(9)), None),
             Framing::Plain,
             Some(both_commits()),
         ),
-        (
+        case(
             "unknown type in a committed transaction",
             record(Some(typed_key(9)), Some(offset_value(12))),
             Framing::Transaction(MarkerType::Commit),
             Some(both_commits()),
         ),
-        (
+        case(
             "known type with an unsupported value version",
             record(known_key(), Some(unsupported_version.clone())),
             Framing::Plain,
             None,
         ),
-        (
+        case(
             "known type with a corrupt value",
             record(known_key(), Some(truncated.clone())),
             Framing::Plain,
             None,
         ),
-        (
+        case(
             "unsupported value version in an aborted transaction",
             record(known_key(), Some(unsupported_version)),
             Framing::Transaction(MarkerType::Abort),
             None,
         ),
-        (
+        case(
             "corrupt value in an aborted transaction",
             record(known_key(), Some(truncated)),
             Framing::Transaction(MarkerType::Abort),
             None,
         ),
-        (
+        case(
             "known type whose key does not decode",
             record(Some(Bytes::from_static(b"\x00\x01\x00\x05g")), None),
             Framing::Plain,
             None,
         ),
-        (
+        case(
             "key shorter than its record type",
             record(Some(Bytes::from_static(b"\x00")), Some(offset_value(12))),
             Framing::Plain,
             None,
         ),
-        (
+        case(
             "record without a key",
             record(None, Some(offset_value(12))),
             Framing::Plain,
@@ -240,7 +253,13 @@ fn replay_skips_unknown_record_types_and_fails_on_bad_records() {
         ),
     ];
 
-    for (name, odd, framing, expected) in cases {
+    for Case {
+        name,
+        odd,
+        framing,
+        expected,
+    } in cases
+    {
         check!(replay_around(odd, framing) == expected, "{name}");
     }
 }

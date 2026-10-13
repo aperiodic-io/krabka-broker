@@ -309,6 +309,19 @@ async fn process_resource(
     }
 }
 
+/// Queue the records of one scope's validation, or answer its refusal on the
+/// resource's response.
+fn submit_or_refuse(
+    result: Result<impl IntoIterator<Item = MetadataRecord>, (i16, String)>,
+    out: &mut AlterConfigsResourceResponse,
+    to_submit: &mut Vec<MetadataRecord>,
+) {
+    match result {
+        Ok(records) => to_submit.extend(records),
+        Err(error) => set_error_response(out, error),
+    }
+}
+
 fn resource_refusal(resource: &AlterConfigsResource, code: i16) -> AlterConfigsResourceResponse {
     AlterConfigsResourceResponse {
         resource_type: resource.resource_type,
@@ -376,9 +389,12 @@ async fn process_resource_once(
             };
             handle_broker_scoped(
                 &resource,
-                image,
-                serving,
-                (&log_dirs, broker.config.features.unstable_api_versions),
+                BrokerConfigContext {
+                    image,
+                    serving,
+                    log_dirs: &log_dirs,
+                    unstable: broker.config.features.unstable_api_versions,
+                },
                 &mut out,
                 &mut to_submit,
             );

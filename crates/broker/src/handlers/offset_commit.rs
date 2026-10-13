@@ -187,9 +187,9 @@ fn existing_partitions(
         response.add_topic(&topic, codes::UNKNOWN_TOPIC_OR_PARTITION);
         return None;
     }
-    let (present, missing): (Vec<_>, Vec<_>) = std::mem::take(&mut topic.partitions)
+    let (present, missing) = std::mem::take(&mut topic.partitions)
         .into_iter()
-        .partition(|partition| {
+        .partition::<Vec<_>, _>(|partition| {
             image
                 .partition(&topic.name, partition.partition_index)
                 .is_some()
@@ -240,7 +240,8 @@ async fn commit_rows(
     let expire_timestamp_ms = expire_timestamp_ms(req.retention_time_ms, now_ms);
     // Kafka's `commitOffset` runs the per-partition validator only on the
     // partitions whose metadata fits, so split them out first.
-    let (valid, rows) = split_oversized_metadata(req, broker.config.offset_metadata_max_bytes);
+    let SplitRequest { valid, rows } =
+        split_oversized_metadata(req, broker.config.offset_metadata_max_bytes);
     let handle = validate(broker, &valid, &image, version).await?;
 
     if valid
@@ -267,14 +268,20 @@ fn metadata_too_large(metadata: Option<&str>, max_bytes: i32) -> bool {
     })
 }
 
+/// The outcome of [`split_oversized_metadata`].
+#[derive(Debug, PartialEq)]
+struct SplitRequest {
+    /// The request that holds the partitions whose metadata fits.
+    valid: OffsetCommitRequest,
+    /// The coordinator's topic rows in request order.
+    rows: Vec<OffsetCommitResponseTopic>,
+}
+
 /// Splits `req` into the request that holds the partitions whose metadata
 /// fits in `max_bytes`, and the coordinator's topic rows in request order: a
 /// partition whose metadata is too large answers `OFFSET_METADATA_TOO_LARGE`,
 /// and every other partition answers `NONE`.
-fn split_oversized_metadata(
-    req: &OffsetCommitRequest,
-    max_bytes: i32,
-) -> (OffsetCommitRequest, Vec<OffsetCommitResponseTopic>) {
+fn split_oversized_metadata(req: &OffsetCommitRequest, max_bytes: i32) -> SplitRequest {
     let mut valid = OffsetCommitRequest {
         topics: Vec::with_capacity(req.topics.len()),
         ..req.clone()
@@ -307,7 +314,7 @@ fn split_oversized_metadata(
         valid.topics.push(kept);
         rows.push(row);
     }
-    (valid, rows)
+    SplitRequest { valid, rows }
 }
 
 /// The wire value of `retention_time_ms` that asks for the broker's own
@@ -664,6 +671,12 @@ mod tests {
         }
     }
 
+    /// A commit row's metadata and the code its row answers.
+    struct MetadataCase {
+        metadata: Option<String>,
+        error_code: i16,
+    }
+
     /// `OffsetMetadataManager.isMetadataInvalid`: Java's `String.length()`
     /// against `offset.metadata.max.bytes`. A character outside the Basic
     /// Multilingual Plane is two UTF-16 code units.
@@ -671,15 +684,33 @@ mod tests {
     fn oversized_metadata_answers_on_its_own_row_and_is_not_committed() {
         const LIMIT: i32 = 4096;
         let supplementary = format!("{}\u{1F980}", "a".repeat(4095));
-        let cases: [(Option<String>, i16); 6] = [
-            (None, codes::NONE),
-            (Some(String::new()), codes::NONE),
-            (Some("a".repeat(4096)), codes::NONE),
-            (Some("a".repeat(4097)), codes::OFFSET_METADATA_TOO_LARGE),
+        let cases: [MetadataCase; 6] = [
+            MetadataCase {
+                metadata: None,
+                error_code: codes::NONE,
+            },
+            MetadataCase {
+                metadata: Some(String::new()),
+                error_code: codes::NONE,
+            },
+            MetadataCase {
+                metadata: Some("a".repeat(4096)),
+                error_code: codes::NONE,
+            },
+            MetadataCase {
+                metadata: Some("a".repeat(4097)),
+                error_code: codes::OFFSET_METADATA_TOO_LARGE,
+            },
             // 4095 + 2 code units, though 4096 characters.
-            (Some(supplementary), codes::OFFSET_METADATA_TOO_LARGE),
+            MetadataCase {
+                metadata: Some(supplementary),
+                error_code: codes::OFFSET_METADATA_TOO_LARGE,
+            },
             // 4096 characters of two UTF-8 bytes each are 4096 code units.
-            (Some("\u{e9}".repeat(4096)), codes::NONE),
+            MetadataCase {
+                metadata: Some("\u{e9}".repeat(4096)),
+                error_code: codes::NONE,
+            },
         ];
         let partition = |index: usize, metadata: &Option<String>| OffsetCommitRequestPartition {
             partition_index: i32::try_from(index).unwrap(),
@@ -694,7 +725,7 @@ mod tests {
                 partitions: cases
                     .iter()
                     .enumerate()
-                    .map(|(index, (metadata, _))| partition(index, metadata))
+                    .map(|(index, case)| partition(index, &case.metadata))
                     .collect(),
                 ..Default::default()
             }],
@@ -707,8 +738,8 @@ mod tests {
                 partitions: cases
                     .iter()
                     .enumerate()
-                    .filter(|(_, (_, code))| *code == codes::NONE)
-                    .map(|(index, (metadata, _))| partition(index, metadata))
+                    .filter(|(_, case)| case.error_code == codes::NONE)
+                    .map(|(index, case)| partition(index, &case.metadata))
                     .collect(),
                 ..Default::default()
             }],
@@ -719,14 +750,20 @@ mod tests {
             partitions: cases
                 .iter()
                 .enumerate()
-                .map(|(index, (_, error_code))| OffsetCommitResponsePartition {
+                .map(|(index, case)| OffsetCommitResponsePartition {
                     partition_index: i32::try_from(index).unwrap(),
-                    error_code: *error_code,
+                    error_code: case.error_code,
                     ..Default::default()
                 })
                 .collect(),
             ..Default::default()
         }];
-        check!(split_oversized_metadata(&request, LIMIT) == (expected_valid, expected_rows));
+        check!(
+            split_oversized_metadata(&request, LIMIT)
+                == SplitRequest {
+                    valid: expected_valid,
+                    rows: expected_rows
+                }
+        );
     }
 }

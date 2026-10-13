@@ -7,7 +7,7 @@ use {
         remote_log_manager::{
             test_support as fixtures,
             test_support::{
-                FakeWormArchive, archived_backends, copy_exports, local_backends,
+                Backends, FakeWormArchive, archived_backends, copy_exports, local_backends,
                 missing_remote_reads, seed_finished_segments, synth_export, tier, tp,
             },
         },
@@ -27,6 +27,20 @@ use {
 /// A partition whose `DeleteRecords` floor has never moved: offset 0, so no
 /// segment breaches it and the case under test is the only axis in play.
 const NO_FLOOR: Offset = Offset(0);
+
+/// The two floors a retention pass measures a segment against.
+struct LogFloors {
+    log_start_offset: Offset,
+    deleted_below: Option<Offset>,
+}
+
+/// The floors a `DeleteRecords` and the log start leave.
+const fn floors(log_start_offset: Offset, deleted_below: Option<Offset>) -> LogFloors {
+    LogFloors {
+        log_start_offset,
+        deleted_below,
+    }
+}
 
 /// Bounds for a fixture with no local bytes or leader-epoch restriction.
 fn empty_local_bounds(
@@ -150,10 +164,10 @@ async fn scheduled_remote_retention_checks_stored_activation_before_size_evictio
     for export in &mut exports {
         export.max_timestamp = 0;
     }
-    let (rsm, rlmm) = archived_backends(remote.path(), &exports).await;
+    let Backends { rsm, rlmm } = archived_backends(remote.path(), &exports).await;
     let before_due = empty_retention_pass(
         &config,
-        (Offset(0), None),
+        floors(Offset(0), None),
         2_099,
         ArchiveMode::Mutable,
         &rsm,
@@ -165,7 +179,7 @@ async fn scheduled_remote_retention_checks_stored_activation_before_size_evictio
     check!(remaining.len() == 1 && remaining[0].start_offset() == 2);
     let due = empty_retention_pass(
         &config,
-        (Offset(2), Some(Offset(2))),
+        floors(Offset(2), Some(Offset(2))),
         2_100,
         ArchiveMode::Mutable,
         &rsm,
@@ -178,7 +192,11 @@ async fn scheduled_remote_retention_checks_stored_activation_before_size_evictio
 
 #[tokio::test]
 async fn scheduled_remote_retention_holds_unreadable_activation_evidence() {
-    let (rlmm, rsm_impl, rsm) = refusing_backends();
+    let RefusingBackends {
+        rlmm,
+        rsm_impl,
+        rsm,
+    } = refusing_backends();
     let config = LogConfig {
         delivery_policy: DeliveryPolicy::Scheduled,
         retention_size: Some(bytes(0)),
@@ -186,7 +204,7 @@ async fn scheduled_remote_retention_holds_unreadable_activation_evidence() {
     };
     let result = empty_retention_pass(
         &config,
-        (NO_FLOOR, None),
+        floors(NO_FLOOR, None),
         10_000,
         ArchiveMode::Mutable,
         &rsm,
@@ -469,7 +487,7 @@ fn remote_retention_eviction_set_walk_stops_at_first_non_deletable() {
 #[tokio::test]
 async fn remote_retention_pass_evicts_old_segments_through_lifecycle() {
     fixtures::rolled_log_fixture!(log_dir, remote_dir, log, exports);
-    let (rsm, rlmm) = archived_backends(remote_dir.path(), &exports).await;
+    let Backends { rsm, rlmm } = archived_backends(remote_dir.path(), &exports).await;
     let pre = rlmm.list_remote_log_segments(&tp()).unwrap();
     assert!(!pre.is_empty());
 
@@ -518,9 +536,7 @@ async fn remote_retention_pass_noop_when_nothing_qualifies() {
     // is independent of wall-clock. `rolled_log` builds batches with
     // default base_timestamp=0, so picking now=1 keeps every segment
     // inside the year-long retention window.
-    let outcome =
-        empty_retention_pass(&cfg, (NO_FLOOR, None), 1, ArchiveMode::Mutable, &rsm, &rlmm).await;
-    assert!(outcome == RemoteRetentionOutcome::default());
+    assert_pass_is_a_noop(&cfg, 1, &rsm, &rlmm).await;
     assert!(rlmm.list_remote_log_segments(&tp()).unwrap().len() == exports.len());
 }
 
@@ -538,16 +554,7 @@ async fn remote_retention_pass_no_settings_and_an_unmoved_floor_evict_nothing() 
         retention_size: None,
         ..LogConfig::default()
     };
-    let outcome = empty_retention_pass(
-        &cfg,
-        (NO_FLOOR, None),
-        now_ms(),
-        ArchiveMode::Mutable,
-        &rsm,
-        &rlmm,
-    )
-    .await;
-    assert!(outcome == RemoteRetentionOutcome::default());
+    assert_pass_is_a_noop(&cfg, now_ms(), &rsm, &rlmm).await;
     assert!(rlmm.list_remote_log_segments(&tp()).unwrap().len() == 3);
 }
 
@@ -633,7 +640,7 @@ async fn remote_retention_pass_never_reaches_the_rsm_for_a_write_once_archive() 
 
     let outcome = empty_retention_pass(
         &cfg,
-        (NO_FLOOR, None),
+        floors(NO_FLOOR, None),
         now_ms() + 1_000_000,
         ArchiveMode::WriteOnce,
         &rsm,
@@ -660,7 +667,11 @@ async fn remote_retention_pass_reaches_a_refusing_rsm_only_on_a_mutable_tier() {
         ("write-once archive never asks", ArchiveMode::WriteOnce, 0),
     ];
     for (name, archive, expected_attempts) in cases {
-        let (rlmm, rsm_impl, rsm) = refusing_backends();
+        let RefusingBackends {
+            rlmm,
+            rsm_impl,
+            rsm,
+        } = refusing_backends();
 
         let outcome = expire_remote_segments(archive, &rsm, &rlmm).await;
 
@@ -795,7 +806,10 @@ macro_rules! archived_prefix_fixture {
     ($local:ident, $remote:ident, $log:ident, $exports:ident, $rsm:ident, $rlmm:ident) => {
         fixtures::rolled_log_fixture!($local, $remote, $log, $exports);
         assert!($exports.len() >= 2, "the test needs a prefix to evict");
-        let ($rsm, $rlmm) = archived_backends($remote.path(), &$exports).await;
+        let Backends {
+            rsm: $rsm,
+            rlmm: $rlmm,
+        } = archived_backends($remote.path(), &$exports).await;
     };
 }
 
@@ -822,7 +836,7 @@ async fn a_breach_eviction_frees_the_archive_without_moving_the_floor() {
 
     let outcome = empty_retention_pass(
         &cfg,
-        (floor, Some(floor)),
+        floors(floor, Some(floor)),
         1,
         ArchiveMode::Mutable,
         &rsm,
@@ -892,8 +906,15 @@ async fn a_floor_nobody_moved_leaves_the_archive_alone() {
         retention_size: None,
         ..LogConfig::default()
     };
-    let outcome =
-        empty_retention_pass(&cfg, (inferred, None), 1, ArchiveMode::Mutable, &rsm, &rlmm).await;
+    let outcome = empty_retention_pass(
+        &cfg,
+        floors(inferred, None),
+        1,
+        ArchiveMode::Mutable,
+        &rsm,
+        &rlmm,
+    )
+    .await;
 
     check!(outcome.deleted == 0, "an inferred floor deletes nothing");
     check!(outcome.log_start == None);
@@ -909,7 +930,7 @@ async fn a_floor_nobody_moved_leaves_the_archive_alone() {
 /// the next tick, and object-store spend is the only other symptom.
 #[tokio::test]
 async fn a_retention_pass_records_its_delete_requests_errors_and_lag() {
-    let (rlmm, _rsm_impl, rsm) = refusing_backends();
+    let RefusingBackends { rlmm, rsm, .. } = refusing_backends();
     let metrics = BrokerMetrics::new();
     let index_cache = Arc::new(krabka_remote_storage::RemoteIndexCache::disabled());
     let tier = fixtures::configured_tier()
@@ -959,9 +980,28 @@ async fn a_retention_pass_records_its_delete_requests_errors_and_lag() {
     );
 }
 
+/// A mutable-tier pass with no floors moves nothing.
+async fn assert_pass_is_a_noop(
+    config: &LogConfig,
+    now_ms: i64,
+    rsm: &Arc<dyn RemoteStorageManager>,
+    rlmm: &Arc<dyn RemoteLogMetadataManager>,
+) {
+    let outcome = empty_retention_pass(
+        config,
+        floors(NO_FLOOR, None),
+        now_ms,
+        ArchiveMode::Mutable,
+        rsm,
+        rlmm,
+    )
+    .await;
+    assert!(outcome == RemoteRetentionOutcome::default());
+}
+
 async fn empty_retention_pass(
     config: &LogConfig,
-    floors: (Offset, Option<Offset>),
+    floors: LogFloors,
     now_ms: i64,
     archive: ArchiveMode,
     rsm: &Arc<dyn RemoteStorageManager>,
@@ -970,22 +1010,35 @@ async fn empty_retention_pass(
     remote_retention_pass(
         &tp(),
         1,
-        empty_local_bounds(config, floors.0, floors.1, now_ms),
+        empty_local_bounds(
+            config,
+            floors.log_start_offset,
+            floors.deleted_below,
+            now_ms,
+        ),
         &tier(archive, rsm, rlmm),
     )
     .await
 }
 
-fn refusing_backends() -> (
-    Arc<dyn RemoteLogMetadataManager>,
-    Arc<RefusesDeleteRsm>,
-    Arc<dyn RemoteStorageManager>,
-) {
+/// A metadata manager holding finished segments and an RSM that refuses to
+/// delete, seen both as its concrete type and as the trait object.
+struct RefusingBackends {
+    rlmm: Arc<dyn RemoteLogMetadataManager>,
+    rsm_impl: Arc<RefusesDeleteRsm>,
+    rsm: Arc<dyn RemoteStorageManager>,
+}
+
+fn refusing_backends() -> RefusingBackends {
     let rlmm = fixtures::in_memory_metadata();
     seed_finished_segments(&rlmm, 3);
     let rsm_impl = Arc::new(RefusesDeleteRsm::default());
     let rsm: Arc<dyn RemoteStorageManager> = rsm_impl.clone();
-    (rlmm, rsm_impl, rsm)
+    RefusingBackends {
+        rlmm,
+        rsm_impl,
+        rsm,
+    }
 }
 
 fn retention_segments(timestamps: [i64; 3]) -> Vec<RemoteLogSegmentMetadata> {
@@ -1007,7 +1060,7 @@ async fn expire_remote_segments(
     };
     empty_retention_pass(
         &config,
-        (NO_FLOOR, None),
+        floors(NO_FLOOR, None),
         now_ms() + 1_000_000,
         archive,
         rsm,

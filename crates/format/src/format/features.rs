@@ -8,9 +8,19 @@
 //! performs live here, apart from the flag definitions they read.
 
 use {
-    krabka_metadata::metadata_version::KRAFT_VERSION_FEATURE, krabka_raft::UnstableFeatureVersions,
+    krabka_metadata::{FeatureLevelRecord, metadata_version::KRAFT_VERSION_FEATURE},
+    krabka_raft::UnstableFeatureVersions,
     std::collections::BTreeMap,
 };
+
+/// What `--release-version` and `--feature` resolve to.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct ResolvedFeatures {
+    /// The `metadata.version` level the cluster bootstraps at.
+    pub(super) metadata_version: i16,
+    /// The levels `--feature` set, by feature name.
+    pub(super) overrides: BTreeMap<String, i16>,
+}
 
 /// The highest `metadata.version` this format accepts under `unstable`:
 /// Kafka 4.3's latest production level, or with unstable feature versions the
@@ -78,8 +88,8 @@ fn resolve_release_level(s: &str, unstable: UnstableFeatureVersions) -> Result<i
         })
 }
 
-/// Parse one `--feature NAME=LEVEL` spec into `(name, level)`.
-pub(super) fn parse_feature_spec(s: &str) -> Result<(String, i16), String> {
+/// Parse one `--feature NAME=LEVEL` spec into the feature and its level.
+pub(super) fn parse_feature_spec(s: &str) -> Result<FeatureLevelRecord, String> {
     let (name, level) = s
         .split_once('=')
         .ok_or("--feature must be NAME=LEVEL, e.g. transaction.version=2")?;
@@ -91,7 +101,10 @@ pub(super) fn parse_feature_spec(s: &str) -> Result<(String, i16), String> {
         .trim()
         .parse()
         .map_err(|e| format!("feature level: {e}"))?;
-    Ok((name.to_string(), level))
+    Ok(FeatureLevelRecord {
+        name: name.to_string(),
+        level,
+    })
 }
 
 /// The `metadata.version` a cluster formats at when neither `--release-version`
@@ -172,18 +185,18 @@ fn verify_metadata_version_level(
 /// feature name and level (`calculateEffectiveFeatureLevels`).
 pub(super) fn resolve_format_features(
     release_version: Option<&str>,
-    features: &[(String, i16)],
+    features: &[FeatureLevelRecord],
     unstable: UnstableFeatureVersions,
-) -> Result<(i16, BTreeMap<String, i16>), String> {
+) -> Result<ResolvedFeatures, String> {
     use krabka_metadata::metadata_version::METADATA_VERSION_FEATURE;
 
     let release_level = release_version
         .map(|rv| resolve_release_level(rv, unstable))
         .transpose()?;
     let mut feature_mv: Option<i16> = None;
-    for (_, level) in features
+    for FeatureLevelRecord { level, .. } in features
         .iter()
-        .filter(|(name, _)| name == METADATA_VERSION_FEATURE)
+        .filter(|feature| feature.name == METADATA_VERSION_FEATURE)
     {
         if release_version.is_some() {
             return Err(
@@ -201,14 +214,15 @@ pub(super) fn resolve_format_features(
     // Every name is checked before any level, as `calculateEffectiveFeatureLevels`
     // does. `metadata.version` is not one of Kafka's `supportedFeatures`; the
     // release checks above own it.
-    if let Some((name, _)) = features.iter().find(|(name, _)| {
-        name != METADATA_VERSION_FEATURE && krabka_metadata::feature(name).is_none()
+    if let Some(FeatureLevelRecord { name, .. }) = features.iter().find(|feature| {
+        feature.name != METADATA_VERSION_FEATURE
+            && krabka_metadata::feature(&feature.name).is_none()
     }) {
         return Err(unsupported_feature(name));
     }
 
     let mut overrides: BTreeMap<String, i16> = BTreeMap::new();
-    for (name, level) in features {
+    for FeatureLevelRecord { name, level } in features {
         // KIP-853 persists kraft.version as a raft control record, never as a
         // FeatureLevelRecord. Its mode-specific validation happens separately.
         if name == KRAFT_VERSION_FEATURE {
@@ -243,7 +257,10 @@ pub(super) fn resolve_format_features(
         .collect();
     krabka_metadata::validate_feature_dependencies(&resolved)?;
 
-    Ok((bootstrap_mv, overrides))
+    Ok(ResolvedFeatures {
+        metadata_version: bootstrap_mv,
+        overrides,
+    })
 }
 
 #[cfg(test)]
@@ -254,6 +271,14 @@ mod tests {
     /// `unstable.feature.versions.enable` at Kafka's default.
     const STRICT: UnstableFeatureVersions = UnstableFeatureVersions::Disabled;
 
+    /// A `--feature` spec.
+    fn spec(name: &str, level: i16) -> FeatureLevelRecord {
+        FeatureLevelRecord {
+            name: name.to_owned(),
+            level,
+        }
+    }
+
     /// A level equal to the supported minimum is in range. Every other case
     /// sits strictly inside the range or well outside it, so relaxing the
     /// guard from `<` to `<=` -- which rejects the minimum itself -- changed
@@ -261,8 +286,8 @@ mod tests {
     #[test]
     fn resolve_features_accepts_a_level_at_the_supported_minimum() {
         // group.version supports 0..=1; metadata.version 7..=25.
-        check!(resolve_format_features(None, &[("group.version".into(), 0)], STRICT).is_ok());
-        check!(resolve_format_features(None, &[("metadata.version".into(), 7)], STRICT).is_ok());
+        check!(resolve_format_features(None, &[spec("group.version", 0)], STRICT).is_ok());
+        check!(resolve_format_features(None, &[spec("metadata.version", 7)], STRICT).is_ok());
     }
 
     #[test]
@@ -312,11 +337,10 @@ mod tests {
     #[test]
     fn parse_feature_spec_happy_path() {
         assert2::assert!(
-            parse_feature_spec("group.version=1").unwrap() == ("group.version".to_string(), 1)
+            parse_feature_spec("group.version=1").unwrap() == spec("group.version", 1)
         );
         assert2::assert!(
-            parse_feature_spec("metadata.version=20").unwrap()
-                == ("metadata.version".to_string(), 20)
+            parse_feature_spec("metadata.version=20").unwrap() == spec("metadata.version", 20)
         );
     }
 
@@ -337,15 +361,20 @@ mod tests {
         // No --release-version, no metadata.version override → bootstrap at
         // 4.3-IV0, not at trunk's unstable levels; an explicit non-metadata
         // feature becomes an override.
-        let (mv, ov) =
-            resolve_format_features(None, &[("group.version".into(), 1)], STRICT).expect("resolve");
+        let ResolvedFeatures {
+            metadata_version: mv,
+            overrides: ov,
+        } = resolve_format_features(None, &[spec("group.version", 1)], STRICT).expect("resolve");
         assert2::assert!(mv == LATEST_PRODUCTION_METADATA_VERSION);
         assert2::assert!(ov.get("group.version") == Some(&1));
     }
 
     #[test]
     fn resolve_features_metadata_version_feature_sets_bootstrap_mv() {
-        let (mv, ov) = resolve_format_features(None, &[("metadata.version".into(), 20)], STRICT)
+        let ResolvedFeatures {
+            metadata_version: mv,
+            overrides: ov,
+        } = resolve_format_features(None, &[spec("metadata.version", 20)], STRICT)
             .expect("resolve");
         assert2::assert!(mv == 20);
         assert2::assert!(ov.get("metadata.version") == Some(&20));
@@ -353,7 +382,10 @@ mod tests {
 
     #[test]
     fn resolve_features_release_version_sets_bootstrap_mv() {
-        let (mv, ov) = resolve_format_features(Some("4.0-IV0"), &[], STRICT).expect("resolve");
+        let ResolvedFeatures {
+            metadata_version: mv,
+            overrides: ov,
+        } = resolve_format_features(Some("4.0-IV0"), &[], STRICT).expect("resolve");
         assert2::assert!(mv == 22);
         assert2::assert!(ov.is_empty());
     }
@@ -361,12 +393,11 @@ mod tests {
     #[test]
     fn resolve_features_release_and_feature_combine() {
         // --release-version sets the base; a non-metadata --feature overrides it.
-        let (mv, ov) = resolve_format_features(
-            Some("4.0-IV0"),
-            &[("transaction.version".into(), 2)],
-            STRICT,
-        )
-        .expect("resolve");
+        let ResolvedFeatures {
+            metadata_version: mv,
+            overrides: ov,
+        } = resolve_format_features(Some("4.0-IV0"), &[spec("transaction.version", 2)], STRICT)
+            .expect("resolve");
         assert2::assert!(mv == 22);
         assert2::assert!(ov.get("transaction.version") == Some(&2));
     }
@@ -460,8 +491,8 @@ mod tests {
                 "No feature:group.version with feature level 5",
             ),
         ] {
-            let err = resolve_format_features(None, &[(feature.0.into(), feature.1)], STRICT)
-                .unwrap_err();
+            let err =
+                resolve_format_features(None, &[spec(feature.0, feature.1)], STRICT).unwrap_err();
             assert2::assert!(err == expected, "{feature:?}");
         }
     }
@@ -473,9 +504,7 @@ mod tests {
             ("metadata.version", 99), // metadata.version supports 7..=25
             ("metadata.version", 1),
         ] {
-            assert2::assert!(
-                resolve_format_features(None, &[(name.into(), level)], STRICT).is_err()
-            );
+            assert2::assert!(resolve_format_features(None, &[spec(name, level)], STRICT).is_err());
         }
     }
 
@@ -483,7 +512,13 @@ mod tests {
     /// through the whole feature resolution, not only the release lookup.
     #[test]
     fn a_three_segment_release_version_formats_at_its_release() {
-        check!(resolve_format_features(Some("4.3.1"), &[], STRICT) == Ok((30, BTreeMap::new())));
+        check!(
+            resolve_format_features(Some("4.3.1"), &[], STRICT)
+                == Ok(ResolvedFeatures {
+                    metadata_version: 30,
+                    overrides: BTreeMap::new(),
+                })
+        );
     }
 
     /// Every rejection `kafka-storage format` makes about `--feature` and
@@ -493,15 +528,16 @@ mod tests {
     /// every level.
     #[test]
     fn feature_errors_are_kafkas_formatter_errors() {
-        type Case<'a> = (
-            &'a str,
-            Option<&'a str>,
-            Vec<(String, i16)>,
-            UnstableFeatureVersions,
-            String,
-        );
+        /// What it is, `--release-version`, the `--feature` flags, whether
+        /// unstable versions are enabled, and the expected error.
+        struct Case<'a> {
+            what: &'a str,
+            release: Option<&'a str>,
+            features: Vec<FeatureLevelRecord>,
+            unstable: UnstableFeatureVersions,
+            want: String,
+        }
         let trunk = UnstableFeatureVersions::Enabled;
-        let spec = |name: &str, level| (name.to_owned(), level);
         let mv = |level| spec("metadata.version", level);
         let unsupported = |name: &str| {
             format!("Unsupported feature: {name}. Supported features are: {SUPPORTED_FEATURES}")
@@ -520,147 +556,155 @@ mod tests {
 
         let cases: Vec<Case<'_>> = vec![
             // An unknown name, in both modes. `metadata.version` is not in the list.
-            (
-                "unknown feature",
-                None,
-                vec![spec("bogus.version", 1)],
-                STRICT,
-                unsupported("bogus.version"),
-            ),
-            (
-                "unknown feature, unstable",
-                None,
-                vec![spec("bogus.version", 1)],
-                trunk,
-                unsupported("bogus.version"),
-            ),
+            Case {
+                what: "unknown feature",
+                release: None,
+                features: vec![spec("bogus.version", 1)],
+                unstable: STRICT,
+                want: unsupported("bogus.version"),
+            },
+            Case {
+                what: "unknown feature, unstable",
+                release: None,
+                features: vec![spec("bogus.version", 1)],
+                unstable: trunk,
+                want: unsupported("bogus.version"),
+            },
             // A level the feature does not define.
-            (
-                "group.version above its range",
-                None,
-                vec![spec("group.version", 5)],
-                STRICT,
-                no_feature("group.version", 5),
-            ),
-            (
-                "transaction.version above its range",
-                None,
-                vec![spec("transaction.version", 3)],
-                STRICT,
-                no_feature("transaction.version", 3),
-            ),
-            (
-                "negative level",
-                None,
-                vec![spec("group.version", -1)],
-                STRICT,
-                no_feature("group.version", -1),
-            ),
+            Case {
+                what: "group.version above its range",
+                release: None,
+                features: vec![spec("group.version", 5)],
+                unstable: STRICT,
+                want: no_feature("group.version", 5),
+            },
+            Case {
+                what: "transaction.version above its range",
+                release: None,
+                features: vec![spec("transaction.version", 3)],
+                unstable: STRICT,
+                want: no_feature("transaction.version", 3),
+            },
+            Case {
+                what: "negative level",
+                release: None,
+                features: vec![spec("group.version", -1)],
+                unstable: STRICT,
+                want: no_feature("group.version", -1),
+            },
             // metadata.version is a table of levels, of which 4.3.1 knows 7 to 31.
-            (
-                "below the table",
-                None,
-                vec![mv(6)],
-                STRICT,
-                no_metadata_version(6, 31),
-            ),
-            (
-                "1 is below the table",
-                None,
-                vec![mv(1)],
-                STRICT,
-                no_metadata_version(1, 31),
-            ),
-            (
-                "31 exists and is not stable",
-                None,
-                vec![mv(31)],
-                STRICT,
-                not_stable("4.4-IV0"),
-            ),
-            (
-                "32 is past 4.3.1's table",
-                None,
-                vec![mv(32)],
-                STRICT,
-                no_metadata_version(32, 31),
-            ),
-            (
-                "33 is past 4.3.1's table",
-                None,
-                vec![mv(33)],
-                STRICT,
-                no_metadata_version(33, 31),
-            ),
-            (
-                "34 is past 4.3.1's table",
-                None,
-                vec![mv(34)],
-                STRICT,
-                no_metadata_version(34, 31),
-            ),
-            (
-                "99 is past 4.3.1's table",
-                None,
-                vec![mv(99)],
-                STRICT,
-                no_metadata_version(99, 31),
-            ),
+            Case {
+                what: "below the table",
+                release: None,
+                features: vec![mv(6)],
+                unstable: STRICT,
+                want: no_metadata_version(6, 31),
+            },
+            Case {
+                what: "1 is below the table",
+                release: None,
+                features: vec![mv(1)],
+                unstable: STRICT,
+                want: no_metadata_version(1, 31),
+            },
+            Case {
+                what: "31 exists and is not stable",
+                release: None,
+                features: vec![mv(31)],
+                unstable: STRICT,
+                want: not_stable("4.4-IV0"),
+            },
+            Case {
+                what: "32 is past 4.3.1's table",
+                release: None,
+                features: vec![mv(32)],
+                unstable: STRICT,
+                want: no_metadata_version(32, 31),
+            },
+            Case {
+                what: "33 is past 4.3.1's table",
+                release: None,
+                features: vec![mv(33)],
+                unstable: STRICT,
+                want: no_metadata_version(33, 31),
+            },
+            Case {
+                what: "34 is past 4.3.1's table",
+                release: None,
+                features: vec![mv(34)],
+                unstable: STRICT,
+                want: no_metadata_version(34, 31),
+            },
+            Case {
+                what: "99 is past 4.3.1's table",
+                release: None,
+                features: vec![mv(99)],
+                unstable: STRICT,
+                want: no_metadata_version(99, 31),
+            },
             // Under unstable feature versions the table is the one krabka knows.
-            (
-                "below the table, unstable",
-                None,
-                vec![mv(6)],
-                trunk,
-                no_metadata_version(6, 34),
-            ),
-            (
-                "past the table, unstable",
-                None,
-                vec![mv(35)],
-                trunk,
-                no_metadata_version(35, 34),
-            ),
+            Case {
+                what: "below the table, unstable",
+                release: None,
+                features: vec![mv(6)],
+                unstable: trunk,
+                want: no_metadata_version(6, 34),
+            },
+            Case {
+                what: "past the table, unstable",
+                release: None,
+                features: vec![mv(35)],
+                unstable: trunk,
+                want: no_metadata_version(35, 34),
+            },
             // Order: the release first, then names, then levels.
-            (
-                "the release string outranks a bad feature",
-                Some("9.9"),
-                vec![spec("bogus.version", 1)],
-                STRICT,
-                unknown_release("9.9"),
-            ),
-            (
-                "a release and a metadata.version feature",
-                Some("4.0-IV0"),
-                vec![mv(24)],
-                STRICT,
-                ambiguity.to_owned(),
-            ),
-            (
-                "ambiguity outranks a level outside the table",
-                Some("4.0-IV0"),
-                vec![mv(99)],
-                STRICT,
-                ambiguity.to_owned(),
-            ),
-            (
-                "a metadata.version problem outranks an unknown name",
-                None,
-                vec![spec("bogus.version", 1), mv(99)],
-                STRICT,
-                no_metadata_version(99, 31),
-            ),
-            (
-                "an unknown name outranks a bad level",
-                None,
-                vec![spec("group.version", 5), spec("bogus.version", 1)],
-                STRICT,
-                unsupported("bogus.version"),
-            ),
+            Case {
+                what: "the release string outranks a bad feature",
+                release: Some("9.9"),
+                features: vec![spec("bogus.version", 1)],
+                unstable: STRICT,
+                want: unknown_release("9.9"),
+            },
+            Case {
+                what: "a release and a metadata.version feature",
+                release: Some("4.0-IV0"),
+                features: vec![mv(24)],
+                unstable: STRICT,
+                want: ambiguity.to_owned(),
+            },
+            Case {
+                what: "ambiguity outranks a level outside the table",
+                release: Some("4.0-IV0"),
+                features: vec![mv(99)],
+                unstable: STRICT,
+                want: ambiguity.to_owned(),
+            },
+            Case {
+                what: "a metadata.version problem outranks an unknown name",
+                release: None,
+                features: vec![spec("bogus.version", 1), mv(99)],
+                unstable: STRICT,
+                want: no_metadata_version(99, 31),
+            },
+            Case {
+                what: "an unknown name outranks a bad level",
+                release: None,
+                features: vec![spec("group.version", 5), spec("bogus.version", 1)],
+                unstable: STRICT,
+                want: unsupported("bogus.version"),
+            },
         ];
-        for (what, release, features, unstable, want) in cases {
+        for Case {
+            what,
+            release,
+            features,
+            unstable,
+            want,
+        } in cases
+        {
             check!(
-                resolve_format_features(release, &features, unstable).map(|(mv, _)| mv)
+                resolve_format_features(release, &features, unstable)
+                    .map(|resolved| resolved.metadata_version)
                     == Err(want),
                 "{what}"
             );
@@ -673,51 +717,46 @@ mod tests {
     /// `latestTesting` when they are.
     #[test]
     fn unstable_metadata_versions_follow_unstable_feature_versions_enable() {
-        type Case<'a> = (
-            Option<&'a str>,
-            Vec<(String, i16)>,
-            UnstableFeatureVersions,
-            Result<i16, String>,
-        );
+        /// `--release-version`, the `--feature` flags, whether unstable versions
+        /// are enabled, and the expected `metadata.version` or error.
+        struct Case<'a> {
+            release: Option<&'a str>,
+            features: Vec<FeatureLevelRecord>,
+            unstable: UnstableFeatureVersions,
+            want: Result<i16, String>,
+        }
         let trunk = UnstableFeatureVersions::Enabled;
-        let mv = |level| vec![("metadata.version".to_string(), level)];
+        let mv = |level| vec![spec("metadata.version", level)];
         let cases: Vec<Case<'_>> = vec![
-            (None, vec![], STRICT, Ok(30)),
-            (None, vec![], trunk, Ok(34)),
-            (Some("4.4"), vec![], STRICT, Err(unknown_release("4.4"))),
-            (Some("4.4-IV0"), vec![], trunk, Ok(31)),
-            (Some("4.4"), vec![], trunk, Ok(33)),
-            (Some("4.5-IV0"), vec![], trunk, Ok(34)),
-            (Some("4.5"), vec![], trunk, Ok(34)),
-            (Some("4.5-IV0"), vec![], STRICT, Err(unknown_release("4.5-IV0"))),
-            (
-                None,
-                mv(31),
-                STRICT,
-                Err("metadata.version 4.4-IV0 is not yet stable.".to_owned()),
-            ),
+            Case { release: None, features: vec![], unstable: STRICT, want: Ok(30) },
+            Case { release: None, features: vec![], unstable: trunk, want: Ok(34) },
+            Case { release: Some("4.4"), features: vec![], unstable: STRICT, want: Err(unknown_release("4.4")) },
+            Case { release: Some("4.4-IV0"), features: vec![], unstable: trunk, want: Ok(31) },
+            Case { release: Some("4.4"), features: vec![], unstable: trunk, want: Ok(33) },
+            Case { release: Some("4.5-IV0"), features: vec![], unstable: trunk, want: Ok(34) },
+            Case { release: Some("4.5"), features: vec![], unstable: trunk, want: Ok(34) },
+            Case { release: Some("4.5-IV0"), features: vec![], unstable: STRICT, want: Err(unknown_release("4.5-IV0")) },
+            Case { release: None, features: mv(31), unstable: STRICT, want: Err("metadata.version 4.4-IV0 is not yet stable.".to_owned()) },
             // 4.3.1's table ends at 4.4-IV0, so the trunk levels do not exist.
-            (
-                None,
-                mv(33),
-                STRICT,
-                Err("No MetadataVersion with feature level 33. Valid feature levels are from 7 to 31.".to_owned()),
-            ),
-            (
-                None,
-                mv(34),
-                STRICT,
-                Err("No MetadataVersion with feature level 34. Valid feature levels are from 7 to 31.".to_owned()),
-            ),
-            (None, mv(30), STRICT, Ok(30)),
-            (None, mv(31), trunk, Ok(31)),
-            (None, mv(32), trunk, Ok(32)),
-            (None, mv(33), trunk, Ok(33)),
-            (None, mv(34), trunk, Ok(34)),
+            Case { release: None, features: mv(33), unstable: STRICT, want: Err("No MetadataVersion with feature level 33. Valid feature levels are from 7 to 31.".to_owned()) },
+            Case { release: None, features: mv(34), unstable: STRICT, want: Err("No MetadataVersion with feature level 34. Valid feature levels are from 7 to 31.".to_owned()) },
+            Case { release: None, features: mv(30), unstable: STRICT, want: Ok(30) },
+            Case { release: None, features: mv(31), unstable: trunk, want: Ok(31) },
+            Case { release: None, features: mv(32), unstable: trunk, want: Ok(32) },
+            Case { release: None, features: mv(33), unstable: trunk, want: Ok(33) },
+            Case { release: None, features: mv(34), unstable: trunk, want: Ok(34) },
         ];
-        for (release, features, unstable, want) in cases {
+        for Case {
+            release,
+            features,
+            unstable,
+            want,
+        } in cases
+        {
             check!(
-                resolve_format_features(release, &features, unstable).map(|(mv, _)| mv) == want,
+                resolve_format_features(release, &features, unstable)
+                    .map(|resolved| resolved.metadata_version)
+                    == want,
                 "{release:?} {features:?} {unstable:?}"
             );
         }
@@ -729,36 +768,86 @@ mod tests {
     /// seeds it as trunk's default, from the registry's `default_level`.
     #[test]
     fn share_version_two_is_trunks_level() {
-        // (release, features, unstable, the seeded share.version or the error)
-        type Case<'a> = (
-            Option<&'a str>,
-            Vec<(String, i16)>,
-            UnstableFeatureVersions,
-            Result<Option<i16>, String>,
-        );
+        /// `--release-version`, the `--feature` flags, whether unstable versions
+        /// are enabled, and the seeded `share.version` or the error.
+        struct Case<'a> {
+            release: Option<&'a str>,
+            features: Vec<FeatureLevelRecord>,
+            unstable: UnstableFeatureVersions,
+            want: Result<Option<i16>, String>,
+        }
         let trunk = UnstableFeatureVersions::Enabled;
-        let share = |level| vec![("share.version".to_string(), level)];
+        let share = |level| vec![spec("share.version", level)];
         let cases: Vec<Case<'_>> = vec![
-            (None, vec![], STRICT, Ok(Some(1))),
-            (None, share(1), STRICT, Ok(Some(1))),
-            (
-                None,
-                share(2),
-                STRICT,
-                Err("No feature:share.version with feature level 2".to_owned()),
-            ),
-            (None, share(2), trunk, Ok(Some(2))),
-            (None, share(1), trunk, Ok(Some(1))),
+            Case {
+                release: None,
+                features: vec![],
+                unstable: STRICT,
+                want: Ok(Some(1)),
+            },
+            Case {
+                release: None,
+                features: share(1),
+                unstable: STRICT,
+                want: Ok(Some(1)),
+            },
+            Case {
+                release: None,
+                features: share(2),
+                unstable: STRICT,
+                want: Err("No feature:share.version with feature level 2".to_owned()),
+            },
+            Case {
+                release: None,
+                features: share(2),
+                unstable: trunk,
+                want: Ok(Some(2)),
+            },
+            Case {
+                release: None,
+                features: share(1),
+                unstable: trunk,
+                want: Ok(Some(1)),
+            },
             // trunk's default at `4.4-IV0` and above
-            (None, vec![], trunk, Ok(Some(2))),
-            (Some("4.4-IV0"), vec![], trunk, Ok(Some(2))),
+            Case {
+                release: None,
+                features: vec![],
+                unstable: trunk,
+                want: Ok(Some(2)),
+            },
+            Case {
+                release: Some("4.4-IV0"),
+                features: vec![],
+                unstable: trunk,
+                want: Ok(Some(2)),
+            },
             // below `4.4-IV0` the release default is 1, and 0 below `4.2-IV0`
-            (Some("4.3"), vec![], trunk, Ok(Some(1))),
-            (Some("4.1"), vec![], trunk, Ok(None)),
+            Case {
+                release: Some("4.3"),
+                features: vec![],
+                unstable: trunk,
+                want: Ok(Some(1)),
+            },
+            Case {
+                release: Some("4.1"),
+                features: vec![],
+                unstable: trunk,
+                want: Ok(None),
+            },
         ];
-        for (release, features, unstable, want) in cases {
+        for Case {
+            release,
+            features,
+            unstable,
+            want,
+        } in cases
+        {
             let seeded = resolve_format_features(release, &features, unstable).map(
-                |(bootstrap_mv, overrides)| {
+                |ResolvedFeatures {
+                     metadata_version: bootstrap_mv,
+                     overrides,
+                 }| {
                     krabka_metadata::bootstrap_feature_records_with_overrides(
                         bootstrap_mv,
                         &overrides,
@@ -785,12 +874,12 @@ mod tests {
     /// `Feature.fromFeatureLevel`'s refusal.
     #[test]
     fn krabka_version_bootstraps_at_level_zero_unless_overridden() {
-        // (case, --feature flags, the seeded records or the error)
-        type Case<'a> = (
-            &'a str,
-            Vec<(String, i16)>,
-            Result<Vec<MetadataRecord>, String>,
-        );
+        /// What it is, the `--feature` flags, and the seeded records or the error.
+        struct Case<'a> {
+            what: &'a str,
+            features: Vec<FeatureLevelRecord>,
+            want: Result<Vec<MetadataRecord>, String>,
+        }
         let feature = |name: &str, level| {
             MetadataRecord::V1FeatureLevel(krabka_metadata::FeatureLevelRecord {
                 name: name.into(),
@@ -811,37 +900,52 @@ mod tests {
             records.push(feature("krabka.version", level));
             records
         };
-        let krabka = |level| vec![("krabka.version".to_owned(), level)];
-        let cases: [Case<'_>; 4] = [
-            ("no override", vec![], Ok(release_defaults.clone())),
-            ("override to 1", krabka(1), Ok(with_krabka(1))),
-            ("override to 0", krabka(0), Ok(release_defaults.clone())),
-            (
-                "override past the range",
-                krabka(2),
-                Err("No feature:krabka.version with feature level 2".to_owned()),
-            ),
+        let krabka = |level| vec![spec("krabka.version", level)];
+        let cases = [
+            Case {
+                what: "no override",
+                features: vec![],
+                want: Ok(release_defaults.clone()),
+            },
+            Case {
+                what: "override to 1",
+                features: krabka(1),
+                want: Ok(with_krabka(1)),
+            },
+            Case {
+                what: "override to 0",
+                features: krabka(0),
+                want: Ok(release_defaults.clone()),
+            },
+            Case {
+                what: "override past the range",
+                features: krabka(2),
+                want: Err("No feature:krabka.version with feature level 2".to_owned()),
+            },
         ];
         let actual: Vec<_> = cases
             .iter()
-            .map(|(case, features, _)| {
+            .map(|Case { what, features, .. }| {
                 let seeded = resolve_format_features(None, features, STRICT).map(
-                    |(bootstrap_mv, overrides)| {
+                    |ResolvedFeatures {
+                         metadata_version: bootstrap_mv,
+                         overrides,
+                     }| {
                         krabka_metadata::bootstrap_feature_records_with_overrides(
                             bootstrap_mv,
                             &overrides,
                         )
                     },
                 );
-                (*case, seeded)
+                (*what, seeded)
             })
             .collect();
         let expected: Vec<_> = cases
             .into_iter()
-            .map(|(case, _, want)| (case, want))
+            .map(|Case { what, want, .. }| (what, want))
             .collect();
         check!(actual == expected);
-        check!(parse_feature_spec("krabka.version=0") == Ok(("krabka.version".to_owned(), 0)));
+        check!(parse_feature_spec("krabka.version=0") == Ok(spec("krabka.version", 0)));
     }
 
     #[test]

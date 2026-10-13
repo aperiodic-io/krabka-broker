@@ -107,13 +107,15 @@ impl AssignmentHandle for KafkaAssignmentHandle {
     }
 }
 
-pub(super) fn metadata_event_channel(
-    capacity: MetadataEventQueueCapacity,
-) -> (
-    mpsc::Sender<MetadataEventRecord>,
-    mpsc::Receiver<MetadataEventRecord>,
-) {
-    mpsc::channel(capacity.capacity())
+/// Both ends of a metadata event queue.
+pub(super) struct MetadataEventChannel {
+    pub sender: mpsc::Sender<MetadataEventRecord>,
+    pub receiver: mpsc::Receiver<MetadataEventRecord>,
+}
+
+pub(super) fn metadata_event_channel(capacity: MetadataEventQueueCapacity) -> MetadataEventChannel {
+    let (sender, receiver) = mpsc::channel(capacity.capacity());
+    MetadataEventChannel { sender, receiver }
 }
 
 async fn connect_with_retry<T, E, F, Fut>(
@@ -323,7 +325,10 @@ mod tests {
 
     #[test]
     fn metadata_event_channel_uses_configured_capacity() {
-        let (tx, _rx) = metadata_event_channel(MetadataEventQueueCapacity::new(2048).unwrap());
+        let MetadataEventChannel {
+            sender: tx,
+            receiver: _rx,
+        } = metadata_event_channel(MetadataEventQueueCapacity::new(2048).unwrap());
         check!(tx.max_capacity() == 2048);
     }
 

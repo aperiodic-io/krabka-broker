@@ -35,12 +35,12 @@ pub(crate) use self::{
 };
 pub use self::{
     request::{
-        PeerRequest, decode_begin, decode_end, decode_fetch, decode_fetch_snapshot, decode_vote,
-        fetch_replica_id,
+        PeerRequest, PreferredCandidate, decode_begin, decode_end, decode_fetch,
+        decode_fetch_snapshot, decode_vote, fetch_replica_id,
     },
     response::{
-        FetchAnswer, FetchSnapshotPartition, PeerResponse, QuorumLeader,
-        encode_begin_quorum_epoch_response, encode_end_quorum_epoch_response,
+        FetchAnswer, FetchSnapshotPartition, LeaderEndpoint, PeerResponse, QuorumLeader,
+        SnapshotChunk, encode_begin_quorum_epoch_response, encode_end_quorum_epoch_response,
         encode_fetch_snapshot_answer, encode_fetch_top_level_error, encode_vote_response,
     },
 };

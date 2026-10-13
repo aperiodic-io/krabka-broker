@@ -84,6 +84,12 @@ async fn format(node: &Node, quorum: &[&str]) -> PathBuf {
     log_dir
 }
 
+/// A node that finished starting, and the directory that backs it.
+struct StartedNode {
+    handle: BrokerHandle,
+    dir: TempDir,
+}
+
 /// Starts `node` with `roles` on its formatted `log_dir`, naming the quorum
 /// through `bootstrap` alone, and fails the test when it does not finish
 /// starting.
@@ -92,7 +98,7 @@ async fn start(
     roles: Vec<NodeRole>,
     log_dir: &Path,
     bootstrap: &[SocketAddr],
-) -> (BrokerHandle, TempDir) {
+) -> StartedNode {
     let meta = krabka_broker::bootstrap::initialize_log_dirs(
         log_dir,
         &[log_dir.to_path_buf()],
@@ -119,12 +125,20 @@ async fn start(
     .await
     .unwrap_or_else(|_| panic!("node {} did not finish starting in {DEADLINE:?}", node.id))
     .unwrap_or_else(|error| panic!("node {} failed to start: {error}", node.id));
-    (handle, node.dir)
+    StartedNode {
+        handle,
+        dir: node.dir,
+    }
 }
 
 /// The quorum as `kafka-metadata-quorum describe --status` reads it through a
 /// broker: the leader id, the voter ids and the observer ids.
-type Described = (i32, BTreeSet<i32>, BTreeSet<i32>);
+#[derive(Debug, PartialEq)]
+struct Described {
+    leader_id: i32,
+    voters: BTreeSet<i32>,
+    observers: BTreeSet<i32>,
+}
 
 async fn describe(broker: SocketAddr) -> Result<Described, String> {
     let mut admin = AdminClient::connect(&[broker.to_string()])
@@ -137,22 +151,22 @@ async fn describe(broker: SocketAddr) -> Result<Described, String> {
     let ids = |replicas: &[krabka_client_admin::QuorumReplica]| {
         replicas.iter().map(|replica| replica.node_id).collect()
     };
-    Ok((
-        quorum.leader_id,
-        ids(&quorum.voters),
-        ids(&quorum.observers),
-    ))
+    Ok(Described {
+        leader_id: quorum.leader_id,
+        voters: ids(&quorum.voters),
+        observers: ids(&quorum.observers),
+    })
 }
 
 /// Waits until `DescribeQuorum` through `broker` names `leader`, exactly the
 /// `voters` and exactly the `observers`, as the system test's
 /// `check_describe_quorum_output` does.
 async fn wait_for_quorum(broker: SocketAddr, leader: i32, voters: &[i32], observers: &[i32]) {
-    let expected: Described = (
-        leader,
-        voters.iter().copied().collect(),
-        observers.iter().copied().collect(),
-    );
+    let expected = Described {
+        leader_id: leader,
+        voters: voters.iter().copied().collect(),
+        observers: observers.iter().copied().collect(),
+    };
     let deadline = Instant::now() + DEADLINE;
     loop {
         let described = describe(broker).await;
@@ -236,7 +250,10 @@ async fn brokers_and_controllers_find_a_standalone_quorum_through_bootstrap_serv
         &listener,
     ])
     .await;
-    let (first, first_dir) = start(first, vec![NodeRole::Controller], &log_dir, &bootstrap).await;
+    let StartedNode {
+        handle: first,
+        dir: first_dir,
+    } = start(first, vec![NodeRole::Controller], &log_dir, &bootstrap).await;
     first.wait_until_controller_leader().await;
     let first_directory = first
         .voter_directory_id_for_test(NodeId(3001))
@@ -251,13 +268,15 @@ async fn brokers_and_controllers_find_a_standalone_quorum_through_bootstrap_serv
         brokers.push(start(broker, vec![NodeRole::Broker], &log_dir, &bootstrap).await);
     }
     first.wait_until_brokers_registered(2).await;
-    let through = brokers[0].0.listen_addr();
+    let through = brokers[0].handle.listen_addr();
     wait_for_quorum(through, 3001, &[3001], &[1, 2]).await;
 
     // A controller formatted to join no initial quorum observes it.
     let log_dir = format(&second, &["--no-initial-controllers"]).await;
-    let (second, second_dir) =
-        start(second, vec![NodeRole::Controller], &log_dir, &bootstrap).await;
+    let StartedNode {
+        handle: second,
+        dir: second_dir,
+    } = start(second, vec![NodeRole::Controller], &log_dir, &bootstrap).await;
     wait_for_quorum(through, 3001, &[3001], &[1, 2, 3002]).await;
 
     // `kafka-metadata-quorum add-controller` sends `AddRaftVoter` for the new
@@ -309,7 +328,11 @@ async fn brokers_and_controllers_find_a_standalone_quorum_through_bootstrap_serv
     let fenced = second.fenced_broker_ids_for_test();
     assert!(fenced.is_empty(), "fenced under the new leader: {fenced:?}");
 
-    for (broker, _dir) in brokers {
+    for StartedNode {
+        handle: broker,
+        dir: _dir,
+    } in brokers
+    {
         broker.shutdown().await;
     }
     second.shutdown().await;
@@ -343,7 +366,10 @@ async fn a_wildcard_controller_advertises_the_host_name_in_the_voter_set() {
     let reachable: SocketAddr = ([127, 0, 0, 1], controller_addr.port()).into();
     let listener = reachable.to_string();
     let log_dir = format(&node, &["--standalone", "--controller-listener", &listener]).await;
-    let (controller, _dir) = start(node, vec![NodeRole::Controller], &log_dir, &[reachable]).await;
+    let StartedNode {
+        handle: controller,
+        dir: _dir,
+    } = start(node, vec![NodeRole::Controller], &log_dir, &[reachable]).await;
     controller.wait_until_controller_leader().await;
 
     let host_name = hostname::get()

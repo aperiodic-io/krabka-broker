@@ -104,14 +104,14 @@ pub(super) fn validate_offset_index(
     require_complete_entries(key, bytes, OFFSET_INDEX_ENTRY_LEN)?;
     let entries = parse_offset_index(bytes)?;
     let max_relative = index_frontier(key, OFFSET_INDEX_ENTRY_LEN, base_offset, end_offset)?;
-    let mut previous: Option<(u32, u32)> = None;
+    let mut previous = None;
 
     for (entry_index, entry) in entries.iter().enumerate() {
         let relative_offset = entry.relative_offset.get();
         let position = entry.position.get();
 
         if !krabka_verified::restore_offset_index_entry_valid(
-            previous,
+            previous.map(|row: &OffsetIndexEntry| (row.relative_offset.get(), row.position.get())),
             relative_offset,
             position,
             max_relative,
@@ -126,7 +126,7 @@ pub(super) fn validate_offset_index(
             ));
         }
 
-        previous = Some((relative_offset, position));
+        previous = Some(entry);
     }
     Ok(())
 }
@@ -149,14 +149,14 @@ pub(super) fn validate_time_index(
     require_complete_entries(key, bytes, TIME_INDEX_ENTRY_LEN)?;
     let entries = parse_time_index(bytes)?;
     let max_relative = index_frontier(key, TIME_INDEX_ENTRY_LEN, base_offset, end_offset)?;
-    let mut previous: Option<(i64, u32)> = None;
+    let mut previous = None;
 
     for (entry_index, entry) in entries.iter().enumerate() {
         let timestamp = entry.timestamp.get();
         let relative_offset = entry.relative_offset.get();
 
         if !krabka_verified::restore_time_index_entry_valid(
-            previous,
+            previous.map(|row: &TimeIndexEntry| (row.timestamp.get(), row.relative_offset.get())),
             timestamp,
             relative_offset,
             max_relative,
@@ -170,7 +170,7 @@ pub(super) fn validate_time_index(
             ));
         }
 
-        previous = Some((timestamp, relative_offset));
+        previous = Some(entry);
     }
     Ok(())
 }

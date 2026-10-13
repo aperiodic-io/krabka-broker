@@ -169,19 +169,34 @@ pub(super) struct LivenessStartup {
     pub(super) initial_unfence: tokio::sync::watch::Receiver<InitialUnfence>,
 }
 
+/// The two places the liveness subsystem reports to: the metric families, and
+/// the audit log that a bypassed background unclean recovery writes its
+/// evidence to.
+#[derive(Clone, Copy)]
+pub(super) struct LivenessReporting<'a> {
+    pub(super) metrics: &'a BrokerMetrics,
+    pub(super) audit_log: &'a Arc<krabka_audit::AuditLog>,
+}
+
+/// The log-dir registries the liveness subsystem reads: health, identity, and
+/// the cordoned set.
+#[derive(Clone, Copy)]
+pub(super) struct LivenessLogDirs<'a> {
+    pub(super) log_dir_status: &'a LogDirRegistry,
+    pub(super) log_dir_ids: &'a LogDirIds,
+    pub(super) cordoned_log_dirs: &'a CordonedLogDirs,
+}
+
 pub(super) fn start_liveness_services(
     config: &BrokerConfig,
     controller: &Arc<dyn MetadataSource>,
     inter_broker_client: &Arc<InterBrokerClient>,
     listener_protocol: krabka_security::ListenerProtocol,
-    // The two places this subsystem reports to, paired the way `log_dirs`
-    // pairs the two log-dir registries: the metric families, and the audit log
-    // that a bypassed background unclean recovery writes its evidence to.
-    observability: (&BrokerMetrics, &Arc<krabka_audit::AuditLog>),
+    observability: LivenessReporting<'_>,
     shutdown: &CancellationToken,
-    log_dirs: (&LogDirRegistry, &LogDirIds, &CordonedLogDirs),
+    log_dirs: LivenessLogDirs<'_>,
 ) -> LivenessStartup {
-    let (metrics, audit_log) = observability;
+    let LivenessReporting { metrics, audit_log } = observability;
     let liveness = Arc::new(ControllerLivenessState::new(config.heartbeat_timeout));
     let (want_shutdown, want_shutdown_rx) = tokio::sync::watch::channel(false);
     let (should_shutdown, _) = tokio::sync::watch::channel(false);
@@ -204,11 +219,11 @@ pub(super) fn start_liveness_services(
         want_shutdown: want_shutdown_rx,
         should_shutdown: Arc::clone(&should_shutdown),
         unfenced,
-        log_dir_status: log_dirs.0.clone(),
-        log_dir_ids: log_dirs.1.clone(),
+        log_dir_status: log_dirs.log_dir_status.clone(),
+        log_dir_ids: log_dirs.log_dir_ids.clone(),
         all_log_dirs: config.all_log_dirs(),
         supervisor_shutdown: shutdown.clone(),
-        cordoned_log_dirs: log_dirs.2.clone(),
+        cordoned_log_dirs: log_dirs.cordoned_log_dirs.clone(),
     }));
     let unclean_recovery = UncleanRecoveryManager::spawn(
         Arc::clone(controller),
@@ -248,7 +263,7 @@ pub(super) fn start_liveness_services(
         shutdown.child_token(),
     );
     spawn_fatal_fault_watcher(
-        log_dirs.0.watch_metadata_dir_fault(),
+        log_dirs.log_dir_status.watch_metadata_dir_fault(),
         Arc::clone(&should_shutdown),
         shutdown.child_token(),
     );

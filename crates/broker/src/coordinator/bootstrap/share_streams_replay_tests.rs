@@ -2,7 +2,10 @@
 //! streams-group seeds from their persisted records.
 
 use {
-    super::replay::{Replayed, apply_record, apply_tombstone},
+    super::{
+        replay::{Replayed, apply_record, apply_tombstone},
+        test_support::LogRecord,
+    },
     crate::coordinator::{GroupCoordinator, persistence},
     assert2::{assert, check},
     krabka_protocol::records::RecordBatch,
@@ -36,8 +39,8 @@ async fn share_group_records_replay_into_seed() {
     let tid = Uuid([9; 16]);
     // Drive the same path bootstrap takes: parse_key on the encoded key,
     // then apply_record on the value bytes.
-    let recs: Vec<(bytes::Bytes, bytes::Bytes)> = vec![
-        (
+    let recs: Vec<LogRecord> = vec![
+        LogRecord::put(
             sp::encode_share_key(&sp::ShareGroupKey::GroupMetadata {
                 group_id: "sg".into(),
             })
@@ -48,7 +51,7 @@ async fn share_group_records_replay_into_seed() {
             }
             .encode(),
         ),
-        (
+        LogRecord::put(
             sp::encode_share_key(&sp::ShareGroupKey::MemberMetadata {
                 group_id: "sg".into(),
                 member_id: "m1".into(),
@@ -62,7 +65,7 @@ async fn share_group_records_replay_into_seed() {
             }
             .encode(),
         ),
-        (
+        LogRecord::put(
             sp::encode_share_key(&sp::ShareGroupKey::CurrentMemberAssignment {
                 group_id: "sg".into(),
                 member_id: "m1".into(),
@@ -76,7 +79,7 @@ async fn share_group_records_replay_into_seed() {
             .encode(),
         ),
     ];
-    super::test_support::replay_values(&coord, recs);
+    super::test_support::replay_stream(&coord, recs);
 
     // Type locked + seed reconstructed.
     assert!(coord.group_type("sg") == Some(crate::coordinator::unified::GroupType::Share));
@@ -118,8 +121,8 @@ async fn streams_group_records_replay_into_seed() {
 
     // Drive the same path bootstrap takes: parse_key on the encoded key,
     // then apply_record on the value bytes.
-    let recs: Vec<(bytes::Bytes, bytes::Bytes)> = vec![
-        (
+    let recs: Vec<LogRecord> = vec![
+        LogRecord::put(
             sp::encode_streams_key(&sp::StreamsGroupKey::GroupMetadata {
                 group_id: "stg".into(),
             })
@@ -141,7 +144,7 @@ async fn streams_group_records_replay_into_seed() {
             }
             .encode(),
         ),
-        (
+        LogRecord::put(
             sp::encode_streams_key(&sp::StreamsGroupKey::MemberMetadata {
                 group_id: "stg".into(),
                 member_id: "m1".into(),
@@ -149,7 +152,7 @@ async fn streams_group_records_replay_into_seed() {
             .unwrap(),
             crate::coordinator::unified::test_support::plain_streams_member(2).encode(),
         ),
-        (
+        LogRecord::put(
             sp::encode_streams_key(&sp::StreamsGroupKey::CurrentMemberAssignment {
                 group_id: "stg".into(),
                 member_id: "m1".into(),
@@ -162,7 +165,7 @@ async fn streams_group_records_replay_into_seed() {
             .encode(),
         ),
     ];
-    super::test_support::replay_values(&coord, recs);
+    super::test_support::replay_stream(&coord, recs);
 
     // Type locked to Streams + seed reconstructed.
     assert!(coord.group_type("stg") == Some(crate::coordinator::unified::GroupType::Streams));

@@ -178,7 +178,7 @@ fn parse_iso8601(text: &str) -> Option<Duration> {
     let mut components = 0_usize;
     let mut rest = days_part;
     if !rest.is_empty() {
-        let (value, tail) = take_signed_number(rest, 'd')?;
+        let SignedPrefix { value, tail } = take_signed_number(rest, 'd')?;
         total_nanos = total_nanos.checked_add(value.checked_mul(86_400_000_000_000)?)?;
         components += 1;
         rest = tail;
@@ -193,7 +193,7 @@ fn parse_iso8601(text: &str) -> Option<Duration> {
             if rest.is_empty() || !rest.contains(unit) {
                 continue;
             }
-            let (value, tail) = take_signed_number(rest, unit)?;
+            let SignedPrefix { value, tail } = take_signed_number(rest, unit)?;
             total_nanos = total_nanos.checked_add(value.checked_mul(unit_nanos)?)?;
             time_components += 1;
             rest = tail;
@@ -219,11 +219,21 @@ fn parse_iso8601(text: &str) -> Option<Duration> {
     Some(Duration::new(secs, subsec))
 }
 
+/// A signed integer taken off the front of a duration text, and the rest of
+/// the text.
+struct SignedPrefix<'a> {
+    value: i128,
+    tail: &'a str,
+}
+
 /// Splits `text` at `unit`, returning the signed integer before it and the
 /// remainder after it.
-fn take_signed_number(text: &str, unit: char) -> Option<(i128, &str)> {
+fn take_signed_number(text: &str, unit: char) -> Option<SignedPrefix<'_>> {
     let (number, tail) = text.split_once(unit)?;
-    Some((parse_signed(number)?, tail))
+    Some(SignedPrefix {
+        value: parse_signed(number)?,
+        tail,
+    })
 }
 
 /// Parses the seconds component, `n` or `n.n`, into nanoseconds.
@@ -607,15 +617,46 @@ mod tests {
     /// `DescribeConfigs` reports the parsed list joined with commas.
     #[test]
     fn rack_aware_assignment_tags_parse_as_kafkas_group_config_does() {
+        /// The tag keys that the value parses to, and the value that
+        /// `DescribeConfigs` reports.
+        struct Parsed {
+            tags: Vec<&'static str>,
+            reported: &'static str,
+        }
+
         const DUPLICATE: &str =
             "streams.rack.aware.assignment.tags must not contain duplicate tag keys.";
         const EMPTY: &str =
             "Configuration 'streams.rack.aware.assignment.tags' values must not be empty.";
         for (value, want) in [
-            ("", Ok((vec![], ""))),
-            ("  ", Ok((vec![], ""))),
-            ("zone", Ok((vec!["zone"], "zone"))),
-            (" zone ,\track ", Ok((vec!["zone", "rack"], "zone,rack"))),
+            (
+                "",
+                Ok(Parsed {
+                    tags: vec![],
+                    reported: "",
+                }),
+            ),
+            (
+                "  ",
+                Ok(Parsed {
+                    tags: vec![],
+                    reported: "",
+                }),
+            ),
+            (
+                "zone",
+                Ok(Parsed {
+                    tags: vec!["zone"],
+                    reported: "zone",
+                }),
+            ),
+            (
+                " zone ,\track ",
+                Ok(Parsed {
+                    tags: vec!["zone", "rack"],
+                    reported: "zone,rack",
+                }),
+            ),
             ("rack,zone,rack", Err(DUPLICATE)),
             ("zone, zone", Err(DUPLICATE)),
             ("zone,,rack", Err(EMPTY)),
@@ -631,7 +672,7 @@ mod tests {
                     (config.rack_aware_assignment_tags, reported)
                 });
             let want = want
-                .map(|(tags, reported): (Vec<&str>, &str)| {
+                .map(|Parsed { tags, reported }| {
                     (
                         tags.into_iter().map(str::to_owned).collect::<Vec<_>>(),
                         reported.to_owned(),

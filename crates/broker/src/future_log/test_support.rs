@@ -180,7 +180,7 @@ pub(super) fn plant_future_log(
     future_logs: &dashmap::DashMap<(String, PartitionIndex), Arc<super::FutureLogState>>,
     target: &Path,
 ) -> PlantedFutureLog {
-    let (path, log) = open_future_log(target);
+    let OpenedFutureLog { path, log } = open_future_log(target);
     let cancel = tokio_util::sync::CancellationToken::new();
     future_logs.insert(
         ("t".into(), PartitionIndex(0)),
@@ -235,9 +235,18 @@ pub(super) fn append_epoch_batch(
 }
 
 /// Open a staged future replica at the same path a real move uses.
-pub(super) fn open_future_log(target: &Path) -> (PathBuf, Arc<Mutex<krabka_log::Log>>) {
+pub(super) fn open_future_log(target: &Path) -> OpenedFutureLog {
     let path = future_partition_dir(target, "t", 0);
     std::fs::create_dir_all(&path).unwrap();
     let log = krabka_log::Log::open(&path, krabka_log::LogConfig::default()).unwrap();
-    (path, Arc::new(Mutex::new(log)))
+    OpenedFutureLog {
+        path,
+        log: Arc::new(Mutex::new(log)),
+    }
+}
+
+/// A staged future replica: where it lives, and its open log.
+pub(super) struct OpenedFutureLog {
+    pub path: PathBuf,
+    pub log: Arc<Mutex<krabka_log::Log>>,
 }

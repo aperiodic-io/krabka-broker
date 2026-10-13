@@ -12,10 +12,55 @@ use {
     uuid::Uuid,
 };
 
+/// A partition, named by its topic id and partition index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PartitionKey {
+    topic_id: Uuid,
+    partition: i32,
+}
+
+impl PartitionKey {
+    fn new(topic_id: Uuid, partition: i32) -> Self {
+        Self {
+            topic_id,
+            partition,
+        }
+    }
+}
+
+/// An indexed range and the object that holds it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndexedRange {
+    /// The key of the object that holds the range.
+    pub object_key: String,
+    /// The range's index entry.
+    pub entry: WalIndexEntry,
+}
+
+/// The part of an object that answers a fetch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchRange {
+    /// The key of the object to read.
+    pub object_key: String,
+    /// The first byte to read.
+    pub byte_start: u64,
+    /// The number of bytes to read.
+    pub byte_len: u64,
+}
+
+/// The object slice that holds one indexed batch.
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ObjectSlice {
+    pub(crate) object_key: String,
+    pub(crate) byte_start: u64,
+    pub(crate) byte_len: u32,
+}
+
 /// In-memory projection of committed `WalFlushRecord`s.
 #[derive(Default)]
 pub struct WalIndexCache {
-    by_topic_partition: HashMap<(Uuid, i32), BTreeMap<i64, (String, WalIndexEntry)>>,
+    by_topic_partition: HashMap<PartitionKey, BTreeMap<i64, IndexedRange>>,
     /// `DeleteRecords` floors, by partition. Records below one of these are
     /// deleted as far as every client is concerned, so the object tier stops
     /// answering for them the moment the trim lands rather than one flush tick
@@ -26,7 +71,7 @@ pub struct WalIndexCache {
     /// leadership move both restore it. The range tombstones alone could not:
     /// a range that straddles the floor, and the newest range that retention
     /// never expires, keep records below the floor in the projection.
-    delete_floors: HashMap<(Uuid, i32), i64>,
+    delete_floors: HashMap<PartitionKey, i64>,
 }
 
 impl WalIndexCache {
@@ -54,19 +99,19 @@ impl WalIndexCache {
 
     fn insert(&mut self, record: &WalFlushRecord, entry: &WalIndexEntry) {
         self.by_topic_partition
-            .entry((entry.topic_id, entry.partition))
+            .entry(PartitionKey::new(entry.topic_id, entry.partition))
             .or_default()
-            .insert(
-                entry.first_offset,
-                (record.object_key.clone(), entry.clone()),
-            );
+            .insert(entry.first_offset, IndexedRange {
+                object_key: record.object_key.clone(),
+                entry: entry.clone(),
+            });
     }
 
     /// Remove one compacted range after its Kafka tombstone is committed.
     pub(crate) fn remove(&mut self, key: WalIndexKey) { self.remove_projected(key); }
 
     fn remove_projected(&mut self, key: WalIndexKey) {
-        let partition = (key.topic_id, key.partition);
+        let partition = PartitionKey::new(key.topic_id, key.partition);
         let empty = self
             .by_topic_partition
             .get_mut(&partition)
@@ -85,11 +130,11 @@ impl WalIndexCache {
     pub(crate) fn keys_for_topic(&self, topic_id: Uuid) -> Vec<WalIndexKey> {
         self.by_topic_partition
             .iter()
-            .filter(|((id, _), _)| *id == topic_id)
-            .flat_map(|((_, partition), entries)| {
+            .filter(|(key, _)| key.topic_id == topic_id)
+            .flat_map(|(key, entries)| {
                 entries.keys().map(|first_offset| WalIndexKey {
                     topic_id,
-                    partition: *partition,
+                    partition: key.partition,
                     first_offset: *first_offset,
                 })
             })
@@ -100,33 +145,33 @@ impl WalIndexCache {
     /// forward, so neither a stale retry nor a replay that delivers an older
     /// record after a newer one can expose records an earlier trim removed.
     pub(crate) fn raise_delete_floor(&mut self, topic_id: Uuid, partition: i32, floor: i64) {
-        let entry = self.delete_floors.entry((topic_id, partition)).or_insert(0);
+        let entry = self
+            .delete_floors
+            .entry(PartitionKey::new(topic_id, partition))
+            .or_insert(0);
         *entry = (*entry).max(floor);
     }
 
     /// Drop one partition's floor after its keyed tombstone is committed.
     pub(crate) fn clear_delete_floor(&mut self, key: WalDeleteFloorKey) {
-        self.delete_floors.remove(&(key.topic_id, key.partition));
+        self.delete_floors
+            .remove(&PartitionKey::new(key.topic_id, key.partition));
     }
 
     /// The partition's `DeleteRecords` floor, or zero when none was set.
     #[must_use]
     pub(crate) fn delete_floor(&self, topic_id: Uuid, partition: i32) -> i64 {
         self.delete_floors
-            .get(&(topic_id, partition))
+            .get(&PartitionKey::new(topic_id, partition))
             .copied()
             .unwrap_or(0)
     }
 
     /// Snapshot indexed ranges in offset order for an exact timestamp scan.
     /// Object reads happen after releasing the projection mutex.
-    pub(crate) fn timestamp_ranges(
-        &self,
-        topic_id: Uuid,
-        partition: i32,
-    ) -> Vec<(String, WalIndexEntry)> {
+    pub(crate) fn timestamp_ranges(&self, topic_id: Uuid, partition: i32) -> Vec<IndexedRange> {
         self.by_topic_partition
-            .get(&(topic_id, partition))
+            .get(&PartitionKey::new(topic_id, partition))
             .map_or_else(Vec::new, |entries| entries.values().cloned().collect())
     }
 
@@ -136,8 +181,8 @@ impl WalIndexCache {
     pub(crate) fn delete_floor_partitions(&self, topic_id: Uuid) -> Vec<i32> {
         self.delete_floors
             .keys()
-            .filter(|(id, _)| *id == topic_id)
-            .map(|(_, partition)| *partition)
+            .filter(|key| key.topic_id == topic_id)
+            .map(|key| key.partition)
             .collect()
     }
 
@@ -154,12 +199,15 @@ impl WalIndexCache {
         partition: i32,
         policy: DisklessRetentionPolicy,
     ) -> Vec<WalIndexKey> {
-        let Some(entries) = self.by_topic_partition.get(&(topic_id, partition)) else {
+        let Some(entries) = self
+            .by_topic_partition
+            .get(&PartitionKey::new(topic_id, partition))
+        else {
             return Vec::new();
         };
         // `BTreeMap` iterates by `first_offset`, which is the oldest-first
         // order the kernel's prefix walk expects.
-        let ranges: Vec<&WalIndexEntry> = entries.values().map(|(_, entry)| entry).collect();
+        let ranges: Vec<&WalIndexEntry> = entries.values().map(|range| &range.entry).collect();
         let max_timestamps: Vec<i64> = ranges.iter().map(|entry| entry.max_timestamp_ms).collect();
         let byte_lens: Vec<u64> = ranges
             .iter()
@@ -179,7 +227,7 @@ impl WalIndexCache {
     pub(crate) fn topic_ids(&self) -> HashSet<Uuid> {
         self.by_topic_partition
             .keys()
-            .map(|(topic_id, _)| *topic_id)
+            .map(|key| key.topic_id)
             .collect()
     }
 
@@ -189,7 +237,7 @@ impl WalIndexCache {
         self.by_topic_partition
             .values()
             .flat_map(BTreeMap::values)
-            .map(|(object_key, _)| object_key.clone())
+            .map(|range| range.object_key.clone())
             .collect()
     }
 
@@ -199,7 +247,7 @@ impl WalIndexCache {
         self.by_topic_partition
             .values()
             .flat_map(BTreeMap::values)
-            .any(|(candidate, _)| candidate == object_key)
+            .any(|range| range.object_key == object_key)
     }
 
     /// Return whether every entry from this flush record is present in the
@@ -208,10 +256,10 @@ impl WalIndexCache {
     pub fn contains_record(&self, record: &WalFlushRecord) -> bool {
         record.entries.iter().all(|entry| {
             self.by_topic_partition
-                .get(&(entry.topic_id, entry.partition))
+                .get(&PartitionKey::new(entry.topic_id, entry.partition))
                 .and_then(|entries| entries.get(&entry.first_offset))
-                .is_some_and(|(object_key, indexed)| {
-                    object_key == &record.object_key && indexed == entry
+                .is_some_and(|indexed| {
+                    indexed.object_key == record.object_key && &indexed.entry == entry
                 })
         })
     }
@@ -222,11 +270,16 @@ impl WalIndexCache {
         topic_id: Uuid,
         partition: i32,
         offset: i64,
-    ) -> Option<(String, u64, u32)> {
-        let entries = self.by_topic_partition.get(&(topic_id, partition))?;
-        let (_, (object_key, entry)) = entries.range(..=offset).next_back()?;
-        (offset <= entry.last_offset)
-            .then(|| (object_key.clone(), entry.byte_start, entry.byte_len))
+    ) -> Option<ObjectSlice> {
+        let entries = self
+            .by_topic_partition
+            .get(&PartitionKey::new(topic_id, partition))?;
+        let (_, IndexedRange { object_key, entry }) = entries.range(..=offset).next_back()?;
+        (offset <= entry.last_offset).then(|| ObjectSlice {
+            object_key: object_key.clone(),
+            byte_start: entry.byte_start,
+            byte_len: entry.byte_len,
+        })
     }
 
     /// Return the contiguous whole-batch range covering `offset`, capped by
@@ -238,15 +291,17 @@ impl WalIndexCache {
         partition: i32,
         offset: i64,
         max_bytes: usize,
-    ) -> Option<(String, u64, u64)> {
+    ) -> Option<FetchRange> {
         if offset < self.delete_floor(topic_id, partition) {
             return None;
         }
-        let entries = self.by_topic_partition.get(&(topic_id, partition))?;
+        let entries = self
+            .by_topic_partition
+            .get(&PartitionKey::new(topic_id, partition))?;
         let indexed: Vec<_> = entries.values().collect();
         let logical: Vec<_> = indexed
             .iter()
-            .map(|(_, entry)| (entry.first_offset, entry.last_offset))
+            .map(|range| (range.entry.first_offset, range.entry.last_offset))
             .collect();
         // Replay supplies this invariant. Fail closed if a truncated or
         // otherwise malformed index violates the proof kernel's preconditions.
@@ -256,11 +311,18 @@ impl WalIndexCache {
             return None;
         }
         let first_index = diskless_logical_range(&logical, offset)?;
-        let (object_key, first) = indexed[first_index];
+        let IndexedRange {
+            object_key,
+            entry: first,
+        } = indexed[first_index];
 
         let mut byte_len = u64::from(first.byte_len);
         let max_bytes = u64::try_from(max_bytes).unwrap_or(u64::MAX);
-        for (next_key, next) in indexed.into_iter().skip(first_index).skip(1) {
+        for IndexedRange {
+            object_key: next_key,
+            entry: next,
+        } in indexed.into_iter().skip(first_index).skip(1)
+        {
             let Some(total) = diskless_span_extension(
                 first.byte_start,
                 byte_len,
@@ -273,17 +335,23 @@ impl WalIndexCache {
             };
             byte_len = total;
         }
-        Some((object_key.clone(), first.byte_start, byte_len))
+        Some(FetchRange {
+            object_key: object_key.clone(),
+            byte_start: first.byte_start,
+            byte_len,
+        })
     }
 
     /// Return the highest flushed offset plus one for the partition.
     #[must_use]
     pub fn flushed_frontier(&self, topic_id: Uuid, partition: i32) -> Option<i64> {
-        let entries = self.by_topic_partition.get(&(topic_id, partition))?;
+        let entries = self
+            .by_topic_partition
+            .get(&PartitionKey::new(topic_id, partition))?;
         entries
             .values()
             .next_back()
-            .and_then(|(_, entry)| entry.last_offset.checked_add(1))
+            .and_then(|range| range.entry.last_offset.checked_add(1))
     }
 
     /// Return the smallest offset object storage still answers for, which is
@@ -292,10 +360,10 @@ impl WalIndexCache {
     pub fn earliest_covered(&self, topic_id: Uuid, partition: i32) -> Option<i64> {
         let floor = self.delete_floor(topic_id, partition);
         self.by_topic_partition
-            .get(&(topic_id, partition))?
+            .get(&PartitionKey::new(topic_id, partition))?
             .values()
             .next()
-            .map(|(_, entry)| entry.first_offset.max(floor))
+            .map(|range| range.entry.first_offset.max(floor))
     }
 }
 
@@ -378,6 +446,14 @@ mod tests {
         }
     }
 
+    fn fetch_range(object_key: &str, byte_start: u64, byte_len: u64) -> FetchRange {
+        FetchRange {
+            object_key: object_key.to_owned(),
+            byte_start,
+            byte_len,
+        }
+    }
+
     #[test]
     fn floor_lookup_returns_covering_object() {
         let mut c = WalIndexCache::default();
@@ -392,8 +468,8 @@ mod tests {
             entries: vec![entry(0, 5, 9)],
         });
         let t = Uuid::from_u128(1);
-        assert!(c.lookup(t, 0, 3).unwrap().0 == "o1");
-        assert!(c.lookup(t, 0, 7).unwrap().0 == "o2");
+        assert!(c.lookup(t, 0, 3).unwrap().object_key == "o1");
+        assert!(c.lookup(t, 0, 7).unwrap().object_key == "o2");
         assert!(c.lookup(t, 0, 20).is_none());
         assert!(c.flushed_frontier(t, 0) == Some(10));
     }
@@ -413,8 +489,8 @@ mod tests {
         });
         let t = Uuid::from_u128(1);
 
-        assert!(c.lookup_fetch_range(t, 0, 0, 5) == Some(("o".into(), 0, 10)));
-        assert!(c.lookup_fetch_range(t, 0, 0, 20) == Some(("o".into(), 0, 20)));
+        assert!(c.lookup_fetch_range(t, 0, 0, 5) == Some(fetch_range("o", 0, 10)));
+        assert!(c.lookup_fetch_range(t, 0, 0, 20) == Some(fetch_range("o", 0, 20)));
     }
 
     #[derive(Clone, Copy)]
@@ -428,15 +504,14 @@ mod tests {
         below_object_floor = { FetchRangeBoundary::BelowObjectFloor },
     )]
     fn fetch_range_obeys_offset_boundaries(boundary: FetchRangeBoundary) {
-        let (entries, offset, expected): (Vec<_>, i64, Option<(String, u64, u64)>) = match boundary
-        {
+        let (entries, offset, expected): (Vec<_>, i64, Option<FetchRange>) = match boundary {
             FetchRangeBoundary::OffsetGap => {
                 let mut first = entry(0, 0, 0);
                 first.byte_len = 10;
                 let mut next = entry(0, 2, 2);
                 next.byte_start = 10;
                 next.byte_len = 10;
-                (vec![first, next], 1, Some(("o".into(), 10, 10)))
+                (vec![first, next], 1, Some(fetch_range("o", 10, 10)))
             }
             FetchRangeBoundary::BelowObjectFloor => (vec![entry(0, 5, 5)], 4, None),
         };
@@ -470,7 +545,7 @@ mod tests {
         });
 
         assert!(
-            c.lookup_fetch_range(Uuid::from_u128(1), 0, 0, 20) == Some(("first".into(), 0, 10))
+            c.lookup_fetch_range(Uuid::from_u128(1), 0, 0, 20) == Some(fetch_range("first", 0, 10))
         );
     }
 
@@ -715,6 +790,14 @@ mod tests {
 
     #[test]
     fn keyed_events_replay_as_latest_value_per_range() {
+        struct Row {
+            what: &'static str,
+            /// The events in partition order.
+            events: &'static [Event],
+            /// The object the range resolves to.
+            resolves_to: Option<&'static str>,
+        }
+
         use Event::{Malformed, Tombstone, Value};
 
         let expected = entry(0, 0, 4);
@@ -724,32 +807,44 @@ mod tests {
             format_version: WalFlushRecord::FORMAT_VERSION,
             entries: vec![entry],
         };
-        // `(what, events in partition order, object the range resolves to)`.
-        let rows: [(&str, &[Event], Option<&str>); 6] = [
-            ("a value is stored", &[Value("a")], Some("a")),
-            (
-                "a later value replaces it",
-                &[Value("a"), Value("b")],
-                Some("b"),
-            ),
-            ("a tombstone removes it", &[Value("a"), Tombstone], None),
-            (
-                "a retried tombstone stays removed",
-                &[Value("a"), Tombstone, Tombstone],
-                None,
-            ),
-            (
-                "a value may follow its range's tombstone",
-                &[Value("a"), Tombstone, Value("b")],
-                Some("b"),
-            ),
-            (
-                "a malformed value removes the old one and exposes nothing",
-                &[Value("a"), Malformed],
-                None,
-            ),
+        let rows: [Row; 6] = [
+            Row {
+                what: "a value is stored",
+                events: &[Value("a")],
+                resolves_to: Some("a"),
+            },
+            Row {
+                what: "a later value replaces it",
+                events: &[Value("a"), Value("b")],
+                resolves_to: Some("b"),
+            },
+            Row {
+                what: "a tombstone removes it",
+                events: &[Value("a"), Tombstone],
+                resolves_to: None,
+            },
+            Row {
+                what: "a retried tombstone stays removed",
+                events: &[Value("a"), Tombstone, Tombstone],
+                resolves_to: None,
+            },
+            Row {
+                what: "a value may follow its range's tombstone",
+                events: &[Value("a"), Tombstone, Value("b")],
+                resolves_to: Some("b"),
+            },
+            Row {
+                what: "a malformed value removes the old one and exposes nothing",
+                events: &[Value("a"), Malformed],
+                resolves_to: None,
+            },
         ];
-        for (what, events, resolves_to) in rows {
+        for Row {
+            what,
+            events,
+            resolves_to,
+        } in rows
+        {
             let mut cache = WalIndexCache::default();
             for event in events {
                 match event {
@@ -763,7 +858,7 @@ mod tests {
             assert!(
                 cache
                     .lookup(Uuid::from_u128(1), 0, 0)
-                    .map(|(object_key, _, _)| object_key)
+                    .map(|slice| slice.object_key)
                     == resolves_to.map(str::to_owned),
                 "{what}"
             );
@@ -784,7 +879,7 @@ mod tests {
         assert!(
             cache
                 .lookup(Uuid::from_u128(1), 0, 5)
-                .map(|(object_key, _, _)| object_key)
+                .map(|slice| slice.object_key)
                 == Some("obj".to_owned())
         );
     }

@@ -12,7 +12,7 @@ use {
         client::create_topic_named,
         discovery::coordinator_lookup_request,
         topics::CreateTopicSetup,
-        transactions::{claim_idempotent_producer, init_producer_request},
+        transactions::{ProducerIdentity, claim_idempotent_producer, init_producer_request},
     },
     assert2::assert,
     krabka_protocol::records::{Attributes, RecordBatch},
@@ -35,7 +35,7 @@ pub(crate) async fn init_producer(p: &support::InProcess) -> (i64, i16) {
 pub(crate) async fn init_transactional_producer(
     p: &support::InProcess,
     transactional_id: &str,
-) -> (i64, i16) {
+) -> ProducerIdentity {
     let coordinator = p
         .client
         .send(coordinator_lookup_request(transactional_id, 1, vec![
@@ -63,7 +63,7 @@ pub(crate) async fn init_transactional_producer(
             .await
             .expect("transactional InitProducerId");
         if init.error_code == 0 {
-            return (init.producer_id, init.producer_epoch);
+            return ProducerIdentity::from_wire((init.producer_id, init.producer_epoch));
         }
         assert!(
             matches!(init.error_code, 15 | 16) && tokio::time::Instant::now() < deadline,

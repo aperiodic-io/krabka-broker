@@ -43,13 +43,20 @@ struct State {
     #[cfg(not(target_os = "wasi"))]
     jobs: VecDeque<Flush>,
     running: bool,
-    error: Option<(io::ErrorKind, String)>,
+    error: Option<FlushError>,
+}
+
+/// The kind and message of the I/O error that failed a flush job.
+#[derive(Debug)]
+struct FlushError {
+    kind: io::ErrorKind,
+    message: String,
 }
 
 impl State {
     fn result(&self) -> io::Result<()> {
-        self.error.as_ref().map_or(Ok(()), |(kind, message)| {
-            Err(io::Error::new(*kind, message.clone()))
+        self.error.as_ref().map_or(Ok(()), |error| {
+            Err(io::Error::new(error.kind, error.message.clone()))
         })
     }
 }
@@ -114,7 +121,10 @@ fn run(shared: &Shared) -> bool {
     let mut state = shared.state.lock().unwrap();
     if let Err(error) = result {
         tracing::error!(%error, "rollover flush failed");
-        state.error = Some((error.kind(), error.to_string()));
+        state.error = Some(FlushError {
+            kind: error.kind(),
+            message: error.to_string(),
+        });
         state.jobs.clear();
     }
     if state.jobs.is_empty() {

@@ -247,7 +247,21 @@ mod tests {
         krabka_security::ListenerProtocol,
     };
 
-    fn marker_response(codes_by_partition: &[(i32, i16)]) -> WriteTxnMarkersResponse {
+    /// The code a marker response answers for one partition.
+    #[derive(Clone, Copy)]
+    struct PartitionAnswer {
+        partition_index: i32,
+        error_code: i16,
+    }
+
+    fn answer(partition_index: i32, error_code: i16) -> PartitionAnswer {
+        PartitionAnswer {
+            partition_index,
+            error_code,
+        }
+    }
+
+    fn marker_response(codes_by_partition: &[PartitionAnswer]) -> WriteTxnMarkersResponse {
         WriteTxnMarkersResponse {
             markers: vec![WritableTxnMarkerResult {
                 producer_id: 7,
@@ -256,7 +270,10 @@ mod tests {
                     partitions: codes_by_partition
                         .iter()
                         .map(
-                            |&(partition_index, error_code)| WritableTxnMarkerPartitionResult {
+                            |&PartitionAnswer {
+                                 partition_index,
+                                 error_code,
+                             }| WritableTxnMarkerPartitionResult {
                                 partition_index,
                                 error_code,
                                 ..Default::default()
@@ -299,46 +316,52 @@ mod tests {
         let cases = [
             (
                 "both acknowledged",
-                marker_response(&[(0, codes::NONE), (1, codes::NONE)]),
+                marker_response(&[answer(0, codes::NONE), answer(1, codes::NONE)]),
                 vec![partition(0), partition(1)],
                 None,
             ),
             (
                 "one refused",
-                marker_response(&[(0, codes::NONE), (1, codes::NOT_LEADER_OR_FOLLOWER)]),
+                marker_response(&[
+                    answer(0, codes::NONE),
+                    answer(1, codes::NOT_LEADER_OR_FOLLOWER),
+                ]),
                 vec![partition(0)],
                 Some(codes::NOT_LEADER_OR_FOLLOWER),
             ),
             (
                 "one answered UNSUPPORTED_FOR_MESSAGE_FORMAT",
-                marker_response(&[(0, codes::NONE), (1, 43)]),
+                marker_response(&[answer(0, codes::NONE), answer(1, 43)]),
                 vec![partition(0), partition(1)],
                 None,
             ),
             (
                 "one answered UNSUPPORTED_VERSION",
-                marker_response(&[(0, codes::UNSUPPORTED_VERSION), (1, codes::NONE)]),
+                marker_response(&[
+                    answer(0, codes::UNSUPPORTED_VERSION),
+                    answer(1, codes::NONE),
+                ]),
                 vec![partition(0), partition(1)],
                 None,
             ),
             (
                 "one dropped, one refused",
                 marker_response(&[
-                    (0, codes::UNSUPPORTED_VERSION),
-                    (1, codes::REQUEST_TIMED_OUT),
+                    answer(0, codes::UNSUPPORTED_VERSION),
+                    answer(1, codes::REQUEST_TIMED_OUT),
                 ]),
                 vec![partition(0)],
                 Some(codes::REQUEST_TIMED_OUT),
             ),
             (
                 "one answered an unexpected code",
-                marker_response(&[(0, codes::NONE), (1, codes::CORRUPT_MESSAGE)]),
+                marker_response(&[answer(0, codes::NONE), answer(1, codes::CORRUPT_MESSAGE)]),
                 vec![partition(0)],
                 Some(codes::CORRUPT_MESSAGE),
             ),
             (
                 "one omitted",
-                marker_response(&[(1, codes::NONE)]),
+                marker_response(&[answer(1, codes::NONE)]),
                 vec![partition(1)],
                 Some(-1),
             ),

@@ -83,8 +83,11 @@ use {
         guards::{ActiveConnectionGuard, InFlightGuard, QueuedRequestGuard},
         registry::{DispatchContext, send_registry_response},
         response::{ResponseShape, apply_request_quota, encode_response},
-        sasl::{SaslFrameOutcome, SaslListener, try_handle_sasl_frame},
-        session::{FrameWaitPolicy, RequestLimits, initial_connection_auth, next_connection_frame},
+        sasl::{SaslConnection, SaslFrameOutcome, SaslListener, try_handle_sasl_frame},
+        session::{
+            FrameSizeLimit, FrameWaitPolicy, RequestLimits, initial_connection_auth,
+            next_connection_frame,
+        },
         write_idle::WriteIdle,
     },
     crate::{
@@ -156,11 +159,17 @@ fn capture_client_software(parsed: &ParsedRequest<'_>, name: &mut String, versio
     }
 }
 
+/// A request parsed off a frame, and the span that traces it.
+struct SpannedRequest<'a> {
+    parsed: ParsedRequest<'a>,
+    span: tracing::Span,
+}
+
 fn parse_connection_request<'a>(
     broker: &Broker,
     frame: &'a Bytes,
     peer: &SocketAddr,
-) -> Option<(ParsedRequest<'a>, tracing::Span)> {
+) -> Option<SpannedRequest<'a>> {
     let peeked_api_key = match peek_api_key(frame) {
         Ok(api_key) => api_key,
         Err(error) => {
@@ -192,13 +201,16 @@ fn parse_connection_request<'a>(
     } else {
         tracing::Span::none()
     };
-    Some((parsed, span))
+    Some(SpannedRequest { parsed, span })
 }
 
-fn begin_request<'a>(
-    broker: &'a Broker,
-    parsed: &ParsedRequest<'_>,
-) -> (std::time::Instant, InFlightGuard<'a>) {
+/// The instant a request began and the guard that counts it in flight.
+struct BegunRequest<'a> {
+    started: std::time::Instant,
+    in_flight: InFlightGuard<'a>,
+}
+
+fn begin_request<'a>(broker: &'a Broker, parsed: &ParsedRequest<'_>) -> BegunRequest<'a> {
     let started = std::time::Instant::now();
     broker.metrics.record_api_request(parsed.api_key);
     // Kafka's `RequestChannel` logs each request at DEBUG on
@@ -212,7 +224,10 @@ fn begin_request<'a>(
         body_len = parsed.body.len(),
         "dispatching request"
     );
-    (started, InFlightGuard::new(&broker.metrics, parsed.api_key))
+    BegunRequest {
+        started,
+        in_flight: InFlightGuard::new(&broker.metrics, parsed.api_key),
+    }
 }
 
 /// Rejects a request at a version outside its API's range, or at a version --
@@ -271,7 +286,10 @@ where
         );
         return AfterResponse::Close;
     }
-    let (started, _in_flight) = begin_request(broker, parsed);
+    let BegunRequest {
+        started,
+        in_flight: _in_flight,
+    } = begin_request(broker, parsed);
     tracing::warn!(
         api_key = parsed.api_key,
         api_version = parsed.api_version,
@@ -412,7 +430,10 @@ async fn serve_connection_stream<S>(
             &auth,
             mute_until.take(),
             &frame_wait,
-            (limits.for_auth(&auth), broker.queued_request_bytes.as_ref()),
+            FrameSizeLimit {
+                maximum: limits.for_auth(&auth),
+                budget: broker.queued_request_bytes.as_ref(),
+            },
         )
         .await
         else {
@@ -438,14 +459,21 @@ async fn serve_connection_stream<S>(
         // SASL tokens with no Kafka request header, both ways.
         // A failed v0 exchange closes with no response.
         if is_sasl_listener && sasl_session.expects_raw_token(&auth) {
-            let session = (&sasl_listener, &mut sasl_session);
+            let session = SaslConnection {
+                listener: &sasl_listener,
+                session: &mut sasl_session,
+            };
             let token = sasl::handle_raw_sasl_token(&broker, &frame, &mut auth, session, &peer);
             match token.await {
                 Some(token) if framed.send(token.clone()).await.is_ok() => continue,
                 _ => break,
             }
         }
-        let Some((parsed, req_span)) = parse_connection_request(&broker, &frame, &peer) else {
+        let Some(SpannedRequest {
+            parsed,
+            span: req_span,
+        }) = parse_connection_request(&broker, &frame, &peer)
+        else {
             // Bytes the broker cannot read as a request are the same reason
             // as bytes the codec refused, one layer further in: the peer sent
             // something that is not a Kafka request and the connection ends.
@@ -553,7 +581,10 @@ async fn serve_connection_stream<S>(
         capture_client_software(&parsed, &mut client_software.0, &mut client_software.1);
         sasl_session.note_api_versions(&auth, &parsed);
 
-        let (_, _in_flight) = begin_request(&broker, &parsed);
+        let BegunRequest {
+            in_flight: _in_flight,
+            ..
+        } = begin_request(&broker, &parsed);
 
         let context = DispatchContext {
             broker: &broker,

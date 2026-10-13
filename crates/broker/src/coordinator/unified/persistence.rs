@@ -918,57 +918,86 @@ mod tests {
             streams::persistence::StreamsGroupKey,
         };
 
-        type Make = fn(String) -> Key;
-        let keys: [(&str, Make); 11] = [
-            ("offset group id", |s| Key::OffsetCommit {
-                group_id: s,
-                topic: "t".into(),
-                partition: 0,
-            }),
-            ("offset topic", |s| Key::OffsetCommit {
-                group_id: "g".into(),
-                topic: s,
-                partition: 0,
-            }),
-            ("classic group id", |s| Key::GroupMetadata { group_id: s }),
-            ("next-gen group id", |s| {
-                Key::NextGen(NextGenKey::GroupMetadata { group_id: s })
-            }),
-            ("next-gen member id", |s| {
-                Key::NextGen(NextGenKey::MemberMetadata {
+        struct KeyCase {
+            name: &'static str,
+            make: fn(String) -> Key,
+        }
+
+        let keys: [KeyCase; 11] = [
+            KeyCase {
+                name: "offset group id",
+                make: |s| Key::OffsetCommit {
+                    group_id: s,
+                    topic: "t".into(),
+                    partition: 0,
+                },
+            },
+            KeyCase {
+                name: "offset topic",
+                make: |s| Key::OffsetCommit {
                     group_id: "g".into(),
-                    member_id: s,
-                })
-            }),
-            ("next-gen regular expression", |s| {
-                Key::NextGen(NextGenKey::RegularExpression {
-                    group_id: "g".into(),
-                    regex: s,
-                })
-            }),
-            ("share group id", |s| {
-                Key::Share(ShareGroupKey::GroupMetadata { group_id: s })
-            }),
-            ("share member id", |s| {
-                Key::Share(ShareGroupKey::MemberMetadata {
-                    group_id: "g".into(),
-                    member_id: s,
-                })
-            }),
-            ("streams group id", |s| {
-                Key::Streams(StreamsGroupKey::GroupMetadata { group_id: s })
-            }),
-            ("streams member id", |s| {
-                Key::Streams(StreamsGroupKey::MemberMetadata {
-                    group_id: "g".into(),
-                    member_id: s,
-                })
-            }),
-            ("streams topology group id", |s| {
-                Key::Streams(StreamsGroupKey::Topology { group_id: s })
-            }),
+                    topic: s,
+                    partition: 0,
+                },
+            },
+            KeyCase {
+                name: "classic group id",
+                make: |s| Key::GroupMetadata { group_id: s },
+            },
+            KeyCase {
+                name: "next-gen group id",
+                make: |s| Key::NextGen(NextGenKey::GroupMetadata { group_id: s }),
+            },
+            KeyCase {
+                name: "next-gen member id",
+                make: |s| {
+                    Key::NextGen(NextGenKey::MemberMetadata {
+                        group_id: "g".into(),
+                        member_id: s,
+                    })
+                },
+            },
+            KeyCase {
+                name: "next-gen regular expression",
+                make: |s| {
+                    Key::NextGen(NextGenKey::RegularExpression {
+                        group_id: "g".into(),
+                        regex: s,
+                    })
+                },
+            },
+            KeyCase {
+                name: "share group id",
+                make: |s| Key::Share(ShareGroupKey::GroupMetadata { group_id: s }),
+            },
+            KeyCase {
+                name: "share member id",
+                make: |s| {
+                    Key::Share(ShareGroupKey::MemberMetadata {
+                        group_id: "g".into(),
+                        member_id: s,
+                    })
+                },
+            },
+            KeyCase {
+                name: "streams group id",
+                make: |s| Key::Streams(StreamsGroupKey::GroupMetadata { group_id: s }),
+            },
+            KeyCase {
+                name: "streams member id",
+                make: |s| {
+                    Key::Streams(StreamsGroupKey::MemberMetadata {
+                        group_id: "g".into(),
+                        member_id: s,
+                    })
+                },
+            },
+            KeyCase {
+                name: "streams topology group id",
+                make: |s| Key::Streams(StreamsGroupKey::Topology { group_id: s }),
+            },
         ];
-        for (name, make) in keys {
+        for KeyCase { name, make } in keys {
             for (length, encodes) in [(MAX_STRING_BYTES, true), (MAX_STRING_BYTES + 1, false)] {
                 let key = make("a".repeat(length));
 

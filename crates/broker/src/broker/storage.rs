@@ -19,7 +19,7 @@ use {
         cordoned_log_dirs::CordonedLogDirs,
         diskless::recovery::{open_config, recover_open_log},
         error::BrokerError,
-        log_dir,
+        log_dir::{self, LocatedPartition},
         log_dir_id::LogDirIds,
         log_dir_status::LogDirRegistry,
         metadata_source::MetadataSource,
@@ -72,7 +72,12 @@ pub(super) async fn recover_storage_and_groups(
         let scan_dirs = log_dir_status.online_subset(&log_dirs);
         let wal_placements =
             desired_wal_placements(&startup_image, config.diskless_wal_local_replica_count);
-        for (topic, partition_id, owning_dir) in log_dir::scan_all(&scan_dirs)? {
+        for LocatedPartition {
+            topic,
+            partition: partition_id,
+            owning_dir,
+        } in log_dir::scan_all(&scan_dirs)?
+        {
             let directory = log_dir::partition_dir(&owning_dir, &topic, partition_id);
             let diskless = resolve_diskless(startup_image.topic_config(&topic));
             let open_config = open_config(&config.log_config, diskless);

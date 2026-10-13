@@ -120,23 +120,40 @@ fn share_version_update(level: i16) -> UpdateFeaturesRequest {
     }
 }
 
-/// The `(supported max, finalized level)` of `share.version` in `ApiVersions`.
-async fn share_version_in_api_versions(p: &support::InProcess) -> (Option<i16>, Option<i16>) {
+/// The supported max and finalized level of `share.version` in `ApiVersions`.
+#[derive(Debug, PartialEq)]
+struct ShareVersion {
+    supported_max: Option<i16>,
+    finalized: Option<i16>,
+}
+
+impl ShareVersion {
+    fn new(supported_max: i16, finalized: i16) -> Self {
+        Self {
+            supported_max: Some(supported_max),
+            finalized: Some(finalized),
+        }
+    }
+}
+
+async fn share_version_in_api_versions(p: &support::InProcess) -> ShareVersion {
     let av = p
         .client
         .send(api_versions_request_for("krabka-test", "0.0.0"))
         .await
         .expect("ApiVersions");
-    (
-        av.supported_features
+    ShareVersion {
+        supported_max: av
+            .supported_features
             .iter()
             .find(|f| f.name == "share.version")
             .map(|f| f.max_version),
-        av.finalized_features
+        finalized: av
+            .finalized_features
             .iter()
             .find(|f| f.name == "share.version")
             .map(|f| f.max_version_level),
-    )
+    }
 }
 
 /// KIP-1191: `share.version` 2 is trunk's `SV_2`. A default node supports
@@ -144,7 +161,7 @@ async fn share_version_in_api_versions(p: &support::InProcess) -> (Option<i16>, 
 #[tokio::test]
 async fn share_version_two_is_refused_by_default() {
     let p = support::start().await;
-    assert!(share_version_in_api_versions(&p).await == (Some(1), Some(1)));
+    assert!(share_version_in_api_versions(&p).await == ShareVersion::new(1, 1));
 
     let resp = p
         .client
@@ -170,14 +187,14 @@ async fn share_version_two_is_refused_by_default() {
 #[tokio::test]
 async fn share_version_two_is_finalizable_under_unstable_feature_versions() {
     let p = start_with_unstable_features().await;
-    assert!(share_version_in_api_versions(&p).await == (Some(2), Some(1)));
+    assert!(share_version_in_api_versions(&p).await == ShareVersion::new(2, 1));
 
     let mut validate_only = share_version_update(2);
     validate_only.validate_only = true;
     let resp = p.client.send(validate_only).await.expect("UpdateFeatures");
     assert!(resp.error_code == 0, "{resp:?}");
     assert!(
-        share_version_in_api_versions(&p).await == (Some(2), Some(1)),
+        share_version_in_api_versions(&p).await == ShareVersion::new(2, 1),
         "validate_only must not finalize level 2"
     );
 
@@ -187,7 +204,7 @@ async fn share_version_two_is_finalizable_under_unstable_feature_versions() {
         .await
         .expect("UpdateFeatures");
     assert!(resp.error_code == 0, "{resp:?}");
-    assert!(share_version_in_api_versions(&p).await == (Some(2), Some(2)));
+    assert!(share_version_in_api_versions(&p).await == ShareVersion::new(2, 2));
 
     let resp = p
         .client

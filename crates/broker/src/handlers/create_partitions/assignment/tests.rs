@@ -26,12 +26,34 @@ fn plain_brokers(node_ids: &[u64]) -> Vec<SiteBrokerView> {
         .collect()
 }
 
+/// A broker id and the site it declares.
+struct BrokerSite {
+    node_id: u64,
+    site: &'static str,
+}
+
+/// Three brokers, one per site `a`, `b` and `c`.
+const THREE_SITES: [BrokerSite; 3] = [
+    BrokerSite {
+        node_id: 1,
+        site: "a",
+    },
+    BrokerSite {
+        node_id: 2,
+        site: "b",
+    },
+    BrokerSite {
+        node_id: 3,
+        site: "c",
+    },
+];
+
 /// Brokers with a site each. A broker whose id is in `witnesses` also
 /// carries the witness role.
-fn site_brokers(brokers: &[(u64, &str)], witnesses: &[u64]) -> Vec<SiteBrokerView> {
+fn site_brokers(brokers: &[BrokerSite], witnesses: &[u64]) -> Vec<SiteBrokerView> {
     brokers
         .iter()
-        .map(|(node_id, site)| SiteBrokerView {
+        .map(|BrokerSite { node_id, site }| SiteBrokerView {
             node_id: NodeId(*node_id),
             site: Some((*site).to_string()),
             is_witness: witnesses.contains(node_id),
@@ -40,17 +62,17 @@ fn site_brokers(brokers: &[(u64, &str)], witnesses: &[u64]) -> Vec<SiteBrokerVie
         .collect()
 }
 
-fn site_of(brokers: &[(u64, &str)], node_id: NodeId) -> String {
+fn site_of(brokers: &[BrokerSite], node_id: NodeId) -> String {
     brokers
         .iter()
-        .find(|(id, _)| NodeId(*id) == node_id)
-        .map(|(_, site)| (*site).to_string())
+        .find(|broker| NodeId(broker.node_id) == node_id)
+        .map(|broker| broker.site.to_string())
         .expect("the placement returns a broker that declared a site")
 }
 
 /// The sites of one replica list, sorted, so the caller can compare the
 /// spread without depending on the replica order.
-fn sites_of(brokers: &[(u64, &str)], replicas: &[NodeId]) -> Vec<String> {
+fn sites_of(brokers: &[BrokerSite], replicas: &[NodeId]) -> Vec<String> {
     sorted_replica_sites(replicas, |node| site_of(brokers, node))
 }
 
@@ -61,7 +83,7 @@ fn automatic(
     rf: i16,
     preferred_site: Option<&str>,
     seed: u64,
-) -> Result<Vec<Vec<NodeId>>, (i16, String)> {
+) -> Result<Vec<Vec<NodeId>>, PlacementRefusal> {
     resolve_new_partition_assignments(
         None,
         brokers,
@@ -78,7 +100,7 @@ fn explicit(
     brokers: &[SiteBrokerView],
     rf: i16,
     preferred_site: Option<&str>,
-) -> Result<Vec<Vec<NodeId>>, (i16, String)> {
+) -> Result<Vec<Vec<NodeId>>, PlacementRefusal> {
     resolve_new_partition_assignments(
         Some(&provided.to_vec()),
         brokers,
@@ -156,7 +178,7 @@ fn new_partitions_start_at_a_fresh_random_broker() {
 
 #[test]
 fn three_sites_hold_one_replica_of_every_new_partition() {
-    const SITES: [(u64, &str); 3] = [(1, "a"), (2, "b"), (3, "c")];
+    const SITES: [BrokerSite; 3] = THREE_SITES;
     let brokers = site_brokers(&SITES, &[]);
 
     for seed in SEEDS {
@@ -175,7 +197,32 @@ fn three_sites_hold_one_replica_of_every_new_partition() {
 
 #[test]
 fn the_preferred_site_leads_every_new_partition() {
-    const SITES: [(u64, &str); 6] = [(1, "a"), (2, "b"), (3, "c"), (4, "a"), (5, "b"), (6, "c")];
+    const SITES: [BrokerSite; 6] = [
+        BrokerSite {
+            node_id: 1,
+            site: "a",
+        },
+        BrokerSite {
+            node_id: 2,
+            site: "b",
+        },
+        BrokerSite {
+            node_id: 3,
+            site: "c",
+        },
+        BrokerSite {
+            node_id: 4,
+            site: "a",
+        },
+        BrokerSite {
+            node_id: 5,
+            site: "b",
+        },
+        BrokerSite {
+            node_id: 6,
+            site: "c",
+        },
+    ];
     let brokers = site_brokers(&SITES, &[]);
 
     for seed in SEEDS {
@@ -198,7 +245,20 @@ fn the_preferred_site_leads_every_new_partition() {
 
 #[test]
 fn a_witness_replicates_new_partitions_but_leads_none() {
-    const SITES: [(u64, &str); 3] = [(1, "a"), (2, "b"), (3, "w")];
+    const SITES: [BrokerSite; 3] = [
+        BrokerSite {
+            node_id: 1,
+            site: "a",
+        },
+        BrokerSite {
+            node_id: 2,
+            site: "b",
+        },
+        BrokerSite {
+            node_id: 3,
+            site: "w",
+        },
+    ];
     let brokers = site_brokers(&SITES, &[3]);
 
     for seed in SEEDS {
@@ -238,7 +298,7 @@ fn a_fenced_broker_takes_a_new_partition_only_as_a_last_resort() {
 
 #[test]
 fn a_manual_assignment_overrides_the_site_placement() {
-    const SITES: [(u64, &str); 3] = [(1, "a"), (2, "b"), (3, "c")];
+    const SITES: [BrokerSite; 3] = THREE_SITES;
     let brokers = site_brokers(&SITES, &[]);
     let provided = vec![assn(&[2, 3])];
 
@@ -254,20 +314,20 @@ fn a_manual_assignment_overrides_the_site_placement() {
 
 #[test]
 fn a_cluster_of_witnesses_returns_invalid_rf() {
-    const SITES: [(u64, &str); 3] = [(1, "a"), (2, "b"), (3, "c")];
+    const SITES: [BrokerSite; 3] = THREE_SITES;
     let brokers = site_brokers(&SITES, &[1, 2, 3]);
 
     let err = automatic(&brokers, 1, 3, None, 0)
         .expect_err("a cluster that can lead no partition must fail");
 
-    assert!(err.0 == codes::INVALID_REPLICATION_FACTOR);
+    assert!(err.code == codes::INVALID_REPLICATION_FACTOR);
 }
 
 #[test]
 fn rf_exceeds_broker_count_returns_invalid_rf() {
     let brokers = plain_brokers(&[0, 1]);
     let err = automatic(&brokers, 1, 3, None, 0).expect_err("rf=3 against 2 brokers must fail");
-    assert!(err.0 == codes::INVALID_REPLICATION_FACTOR);
+    assert!(err.code == codes::INVALID_REPLICATION_FACTOR);
 }
 
 #[test]
@@ -289,45 +349,51 @@ fn honored_assignments_pass_through_verbatim() {
 /// these messages, on brokers 0 to 2 and a topic of replication factor 2.
 #[test]
 fn invalid_explicit_assignments_answer_kafkas_messages() {
+    /// The replica lists of an explicit assignment, and the message that refuses it.
+    struct RefusalCase {
+        lists: &'static [&'static [i32]],
+        message: &'static str,
+    }
+
     let brokers = plain_brokers(&[0, 1, 2]);
-    let cases: [(&[&[i32]], &str); 5] = [
-        (
-            &[&[0, 1, 2]],
-            "The manual partition assignment includes a partition with 3 replica(s), but this \
+    let cases: [RefusalCase; 5] = [
+        RefusalCase {
+            lists: &[&[0, 1, 2]],
+            message: "The manual partition assignment includes a partition with 3 replica(s), but this \
              is not consistent with previous partitions, which have 2 replica(s).",
-        ),
-        (
-            &[&[1, 1]],
-            "The manual partition assignment includes the broker 1 more than once.",
-        ),
-        (
-            &[&[0, 9]],
-            "The manual partition assignment includes broker 9, but no such broker is \
+        },
+        RefusalCase {
+            lists: &[&[1, 1]],
+            message: "The manual partition assignment includes the broker 1 more than once.",
+        },
+        RefusalCase {
+            lists: &[&[0, 9]],
+            message: "The manual partition assignment includes broker 9, but no such broker is \
              registered.",
-        ),
-        (
-            &[&[0, -1]],
-            "The manual partition assignment includes broker -1, but no such broker is \
+        },
+        RefusalCase {
+            lists: &[&[0, -1]],
+            message: "The manual partition assignment includes broker -1, but no such broker is \
              registered.",
-        ),
-        (
-            &[&[0, 1], &[]],
-            "The manual partition assignment includes an empty replica list.",
-        ),
+        },
+        RefusalCase {
+            lists: &[&[0, 1], &[]],
+            message: "The manual partition assignment includes an empty replica list.",
+        },
     ];
 
-    let (actual, expected): (Vec<_>, Vec<_>) = cases
-        .into_iter()
-        .map(|(lists, message)| {
-            let provided: Vec<CreatePartitionsAssignment> =
-                lists.iter().map(|list| assn(list)).collect();
-            (
-                explicit(&provided, &brokers, 2, None),
-                Err((codes::INVALID_REPLICA_ASSIGNMENT, message.to_owned())),
-            )
-        })
-        .unzip();
-    assert!(actual == expected);
+    for RefusalCase { lists, message } in cases {
+        let provided: Vec<CreatePartitionsAssignment> =
+            lists.iter().map(|list| assn(list)).collect();
+        assert!(
+            explicit(&provided, &brokers, 2, None)
+                == Err(PlacementRefusal {
+                    code: codes::INVALID_REPLICA_ASSIGNMENT,
+                    message: message.to_owned(),
+                }),
+            "{message}"
+        );
+    }
 }
 
 /// An automatic placement that cannot put `rf` replicas on the brokers
@@ -348,19 +414,21 @@ fn an_unplaceable_rf_answers_the_placers_message() {
 
     assert!(
         too_many
-            == Err((
-                codes::INVALID_REPLICATION_FACTOR,
-                "The target replication factor of 3 cannot be reached because only 2 broker(s) \
+            == Err(PlacementRefusal {
+                code: codes::INVALID_REPLICATION_FACTOR,
+                message:
+                    "The target replication factor of 3 cannot be reached because only 2 broker(s) \
                  are registered or some brokers have all their log directories cordoned."
-                    .to_owned(),
-            ))
+                        .to_owned(),
+            })
     );
     assert!(
         none_unfenced
-            == Err((
-                codes::INVALID_REPLICATION_FACTOR,
-                "All brokers are currently fenced, or have all their log directories cordoned."
-                    .to_owned(),
-            ))
+            == Err(PlacementRefusal {
+                code: codes::INVALID_REPLICATION_FACTOR,
+                message:
+                    "All brokers are currently fenced, or have all their log directories cordoned."
+                        .to_owned(),
+            })
     );
 }

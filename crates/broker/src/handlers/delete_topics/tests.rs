@@ -115,10 +115,18 @@ async fn handle_unknown_name_and_id_preserve_error_rows() {
 
 // ── KFC-9: the break-glass gate over a topic deletion ───────────────
 
+/// The topic row a deletion answers, the topic id, and whether the topic
+/// still exists.
+struct DoomedOutcome {
+    row: DeletableTopicResult,
+    topic_id: WireUuid,
+    exists: bool,
+}
+
 /// Create [`DOOMED`] on a broker with this break-glass configuration, run one
 /// `DeleteTopics` request for it, and answer the topic row, the topic id, and
 /// whether the topic still exists.
-async fn delete_doomed(break_glass: BreakGlassConfig) -> (DeletableTopicResult, WireUuid, bool) {
+async fn delete_doomed(break_glass: BreakGlassConfig) -> DoomedOutcome {
     let (broker_handle, _dir) = start_broker_no_audit_with(move |cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.break_glass = break_glass;
@@ -152,12 +160,20 @@ async fn delete_doomed(break_glass: BreakGlassConfig) -> (DeletableTopicResult, 
     let exists = broker.controller.current_image().topic(DOOMED).is_some();
     broker_handle.shutdown().await;
     let row = resp.responses.into_iter().next().expect("one topic row");
-    (row, topic_id, exists)
+    DoomedOutcome {
+        row,
+        topic_id,
+        exists,
+    }
 }
 
 #[tokio::test]
 async fn the_wire_handler_refuses_a_deletion_that_no_proposal_covers() {
-    let (refused, topic_id, exists) = delete_doomed(gated_config()).await;
+    let DoomedOutcome {
+        row: refused,
+        topic_id,
+        exists,
+    } = delete_doomed(gated_config()).await;
 
     let expected = tagged_wire!(DeletableTopicResult {
         name: Some(DOOMED.to_owned()),
@@ -175,8 +191,16 @@ async fn the_wire_handler_refuses_a_deletion_that_no_proposal_covers() {
 async fn a_refused_deletion_never_reaches_the_metadata_quorum() {
     // An ungated broker deletes the topic. A gated one answers
     // `POLICY_VIOLATION` and leaves the topic in the metadata image.
-    let (ungated, ungated_id, ungated_exists) = delete_doomed(BreakGlassConfig::default()).await;
-    let (gated, _, gated_exists) = delete_doomed(gated_config()).await;
+    let DoomedOutcome {
+        row: ungated,
+        topic_id: ungated_id,
+        exists: ungated_exists,
+    } = delete_doomed(BreakGlassConfig::default()).await;
+    let DoomedOutcome {
+        row: gated,
+        exists: gated_exists,
+        ..
+    } = delete_doomed(gated_config()).await;
 
     check!(ungated == row(Some(DOOMED), ungated_id, codes::NONE));
     check!(!ungated_exists);
@@ -506,13 +530,19 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
     const TOPIC: &str = "t";
     const MISSING: &str = "missing";
 
+    struct ExpectedRow {
+        name: Option<&'static str>,
+        with_id: bool,
+        code: i16,
+    }
+
     struct Case {
         label: &'static str,
         acls: Vec<AclEntry>,
         by_id: bool,
         names: &'static [&'static str],
-        // (name, carries the topic id, code) per expected row.
-        expected: &'static [(Option<&'static str>, bool, i16)],
+        // The name, whether it carries the topic id, and the code of each expected row.
+        expected: &'static [ExpectedRow],
         deleted: bool,
     }
 
@@ -524,7 +554,11 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             acls: vec![topic(AclOperation::Delete)],
             by_id: true,
             names: &[],
-            expected: &[(Some(TOPIC), true, codes::NONE)],
+            expected: &[ExpectedRow {
+                name: Some(TOPIC),
+                with_id: true,
+                code: codes::NONE,
+            }],
             deleted: true,
         },
         Case {
@@ -532,7 +566,11 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             acls: vec![topic(AclOperation::Describe)],
             by_id: true,
             names: &[],
-            expected: &[(Some(TOPIC), true, codes::TOPIC_AUTHORIZATION_FAILED)],
+            expected: &[ExpectedRow {
+                name: Some(TOPIC),
+                with_id: true,
+                code: codes::TOPIC_AUTHORIZATION_FAILED,
+            }],
             deleted: false,
         },
         Case {
@@ -540,7 +578,11 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             acls: vec![],
             by_id: true,
             names: &[],
-            expected: &[(None, true, codes::TOPIC_AUTHORIZATION_FAILED)],
+            expected: &[ExpectedRow {
+                name: None,
+                with_id: true,
+                code: codes::TOPIC_AUTHORIZATION_FAILED,
+            }],
             deleted: false,
         },
         Case {
@@ -552,7 +594,11 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             )],
             by_id: false,
             names: &[MISSING],
-            expected: &[(Some(MISSING), false, codes::UNKNOWN_TOPIC_OR_PARTITION)],
+            expected: &[ExpectedRow {
+                name: Some(MISSING),
+                with_id: false,
+                code: codes::UNKNOWN_TOPIC_OR_PARTITION,
+            }],
             deleted: false,
         },
         Case {
@@ -560,7 +606,11 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             acls: vec![],
             by_id: false,
             names: &[MISSING],
-            expected: &[(Some(MISSING), false, codes::TOPIC_AUTHORIZATION_FAILED)],
+            expected: &[ExpectedRow {
+                name: Some(MISSING),
+                with_id: false,
+                code: codes::TOPIC_AUTHORIZATION_FAILED,
+            }],
             deleted: false,
         },
         Case {
@@ -568,7 +618,11 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             acls: vec![topic(AclOperation::Describe)],
             by_id: false,
             names: &[TOPIC],
-            expected: &[(Some(TOPIC), false, codes::TOPIC_AUTHORIZATION_FAILED)],
+            expected: &[ExpectedRow {
+                name: Some(TOPIC),
+                with_id: false,
+                code: codes::TOPIC_AUTHORIZATION_FAILED,
+            }],
             deleted: false,
         },
     ];
@@ -607,10 +661,16 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
         let responses = case
             .expected
             .iter()
-            .map(|(name, with_id, code)| {
-                let id = if *with_id { topic_id } else { WireUuid::ZERO };
-                row(*name, id, *code)
-            })
+            .map(
+                |ExpectedRow {
+                     name,
+                     with_id,
+                     code,
+                 }| {
+                    let id = if *with_id { topic_id } else { WireUuid::ZERO };
+                    row(*name, id, *code)
+                },
+            )
             .chain([row(None, unknown_id, codes::UNKNOWN_TOPIC_ID)])
             .collect();
         actual.push((case.label, resp, still_there));

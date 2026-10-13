@@ -662,16 +662,28 @@ mod tests {
         // `handleDeleteShareGroupOffsetsRequest` puts every denied-topic row
         // ahead of the coordinator-returned rows, regardless of request
         // order, and never routes a denied topic to the coordinator.
-        type Case<'a> = (&'a str, &'a [&'a str]);
-        let cases: Vec<Case<'_>> = vec![
-            ("one allowed, one denied: denied row comes first", &[
-                "deny-topic",
-            ]),
-            ("all topics denied", &["allow-topic", "deny-topic"]),
-            ("all topics allowed", &[]),
+        /// A case name and the topics denied `Read`.
+        struct DenialCase {
+            case: &'static str,
+            denied_names: &'static [&'static str],
+        }
+
+        let cases: Vec<DenialCase> = vec![
+            DenialCase {
+                case: "one allowed, one denied: denied row comes first",
+                denied_names: &["deny-topic"],
+            },
+            DenialCase {
+                case: "all topics denied",
+                denied_names: &["allow-topic", "deny-topic"],
+            },
+            DenialCase {
+                case: "all topics allowed",
+                denied_names: &[],
+            },
         ];
 
-        for (case, denied_names) in cases {
+        for DenialCase { case, denied_names } in cases {
             let denied: HashSet<&'static str> = denied_names.iter().copied().collect();
             let (broker_handle, _dir) = start_share_broker()
                 .authorizer(Arc::new(DenyReadOnTopics(denied.clone())))

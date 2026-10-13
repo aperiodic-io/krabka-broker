@@ -14,14 +14,22 @@ use {
 /// Audit record-header key carrying the event class (e.g. `checkpoint`).
 const HEADER_EVENT_CLASS: &str = "event_class";
 
-/// Read the tail of `partition` and return `(next_seq, head)` implied by the
+/// Where the audit hash chain continues: the sequence number of the next
+/// record and the chain head that its `prev_hash` must carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ChainResume {
+    pub(crate) next_seq: u64,
+    pub(crate) head: [u8; 32],
+}
+
+/// Read the tail of `partition` and return the [`ChainResume`] implied by the
 /// last chained (non-checkpoint) record, or `None` if there are none.
 #[must_use]
 pub(crate) fn recover_from_partition_tail(
     partition: &Partition,
     tail_window_offsets: i64,
     tail_read_max: ByteSize,
-) -> Option<(u64, [u8; 32])> {
+) -> Option<ChainResume> {
     let leo = partition.log_end_offset();
     if leo <= krabka_log::Offset(0) {
         return None;
@@ -29,7 +37,7 @@ pub(crate) fn recover_from_partition_tail(
     // Read a bounded tail window (audit records are small).
     let start = tail_window_start(leo, tail_window_offsets);
     let out = partition.read_log(start, tail_read_max).ok()?;
-    let mut last: Option<(u64, [u8; 32])> = None;
+    let mut last: Option<ChainResume> = None;
     for batch in &out.batches {
         for rec in &batch.records {
             // Skip checkpoint records (they don't advance the chained seq).
@@ -44,7 +52,10 @@ pub(crate) fn recover_from_partition_tail(
                 .map(std::convert::AsRef::as_ref)
                 .unwrap_or_default();
             if let (Some(seq), Some(prev)) = (seq, prev) {
-                last = Some((seq + 1, chain_hash(&prev, seq, value)));
+                last = Some(ChainResume {
+                    next_seq: seq + 1,
+                    head: chain_hash(&prev, seq, value),
+                });
             }
         }
     }
@@ -83,10 +94,16 @@ mod tests {
         tokio::sync::Notify,
     };
 
-    fn test_partition() -> (Partition, tempfile::TempDir) {
+    /// A partition of the audit topic, and the directory that holds its log.
+    struct TestPartition {
+        partition: Partition,
+        dir: tempfile::TempDir,
+    }
+
+    fn test_partition() -> TestPartition {
         let (mut partition, dir) = make_test_partition(Arc::new(Notify::new()));
         partition.topic = "__audit".into();
-        (partition, dir)
+        TestPartition { partition, dir }
     }
 
     fn header(key: &str, value: impl Into<Bytes>) -> RecordHeader {
@@ -145,14 +162,20 @@ mod tests {
 
     #[tokio::test]
     async fn recover_empty_partition_returns_none() {
-        let (partition, _td) = test_partition();
+        let TestPartition {
+            partition,
+            dir: _dir,
+        } = test_partition();
 
         assert!(recover_from_partition_tail(&partition, 4096, mebibytes(1)).is_none());
     }
 
     #[tokio::test]
     async fn recover_returns_next_sequence_and_chain_head_from_tail_record() {
-        let (partition, _td) = test_partition();
+        let TestPartition {
+            partition,
+            dir: _dir,
+        } = test_partition();
         let seq = 0x0102_0304_0506_0708;
         let value = b"tail-value";
         append_records(&partition, vec![chained_record(seq, &GENESIS_HEAD, value)]);
@@ -160,13 +183,21 @@ mod tests {
         let recovered =
             recover_from_partition_tail(&partition, 4096, mebibytes(1)).expect("tail record");
 
-        assert!(recovered.0 == seq + 1);
-        assert!(recovered.1 == chain_hash(&GENESIS_HEAD, seq, value));
+        assert!(
+            recovered
+                == ChainResume {
+                    next_seq: seq + 1,
+                    head: chain_hash(&GENESIS_HEAD, seq, value),
+                }
+        );
     }
 
     #[tokio::test]
     async fn recover_uses_next_sequence_from_last_chained_record() {
-        let (partition, _td) = test_partition();
+        let TestPartition {
+            partition,
+            dir: _dir,
+        } = test_partition();
         let first = chained_record(3, &GENESIS_HEAD, b"first");
         let first_head = chain_hash(&GENESIS_HEAD, 3, b"first");
         let last = chained_record(9, &first_head, b"last");
@@ -176,12 +207,21 @@ mod tests {
         let recovered = recover_from_partition_tail(&partition, 4096, mebibytes(1))
             .expect("last chained record");
 
-        assert!(recovered == (10, last_head));
+        assert!(
+            recovered
+                == ChainResume {
+                    next_seq: 10,
+                    head: last_head,
+                }
+        );
     }
 
     #[tokio::test]
     async fn recover_skips_checkpoints_and_malformed_records() {
-        let (partition, _td) = test_partition();
+        let TestPartition {
+            partition,
+            dir: _dir,
+        } = test_partition();
         let first = chained_record(0, &GENESIS_HEAD, b"first");
         let first_head = chain_hash(&GENESIS_HEAD, 0, b"first");
         let malformed = Record {
@@ -201,12 +241,21 @@ mod tests {
         let recovered = recover_from_partition_tail(&partition, 4096, mebibytes(1))
             .expect("last chained record");
 
-        assert!(recovered == (2, second_head));
+        assert!(
+            recovered
+                == ChainResume {
+                    next_seq: 2,
+                    head: second_head,
+                }
+        );
     }
 
     #[tokio::test]
     async fn recover_honors_configured_tail_bounds() {
-        let (partition, _td) = test_partition();
+        let TestPartition {
+            partition,
+            dir: _dir,
+        } = test_partition();
         let value = b"chained";
         append_records(&partition, vec![chained_record(7, &GENESIS_HEAD, value)]);
         append_records(&partition, vec![checkpoint_record()]);
@@ -214,25 +263,39 @@ mod tests {
         assert!(recover_from_partition_tail(&partition, 1, kibibytes(1)).is_none());
         assert!(
             recover_from_partition_tail(&partition, 2, kibibytes(1))
-                == Some((8, chain_hash(&GENESIS_HEAD, 7, value)))
+                == Some(ChainResume {
+                    next_seq: 8,
+                    head: chain_hash(&GENESIS_HEAD, 7, value),
+                })
         );
     }
 
     #[tokio::test]
     async fn recover_honors_configured_tail_read_max_bytes() {
-        let (partition, _td) = test_partition();
+        let TestPartition {
+            partition,
+            dir: _dir,
+        } = test_partition();
         let value = b"chained";
         append_records(&partition, vec![chained_record(7, &GENESIS_HEAD, value)]);
 
         assert!(recover_from_partition_tail(&partition, 1, bytes(1)).is_none());
         assert!(
             recover_from_partition_tail(&partition, 1, kibibytes(1))
-                == Some((8, chain_hash(&GENESIS_HEAD, 7, value)))
+                == Some(ChainResume {
+                    next_seq: 8,
+                    head: chain_hash(&GENESIS_HEAD, 7, value),
+                })
         );
     }
 
     #[test]
     fn header_bytes_matches_requested_key_and_preserves_value() {
+        struct Case<'a> {
+            key: &'a str,
+            want: Option<&'a [u8]>,
+        }
+
         let rec = Record {
             headers: vec![
                 header("other", Bytes::from_static(&[0])),
@@ -241,9 +304,17 @@ mod tests {
             ..Default::default()
         };
 
-        let cases: [(&str, Option<&[u8]>); 2] =
-            [("target", Some(&[0xCA, 0xFE])), ("missing", None)];
-        for (key, want) in cases {
+        let cases = [
+            Case {
+                key: "target",
+                want: Some(&[0xCA, 0xFE]),
+            },
+            Case {
+                key: "missing",
+                want: None,
+            },
+        ];
+        for Case { key, want } in cases {
             assert!(header_bytes(&rec, key) == want, "key {key:?}");
         }
     }

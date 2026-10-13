@@ -6,8 +6,8 @@
 use {
     super::{
         super::checks::{FreezeEnv, check_approval, consumed_proposal_id, record_of},
-        ALICE, PROPOSAL, alice_key_configuration, config_with_alice, freeze_request, image,
-        with_freeze_env,
+        ALICE, AliceKeyConfiguration, AliceKeys, PROPOSAL, alice_key_configuration,
+        config_with_alice, freeze_request, image, with_freeze_env,
     },
     crate::{
         codes,
@@ -25,7 +25,9 @@ use {
 
 #[test]
 fn a_thaw_with_no_proposal_needs_a_break_glass_approval() {
-    let (_dir, config, _) = alice_key_configuration();
+    let AliceKeyConfiguration {
+        dir: _dir, config, ..
+    } = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[("orders", PatternType::Literal)] ; env, config);
     let thaw = TopicFreezeRecord {
         frozen: false,
@@ -44,7 +46,9 @@ fn a_thaw_with_no_proposal_needs_a_break_glass_approval() {
 
 #[test]
 fn a_freeze_needs_no_proposal() {
-    let (_dir, config, _) = alice_key_configuration();
+    let AliceKeyConfiguration {
+        dir: _dir, config, ..
+    } = alice_key_configuration();
     freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
     let record = record_of(
         &freeze_request("orders", PATTERN_TYPE_LITERAL),
@@ -77,7 +81,8 @@ fn a_thaw_that_names_another_proposal_is_refused() {
 
 fn with_approved_thaw(proposal_id: Uuid, check: impl FnOnce(&FreezeEnv<'_>, &TopicFreezeRecord)) {
     let dir = TempDir::new().expect("tempdir");
-    let (config, image) = approved_context(&dir, &[("orders", PatternType::Literal)]);
+    let ApprovedContext { config, image } =
+        approved_context(&dir, &[("orders", PatternType::Literal)]);
     with_freeze_env(&config, &image, |env| {
         let thaw = TopicFreezeRecord {
             frozen: false,
@@ -96,7 +101,7 @@ fn with_approved_thaw(proposal_id: Uuid, check: impl FnOnce(&FreezeEnv<'_>, &Top
 #[test]
 fn a_proposal_for_one_scope_does_not_thaw_another() {
     let dir = TempDir::new().expect("tempdir");
-    let (config, image) = approved_context(&dir, &[
+    let ApprovedContext { config, image } = approved_context(&dir, &[
         ("orders", PatternType::Literal),
         ("orders", PatternType::Prefixed),
     ]);
@@ -128,11 +133,13 @@ fn a_proposal_for_one_scope_does_not_thaw_another() {
 }
 
 // Alice's configured approvers and their literal orders thaw proposal.
-fn approved_context(
-    dir: &TempDir,
-    entries: &[(&str, PatternType)],
-) -> (BrokerConfig, MetadataImage) {
-    let (base, _) = config_with_alice(dir);
+struct ApprovedContext {
+    config: BrokerConfig,
+    image: MetadataImage,
+}
+
+fn approved_context(dir: &TempDir, entries: &[(&str, PatternType)]) -> ApprovedContext {
+    let AliceKeys { config: base, .. } = config_with_alice(dir);
     let config = BrokerConfig {
         break_glass: BreakGlassConfig {
             approvers: ["User:alice", "User:bob", "User:carol"]
@@ -146,7 +153,7 @@ fn approved_context(
     image.apply(&MetadataRecord::V1BreakGlassProposal(approved_thaw(
         "literal:orders",
     )));
-    (config, image)
+    ApprovedContext { config, image }
 }
 
 // A proposal that two distinct principals approved, on `target`.

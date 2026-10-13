@@ -5,7 +5,9 @@
 //! inconsistency are stated once, here.
 
 use {
-    krabka_remote_storage::{PartitionDump, RemoteLogSegmentMetadata, RemoteLogSegmentState},
+    krabka_remote_storage::{
+        PartitionDump, RemoteLogSegmentMetadata, RemoteLogSegmentState, TopicIdPartition,
+    },
     krabka_remote_storage_topic::Snapshot,
     krabka_verified::{RestoreReconcileDecision, RestoreSnapshotState},
     std::collections::{HashMap, HashSet},
@@ -82,36 +84,32 @@ fn reconcile_with_snapshot_policy(
     snapshot: &Snapshot,
     retain_deleted_objects: bool,
 ) -> Result<(), RestoreError> {
-    let mut dumps: HashMap<(Uuid, i32), &PartitionDump> = HashMap::new();
+    let mut dumps: HashMap<&TopicIdPartition, &PartitionDump> = HashMap::new();
     for dump in &snapshot.dump.partitions {
-        if args.selects_topic(&dump.topic_id_partition.topic) {
-            let key = (
-                dump.topic_id_partition.topic_id,
-                dump.topic_id_partition.partition,
-            );
-            if dumps.insert(key, dump).is_some() {
-                return Err(RestoreError::MetadataDisagreement {
-                    topic: dump.topic_id_partition.topic.clone(),
-                    partition: dump.topic_id_partition.partition,
-                    scanned: "duplicate partition entries in RLMM snapshot".to_owned(),
-                    snapshot: summarize_dump(Some(dump)),
-                });
-            }
+        if args.selects_topic(&dump.topic_id_partition.topic)
+            && dumps.insert(&dump.topic_id_partition, dump).is_some()
+        {
+            return Err(RestoreError::MetadataDisagreement {
+                topic: dump.topic_id_partition.topic.clone(),
+                partition: dump.topic_id_partition.partition,
+                scanned: "duplicate partition entries in RLMM snapshot".to_owned(),
+                snapshot: summarize_dump(Some(dump)),
+            });
         }
     }
 
-    let mut scanned_keys: HashSet<(Uuid, i32)> = HashSet::new();
+    let mut scanned_keys: HashSet<TopicIdPartition> = HashSet::new();
     for partition in partitions.iter_mut() {
-        let key = (partition.partition.topic_id, partition.partition.partition);
-        scanned_keys.insert(key);
+        let key = partition.partition.clone();
         reconcile_partition(partition, dumps.get(&key).copied(), retain_deleted_objects)?;
+        scanned_keys.insert(key);
     }
 
     // A partition the snapshot names with live segments, but the scan found
     // nothing for at all, is also a disagreement: the scan loop above never
     // visits it, because it never became a `PartitionInventory`.
     for (key, dump) in &dumps {
-        if scanned_keys.contains(key) {
+        if scanned_keys.contains(*key) {
             continue;
         }
         if dump.segments.iter().any(|segment| {
@@ -156,6 +154,13 @@ fn reconcile_decision(
     krabka_verified::restore_archive_reconcile(scanned, snapshot_state(state))
 }
 
+/// A segment as the RLMM snapshot and the scan both identify it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SegmentKey {
+    segment_id: Uuid,
+    base_offset: i64,
+}
+
 /// Reconcile one partition's scanned segments against its snapshot entry, if
 /// any, then drop the segments the snapshot says are mid-deletion.
 ///
@@ -168,10 +173,13 @@ fn reconcile_partition(
     dump: Option<&PartitionDump>,
     retain_deleted_objects: bool,
 ) -> Result<(), RestoreError> {
-    let mut by_key: HashMap<(Uuid, i64), RemoteLogSegmentState> = HashMap::new();
+    let mut by_key: HashMap<SegmentKey, RemoteLogSegmentState> = HashMap::new();
     let mut duplicate_snapshot_key = false;
     for segment in dump.into_iter().flat_map(|dump| &dump.segments) {
-        let key = (segment.remote_log_segment_id().id, segment.start_offset());
+        let key = SegmentKey {
+            segment_id: segment.remote_log_segment_id().id,
+            base_offset: segment.start_offset(),
+        };
         duplicate_snapshot_key |= by_key.insert(key, segment.state()).is_some();
     }
 
@@ -179,7 +187,10 @@ fn reconcile_partition(
         reconcile_decision(
             true,
             by_key
-                .get(&(segment.segment_id, segment.base_offset.get()))
+                .get(&SegmentKey {
+                    segment_id: segment.segment_id,
+                    base_offset: segment.base_offset.get(),
+                })
                 .copied(),
             retain_deleted_objects,
         ) == RestoreReconcileDecision::Disagree
@@ -212,7 +223,10 @@ fn reconcile_partition(
         reconcile_decision(
             true,
             by_key
-                .get(&(segment.segment_id, segment.base_offset.get()))
+                .get(&SegmentKey {
+                    segment_id: segment.segment_id,
+                    base_offset: segment.base_offset.get(),
+                })
                 .copied(),
             retain_deleted_objects,
         ) == RestoreReconcileDecision::Keep

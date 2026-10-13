@@ -257,6 +257,13 @@ mod tests {
         })
     }
 
+    /// A topic of a request filter and the partition indexes it names.
+    #[derive(Clone, Copy)]
+    struct FilterTopic<'a> {
+        name: &'a str,
+        indexes: &'a [i32],
+    }
+
     /// Kafka's `ReplicationControlManager.listPartitionReassignments` and
     /// `listReassigningTopic`: null topics list every reassigning partition,
     /// a named topic lists only its requested indexes that are reassigning,
@@ -298,36 +305,84 @@ mod tests {
                 partitions: partitions.iter().map(|&p| row(p)).collect(),
             })
         };
-        let filter = |topics: &[(&str, &[i32])]| {
+        let filter = |topics: &[FilterTopic<'_>]| {
             Some(
                 topics
                     .iter()
-                    .map(|&(name, indexes)| ListPartitionReassignmentsTopics {
-                        name: name.into(),
-                        partition_indexes: indexes.to_vec(),
-                        ..Default::default()
-                    })
+                    .map(
+                        |&FilterTopic { name, indexes }| ListPartitionReassignmentsTopics {
+                            name: name.into(),
+                            partition_indexes: indexes.to_vec(),
+                            ..Default::default()
+                        },
+                    )
                     .collect(),
             )
         };
         let cases = vec![
             ("null topics", None, vec![topic("t", &[0, 1])]),
-            ("empty index list", filter(&[("t", &[])]), vec![]),
-            ("one index", filter(&[("t", &[1])]), vec![topic("t", &[1])]),
-            ("repeated index", filter(&[("t", &[1, 1])]), vec![topic(
-                "t",
-                &[1, 1],
-            )]),
-            ("request order", filter(&[("t", &[1, 0])]), vec![topic(
-                "t",
-                &[1, 0],
-            )]),
-            ("idle partition", filter(&[("t", &[2])]), vec![]),
-            ("unknown topic", filter(&[("u", &[0])]), vec![]),
-            ("repeated topic", filter(&[("t", &[0]), ("t", &[1])]), vec![
-                topic("t", &[0]),
-                topic("t", &[1]),
-            ]),
+            (
+                "empty index list",
+                filter(&[FilterTopic {
+                    name: "t",
+                    indexes: &[],
+                }]),
+                vec![],
+            ),
+            (
+                "one index",
+                filter(&[FilterTopic {
+                    name: "t",
+                    indexes: &[1],
+                }]),
+                vec![topic("t", &[1])],
+            ),
+            (
+                "repeated index",
+                filter(&[FilterTopic {
+                    name: "t",
+                    indexes: &[1, 1],
+                }]),
+                vec![topic("t", &[1, 1])],
+            ),
+            (
+                "request order",
+                filter(&[FilterTopic {
+                    name: "t",
+                    indexes: &[1, 0],
+                }]),
+                vec![topic("t", &[1, 0])],
+            ),
+            (
+                "idle partition",
+                filter(&[FilterTopic {
+                    name: "t",
+                    indexes: &[2],
+                }]),
+                vec![],
+            ),
+            (
+                "unknown topic",
+                filter(&[FilterTopic {
+                    name: "u",
+                    indexes: &[0],
+                }]),
+                vec![],
+            ),
+            (
+                "repeated topic",
+                filter(&[
+                    FilterTopic {
+                        name: "t",
+                        indexes: &[0],
+                    },
+                    FilterTopic {
+                        name: "t",
+                        indexes: &[1],
+                    },
+                ]),
+                vec![topic("t", &[0]), topic("t", &[1])],
+            ),
         ];
         for (name, topics, expected_topics) in cases {
             let resp = handle(

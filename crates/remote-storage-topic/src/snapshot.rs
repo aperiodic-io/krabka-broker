@@ -53,6 +53,19 @@ pub struct Snapshot {
     pub dump: RlmmCacheDump,
 }
 
+/// A partition's identity in a snapshot being decoded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct PartitionKey {
+    topic_id: uuid::Uuid,
+    partition: i32,
+}
+
+/// A partition's dump and the order its first event appeared in.
+struct OrderedDump {
+    ordinal: usize,
+    dump: PartitionDump,
+}
+
 impl Snapshot {
     /// Encode this snapshot into freshly-allocated bytes.
     ///
@@ -139,7 +152,7 @@ impl Snapshot {
             .map_err(|_| CodecError::LengthOverflow(u64::MAX))?;
 
         // Accumulate per-partition while preserving first-seen order.
-        let mut by_tp: BTreeMap<(uuid::Uuid, i32), (usize, PartitionDump)> = BTreeMap::new();
+        let mut by_tp: BTreeMap<PartitionKey, OrderedDump> = BTreeMap::new();
         for _ in 0..n_entries {
             let len = usize::try_from(read_uvarint(&mut r)?)
                 .map_err(|_| CodecError::LengthOverflow(u64::MAX))?;
@@ -147,37 +160,42 @@ impl Snapshot {
             match MetadataEvent::decode(raw)? {
                 MetadataEvent::AddSegment(md) => {
                     let tp = md.remote_log_segment_id().topic_id_partition.clone();
-                    let key = (tp.topic_id, tp.partition);
+                    let key = PartitionKey {
+                        topic_id: tp.topic_id,
+                        partition: tp.partition,
+                    };
                     let ordinal = by_tp.len();
                     by_tp
                         .entry(key)
-                        .or_insert_with(|| {
-                            (ordinal, PartitionDump {
+                        .or_insert_with(|| OrderedDump {
+                            ordinal,
+                            dump: PartitionDump {
                                 topic_id_partition: tp,
                                 segments: Vec::new(),
                                 delete_state: None,
-                            })
+                            },
                         })
-                        .1
+                        .dump
                         .segments
                         .push(md);
                 }
                 MetadataEvent::PartitionDelete(d) => {
-                    let key = (
-                        d.topic_id_partition.topic_id,
-                        d.topic_id_partition.partition,
-                    );
+                    let key = PartitionKey {
+                        topic_id: d.topic_id_partition.topic_id,
+                        partition: d.topic_id_partition.partition,
+                    };
                     let ordinal = by_tp.len();
                     by_tp
                         .entry(key)
-                        .or_insert_with(|| {
-                            (ordinal, PartitionDump {
+                        .or_insert_with(|| OrderedDump {
+                            ordinal,
+                            dump: PartitionDump {
                                 topic_id_partition: d.topic_id_partition,
                                 segments: Vec::new(),
                                 delete_state: None,
-                            })
+                            },
                         })
-                        .1
+                        .dump
                         .delete_state = Some(d.state);
                 }
                 MetadataEvent::UpdateSegment(_) => {
@@ -194,11 +212,8 @@ impl Snapshot {
             return Err(SnapshotError::TrailingBytes(r.remaining()));
         }
         let mut ordered: Vec<_> = by_tp.into_values().collect();
-        ordered.sort_unstable_by_key(|(ordinal, _)| *ordinal);
-        let partitions = ordered
-            .into_iter()
-            .map(|(_, partition)| partition)
-            .collect();
+        ordered.sort_unstable_by_key(|entry| entry.ordinal);
+        let partitions = ordered.into_iter().map(|entry| entry.dump).collect();
         Ok(Self {
             committed_offsets,
             dump: RlmmCacheDump { partitions },

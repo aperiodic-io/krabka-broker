@@ -7,7 +7,7 @@
 //! reads, and every method that writes it, live here.
 
 use {
-    super::{DistributedQuorum, WalShardEngine, strict_majority},
+    super::{DistributedQuorum, ShardObservability, WalShardEngine, strict_majority},
     krabka_ids::Offset,
     krabka_kraft_core::NodeId,
     std::{collections::HashMap, sync::atomic::Ordering},
@@ -30,7 +30,7 @@ impl WalShardEngine {
             *distributed = None;
             drop(distributed);
             self.durable_advanced.notify_waiters();
-            if let Some((shard, metrics)) = self.observability.get() {
+            if let Some(ShardObservability { shard, metrics }) = self.observability.get() {
                 metrics.remove_diskless_wal_shard(
                     shard.topic_id,
                     shard.partition,
@@ -228,14 +228,23 @@ mod tests {
         std::sync::{Arc, Mutex},
     };
 
-    fn unfsynced_three_voter_engine(
-        records: i32,
-    ) -> (tempfile::TempDir, Arc<Mutex<Log>>, WalShardEngine) {
+    /// A directory, the source log in it and the engine over it.
+    struct UnfsyncedEngine {
+        dir: tempfile::TempDir,
+        source: Arc<Mutex<Log>>,
+        engine: WalShardEngine,
+    }
+
+    fn unfsynced_three_voter_engine(records: i32) -> UnfsyncedEngine {
         let dir = tempfile::tempdir().unwrap();
         let source = source_log(dir.path());
         let engine = distributed_engine(&source, 3, &[NodeId(1), NodeId(2), NodeId(3)]);
         source.lock().unwrap().append(&mut batch(records)).unwrap();
-        (dir, source, engine)
+        UnfsyncedEngine {
+            dir,
+            source,
+            engine,
+        }
     }
 
     #[test]
@@ -264,7 +273,11 @@ mod tests {
     /// second follower's); the leader's log end is not a vote.
     #[tokio::test(flavor = "multi_thread")]
     async fn leader_log_end_does_not_vote_before_the_leader_fsyncs() {
-        let (_dir, source, engine) = unfsynced_three_voter_engine(3);
+        let UnfsyncedEngine {
+            dir: _dir,
+            source,
+            engine,
+        } = unfsynced_three_voter_engine(3);
 
         assert!(!engine.record_follower_ack(NodeId(2), Offset(3)));
         assert!(engine.durable_watermark() == Offset(0));
@@ -277,7 +290,9 @@ mod tests {
 
     #[test]
     fn two_follower_fsyncs_commit_without_the_leader() {
-        let (_dir, _source, engine) = unfsynced_three_voter_engine(3);
+        let UnfsyncedEngine {
+            dir: _dir, engine, ..
+        } = unfsynced_three_voter_engine(3);
 
         assert!(!engine.record_follower_ack(NodeId(2), Offset(3)));
         assert!(engine.record_follower_ack(NodeId(3), Offset(3)));

@@ -20,16 +20,16 @@
 #[must_use]
 pub fn subject_dn_rfc2253(cert_der: &[u8]) -> Option<String> {
     let certificate = Tlv::read_exact(cert_der, SEQUENCE)?;
-    let mut tbs = Tlv::read(certificate.value, SEQUENCE)?.0.value;
+    let mut tbs = Tlv::read(certificate.value, SEQUENCE)?.tlv.value;
     // TBSCertificate: [0] version (optional), serialNumber, signature, issuer,
     // validity, subject.
     if tbs.first() == Some(&EXPLICIT_VERSION) {
-        tbs = Tlv::read(tbs, EXPLICIT_VERSION)?.1;
+        tbs = Tlv::read(tbs, EXPLICIT_VERSION)?.rest;
     }
     for tag in [INTEGER, SEQUENCE, SEQUENCE, SEQUENCE] {
-        tbs = Tlv::read(tbs, tag)?.1;
+        tbs = Tlv::read(tbs, tag)?.rest;
     }
-    let subject = Tlv::read(tbs, SEQUENCE)?.0;
+    let subject = Tlv::read(tbs, SEQUENCE)?.tlv;
     name_rfc2253(subject.value)
 }
 
@@ -37,12 +37,15 @@ pub fn subject_dn_rfc2253(cert_der: &[u8]) -> Option<String> {
 fn name_rfc2253(mut rdn_sequence: &[u8]) -> Option<String> {
     let mut rdns = Vec::new();
     while !rdn_sequence.is_empty() {
-        let (set, rest) = Tlv::read(rdn_sequence, SET)?;
+        let TlvAndRest { tlv: set, rest } = Tlv::read(rdn_sequence, SET)?;
         rdn_sequence = rest;
         let mut attributes = Vec::new();
         let mut members = set.value;
         while !members.is_empty() {
-            let (attribute, rest) = Tlv::read(members, SEQUENCE)?;
+            let TlvAndRest {
+                tlv: attribute,
+                rest,
+            } = Tlv::read(members, SEQUENCE)?;
             members = rest;
             attributes.push(attribute_rfc2253(attribute.value)?);
         }
@@ -54,12 +57,12 @@ fn name_rfc2253(mut rdn_sequence: &[u8]) -> Option<String> {
 
 /// Renders one `AttributeTypeAndValue`.
 fn attribute_rfc2253(type_and_value: &[u8]) -> Option<String> {
-    let (oid, rest) = Tlv::read(type_and_value, OBJECT_IDENTIFIER)?;
+    let TlvAndRest { tlv: oid, rest } = Tlv::read(type_and_value, OBJECT_IDENTIFIER)?;
     let value = Tlv::read_exact(rest, None)?;
     let oid = dotted_oid(oid.value)?;
     let keyword = RFC2253_KEYWORDS
         .iter()
-        .find_map(|(keyword_oid, keyword)| (*keyword_oid == oid).then_some(*keyword));
+        .find_map(|entry| (entry.oid == oid).then_some(entry.keyword));
     // Java's `AVA.toRFC2253String` hex-encodes a value whose type is written
     // as an OID, or whose value is not a directory string.
     Some(match (keyword, directory_string(value.tag, value.value)) {
@@ -77,17 +80,27 @@ fn attribute_rfc2253(type_and_value: &[u8]) -> Option<String> {
 
 /// The attribute types RFC 2253 writes by keyword, as Java's `AVAKeyword`
 /// table marks them.
-const RFC2253_KEYWORDS: [(&str, &str); 9] = [
-    ("2.5.4.3", "CN"),
-    ("2.5.4.6", "C"),
-    ("2.5.4.7", "L"),
-    ("2.5.4.8", "ST"),
-    ("2.5.4.9", "STREET"),
-    ("2.5.4.10", "O"),
-    ("2.5.4.11", "OU"),
-    ("0.9.2342.19200300.100.1.25", "DC"),
-    ("0.9.2342.19200300.100.1.1", "UID"),
+const RFC2253_KEYWORDS: [Rfc2253Keyword; 9] = [
+    Rfc2253Keyword::new("2.5.4.3", "CN"),
+    Rfc2253Keyword::new("2.5.4.6", "C"),
+    Rfc2253Keyword::new("2.5.4.7", "L"),
+    Rfc2253Keyword::new("2.5.4.8", "ST"),
+    Rfc2253Keyword::new("2.5.4.9", "STREET"),
+    Rfc2253Keyword::new("2.5.4.10", "O"),
+    Rfc2253Keyword::new("2.5.4.11", "OU"),
+    Rfc2253Keyword::new("0.9.2342.19200300.100.1.25", "DC"),
+    Rfc2253Keyword::new("0.9.2342.19200300.100.1.1", "UID"),
 ];
+
+/// An attribute type written by keyword: its dotted OID and the keyword.
+struct Rfc2253Keyword {
+    oid: &'static str,
+    keyword: &'static str,
+}
+
+impl Rfc2253Keyword {
+    const fn new(oid: &'static str, keyword: &'static str) -> Self { Self { oid, keyword } }
+}
 
 /// The text of a value Java's `AVA.isDerString` accepts, decoded with the
 /// charset `AVA.getCharset` picks for its tag, or `None` for any other value
@@ -193,10 +206,16 @@ struct Tlv<'a> {
     whole: &'a [u8],
 }
 
+/// A TLV read from the start of some bytes, and the bytes after it.
+struct TlvAndRest<'a> {
+    tlv: Tlv<'a>,
+    rest: &'a [u8],
+}
+
 impl<'a> Tlv<'a> {
     /// Reads the TLV at the start of `input`, which must carry `tag`, and
     /// returns it with the bytes after it.
-    fn read(input: &'a [u8], tag: impl Into<Option<u8>>) -> Option<(Self, &'a [u8])> {
+    fn read(input: &'a [u8], tag: impl Into<Option<u8>>) -> Option<TlvAndRest<'a>> {
         let (&found, rest) = input.split_first()?;
         if tag.into().is_some_and(|tag| tag != found) || found & 0x1F == 0x1F {
             return None;
@@ -225,12 +244,12 @@ impl<'a> Tlv<'a> {
             value,
             whole: &input[..header + length],
         };
-        Some((tlv, after))
+        Some(TlvAndRest { tlv, rest: after })
     }
 
     /// Reads a TLV that must fill all of `input`.
     fn read_exact(input: &'a [u8], tag: impl Into<Option<u8>>) -> Option<Self> {
-        let (tlv, rest) = Self::read(input, tag)?;
+        let TlvAndRest { tlv, rest } = Self::read(input, tag)?;
         rest.is_empty().then_some(tlv)
     }
 }

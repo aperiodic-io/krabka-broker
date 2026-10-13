@@ -404,25 +404,29 @@ mod tests {
             krabka_protocol::records::metadata::KraftMetadataRecord,
         };
 
-        let rows: [(&str, MetadataRecord); 4] = [
-            (
-                "features epoch",
-                MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
+        struct Row {
+            label: &'static str,
+            rec: MetadataRecord,
+        }
+        let rows = [
+            Row {
+                label: "features epoch",
+                rec: MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
                     name: "metadata.version".into(),
                     level: 25,
                 }),
-            ),
-            (
-                "diskless offset advance",
-                MetadataRecord::V1PartitionOffsetAdvance(PartitionOffsetAdvanceRecord {
+            },
+            Row {
+                label: "diskless offset advance",
+                rec: MetadataRecord::V1PartitionOffsetAdvance(PartitionOffsetAdvanceRecord {
                     topic: "orders".into(),
                     partition: 0,
                     count: 12,
                 }),
-            ),
-            (
-                "write freeze",
-                MetadataRecord::V1TopicFreeze(TopicFreezeRecord {
+            },
+            Row {
+                label: "write freeze",
+                rec: MetadataRecord::V1TopicFreeze(TopicFreezeRecord {
                     scope: "orders".into(),
                     pattern_type: PatternType::Literal,
                     frozen: true,
@@ -433,10 +437,10 @@ mod tests {
                     key_id: String::new(),
                     signature: vec![],
                 }),
-            ),
-            (
-                "break-glass proposal",
-                MetadataRecord::V1BreakGlassProposal(BreakGlassProposalRecord {
+            },
+            Row {
+                label: "break-glass proposal",
+                rec: MetadataRecord::V1BreakGlassProposal(BreakGlassProposalRecord {
                     proposal_id: Uuid::from_u128(0xB1),
                     action: BreakGlassAction::ThawTopicFreeze,
                     target: "literal:orders".into(),
@@ -448,9 +452,9 @@ mod tests {
                     consumed_at_ms: 0,
                     withdrawn: false,
                 }),
-            ),
+            },
         ];
-        for (label, rec) in rows {
+        for Row { label, rec } in rows {
             let mut image = MetadataImage::new(Uuid::new_v4());
             image.apply(&rec);
 

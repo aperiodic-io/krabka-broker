@@ -13,7 +13,7 @@ use {
         streams_harness::{
             connect, create_topic, finalize_streams_version, first_join, follow_up, topology,
         },
-        support::start_group_coordinator_with_config,
+        support::{GroupCoordinatorBoot, start_group_coordinator_with_config},
     },
     assert2::assert,
     krabka_broker::{BrokerConfig, file_config::FileConfig},
@@ -41,19 +41,18 @@ const TRUNK_WITH_PLUGIN: &str = r#"
 const GROUP: &str = "topology-description-app";
 const SOURCE: &str = "topology-description-input";
 
-async fn boot_with_plugin() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
+async fn boot_with_plugin() -> GroupCoordinatorBoot {
     let dir = tempfile::TempDir::new().unwrap();
     let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
     let file: FileConfig = toml::from_str(TRUNK_WITH_PLUGIN).expect("parse the properties");
     file.apply_to(&mut config).expect("apply the properties");
-    let started = Box::pin(
+    Box::pin(
         start_group_coordinator_with_config()
             .config(config)
             .directory(dir)
             .call(),
     )
-    .await;
-    (started.broker, started.bootstrap, started.directory)
+    .await
 }
 
 /// The description a Streams client pushes for [`topology`]: one source node.
@@ -112,7 +111,11 @@ async fn describe_with_description(client: &Client) -> DescribedGroup {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn one_member_is_asked_and_its_push_is_described() {
-    let (_broker, bootstrap, _dir) = Box::pin(boot_with_plugin()).await;
+    let GroupCoordinatorBoot {
+        broker: _broker,
+        bootstrap,
+        directory: _dir,
+    } = Box::pin(boot_with_plugin()).await;
     let client = connect(&bootstrap).await;
     finalize_streams_version(&client).await;
     let source_topic = SOURCE;
@@ -185,8 +188,8 @@ async fn one_member_is_asked_and_its_push_is_described() {
 /// join creates is asked again and describes nothing stored.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_deleted_and_recreated_group_is_asked_again() {
-    let (_broker, bootstrap, _dir) = Box::pin(boot_with_plugin()).await;
-    let client = connect(&bootstrap).await;
+    let booted = Box::pin(boot_with_plugin()).await;
+    let client = connect(&booted.bootstrap).await;
     finalize_streams_version(&client).await;
     create_topic(&client, SOURCE, 1).await;
     let member = client

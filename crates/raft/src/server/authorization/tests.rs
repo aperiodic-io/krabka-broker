@@ -93,6 +93,15 @@ fn each_controller_api_needs_the_kafka_operation() {
     }
 }
 
+/// The refusal of a `SubmitChange` without `ClusterAction`.
+fn submit_change_refusal() -> Refusal {
+    Refusal::SubmitChange(KrabkaSubmitChangeResponse {
+        error_code: 31,
+        leader_hint: -1,
+        result: Bytes::new(),
+    })
+}
+
 /// One decoded refusal.
 #[derive(Debug, PartialEq)]
 enum Refusal {
@@ -112,8 +121,24 @@ enum Refusal {
     MetadataFetch(KrabkaMetadataFetchResponse),
 }
 
-fn check_refusal_cases(cases: impl IntoIterator<Item = (&'static str, i16, i16, Bytes, Refusal)>) {
-    for (name, api, version, body, expected) in cases {
+/// A request that the listener refuses, and the refusal it expects.
+struct RefusalCase {
+    name: &'static str,
+    api: i16,
+    version: i16,
+    body: Bytes,
+    expected: Refusal,
+}
+
+fn check_refusal_cases(cases: impl IntoIterator<Item = RefusalCase>) {
+    for RefusalCase {
+        name,
+        api,
+        version,
+        body,
+        expected,
+    } in cases
+    {
         let bytes = refusal(api, version, &body).expect("encode the refusal");
         check!(decode(api, version, &bytes) == expected, "{name}");
     }
@@ -201,12 +226,12 @@ fn fetch_and_quorum_refusals_are_kafka_error_responses() {
         ..Default::default()
     };
     let cases = [
-        (
-            "Fetch before v13 names every partition",
-            api_key::FETCH,
-            12,
-            fetch_request(12),
-            Refusal::Fetch(FetchResponse {
+        RefusalCase {
+            name: "Fetch before v13 names every partition",
+            api: api_key::FETCH,
+            version: 12,
+            body: fetch_request(12),
+            expected: Refusal::Fetch(FetchResponse {
                 error_code: 31,
                 session_id: 7,
                 responses: vec![FetchableTopicResponse {
@@ -218,69 +243,69 @@ fn fetch_and_quorum_refusals_are_kafka_error_responses() {
                 }],
                 ..Default::default()
             }),
-        ),
-        (
-            "Fetch at exactly v13 has only the top-level error",
-            api_key::FETCH,
-            13,
-            fetch_request(13),
-            Refusal::Fetch(FetchResponse {
+        },
+        RefusalCase {
+            name: "Fetch at exactly v13 has only the top-level error",
+            api: api_key::FETCH,
+            version: 13,
+            body: fetch_request(13),
+            expected: Refusal::Fetch(FetchResponse {
                 error_code: 31,
                 session_id: 7,
                 ..Default::default()
             }),
-        ),
-        (
-            "Fetch from v13 has only the top-level error",
-            api_key::FETCH,
-            17,
-            fetch_request(17),
-            Refusal::Fetch(FetchResponse {
+        },
+        RefusalCase {
+            name: "Fetch from v13 has only the top-level error",
+            api: api_key::FETCH,
+            version: 17,
+            body: fetch_request(17),
+            expected: Refusal::Fetch(FetchResponse {
                 error_code: 31,
                 session_id: 7,
                 ..Default::default()
             }),
-        ),
-        (
-            "Vote",
-            api_key::VOTE,
-            2,
-            Bytes::new(),
-            Refusal::Vote(VoteResponse {
+        },
+        RefusalCase {
+            name: "Vote",
+            api: api_key::VOTE,
+            version: 2,
+            body: Bytes::new(),
+            expected: Refusal::Vote(VoteResponse {
                 error_code: 31,
                 ..Default::default()
             }),
-        ),
-        (
-            "BeginQuorumEpoch",
-            api_key::BEGIN_QUORUM_EPOCH,
-            1,
-            Bytes::new(),
-            Refusal::BeginQuorumEpoch(BeginQuorumEpochResponse {
+        },
+        RefusalCase {
+            name: "BeginQuorumEpoch",
+            api: api_key::BEGIN_QUORUM_EPOCH,
+            version: 1,
+            body: Bytes::new(),
+            expected: Refusal::BeginQuorumEpoch(BeginQuorumEpochResponse {
                 error_code: 31,
                 ..Default::default()
             }),
-        ),
-        (
-            "EndQuorumEpoch",
-            api_key::END_QUORUM_EPOCH,
-            1,
-            Bytes::new(),
-            Refusal::EndQuorumEpoch(EndQuorumEpochResponse {
+        },
+        RefusalCase {
+            name: "EndQuorumEpoch",
+            api: api_key::END_QUORUM_EPOCH,
+            version: 1,
+            body: Bytes::new(),
+            expected: Refusal::EndQuorumEpoch(EndQuorumEpochResponse {
                 error_code: 31,
                 ..Default::default()
             }),
-        ),
-        (
-            "FetchSnapshot",
-            api_key::FETCH_SNAPSHOT,
-            1,
-            Bytes::new(),
-            Refusal::FetchSnapshot(FetchSnapshotResponse {
+        },
+        RefusalCase {
+            name: "FetchSnapshot",
+            api: api_key::FETCH_SNAPSHOT,
+            version: 1,
+            body: Bytes::new(),
+            expected: Refusal::FetchSnapshot(FetchSnapshotResponse {
                 error_code: 31,
                 ..Default::default()
             }),
-        ),
+        },
     ];
     check_refusal_cases(cases);
 }
@@ -293,101 +318,101 @@ fn admin_and_private_refusals_are_kafka_error_responses() {
         result: Bytes::new(),
     };
     let cases = [
-        (
-            "AssignReplicasToDirs",
-            73,
-            0,
-            Bytes::new(),
-            Refusal::AssignReplicasToDirs(AssignReplicasToDirsResponse {
+        RefusalCase {
+            name: "AssignReplicasToDirs",
+            api: 73,
+            version: 0,
+            body: Bytes::new(),
+            expected: Refusal::AssignReplicasToDirs(AssignReplicasToDirsResponse {
                 error_code: 31,
                 ..Default::default()
             }),
-        ),
-        (
-            "ControllerRegistration",
-            70,
-            0,
-            Bytes::new(),
-            Refusal::ControllerRegistration(ControllerRegistrationResponse {
-                error_code: 31,
-                error_message: Some(MESSAGE.to_string()),
-                ..Default::default()
-            }),
-        ),
-        (
-            "UpdateRaftVoter",
-            82,
-            0,
-            Bytes::new(),
-            Refusal::UpdateRaftVoter(UpdateRaftVoterResponse {
-                error_code: 31,
-                ..Default::default()
-            }),
-        ),
-        (
-            "AddRaftVoter",
-            80,
-            0,
-            Bytes::new(),
-            Refusal::AddRaftVoter(AddRaftVoterResponse {
+        },
+        RefusalCase {
+            name: "ControllerRegistration",
+            api: 70,
+            version: 0,
+            body: Bytes::new(),
+            expected: Refusal::ControllerRegistration(ControllerRegistrationResponse {
                 error_code: 31,
                 error_message: Some(MESSAGE.to_string()),
                 ..Default::default()
             }),
-        ),
-        (
-            "RemoveRaftVoter",
-            81,
-            0,
-            Bytes::new(),
-            Refusal::RemoveRaftVoter(RemoveRaftVoterResponse {
+        },
+        RefusalCase {
+            name: "UpdateRaftVoter",
+            api: 82,
+            version: 0,
+            body: Bytes::new(),
+            expected: Refusal::UpdateRaftVoter(UpdateRaftVoterResponse {
+                error_code: 31,
+                ..Default::default()
+            }),
+        },
+        RefusalCase {
+            name: "AddRaftVoter",
+            api: 80,
+            version: 0,
+            body: Bytes::new(),
+            expected: Refusal::AddRaftVoter(AddRaftVoterResponse {
                 error_code: 31,
                 error_message: Some(MESSAGE.to_string()),
                 ..Default::default()
             }),
-        ),
-        (
-            "DescribeCluster",
-            60,
-            1,
-            Bytes::new(),
-            Refusal::DescribeCluster(DescribeClusterResponse {
+        },
+        RefusalCase {
+            name: "RemoveRaftVoter",
+            api: 81,
+            version: 0,
+            body: Bytes::new(),
+            expected: Refusal::RemoveRaftVoter(RemoveRaftVoterResponse {
                 error_code: 31,
                 error_message: Some(MESSAGE.to_string()),
                 ..Default::default()
             }),
-        ),
-        (
-            "DescribeQuorum",
-            55,
-            2,
-            Bytes::new(),
-            Refusal::DescribeQuorum(DescribeQuorumResponse {
+        },
+        RefusalCase {
+            name: "DescribeCluster",
+            api: 60,
+            version: 1,
+            body: Bytes::new(),
+            expected: Refusal::DescribeCluster(DescribeClusterResponse {
                 error_code: 31,
                 error_message: Some(MESSAGE.to_string()),
                 ..Default::default()
             }),
-        ),
-        (
-            "SubmitChange",
-            API_KEY_SUBMIT_CHANGE,
-            0,
-            Bytes::new(),
-            Refusal::SubmitChange(private_submit.clone()),
-        ),
-        (
-            "DelegationTokenMutation",
-            API_KEY_DELEGATION_TOKEN_MUTATION,
-            0,
-            Bytes::new(),
-            Refusal::SubmitChange(private_submit),
-        ),
-        (
-            "MetadataFetch",
-            API_KEY_METADATA_FETCH,
-            0,
-            Bytes::new(),
-            Refusal::MetadataFetch(KrabkaMetadataFetchResponse {
+        },
+        RefusalCase {
+            name: "DescribeQuorum",
+            api: 55,
+            version: 2,
+            body: Bytes::new(),
+            expected: Refusal::DescribeQuorum(DescribeQuorumResponse {
+                error_code: 31,
+                error_message: Some(MESSAGE.to_string()),
+                ..Default::default()
+            }),
+        },
+        RefusalCase {
+            name: "SubmitChange",
+            api: API_KEY_SUBMIT_CHANGE,
+            version: 0,
+            body: Bytes::new(),
+            expected: Refusal::SubmitChange(private_submit.clone()),
+        },
+        RefusalCase {
+            name: "DelegationTokenMutation",
+            api: API_KEY_DELEGATION_TOKEN_MUTATION,
+            version: 0,
+            body: Bytes::new(),
+            expected: Refusal::SubmitChange(private_submit),
+        },
+        RefusalCase {
+            name: "MetadataFetch",
+            api: API_KEY_METADATA_FETCH,
+            version: 0,
+            body: Bytes::new(),
+            expected: Refusal::MetadataFetch(KrabkaMetadataFetchResponse {
                 error_code: 31,
                 leader_hint: -1,
                 leader_epoch: -1,
@@ -397,7 +422,7 @@ fn admin_and_private_refusals_are_kafka_error_responses() {
                 snapshot_id: None,
                 records: Bytes::new(),
             }),
-        ),
+        },
     ];
     check_refusal_cases(cases);
 }
@@ -476,18 +501,19 @@ fn submit_change(topic: &str) -> Bytes {
     Bytes::from(out)
 }
 
-/// One request of [`a_denied_request_never_reaches_the_engine`]: its name, the
-/// grants of the connection, the api, the version, the body, the refusal it
-/// expects (or `None` when the request runs), and a topic that it commits.
-type Case = (
-    &'static str,
-    &'static [&'static str],
-    i16,
-    i16,
-    Bytes,
-    Option<Refusal>,
-    Option<&'static str>,
-);
+/// One request of [`a_denied_request_never_reaches_the_engine`].
+struct Case {
+    name: &'static str,
+    /// The grants of the connection.
+    grants: &'static [&'static str],
+    api: i16,
+    version: i16,
+    body: Bytes,
+    /// The refusal it expects, or `None` when the request runs.
+    refused: Option<Refusal>,
+    /// A topic that the request commits.
+    committed_topic: Option<&'static str>,
+}
 
 /// The listener checks each request against the grants of its connection and
 /// answers a denial without running the request (#684).
@@ -524,74 +550,81 @@ async fn a_denied_request_never_reaches_the_engine() {
         1,
     );
 
-    let denied_submit_change = |name: &'static str, grants: &'static [&'static str]| -> Case {
-        (
-            name,
-            grants,
-            API_KEY_SUBMIT_CHANGE,
-            0,
-            submit_change("denied-topic"),
-            Some(Refusal::SubmitChange(KrabkaSubmitChangeResponse {
-                error_code: 31,
-                leader_hint: -1,
-                result: Bytes::new(),
-            })),
-            None,
-        )
-    };
-
-    let cases: [Case; 6] = [
-        denied_submit_change("SubmitChange without a grant", &[]),
-        denied_submit_change("SubmitChange with Alter and Describe only", &[
-            "Alter", "Describe",
-        ]),
-        (
-            "SubmitChange with ClusterAction",
-            &["ClusterAction"],
-            API_KEY_SUBMIT_CHANGE,
-            0,
-            submit_change("allowed-topic"),
-            None,
-            Some("allowed-topic"),
-        ),
-        (
-            "DescribeQuorum with ClusterAction only",
-            &["ClusterAction"],
-            55,
-            2,
-            describe_quorum.clone(),
-            Some(Refusal::DescribeQuorum(DescribeQuorumResponse {
+    let cases = [
+        Case {
+            name: "SubmitChange without a grant",
+            grants: &[],
+            api: API_KEY_SUBMIT_CHANGE,
+            version: 0,
+            body: submit_change("denied-topic"),
+            refused: Some(submit_change_refusal()),
+            committed_topic: None,
+        },
+        Case {
+            name: "SubmitChange with Alter and Describe only",
+            grants: &["Alter", "Describe"],
+            api: API_KEY_SUBMIT_CHANGE,
+            version: 0,
+            body: submit_change("denied-topic"),
+            refused: Some(submit_change_refusal()),
+            committed_topic: None,
+        },
+        Case {
+            name: "SubmitChange with ClusterAction",
+            grants: &["ClusterAction"],
+            api: API_KEY_SUBMIT_CHANGE,
+            version: 0,
+            body: submit_change("allowed-topic"),
+            refused: None,
+            committed_topic: Some("allowed-topic"),
+        },
+        Case {
+            name: "DescribeQuorum with ClusterAction only",
+            grants: &["ClusterAction"],
+            api: 55,
+            version: 2,
+            body: describe_quorum.clone(),
+            refused: Some(Refusal::DescribeQuorum(DescribeQuorumResponse {
                 error_code: 31,
                 error_message: Some(MESSAGE.to_string()),
                 ..Default::default()
             })),
-            None,
-        ),
-        (
-            "DescribeCluster with Describe only",
-            &["Describe"],
-            60,
-            1,
-            describe_cluster,
-            Some(Refusal::DescribeCluster(DescribeClusterResponse {
+            committed_topic: None,
+        },
+        Case {
+            name: "DescribeCluster with Describe only",
+            grants: &["Describe"],
+            api: 60,
+            version: 1,
+            body: describe_cluster,
+            refused: Some(Refusal::DescribeCluster(DescribeClusterResponse {
                 error_code: 31,
                 error_message: Some(MESSAGE.to_string()),
                 ..Default::default()
             })),
-            None,
-        ),
-        (
-            "DescribeQuorum with Describe",
-            &["Describe"],
-            55,
-            2,
-            describe_quorum,
-            None,
-            None,
-        ),
+            committed_topic: None,
+        },
+        Case {
+            name: "DescribeQuorum with Describe",
+            grants: &["Describe"],
+            api: 55,
+            version: 2,
+            body: describe_quorum,
+            refused: None,
+            committed_topic: None,
+        },
     ];
 
-    for (name, grants, api, version, body, refused, committed_topic) in cases {
+    for Case {
+        name,
+        grants,
+        api,
+        version,
+        body,
+        refused,
+        committed_topic,
+    } in cases
+    {
         let (mut client, server) = tokio::io::duplex(64 * 1024);
         let connection = tokio::spawn(handle_conn(
             server,

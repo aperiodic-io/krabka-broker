@@ -61,30 +61,78 @@ mod tests {
 
     #[test]
     fn murmur2_matches_kafka_vectors_for_remainder_lengths() {
-        let cases: &[(&[u8], u32)] = &[
-            (b"", 0x106e_08d9),
-            (b"a", 0xa2d0_b27c),
-            (b"ab", 0x12d8_262a),
-            (b"abc", 0x1c94_221b),
-            (b"abcd", 0xb11a_b5f4),
-            (b"abcde", 0x1b89_7edd),
+        struct Case {
+            input: &'static [u8],
+            expected: u32,
+        }
+        let cases: &[Case] = &[
+            Case {
+                input: b"",
+                expected: 0x106e_08d9,
+            },
+            Case {
+                input: b"a",
+                expected: 0xa2d0_b27c,
+            },
+            Case {
+                input: b"ab",
+                expected: 0x12d8_262a,
+            },
+            Case {
+                input: b"abc",
+                expected: 0x1c94_221b,
+            },
+            Case {
+                input: b"abcd",
+                expected: 0xb11a_b5f4,
+            },
+            Case {
+                input: b"abcde",
+                expected: 0x1b89_7edd,
+            },
         ];
 
-        for (input, expected) in cases {
+        for Case { input, expected } in cases {
             assert!(murmur2(input) == *expected);
         }
     }
 
     #[test]
     fn murmur2_partition_matches_kafka_utils_abs_mod() {
-        let cases: &[(&[u8], i32, i32)] = &[
-            (b"my-tid", 50, 43),
-            (b"producer-1", 50, 45),
-            (b"tx-orders-prod", 50, 26),
-            (b"abcde", 7, 4),
+        struct Case {
+            input: &'static [u8],
+            partitions: i32,
+            expected: i32,
+        }
+        let cases: &[Case] = &[
+            Case {
+                input: b"my-tid",
+                partitions: 50,
+                expected: 43,
+            },
+            Case {
+                input: b"producer-1",
+                partitions: 50,
+                expected: 45,
+            },
+            Case {
+                input: b"tx-orders-prod",
+                partitions: 50,
+                expected: 26,
+            },
+            Case {
+                input: b"abcde",
+                partitions: 7,
+                expected: 4,
+            },
         ];
 
-        for (input, partitions, expected) in cases {
+        for Case {
+            input,
+            partitions,
+            expected,
+        } in cases
+        {
             assert!(murmur2_partition(input, *partitions) == *expected);
         }
     }

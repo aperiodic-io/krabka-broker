@@ -55,7 +55,7 @@ use {
         },
         seed::apply_seed,
         session::handle_session_tick,
-        share_state::apply_initialized,
+        share_state::{InitializeOutcome, apply_initialized},
     },
     super::{config::ShareGroupConfig, state::ShareGroupState},
     crate::{
@@ -97,7 +97,7 @@ pub enum ShareGroupActorMessage {
     /// The outcome of the share-state `Initialize` calls that a heartbeat
     /// started: each share partition, and whether the persister initialized
     /// it. The actor sends it to itself, from the task that ran the calls.
-    ShareStateInitialized(Vec<((krabka_protocol::primitives::uuid::Uuid, i32), bool)>),
+    ShareStateInitialized(Vec<InitializeOutcome>),
     Shutdown(oneshot::Sender<()>),
 }
 

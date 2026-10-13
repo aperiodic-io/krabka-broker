@@ -43,25 +43,36 @@ fn spawn_writer(
     })
 }
 
-async fn queued_descending_batches(tx: &mpsc::Sender<WriterMessage>) -> (ProduceAck, ProduceAck) {
-    let later = queue_batch(tx, batch_at(NOW_MS + 60_000)).await;
-    let earlier = queue_batch(tx, batch_at(NOW_MS)).await;
-    (later, earlier)
+/// The acknowledgements of two queued produces whose delivery times descend.
+struct DescendingAcks {
+    later: ProduceAck,
+    earlier: ProduceAck,
 }
 
-async fn queued_scenario_writer(
-    dir: &std::path::Path,
-    log: &Arc<Mutex<Log>>,
-) -> (
-    mpsc::Sender<WriterMessage>,
-    ProduceAck,
-    ProduceAck,
-    tokio::task::JoinHandle<()>,
-) {
+async fn queued_descending_batches(tx: &mpsc::Sender<WriterMessage>) -> DescendingAcks {
+    let later = queue_batch(tx, batch_at(NOW_MS + 60_000)).await;
+    let earlier = queue_batch(tx, batch_at(NOW_MS)).await;
+    DescendingAcks { later, earlier }
+}
+
+/// A writer over two queued descending produces, with their acknowledgements.
+struct QueuedScenario {
+    tx: mpsc::Sender<WriterMessage>,
+    later: ProduceAck,
+    earlier: ProduceAck,
+    writer: tokio::task::JoinHandle<()>,
+}
+
+async fn queued_scenario_writer(dir: &std::path::Path, log: &Arc<Mutex<Log>>) -> QueuedScenario {
     let (tx, rx) = mpsc::channel(2);
-    let (later, earlier) = queued_descending_batches(&tx).await;
+    let DescendingAcks { later, earlier } = queued_descending_batches(&tx).await;
     let writer = spawn_writer(dir, log, rx);
-    (tx, later, earlier, writer)
+    QueuedScenario {
+        tx,
+        later,
+        earlier,
+        writer,
+    }
 }
 
 /// Two produces whose delivery times descend, queued before the writer runs so
@@ -77,7 +88,12 @@ async fn a_backwards_delivery_time_in_one_writer_group_is_refused() {
         Log::open(dir.path(), monotonic_config()).expect("open the scheduled log"),
     ));
 
-    let (tx, later, earlier, writer) = queued_scenario_writer(dir.path(), &log).await;
+    let QueuedScenario {
+        tx,
+        later,
+        earlier,
+        writer,
+    } = queued_scenario_writer(dir.path(), &log).await;
 
     let later = later.await.expect("ack the later batch");
     check!(later.expect("the later batch is admitted").base_offset == Offset(0));
@@ -115,7 +131,12 @@ async fn a_backwards_delivery_time_is_admitted_without_the_setting() {
         .expect("open the scheduled log"),
     ));
 
-    let (tx, later, earlier, writer) = queued_scenario_writer(dir.path(), &log).await;
+    let QueuedScenario {
+        tx,
+        later,
+        earlier,
+        writer,
+    } = queued_scenario_writer(dir.path(), &log).await;
 
     check!(
         later

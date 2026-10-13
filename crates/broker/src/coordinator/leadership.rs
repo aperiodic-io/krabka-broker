@@ -388,8 +388,13 @@ mod tests {
 
     /// A coordinator that leads the one partition of the offsets topic, its
     /// image, and the metrics it reports to.
-    fn coordinator_of_the_offsets_partition()
-    -> (Arc<GroupCoordinator>, MetadataImage, BrokerMetrics) {
+    struct OffsetsPartitionCoordinator {
+        coordinator: Arc<GroupCoordinator>,
+        image: MetadataImage,
+        metrics: BrokerMetrics,
+    }
+
+    fn coordinator_of_the_offsets_partition() -> OffsetsPartitionCoordinator {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
             name: OFFSETS_TOPIC.into(),
@@ -419,7 +424,11 @@ mod tests {
         );
         let metrics = BrokerMetrics::new();
         coordinator.set_metrics(metrics.clone());
-        (coordinator, image, metrics)
+        OffsetsPartitionCoordinator {
+            coordinator,
+            image,
+            metrics,
+        }
     }
 
     /// Losing the offsets partition that hosts a group ends this broker's
@@ -428,7 +437,11 @@ mod tests {
     /// this broker's lag sampler will never name the group again.
     #[tokio::test]
     async fn unloading_a_partition_releases_its_groups_lag_series() {
-        let (coordinator, image, metrics) = coordinator_of_the_offsets_partition();
+        let OffsetsPartitionCoordinator {
+            coordinator,
+            image,
+            metrics,
+        } = coordinator_of_the_offsets_partition();
         // The group has to be live for the unload to find it.
         let _actor = coordinator.get_or_create_classic("billing");
         let label = ConsumerGroupLabel {
@@ -449,7 +462,11 @@ mod tests {
     /// coordinator's to release, and would start again from zero if they were.
     #[tokio::test]
     async fn unloading_a_partition_keeps_its_share_groups_dead_letter_counters() {
-        let (coordinator, image, metrics) = coordinator_of_the_offsets_partition();
+        let OffsetsPartitionCoordinator {
+            coordinator,
+            image,
+            metrics,
+        } = coordinator_of_the_offsets_partition();
         coordinator.mark_share("workers");
         let _actor = coordinator.get_or_create_share("workers");
         metrics.record_share_dlq_produce("workers");

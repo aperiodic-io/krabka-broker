@@ -65,9 +65,25 @@ mod linux {
         tempfile::TempDir,
     };
 
+    /// One read and write size, with the label of its benchmark group.
+    #[derive(Debug, Clone, Copy)]
+    struct LabeledSize {
+        label: &'static str,
+        size: ByteSize,
+    }
+
     /// The two read and write sizes `mmap_read` uses: one Kafka-default fetch
     /// chunk, and a small scattered read.
-    const SIZES: [(&str, ByteSize); 2] = [("1MiB", mebibytes(1)), ("16KiB", kibibytes(16))];
+    const SIZES: [LabeledSize; 2] = [
+        LabeledSize {
+            label: "1MiB",
+            size: mebibytes(1),
+        },
+        LabeledSize {
+            label: "16KiB",
+            size: kibibytes(16),
+        },
+    ];
     /// Size of each fixture file: 64 distinct 1 MiB ranges, so the warm and
     /// write walks spread over more than one spot on the device.
     const FILE_SIZE: ByteSize = mebibytes(64);
@@ -335,7 +351,7 @@ mod linux {
         let fixture = Fixture::build();
         let file = File::open(&fixture.read_path).expect("open fixture");
 
-        for (label, size) in SIZES {
+        for LabeledSize { label, size } in SIZES {
             let len = size.bytes_u64();
             let mut buf = vec![0u8; size.bytes_usize()];
             let mut group = c.benchmark_group(format!("uncached_read/{label}"));
@@ -474,7 +490,7 @@ mod linux {
 
         // Overwrite runs first, while the fixture is still full.
         for shape in [WriteShape::Overwrite, WriteShape::Append] {
-            for (label, size) in SIZES {
+            for LabeledSize { label, size } in SIZES {
                 let len = size.bytes_u64();
                 let payload = |at: u64| {
                     let at = usize::try_from(at).expect("offset fits usize");

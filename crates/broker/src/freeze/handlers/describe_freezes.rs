@@ -137,17 +137,37 @@ mod tests {
         }
     }
 
-    fn registry(entries: &[(&str, PatternType)]) -> MetadataImage {
+    /// A freeze scope and its pattern type.
+    struct FrozenScope<'a> {
+        scope: &'a str,
+        pattern_type: PatternType,
+    }
+
+    fn registry(entries: &[FrozenScope<'_>]) -> MetadataImage {
         let mut image = MetadataImage::new(Uuid::from_u128(0x5150));
-        for (scope, pattern_type) in entries {
+        for FrozenScope {
+            scope,
+            pattern_type,
+        } in entries
+        {
             image.apply(&MetadataRecord::V1TopicFreeze(entry(scope, *pattern_type)));
         }
         image
     }
 
-    fn scopes(rows: &[DescribedTopicFreeze]) -> Vec<(String, i8)> {
+    /// A described freeze's scope and its pattern type byte.
+    #[derive(Debug, PartialEq, Eq)]
+    struct ScopeRow {
+        scope: String,
+        pattern_type: i8,
+    }
+
+    fn scopes(rows: &[DescribedTopicFreeze]) -> Vec<ScopeRow> {
         rows.iter()
-            .map(|row| (row.scope.clone(), row.pattern_type))
+            .map(|row| ScopeRow {
+                scope: row.scope.clone(),
+                pattern_type: row.pattern_type,
+            })
             .collect()
     }
 
@@ -197,10 +217,22 @@ mod tests {
     #[test]
     fn the_two_filters_select_the_entries_they_name() {
         let image = registry(&[
-            ("orders", PatternType::Literal),
-            ("orders", PatternType::Prefixed),
-            ("payments", PatternType::Literal),
-            ("tenant-a.", PatternType::Prefixed),
+            FrozenScope {
+                scope: "orders",
+                pattern_type: PatternType::Literal,
+            },
+            FrozenScope {
+                scope: "orders",
+                pattern_type: PatternType::Prefixed,
+            },
+            FrozenScope {
+                scope: "payments",
+                pattern_type: PatternType::Literal,
+            },
+            FrozenScope {
+                scope: "tenant-a.",
+                pattern_type: PatternType::Prefixed,
+            },
         ]);
 
         for (label, scope_filter, pattern_filter, expected) in [
@@ -265,9 +297,12 @@ mod tests {
             ),
         ] {
             let rows = matching_freezes(&image, scope_filter, pattern_filter);
-            let expected: Vec<(String, i8)> = expected
+            let expected: Vec<ScopeRow> = expected
                 .into_iter()
-                .map(|(scope, pattern)| (scope.to_owned(), pattern))
+                .map(|(scope, pattern_type)| ScopeRow {
+                    scope: scope.to_owned(),
+                    pattern_type,
+                })
                 .collect();
             check!(scopes(&rows) == expected, "{label}");
         }
@@ -275,7 +310,10 @@ mod tests {
 
     #[test]
     fn a_thawed_scope_is_gone_from_the_registry() {
-        let mut image = registry(&[("orders", PatternType::Literal)]);
+        let mut image = registry(&[FrozenScope {
+            scope: "orders",
+            pattern_type: PatternType::Literal,
+        }]);
         image.apply(&MetadataRecord::V1TopicFreeze(TopicFreezeRecord {
             frozen: false,
             ..entry("orders", PatternType::Literal)

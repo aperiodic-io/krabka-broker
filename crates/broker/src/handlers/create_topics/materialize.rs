@@ -100,11 +100,18 @@ mod tests {
         std::sync::{Arc, atomic::Ordering},
     };
 
+    /// One entry of a leader-epoch cache: an epoch and the offset it starts at.
+    #[derive(Debug, PartialEq, Eq)]
+    struct EpochStart {
+        epoch: i32,
+        start_offset: i64,
+    }
+
     /// What an installed leadership left on a partition.
     #[derive(Debug, PartialEq, Eq)]
     struct InstalledRole {
-        /// The leader-epoch cache, as `(epoch, start_offset)` pairs.
-        epoch_history: Vec<(i32, i64)>,
+        /// The leader-epoch cache.
+        epoch_history: Vec<EpochStart>,
         leader: u64,
         leader_epoch: i32,
         /// The ISR, sorted by node id.
@@ -119,7 +126,10 @@ mod tests {
             .epoch_checkpoint()
             .entries()
             .iter()
-            .map(|entry| (entry.epoch.0, entry.start_offset.0))
+            .map(|entry| EpochStart {
+                epoch: entry.epoch.0,
+                start_offset: entry.start_offset.0,
+            })
             .collect();
         let mut isr: Vec<u64> = partition
             .replica_state
@@ -149,67 +159,88 @@ mod tests {
     /// nor the ISR.
     #[tokio::test]
     async fn a_new_partition_leader_records_its_epoch_before_publishing_the_role() {
+        /// A case name, the leader, whether the topic is diskless, whether the
+        /// epoch checkpoint fails, whether the install succeeds, and the role left behind.
+        struct InstallCase {
+            name: &'static str,
+            leader: NodeId,
+            diskless: bool,
+            checkpoint_fails: bool,
+            installs: bool,
+            expected: InstalledRole,
+        }
+
         const LOCAL: NodeId = NodeId(1);
         let leadership = |leader| InitialLeadership {
             leader,
             isr: vec![NodeId(1), NodeId(2)],
         };
-        // (name, leader, diskless, checkpoint fails, install succeeds, role)
         let cases = [
-            (
-                "local disk-backed leader",
-                LOCAL,
-                false,
-                false,
-                true,
-                InstalledRole {
-                    epoch_history: vec![(4, 0)],
+            InstallCase {
+                name: "local disk-backed leader",
+                leader: LOCAL,
+                diskless: false,
+                checkpoint_fails: false,
+                installs: true,
+                expected: InstalledRole {
+                    epoch_history: vec![EpochStart {
+                        epoch: 4,
+                        start_offset: 0,
+                    }],
                     leader: 1,
                     leader_epoch: 4,
                     isr: vec![1, 2],
                 },
-            ),
-            (
-                "follower replica",
-                NodeId(2),
-                false,
-                false,
-                true,
-                InstalledRole {
+            },
+            InstallCase {
+                name: "follower replica",
+                leader: NodeId(2),
+                diskless: false,
+                checkpoint_fails: false,
+                installs: true,
+                expected: InstalledRole {
                     epoch_history: vec![],
                     leader: 2,
                     leader_epoch: 4,
                     isr: vec![],
                 },
-            ),
-            (
-                "local diskless leader",
-                LOCAL,
-                true,
-                false,
-                true,
-                InstalledRole {
+            },
+            InstallCase {
+                name: "local diskless leader",
+                leader: LOCAL,
+                diskless: true,
+                checkpoint_fails: false,
+                installs: true,
+                expected: InstalledRole {
                     epoch_history: vec![],
                     leader: 1,
                     leader_epoch: 4,
                     isr: vec![1, 2],
                 },
-            ),
-            (
-                "epoch checkpoint on a full disk",
-                LOCAL,
-                false,
-                true,
-                false,
-                InstalledRole {
+            },
+            InstallCase {
+                name: "epoch checkpoint on a full disk",
+                leader: LOCAL,
+                diskless: false,
+                checkpoint_fails: true,
+                installs: false,
+                expected: InstalledRole {
                     epoch_history: vec![],
                     leader: 0,
                     leader_epoch: 0,
                     isr: vec![],
                 },
-            ),
+            },
         ];
-        for (name, leader, diskless, checkpoint_fails, installs, expected) in cases {
+        for InstallCase {
+            name,
+            leader,
+            diskless,
+            checkpoint_fails,
+            installs,
+            expected,
+        } in cases
+        {
             let (mut partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
             partition.diskless = diskless;
             if checkpoint_fails {
@@ -238,21 +269,67 @@ mod tests {
 
     #[test]
     fn local_materialization_predicates_track_replica_membership_and_leader() {
-        let materialize_cases: [(&[krabka_raft::NodeId], krabka_raft::NodeId, bool); 3] = [
-            (&[NodeId(1), NodeId(2)], NodeId(1), true),
-            (&[NodeId(1), NodeId(2)], NodeId(2), true),
-            (&[NodeId(1), NodeId(2)], NodeId(3), false),
+        /// The replicas of a partition, a node, and whether the node materializes it.
+        struct MaterializeCase {
+            replicas: &'static [krabka_raft::NodeId],
+            node_id: krabka_raft::NodeId,
+            want: bool,
+        }
+
+        /// A leader, a node, and whether the node is the local leader.
+        struct LeaderCase {
+            leader: krabka_raft::NodeId,
+            node_id: krabka_raft::NodeId,
+            want: bool,
+        }
+
+        let materialize_cases: [MaterializeCase; 3] = [
+            MaterializeCase {
+                replicas: &[NodeId(1), NodeId(2)],
+                node_id: NodeId(1),
+                want: true,
+            },
+            MaterializeCase {
+                replicas: &[NodeId(1), NodeId(2)],
+                node_id: NodeId(2),
+                want: true,
+            },
+            MaterializeCase {
+                replicas: &[NodeId(1), NodeId(2)],
+                node_id: NodeId(3),
+                want: false,
+            },
         ];
-        for (replicas, node_id, want) in materialize_cases {
+        for MaterializeCase {
+            replicas,
+            node_id,
+            want,
+        } in materialize_cases
+        {
             assert!(
                 should_materialize_locally(replicas, node_id) == want,
                 "replicas {replicas:?}, node {node_id}"
             );
         }
 
-        let leader_cases: [(krabka_raft::NodeId, krabka_raft::NodeId, bool); 2] =
-            [(NodeId(1), NodeId(1), true), (NodeId(2), NodeId(1), false)];
-        for (leader, node_id, want) in leader_cases {
+        let leader_cases: [LeaderCase; 2] = [
+            LeaderCase {
+                leader: NodeId(1),
+                node_id: NodeId(1),
+                want: true,
+            },
+            LeaderCase {
+                leader: NodeId(2),
+                node_id: NodeId(1),
+                want: false,
+            },
+        ];
+        for LeaderCase {
+            leader,
+            node_id,
+            want,
+        } in leader_cases
+        {
             assert!(
                 is_local_leader(leader, node_id) == want,
                 "leader {leader}, node {node_id}"

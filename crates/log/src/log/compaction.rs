@@ -162,6 +162,13 @@ fn compaction_is_due(
     candidacy.cleanable_ratio().as_f64() > schedule.min_ratio.as_f64()
 }
 
+/// One output group of a compaction pass: the base offsets of the segments it
+/// consumes and the rewrite that replaces them.
+struct GroupRewrite {
+    group_bases: Vec<Offset>,
+    rewrite: RewriteOutput,
+}
+
 impl Log {
     /// Whether a compaction pass over this partition is due, as Kafka's
     /// `LogCleanerManager` decides it: the cleanable range has to be a large
@@ -406,7 +413,7 @@ impl Log {
         // groups of one pass.
         self.rollover_flusher.finish()?;
         let active_producers = self.last_records_of_active_producers();
-        let mut rewrites: Vec<(Vec<Offset>, RewriteOutput)> = Vec::new();
+        let mut rewrites: Vec<GroupRewrite> = Vec::new();
         {
             let sealed_refs: Vec<&Segment> = self.segments[..consumed].iter().collect();
             let consumed_end = self.sealed_segment_end(consumed - 1);
@@ -449,7 +456,10 @@ impl Log {
                         max_decompressed_record: record_limit,
                     },
                 )?;
-                rewrites.push((group_bases, rewrite));
+                rewrites.push(GroupRewrite {
+                    group_bases,
+                    rewrite,
+                });
                 start += group_len;
             }
             // `sealed_refs` (and the borrow of `self.segments` it holds)
@@ -477,7 +487,11 @@ impl Log {
         drop(consumed_segments);
 
         let mut new_segments: Vec<Segment> = Vec::with_capacity(rewrites.len());
-        for (group_bases, rewrite) in &rewrites {
+        for GroupRewrite {
+            group_bases,
+            rewrite,
+        } in &rewrites
+        {
             if self.config.read().unwrap().file_delete_delay <= krabka_units::Time::ZERO {
                 atomic_swap(&*self.io, &self.dir, group_bases, rewrite)?;
             } else {
@@ -533,10 +547,11 @@ mod tests {
             CleanupPolicy,
             config::{DeliveryPolicy, LogConfig},
             log::test_support::{
-                append_keyed_samples, compact_test_log, compacting_segments, compaction_ctx,
-                keyed_batch, set_segment_size, tiny_segments,
+                KeyedRecord, TempLog, append_keyed_samples, compact_test_log, compacting_segments,
+                compaction_ctx, keyed_batch, set_segment_size, tiny_segments,
             },
             name,
+            test_support::KeyValue,
         },
         bytes::BytesMut,
         krabka_units::prelude::{bytes, mebibytes},
@@ -674,7 +689,7 @@ mod tests {
     fn a_pass_leaves_a_log_the_cleaner_no_longer_owes_one() {
         // Twelve distinct keys survive the pass, so the segment it produces is
         // the bulk of the log and the ratio falls under Kafka's 0.5 default.
-        let (_dir, mut log) = compact_test_log();
+        let TempLog { dir: _dir, mut log } = compact_test_log();
         append_keyed_samples(&mut log, 12, |i| format!("k{i}"));
         assert2::check!(log.compaction_due(std::time::SystemTime::now(), UNBOUNDED_HW));
 
@@ -694,7 +709,11 @@ mod tests {
         let mut log = Log::open(dir, cfg).unwrap();
         for i in 0..batches {
             let value = format!("v{i}");
-            let mut batch = keyed_batch(i, &[(0, b"key", value.as_bytes())]);
+            let mut batch = keyed_batch(i, &[KeyedRecord {
+                offset_delta: 0,
+                key: b"key",
+                value: value.as_bytes(),
+            }]);
             batch.base_timestamp = i * 1_000;
             batch.max_timestamp = i * 1_000;
             log.append(&mut batch).unwrap();
@@ -739,20 +758,50 @@ mod tests {
     /// where it can and never splitting a single segment across groups.
     #[test]
     fn group_segments_by_size_caps_every_group_at_segment_bytes() {
-        // `(sizes, segment_bytes, expected group lengths)`.
-        let cases: [(&[u32], u32, &[usize]); 5] = [
-            (&[], 100, &[]),
-            (&[10], 100, &[1]),
+        /// The segment sizes, `segment.bytes`, and the expected group lengths.
+        struct GroupCase {
+            sizes: &'static [u32],
+            segment_bytes: u32,
+            expected: &'static [usize],
+        }
+        let cases = [
+            GroupCase {
+                sizes: &[],
+                segment_bytes: 100,
+                expected: &[],
+            },
+            GroupCase {
+                sizes: &[10],
+                segment_bytes: 100,
+                expected: &[1],
+            },
             // Every size fits in one group together.
-            (&[10, 10, 10], 100, &[3]),
+            GroupCase {
+                sizes: &[10, 10, 10],
+                segment_bytes: 100,
+                expected: &[3],
+            },
             // Nothing combines: each already at or over the limit.
-            (&[60, 60, 60], 50, &[1, 1, 1]),
+            GroupCase {
+                sizes: &[60, 60, 60],
+                segment_bytes: 50,
+                expected: &[1, 1, 1],
+            },
             // A mix: the first two combine, the third starts a new group
             // with the fourth, and the fifth (alone, over the limit) gets
             // its own group.
-            (&[30, 30, 30, 30, 200], 70, &[2, 2, 1]),
+            GroupCase {
+                sizes: &[30, 30, 30, 30, 200],
+                segment_bytes: 70,
+                expected: &[2, 2, 1],
+            },
         ];
-        for (sizes, segment_bytes, expected) in cases {
+        for GroupCase {
+            sizes,
+            segment_bytes,
+            expected,
+        } in cases
+        {
             let sizes: Vec<ByteSize> = sizes.iter().map(|&n| bytes(n)).collect();
             let groups = Log::group_segments_by_size(&sizes, bytes(segment_bytes));
             assert2::check!(
@@ -816,8 +865,23 @@ mod tests {
         let mut log = Log::open(dir.path(), cfg).unwrap();
         // The first segment holds two records under one key, written at
         // timestamp 0. A second batch seals it.
-        let mut first = keyed_batch(0, &[(0, b"key", b"old"), (1, b"key", b"new")]);
-        let mut second = keyed_batch(0, &[(0, b"other", b"v")]);
+        let mut first = keyed_batch(0, &[
+            KeyedRecord {
+                offset_delta: 0,
+                key: b"key",
+                value: b"old",
+            },
+            KeyedRecord {
+                offset_delta: 1,
+                key: b"key",
+                value: b"new",
+            },
+        ]);
+        let mut second = keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"other",
+            value: b"v",
+        }]);
         second.base_timestamp = 1_000;
         second.max_timestamp = 1_000;
         log.append(&mut first).unwrap();
@@ -963,7 +1027,11 @@ mod tests {
         let mut log = Log::open(dir.path(), cfg.clone()).unwrap();
         for i in 0..3 {
             let value = format!("v{i}");
-            let mut batch = keyed_batch(i, &[(0, b"key", value.as_bytes())]);
+            let mut batch = keyed_batch(i, &[KeyedRecord {
+                offset_delta: 0,
+                key: b"key",
+                value: value.as_bytes(),
+            }]);
             log.append(&mut batch).unwrap();
         }
         assert2::check!(!log.compaction_due(std::time::SystemTime::now(), UNBOUNDED_HW));
@@ -978,10 +1046,14 @@ mod tests {
     }
 
     fn assert_corrupt_suffix_preserves_originals(suffix: &[u8]) {
-        let (dir, mut log) = compact_test_log();
+        let TempLog { dir, mut log } = compact_test_log();
         for i in 0..3 {
             let value = format!("v{i}");
-            let mut batch = keyed_batch(0, &[(0, b"key", value.as_bytes())]);
+            let mut batch = keyed_batch(0, &[KeyedRecord {
+                offset_delta: 0,
+                key: b"key",
+                value: value.as_bytes(),
+            }]);
             log.append(&mut batch).unwrap();
         }
         assert2::assert!(!log.segments.is_empty());
@@ -1025,7 +1097,11 @@ mod tests {
 
     #[test]
     fn compact_rejects_crc_corrupt_suffix_without_replacing_originals() {
-        let batch = keyed_batch(0, &[(0, b"corrupt", b"suffix")]);
+        let batch = keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"corrupt",
+            value: b"suffix",
+        }]);
         let mut encoded = BytesMut::with_capacity(batch.encoded_len());
         batch.encode(&mut encoded).unwrap();
         // The stored CRC occupies bytes 17..21. Changing it preserves framing
@@ -1047,7 +1123,11 @@ mod tests {
             (b"k1", b"new"),
             (b"tail", b"t"),
         ] {
-            let mut batch = keyed_batch(0, &[(0, key, value)]);
+            let mut batch = keyed_batch(0, &[KeyedRecord {
+                offset_delta: 0,
+                key,
+                value,
+            }]);
             batch.attributes = batch.attributes.with_compression(codec);
             log.append(&mut batch).unwrap();
         }
@@ -1056,13 +1136,24 @@ mod tests {
     fn append_versions(log: &mut Log) {
         for i in 0..3 {
             let value = format!("v{i}");
-            log.append(&mut keyed_batch(0, &[(0, b"k1", value.as_bytes())]))
-                .unwrap();
+            log.append(&mut keyed_batch(0, &[KeyedRecord {
+                offset_delta: 0,
+                key: b"k1",
+                value: value.as_bytes(),
+            }]))
+            .unwrap();
         }
     }
 
     /// Three sealed versions of k1 plus an active record outside the pass.
-    fn versioned_log(dir: &std::path::Path, active: (&[u8], &[u8])) -> Log {
+    /// A segment's base offset and the bytes of its `.log` file.
+    #[derive(Debug, PartialEq, Eq)]
+    struct SegmentFile {
+        base: i64,
+        contents: Vec<u8>,
+    }
+
+    fn versioned_log(dir: &std::path::Path, active: KeyValue<'_>) -> Log {
         let cfg = LogConfig {
             cleanup_policy: CleanupPolicy::Compact,
             segment_size: bytes(256), // force rolls
@@ -1070,8 +1161,12 @@ mod tests {
         };
         let mut log = Log::open(dir, cfg).unwrap();
         append_versions(&mut log);
-        log.append(&mut keyed_batch(0, &[(0, active.0, active.1)]))
-            .unwrap();
+        log.append(&mut keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: active.key,
+            value: active.value,
+        }]))
+        .unwrap();
         log
     }
 
@@ -1106,15 +1201,15 @@ mod tests {
             };
             let mut log = Log::open(dir.path(), cfg).unwrap();
             append_compressed_versions(&mut log, codec);
-            let files = |log: &Log| -> Vec<(i64, Vec<u8>)> {
+            let files = |log: &Log| -> Vec<SegmentFile> {
                 log.segments
                     .iter()
                     .map(|segment| {
                         let base = segment.base_offset().0;
-                        (
+                        SegmentFile {
                             base,
-                            std::fs::read(name::log_path(dir.path(), base)).unwrap(),
-                        )
+                            contents: std::fs::read(name::log_path(dir.path(), base)).unwrap(),
+                        }
                     })
                     .collect()
             };
@@ -1190,7 +1285,11 @@ mod tests {
             ..Default::default()
         };
         let mut log = Log::open(dir.path(), cfg).unwrap();
-        let mut b = keyed_batch(0, &[(0, b"k1", b"v1")]);
+        let mut b = keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"k1",
+            value: b"v1",
+        }]);
         log.append(&mut b).unwrap();
         // Only the active segment exists; sealed list is empty.
         log.compact(&compaction_ctx()).unwrap();
@@ -1202,7 +1301,10 @@ mod tests {
         let dir = tempdir().unwrap();
         // Write 3 sealed segments, each with one record under "k1", then a
         // fresh active segment outside the compaction pass.
-        let mut log = versioned_log(dir.path(), (b"active-key", b"active-value"));
+        let mut log = versioned_log(dir.path(), KeyValue {
+            key: b"active-key",
+            value: b"active-value",
+        });
 
         let active_leo_before = log.log_end_offset();
         log.compact(&compaction_ctx()).unwrap();
@@ -1228,12 +1330,16 @@ mod tests {
     /// sealed segments.
     #[test]
     fn compact_actually_dedupes_reducing_record_count() {
-        let (_dir, mut log) = compact_test_log();
+        let TempLog { dir: _dir, mut log } = compact_test_log();
 
         // Three sealed segments, each one record under "k1" (v0, v1, v2).
         append_versions(&mut log);
         // A final append lands in a fresh active segment (untouched by compact).
-        let mut tail = keyed_batch(0, &[(0, b"tail", b"t")]);
+        let mut tail = keyed_batch(0, &[KeyedRecord {
+            offset_delta: 0,
+            key: b"tail",
+            value: b"t",
+        }]);
         log.append(&mut tail).unwrap();
 
         // Sanity: before compaction there are >= 2 sealed segments holding the
@@ -1264,7 +1370,10 @@ mod tests {
     #[test]
     fn compact_is_idempotent() {
         let dir = tempdir().unwrap();
-        let mut log = versioned_log(dir.path(), (b"active", b"x"));
+        let mut log = versioned_log(dir.path(), KeyValue {
+            key: b"active",
+            value: b"x",
+        });
         log.compact(&compaction_ctx()).unwrap();
         let leo1 = log.log_end_offset();
         log.compact(&compaction_ctx()).unwrap();
@@ -1284,7 +1393,7 @@ mod tests {
     /// outputs would still (wrongly) report itself due for another pass.
     #[test]
     fn a_multi_group_pass_treats_every_output_as_clean() {
-        let (_dir, mut log) = compact_test_log();
+        let TempLog { dir: _dir, mut log } = compact_test_log();
         // Six distinct keys: nothing is superseded, so the pass only
         // regroups records into size-bounded outputs, it never shrinks them.
         append_distinct_keys(&mut log);
@@ -1340,7 +1449,7 @@ mod tests {
     /// precondition rules out.
     #[test]
     fn a_multi_group_pass_drops_every_original_segment_file_before_swap() {
-        let (dir, mut log) = compact_test_log();
+        let TempLog { dir, mut log } = compact_test_log();
         append_distinct_keys(&mut log);
         let original_bases: Vec<i64> = log.segments.iter().map(|s| s.base_offset().0).collect();
         assert2::assert!(original_bases.len() == 5);

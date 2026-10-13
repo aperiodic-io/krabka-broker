@@ -38,7 +38,7 @@ use {
     krabka_raft::{
         NodeId,
         kraft::{
-            snapshot_fetch::{SnapshotFetchState, SnapshotFetchStep},
+            snapshot_fetch::{SnapshotFetchState, SnapshotFetchStep, SnapshotId},
             transport::{
                 api_key,
                 wire::{FETCH_SNAPSHOT_VERSION, PeerRequest, PeerResponse},
@@ -77,6 +77,16 @@ fn range_max_bytes(config: &ObserverConfig) -> i32 {
     i32::try_from(capped).unwrap_or(i32::MAX)
 }
 
+/// The controller a snapshot is fetched from and the quorum epoch its metadata
+/// fetch reported.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SnapshotTarget {
+    /// The controller that answered the metadata fetch.
+    pub(super) controller: NodeId,
+    /// The leader epoch that answer reported.
+    pub(super) leader_epoch: i32,
+}
+
 /// Fetch, install, and persist `snapshot_id` from the controller on `conn`.
 ///
 /// Returns the offset to fetch from next — the snapshot's end offset — or
@@ -90,8 +100,8 @@ fn range_max_bytes(config: &ObserverConfig) -> i32 {
 pub(super) async fn install_snapshot(
     config: &ObserverConfig,
     conn: &Connection,
-    target: (NodeId, i32),
-    snapshot_id: (i64, i32),
+    target: SnapshotTarget,
+    snapshot_id: SnapshotId,
     image_tx: &watch::Sender<Arc<MetadataImage>>,
     store: &mut ObserverStore,
 ) -> Option<u64> {
@@ -124,8 +134,11 @@ pub(super) async fn install_snapshot(
 async fn transfer(
     config: &ObserverConfig,
     conn: &Connection,
-    (target, leader_epoch): (NodeId, i32),
-    snapshot_id: (i64, i32),
+    SnapshotTarget {
+        controller: target,
+        leader_epoch,
+    }: SnapshotTarget,
+    snapshot_id: SnapshotId,
 ) -> Option<bytes::Bytes> {
     let mut state = SnapshotFetchState::with_max(snapshot_id, target, config.snapshot_fetch_max);
     loop {
@@ -193,7 +206,7 @@ async fn transfer(
 #[cfg(test)]
 mod tests {
     use {
-        super::*,
+        super::{super::store::Resumed, *},
         crate::{
             metadata_observer::{
                 fetch::{FetchOutcome, fetch_once},
@@ -263,7 +276,7 @@ mod tests {
     }
 
     async fn snapshot_broker(
-        snapshot_id: (i64, i32),
+        snapshot_id: SnapshotId,
         mut response: impl FnMut(&[u8]) -> Option<PeerResponse> + Send + 'static,
     ) -> krabka_client_core::MockBroker {
         krabka_client_core::MockBroker::start(move |api_key, _version, _corr_id, body| {
@@ -305,7 +318,7 @@ mod tests {
         &rest[1..]
     }
 
-    fn metadata_fetch_redirect(snapshot_id: (i64, i32)) -> Vec<u8> {
+    fn metadata_fetch_redirect(snapshot_id: SnapshotId) -> Vec<u8> {
         let mut out = vec![0u8];
         krabka_raft::KrabkaMetadataFetchResponse {
             error_code: 0,
@@ -384,7 +397,10 @@ mod tests {
         // partial batch in the records codec and arrives empty.
         assert!(chunks.load(std::sync::atomic::Ordering::SeqCst) == 1);
 
-        let (restored, fetch_offset) = ObserverStore::open(fixture.directory.path(), 0)
+        let Resumed {
+            image: restored,
+            fetch_offset,
+        } = ObserverStore::open(fixture.directory.path(), 0)
             .resume(cluster_id)
             .expect("the installed snapshot was persisted");
         assert!(fetch_offset == 4_096);

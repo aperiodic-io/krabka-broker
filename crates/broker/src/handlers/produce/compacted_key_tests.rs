@@ -104,9 +104,15 @@ fn response(topic: &str, partition: PartitionProduceResponse) -> ProduceResponse
     }
 }
 
-fn appended(record_count: i64) -> (PartitionProduceResponse, i64) {
-    (
-        PartitionProduceResponse {
+/// The row that a partition answers, and the log end offset that it leaves.
+struct Answer {
+    partition: PartitionProduceResponse,
+    log_end: i64,
+}
+
+fn appended(record_count: i64) -> Answer {
+    Answer {
+        partition: PartitionProduceResponse {
             index: 0,
             error_code: codes::NONE,
             base_offset: 0,
@@ -114,12 +120,12 @@ fn appended(record_count: i64) -> (PartitionProduceResponse, i64) {
             log_start_offset: 0,
             ..Default::default()
         },
-        record_count,
-    )
+        log_end: record_count,
+    }
 }
 
 /// The row Kafka answers for a batch whose records at `indices` have no key.
-fn refused(topic: &str, indices: &[i32]) -> (PartitionProduceResponse, i64) {
+fn refused(topic: &str, indices: &[i32]) -> Answer {
     let message =
         format!("Compacted topic cannot accept message without key in topic partition {topic}-0");
     let shown = indices
@@ -127,8 +133,8 @@ fn refused(topic: &str, indices: &[i32]) -> (PartitionProduceResponse, i64) {
         .map(|index| format!("RecordError(batchIndex={index}, message='{message}')"))
         .collect::<Vec<_>>()
         .join(", ");
-    (
-        PartitionProduceResponse {
+    Answer {
+        partition: PartitionProduceResponse {
             index: 0,
             error_code: codes::INVALID_RECORD,
             base_offset: -1,
@@ -149,8 +155,8 @@ fn refused(topic: &str, indices: &[i32]) -> (PartitionProduceResponse, i64) {
             )),
             ..Default::default()
         },
-        0,
-    )
+        log_end: 0,
+    }
 }
 
 #[tokio::test]
@@ -174,7 +180,7 @@ async fn a_compacted_topic_refuses_a_record_without_a_key() {
         let actual = produce(&broker, &topic, batch(keys)).await;
 
         let record_count = i64::try_from(keys.len()).expect("small batch");
-        let (partition, log_end) = if policy.contains("compact") && keys == KEYLESS {
+        let Answer { partition, log_end } = if policy.contains("compact") && keys == KEYLESS {
             refused(&topic, &[0, 2])
         } else {
             appended(record_count)

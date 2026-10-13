@@ -19,7 +19,9 @@ use {
             decode_response, dispatch_context, encode_request, peer, principal, request_context,
         },
         txn::{
-            handlers::add_partitions_to_txn::test_support::{seed_transaction, start_coordinator},
+            handlers::add_partitions_to_txn::test_support::{
+                CoordinatorBroker, seed_transaction, start_coordinator,
+            },
             state::TxnState,
         },
     },
@@ -109,9 +111,24 @@ async fn end_txn(broker: &Broker, version: i16, epoch: i16, committed: bool) -> 
     decode_response(&bytes, version)
 }
 
-/// The coordinator's entry as `(state, producer epoch, client transaction
-/// version)`.
-async fn entry(broker: &Broker) -> (TxnState, i16, i16) {
+/// The parts of the coordinator's entry that a client-version step changes.
+#[derive(Debug, PartialEq, Eq)]
+struct EntryView {
+    state: TxnState,
+    producer_epoch: i16,
+    client_transaction_version: i16,
+}
+
+/// One step: its name, the code it answered, and the entry after it.
+#[derive(Debug, PartialEq, Eq)]
+struct Step {
+    name: &'static str,
+    code: i16,
+    entry: EntryView,
+}
+
+/// The coordinator's entry as an [`EntryView`].
+async fn entry(broker: &Broker) -> EntryView {
     let entry = broker
         .txn_coordinator
         .get(TID)
@@ -119,17 +136,18 @@ async fn entry(broker: &Broker) -> (TxnState, i16, i16) {
         .lock()
         .await
         .clone();
-    (
-        entry.state,
-        entry.producer_epoch,
-        entry.client_transaction_version,
-    )
+    EntryView {
+        state: entry.state,
+        producer_epoch: entry.producer_epoch,
+        client_transaction_version: entry.client_transaction_version,
+    }
 }
 
 #[tokio::test]
 async fn a_client_that_speaks_an_older_protocol_keeps_its_epoch_on_a_transaction_version_2_cluster()
 {
-    let (handle, _dir) = start_coordinator(Arc::new(AllowAllAuthorizer)).await;
+    let CoordinatorBroker { handle, dir: _dir } =
+        start_coordinator(Arc::new(AllowAllAuthorizer)).await;
     let broker = handle.broker_arc_for_test();
     seed_transaction(&broker, TID, PRODUCER_ID).await;
     // The commit writes its marker to `a-0`, which has to be local by then.
@@ -145,75 +163,98 @@ async fn a_client_that_speaks_an_older_protocol_keeps_its_epoch_on_a_transaction
     // `seed_transaction` opens the transaction at producer epoch 2.
     let epoch = 2;
 
-    // (step, code, entry after the step as (state, epoch, client version))
     let mut actual = Vec::new();
-    actual.push((
-        "AddPartitionsToTxn v3",
-        add_partition(&broker, 3, epoch).await,
-        entry(&broker).await,
-    ));
-    actual.push((
-        "EndTxn v4 commit",
-        end_txn(&broker, 4, epoch, true).await.error_code,
-        entry(&broker).await,
-    ));
+    actual.push(Step {
+        name: "AddPartitionsToTxn v3",
+        code: add_partition(&broker, 3, epoch).await,
+        entry: entry(&broker).await,
+    });
+    actual.push(Step {
+        name: "EndTxn v4 commit",
+        code: end_txn(&broker, 4, epoch, true).await.error_code,
+        entry: entry(&broker).await,
+    });
     // A v3 client uses the epoch it holds for its second transaction. A
     // completion that bumped it would answer PRODUCER_FENCED here.
-    actual.push((
-        "AddPartitionsToTxn v3 again",
-        add_partition(&broker, 3, epoch).await,
-        entry(&broker).await,
-    ));
-    actual.push((
-        "EndTxn v4 abort",
-        end_txn(&broker, 4, epoch, false).await.error_code,
-        entry(&broker).await,
-    ));
-    actual.push((
-        "AddPartitionsToTxn v4",
-        add_partition(&broker, 4, epoch).await,
-        entry(&broker).await,
-    ));
+    actual.push(Step {
+        name: "AddPartitionsToTxn v3 again",
+        code: add_partition(&broker, 3, epoch).await,
+        entry: entry(&broker).await,
+    });
+    actual.push(Step {
+        name: "EndTxn v4 abort",
+        code: end_txn(&broker, 4, epoch, false).await.error_code,
+        entry: entry(&broker).await,
+    });
+    actual.push(Step {
+        name: "AddPartitionsToTxn v4",
+        code: add_partition(&broker, 4, epoch).await,
+        entry: entry(&broker).await,
+    });
     // Only EndTxn v5 bumps the epoch, and it answers the new one.
     let committed = end_txn(&broker, 5, epoch, true).await;
-    actual.push((
-        "EndTxn v5 commit",
-        committed.error_code,
-        entry(&broker).await,
-    ));
+    actual.push(Step {
+        name: "EndTxn v5 commit",
+        code: committed.error_code,
+        entry: entry(&broker).await,
+    });
     let expected = vec![
-        (
-            "AddPartitionsToTxn v3",
-            codes::NONE,
-            (TxnState::Ongoing, epoch, 0),
-        ),
-        (
-            "EndTxn v4 commit",
-            codes::NONE,
-            (TxnState::CompleteCommit, epoch, 0),
-        ),
-        (
-            "AddPartitionsToTxn v3 again",
-            codes::NONE,
-            (TxnState::Ongoing, epoch, 0),
-        ),
-        (
-            "EndTxn v4 abort",
-            codes::NONE,
-            (TxnState::CompleteAbort, epoch, 0),
-        ),
+        Step {
+            name: "AddPartitionsToTxn v3",
+            code: codes::NONE,
+            entry: EntryView {
+                state: TxnState::Ongoing,
+                producer_epoch: epoch,
+                client_transaction_version: 0,
+            },
+        },
+        Step {
+            name: "EndTxn v4 commit",
+            code: codes::NONE,
+            entry: EntryView {
+                state: TxnState::CompleteCommit,
+                producer_epoch: epoch,
+                client_transaction_version: 0,
+            },
+        },
+        Step {
+            name: "AddPartitionsToTxn v3 again",
+            code: codes::NONE,
+            entry: EntryView {
+                state: TxnState::Ongoing,
+                producer_epoch: epoch,
+                client_transaction_version: 0,
+            },
+        },
+        Step {
+            name: "EndTxn v4 abort",
+            code: codes::NONE,
+            entry: EntryView {
+                state: TxnState::CompleteAbort,
+                producer_epoch: epoch,
+                client_transaction_version: 0,
+            },
+        },
         // AddPartitionsToTxn v4 comes from a TV_2 client or a broker, and
         // records TV_2.
-        (
-            "AddPartitionsToTxn v4",
-            codes::NONE,
-            (TxnState::Ongoing, epoch, 2),
-        ),
-        (
-            "EndTxn v5 commit",
-            codes::NONE,
-            (TxnState::CompleteCommit, epoch + 1, 2),
-        ),
+        Step {
+            name: "AddPartitionsToTxn v4",
+            code: codes::NONE,
+            entry: EntryView {
+                state: TxnState::Ongoing,
+                producer_epoch: epoch,
+                client_transaction_version: 2,
+            },
+        },
+        Step {
+            name: "EndTxn v5 commit",
+            code: codes::NONE,
+            entry: EntryView {
+                state: TxnState::CompleteCommit,
+                producer_epoch: epoch + 1,
+                client_transaction_version: 2,
+            },
+        },
     ];
     check!(actual == expected);
     check!((committed.producer_id, committed.producer_epoch) == (PRODUCER_ID, epoch + 1));

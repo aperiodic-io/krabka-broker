@@ -75,7 +75,18 @@ pub fn lookup_quota_with_key(
         (false, true) => Levels::CLIENT,
         (false, false) => return None,
     };
-    let (selected, rate) = resolve_levels(image, (principal, client_id), quota_key, levels)?;
+    let LevelRate {
+        precedence: selected,
+        rate,
+    } = resolve_levels(
+        image,
+        RequestIdentity {
+            principal,
+            client_id,
+        },
+        quota_key,
+        levels,
+    )?;
     Some((bucket_key(selected, principal, client_id), rate))
 }
 
@@ -113,7 +124,7 @@ fn lookup_null_client_quota(
     ]
     .into_iter()
     .find_map(|(key, throttles)| {
-        quota_for_key(image, key, quota_key).map(|(_, rate)| (throttles, rate))
+        quota_for_key(image, &key, quota_key).map(|rate| (throttles, rate))
     })?;
     throttles.then(|| (user(Some(principal)), rate))
 }
@@ -148,7 +159,16 @@ pub(super) fn lookup_bucket_rate(
         }
         _ => return None,
     };
-    resolve_levels(image, (principal, client_id), quota_key, levels).map(|(_, rate)| rate)
+    resolve_levels(
+        image,
+        RequestIdentity {
+            principal,
+            client_id,
+        },
+        quota_key,
+        levels,
+    )
+    .map(|level| level.rate)
 }
 
 /// Which of the eight levels of [`lookup_quota_with_key`] a lookup consults,
@@ -170,14 +190,31 @@ impl Levels {
     const USER: Self = Self([false, false, true, false, false, true, false, false]);
 }
 
+/// The principal and client id a lookup resolves levels for. An empty one
+/// stands for a component the request does not have.
+#[derive(Clone, Copy)]
+struct RequestIdentity<'a> {
+    principal: &'a str,
+    client_id: &'a str,
+}
+
+/// The level a lookup matched and the value configured there.
+struct LevelRate {
+    precedence: UserClientQuotaPrecedence,
+    rate: f64,
+}
+
 /// The highest-precedence level of `levels` that has `quota_key` set for
 /// `(principal, client_id)`, with its value.
 fn resolve_levels(
     image: &MetadataImage,
-    (principal, client_id): (&str, &str),
+    RequestIdentity {
+        principal,
+        client_id,
+    }: RequestIdentity<'_>,
     quota_key: &str,
     levels: Levels,
-) -> Option<(UserClientQuotaPrecedence, f64)> {
+) -> Option<LevelRate> {
     let candidates: [EntityKey; 8] = [
         vec![
             ("client-id".into(), Some(client_id.into())),
@@ -200,7 +237,7 @@ fn resolve_levels(
     let mut values: [Option<f64>; 8] = [None; 8];
     for (index, key) in candidates.into_iter().enumerate() {
         if levels.0[index] {
-            values[index] = quota_for_key(image, key, quota_key).map(|(_, rate)| rate);
+            values[index] = quota_for_key(image, &key, quota_key);
         }
     }
     let present = |index: usize| {
@@ -231,7 +268,10 @@ fn resolve_levels(
         UserClientQuotaPrecedence::DefaultClient => 7,
         UserClientQuotaPrecedence::None => return None,
     };
-    values[index].map(|rate| (selected, rate))
+    values[index].map(|rate| LevelRate {
+        precedence: selected,
+        rate,
+    })
 }
 
 /// The bucket key of the sensor a matched level charges.
@@ -293,15 +333,13 @@ pub fn lookup_ip_quota_with_key(
     let ip_entity = |name: Option<String>| -> EntityKey { vec![("ip".into(), name)] };
     // The entity named by the peer's own spelling, or else one whose name
     // resolves to the peer.
-    let exact = quota_for_key(image, bucket_key.clone(), quota_key)
-        .or_else(|| {
-            names
-                .entity_names(peer)
-                .into_iter()
-                .find_map(|name| quota_for_key(image, ip_entity(Some(name)), quota_key))
-        })
-        .map(|(_, rate)| rate);
-    let default = quota_for_key(image, ip_entity(None), quota_key).map(|(_, rate)| rate);
+    let exact = quota_for_key(image, &bucket_key, quota_key).or_else(|| {
+        names
+            .entity_names(peer)
+            .into_iter()
+            .find_map(|name| quota_for_key(image, &ip_entity(Some(name)), quota_key))
+    });
+    let default = quota_for_key(image, &ip_entity(None), quota_key);
     match ip_quota_precedence(exact.is_some(), default.is_some()) {
         IpQuotaPrecedence::Exact => exact,
         IpQuotaPrecedence::Default => default,
@@ -310,16 +348,13 @@ pub fn lookup_ip_quota_with_key(
     .map(|rate| (bucket_key, rate))
 }
 
-fn quota_for_key(
-    image: &MetadataImage,
-    key: EntityKey,
-    quota_key: &str,
-) -> Option<(EntityKey, f64)> {
+/// The value configured for `quota_key` under the entity `key`.
+fn quota_for_key(image: &MetadataImage, key: &EntityKey, quota_key: &str) -> Option<f64> {
     image
         .client_quotas()
-        .get(&key)
+        .get(key)
         .and_then(|configs| configs.get(quota_key))
-        .map(|value| (key, *value))
+        .copied()
 }
 
 #[cfg(test)]
@@ -441,13 +476,13 @@ mod tests {
     fn a_missing_client_id_or_principal_skips_the_levels_that_need_it() {
         /// A label, the configured levels, the principal, the client id and
         /// the expected bucket key and rate.
-        type Row = (
-            &'static str,
-            Vec<Level>,
-            &'static str,
-            &'static str,
-            Option<(EntityKey, f64)>,
-        );
+        struct Row {
+            label: &'static str,
+            configured: Vec<Level>,
+            principal: &'static str,
+            client_id: &'static str,
+            expected: Option<(EntityKey, f64)>,
+        }
         let default_client: Level = vec![("client-id", None)];
         let user_default_client: Level = vec![("user", Some("alice")), ("client-id", None)];
         let default_pair: Level = vec![("user", None), ("client-id", None)];
@@ -456,71 +491,78 @@ mod tests {
         let app: Level = vec![("client-id", Some("app"))];
         let default_user_app: Level = vec![("user", None), ("client-id", Some("app"))];
         let cases: Vec<Row> = vec![
-            (
-                "a default client quota does not throttle a client with no id",
-                vec![default_client.clone()],
-                "alice",
-                "",
-                None,
-            ),
-            (
-                "a client id makes the same default client quota apply",
-                vec![default_client.clone()],
-                "alice",
-                "app",
-                Some((client_key("app"), 64.0)),
-            ),
-            (
-                "a (user, default client) quota needs a client id",
-                vec![user_default_client],
-                "alice",
-                "",
-                None,
-            ),
-            (
-                "a (default, default) quota needs a client id",
-                vec![default_pair],
-                "alice",
-                "",
-                None,
-            ),
-            (
-                "the user quota applies without a client id",
-                vec![alice.clone(), default_client.clone()],
-                "alice",
-                "",
-                Some((user_key("alice"), 64.0)),
-            ),
-            (
-                "the default user quota applies without a client id",
-                vec![default_user.clone(), default_client.clone()],
-                "alice",
-                "",
-                Some((user_key("alice"), 64.0)),
-            ),
-            (
-                "the client quota applies without a principal",
-                vec![app.clone(), alice.clone()],
-                "",
-                "app",
-                Some((client_key("app"), 64.0)),
-            ),
-            (
-                "the user levels are skipped without a principal",
-                vec![default_user.clone(), default_user_app, default_client],
-                "",
-                "app",
-                Some((client_key("app"), 64.0)),
-            ),
-            (
-                "neither a principal nor a client id matches nothing",
-                vec![alice, default_user, app],
-                "",
-                "",
-                None,
-            ),
+            Row {
+                label: "a default client quota does not throttle a client with no id",
+                configured: vec![default_client.clone()],
+                principal: "alice",
+                client_id: "",
+                expected: None,
+            },
+            Row {
+                label: "a client id makes the same default client quota apply",
+                configured: vec![default_client.clone()],
+                principal: "alice",
+                client_id: "app",
+                expected: Some((client_key("app"), 64.0)),
+            },
+            Row {
+                label: "a (user, default client) quota needs a client id",
+                configured: vec![user_default_client],
+                principal: "alice",
+                client_id: "",
+                expected: None,
+            },
+            Row {
+                label: "a (default, default) quota needs a client id",
+                configured: vec![default_pair],
+                principal: "alice",
+                client_id: "",
+                expected: None,
+            },
+            Row {
+                label: "the user quota applies without a client id",
+                configured: vec![alice.clone(), default_client.clone()],
+                principal: "alice",
+                client_id: "",
+                expected: Some((user_key("alice"), 64.0)),
+            },
+            Row {
+                label: "the default user quota applies without a client id",
+                configured: vec![default_user.clone(), default_client.clone()],
+                principal: "alice",
+                client_id: "",
+                expected: Some((user_key("alice"), 64.0)),
+            },
+            Row {
+                label: "the client quota applies without a principal",
+                configured: vec![app.clone(), alice.clone()],
+                principal: "",
+                client_id: "app",
+                expected: Some((client_key("app"), 64.0)),
+            },
+            Row {
+                label: "the user levels are skipped without a principal",
+                configured: vec![default_user.clone(), default_user_app, default_client],
+                principal: "",
+                client_id: "app",
+                expected: Some((client_key("app"), 64.0)),
+            },
+            Row {
+                label: "neither a principal nor a client id matches nothing",
+                configured: vec![alice, default_user, app],
+                principal: "",
+                client_id: "",
+                expected: None,
+            },
         ];
-        for (label, configured, principal, client_id, expected) in cases {
+        for Row {
+            label,
+            configured,
+            principal,
+            client_id,
+            expected,
+        } in cases
+        {
             let img = producer_quota_image(configured);
             check!(
                 lookup_quota_with_key(&img, principal, Some(client_id), "producer_byte_rate")
@@ -541,13 +583,13 @@ mod tests {
     fn a_null_client_id_meets_only_the_user_levels_a_pair_level_does_not_shadow() {
         /// A label, the configured levels, the principal and the expected
         /// bucket key and rate for a null client id and for an empty one.
-        type Row = (
-            &'static str,
-            Vec<Level>,
-            &'static str,
-            Option<(EntityKey, f64)>,
-            Option<(EntityKey, f64)>,
-        );
+        struct Row {
+            label: &'static str,
+            configured: Vec<Level>,
+            principal: &'static str,
+            null_expected: Option<(EntityKey, f64)>,
+            empty_expected: Option<(EntityKey, f64)>,
+        }
         let default_client: Level = vec![("client-id", None)];
         let app: Level = vec![("client-id", Some("app"))];
         let user_default_client: Level = vec![("user", Some("alice")), ("client-id", None)];
@@ -556,64 +598,71 @@ mod tests {
         let alice: Level = vec![("user", Some("alice"))];
         let default_user: Level = vec![("user", None)];
         let cases: Vec<Row> = vec![
-            (
-                "client-id levels never match a null client id",
-                vec![default_client.clone(), app],
-                "alice",
-                None,
-                None,
-            ),
-            (
-                "the user quota applies to a null client id",
-                vec![alice.clone(), default_client.clone()],
-                "alice",
-                Some((user_key("alice"), 64.0)),
-                Some((user_key("alice"), 64.0)),
-            ),
-            (
-                "the default user quota applies to a null client id",
-                vec![default_user.clone(), default_client],
-                "alice",
-                Some((user_key("alice"), 64.0)),
-                Some((user_key("alice"), 64.0)),
-            ),
-            (
-                "a (user, default client) quota shadows the user quota",
-                vec![user_default_client.clone(), alice.clone()],
-                "alice",
-                None,
-                Some((user_key("alice"), 64.0)),
-            ),
-            (
-                "a (default, default) quota shadows the default user quota",
-                vec![default_pair.clone(), default_user.clone()],
-                "alice",
-                None,
-                Some((user_key("alice"), 64.0)),
-            ),
-            (
-                "the user quota comes before a (default, default) quota",
-                vec![default_pair, alice.clone(), default_user.clone()],
-                "alice",
-                Some((user_key("alice"), 64.0)),
-                Some((user_key("alice"), 64.0)),
-            ),
-            (
-                "another user's pair level shadows nothing",
-                vec![user_default_client, default_user_app, default_user],
-                "bob",
-                Some((user_key("bob"), 64.0)),
-                Some((user_key("bob"), 64.0)),
-            ),
-            (
-                "a null client id and no principal match nothing",
-                vec![alice],
-                "",
-                None,
-                None,
-            ),
+            Row {
+                label: "client-id levels never match a null client id",
+                configured: vec![default_client.clone(), app],
+                principal: "alice",
+                null_expected: None,
+                empty_expected: None,
+            },
+            Row {
+                label: "the user quota applies to a null client id",
+                configured: vec![alice.clone(), default_client.clone()],
+                principal: "alice",
+                null_expected: Some((user_key("alice"), 64.0)),
+                empty_expected: Some((user_key("alice"), 64.0)),
+            },
+            Row {
+                label: "the default user quota applies to a null client id",
+                configured: vec![default_user.clone(), default_client],
+                principal: "alice",
+                null_expected: Some((user_key("alice"), 64.0)),
+                empty_expected: Some((user_key("alice"), 64.0)),
+            },
+            Row {
+                label: "a (user, default client) quota shadows the user quota",
+                configured: vec![user_default_client.clone(), alice.clone()],
+                principal: "alice",
+                null_expected: None,
+                empty_expected: Some((user_key("alice"), 64.0)),
+            },
+            Row {
+                label: "a (default, default) quota shadows the default user quota",
+                configured: vec![default_pair.clone(), default_user.clone()],
+                principal: "alice",
+                null_expected: None,
+                empty_expected: Some((user_key("alice"), 64.0)),
+            },
+            Row {
+                label: "the user quota comes before a (default, default) quota",
+                configured: vec![default_pair, alice.clone(), default_user.clone()],
+                principal: "alice",
+                null_expected: Some((user_key("alice"), 64.0)),
+                empty_expected: Some((user_key("alice"), 64.0)),
+            },
+            Row {
+                label: "another user's pair level shadows nothing",
+                configured: vec![user_default_client, default_user_app, default_user],
+                principal: "bob",
+                null_expected: Some((user_key("bob"), 64.0)),
+                empty_expected: Some((user_key("bob"), 64.0)),
+            },
+            Row {
+                label: "a null client id and no principal match nothing",
+                configured: vec![alice],
+                principal: "",
+                null_expected: None,
+                empty_expected: None,
+            },
         ];
-        for (label, configured, principal, null_expected, empty_expected) in cases {
+        for Row {
+            label,
+            configured,
+            principal,
+            null_expected,
+            empty_expected,
+        } in cases
+        {
             let img = producer_quota_image(configured);
             check!(
                 lookup_quota_with_key(&img, principal, None, "producer_byte_rate") == null_expected,
@@ -633,6 +682,12 @@ mod tests {
     /// bucket that the client `(alice, app2)` still draws on.
     #[test]
     fn a_bucket_is_rated_by_its_own_key_levels() {
+        /// A bucket key and the rate it must be re-rated to.
+        struct BucketRateCase {
+            label: &'static str,
+            key: EntityKey,
+            expected: Option<f64>,
+        }
         let img = img_with(vec![
             rec().call(),
             alice_app1_producer_quota(),
@@ -644,51 +699,59 @@ mod tests {
                 .value(9.0)
                 .call(),
         ]);
-        // (label, bucket key, expected rate)
-        let cases: [(&str, EntityKey, Option<f64>); 9] = [
-            (
-                "the user bucket keeps the user quota",
-                user_key("alice"),
-                Some(1_000.0),
-            ),
-            (
-                "a user with no quota falls to the default user",
-                user_key("bob"),
-                Some(700.0),
-            ),
-            (
-                "the pair bucket has the pair quota",
-                pair_key("alice", "app1"),
-                Some(5_000.0),
-            ),
-            (
-                "a pair with no pair level has no quota, not the user's",
-                pair_key("alice", "app2"),
-                None,
-            ),
-            (
-                "the client bucket keeps the client quota",
-                client_key("app1"),
-                Some(200.0),
-            ),
-            (
-                "a client with no quota falls to the default client",
-                client_key("app2"),
-                Some(300.0),
-            ),
-            (
-                "an ip key is not a user or client bucket",
-                vec![("ip".into(), Some("10.0.0.1".into()))],
-                None,
-            ),
-            (
-                "a user bucket with no name has no quota",
-                vec![("user".into(), None)],
-                None,
-            ),
-            ("an empty key has no quota", vec![], None),
+        let cases: [BucketRateCase; 9] = [
+            BucketRateCase {
+                label: "the user bucket keeps the user quota",
+                key: user_key("alice"),
+                expected: Some(1_000.0),
+            },
+            BucketRateCase {
+                label: "a user with no quota falls to the default user",
+                key: user_key("bob"),
+                expected: Some(700.0),
+            },
+            BucketRateCase {
+                label: "the pair bucket has the pair quota",
+                key: pair_key("alice", "app1"),
+                expected: Some(5_000.0),
+            },
+            BucketRateCase {
+                label: "a pair with no pair level has no quota, not the user's",
+                key: pair_key("alice", "app2"),
+                expected: None,
+            },
+            BucketRateCase {
+                label: "the client bucket keeps the client quota",
+                key: client_key("app1"),
+                expected: Some(200.0),
+            },
+            BucketRateCase {
+                label: "a client with no quota falls to the default client",
+                key: client_key("app2"),
+                expected: Some(300.0),
+            },
+            BucketRateCase {
+                label: "an ip key is not a user or client bucket",
+                key: vec![("ip".into(), Some("10.0.0.1".into()))],
+                expected: None,
+            },
+            BucketRateCase {
+                label: "a user bucket with no name has no quota",
+                key: vec![("user".into(), None)],
+                expected: None,
+            },
+            BucketRateCase {
+                label: "an empty key has no quota",
+                key: vec![],
+                expected: None,
+            },
         ];
-        for (label, key, expected) in cases {
+        for BucketRateCase {
+            label,
+            key,
+            expected,
+        } in cases
+        {
             check!(
                 lookup_bucket_rate(&img, &key, "producer_byte_rate") == expected,
                 "{label}"
@@ -892,9 +955,19 @@ mod tests {
     #[test]
     fn precedence_matches_kafkas_client_quota_manager() {
         type Level = Vec<(&'static str, Option<&'static str>)>;
+        /// A level and the rate configured at it.
+        struct ConfiguredLevel {
+            entity: Level,
+            rate: f64,
+        }
         /// A case name, the configured levels and rates, and the expected
         /// bucket key and rate.
-        type Row = (String, Vec<(Level, f64)>, (EntityKey, f64));
+        struct Row {
+            name: String,
+            configured: Vec<ConfiguredLevel>,
+            expected: (EntityKey, f64),
+        }
+        let at = |entity: Level, rate: f64| ConfiguredLevel { entity, rate };
         let pair: EntityKey = vec![
             ("client-id".into(), Some("app".into())),
             ("user".into(), Some("alice".into())),
@@ -905,54 +978,60 @@ mod tests {
         // Every adjacent pair: level N and N+1 both set, level N wins.
         let bucket_for_level = [&pair, &pair, &user, &pair, &pair, &user, &client, &client];
         let mut rows: Vec<Row> = (0..7)
-            .map(|n| {
-                (
-                    format!("levels {} and {}", n + 1, n + 2),
-                    vec![(levels[n].clone(), 1000.0), (levels[n + 1].clone(), 5000.0)],
-                    (bucket_for_level[n].clone(), 1000.0),
-                )
+            .map(|n| Row {
+                name: format!("levels {} and {}", n + 1, n + 2),
+                configured: vec![
+                    at(levels[n].clone(), 1000.0),
+                    at(levels[n + 1].clone(), 5000.0),
+                ],
+                expected: (bucket_for_level[n].clone(), 1000.0),
             })
             .collect();
         // The four examples from the issue.
         rows.extend([
-            (
-                "user=alice over the default pair".to_owned(),
-                vec![
-                    (vec![("user", Some("alice"))], 1000.0),
-                    (vec![("user", None), ("client-id", None)], 5000.0),
+            Row {
+                name: "user=alice over the default pair".to_owned(),
+                configured: vec![
+                    at(vec![("user", Some("alice"))], 1000.0),
+                    at(vec![("user", None), ("client-id", None)], 5000.0),
                 ],
-                (user.clone(), 1000.0),
-            ),
-            (
-                "user=alice,client-id=default over user=default,client-id=app".to_owned(),
-                vec![
-                    (vec![("user", Some("alice")), ("client-id", None)], 1000.0),
-                    (vec![("user", None), ("client-id", Some("app"))], 5000.0),
+                expected: (user.clone(), 1000.0),
+            },
+            Row {
+                name: "user=alice,client-id=default over user=default,client-id=app".to_owned(),
+                configured: vec![
+                    at(vec![("user", Some("alice")), ("client-id", None)], 1000.0),
+                    at(vec![("user", None), ("client-id", Some("app"))], 5000.0),
                 ],
-                (pair.clone(), 1000.0),
-            ),
-            (
-                "user=alice over user=default,client-id=app".to_owned(),
-                vec![
-                    (vec![("user", Some("alice"))], 1000.0),
-                    (vec![("user", None), ("client-id", Some("app"))], 5000.0),
+                expected: (pair.clone(), 1000.0),
+            },
+            Row {
+                name: "user=alice over user=default,client-id=app".to_owned(),
+                configured: vec![
+                    at(vec![("user", Some("alice"))], 1000.0),
+                    at(vec![("user", None), ("client-id", Some("app"))], 5000.0),
                 ],
-                (user.clone(), 1000.0),
-            ),
-            (
-                "user=default over client-id=app".to_owned(),
-                vec![
-                    (vec![("user", None)], 1000.0),
-                    (vec![("client-id", Some("app"))], 5000.0),
+                expected: (user.clone(), 1000.0),
+            },
+            Row {
+                name: "user=default over client-id=app".to_owned(),
+                configured: vec![
+                    at(vec![("user", None)], 1000.0),
+                    at(vec![("client-id", Some("app"))], 5000.0),
                 ],
-                (user.clone(), 1000.0),
-            ),
+                expected: (user.clone(), 1000.0),
+            },
         ]);
-        for (name, configured, expected) in rows {
+        for Row {
+            name,
+            configured,
+            expected,
+        } in rows
+        {
             let img = img_with(
                 configured
                     .into_iter()
-                    .map(|(entity, value)| rec().entity(entity).value(value).call())
+                    .map(|ConfiguredLevel { entity, rate }| rec().entity(entity).value(rate).call())
                     .collect(),
             );
             let got = lookup_quota_with_key(&img, "alice", Some("app"), "producer_byte_rate");

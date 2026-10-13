@@ -30,13 +30,22 @@ impl ReplicaView {
     /// Kafka's `ReplicaView.comparator()`, the order of "most caught up":
     /// the higher log end offset, then the shorter time since last caught up,
     /// then the higher node id. The greatest key wins.
-    fn caught_up_rank(&self) -> (i64, std::cmp::Reverse<Duration>, i32) {
-        (
-            self.log_end_offset,
-            std::cmp::Reverse(self.time_since_caught_up),
-            self.node_id,
-        )
+    fn caught_up_rank(&self) -> CaughtUpRank {
+        CaughtUpRank {
+            log_end_offset: self.log_end_offset,
+            time_since_caught_up: std::cmp::Reverse(self.time_since_caught_up),
+            node_id: self.node_id,
+        }
     }
+}
+
+/// The sort key of [`ReplicaView::caught_up_rank`]. Its fields compare in
+/// declaration order, which is the order of Kafka's comparator.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct CaughtUpRank {
+    log_end_offset: i64,
+    time_since_caught_up: std::cmp::Reverse<Duration>,
+    node_id: i32,
 }
 
 /// Which built-in selector the broker uses. Maps to Kafka's

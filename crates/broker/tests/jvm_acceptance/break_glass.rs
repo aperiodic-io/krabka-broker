@@ -27,11 +27,23 @@ pub(crate) async fn propose(
     response.proposal_id
 }
 
+/// How far along a proposal is after one approval.
+#[derive(Debug)]
+pub(crate) struct Approvals {
+    /// Distinct principals that have approved it.
+    pub(crate) held: i32,
+    /// Distinct principals it needs. The broker refuses a configured value
+    /// below two.
+    pub(crate) required: i32,
+}
+
+/// Add one approval to a proposal as `operator`, and answer with the
+/// approvals now held.
 pub(crate) async fn approve(
     bootstrap: &str,
     operator: (&str, &str),
     proposal_id: krabka_protocol::primitives::uuid::Uuid,
-) -> (i32, i32) {
+) -> Approvals {
     use krabka_protocol::krabka::break_glass::ApproveBreakGlassRequest;
     let client = sasl_client(bootstrap, operator.0, operator.1).await;
     let response = client
@@ -49,5 +61,8 @@ pub(crate) async fn approve(
         code == 0,
         "approve as {who}: code={code} message={message:?}"
     );
-    (response.approvals_held, response.approvals_required)
+    Approvals {
+        held: response.approvals_held,
+        required: response.approvals_required,
+    }
 }

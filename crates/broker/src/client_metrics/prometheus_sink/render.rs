@@ -13,6 +13,14 @@ use {
     std::{collections::HashMap, time::Instant},
 };
 
+/// A live series of one metric name: the client that reported it, and its
+/// latest point.
+struct LiveSeries<'a> {
+    instance: &'a str,
+    client: &'a str,
+    point: &'a StoredPoint,
+}
+
 impl Collector for ClientMetricsCollector {
     fn encode(&self, mut encoder: DescriptorEncoder) -> Result<(), std::fmt::Error> {
         let now = Instant::now();
@@ -23,20 +31,23 @@ impl Collector for ClientMetricsCollector {
         // # HELP / # TYPE line on every encode_descriptor call, so calling it
         // N times for N series sharing the same name would produce duplicate
         // descriptor lines → invalid OpenMetrics output.
-        let mut by_name: HashMap<String, Vec<(&str, &str, &StoredPoint)>> = HashMap::new();
-        for ((metric, instance, client, _), sp) in guard.iter() {
+        let mut by_name: HashMap<String, Vec<LiveSeries<'_>>> = HashMap::new();
+        for (key, sp) in guard.iter() {
             if !Self::is_live(now.duration_since(sp.at), self.ttl) {
                 continue;
             }
-            by_name.entry(sanitize(metric)).or_default().push((
-                instance.as_str(),
-                client.as_str(),
-                sp,
-            ));
+            by_name
+                .entry(sanitize(&key.metric))
+                .or_default()
+                .push(LiveSeries {
+                    instance: key.client_instance_id.as_str(),
+                    client: key.client_id.as_str(),
+                    point: sp,
+                });
         }
 
         for (name, series) in &by_name {
-            let Some((_, _, first)) = series.first() else {
+            let Some(LiveSeries { point: first, .. }) = series.first() else {
                 continue;
             };
             let mut metric_encoder = encoder.encode_descriptor(
@@ -45,7 +56,12 @@ impl Collector for ClientMetricsCollector {
                 None,
                 first.value.metric_type(),
             )?;
-            for (instance, client, point) in series {
+            for LiveSeries {
+                instance,
+                client,
+                point,
+            } in series
+            {
                 if !point.value.same_type(&first.value) {
                     continue;
                 }

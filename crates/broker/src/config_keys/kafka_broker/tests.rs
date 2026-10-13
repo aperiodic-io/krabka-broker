@@ -109,110 +109,158 @@ fn keys_kafka_refuses_to_alter_are_read_only() {
 /// the value Kafka reports, or its `ConfigException` text.
 #[test]
 fn dynamic_keys_are_parsed_and_range_checked_the_way_config_def_does() {
-    let cases: [(&str, &str, Result<&str, &str>); 22] = [
-        ("num.io.threads", " 16 ", Ok("16")),
-        (
-            "num.io.threads",
-            "abc",
-            Err("Invalid value abc for configuration num.io.threads: Not a number of type INT"),
-        ),
-        (
-            "num.io.threads",
-            "0",
-            Err("Invalid value 0 for configuration num.io.threads: Value must be at least 1"),
-        ),
-        (
-            "num.io.threads",
-            "2147483648",
-            Err(
+    struct Case {
+        key: &'static str,
+        value: &'static str,
+        want: Result<&'static str, &'static str>,
+    }
+    let cases: [Case; 22] = [
+        Case {
+            key: "num.io.threads",
+            value: " 16 ",
+            want: Ok("16"),
+        },
+        Case {
+            key: "num.io.threads",
+            value: "abc",
+            want: Err(
+                "Invalid value abc for configuration num.io.threads: Not a number of type INT",
+            ),
+        },
+        Case {
+            key: "num.io.threads",
+            value: "0",
+            want: Err("Invalid value 0 for configuration num.io.threads: Value must be at least 1"),
+        },
+        Case {
+            key: "num.io.threads",
+            value: "2147483648",
+            want: Err(
                 "Invalid value 2147483648 for configuration num.io.threads: Not a number of type \
                  INT",
             ),
-        ),
-        (
-            "max.connections",
-            "-5",
-            Err("Invalid value -5 for configuration max.connections: Value must be at least 0"),
-        ),
+        },
+        Case {
+            key: "max.connections",
+            value: "-5",
+            want: Err(
+                "Invalid value -5 for configuration max.connections: Value must be at least 0",
+            ),
+        },
         // `log.cleaner.threads` is `atLeast(0)`: zero is a value Kafka takes.
-        ("log.cleaner.threads", "0", Ok("0")),
-        (
-            "log.cleaner.threads",
-            "-1",
-            Err("Invalid value -1 for configuration log.cleaner.threads: Value must be at least 0"),
-        ),
-        ("log.cleaner.io.buffer.load.factor", "0.75", Ok("0.75")),
-        (
-            "log.cleaner.io.buffer.load.factor",
-            "x",
-            Err(
+        Case {
+            key: "log.cleaner.threads",
+            value: "0",
+            want: Ok("0"),
+        },
+        Case {
+            key: "log.cleaner.threads",
+            value: "-1",
+            want: Err(
+                "Invalid value -1 for configuration log.cleaner.threads: Value must be at least 0",
+            ),
+        },
+        Case {
+            key: "log.cleaner.io.buffer.load.factor",
+            value: "0.75",
+            want: Ok("0.75"),
+        },
+        Case {
+            key: "log.cleaner.io.buffer.load.factor",
+            value: "x",
+            want: Err(
                 "Invalid value x for configuration log.cleaner.io.buffer.load.factor: Not a \
                  number of type DOUBLE",
             ),
-        ),
-        ("sasl.login.refresh.buffer.seconds", "300", Ok("300")),
-        (
-            "sasl.login.refresh.buffer.seconds",
-            "40000",
-            Err(
+        },
+        Case {
+            key: "sasl.login.refresh.buffer.seconds",
+            value: "300",
+            want: Ok("300"),
+        },
+        Case {
+            key: "sasl.login.refresh.buffer.seconds",
+            value: "40000",
+            want: Err(
                 "Invalid value 40000 for configuration sasl.login.refresh.buffer.seconds: Not a \
                  number of type SHORT",
             ),
-        ),
-        (
-            "follower.fetch.last.tiered.offset.enable",
-            "TRUE",
-            Ok("true"),
-        ),
-        (
-            "follower.fetch.last.tiered.offset.enable",
-            "yes",
-            Err(
+        },
+        Case {
+            key: "follower.fetch.last.tiered.offset.enable",
+            value: "TRUE",
+            want: Ok("true"),
+        },
+        Case {
+            key: "follower.fetch.last.tiered.offset.enable",
+            value: "yes",
+            want: Err(
                 "Invalid value yes for configuration follower.fetch.last.tiered.offset.enable: \
                  Expected value to be either true or false",
             ),
-        ),
-        ("metric.reporters", "a, b", Ok("a,b")),
-        ("metric.reporters", "", Ok("")),
-        (
-            "metric.reporters",
-            "a,a",
-            Err("Configuration 'metric.reporters' values must not be duplicated."),
-        ),
-        (
-            "listeners",
-            " ",
-            Err(
+        },
+        Case {
+            key: "metric.reporters",
+            value: "a, b",
+            want: Ok("a,b"),
+        },
+        Case {
+            key: "metric.reporters",
+            value: "",
+            want: Ok(""),
+        },
+        Case {
+            key: "metric.reporters",
+            value: "a,a",
+            want: Err("Configuration 'metric.reporters' values must not be duplicated."),
+        },
+        Case {
+            key: "listeners",
+            value: " ",
+            want: Err(
                 "Configuration 'listeners' must not be empty. Valid values include: any \
                  non-empty value",
             ),
-        ),
-        (
-            "ssl.client.auth",
-            "maybe",
-            Err(
+        },
+        Case {
+            key: "ssl.client.auth",
+            value: "maybe",
+            want: Err(
                 "Invalid value maybe for configuration ssl.client.auth: String must be one of: \
                  required, requested, none",
             ),
-        ),
-        ("ssl.client.auth", " required ", Ok("required")),
+        },
+        Case {
+            key: "ssl.client.auth",
+            value: " required ",
+            want: Ok("required"),
+        },
         // A password is trimmed, and a class name is not loaded.
-        ("ssl.keystore.password", " secret ", Ok("secret")),
-        (
-            "principal.builder.class",
-            "no.such.Class",
-            Ok("no.such.Class"),
-        ),
-        (
-            "group.coordinator.cached.buffer.max.bytes",
-            "1",
-            Err(
+        Case {
+            key: "ssl.keystore.password",
+            value: " secret ",
+            want: Ok("secret"),
+        },
+        Case {
+            key: "principal.builder.class",
+            value: "no.such.Class",
+            want: Ok("no.such.Class"),
+        },
+        Case {
+            key: "group.coordinator.cached.buffer.max.bytes",
+            value: "1",
+            want: Err(
                 "Invalid value 1 for configuration group.coordinator.cached.buffer.max.bytes: \
                  Value must be at least 524288",
             ),
-        ),
+        },
     ];
-    for (name, value, want) in cases {
+    for Case {
+        key: name,
+        value,
+        want,
+    } in cases
+    {
         let row = lookup(name).expect("a KafkaConfig key");
         check!(
             row.canonical(value) == want.map(str::to_owned).map_err(str::to_owned),
