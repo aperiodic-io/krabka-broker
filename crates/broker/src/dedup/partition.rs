@@ -322,14 +322,19 @@ impl PartitionDedup {
         }
         active.filter.clear();
         let key_header = active.config.settings.key_header.clone();
-        let outcome = rebuild_from_log(&mut active.filter, key_header.as_deref(), log, now_ms);
-        if let Some(error) = &outcome.error {
+        let policy = active.policy();
+        let outcome = rebuild_from_log(
+            &mut active.filter,
+            (key_header.as_deref(), policy),
+            log,
+            now_ms,
+        );
+        if let Some(stop) = &outcome.stopped {
             warn!(
                 topic = &*self.topic,
                 partition = self.partition,
-                %error,
-                "dedup: index rebuild stopped at a log read error; the index holds the \
-                 identities read before it"
+                %stop,
+                "dedup: index rebuild stopped early; the index holds the identities read before it"
             );
         }
         active.covered_through = Some(outcome.covered_through);

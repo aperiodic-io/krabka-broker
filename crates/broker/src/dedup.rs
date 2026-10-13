@@ -34,3 +34,6 @@ pub(crate) use self::{
     identity::{BatchSource, CollectedIdentities, IdentityCollector},
     partition::{ClassifiedAppend, DedupJob, PartitionDedup},
 };
+
+#[cfg(test)]
+mod stress_tests;

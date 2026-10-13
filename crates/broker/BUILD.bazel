@@ -131,10 +131,13 @@ crate_tests(
     # an index fills, grows and rebuilds, and compares it with a topic without
     # dedup in the same run; its bounds are wide, but a lane of ~140 suites on
     # four cores is exactly the noise they would otherwise have to absorb.
+    # `dedup_stress` measures peak memory and lock waits in child processes it
+    # starts, for the same reason.
     cpu_heavy = [
         "compaction",
         "dedup_bounds",
         "dedup_recovery",
+        "dedup_stress",
         "diskless_e2e",
         "durability",
         "elect_leaders",
