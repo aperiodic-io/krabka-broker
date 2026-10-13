@@ -1,13 +1,13 @@
 use {
-    super::*,
+    super::{
+        test_support::{NOW, OpRun, OpSpace},
+        *,
+    },
     assert2::assert,
     proptest::prelude::*,
     std::{ptr, sync::Arc},
 };
 
-// Far ahead of every fixed timestamp below, so the clamp changes nothing
-// except in the tests that are about it.
-const NOW: i64 = 1_000_000_000_000;
 const SECOND: i64 = 1_000;
 const MINUTE: i64 = 60 * SECOND;
 const HOUR: i64 = 60 * MINUTE;
@@ -495,11 +495,17 @@ fn expired_entries_drain_incrementally() {
     assert!(kept(&mut f, "stale-0", 5000));
 }
 
-#[test]
-fn entry_limit_fails_open_without_growing_the_index() {
+// A filter whose two-entry limit `a` and `b` fill.
+fn filter_full_of_a_and_b() -> DedupWindowFilter {
     let mut f = DedupWindowFilter::new(HOUR, 2, None);
     assert!(kept(&mut f, "a", 1000));
     assert!(kept(&mut f, "b", 1000));
+    f
+}
+
+#[test]
+fn entry_limit_fails_open_without_growing_the_index() {
+    let mut f = filter_full_of_a_and_b();
 
     // A new identity is admitted with the index full, and is not remembered.
     assert!(kept(&mut f, "c", 1000));
@@ -513,9 +519,7 @@ fn entry_limit_fails_open_without_growing_the_index() {
 
 #[test]
 fn drops_and_saturation_are_counted() {
-    let mut f = DedupWindowFilter::new(HOUR, 2, None);
-    assert!(kept(&mut f, "a", 1000));
-    assert!(kept(&mut f, "b", 1000));
+    let mut f = filter_full_of_a_and_b();
     assert!(f.counters() == DedupCounters::default());
 
     assert!(!kept(&mut f, "a", 1000));
@@ -679,6 +683,23 @@ fn sweep_work_does_not_grow_with_index_size() {
     assert!(f.sweep_visits() == before);
 }
 
+// Sends `count` new identities, `step_ms` apart, through the leader's classify
+// path and the follower's populate path, as the follower applies them from the
+// log.
+fn feed_leader_and_follower(
+    leader: &mut DedupWindowFilter,
+    follower: &mut DedupWindowFilter,
+    count: i64,
+    step_ms: i64,
+) {
+    for index in 0..count {
+        let key = format!("id-{index}");
+        let timestamp = 1000 + index * step_ms;
+        assert!(kept(leader, &key, timestamp));
+        populate(follower, &key, timestamp);
+    }
+}
+
 // The index is a function of the log, so the leader's classify path and the
 // follower's populate path must agree entry for entry, including which live
 // entries capacity trimming drops. The cursor position is part of the state,
@@ -689,13 +710,7 @@ fn leader_and_follower_converge_across_the_entry_limit() {
     let mut leader = DedupWindowFilter::new(100 * SECOND, CAP, None);
     let mut follower = DedupWindowFilter::new(100 * SECOND, CAP, None);
 
-    for index in 0..60_i64 {
-        let key = format!("id-{index}");
-        let timestamp = 1000 + index * 1500;
-        assert!(kept(&mut leader, &key, timestamp));
-        populate(&mut follower, &key, timestamp);
-    }
-
+    feed_leader_and_follower(&mut leader, &mut follower, 60, 1500);
     assert!(leader.counters().capacity_evicted_entries > 0);
     assert!(entries(&leader) == entries(&follower));
     assert!(leader.max_timestamp_ms() == follower.max_timestamp_ms());
@@ -1068,52 +1083,11 @@ fn leader_and_follower_agree_under_budget_pressure() {
     let mut leader = DedupWindowFilter::new(100 * SECOND, 1000, Some(leader_budget.clone()));
     let mut follower = DedupWindowFilter::new(100 * SECOND, 1000, Some(follower_budget.clone()));
 
-    for index in 0..500_i64 {
-        let key = format!("id-{index}");
-        let timestamp = 1000 + index * 150;
-        assert!(kept(&mut leader, &key, timestamp));
-        populate(&mut follower, &key, timestamp);
-    }
+    feed_leader_and_follower(&mut leader, &mut follower, 500, 150);
     assert!(leader.counters().capacity_evicted_entries > 0);
     assert!(entries(&leader) == entries(&follower));
     assert!(leader_budget.entries() == follower_budget.entries());
     assert!(leader.counters() == follower.counters());
-}
-
-#[derive(Clone, Debug)]
-enum Op {
-    Classify {
-        filter: usize,
-        key: u16,
-        advance: i64,
-        keep_undo: bool,
-    },
-    Populate {
-        filter: usize,
-        key: u16,
-        advance: i64,
-    },
-    Revert,
-    Clear {
-        filter: usize,
-    },
-    Replace {
-        filter: usize,
-    },
-}
-
-const FILTERS: usize = 3;
-
-fn op() -> impl Strategy<Value = Op> {
-    prop_oneof![
-        8 => (0..FILTERS, 0..700_u16, 0..50_i64, any::<bool>())
-            .prop_map(|(filter, key, advance, keep_undo)| Op::Classify { filter, key, advance, keep_undo }),
-        8 => (0..FILTERS, 0..700_u16, 0..50_i64)
-            .prop_map(|(filter, key, advance)| Op::Populate { filter, key, advance }),
-        1 => Just(Op::Revert),
-        1 => (0..FILTERS).prop_map(|filter| Op::Clear { filter }),
-        1 => (0..FILTERS).prop_map(|filter| Op::Replace { filter }),
-    ]
 }
 
 fn budget_filter(shared: &Arc<DedupBudget>) -> DedupWindowFilter {
@@ -1125,37 +1099,22 @@ proptest! {
     // equals the sum of their sizes after each one, and drops to zero when
     // they all go.
     #[test]
-    fn budget_total_matches_the_indices(ops in prop::collection::vec(op(), 1..800)) {
-        let shared = budget(300);
-        let mut filters: Vec<DedupWindowFilter> = (0..FILTERS).map(|_| budget_filter(&shared)).collect();
-        let mut clock = 1000;
-        let mut pending: Vec<(usize, Undo)> = Vec::new();
-        for op in ops {
-            match op {
-                Op::Classify { filter, key, advance, keep_undo } => {
-                    clock += advance;
-                    let result = filters[filter].classify(&[rec(&format!("k-{key}"), clock)], NOW);
-                    if keep_undo {
-                        pending.push((filter, result.undo));
-                    }
-                }
-                Op::Populate { filter, key, advance } => {
-                    clock += advance;
-                    filters[filter].populate(id(&format!("k-{key}")), clock, NOW);
-                }
-                Op::Revert => {
-                    if let Some((filter, undo)) = pending.pop() {
-                        filters[filter].revert(&undo);
-                    }
-                }
-                Op::Clear { filter } => filters[filter].clear(),
-                Op::Replace { filter } => filters[filter] = budget_filter(&shared),
-            }
-            let total: usize = filters.iter().map(DedupWindowFilter::len).sum();
-            assert!(shared.entries() == total);
-            assert!(filters.iter().all(|f| f.len() <= f.max_entries()));
+    fn budget_total_matches_the_indices(ops in prop::collection::vec(
+        OpSpace {
+            keys: 700,
+            advance: 0..50,
+            jump: None,
+            revert_weight: 1,
         }
-        drop(filters);
-        assert!(shared.entries() == 0);
+        .strategy(),
+        1..800,
+    )) {
+        OpRun {
+            budget: 300,
+            start_ms: 1000,
+            filter: budget_filter,
+            identity: |key| id(&format!("k-{key}")),
+        }
+        .run(ops);
     }
 }

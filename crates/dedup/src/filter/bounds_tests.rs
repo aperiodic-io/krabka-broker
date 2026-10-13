@@ -4,26 +4,23 @@
 // the tests are deterministic. The one timed test is ignored.
 
 use {
-    super::*,
+    super::{
+        test_support::{NOW, OpRun, OpSpace, VISITS_PER_CALL, check_invariants, nth},
+        *,
+    },
     assert2::assert,
     proptest::prelude::*,
     std::{sync::Arc, time::Instant},
 };
 
-const NOW: i64 = 1_000_000_000_000;
 const SECOND: i64 = 1_000;
 const HOUR: i64 = 3_600 * SECOND;
 const SEGMENTS: usize = DedupWindowFilter::SEGMENTS;
-
-// The most entries the cursor visits in one call for one record.
-const VISITS_PER_CALL: u64 = (SWEEP_BUDGET + CAPACITY_EMERGENCY_BUDGET) as u64;
 
 // An upper bound of the heap of one live entry in a segment that is at least a
 // quarter full: the dense entry, and up to 16/7 hash buckets, from the 7/8 load
 // limit and the rounding of the bucket count to a power of two.
 const BYTES_PER_ENTRY: usize = ENTRY_BYTES + 3 * INDEX_BUCKET_BYTES;
-
-fn nth(index: u64) -> IdentityDigest { IdentityDigest::of(&index.to_le_bytes()) }
 
 // The heap a filter is allowed for `entries` live entries: `factor` times
 // their bytes, every segment at the shrink floor, and the fixed segment table
@@ -58,32 +55,6 @@ impl Path {
 }
 
 const PATHS: [Path; 2] = [Path::Leader, Path::Follower];
-
-// The state the segments must agree on after every call.
-fn check_invariants(filter: &DedupWindowFilter) {
-    let mut total = 0;
-    let mut occupied = 0_u64;
-    for (index, segment) in filter.segments.iter().enumerate() {
-        total += segment.table.len();
-        if !segment.table.is_empty() {
-            occupied |= 1 << index;
-        }
-        assert!(
-            segment.table.len() <= filter.segment_limit,
-            "segment {index}"
-        );
-        // The usable slots never exceed the allocation the segment records.
-        assert!(
-            segment.table.capacity() <= segment.capacity,
-            "segment {index}"
-        );
-    }
-    assert!(total == filter.len());
-    assert!(occupied == filter.occupied);
-    assert!(filter.len() <= filter.max_entries());
-    assert!(filter.largest_relocation() <= filter.segment_limit);
-    assert!(filter.sweep_segment < SEGMENTS);
-}
 
 // A small deterministic generator, so traffic is varied and repeatable.
 struct Lcg(u64);
@@ -529,48 +500,6 @@ fn report_slowest_classify_while_growing() {
     );
 }
 
-#[derive(Clone, Debug)]
-enum Op {
-    Classify {
-        filter: usize,
-        key: u16,
-        advance: i64,
-        keep_undo: bool,
-    },
-    Populate {
-        filter: usize,
-        key: u16,
-        advance: i64,
-    },
-    // A jump of the clock with no record: the next record then expires a
-    // wave of entries, or arrives behind the stored ones.
-    Jump {
-        advance: i64,
-    },
-    Revert,
-    Clear {
-        filter: usize,
-    },
-    Replace {
-        filter: usize,
-    },
-}
-
-const FILTERS: usize = 3;
-
-fn op() -> impl Strategy<Value = Op> {
-    prop_oneof![
-        8 => (0..FILTERS, 0..2000_u16, -3000..3000_i64, any::<bool>())
-            .prop_map(|(filter, key, advance, keep_undo)| Op::Classify { filter, key, advance, keep_undo }),
-        8 => (0..FILTERS, 0..2000_u16, -3000..3000_i64)
-            .prop_map(|(filter, key, advance)| Op::Populate { filter, key, advance }),
-        1 => (-20_000..40_000_i64).prop_map(|advance| Op::Jump { advance }),
-        2 => Just(Op::Revert),
-        1 => (0..FILTERS).prop_map(|filter| Op::Clear { filter }),
-        1 => (0..FILTERS).prop_map(|filter| Op::Replace { filter }),
-    ]
-}
-
 // Small segments that shrink and fill, so that random sequences reach the
 // shrink and the segment limit with the cursor inside the segment.
 fn small_filter(shared: &Arc<DedupBudget>) -> DedupWindowFilter {
@@ -587,46 +516,22 @@ proptest! {
     // is crossed, the budget stays exact, and the cursor never leaves the
     // segments.
     #[test]
-    fn random_ops_keep_every_bound(ops in prop::collection::vec(op(), 1..1500)) {
-        let shared = Arc::new(DedupBudget::new(300));
-        let mut filters: Vec<DedupWindowFilter> = (0..FILTERS).map(|_| small_filter(&shared)).collect();
-        let mut clock = 100_000;
-        let mut pending: Vec<(usize, Undo)> = Vec::new();
-        for op in ops {
-            match op {
-                Op::Classify { filter, key, advance, keep_undo } => {
-                    clock += advance;
-                    let record = DedupRecord { identity: Some(nth(u64::from(key))), timestamp_ms: clock };
-                    let before = filters[filter].sweep_visits();
-                    let result = filters[filter].classify(&[record], NOW);
-                    assert!(filters[filter].sweep_visits() - before <= VISITS_PER_CALL);
-                    if keep_undo {
-                        pending.push((filter, result.undo));
-                    }
-                }
-                Op::Populate { filter, key, advance } => {
-                    clock += advance;
-                    let before = filters[filter].sweep_visits();
-                    filters[filter].populate(nth(u64::from(key)), clock, NOW);
-                    assert!(filters[filter].sweep_visits() - before <= VISITS_PER_CALL);
-                }
-                Op::Jump { advance } => clock += advance,
-                Op::Revert => {
-                    if let Some((filter, undo)) = pending.pop() {
-                        filters[filter].revert(&undo);
-                    }
-                }
-                Op::Clear { filter } => filters[filter].clear(),
-                Op::Replace { filter } => filters[filter] = small_filter(&shared),
-            }
-            let total: usize = filters.iter().map(DedupWindowFilter::len).sum();
-            assert!(shared.entries() == total);
-            assert!(shared.entries() <= shared.max_entries());
-            for filter in &filters {
-                check_invariants(filter);
-            }
+    fn random_ops_keep_every_bound(ops in prop::collection::vec(
+        OpSpace {
+            keys: 2000,
+            advance: -3000..3000,
+            jump: Some(-20_000..40_000),
+            revert_weight: 2,
         }
-        drop(filters);
-        assert!(shared.entries() == 0);
+        .strategy(),
+        1..1500,
+    )) {
+        OpRun {
+            budget: 300,
+            start_ms: 100_000,
+            filter: small_filter,
+            identity: |key| nth(u64::from(key)),
+        }
+        .run(ops);
     }
 }
