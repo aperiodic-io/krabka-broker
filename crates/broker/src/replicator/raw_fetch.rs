@@ -1,8 +1,7 @@
 //! Fetch response decoding that leaves record batches in their wire form.
 
 use {
-    bytes::{Buf, BufMut, Bytes, BytesMut},
-    krabka_client_core::{ClientError, Connection},
+    bytes::{Buf, BufMut, Bytes},
     krabka_protocol::{
         Decode, Encode, ProtocolError, ProtocolRequest,
         owned::{
@@ -78,9 +77,10 @@ impl Decode<'_> for RawFetchResponse {
     }
 }
 
-/// The next `length` bytes of `buf`. On a `Bytes` buffer, which is what
-/// [`fetch_raw`] decodes from, this is a slice of the response frame and copies
-/// nothing: a follower's records go from the socket buffer to the log write.
+/// The next `length` bytes of `buf`. On a `Bytes` buffer, which is what a
+/// follower's `LeaderLink::send` decodes from, this is a slice of the response
+/// frame and copies nothing: a follower's records go from the socket buffer to
+/// the log write.
 fn take_bytes<B: Buf>(buf: &mut B, length: usize) -> Result<Bytes, ProtocolError> {
     if buf.remaining() < length {
         return Err(ProtocolError::UnexpectedEof {
@@ -88,39 +88,6 @@ fn take_bytes<B: Buf>(buf: &mut B, length: usize) -> Result<Bytes, ProtocolError
         });
     }
     Ok(buf.copy_to_bytes(length))
-}
-
-/// Sends a follower fetch and decodes its response from the frame bytes
-/// themselves, so the records stay slices of the frame.
-///
-/// [`Connection::send`] decodes a response from a borrowed slice, which
-/// copies every partition's records out of it. Its raw sibling returns the
-/// frame, and it frames both headers as flexible, which every Fetch version a
-/// krabka leader negotiates with a krabka follower is; an older one takes the
-/// typed path.
-///
-/// # Errors
-///
-/// What [`Connection::send`] or [`Connection::raw_request`] returns: an
-/// encoding, transport or decoding failure.
-pub(super) async fn fetch_raw(
-    connection: &Connection,
-    request: RawFetchRequest,
-) -> Result<RawFetchResponse, ClientError> {
-    let version = connection.versions().negotiate::<RawFetchRequest>()?;
-    if version < <FetchRequest as ProtocolRequest>::FLEXIBLE_MIN {
-        return connection.send(request).await;
-    }
-    let mut body = BytesMut::with_capacity(request.encoded_len(version));
-    request.encode(&mut body, version)?;
-    let mut frame = connection
-        .raw_request(
-            <FetchRequest as ProtocolRequest>::API_KEY,
-            version,
-            body.freeze(),
-        )
-        .await?;
-    Ok(RawFetchResponse::decode(&mut frame, version)?)
 }
 
 fn decode_topic<B: Buf>(

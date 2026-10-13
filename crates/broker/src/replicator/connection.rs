@@ -9,11 +9,18 @@
 //! partition -- the reconnect storm an operator used to see during a roll.
 
 use {
-    super::FetcherConfig,
+    super::{
+        FetcherConfig,
+        leader_link::{LeaderLink, LinkSettings},
+    },
     crate::{config::ReplicationRuntimeConfig, network::client::InterBrokerClient},
-    krabka_client_core::{Connection, ConnectionOptions},
+    krabka_client_core::{ClientDuplex, Connection, ConnectionOptions},
     krabka_security::ListenerProtocol,
-    krabka_units::{Time, convert::TimeExt, fmt::Human as _},
+    krabka_units::{
+        Time,
+        convert::{ByteSizeExt as _, TimeExt},
+        fmt::Human as _,
+    },
     tokio_util::sync::CancellationToken,
     tracing::warn,
 };
@@ -58,11 +65,40 @@ impl<'a> LeaderDial<'a> {
     }
 }
 
-/// Opens a [`Connection`] against a fetcher's leader.
-///
-/// See [`connect_leader_with_backoff`].
-pub(super) async fn connect_with_backoff(fetcher: &FetcherConfig) -> Result<Connection, String> {
-    connect_leader_with_backoff(&LeaderDial::fetcher(fetcher)).await
+/// A follower fetcher's link to its leader.
+pub(super) type FollowerLink = LeaderLink<Box<dyn ClientDuplex>>;
+
+/// Opens a [`FollowerLink`] against a fetcher's leader, with the retries of
+/// [`connect_leader_with_backoff`].
+pub(super) async fn connect_with_backoff(fetcher: &FetcherConfig) -> Result<FollowerLink, String> {
+    let dial = LeaderDial::fetcher(fetcher);
+    with_backoff(&dial, || open_link(&dial)).await
+}
+
+/// Dials `dial`'s leader, runs TLS and SASL as its listener asks, and
+/// negotiates API versions on a [`LeaderLink`].
+async fn open_link(dial: &LeaderDial<'_>) -> Result<FollowerLink, String> {
+    let mut options = connection_options(dial.client_id);
+    dial.client.apply_resource_policy(&mut options);
+    let stream = dial
+        .client
+        .connect(
+            dial.host,
+            dial.port,
+            dial.protocol,
+            dial.server_name,
+            &options,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let settings = LinkSettings {
+        client_id: dial.client_id.to_owned(),
+        frame_max: options.frame_max.size().bytes_usize(),
+        request_timeout: options.request_timeout,
+    };
+    LeaderLink::open(stream, settings)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// Opens a [`Connection`] against `dial`'s leader.
@@ -77,21 +113,33 @@ pub(super) async fn connect_with_backoff(fetcher: &FetcherConfig) -> Result<Conn
 pub(crate) async fn connect_leader_with_backoff(
     dial: &LeaderDial<'_>,
 ) -> Result<Connection, String> {
-    let mut delay = reconnect_delay(dial.replication, None);
-    loop {
-        let attempt = dial.client.connect_as_connection(
+    with_backoff(dial, || {
+        dial.client.connect_as_connection(
             dial.host,
             dial.port,
             dial.protocol,
             dial.server_name,
             connection_options(dial.client_id),
-        );
+        )
+    })
+    .await
+}
+
+/// Runs `attempt` until it succeeds, backing off between failures as the
+/// reconnect policy says. Returns `Err` only if a shutdown starts during an
+/// attempt or the wait.
+async fn with_backoff<T, E: std::fmt::Display, F: Future<Output = Result<T, E>>>(
+    dial: &LeaderDial<'_>,
+    mut attempt: impl FnMut() -> F,
+) -> Result<T, String> {
+    let mut delay = reconnect_delay(dial.replication, None);
+    loop {
         let result = tokio::select! {
             () = dial.shutdown.cancelled() => return Err("cancelled".into()),
-            r = attempt => r,
+            r = attempt() => r,
         };
         match result {
-            Ok(c) => return Ok(c),
+            Ok(connected) => return Ok(connected),
             Err(e) => {
                 warn!(
                     host = %dial.host, port = dial.port, error = %e,
@@ -104,8 +152,6 @@ pub(crate) async fn connect_leader_with_backoff(
     }
 }
 
-/// Sleeps for `delay`, or returns `Err` as soon as `shutdown` is cancelled,
-/// so a shutdown always wins over a pending retry delay.
 pub(crate) async fn sleep_or_cancel(
     shutdown: &CancellationToken,
     delay: Time,

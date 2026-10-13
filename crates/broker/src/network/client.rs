@@ -144,7 +144,12 @@ pub struct InterBrokerClient {
 }
 
 impl InterBrokerClient {
-    fn apply_resource_policy(&self, options: &mut krabka_client_core::ConnectionOptions) {
+    /// Sets the dispatch queue and frame limits of this broker's outbound
+    /// client resource policy on `options`.
+    pub(crate) fn apply_resource_policy(
+        &self,
+        options: &mut krabka_client_core::ConnectionOptions,
+    ) {
         options.dispatch_queue_capacity = self.dispatch_queue_capacity;
         options.frame_max = self.frame_max;
     }
