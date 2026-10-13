@@ -553,6 +553,26 @@ struct IndexSize {
     heap_bytes: usize,
 }
 
+impl Drop for PartitionDedup {
+    /// A partition writer ends when its topic is deleted or the replica moves
+    /// away. Dropping the index gives its entries back to the broker-wide
+    /// budget; publish the budget's new size so the broker gauge does not wait
+    /// for another partition's append. The partition's own series are left
+    /// alone: the path that removed the partition evicts them, and setting
+    /// one here would bring it back.
+    fn drop(&mut self) {
+        let Some(active) = self.active.take() else {
+            return;
+        };
+        let runtime = Arc::clone(&active.config.runtime);
+        drop(active);
+        let budget = runtime.budget();
+        runtime
+            .metrics()
+            .set_dedup_broker_index(budget.entries(), budget.max_entries());
+    }
+}
+
 fn report(
     topic: &Arc<str>,
     partition: i32,
