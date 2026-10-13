@@ -13,6 +13,7 @@ use {
         client_metrics::ClientMetrics,
         config::BrokerConfig,
         coordinator::GroupCoordinator,
+        dedup::DedupRuntime,
         diskless::{hot_tail::HotTailCache, read::DisklessReadHandle},
         fetch_session::FetchSessionCache,
         future_log::FutureLogState,
@@ -123,6 +124,9 @@ pub struct Broker {
     pub(crate) auto_topic_creation: Arc<AutoTopicCreation>,
     pub(crate) producer_ids: Arc<ProducerIdManager>,
     pub(crate) producer_state: Arc<ProducerState>,
+    /// KFC-10: the entry budget, limits and metrics that every partition's
+    /// dedup index shares.
+    pub(crate) dedup: Arc<DedupRuntime>,
     pub(crate) txn_coordinator: Arc<TxnCoordinator>,
     pub(crate) share_coordinator: Arc<ShareCoordinator>,
     pub(crate) barrier_coordinator: Arc<BarrierCoordinator>,

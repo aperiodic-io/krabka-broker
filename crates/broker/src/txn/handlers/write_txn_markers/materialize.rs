@@ -646,6 +646,7 @@ mod tests {
                     data,
                     ack,
                     producer_check,
+                    dedup,
                 } = job;
                 let (landed_tx, landed_rx) = tokio::sync::oneshot::channel();
                 let forwarded = writer
@@ -653,6 +654,7 @@ mod tests {
                         data,
                         ack: landed_tx,
                         producer_check,
+                        dedup,
                     }))
                     .await;
                 if forwarded.is_ok() {

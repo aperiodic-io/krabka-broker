@@ -285,6 +285,7 @@ mod tests {
             base_sequence: -1,
             keyless_records: Vec::new(),
             invalid_timestamp_records: Vec::new(),
+            dedup: None,
             source: PreparedSource::Verbatim(bytes),
         };
         // No request reaches the registry: the record fails to decode before

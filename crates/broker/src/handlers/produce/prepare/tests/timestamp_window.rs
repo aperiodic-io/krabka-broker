@@ -101,6 +101,7 @@ fn prepare(
             topic_name: &Arc::from("t"),
             metrics: &metrics,
             policy: RecordDecompressionPolicy::default(),
+            dedup: None,
         },
         13,
     )?;

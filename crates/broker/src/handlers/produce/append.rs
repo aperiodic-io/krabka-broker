@@ -18,6 +18,7 @@ use {
     },
     crate::{
         codes,
+        dedup::{DedupConfig, DedupJob},
         error::BrokerError,
         metrics::RequestPhases,
         partition::{
@@ -51,6 +52,9 @@ pub(super) struct AppendContext<'a> {
     pub(super) phases: &'a RequestPhases,
     /// The transaction check the log runs just before the append.
     pub(super) producer_check: Option<ProducerAppendCheck>,
+    /// The topic's KFC-10 dedup config, which the writer classifies the
+    /// batch's identities under.
+    pub(super) dedup: Option<&'a DedupConfig>,
 }
 
 /// What the append half of one partition produced.
@@ -178,7 +182,7 @@ pub(super) fn ack_completion_code(isr_size: Option<usize>, effective_min_isr: us
 }
 
 pub(super) async fn dispatch_prepared(
-    prepared: PreparedBatch,
+    mut prepared: PreparedBatch,
     context: AppendContext<'_>,
     shared_topic: &Arc<str>,
 ) -> Result<AppendOutcome, BrokerError> {
@@ -204,12 +208,21 @@ pub(super) async fn dispatch_prepared(
         is_transactional: prepared.attributes.is_transactional(),
         base_offset: Offset(INVALID_OFFSET),
     };
+    let dedup = prepared
+        .dedup
+        .take()
+        .zip(context.dedup.cloned())
+        .map(|(identities, config)| DedupJob {
+            config,
+            records: identities.records,
+        });
     let data = build_produce_data(prepared, context.leader_epoch);
     let (ack_tx, ack_rx) = oneshot::channel();
     let job = WriterMessage::Produce(ProduceJob {
         data,
         ack: ack_tx,
         producer_check: context.producer_check,
+        dedup,
     });
     // The local phase opens here and closes when the writer answers: the
     // enqueue plus the append is the work this broker's own log does for this
@@ -661,6 +674,7 @@ mod tests {
                 topic_name: &topic,
                 metrics: &BrokerMetrics::new(),
                 policy: RecordDecompressionPolicy::default(),
+                dedup: None,
             },
             13,
         )
@@ -676,6 +690,7 @@ mod tests {
                 leader_epoch: 0,
                 phases: &RequestPhases::default(),
                 producer_check: None,
+                dedup: None,
             },
             &topic,
         )

@@ -8,10 +8,11 @@
 use {
     super::{
         WriterPartition,
-        append::{run_produce_append_batch, run_produce_append_batch_at},
+        append::{DedupGroup, run_produce_append_batch, run_produce_append_batch_at},
         storage::{StorageStatus, flag_storage_failure, storage_failure_error},
     },
     crate::{
+        dedup::PartitionDedup,
         error::BrokerError,
         partition::{ProduceData, ProduceJob, WriterMessage},
         producer_state::ProducerState,
@@ -30,12 +31,14 @@ pub(super) struct ProduceGroup {
     pub(super) max_size: usize,
 }
 
-/// The log, its storage health, and the producer tracker a produce group touches.
+/// The log, its storage health, the producer tracker and the dedup index a
+/// produce group touches.
 #[derive(Clone, Copy)]
 pub(super) struct ProduceStorage<'a> {
     pub(super) log: &'a Arc<Mutex<Log>>,
     pub(super) status: StorageStatus<'a>,
     pub(super) producer_state: &'a ProducerState,
+    pub(super) dedup: &'a Arc<Mutex<PartitionDedup>>,
 }
 
 /// The notifications and replica state a produce group signals.
@@ -74,6 +77,7 @@ pub(super) async fn handle_produce(
             registry: log_dir_status,
         },
         producer_state,
+        dedup,
     } = storage;
     let ProduceSignals {
         append_notify,
@@ -95,15 +99,18 @@ pub(super) async fn handle_produce(
     let mut acks = Vec::with_capacity(jobs.len());
     let mut datas = Vec::with_capacity(jobs.len());
     let mut checks = Vec::with_capacity(jobs.len());
+    let mut dedup_jobs = Vec::with_capacity(jobs.len());
     for ProduceJob {
         data,
         ack,
         producer_check,
+        dedup,
     } in jobs
     {
         acks.push(ack);
         datas.push(data);
         checks.push(producer_check);
+        dedup_jobs.push(dedup);
     }
 
     // A transaction marker adds a complete transaction that holds the last
@@ -146,7 +153,17 @@ pub(super) async fn handle_produce(
             }
         }
     } else {
-        run_produce_append_batch(Arc::clone(log), high_watermark, (datas, checks)).await
+        let dedup = DedupGroup {
+            index: Arc::clone(dedup),
+            jobs: dedup_jobs,
+        };
+        run_produce_append_batch(
+            Arc::clone(log),
+            high_watermark,
+            (datas, checks),
+            Some(dedup),
+        )
+        .await
     };
     let (results, leo, control_entries) = match append_result {
         Ok(value) => value,

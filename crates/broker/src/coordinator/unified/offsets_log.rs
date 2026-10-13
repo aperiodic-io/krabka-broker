@@ -170,6 +170,7 @@ pub(crate) async fn append_as_leader(
             data: ProduceData::Owned(batch),
             ack: ack_tx,
             producer_check,
+            dedup: None,
         }))
         .await
         .is_err()

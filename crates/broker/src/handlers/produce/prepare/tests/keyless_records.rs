@@ -135,6 +135,7 @@ fn a_compacted_topic_names_every_keyless_record_on_both_paths() {
                     topic_name: &Arc::from("t"),
                     metrics: &metrics,
                     policy: RecordDecompressionPolicy::default(),
+                    dedup: None,
                 },
                 13,
             )

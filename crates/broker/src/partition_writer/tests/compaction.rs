@@ -288,6 +288,7 @@ async fn append(
                 data,
                 ack,
                 producer_check: None,
+                dedup: None,
             }))
             .await
             .expect("send produce");

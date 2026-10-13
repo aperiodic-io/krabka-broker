@@ -40,6 +40,7 @@ fn record_decompression_policy_limits_owned_and_verbatim_produce() {
                 topic_name: &topic(),
                 metrics: &metrics,
                 policy: pol,
+                dedup: None,
             },
             13,
         )

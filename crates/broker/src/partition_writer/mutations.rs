@@ -11,8 +11,13 @@ use {
         storage::{StorageStatus, flag_storage_failure, lock_log, run_log_mutation},
     },
     crate::{
-        error::BrokerError, log_dir_status::LogDirRegistry, producer_state::ProducerState,
-        replica_state::ReplicaState, wal::SharedWal,
+        dedup::{ObservedBatch, PartitionDedup},
+        error::BrokerError,
+        log_dir_status::LogDirRegistry,
+        producer_state::ProducerState,
+        replica_state::ReplicaState,
+        time_util::now_ms,
+        wal::SharedWal,
     },
     arc_swap::ArcSwap,
     krabka_log::{Log, Offset},
@@ -23,11 +28,52 @@ use {
     tokio::sync::Notify,
 };
 
-/// The producer tracker and replica watermark a replicated batch updates.
+/// The producer tracker, replica watermark and dedup index a replicated batch
+/// updates.
 #[derive(Clone, Copy)]
 pub(super) struct ReplicationState<'a> {
     pub(super) producer_state: &'a ProducerState,
     pub(super) replica_state: &'a tokio::sync::Mutex<ReplicaState>,
+    pub(super) dedup: &'a Arc<Mutex<PartitionDedup>>,
+}
+
+/// Follow one replicated append with the partition's dedup index.
+///
+/// A follower indexes what it replicates with the rule its leader classified
+/// with, so that a promoted follower deduplicates its first produce without a
+/// rebuild. `append` runs under the log lock; the index reads the batch after
+/// that lock is released. A stale index catches up from the log first, which
+/// costs one window of reading after a restart or a config change.
+fn follow_replicated<T>(
+    log: &Mutex<Log>,
+    dedup: &Mutex<PartitionDedup>,
+    observed: impl FnOnce() -> ObservedBatch,
+    append: impl FnOnce(&mut Log) -> Result<T, BrokerError>,
+) -> Result<T, BrokerError> {
+    let mut index = lock_dedup(dedup);
+    if !index.is_enabled() {
+        return append(&mut lock_log(log));
+    }
+    let now = now_ms();
+    index.make_current(log, now);
+    let observed = observed();
+    let (value, before, after) = {
+        let mut log = lock_log(log);
+        let before = log.log_end_offset();
+        let value = append(&mut log)?;
+        (value, before, log.log_end_offset())
+    };
+    index.follow(&observed, before, after, now);
+    index.report_metrics();
+    Ok(value)
+}
+
+pub(super) fn lock_dedup(
+    dedup: &Mutex<PartitionDedup>,
+) -> std::sync::MutexGuard<'_, PartitionDedup> {
+    dedup
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 pub(super) async fn handle_replicate(
@@ -42,6 +88,7 @@ pub(super) async fn handle_replicate(
     let ReplicationState {
         producer_state,
         replica_state,
+        dedup,
     } = state;
     let offset = batch.base_offset;
     // Read before `batch` moves into the closure. A control batch is the only
@@ -64,6 +111,7 @@ pub(super) async fn handle_replicate(
         None => None,
     };
     let log_for_blocking = Arc::clone(log);
+    let dedup = Arc::clone(dedup);
     // Read the mirror entry inside this same closure, under the lock the
     // append already takes here through `run_log_mutation`, rather than by a
     // second, separate `lock_log` call afterward on the calling async task. A
@@ -77,14 +125,26 @@ pub(super) async fn handle_replicate(
     // controller's liveness timeout.
     let result = run_log_mutation(
         move || {
-            let mut guard = lock_log(&log_for_blocking);
-            if let Some(high_watermark) = high_watermark {
-                guard.release_replicated_transactions(high_watermark);
-            }
-            guard
-                .append_at(&mut batch, Offset(offset))
-                .map_err(BrokerError::from)?;
-            Ok(control_producer.and_then(|producer_id| guard.producer_state_entry(producer_id)))
+            // The append borrows the batch mutably, so the index's copy is
+            // taken first, and only when the partition deduplicates.
+            let observed = lock_dedup(&dedup)
+                .is_enabled()
+                .then(|| ObservedBatch::Owned(batch.clone()));
+            follow_replicated(
+                &log_for_blocking,
+                &dedup,
+                || observed.unwrap_or(ObservedBatch::Empty),
+                |guard| {
+                    if let Some(high_watermark) = high_watermark {
+                        guard.release_replicated_transactions(high_watermark);
+                    }
+                    guard
+                        .append_at(&mut batch, Offset(offset))
+                        .map_err(BrokerError::from)?;
+                    Ok(control_producer
+                        .and_then(|producer_id| guard.producer_state_entry(producer_id)))
+                },
+            )
         },
         "replicate task panicked",
         storage_status,
@@ -113,21 +173,27 @@ pub(super) async fn handle_replicate(
 }
 
 pub(super) async fn handle_replicate_verbatim(
-    log: &Arc<Mutex<Log>>,
-    log_dir: &Arc<ArcSwap<PathBuf>>,
-    log_dir_status: &LogDirRegistry,
+    (log, log_dir, log_dir_status): (&Arc<Mutex<Log>>, &Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
+    dedup: &Arc<Mutex<PartitionDedup>>,
     batch: krabka_log::VerbatimBatch,
     base_offset: Offset,
     ack: tokio::sync::oneshot::Sender<Result<(), BrokerError>>,
     append_notify: &Notify,
 ) {
     let log_for_blocking = Arc::clone(log);
+    let dedup = Arc::clone(dedup);
     let result = run_log_mutation(
         move || {
-            lock_log(&log_for_blocking)
-                .append_verbatim_at(&batch, base_offset)
-                .map(|_| ())
-                .map_err(BrokerError::from)
+            follow_replicated(
+                &log_for_blocking,
+                &dedup,
+                || ObservedBatch::Bytes(batch.bytes.clone()),
+                |log| {
+                    log.append_verbatim_at(&batch, base_offset)
+                        .map(|_| ())
+                        .map_err(BrokerError::from)
+                },
+            )
         },
         "replicate verbatim task panicked",
         StorageStatus {
@@ -150,8 +216,11 @@ pub(super) enum ResetMutation {
 }
 
 /// Apply the selected reset and answer its acknowledgement after resetting the frontiers.
+///
+/// The dedup index may hold identities of the records the cut removes, so it
+/// is marked stale and rebuilds from the log before the next append.
 pub(super) async fn handle_log_reset(
-    log: &Arc<Mutex<Log>>,
+    (log, dedup): (&Arc<Mutex<Log>>, &Mutex<PartitionDedup>),
     storage_status: StorageStatus<'_>,
     replica_state: &tokio::sync::Mutex<ReplicaState>,
     wal: Option<&SharedWal>,
@@ -162,6 +231,7 @@ pub(super) async fn handle_log_reset(
         ResetMutation::Truncate(_) => "truncate task panicked",
         ResetMutation::Reset(_) => "reset_to task panicked",
     };
+    lock_dedup(dedup).invalidate();
     let log_for_blocking = Arc::clone(log);
     let result = run_log_mutation(
         move || {

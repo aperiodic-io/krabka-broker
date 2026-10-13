@@ -93,6 +93,7 @@ pub(super) async fn append_source(
             vec![crate::partition::ProduceData::Owned(batch(records))],
             Vec::new(),
         ),
+        None,
     )
     .await
     .unwrap();

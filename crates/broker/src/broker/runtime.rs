@@ -32,6 +32,7 @@ use {
         client_metrics::ClientMetrics,
         config::BrokerConfig,
         cordoned_log_dirs::spawn_watcher,
+        dedup::DedupRuntime,
         delegation_token_cleanup::{
             DelegationTokenController, run as run_delegation_token_cleanup,
         },
@@ -223,6 +224,7 @@ pub(super) struct BrokerRuntimeStartup {
     pub(super) kafka_swap_kickoff: Option<KafkaSwapKickoff>,
     pub(super) kafka_swap_target: Option<Arc<krabka_remote_storage_topic::SwappableRlmm>>,
     pub(super) inter_listener_protocol: krabka_security::ListenerProtocol,
+    pub(super) dedup: Arc<DedupRuntime>,
 }
 
 /// The local storage the runtime services read: the partitions, the producer
@@ -279,6 +281,7 @@ pub(super) async fn start_broker_runtime(
         &metrics,
         &supervisor_shutdown,
     );
+    let dedup = Arc::new(DedupRuntime::from_config(config, metrics.clone())?);
     let supervisor_handle = spawn_replicator_supervisor(
         config,
         controller,
@@ -289,6 +292,7 @@ pub(super) async fn start_broker_runtime(
             shutdown: &supervisor_shutdown,
             throttle_state: &throttle_state,
             metrics: &metrics,
+            dedup: &dedup,
         },
         ReplicatorStorage {
             log_dir_status: storage.log_dir_status,
@@ -383,6 +387,7 @@ pub(super) async fn start_broker_runtime(
         &supervisor_shutdown,
     );
     Ok(BrokerRuntimeStartup {
+        dedup,
         supervisor_shutdown,
         supervisor_handle,
         disk_scanner_handle,

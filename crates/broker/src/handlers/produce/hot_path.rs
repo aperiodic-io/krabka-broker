@@ -96,6 +96,7 @@ pub fn append_one_batch(
         topic_name: &settings.topic_name,
         metrics: settings.metrics,
         policy: settings.decompression_policy,
+        dedup: None,
     };
     let prepared = match choice {
         PathChoice::Dispatch => prepare_batch(

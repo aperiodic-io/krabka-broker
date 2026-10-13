@@ -81,6 +81,7 @@ mod tests {
                 ],
                 Vec::new(),
             ),
+            None,
         )
         .await
         .unwrap();
@@ -109,6 +110,7 @@ mod tests {
             w.log.clone(),
             None,
             (vec![sample_owned().count(3).call()], Vec::new()),
+            None,
         )
         .await
         .unwrap();

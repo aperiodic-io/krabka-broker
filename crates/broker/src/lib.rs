@@ -187,6 +187,7 @@ pub(crate) mod cordoned_log_dirs;
 /// cores.
 #[cfg(test)]
 mod data_path_model;
+mod dedup;
 pub(crate) mod delegation_token_cleanup;
 pub(crate) mod delivery;
 pub mod disk_scanner;

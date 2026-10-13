@@ -168,6 +168,7 @@ mod tests {
                 topic_name: &Arc::from("orders"),
                 metrics: &BrokerMetrics::new(),
                 policy: RecordDecompressionPolicy::default(),
+                dedup: None,
             },
             13,
         )

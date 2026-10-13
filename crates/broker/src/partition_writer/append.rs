@@ -5,15 +5,20 @@
 //! the one-lock-per-group discipline, so they stay together in one module.
 
 use {
-    super::storage::{lock_log, storage_failure_error},
+    super::{
+        mutations::lock_dedup,
+        storage::{lock_log, storage_failure_error},
+    },
     crate::{
         blocking::run_blocking_catching,
+        dedup::{ClassifiedAppend, DedupJob, PartitionDedup},
         error::BrokerError,
         partition::{AppendedBatch, ProduceData, ProducerAppendCheck},
+        time_util::now_ms,
     },
     krabka_compression::CompressionType,
     krabka_log::{Log, Offset},
-    krabka_protocol::records::RecordBatch,
+    krabka_protocol::records::{RecordBatch, TimestampType},
     krabka_units::prelude::{ByteSizeExt as _, mebibytes},
     std::sync::{Arc, Mutex},
 };
@@ -25,10 +30,12 @@ type AppendOutcome = (
     Vec<krabka_log::ProducerSnapshotEntry>,
 );
 
-/// The group's held log lock and the topic's configured compression codec.
+/// The group's held log lock, the topic's configured compression codec, and
+/// whether the log stamps each batch with its append time.
 struct LockedLog<'a> {
     guard: std::sync::MutexGuard<'a, Log>,
     target: Option<CompressionType>,
+    append_time: bool,
 }
 
 /// Hold the group's log lock after releasing any replicated transactions.
@@ -37,8 +44,76 @@ fn prepare_log(log: &Mutex<Log>, high_watermark: Option<Offset>) -> LockedLog<'_
     if let Some(high_watermark) = high_watermark {
         guard.release_replicated_transactions(high_watermark);
     }
-    let target = guard.config_snapshot().compression_type;
-    LockedLog { guard, target }
+    let config = guard.config_snapshot();
+    LockedLog {
+        target: config.compression_type,
+        append_time: config.message_timestamp_type == TimestampType::LogAppendTime,
+        guard,
+    }
+}
+
+/// A partition's dedup index and the identities of each job in a group.
+pub(crate) struct DedupGroup {
+    pub(crate) index: Arc<Mutex<PartitionDedup>>,
+    /// One entry per job of the group, in group order.
+    pub(crate) jobs: Vec<Option<DedupJob>>,
+}
+
+/// Append a group to a partition that deduplicates, one job at a time.
+///
+/// Each job is classified against the index under the group's log lock,
+/// immediately before it appends, and the index follows the result before the
+/// next job is classified. So no job drops a record because of a job whose
+/// append then failed, and the group never shares a Direct I/O write: that
+/// would decide every job before any of them appended.
+///
+/// A stale index catches up from the log before the group takes the log lock,
+/// so the rebuild's reads do not hold up fetches.
+fn append_deduplicated_batch(
+    log: &Mutex<Log>,
+    high_watermark: Option<Offset>,
+    (datas, checks): CheckedBatches,
+    dedup: DedupGroup,
+) -> AppendOutcome {
+    let DedupGroup { index, mut jobs } = dedup;
+    let mut index = lock_dedup(&index);
+    let now = now_ms();
+    index.adopt(jobs.iter().flatten().next());
+    index.make_current(log, now);
+    let LockedLog {
+        mut guard,
+        target,
+        append_time,
+    } = prepare_log(log, high_watermark);
+    let append_time_ms = append_time.then_some(now);
+    let mut results = Vec::with_capacity(datas.len());
+    let mut control_entries = Vec::new();
+    for (index_in_group, data) in datas.into_iter().enumerate() {
+        let job = jobs.get_mut(index_in_group).and_then(Option::take);
+        if let Some(refused) = refuse_transactional_append(&guard, checks.get(index_in_group)) {
+            results.push(Err(refused));
+            continue;
+        }
+        index.adopt(job.as_ref());
+        let before = guard.log_end_offset();
+        let ClassifiedAppend { data, pending } =
+            index.classify(data, job, before, append_time_ms, now);
+        let control_producer = data.control_producer_id();
+        let r = append_data(&mut guard, data, target, None);
+        index.finish(
+            pending,
+            r.is_ok(),
+            guard.log_end_offset(),
+            append_time_ms,
+            now,
+        );
+        capture_control_entry(&guard, r.is_ok(), control_producer, &mut control_entries);
+        results.push(r);
+    }
+    let leo = guard.log_end_offset();
+    drop(guard);
+    index.report_metrics();
+    (results, leo, control_entries)
 }
 
 /// Append owned bytes at an assigned offset, or let the leader stamp them.
@@ -167,8 +242,16 @@ fn append_produce_batch(
     log: &Mutex<Log>,
     high_watermark: Option<Offset>,
     (datas, checks): CheckedBatches,
+    dedup: Option<DedupGroup>,
 ) -> AppendOutcome {
-    let LockedLog { mut guard, target } = prepare_log(log, high_watermark);
+    if let Some(dedup) = dedup
+        && (lock_dedup(&dedup.index).is_enabled() || dedup.jobs.iter().any(Option::is_some))
+    {
+        return append_deduplicated_batch(log, high_watermark, (datas, checks), dedup);
+    }
+    let LockedLog {
+        mut guard, target, ..
+    } = prepare_log(log, high_watermark);
     if let Some(results) = try_append_direct_group(&mut guard, &datas, &checks) {
         return (results, guard.log_end_offset(), Vec::new());
     }
@@ -275,7 +358,9 @@ fn append_produce_batch_at(
     high_watermark: Option<Offset>,
     (datas, checks): CheckedBatches,
 ) -> AppendOutcome {
-    let LockedLog { mut guard, target } = prepare_log(log, high_watermark);
+    let LockedLog {
+        mut guard, target, ..
+    } = prepare_log(log, high_watermark);
     let mut next = base;
     let mut results = Vec::with_capacity(datas.len());
     let mut control_entries = Vec::new();
@@ -314,8 +399,9 @@ pub(crate) async fn run_produce_append_batch(
     log: Arc<Mutex<Log>>,
     high_watermark: Option<Offset>,
     datas: CheckedBatches,
+    dedup: Option<DedupGroup>,
 ) -> Result<AppendOutcome, BrokerError> {
-    run_blocking_catching(move || append_produce_batch(&log, high_watermark, datas))
+    run_blocking_catching(move || append_produce_batch(&log, high_watermark, datas, dedup))
         .await
         .map_err(|error| storage_failure_error("append task panicked", error))
 }
@@ -466,7 +552,8 @@ mod tests {
             let datas = (0..jobs)
                 .map(|_| ProduceData::Verbatim(batch.clone()))
                 .collect();
-            let (results, leo, controls) = append_produce_batch(&log, None, (datas, Vec::new()));
+            let (results, leo, controls) =
+                append_produce_batch(&log, None, (datas, Vec::new()), None);
             assert!(controls.is_empty());
             assert!(disk.next.load(std::sync::atomic::Ordering::Relaxed) == writes);
             let failures: Vec<_> = results.iter().filter(|result| result.is_err()).collect();
@@ -503,7 +590,7 @@ mod tests {
         let log = failing_log(dir.path());
 
         let (results, leo, _) =
-            append_produce_batch(&log, None, (two_single_record_batches(), Vec::new()));
+            append_produce_batch(&log, None, (two_single_record_batches(), Vec::new()), None);
 
         assert_partial_append(&results, leo);
         assert!(log.lock().unwrap().log_end_offset() == Offset(1));
@@ -542,8 +629,12 @@ mod tests {
         let original = sample_batch().count(2).call();
         assert!(original.attributes.compression() == CompressionType::None);
 
-        let (results, leo, _) =
-            append_produce_batch(&log, None, (vec![ProduceData::Owned(original)], Vec::new()));
+        let (results, leo, _) = append_produce_batch(
+            &log,
+            None,
+            (vec![ProduceData::Owned(original)], Vec::new()),
+            None,
+        );
         assert!(results.len() == 1);
         let assigned = results.into_iter().next().unwrap().expect("append ok");
         assert!(assigned.base_offset == 0);
@@ -612,6 +703,7 @@ mod tests {
             &log,
             None,
             (vec![ProduceData::OwnedControl(marker)], Vec::new()),
+            None,
         );
         let assigned = results.into_iter().next().unwrap().expect("append ok");
         assert!(assigned.base_offset == 0);
@@ -664,7 +756,7 @@ mod tests {
                     let (results, _, _) = if at_offset {
                         append_produce_batch_at(&log, base, high_watermark, (datas, Vec::new()))
                     } else {
-                        append_produce_batch(&log, high_watermark, (datas, Vec::new()))
+                        append_produce_batch(&log, high_watermark, (datas, Vec::new()), None)
                     };
                     assert!(results.iter().all(Result::is_ok), "{name}");
                 };
