@@ -6,8 +6,8 @@ use {
     crate::{
         break_glass::ALL_ACTIONS,
         metrics::{
-            BarrierGroupLabel, BreakGlassAction, BreakGlassState, BrokerMetrics, DirectoryLabel,
-            PartitionLabel, RemoteTierPath, ShareGroupLabel, TopicLabel,
+            BarrierGroupLabel, BreakGlassAction, BreakGlassState, BrokerMetrics, DedupCounterDelta,
+            DirectoryLabel, PartitionLabel, RemoteTierPath, ShareGroupLabel, TopicLabel,
         },
     },
     assert2::assert,
@@ -67,6 +67,44 @@ fn seed_remote_tier_and_replication_throttle(m: &BrokerMetrics) {
     m.record_replication_throttled_out(1_024);
     m.record_replication_throttled_in(512);
     m.record_replication_throttle_sleep();
+}
+
+fn seed_dedup(m: &BrokerMetrics, topic: &Arc<str>) {
+    m.record_dedup_partition(
+        topic,
+        0,
+        DedupCounterDelta {
+            records_dropped: 1,
+            records_unindexed: 1,
+            records_skew_clamped: 1,
+            capacity_evicted_entries: 1,
+            batches_rebuilt: 1,
+            index_rebuilds: 1,
+        },
+        5,
+    );
+    m.set_dedup_broker_index(5, 1_000);
+}
+
+#[tokio::test]
+async fn dedup_metrics_are_registered_with_the_broker_prefix() {
+    let m = BrokerMetrics::new();
+    seed_dedup(&m, &Arc::from("topic-a"));
+
+    crate::metrics::test_support::render_registry!(m, buf, r; unwrap());
+    for needle in [
+        "krabka_broker_dedup_records_dropped_total",
+        "krabka_broker_dedup_records_unindexed_total",
+        "krabka_broker_dedup_records_skew_clamped_total",
+        "krabka_broker_dedup_capacity_evicted_entries_total",
+        "krabka_broker_dedup_batches_rebuilt_total",
+        "krabka_broker_dedup_index_rebuilds_total",
+        "krabka_broker_dedup_index_entries",
+        "krabka_broker_dedup_broker_index_entries",
+        "krabka_broker_dedup_broker_index_max_entries",
+    ] {
+        assert!(buf.contains(needle), "missing {needle} in:\n{buf}");
+    }
 }
 
 #[tokio::test]

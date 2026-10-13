@@ -238,6 +238,26 @@ The `action` label on the break-glass families is one of `thaw_topic_freeze`,
 `unclean_elect_leaders`, `unclean_recovery`, `unregister_broker`,
 `cancel_reassignment`, `delete_topic` and `delete_records`.
 
+## Produce deduplication
+
+KFC-10 drops records at produce time whose identity is already in the
+partition's dedup window. A per-partition gauge appears when the partition's
+dedup state first reports, and a counter series on its first non-zero
+increment. A partition's series are released when this broker stops hosting
+it, with the rest of its per-partition series.
+
+| Series | Type | Labels | Replaces | Meaning |
+| :--- | :--- | :--- | :--- | :--- |
+| `krabka_broker_dedup_records_dropped_total` | counter | `topic`, `partition` | - | KFC-10 records dropped as duplicates. A dropped record never reaches the log, so this is its only trace. |
+| `krabka_broker_dedup_records_unindexed_total` | counter | `topic`, `partition` | - | KFC-10 records admitted without being indexed because the partition index or the broker-wide budget was full. Their duplicates are not detected. Alert on `rate(...) > 0` and raise `dedup_max_entries_per_partition` or `dedup_max_entries`. |
+| `krabka_broker_dedup_records_skew_clamped_total` | counter | `topic`, `partition` | - | KFC-10 records whose timestamp was ahead of the broker clock and was clamped before reaching the index. Non-zero means producer clock skew. |
+| `krabka_broker_dedup_capacity_evicted_entries_total` | counter | `topic`, `partition` | - | KFC-10 still-live identities dropped to make room at the entry limits. Non-zero means the effective window is narrower than configured. |
+| `krabka_broker_dedup_batches_rebuilt_total` | counter | `topic`, `partition` | - | KFC-10 produce batches re-encoded and recompressed because some but not all of their records were duplicates. This rate drives dedup's produce-path cost. |
+| `krabka_broker_dedup_index_rebuilds_total` | counter | `topic`, `partition` | - | KFC-10 rebuilds of the partition's index from the log, after a restart, a truncation, or a dedup config change. |
+| `krabka_broker_dedup_index_entries` | gauge | `topic`, `partition` | - | KFC-10 identities in this partition replica's dedup index. |
+| `krabka_broker_dedup_broker_index_entries` | gauge | - | - | KFC-10 identities across every dedup index on this broker. At `dedup_broker_index_max_entries`, records are admitted unindexed. |
+| `krabka_broker_dedup_broker_index_max_entries` | gauge | - | - | KFC-10 broker-wide limit on dedup index identities, `dedup_max_entries`. |
+
 ## The contract check
 
 [`grafana-dashboard.json`](grafana-dashboard.json) and
