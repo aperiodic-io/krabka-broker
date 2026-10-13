@@ -2466,7 +2466,7 @@
         },
         "replication_fetch_max": {
           "default": null,
-          "description": "Maximum bytes a follower requests from a leader in one replication\nfetch. It reaches the leader as the fetch request's `max_bytes`.",
+          "description": "Maximum bytes a follower requests for one partition in a replication\nfetch, Kafka's `replica.fetch.max.bytes`. It reaches the leader as each\npartition's `partition_max_bytes`.",
           "format": "byte-size",
           "type": [
             "string",
@@ -2485,6 +2485,15 @@
         "replication_fetch_min": {
           "default": null,
           "description": "Minimum bytes that satisfy a replication fetch. It reaches the leader\nas the fetch request's `min_bytes`, which the leader honours as a\nfloor.",
+          "format": "byte-size",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replication_fetch_response_max": {
+          "default": null,
+          "description": "Maximum bytes of one whole replication fetch response, Kafka's\n`replica.fetch.response.max.bytes`. It reaches the leader as the fetch\nrequest's `max_bytes`.",
           "format": "byte-size",
           "type": [
             "string",
