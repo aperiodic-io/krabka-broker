@@ -12,9 +12,9 @@ pub use self::swap::swap_orphan_recover;
 use {
     crate::{
         error::LogError,
-        io::{IoTarget, LogIo},
+        io::LogIo,
         name,
-        retention::DELETED_SUFFIX,
+        retention::{DELETED_SUFFIX, remove_optional_counted},
     },
     std::{collections::HashSet, path::Path},
     tracing::instrument,
@@ -68,10 +68,8 @@ pub fn deleted_orphan_recover(io: &dyn LogIo, dir: &Path) -> Result<(), LogError
         if !is_deleted_tombstone(&name) && !is_stranded_sidecar(&name, &log_bases) {
             continue;
         }
-        match io.remove_file(IoTarget::SegmentDeletion, &dir.join(&name)) {
-            Ok(()) => reclaimed += 1,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(LogError::Io(error)),
+        if remove_optional_counted(io, &dir.join(&name))? {
+            reclaimed += 1;
         }
     }
     tracing::Span::current().record("reclaimed", reclaimed);

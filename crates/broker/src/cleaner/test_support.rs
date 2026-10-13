@@ -8,7 +8,7 @@ use {
         log_dir_status::LogDirRegistry,
         partition::Partition,
         partition_registry::PartitionRegistry,
-        test_support::{CommittedPartitionSetup, block_log_artifact_paths, committed_partition},
+        test_support::{block_log_artifact_paths, committed_partition},
     },
     bytes::Bytes,
     krabka_ids::PartitionIndex,
@@ -69,10 +69,23 @@ impl Default for CompactionSetup<'_> {
 }
 
 /// Seed duplicate keys over the selected log policy and registry.
+#[bon::builder]
 pub(super) async fn compactable_partition(
     root: &TempDir,
-    setup: CompactionSetup<'_>,
+    #[builder(default = CompactionSetup::default().topic)] topic: &'_ str,
+    #[builder(into, default = CompactionSetup::default().partition_id)]
+    partition_id: PartitionIndex,
+    #[builder(into, default = CompactionSetup::default().leader)] leader: NodeId,
+    #[builder(default = CompactionSetup::default().cfg)] cfg: krabka_log::LogConfig,
+    #[builder(default = CompactionSetup::default().log_dir_status)] log_dir_status: LogDirRegistry,
 ) -> Arc<Partition> {
+    let setup = CompactionSetup {
+        topic,
+        partition_id,
+        leader,
+        cfg,
+        log_dir_status,
+    };
     let CompactionSetup {
         topic,
         partition_id,
@@ -90,13 +103,15 @@ pub(super) async fn compactable_partition(
     let mut active = keyed_batch(12, b"active-key", b"active");
     log.append(&mut active).expect("append active batch");
 
-    committed_partition(root.path(), log, CommittedPartitionSetup {
-        topic,
-        partition: partition_id,
-        leader,
-        registry: log_dir_status,
-    })
-    .await
+    committed_partition()
+        .root(root.path())
+        .log(log)
+        .topic(topic)
+        .partition(partition_id)
+        .leader(leader)
+        .registry(log_dir_status)
+        .call()
+        .await
 }
 
 pub(super) fn record_count(partition: &Partition) -> usize {
@@ -115,11 +130,7 @@ pub(super) async fn register_compactable(
     registry: &PartitionRegistry,
     topic: &str,
 ) -> (Arc<Partition>, usize) {
-    let partition = compactable_partition(root, CompactionSetup {
-        topic,
-        ..Default::default()
-    })
-    .await;
+    let partition = compactable_partition().root(root).topic(topic).call().await;
     let initial_count = record_count(&partition);
     registry.insert(topic.into(), PartitionIndex(0), partition.clone());
     (partition, initial_count)

@@ -87,15 +87,7 @@ const TIME_INDEX_BODY: &[u8] = b"TIME-IDX";
 const SNAPSHOT_BODY: &[u8] = b"SNAP";
 const EPOCH_BODY: &[u8] = b"EPOCH-BYTES";
 
-/// A free ephemeral port on the loopback interface, so two container suites
-/// running at once do not fight over a fixed 4443.
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
-    listener
-        .local_addr()
-        .expect("the bound listener has an address")
-        .port()
-}
+krabka_macros::ephemeral_port_fixture!(free_port);
 
 /// A `docker run -d` emulator, removed on drop so an aborted test leaves
 /// nothing behind.

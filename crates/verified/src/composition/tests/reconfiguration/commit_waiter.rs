@@ -79,7 +79,7 @@ proptest! {
 #[test]
 fn supported_controls_commit_in_record_order_at_every_frontier() {
     let old = [1, 2, 3];
-    for (kind, node, member, version) in [
+    let cases = [
         (VoterChangeKind::Add, 4, TargetMembership::Absent, 1),
         (
             VoterChangeKind::Remove,
@@ -87,25 +87,13 @@ fn supported_controls_commit_in_record_order_at_every_frontier() {
             TargetMembership::PresentSameDirectory,
             1,
         ),
-        (
-            VoterChangeKind::Update,
-            1,
-            TargetMembership::PresentSameDirectory,
-            1,
-        ),
-        (
-            VoterChangeKind::Update,
-            1,
-            TargetMembership::PresentUnknownDirectory,
-            0,
-        ),
-        (
-            VoterChangeKind::FinalizeKraftVersion,
-            1,
-            TargetMembership::Absent,
-            0,
-        ),
-    ] {
+    ]
+    .into_iter()
+    .chain(
+        super::known_control_cases(1)
+            .map(|(kind, node, member, version, _)| (kind, node, member, version)),
+    );
+    for (kind, node, member, version) in cases {
         for base in [-1, 0, 5, i64::MAX - 2, i64::MAX - 1, i64::MAX] {
             for previous in [-1, 0, base, base.saturating_add(1)] {
                 for requested in [i64::MIN, 0, base, base.saturating_add(1), i64::MAX] {

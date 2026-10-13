@@ -49,7 +49,21 @@ impl Default for AutoTopicSetup<'_> {
     }
 }
 
-fn topic(setup: AutoTopicSetup<'_>) -> CreatableTopic {
+#[bon::builder]
+fn topic(
+    #[builder(default = AutoTopicSetup::default().name)] name: &'_ str,
+    #[builder(into, default = AutoTopicSetup::default().num_partitions)]
+    num_partitions: PartitionCount,
+    #[builder(into, default = AutoTopicSetup::default().replication_factor)]
+    replication_factor: ReplicationFactor,
+    #[builder(default = AutoTopicSetup::default().configs)] configs: Vec<CreatableTopicConfig>,
+) -> CreatableTopic {
+    let setup = AutoTopicSetup {
+        name,
+        num_partitions,
+        replication_factor,
+        configs,
+    };
     let AutoTopicSetup {
         name,
         num_partitions,
@@ -101,95 +115,80 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
             "__consumer_offsets",
             &config,
             OFFSETS_TOPIC,
-            topic(AutoTopicSetup {
-                name: OFFSETS_TOPIC,
-                num_partitions: PartitionCount(11),
-                replication_factor: ReplicationFactor(3),
-                configs: configs(&[
+            topic()
+                .name(OFFSETS_TOPIC)
+                .num_partitions(11)
+                .replication_factor(3)
+                .configs(configs(&[
                     ("cleanup.policy", "compact"),
                     ("compression.type", "producer"),
                     ("segment.bytes", "104857600"),
-                ]),
-            }),
+                ]))
+                .call(),
         ),
         (
             "__transaction_state",
             &config,
             TXN_TOPIC,
-            topic(AutoTopicSetup {
-                name: TXN_TOPIC,
-                num_partitions: PartitionCount(12),
-                replication_factor: ReplicationFactor(2),
-                configs: configs(&[
+            topic()
+                .name(TXN_TOPIC)
+                .num_partitions(12)
+                .replication_factor(2)
+                .configs(configs(&[
                     ("cleanup.policy", "compact"),
                     ("compression.type", "uncompressed"),
                     ("min.insync.replicas", "2"),
                     ("segment.bytes", "104857600"),
                     ("unclean.leader.election.enable", "false"),
-                ]),
-            }),
+                ]))
+                .call(),
         ),
         (
             "__share_group_state",
             &config,
             SHARE_TOPIC,
-            topic(AutoTopicSetup {
-                name: SHARE_TOPIC,
-                num_partitions: PartitionCount(13),
-                replication_factor: ReplicationFactor(4),
-                configs: configs(&[
+            topic()
+                .name(SHARE_TOPIC)
+                .num_partitions(13)
+                .replication_factor(4)
+                .configs(configs(&[
                     ("cleanup.policy", "delete"),
                     ("compression.type", "producer"),
                     ("min.insync.replicas", "3"),
                     ("retention.ms", "-1"),
                     ("segment.bytes", "104857600"),
-                ]),
-            }),
+                ]))
+                .call(),
         ),
         (
             "__barrier_state",
             &config,
             STATE_TOPIC,
-            topic(AutoTopicSetup {
-                name: STATE_TOPIC,
-                num_partitions: PartitionCount(14),
-                replication_factor: ReplicationFactor(5),
-                configs: configs(&[("cleanup.policy", "compact")]),
-            }),
+            topic()
+                .name(STATE_TOPIC)
+                .num_partitions(14)
+                .replication_factor(5)
+                .configs(configs(&[("cleanup.policy", "compact")]))
+                .call(),
         ),
-        (
-            "no default supplied",
-            &config,
-            "orders",
-            topic(AutoTopicSetup::default()),
-        ),
+        ("no default supplied", &config, "orders", topic().call()),
         (
             "an internal name that is not a coordinator topic",
             &config,
             "__remote_log_metadata",
-            topic(AutoTopicSetup {
-                name: "__remote_log_metadata",
-                ..Default::default()
-            }),
+            topic().name("__remote_log_metadata").call(),
         ),
         (
             "num.partitions supplied",
             &partitions_supplied,
             "orders",
-            topic(AutoTopicSetup {
-                num_partitions: PartitionCount(6),
-                ..Default::default()
-            }),
+            topic().num_partitions(6).call(),
         ),
         (
             "both defaults supplied",
             &both_supplied,
             "orders",
-            topic(AutoTopicSetup {
-                num_partitions: PartitionCount(6),
-                replication_factor: ReplicationFactor(7),
-                ..Default::default()
-            }),
+            topic().num_partitions(6).replication_factor(7).call(),
         ),
     ];
     for (case, config, name, expected) in cases {
@@ -213,14 +212,13 @@ async fn an_unbound_request_creates_nothing() {
 fn the_dead_letter_topic_is_created_as_kafka_creates_it() {
     check!(
         dead_letter_topic("dlq.orders")
-            == topic(AutoTopicSetup {
-                name: "dlq.orders",
-                configs: configs(&[
+            == topic()
+                .name("dlq.orders")
+                .configs(configs(&[
                     ("errors.deadletterqueue.group.enable", "true"),
                     ("message.timestamp.type", "CreateTime"),
-                ]),
-                ..Default::default()
-            })
+                ]))
+                .call()
     );
 }
 
@@ -412,16 +410,8 @@ async fn a_streams_creation_skips_a_backed_off_or_in_flight_topic() {
     creation.create_streams_internal_topics(
         &broker,
         vec![
-            topic(AutoTopicSetup {
-                name: "backed-off",
-                num_partitions: PartitionCount(1),
-                ..Default::default()
-            }),
-            topic(AutoTopicSetup {
-                name: "in-flight",
-                num_partitions: PartitionCount(1),
-                ..Default::default()
-            }),
+            topic().name("backed-off").num_partitions(1).call(),
+            topic().name("in-flight").num_partitions(1).call(),
         ],
         identity.clone(),
         60_000,
@@ -431,16 +421,8 @@ async fn a_streams_creation_skips_a_backed_off_or_in_flight_topic() {
     creation.create_streams_internal_topics(
         &broker,
         vec![
-            topic(AutoTopicSetup {
-                name: "backed-off",
-                num_partitions: PartitionCount(1),
-                ..Default::default()
-            }),
-            topic(AutoTopicSetup {
-                name: "fresh",
-                num_partitions: PartitionCount(1),
-                ..Default::default()
-            }),
+            topic().name("backed-off").num_partitions(1).call(),
+            topic().name("fresh").num_partitions(1).call(),
         ],
         identity,
         60_000,

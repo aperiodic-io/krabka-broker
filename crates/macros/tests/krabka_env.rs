@@ -24,9 +24,10 @@ struct Flags {
 
 fn command() -> Command { Flags::augment_args(Command::new("flags")) }
 
-#[test]
-fn every_field_without_arg_gets_a_long_flag_and_a_krabka_env() {
-    let shapes = command()
+fn argument_names_and_help(
+    command: &Command,
+) -> Vec<(Option<String>, Option<String>, Option<String>)> {
+    command
         .get_arguments()
         .map(|arg| {
             (
@@ -35,7 +36,12 @@ fn every_field_without_arg_gets_a_long_flag_and_a_krabka_env() {
                 arg.get_help().map(ToString::to_string),
             )
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+#[test]
+fn every_field_without_arg_gets_a_long_flag_and_a_krabka_env() {
+    let shapes = argument_names_and_help(&command());
     let expected = [
         (
             "request-timeout",
@@ -60,24 +66,22 @@ fn every_field_without_arg_gets_a_long_flag_and_a_krabka_env() {
     assert!(shapes == expected);
 }
 
-#[test]
-fn the_value_parser_follows_the_field_type() {
-    for (flag, accepted) in [
-        ("--request-timeout=1ms", true),
-        ("--request-timeout=0ms", false),
-        ("--attempts=1", true),
-        ("--attempts=0", false),
-        ("--lag=0", true),
-        ("--lag=-1", false),
-        ("--threads=-1", true),
-        ("--enabled=false", true),
-        ("--enabled=maybe", false),
-        ("--name=anything", true),
-        ("--explicit-flag=0", true),
-    ] {
-        let parsed = command().try_get_matches_from(["flags", flag]).is_ok();
-        assert!(parsed == accepted, "{flag}");
-    }
+#[yare::parameterized(
+    valid_time = { "--request-timeout=1ms", true },
+    zero_time = { "--request-timeout=0ms", false },
+    positive_attempts = { "--attempts=1", true },
+    zero_attempts = { "--attempts=0", false },
+    zero_lag = { "--lag=0", true },
+    negative_lag = { "--lag=-1", false },
+    negative_threads = { "--threads=-1", true },
+    false_boolean = { "--enabled=false", true },
+    invalid_boolean = { "--enabled=maybe", false },
+    arbitrary_name = { "--name=anything", true },
+    explicit_flag = { "--explicit-flag=0", true },
+)]
+fn the_value_parser_follows_the_field_type(flag: &str, accepted: bool) {
+    let parsed = command().try_get_matches_from(["flags", flag]).is_ok();
+    assert2::assert!(parsed == accepted, "{flag}");
 }
 
 #[derive(Debug, Args)]
@@ -95,14 +99,9 @@ struct WithFlattened {
 }
 
 fn argument_names(command: &Command) -> Vec<(Option<String>, Option<String>)> {
-    command
-        .get_arguments()
-        .map(|arg| {
-            (
-                arg.get_long().map(str::to_owned),
-                arg.get_env().map(|env| env.to_string_lossy().into_owned()),
-            )
-        })
+    argument_names_and_help(command)
+        .into_iter()
+        .map(|(long, env, _help)| (long, env))
         .collect()
 }
 

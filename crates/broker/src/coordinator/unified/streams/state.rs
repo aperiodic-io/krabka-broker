@@ -534,6 +534,7 @@ fn tasks_contained(
 mod tests {
     use {
         super::{test_support::task_map, *},
+        crate::coordinator::unified::test_support::assert_group_epoch_exhaustion,
         assert2::{assert, check},
     };
 
@@ -606,11 +607,12 @@ mod tests {
 
     #[test]
     fn bump_epoch_rejects_exhaustion() {
-        let mut group = StreamsGroupState::new("g");
-        group.group_epoch = i32::MAX;
-
-        assert!(!group.bump_epoch());
-        assert!(group.group_epoch == i32::MAX);
+        assert_group_epoch_exhaustion(
+            StreamsGroupState::new("g"),
+            |group| group.group_epoch = i32::MAX,
+            StreamsGroupState::bump_epoch,
+            |group| group.group_epoch,
+        );
     }
 
     #[test]

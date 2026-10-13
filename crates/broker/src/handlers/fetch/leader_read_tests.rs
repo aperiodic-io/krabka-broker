@@ -21,9 +21,7 @@ use {
         broker::BrokerHandle,
         codes,
         fetch_session::INVALID_SESSION_ID,
-        handlers::test_support::{
-            ReplicatedTopicSetup, default_records_batch, seed_partition_replicas,
-        },
+        handlers::test_support::{default_records_batch, seed_partition_replicas},
         partition::Partition,
         test_support::{KafkaErrorCode, append_partition_batch, start_broker_no_audit_with},
     },
@@ -104,10 +102,24 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 
 /// Create `topic` with replicas 1 and 2, led by `leader`, wait until this
 /// broker holds the partition in that role, and append two records.
-async fn partition(broker: &BrokerHandle, setup: ReplicatedTopicSetup<'_>) -> Arc<Partition> {
-    let topic = setup.topic;
-    let leader = setup.leader;
-    seed_partition_replicas(broker, setup).await;
+#[bon::builder]
+async fn partition(
+    broker: &BrokerHandle,
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(default = uuid::Uuid::from_u128(1))] topic_id: uuid::Uuid,
+    #[builder(into, default = NodeId(1))] leader: NodeId,
+    #[builder(default = &[NodeId(1), NodeId(2)])] replicas: &'_ [NodeId],
+    #[builder(into, default)] leader_epoch: LeaderEpoch,
+) -> Arc<Partition> {
+    seed_partition_replicas()
+        .broker(broker)
+        .topic(topic)
+        .topic_id(topic_id)
+        .leader(leader.0)
+        .replicas(replicas)
+        .leader_epoch(leader_epoch.0)
+        .call()
+        .await;
 
     wait_for_local_partition!(
         (shared, partition),
@@ -146,7 +158,17 @@ struct LeaderFetchSetup<'a> {
     topic: &'a str,
 }
 
-fn request(setup: LeaderFetchSetup<'_>) -> FetchRequest {
+#[bon::builder]
+fn request(
+    #[builder(into, default = ApiVersion (12))] version: ApiVersion,
+    #[builder(default = Sender :: Consumer)] sender: Sender,
+    #[builder(default = "orders")] topic: &'_ str,
+) -> FetchRequest {
+    let setup = LeaderFetchSetup {
+        version,
+        sender,
+        topic,
+    };
     let LeaderFetchSetup {
         version,
         sender,
@@ -168,10 +190,10 @@ fn request(setup: LeaderFetchSetup<'_>) -> FetchRequest {
             }],
             ..Default::default()
         }],
-        ..super::test_support::sessionless_request(super::test_support::SessionlessFetchSetup {
-            version,
-            replica: super::test_support::FetchReplicaId(replica_id),
-        })
+        ..super::test_support::sessionless_request()
+            .version(version)
+            .replica(replica_id)
+            .call()
     }
 }
 
@@ -180,29 +202,31 @@ async fn fetch(
     version: ApiVersion,
     request: &FetchRequest,
 ) -> FetchResponse {
-    super::test_support::fetch_wire(broker, request, super::test_support::FetchWireSetup {
-        version,
-        user: "client",
-        client_id: "fetch-client",
-    })
-    .await
+    super::test_support::fetch_wire()
+        .broker(broker)
+        .request(request)
+        .version(version)
+        .user("client")
+        .client_id("fetch-client")
+        .call()
+        .await
 }
 
 fn expected(case: Case, label: String, topic: &str) -> Outcome {
     let (row, high_watermark, tracked_followers) = match case.expect {
         Expect::FollowerRead => (
-            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
-                watermark: Offset(0),
-                records: RecordsPayload::Legacy(Bytes::new()),
-            }),
+            super::test_support::expected_read()
+                .watermark(0)
+                .records(RecordsPayload::Legacy(Bytes::new()))
+                .call(),
             LOG_END,
             vec![OTHER_NODE.0],
         ),
         Expect::ConsumerRead => (
-            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
-                watermark: Offset(0),
-                records: RecordsPayload::Legacy(Bytes::new()),
-            }),
+            super::test_support::expected_read()
+                .watermark(0)
+                .records(RecordsPayload::Legacy(Bytes::new()))
+                .call(),
             Offset(0),
             if case.leader == THIS_NODE {
                 vec![OTHER_NODE.0]
@@ -332,25 +356,22 @@ async fn a_read_needs_the_leader_and_an_assigned_follower() {
         "leader-read",
         cases,
         {
-            let partition = partition(
-                &broker,
-                crate::handlers::test_support::ReplicatedTopicSetup {
-                    topic: &name,
-                    topic_id: uuid::Uuid::from_u128(index + 1),
-                    leader: case.leader,
-                    ..Default::default()
-                },
-            )
-            .await;
+            let partition = partition()
+                .broker(&broker)
+                .topic(&name)
+                .topic_id(uuid::Uuid::from_u128(index + 1))
+                .leader(case.leader.0)
+                .call()
+                .await;
 
             let response = fetch(
                 &broker,
                 case.version,
-                &request(LeaderFetchSetup {
-                    version: case.version,
-                    sender: case.sender,
-                    topic: &name,
-                }),
+                &request()
+                    .version(case.version)
+                    .sender(case.sender)
+                    .topic(&name)
+                    .call(),
             )
             .await;
             let mut tracked_followers: Vec<u64> = partition

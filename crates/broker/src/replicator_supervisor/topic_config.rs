@@ -102,11 +102,19 @@ mod tests {
         }
     }
 
+    #[bon::builder]
     async fn pushed_config(
         image: &MetadataImage,
-        setup: PushedConfigSetup<'_>,
+        #[builder(default = PushedConfigSetup::default().base)] base: &'_ LogConfig,
+        #[builder(default = PushedConfigSetup::default().unstable)] unstable: UnstableApiVersions,
+        #[builder(default = PushedConfigSetup::default().what)] what: &'_ str,
         ready: impl Fn(&LogConfig) -> bool,
     ) -> LogConfig {
+        let setup = PushedConfigSetup {
+            base,
+            unstable,
+            what,
+        };
         let PushedConfigSetup {
             base,
             unstable,
@@ -140,16 +148,13 @@ mod tests {
             segment_size: krabka_units::mebibytes(1),
             ..LogConfig::default()
         };
-        let snap = pushed_config(
-            &img,
-            PushedConfigSetup {
-                base: &base,
-                what: "retention.ms=60s applied to partition log",
-                ..Default::default()
-            },
-            |config| config.retention == Some(krabka_units::minutes(1)),
-        )
-        .await;
+        let snap = pushed_config()
+            .image(&img)
+            .base(&base)
+            .what("retention.ms=60s applied to partition log")
+            .ready(|config| config.retention == Some(krabka_units::minutes(1)))
+            .call()
+            .await;
         assert!(snap.retention == Some(krabka_units::minutes(1)));
         assert!(snap.segment_size == krabka_units::mebibytes(1));
     }
@@ -231,16 +236,13 @@ mod tests {
                 },
             ));
 
-            let snap = pushed_config(
-                &img,
-                PushedConfigSetup {
-                    unstable,
-                    what: "the push reached the partition log",
-                    ..Default::default()
-                },
-                |config| config.retention == Some(krabka_units::minutes(1)),
-            )
-            .await;
+            let snap = pushed_config()
+                .image(&img)
+                .unstable(unstable)
+                .what("the push reached the partition log")
+                .ready(|config| config.retention == Some(krabka_units::minutes(1)))
+                .call()
+                .await;
             assert!(snap.max_decompressed_record == expected, "{name}");
         }
     }
@@ -250,15 +252,12 @@ mod tests {
         let img = single_partition_image("t", Uuid::new_v4(), krabka_raft::NodeId(1));
 
         // No overrides → the writer retains the default log config.
-        let snap = pushed_config(
-            &img,
-            PushedConfigSetup {
-                what: "default retention applied to partition log",
-                ..Default::default()
-            },
-            |config| config.retention == LogConfig::default().retention,
-        )
-        .await;
+        let snap = pushed_config()
+            .image(&img)
+            .what("default retention applied to partition log")
+            .ready(|config| config.retention == LogConfig::default().retention)
+            .call()
+            .await;
         assert!(snap.retention == LogConfig::default().retention);
     }
 
@@ -297,15 +296,12 @@ mod tests {
             },
         ));
 
-        let snap = pushed_config(
-            &img,
-            PushedConfigSetup {
-                what: "dynamic broker defaults applied to the partition log",
-                ..Default::default()
-            },
-            |config| config.max_message_size == krabka_units::bytes(4_194_304),
-        )
-        .await;
+        let snap = pushed_config()
+            .image(&img)
+            .what("dynamic broker defaults applied to the partition log")
+            .ready(|config| config.max_message_size == krabka_units::bytes(4_194_304))
+            .call()
+            .await;
         // The cluster default, the node's own override over it, and the
         // topic's override over the cluster default.
         assert!(snap.retention == Some(krabka_units::minutes(2)));

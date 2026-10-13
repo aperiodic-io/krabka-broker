@@ -189,14 +189,26 @@ impl Segment {
 mod tests {
     use {
         super::*,
-        crate::segment::test_support::{
-            DENSE_INDEX, NO_LIMIT, RecordCount, RecordTimestamp, SECOND_TWO_RECORD_BATCH,
-            SampleBatchSetup, SeededSegmentSetup, THIRD_TWO_RECORD_BATCH, THREE_RECORD_BATCH,
-            TWO_RECORD_BATCH, sample_batch, seeded_fixture, test_batch_at, test_segment,
-            two_record_fixture,
-        },
         assert2::check,
         krabka_units::prelude::{bytes, mebibytes},
+    };
+
+    fn assert_read_offsets(read: &RawSegmentRead, start: i64, last: i64) {
+        check!(
+            read.start_offset == Offset(start),
+            "start {:?}",
+            read.start_offset
+        );
+        check!(
+            read.last_offset == Offset(last),
+            "last {:?}",
+            read.last_offset
+        );
+    }
+    use crate::segment::test_support::{
+        DENSE_INDEX, NO_LIMIT, SECOND_TWO_RECORD_BATCH, THIRD_TWO_RECORD_BATCH, THREE_RECORD_BATCH,
+        TWO_RECORD_BATCH, sample_batch, seeded_fixture, test_batch_at, test_segment,
+        two_record_fixture,
     };
 
     /// A fetch reads nothing when it starts past the segment, and nothing when
@@ -208,11 +220,11 @@ mod tests {
     fn append_two_record_batches(seg: &mut Segment, count: BatchCount) {
         for i in 0..count.0 {
             seg.append(
-                &sample_batch(SampleBatchSetup {
-                    offset: Offset(i * 2),
-                    records: RecordCount(2),
-                    timestamp: RecordTimestamp(100 + i),
-                }),
+                &sample_batch()
+                    .offset(i * 2)
+                    .records(2)
+                    .timestamp(100 + i)
+                    .call(),
                 DENSE_INDEX,
             )
             .unwrap();
@@ -221,12 +233,11 @@ mod tests {
 
     #[test]
     fn a_fetch_past_the_segment_or_at_the_limit_reads_nothing() {
-        let (_dir, seg) = seeded_fixture(SeededSegmentSetup {
-            batches: &[
+        let (_dir, seg) = seeded_fixture()
+            .batches(&[
                 THREE_RECORD_BATCH, // offsets 0..=2
-            ],
-            ..Default::default()
-        });
+            ])
+            .call();
 
         let past = seg.read_raw(Offset(3), Offset(99), NO_LIMIT).unwrap();
         check!(past.is_empty(), "a fetch past the last offset");
@@ -252,11 +263,33 @@ mod tests {
         // batches before the one asked for -- with a dense index it would jump
         // straight there and never step at all.
         let sparse = mebibytes(1);
-        seg.append(&sample_batch(TWO_RECORD_BATCH), sparse).unwrap(); // 0..=1
-        seg.append(&sample_batch(SECOND_TWO_RECORD_BATCH), sparse)
-            .unwrap(); // 2..=3
-        seg.append(&sample_batch(THIRD_TWO_RECORD_BATCH), sparse)
-            .unwrap(); // 4..=5
+        seg.append(
+            &sample_batch()
+                .offset(TWO_RECORD_BATCH.offset.0)
+                .records(TWO_RECORD_BATCH.records.0)
+                .timestamp(TWO_RECORD_BATCH.timestamp.0)
+                .call(),
+            sparse,
+        )
+        .unwrap(); // 0..=1
+        seg.append(
+            &sample_batch()
+                .offset(SECOND_TWO_RECORD_BATCH.offset.0)
+                .records(SECOND_TWO_RECORD_BATCH.records.0)
+                .timestamp(SECOND_TWO_RECORD_BATCH.timestamp.0)
+                .call(),
+            sparse,
+        )
+        .unwrap(); // 2..=3
+        seg.append(
+            &sample_batch()
+                .offset(THIRD_TWO_RECORD_BATCH.offset.0)
+                .records(THIRD_TWO_RECORD_BATCH.records.0)
+                .timestamp(THIRD_TWO_RECORD_BATCH.timestamp.0)
+                .call(),
+            sparse,
+        )
+        .unwrap(); // 4..=5
 
         let read = seg
             .read_raw_with_policy(
@@ -267,12 +300,7 @@ mod tests {
                 DEFAULT_READ_AHEAD_MAX,
             )
             .unwrap();
-        check!(
-            read.start_offset == Offset(4),
-            "start {:?}",
-            read.start_offset
-        );
-        check!(read.last_offset == Offset(5), "last {:?}", read.last_offset);
+        assert_read_offsets(&read, 4, 5);
     }
 
     /// A batch that will not fit the first read is fetched on its own, from
@@ -289,12 +317,7 @@ mod tests {
         // A one-byte budget makes the first read header-sized, so the batch
         // cannot fit it and takes the read-one-batch path.
         let read = seg.read_raw(Offset(4), Offset(99), bytes(1)).unwrap();
-        check!(
-            read.start_offset == Offset(4),
-            "start {:?}",
-            read.start_offset
-        );
-        check!(read.last_offset == Offset(5), "last {:?}", read.last_offset);
+        assert_read_offsets(&read, 4, 5);
         check!(!read.is_empty());
     }
 
@@ -302,18 +325,28 @@ mod tests {
     fn batch_too_large_with_nonzero_start_pos_and_pos() {
         let (_dir, mut seg) = two_record_fixture();
         let p1 = seg.log_size;
-        seg.append(&sample_batch(SECOND_TWO_RECORD_BATCH), DENSE_INDEX)
-            .unwrap();
+        seg.append(
+            &sample_batch()
+                .offset(SECOND_TWO_RECORD_BATCH.offset.0)
+                .records(SECOND_TWO_RECORD_BATCH.records.0)
+                .timestamp(SECOND_TWO_RECORD_BATCH.timestamp.0)
+                .call(),
+            DENSE_INDEX,
+        )
+        .unwrap();
         let b1_len = seg.log_size - p1;
         let no_index = mebibytes(1);
-        seg.append(&sample_batch(THIRD_TWO_RECORD_BATCH), no_index)
-            .unwrap();
         seg.append(
-            &sample_batch(SampleBatchSetup {
-                offset: Offset(6),
-                records: RecordCount(2),
-                timestamp: RecordTimestamp(400),
-            }),
+            &sample_batch()
+                .offset(THIRD_TWO_RECORD_BATCH.offset.0)
+                .records(THIRD_TWO_RECORD_BATCH.records.0)
+                .timestamp(THIRD_TWO_RECORD_BATCH.timestamp.0)
+                .call(),
+            no_index,
+        )
+        .unwrap();
+        seg.append(
+            &sample_batch().offset(6).records(2).timestamp(400).call(),
             no_index,
         )
         .unwrap();
@@ -345,7 +378,15 @@ mod tests {
             everything.last_offset
         );
 
-        let batch_size = u32::try_from(sample_batch(TWO_RECORD_BATCH).encoded_len()).unwrap();
+        let batch_size = u32::try_from(
+            sample_batch()
+                .offset(TWO_RECORD_BATCH.offset.0)
+                .records(TWO_RECORD_BATCH.records.0)
+                .timestamp(TWO_RECORD_BATCH.timestamp.0)
+                .call()
+                .encoded_len(),
+        )
+        .unwrap();
         let two_batches = seg
             .read_raw(Offset(0), Offset(99), bytes(batch_size * 2))
             .unwrap();

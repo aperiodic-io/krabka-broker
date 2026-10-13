@@ -149,10 +149,10 @@ mod tests {
         super::*,
         crate::{
             isr_maintenance::test_support::{
-                IsrSetup, fake_source, fixture_partition, partition, set_replica_state, topic,
+                fake_source, fixture_partition, partition, set_replica_state, topic,
             },
             metadata_source::MetadataSource,
-            test_support::{PartitionEpoch, StandalonePartitionSetup, plaintext_controller_dialer},
+            test_support::plaintext_controller_dialer,
         },
         krabka_ids::PartitionIndex,
         krabka_metadata::MetadataImage,
@@ -175,24 +175,19 @@ mod tests {
     #[tokio::test]
     async fn run_bumps_shrink_metric_for_leader_partition() {
         let log_dir = tempdir().unwrap();
-        let part = fixture_partition(log_dir.path(), StandalonePartitionSetup {
-            topic: "t",
-            ..Default::default()
-        });
+        let part = fixture_partition()
+            .log_dir(log_dir.path())
+            .topic("t")
+            .call();
         part.current_leader.store(1, Ordering::Release);
-        set_replica_state(&part, IsrSetup {
-            leader_epoch: krabka_ids::LeaderEpoch(10),
-            stale_followers: &[(NodeId(2), Duration::from_secs(30))],
-            ..Default::default()
-        })
+        set_replica_state(&part, partition().leader_epoch(10).call(), &[(
+            NodeId(2),
+            Duration::from_secs(30),
+        )])
         .await;
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&topic("t", uuid::Uuid::from_u128(1)));
-        image.apply(&partition(IsrSetup {
-            leader_epoch: krabka_ids::LeaderEpoch(10),
-            partition_epoch: PartitionEpoch(4),
-            ..Default::default()
-        }));
+        image.apply(&partition().leader_epoch(10).partition_epoch(4).call());
 
         let partitions = Arc::new(PartitionRegistry::new());
         partitions.insert("t".into(), PartitionIndex(0), part);

@@ -4,8 +4,7 @@
 
 use {
     crate::harness::{
-        SimClusterSetup, await_single_leader, await_until, start_engines, three_voter_network,
-        topic_record,
+        await_single_leader, await_until, start_engines, three_voter_network, topic_record,
     },
     krabka_raft::RaftError,
     std::time::Duration,
@@ -18,11 +17,7 @@ async fn follower_submit_change_propagates() {
     let (net, ids) = three_voter_network();
     let cid = uuid::Uuid::from_u128(200);
 
-    let _dirs = start_engines(&net, SimClusterSetup {
-        ids: &ids,
-        cluster_id: cid,
-        ..Default::default()
-    });
+    let _dirs = start_engines().net(&net).ids(&ids).cluster_id(cid).call();
 
     let (leader, _epoch) = await_single_leader(&net, &ids, Duration::from_secs(10)).await;
 

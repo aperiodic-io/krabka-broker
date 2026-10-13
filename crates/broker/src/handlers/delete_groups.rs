@@ -123,30 +123,36 @@ mod tests {
             .expect("handle")
     }
 
+    fn result(group_id: &str, error_code: i16) -> DeletableGroupResult {
+        tagged_wire!(DeletableGroupResult {
+            group_id: group_id.to_owned(),
+            error_code,
+            error_message: None,
+        })
+    }
+
+    async fn assert_results(
+        broker: &Broker,
+        ctx: &RequestContext<'_>,
+        groups: &[&str],
+        results: Vec<DeletableGroupResult>,
+    ) {
+        let response = drive(broker, &request(groups), ctx).await;
+        let expected = unthrottled_wire!(DeleteGroupsResponse { results });
+        assert!(response == expected);
+    }
+
     #[tokio::test]
     async fn handle_denies_delete_for_each_group() {
         let (broker_handle, _dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((p, peer), principal("alice"));
-        let req = request(&["group-a", "group-b"]);
-
-        let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
-
-        let expected = unthrottled_wire!(DeleteGroupsResponse {
-            results: vec![
-                tagged_wire!(DeletableGroupResult {
-                    group_id: "group-a".to_string(),
-                    error_code: codes::GROUP_AUTHORIZATION_FAILED,
-                    error_message: None,
-                }),
-                tagged_wire!(DeletableGroupResult {
-                    group_id: "group-b".to_string(),
-                    error_code: codes::GROUP_AUTHORIZATION_FAILED,
-                    error_message: None,
-                }),
-            ],
-        });
-        assert!(resp == expected);
+        let ctx = test_context(&p, &peer);
+        assert_results(&broker, &ctx, &["group-a", "group-b"], vec![
+            result("group-a", codes::GROUP_AUTHORIZATION_FAILED),
+            result("group-b", codes::GROUP_AUTHORIZATION_FAILED),
+        ])
+        .await;
         broker_handle.shutdown().await;
     }
 
@@ -224,18 +230,12 @@ mod tests {
     async fn handle_allowed_missing_group_returns_not_found() {
         broker_fixture!((broker_handle, _dir, broker), group_allow_all);
         request_identity!((p, peer), principal("admin"));
-        let req = request(&["missing"]);
-
-        let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
-
-        let expected = unthrottled_wire!(DeleteGroupsResponse {
-            results: vec![tagged_wire!(DeletableGroupResult {
-                group_id: "missing".to_string(),
-                error_code: codes::GROUP_ID_NOT_FOUND,
-                error_message: None,
-            })],
-        });
-        assert!(resp == expected);
+        let ctx = test_context(&p, &peer);
+        assert_results(&broker, &ctx, &["missing"], vec![result(
+            "missing",
+            codes::GROUP_ID_NOT_FOUND,
+        )])
+        .await;
         broker_handle.shutdown().await;
     }
 

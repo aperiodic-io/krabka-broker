@@ -4,33 +4,16 @@
 //! source over a fixed image are each needed by more than one of the test
 //! modules under this module, so the builders live in one file.
 
+pub(super) use crate::barrier::test_support::{at, marker};
 use {
     crate::{
-        barrier::{
-            config::BarrierConfig, marker::BarrierMarker, state::TargetPartition, test_support,
-        },
+        barrier::{config::BarrierConfig, test_support},
         metadata_source::MetadataSource,
     },
-    krabka_ids::PartitionIndex,
     krabka_metadata::MetadataRecord,
     krabka_units::millis,
     std::sync::Arc,
 };
-
-pub(super) fn at(topic: &str, partition: i32) -> TargetPartition {
-    TargetPartition {
-        topic: topic.to_owned(),
-        partition: PartitionIndex(partition),
-    }
-}
-
-pub(super) fn marker() -> BarrierMarker {
-    BarrierMarker {
-        group: "orders-cut".to_owned(),
-        epoch: 4,
-        triggered_at: 1_724_500_000_000,
-    }
-}
 
 pub(super) fn fast_config() -> BarrierConfig {
     BarrierConfig {

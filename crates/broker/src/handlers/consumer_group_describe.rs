@@ -315,9 +315,7 @@ mod tests {
                     GroupFeatureLevel, acl_authorizer, image_with_group_version, set_group_version,
                 },
             },
-            test_support::{
-                AllowAclSetup, allow_acl, start_group_broker_no_audit, start_group_broker_with,
-            },
+            test_support::{allow_acl, start_group_broker_no_audit, start_group_broker_with},
         },
         assert2::assert,
         krabka_metadata::MetadataRecord,
@@ -539,31 +537,25 @@ mod tests {
 
         let expected = unthrottled_wire!(ConsumerGroupDescribeResponse {
             groups: vec![
-                tagged_wire!(DescribedGroup {
-                    error_code: codes::GROUP_ID_NOT_FOUND,
-                    error_message: None,
-                    group_id: "a".to_string(),
-                    group_state: String::new(),
-                    group_epoch: 0,
-                    assignment_epoch: 0,
-                    assignor_name: String::new(),
-                    members: vec![],
-                    authorized_operations: -2_147_483_648,
-                }),
-                tagged_wire!(DescribedGroup {
-                    error_code: codes::UNSUPPORTED_VERSION,
-                    error_message: None,
-                    group_id: "b".to_string(),
-                    group_state: String::new(),
-                    group_epoch: 0,
-                    assignment_epoch: 0,
-                    assignor_name: String::new(),
-                    members: vec![],
-                    authorized_operations: -2_147_483_648,
-                }),
+                error_group_row("a", codes::GROUP_ID_NOT_FOUND, None),
+                error_group_row("b", codes::UNSUPPORTED_VERSION, None),
             ],
         });
         assert!(resp == expected, "{resp:?}");
+    }
+
+    fn error_group_row(group_id: &str, error_code: i16, message: Option<&str>) -> DescribedGroup {
+        tagged_wire!(DescribedGroup {
+            error_code,
+            error_message: message.map(str::to_string),
+            group_id: group_id.to_string(),
+            group_state: String::new(),
+            group_epoch: 0,
+            assignment_epoch: 0,
+            assignor_name: String::new(),
+            members: vec![],
+            authorized_operations: -2_147_483_648,
+        })
     }
 
     /// Kafka's `handleConsumerGroupDescribe` checks `Describe` on every topic
@@ -574,12 +566,9 @@ mod tests {
     #[test]
     fn a_group_naming_an_undescribable_topic_is_replaced_by_an_error_row() {
         let mut image = image_with_topics();
-        image.apply(&MetadataRecord::V1AccessControlEntry(allow_acl(
-            AllowAclSetup {
-                operation: AclOperation::Describe,
-                ..Default::default()
-            },
-        )));
+        image.apply(&MetadataRecord::V1AccessControlEntry(
+            allow_acl().operation(AclOperation::Describe).call(),
+        ));
         let authorizer = acl_authorizer();
         request_identity!(
             (principal, peer, ctx),
@@ -647,24 +636,11 @@ mod tests {
             client_id = "admin-client",
             address = crate::test_support::peer()
         );
-        let row = |group_id: &str, error_code, message: Option<&str>| {
-            tagged_wire!(DescribedGroup {
-                error_code,
-                error_message: message.map(str::to_string),
-                group_id: group_id.to_string(),
-                group_state: String::new(),
-                group_epoch: 0,
-                assignment_epoch: 0,
-                assignor_name: String::new(),
-                members: vec![],
-                authorized_operations: i32::MIN,
-            })
-        };
         // (requested id, expected row)
         let rows = [
             (
                 "missing-group",
-                row(
+                error_group_row(
                     "missing-group",
                     codes::GROUP_ID_NOT_FOUND,
                     Some("Group missing-group not found."),
@@ -672,7 +648,7 @@ mod tests {
             ),
             (
                 "classic-group",
-                row(
+                error_group_row(
                     "classic-group",
                     codes::GROUP_ID_NOT_FOUND,
                     Some("Group classic-group is not a consumer group."),
@@ -680,7 +656,7 @@ mod tests {
             ),
             (
                 "share-group",
-                row(
+                error_group_row(
                     "share-group",
                     codes::GROUP_ID_NOT_FOUND,
                     Some("Group share-group is not a consumer group."),
@@ -688,7 +664,7 @@ mod tests {
             ),
             (
                 "share-actor",
-                row(
+                error_group_row(
                     "share-actor",
                     codes::GROUP_ID_NOT_FOUND,
                     Some("Group share-actor is not a consumer group."),
@@ -696,13 +672,13 @@ mod tests {
             ),
             (
                 "streams-group",
-                row(
+                error_group_row(
                     "streams-group",
                     codes::GROUP_ID_NOT_FOUND,
                     Some("Group streams-group is not a consumer group."),
                 ),
             ),
-            ("", row("", codes::INVALID_GROUP_ID, None)),
+            ("", error_group_row("", codes::INVALID_GROUP_ID, None)),
         ];
         for (group_id, expected) in rows {
             let resp = handle(&broker, request(vec![group_id]), VERSION, &ctx)
@@ -785,12 +761,11 @@ mod tests {
         broker
             .controller
             .submit_change(vec![MetadataRecord::V1AccessControlEntry(
-                crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
-                    resource_type: krabka_metadata::ResourceType::Group,
-                    resource_name: "allowed",
-                    operation: krabka_metadata::AclOperation::Describe,
-                    ..Default::default()
-                }),
+                crate::test_support::allow_acl()
+                    .resource_type(krabka_metadata::ResourceType::Group)
+                    .resource_name("allowed")
+                    .operation(krabka_metadata::AclOperation::Describe)
+                    .call(),
             )])
             .await
             .expect("grant alice Describe on allowed");

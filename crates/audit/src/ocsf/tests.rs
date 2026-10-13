@@ -83,7 +83,7 @@ fn expected_metadata() -> serde_json::Value {
     })
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 struct EventTimeMillis(i64);
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -107,7 +107,33 @@ struct UnsignedPrivilegeSetup<'a> {
     time_ms: EventTimeMillis,
 }
 
-fn unsigned_privilege(setup: UnsignedPrivilegeSetup<'_>) -> AuditEvent {
+#[bon::builder]
+fn unsigned_privilege(
+    #[builder(default = AuditOutcome :: Success)] outcome: AuditOutcome,
+    #[builder(default = PrivilegedPhase :: Consumed)] phase: PrivilegedPhase,
+    #[builder(default = "unclean_elect_leaders")] action: &'_ str,
+    #[builder(default = "orders-3")] target: &'_ str,
+    #[builder(default = "bg-7")] proposal_id: &'_ str,
+    #[builder(default = AuditPrincipal { name : "User:alice" . into () , auth_method : "MTls" . into () })]
+    principal: AuditPrincipal,
+    #[builder(default)] counterparties: Vec<AuditPrincipal>,
+    #[builder(default = AuditEndpoint { ip : "10.0.0.4" . into () , port : 9092 })]
+    source: AuditEndpoint,
+    #[builder(default)] reason: &'_ str,
+    #[builder(into, default)] time_ms: EventTimeMillis,
+) -> AuditEvent {
+    let setup = UnsignedPrivilegeSetup {
+        outcome,
+        phase,
+        action,
+        target,
+        proposal_id,
+        principal,
+        counterparties,
+        source,
+        reason,
+        time_ms,
+    };
     let UnsignedPrivilegeSetup {
         outcome,
         phase,
@@ -188,12 +214,11 @@ fn privileged_action_maps_to_6003_with_the_whole_body() {
         ),
         (
             "unsigned two-person consumption",
-            unsigned_privilege(UnsignedPrivilegeSetup {
-                principal: carol.clone(),
-                counterparties: vec![alice.clone(), bob.clone()],
-                time_ms: EventTimeMillis(11),
-                ..Default::default()
-            }),
+            unsigned_privilege()
+                .principal(carol.clone())
+                .counterparties(vec![alice.clone(), bob.clone()])
+                .time_ms(11)
+                .call(),
             serde_json::json!({
                 "class_uid": 6003,
                 "category_uid": 6,
@@ -228,20 +253,19 @@ fn privileged_action_maps_to_6003_with_the_whole_body() {
         ),
         (
             "bypassed gate reports failure",
-            unsigned_privilege(UnsignedPrivilegeSetup {
-                outcome: AuditOutcome::Failure,
-                phase: PrivilegedPhase::Bypassed,
-                action: "unclean_recovery",
-                target: "orders-9",
-                proposal_id: "",
-                principal: AuditPrincipal {
+            unsigned_privilege()
+                .outcome(AuditOutcome::Failure)
+                .phase(PrivilegedPhase::Bypassed)
+                .action("unclean_recovery")
+                .target("orders-9")
+                .proposal_id("")
+                .principal(AuditPrincipal {
                     name: "broker".into(),
                     auth_method: "Internal".into(),
-                },
-                reason: "background recovery ran without an approval",
-                time_ms: EventTimeMillis(12),
-                ..Default::default()
-            }),
+                })
+                .reason("background recovery ran without an approval")
+                .time_ms(12)
+                .call(),
             serde_json::json!({
                 "class_uid": 6003,
                 "category_uid": 6,

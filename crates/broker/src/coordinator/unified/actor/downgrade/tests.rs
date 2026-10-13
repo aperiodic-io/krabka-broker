@@ -8,11 +8,10 @@ use {
             actor::{
                 GroupActorMessage, GroupKindTag,
                 test_support::{
-                    BidirectionalClassicSetup, ClassicMemberSetup, bidirectional_coordinator,
-                    bidirectional_with_members, decode_assignment, join_native_consumer,
-                    log_has_classic_group_metadata_write, make_coordinator_with_topic,
-                    make_coordinator_with_topic_policy, rpc, seed_classic_member,
-                    seeded_bidirectional_coordinator, spawn_and_downgrade,
+                    ClassicMemberSetup, bidirectional_coordinator, bidirectional_with_members,
+                    decode_assignment, join_native_consumer, log_has_classic_group_metadata_write,
+                    make_coordinator_with_topic, make_coordinator_with_topic_policy, rpc,
+                    seed_classic_member, seeded_bidirectional_coordinator, spawn_and_downgrade,
                     upgrade_with_transient_native,
                 },
             },
@@ -34,7 +33,7 @@ async fn last_consumer_member_leaving_downgrades_to_classic() {
     let (coord, log) = make_coordinator_with_topic("t", 2);
 
     // Seed a classic group with one classic member subscribed to "t".
-    let handle = seed_classic_member(&coord, ClassicMemberSetup::default());
+    let handle = seed_classic_member().coord(&coord).call();
 
     // The only native consumer joins and leaves, driving both migration flips.
     upgrade_with_transient_native(&handle, "t").await;
@@ -66,8 +65,7 @@ async fn last_consumer_member_leaving_downgrades_to_classic() {
 /// assigned, with its partitions kept across both flips.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn upgrade_then_downgrade_round_trip() {
-    let (coord, _log, handle) =
-        seeded_bidirectional_coordinator(BidirectionalClassicSetup::default());
+    let (coord, _log, handle) = seeded_bidirectional_coordinator().call();
 
     // A native consumer "c1" heartbeats → in-place UPGRADE; the group is now
     // consumer-kind and hosts both m1 (classic facade) and c1.
@@ -142,10 +140,9 @@ async fn classic_leave_of_last_native_member_triggers_downgrade() {
 /// instance id but `ClassicMemberView` does.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn static_member_identity_survives_both_flips() {
-    let (_coord, _log, handle) = seeded_bidirectional_coordinator(BidirectionalClassicSetup {
-        instance_id: Some("inst-a"),
-        ..Default::default()
-    });
+    let (_coord, _log, handle) = seeded_bidirectional_coordinator()
+        .maybe_instance_id(Some("inst-a"))
+        .call();
 
     // Upgrade via a native consumer heartbeat, then downgrade by having that
     // native member leave.
@@ -177,7 +174,12 @@ async fn policy_disabled_keeps_group_classic() {
     use crate::coordinator::unified::config::ConsumerGroupMigrationPolicy;
     let (coord, _log) =
         make_coordinator_with_topic_policy("t", 2, ConsumerGroupMigrationPolicy::Disabled);
-    let handle = seed_classic_member(&coord, ClassicMemberSetup::dynamic("m1"));
+    let handle = seed_classic_member()
+        .coord(&coord)
+        .member_id(ClassicMemberSetup::dynamic("m1").member_id)
+        .topic(ClassicMemberSetup::dynamic("m1").topic)
+        .maybe_instance_id(ClassicMemberSetup::dynamic("m1").instance_id)
+        .call();
 
     // A native consumer heartbeat must be rejected (no upgrade is allowed).
     let resp = rpc::consumer_heartbeat(&handle, "", 0, Some("t")).await;
@@ -205,8 +207,7 @@ async fn policy_disabled_keeps_group_classic() {
 /// still readable, downgrades, and asserts it is STILL there.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn committed_offsets_survive_a_flip() {
-    let (_coord, _log, handle) =
-        seeded_bidirectional_coordinator(BidirectionalClassicSetup::default());
+    let (_coord, _log, handle) = seeded_bidirectional_coordinator().call();
 
     // Record a committed offset for ("t", 0) via the kind-agnostic path.
     let rx = rpc::begin(&handle, |tx| GroupActorMessage::UpdateCommitted {

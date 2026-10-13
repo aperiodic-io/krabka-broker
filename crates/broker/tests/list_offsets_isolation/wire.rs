@@ -15,8 +15,8 @@
 use {
     crate::support::{
         offsets::{list_offset_partition, single_partition_list_offsets},
-        producer::{ProducerRecordSetup, producer_record},
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        producer::producer_record,
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::check,
     bytes::Bytes,
@@ -92,12 +92,9 @@ pub(super) fn latest_row(offset: i64) -> ListOffsetsPartitionResponse { matched_
 
 pub(super) async fn create_topic(client: &Client, name: &str) {
     let response = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: (name).into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name((name).into()).call(),
+        ))
         .await
         .expect("CreateTopics");
     check!(
@@ -155,11 +152,10 @@ pub(super) async fn wait_for_settled_log(broker: &BrokerHandle, topic: &str, off
 }
 
 fn record(topic: &str, value: &'static str) -> ProducerRecord {
-    producer_record(ProducerRecordSetup {
-        topic: (topic).into(),
-        value: Some(Bytes::from_static(value.as_bytes())),
-        ..Default::default()
-    })
+    producer_record()
+        .topic((topic).into())
+        .maybe_value(Some(Some(Bytes::from_static(value.as_bytes()))))
+        .call()
 }
 
 pub(super) async fn send_ok(producer: &Producer, topic: &str, value: &'static str) {

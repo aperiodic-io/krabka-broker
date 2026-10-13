@@ -21,8 +21,8 @@ use {
         codes,
         fetch_session::{FINAL_EPOCH, INITIAL_EPOCH, INVALID_SESSION_ID},
         handlers::test_support::{
-            ClientTopicSetup, ReplicatedTopicSetup, check_cases, check_denied_topic_cases,
-            create_topic as create_topic_from_test_support, seed_partition_replicas,
+            check_cases, check_denied_topic_cases, create_topic as create_topic_from_test_support,
+            seed_partition_replicas,
         },
         test_support::{DenyAll, KafkaErrorCode, start_broker_with_authorizer_no_audit as start},
     },
@@ -95,23 +95,25 @@ fn fetch_topic(name: &str, topic_id: WireUuid) -> FetchTopic {
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    create_topic_from_test_support(broker, ClientTopicSetup {
-        client_id: "fetch-resolution-test",
-        name,
-        ..Default::default()
-    })
-    .await
+    create_topic_from_test_support()
+        .broker(broker)
+        .client_id("fetch-resolution-test")
+        .name(name)
+        .call()
+        .await
 }
 
 /// Send one `Fetch` at `version` and return the response as a client decodes
 /// it.
 async fn fetch(broker: &BrokerHandle, version: i16, request: &FetchRequest) -> FetchResponse {
-    super::test_support::fetch_wire(broker, request, super::test_support::FetchWireSetup {
-        version: krabka_ids::ApiVersion(version),
-        user: "consumer",
-        client_id: "consumer-client",
-    })
-    .await
+    super::test_support::fetch_wire()
+        .broker(broker)
+        .request(request)
+        .version(version)
+        .user("consumer")
+        .client_id("consumer-client")
+        .call()
+        .await
 }
 
 /// Send one sessionless single-row `Fetch` at `case.version` for `case.topic`.
@@ -305,14 +307,15 @@ async fn a_partition_the_metadata_holds_and_this_broker_does_not_host_is_not_lea
     let (broker, _dir) = start(Arc::new(AllowAllAuthorizer)).await;
     // Node 1, this broker, is not a replica: node 2 leads and node 3 follows.
     let topic_id = uuid::Uuid::from_u128(0x51);
-    seed_partition_replicas(&broker, ReplicatedTopicSetup {
-        topic: "moved",
-        topic_id,
-        leader: krabka_audit::NodeId(2),
-        replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
-        leader_epoch: krabka_ids::LeaderEpoch(4),
-    })
-    .await;
+    seed_partition_replicas()
+        .broker(&broker)
+        .topic("moved")
+        .topic_id(topic_id)
+        .leader(2)
+        .replicas(&[krabka_audit::NodeId(2), krabka_audit::NodeId(3)])
+        .leader_epoch(4)
+        .call()
+        .await;
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while broker
             .controller_image_for_test()

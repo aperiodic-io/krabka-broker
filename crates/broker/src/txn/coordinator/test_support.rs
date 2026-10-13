@@ -10,7 +10,7 @@ use {
         partition::Partition,
         partition_registry::PartitionRegistry,
         producer_id_manager::ProducerIdManager,
-        test_support::{PartitionCount, StandalonePartitionSetup, open_partition},
+        test_support::{PartitionCount, open_partition},
         txn::{bootstrap, state::TxnEntry},
     },
     krabka_ids::PartitionIndex,
@@ -48,7 +48,19 @@ pub(super) struct StateImageSetup<'a> {
 }
 
 /// Single-partition transaction-state metadata, locally led by default.
-pub(super) fn state_image(setup: StateImageSetup<'_>) -> MetadataImage {
+#[bon::builder]
+pub(super) fn state_image(
+    #[builder(default = uuid :: Uuid :: from_u128 (1))] topic_id: uuid::Uuid,
+    #[builder(into, default = NodeId (1))] leader: NodeId,
+    #[builder(into, default)] leader_epoch: LeaderEpoch,
+    #[builder(default = & [NodeId (1)])] replicas: &'_ [NodeId],
+) -> MetadataImage {
+    let setup = StateImageSetup {
+        topic_id,
+        leader,
+        leader_epoch,
+        replicas,
+    };
     let StateImageSetup {
         topic_id,
         leader,
@@ -79,10 +91,7 @@ pub(super) fn state_registry(dir: &Path) -> Arc<PartitionRegistry> {
     partitions.insert(
         bootstrap::TOPIC.into(),
         PartitionIndex(0),
-        open_partition(dir, StandalonePartitionSetup {
-            topic: bootstrap::TOPIC,
-            ..Default::default()
-        }),
+        open_partition().log_dir(dir).topic(bootstrap::TOPIC).call(),
     );
     partitions
 }
@@ -106,10 +115,7 @@ pub(super) async fn hosted_data_partition(
     dir: &Path,
     partitions: &PartitionRegistry,
 ) -> Arc<Partition> {
-    let data = open_partition(dir, StandalonePartitionSetup {
-        topic: DATA_TOPIC,
-        ..Default::default()
-    });
+    let data = open_partition().log_dir(dir).topic(DATA_TOPIC).call();
     // The metadata reconcile installs this broker, node 1, as the leader.
     data.install_leader_change(1, 0).await;
     partitions.insert(
@@ -132,7 +138,7 @@ pub(super) async fn live_coordinator(dir: &Path) -> (Arc<TxnCoordinator>, Arc<Pa
         partitions,
         PartitionCount(1),
     ));
-    let image = state_image(StateImageSetup::default());
+    let image = state_image().call();
     coordinator
         .refresh_leader_partitions(&image)
         .await
@@ -153,7 +159,7 @@ pub(super) fn test_coordinator_with_partitions(num_partitions: PartitionCount) -
     )
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub(super) struct ProducerEpoch(pub i16);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -170,7 +176,21 @@ pub(super) struct TxnEntrySetup<'a> {
     pub next_epoch: ProducerEpoch,
 }
 
-pub(super) fn entry(setup: TxnEntrySetup<'_>) -> TxnEntry {
+#[bon::builder]
+pub(super) fn entry(
+    #[builder(default = "tid-a")] transactional_id: &'_ str,
+    #[builder(into, default = ProducerId (1000))] producer: ProducerId,
+    #[builder(into, default = ProducerId (- 1))] previous: ProducerId,
+    #[builder(into, default = ProducerId (- 1))] next: ProducerId,
+    #[builder(into, default = ProducerEpoch (- 1))] next_epoch: ProducerEpoch,
+) -> TxnEntry {
+    let setup = TxnEntrySetup {
+        transactional_id,
+        producer,
+        previous,
+        next,
+        next_epoch,
+    };
     let mut e = TxnEntry::new_empty(setup.transactional_id.into(), setup.producer, 0, 60_000, 0);
     e.prev_producer_id = setup.previous;
     e.next_producer_id = setup.next;

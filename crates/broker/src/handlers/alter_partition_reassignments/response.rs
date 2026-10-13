@@ -74,9 +74,7 @@ mod tests {
         super::*,
         crate::{
             codes::{CLUSTER_AUTHORIZATION_FAILED, UNKNOWN_TOPIC_OR_PARTITION},
-            handlers::alter_partition_reassignments::test_support::{
-                ReassignmentRequestSetup, request,
-            },
+            handlers::alter_partition_reassignments::test_support::request,
         },
         assert2::assert,
     };
@@ -102,27 +100,19 @@ mod tests {
 
     #[test]
     fn whole_request_error_preserves_request_shape() {
-        let req = request(ReassignmentRequestSetup {
-            topic: "payments",
-            partition_index: krabka_ids::PartitionIndex(8),
-            ..Default::default()
-        });
+        let req = request().topic("payments").partition_index(8).call();
 
         let resp = whole_request_error(&req, CLUSTER_AUTHORIZATION_FAILED, "denied");
 
-        let expected = unthrottled_wire!(AlterPartitionReassignmentsResponse {
-            allow_replication_factor_change: true,
-            error_code: CLUSTER_AUTHORIZATION_FAILED,
-            error_message: Some("denied".into()),
-            responses: vec![tagged_wire!(ReassignableTopicResponse {
-                name: "payments".into(),
-                partitions: vec![tagged_wire!(ReassignablePartitionResponse {
-                    partition_index: 8,
-                    error_code: CLUSTER_AUTHORIZATION_FAILED,
-                    error_message: Some("denied".into()),
-                })],
-            })],
-        });
-        assert!(resp == expected);
+        assert!(resp.allow_replication_factor_change);
+        assert!(resp.error_code == CLUSTER_AUTHORIZATION_FAILED);
+        assert!(resp.error_message.as_deref() == Some("denied"));
+        assert!(resp.responses.len() == 1);
+        assert!(resp.responses[0].name == "payments");
+        assert!(resp.responses[0].partitions.len() == 1);
+        let partition = &resp.responses[0].partitions[0];
+        assert!(partition.partition_index == 8);
+        assert!(partition.error_code == CLUSTER_AUTHORIZATION_FAILED);
+        assert!(partition.error_message.as_deref() == Some("denied"));
     }
 }

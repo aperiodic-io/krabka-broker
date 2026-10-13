@@ -56,7 +56,38 @@ impl Default for ElectionSetup<'_> {
     }
 }
 
-pub fn img_with_partition(setup: ElectionSetup<'_>) -> MetadataImage {
+macro_rules! election_fixture_builder {
+    ($name:ident -> $result:ty = $constructor:path) => {
+        #[bon::builder]
+        pub fn $name(
+            #[builder(default = ElectionSetup::default().topic)] topic: &'_ str,
+            #[builder(into, default = ElectionSetup::default().partition)]
+            partition: krabka_ids::PartitionIndex,
+            #[builder(into, default = ElectionSetup::default().leader)] leader: NodeId,
+            #[builder(default = ElectionSetup::default().replicas)] replicas: &'_ [NodeId],
+            #[builder(default = ElectionSetup::default().isr)] isr: &'_ [NodeId],
+            #[builder(default = ElectionSetup::default().dirs)] dirs: &'_ [Uuid],
+            #[builder(default = ElectionSetup::default().configs)] configs: &'_ [(
+                &'_ str,
+                &'_ str,
+            )],
+            #[builder(default = ElectionSetup::default().elr)] elr: ElrFinalization,
+        ) -> $result {
+            $constructor(ElectionSetup {
+                topic,
+                partition,
+                leader,
+                replicas,
+                isr,
+                dirs,
+                configs,
+                elr,
+            })
+        }
+    };
+}
+
+fn image_from_election_setup(setup: ElectionSetup<'_>) -> MetadataImage {
     let mut img = MetadataImage::new(Uuid::nil());
     img.apply(&MetadataRecord::V1Topic(TopicRecord {
         name: setup.topic.into(),
@@ -64,21 +95,23 @@ pub fn img_with_partition(setup: ElectionSetup<'_>) -> MetadataImage {
         partitions: 1,
         replication_factor: i16::try_from(setup.replicas.len()).unwrap(),
     }));
-    img.apply(&MetadataRecord::V1Partition(seed_partition(setup)));
+    img.apply(&MetadataRecord::V1Partition(
+        partition_record_from_election_setup(setup),
+    ));
     if matches!(setup.elr, ElrFinalization::Enabled) {
         finalize_elr_version(&mut img);
     }
     if !setup.configs.is_empty() {
-        set_topic_configs(&mut img, TopicConfigSetup {
-            topic: setup.topic,
-            entries: setup.configs,
-        });
+        set_topic_configs()
+            .img(&mut img)
+            .topic(setup.topic)
+            .entries(setup.configs)
+            .call();
     }
     img
 }
 
-/// Input partition for election tests, before any leader or ISR change.
-pub fn seed_partition(setup: ElectionSetup<'_>) -> PartitionRecord {
+fn partition_record_from_election_setup(setup: ElectionSetup<'_>) -> PartitionRecord {
     let ElectionSetup {
         topic,
         partition,
@@ -101,6 +134,10 @@ pub fn seed_partition(setup: ElectionSetup<'_>) -> PartitionRecord {
         partition_epoch: 0,
     }
 }
+
+// Input partition for election tests, before any leader or ISR change.
+election_fixture_builder!(img_with_partition -> MetadataImage = image_from_election_setup);
+election_fixture_builder!(seed_partition -> PartitionRecord = partition_record_from_election_setup);
 
 /// Run a failover scan whose metrics are not inspected by the test.
 pub async fn failover(
@@ -127,12 +164,11 @@ pub fn expected_clean_election(
     isr: &[NodeId],
     directories: Vec<Uuid>,
 ) -> PartitionRecord {
-    expected_partition(ExpectedPartitionSetup {
-        leader,
-        isr,
-        directories,
-        ..Default::default()
-    })
+    expected_partition()
+        .leader(leader)
+        .isr(isr)
+        .directories(directories)
+        .call()
 }
 
 /// Independent expected partition after one change to the three-replica fixture.
@@ -156,7 +192,22 @@ impl Default for ExpectedPartitionSetup<'_> {
     }
 }
 
-pub fn expected_partition(setup: ExpectedPartitionSetup<'_>) -> PartitionRecord {
+#[bon::builder]
+pub fn expected_partition(
+    #[builder(default = ExpectedPartitionSetup::default().topic)] topic: &'_ str,
+    #[builder(into, default = ExpectedPartitionSetup::default().leader)] leader: NodeId,
+    #[builder(default = ExpectedPartitionSetup::default().isr)] isr: &'_ [NodeId],
+    #[builder(into, default = ExpectedPartitionSetup::default().leader_epoch)]
+    leader_epoch: LeaderEpoch,
+    #[builder(default = ExpectedPartitionSetup::default().directories)] directories: Vec<Uuid>,
+) -> PartitionRecord {
+    let setup = ExpectedPartitionSetup {
+        topic,
+        leader,
+        isr,
+        leader_epoch,
+        directories,
+    };
     let ExpectedPartitionSetup {
         topic,
         leader,
@@ -256,7 +307,13 @@ pub struct TopicConfigSetup<'a> {
 }
 
 /// Apply the complete override map in one record, with ELR state in its own records.
-pub fn set_topic_configs(img: &mut MetadataImage, setup: TopicConfigSetup<'_>) {
+#[bon::builder]
+pub fn set_topic_configs(
+    img: &mut MetadataImage,
+    #[builder(default = "t")] topic: &'_ str,
+    #[builder(default)] entries: &'_ [(&'_ str, &'_ str)],
+) {
+    let setup = TopicConfigSetup { topic, entries };
     let TopicConfigSetup { topic, entries } = setup;
     let overrides: BTreeMap<String, String> = entries
         .iter()

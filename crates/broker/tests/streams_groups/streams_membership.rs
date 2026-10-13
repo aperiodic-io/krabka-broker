@@ -6,12 +6,9 @@
 //! subtopology drags in.
 
 use {
-    crate::{
-        streams_harness::{
-            active_partition_count, active_partitions_for, boot, connect, create_topic, describe,
-            finalize_streams_version, follow_up, join_and_converge, topology,
-        },
-        support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
+    crate::streams_harness::{
+        active_partition_count, active_partitions_for, boot, connect, create_topic, describe,
+        finalize_streams_version, follow_up, join_and_converge, topology,
     },
     assert2::{assert, check},
 };
@@ -76,12 +73,13 @@ async fn leave_removes_member() {
 
     // Leave: member_epoch == -1.
     let leave = client
-        .send(follow_up(StreamsFollowUpSetup {
-            group: "streams-app-4",
-            member_id: &member_id,
-            epoch: StreamsMemberEpoch(-1),
-            ..Default::default()
-        }))
+        .send(
+            follow_up()
+                .group("streams-app-4")
+                .member_id(&member_id)
+                .epoch(-1)
+                .call(),
+        )
         .await
         .expect("leave heartbeat");
     assert!(leave.error_code == 0, "leave failed: {leave:?}");

@@ -9,11 +9,33 @@ use {
     },
     assert2::assert,
     krabka_ids::{ApiVersion, Offset, PartitionIndex},
+    krabka_log::Log,
     krabka_protocol::{
         Decode,
         owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
+        records::{Record, RecordBatch},
     },
 };
+
+#[bon::builder]
+pub(super) fn epoch_record_batch(epoch: i32) -> RecordBatch {
+    RecordBatch {
+        partition_leader_epoch: epoch,
+        records: vec![Record::default()],
+        ..Default::default()
+    }
+}
+
+pub(super) fn append_epoch_batch(log: &mut Log, epoch: i32) -> i64 {
+    let mut batch = epoch_record_batch().epoch(epoch).call();
+    log.append(&mut batch).expect("append").0.0
+}
+
+pub(super) fn append_epoch_batches(log: &mut Log, epochs: &[i32]) {
+    for &epoch in epochs {
+        append_epoch_batch(log, epoch);
+    }
+}
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub(super) struct FetchWireSetup<'a> {
@@ -25,7 +47,7 @@ pub(super) struct FetchWireSetup<'a> {
     pub client_id: &'a str,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(derive_more::From, derive_more::Into, Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct FetchReplicaId(pub i32);
 impl Default for FetchReplicaId {
     fn default() -> Self { Self(-1) }
@@ -54,8 +76,15 @@ impl TopicRepresentation {
 }
 
 /// A sessionless fetch with the follower identity in the field served by this version.
-pub(super) fn sessionless_request(setup: SessionlessFetchSetup) -> FetchRequest {
+#[bon::builder]
+pub(super) fn sessionless_request(
+    #[builder(into, default = ApiVersion (krabka_protocol :: owned :: fetch_request :: MAX_VERSION))]
+    version: ApiVersion,
+    #[builder(into, default)] replica: FetchReplicaId,
+) -> FetchRequest {
     use krabka_protocol::owned::fetch_request::ReplicaState;
+
+    let setup = SessionlessFetchSetup { version, replica };
     let version = setup.version.0;
     let replica_id = setup.replica.0;
     let (replica_id, replica_state) = if version >= 15 {
@@ -78,11 +107,20 @@ pub(super) fn sessionless_request(setup: SessionlessFetchSetup) -> FetchRequest 
     }
 }
 
+#[bon::builder]
 pub(super) async fn fetch_wire(
     broker: &BrokerHandle,
     request: &FetchRequest,
-    setup: FetchWireSetup<'_>,
+    #[builder(into, default = ApiVersion (krabka_protocol :: owned :: fetch_request :: MAX_VERSION))]
+    version: ApiVersion,
+    #[builder(default = "client")] user: &'_ str,
+    #[builder(default = "fetch-client")] client_id: &'_ str,
 ) -> FetchResponse {
+    let setup = FetchWireSetup {
+        version,
+        user,
+        client_id,
+    };
     let FetchWireSetup {
         version,
         user,
@@ -172,9 +210,13 @@ pub(super) struct ExpectedReadSetup {
     pub records: krabka_protocol::records::RecordsPayload,
 }
 
+#[bon::builder]
 pub(super) fn expected_read(
-    setup: ExpectedReadSetup,
+    #[builder(into, default)] watermark: Offset,
+    #[builder(default = krabka_protocol :: records :: RecordsPayload :: Legacy (bytes :: Bytes :: new ()))]
+    records: krabka_protocol::records::RecordsPayload,
 ) -> krabka_protocol::owned::fetch_response::PartitionData {
+    let setup = ExpectedReadSetup { watermark, records };
     krabka_protocol::owned::fetch_response::PartitionData {
         partition_index: 0,
         error_code: NONE,

@@ -6,11 +6,4 @@
 //! reachable from both. The approved proposal and the image that holds it are
 //! the crate-wide break-glass fixtures in `break_glass::gate::tests`.
 
-use crate::config::BreakGlassConfig;
-
-pub(super) fn gated_config() -> BreakGlassConfig {
-    BreakGlassConfig {
-        approvers: ["User:alice", "User:bob"].map(str::to_owned).to_vec(),
-        ..BreakGlassConfig::default()
-    }
-}
+pub(super) use crate::test_support::gated_break_glass_config as gated_config;

@@ -14,8 +14,7 @@ use {
         broker::BrokerHandle,
         codes,
         handlers::test_support::{
-            ClientTopicSetup, ShareWireSetup, create_topic as create_topic_from_test_support,
-            share_fetch_wire,
+            create_topic as create_topic_from_test_support, share_fetch_wire,
         },
         test_support::start_broker_no_audit_with,
     },
@@ -59,12 +58,12 @@ async fn start(authorizer: Arc<dyn Authorizer>) -> (BrokerHandle, tempfile::Temp
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    create_topic_from_test_support(broker, ClientTopicSetup {
-        client_id: "share-fetch-resolution-test",
-        name,
-        ..Default::default()
-    })
-    .await
+    create_topic_from_test_support()
+        .broker(broker)
+        .client_id("share-fetch-resolution-test")
+        .name(name)
+        .call()
+        .await
 }
 
 /// A request for partition 0 of `topic_id`, in the share session of `member`.
@@ -89,7 +88,19 @@ struct TopicResolutionSetup<'a> {
     acknowledgements: AcknowledgementPresence,
 }
 
-fn request(setup: TopicResolutionSetup<'_>) -> ShareFetchRequest {
+#[bon::builder]
+fn request(
+    #[builder(default = "member")] member: &'_ str,
+    #[builder(into, default = ShareSessionEpoch (0))] epoch: ShareSessionEpoch,
+    #[builder(default = WireUuid :: ZERO)] topic_id: WireUuid,
+    #[builder(default)] acknowledgements: AcknowledgementPresence,
+) -> ShareFetchRequest {
+    let setup = TopicResolutionSetup {
+        member,
+        epoch,
+        topic_id,
+        acknowledgements,
+    };
     let TopicResolutionSetup {
         member,
         epoch,
@@ -119,11 +130,12 @@ async fn share_fetch(
     version: i16,
     request: &ShareFetchRequest,
 ) -> ShareFetchResponse {
-    share_fetch_wire(broker, request, ShareWireSetup {
-        version: krabka_ids::ApiVersion(version),
-        ..Default::default()
-    })
-    .await
+    share_fetch_wire()
+        .broker(broker)
+        .request(request)
+        .version(version)
+        .call()
+        .await
 }
 
 /// The empty record set, as a client decodes it. Kafka's
@@ -163,11 +175,7 @@ async fn drive(
         let response = share_fetch(
             broker,
             case.version,
-            &request(TopicResolutionSetup {
-                member: &member,
-                topic_id,
-                ..Default::default()
-            }),
+            &request().member(&member).topic_id(topic_id).call(),
         )
         .await;
         actual.push((case.version, case.topic, response));
@@ -255,22 +263,18 @@ async fn a_piggybacked_acknowledgement_on_an_unresolved_id_answers_unknown_topic
         let opened = share_fetch(
             &broker,
             version,
-            &request(TopicResolutionSetup {
-                member: &member,
-                topic_id,
-                ..Default::default()
-            }),
+            &request().member(&member).topic_id(topic_id).call(),
         )
         .await;
         let acknowledged = share_fetch(
             &broker,
             version,
-            &request(TopicResolutionSetup {
-                member: &member,
-                epoch: ShareSessionEpoch(1),
-                topic_id,
-                acknowledgements: AcknowledgementPresence::AcceptFirstRecord,
-            }),
+            &request()
+                .member(&member)
+                .epoch(1)
+                .topic_id(topic_id)
+                .acknowledgements(AcknowledgementPresence::AcceptFirstRecord)
+                .call(),
         )
         .await;
         actual.push((topic_id, opened, acknowledged));

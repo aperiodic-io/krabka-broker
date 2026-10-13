@@ -52,17 +52,16 @@ async fn create_topics_returns_the_configs_describe_configs_reports() {
     let (_cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
 
     let create = CreateTopicsRequest {
-        topics: vec![crate::support::topics::creatable_topic_with_configs(
-            crate::support::topics::ConfiguredTopicSetup {
-                name: "t-kip525".into(),
-                configs: vec![CreatableTopicConfig {
+        topics: vec![
+            crate::support::topics::creatable_topic_with_configs()
+                .name("t-kip525".into())
+                .configs(vec![CreatableTopicConfig {
                     name: "retention.ms".into(),
                     value: Some("60000".into()),
                     ..Default::default()
-                }],
-                ..Default::default()
-            },
-        )],
+                }])
+                .call(),
+        ],
         timeout_ms: 5_000,
         ..Default::default()
     };

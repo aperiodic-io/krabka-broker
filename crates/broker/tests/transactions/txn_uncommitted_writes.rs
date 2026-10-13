@@ -26,14 +26,12 @@ use {
             shutdown_cluster,
             topics::AssignedTopicSetup,
             transaction_wire::{
-                AssignedTransactionTopicSetup, TransactionProduceSetup, add_partition_request,
-                coordinator_loading, create_assigned_topic, init_producer_request,
-                initialized_identity, partition_added, partition_leader, produce_fixture,
-                read_committed_through, retry_coordinator,
+                add_partition_request, coordinator_loading, create_assigned_topic,
+                init_producer_request, initialized_identity, partition_added, partition_leader,
+                produce_fixture, read_committed_through, retry_coordinator,
             },
             transactions::{
-                EndTransactionSetup, ProducerIdentity, end_transaction_request,
-                txn_offset_partition, txn_offset_topic,
+                ProducerIdentity, end_transaction_request, txn_offset_partition, txn_offset_topic,
             },
         },
         txn_harness::registered_transaction_cluster,
@@ -94,11 +92,17 @@ async fn leader_of(handle: &BrokerHandle, topic: &str) -> u64 {
 }
 
 async fn create_topic(client: &Client, topic: AssignedTopicSetup) -> WireUuid {
-    create_assigned_topic(client, AssignedTransactionTopicSetup {
-        topic,
-        ..Default::default()
-    })
-    .await
+    create_assigned_topic()
+        .client(client)
+        .topic(topic)
+        .call()
+        .await
+}
+
+fn other_node(coordinator: u64) -> u64 {
+    (1..=3)
+        .find(|node| *node != coordinator)
+        .expect("another broker")
 }
 
 async fn init_producer(connection: &Connection) -> (i64, i16) {
@@ -125,24 +129,22 @@ async fn produce(
     producer: Option<(i64, i16)>,
     values: &[&'static str],
 ) {
-    produce_fixture(
-        TransactionProduceSetup {
-            transactional_id: TID,
-            topic: TOPIC,
-            topic_id,
-            producer: producer.map(ProducerIdentity::from_wire),
-            values,
-        },
-        |request| connection.send(request),
-    )
-    .await;
+    produce_fixture()
+        .transactional_id(TID)
+        .topic(TOPIC)
+        .topic_id(topic_id)
+        .maybe_producer(producer.map(ProducerIdentity::from_wire))
+        .values(values)
+        .send(|request| connection.send(request))
+        .call()
+        .await;
 }
 
 fn end_txn_request((producer_id, epoch): (i64, i16)) -> EndTxnRequest {
-    end_transaction_request(TID, EndTransactionSetup {
-        producer: ProducerIdentity::from_wire((producer_id, epoch)),
-        ..Default::default()
-    })
+    end_transaction_request()
+        .transactional_id(TID)
+        .producer(ProducerIdentity::from_wire((producer_id, epoch)))
+        .call()
 }
 
 /// Commit, and retry while the coordinator answers a retriable error.
@@ -253,14 +255,19 @@ impl RelayedCluster {
             support::listener_pairs(client_listeners, controller_listeners)
         {
             let dir = TempDir::new().expect("tempdir");
-            let mut config = support::broker_config(
-                dir.path(),
-                topology.node_setup(ClusterBootstrapSetup {
-                    index: NodeIndex(index),
-                    ..Default::default()
-                }),
-            )
-            .with_internal_topics_for(3);
+            let node = topology.node_setup(ClusterBootstrapSetup {
+                index: NodeIndex(index),
+                ..Default::default()
+            });
+            let mut config = support::broker_config()
+                .log_dir(dir.path())
+                .index(index)
+                .client_addrs(node.client_addrs)
+                .controller_addrs(node.controller_addrs)
+                .voters(node.voters)
+                .mode(node.mode)
+                .call()
+                .with_internal_topics_for(3);
             config.advertised_listener = relays[index].addr().to_string();
             config.directory_id = uuid::Uuid::from_u128(u128::from(config.node_id.0));
             config.auto_join = false;
@@ -404,9 +411,7 @@ async fn an_end_txn_is_answered_only_once_its_commit_decision_is_replicated() {
         .await;
     // The data partition lives on another broker, so its markers do not go
     // through the coordinator's relay, and it survives the coordinator.
-    let data_node = (1..=3)
-        .find(|node| *node != coordinator)
-        .expect("another broker");
+    let data_node = other_node(coordinator);
     let topic_id = create_topic(
         &admin,
         AssignedTopicSetup::on_replicas(TOPIC, vec![krabka_metadata::NodeId(data_node)]),
@@ -506,9 +511,7 @@ async fn a_transaction_completes_only_once_its_markers_are_committed() {
         config.isr_scan_interval = krabka_units::hours(1);
     })
     .await;
-    let follower = (1..=3)
-        .find(|node| *node != coordinator)
-        .expect("another broker");
+    let follower = other_node(coordinator);
     let topic_id = create_topic(
         &admin,
         AssignedTopicSetup::on_replicas(TOPIC, vec![

@@ -13,10 +13,7 @@ use {
             InitializedRestartFixture, acquired_count, fetch_until_acquired,
             initialized_restart_fixture,
         },
-        support::share::{
-            ShareAck, ShareRecordCount, ShareRecordSeedSetup, ShareSessionSetup,
-            acknowledge_success, rejoin_group,
-        },
+        support::share::{ShareAck, ShareSessionSetup, acknowledge_success, rejoin_group},
     },
     assert2::assert,
 };
@@ -48,10 +45,7 @@ async fn delivery_complete_count_restored_across_restart() {
         _dir,
         log_dir,
         topic: initial,
-    } = initialized_restart_fixture(ShareRecordSeedSetup {
-        count: ShareRecordCount(N),
-    })
-    .await;
+    } = initialized_restart_fixture().count(N).call().await;
 
     let tid;
     {

@@ -9,13 +9,13 @@
 
 use {
     crate::support::{
-        self, OperatorKeysSetup, OperatorSaslSetup,
+        self, OperatorKeysSetup,
         discovery::named_topic_metadata,
         offsets::{delete_records_partition, delete_records_request, delete_records_topic},
         produce::{SinglePartitionProduceSetup, send_batch},
         records::{batch_from_records, value_record},
-        sasl::{ScramAlgorithm, ScramUpsertionSetup, scram_upsertion},
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        sasl::{ScramAlgorithm, scram_upsertion},
+        topics::{creatable_topic, create_topic_request},
     },
     krabka_broker::coordinator::AUDIT_TOPIC,
     krabka_protocol::{
@@ -182,12 +182,9 @@ async fn every_admin_mutation_is_audited() {
 
     let created = p
         .client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: (topic).into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name((topic).into()).call(),
+        ))
         .await
         .expect("CreateTopics");
     assert2::check!(created.topics[0].error_code == 0);
@@ -301,13 +298,16 @@ async fn every_admin_mutation_is_audited() {
     let scram = p
         .client
         .send(AlterUserScramCredentialsRequest {
-            upsertions: vec![scram_upsertion(ScramUpsertionSetup {
-                name: (user).into(),
-                mechanism: ScramAlgorithm::Sha256,
-                salt: bytes::Bytes::from_static(b"audited-salt"),
-                salted_password: bytes::Bytes::from_static(b"audited-salted-password-32-byte"),
-                ..Default::default()
-            })],
+            upsertions: vec![
+                scram_upsertion()
+                    .name((user).into())
+                    .mechanism(ScramAlgorithm::Sha256)
+                    .salt(bytes::Bytes::from_static(b"audited-salt"))
+                    .salted_password(bytes::Bytes::from_static(
+                        b"audited-salted-password-32-byte",
+                    ))
+                    .call(),
+            ],
             ..Default::default()
         })
         .await
@@ -402,14 +402,14 @@ async fn every_admin_mutation_is_audited() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_plain_logins_are_audited_either_way() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let (broker, bootstrap, _config) =
-        support::start_with_operator_keys_sasl(&dir.path().join("data"), OperatorSaslSetup {
-            trust: OperatorKeysSetup {
-                keys: &[],
-                approvers: &[],
-            },
-            users: &[("alice", "alice-secret")],
+    let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl()
+        .dir(&dir.path().join("data"))
+        .trust(OperatorKeysSetup {
+            keys: &[],
+            approvers: &[],
         })
+        .users(&[("alice", "alice-secret")])
+        .call()
         .await;
     broker.wait_until_partition_present(AUDIT_TOPIC, 0).await;
 

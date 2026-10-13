@@ -6,17 +6,12 @@
 
 use {
     crate::{
-        kafka_wire::AutomaticTopicSetup,
         plaintext_wire::CLIENT_ID,
         sasl_wire::{
             create_topic_as_admin, drive_alter_reassignments_sasl_plain,
             start_single_broker_sasl_plaintext_with_users,
         },
-        support::{
-            acl::{TopicAclSetup, topic_acl_record},
-            retry::retry_until,
-            topics::ConfiguredTopicSetup,
-        },
+        support::{acl::topic_acl_record, retry::retry_until, topics::configured_topic_setup},
     },
     assert2::assert,
 };
@@ -39,11 +34,12 @@ async fn non_super_user_denied() {
     // irrelevant — any non-empty `image.acls` flips the shim off and forces
     // the authorizer to evaluate every request.
     handle
-        .submit_metadata_record_for_test(topic_acl_record(TopicAclSetup {
-            topic: "__compat_shim_disable__",
-            principal: "User:admin",
-            ..Default::default()
-        }))
+        .submit_metadata_record_for_test(
+            topic_acl_record()
+                .topic("__compat_shim_disable__")
+                .principal("User:admin")
+                .call(),
+        )
         .await
         .expect("seed dummy ACL");
 
@@ -55,15 +51,12 @@ async fn non_super_user_denied() {
         .wait_for_image(|img| img.all_acls().next().is_some())
         .await;
 
-    create_topic_as_admin(addr, AutomaticTopicSetup {
-        client_id: CLIENT_ID,
-        topic: ConfiguredTopicSetup {
-            name: "foo".to_string(),
-            configs: vec![],
-            ..Default::default()
-        },
-    })
-    .await;
+    create_topic_as_admin()
+        .addr(addr)
+        .client_id(CLIENT_ID)
+        .topic(configured_topic_setup().name("foo").call())
+        .call()
+        .await;
     handle.wait_until_partition_present("foo", 0).await;
 
     // Retry up to 5s to absorb raft apply latency on slow runners.

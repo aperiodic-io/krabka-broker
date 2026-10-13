@@ -59,6 +59,14 @@ pub(crate) fn test_partition(hw_advance_notify: Arc<Notify>) -> (Partition, temp
     (p, dir)
 }
 
+/// Update a test partition's log configuration without copying the log-lock boilerplate.
+pub(crate) fn update_log_config(partition: &Partition, update: impl FnOnce(&mut LogConfig)) {
+    let log = partition.log.lock().expect("partition log lock");
+    let mut config = log.config_snapshot();
+    update(&mut config);
+    log.set_config(config);
+}
+
 /// Whether a commit fixture keeps the partition's initial leader or installs the test term.
 #[derive(Clone, Copy, Default)]
 pub(crate) enum CommitFixtureLeader {
@@ -74,9 +82,15 @@ pub(crate) struct CommitPartitionSetup {
 }
 
 /// A real temporary partition with the requested commit frontier and its own notifier.
+#[bon::builder]
 pub(crate) async fn commit_partition(
-    setup: CommitPartitionSetup,
+    #[builder(into, default)] high_watermark: krabka_log::Offset,
+    #[builder(default)] leader: CommitFixtureLeader,
 ) -> (Arc<Partition>, tempfile::TempDir, Arc<Notify>) {
+    let setup = CommitPartitionSetup {
+        high_watermark,
+        leader,
+    };
     let notify = Arc::new(Notify::new());
     let (partition, directory) = test_partition(Arc::clone(&notify));
     let partition = Arc::new(partition);
@@ -131,7 +145,10 @@ pub(crate) async fn install_three_replica_isr(partition: &Partition) {
 }
 
 pub(super) fn append_records(p: &Partition, setup: PartitionRecordsSetup) {
-    let mut batch = partition_records_batch(setup);
+    let mut batch = partition_records_batch()
+        .count(setup.count)
+        .timestamp(setup.timestamp)
+        .call();
     p.log
         .lock()
         .expect("log mutex")

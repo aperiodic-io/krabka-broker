@@ -5,10 +5,14 @@
 //! log end offset, and that a `kafka-console-consumer` then recovers. Its
 //! divergence recipe is specific to this direction, so it has its own file.
 
-use crate::{
-    docker::{KAFKA_IMAGE, docker_run_kafka_tool_with_image},
-    dump_log::grep_base_offsets,
-    test_support::truncation::{prelude::*, *},
+use {
+    crate::{
+        docker::{KAFKA_IMAGE, docker_run_kafka_tool_with_image},
+        dump_log::grep_base_offsets,
+        test_support::truncation::*,
+    },
+    krabka_metadata::{LeaderEpoch, MetadataRecord},
+    std::time::{Duration, Instant},
 };
 
 /// Recreates a shorter Krabka-led suffix, then verifies the JVM follower
@@ -38,15 +42,14 @@ async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     eprintln!("KRABKA[kip320] partition before divergence: {pr:?}");
 
     let jvm_epoch = LeaderEpoch(pr.leader_epoch.0 + 1);
-    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(single_leader_record(
-        &pr,
-        SingleLeaderSetup {
-            topic: TOPIC,
-            leader: krabka_broker::NodeId(3),
-            epoch: jvm_epoch,
-            ..Default::default()
-        },
-    )))
+    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(
+        single_leader_record()
+            .previous(&pr)
+            .topic(TOPIC)
+            .leader(3)
+            .epoch(jvm_epoch)
+            .call(),
+    ))
     .await
     .expect("promote JVM broker for divergent suffix");
     wait_for_described_leader(&bootstrap_all, TOPIC, 3, LEADER_WAIT).await;
@@ -73,12 +76,15 @@ async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     // the assignment and directory vector intact so this record changes only
     // leadership/epoch state.
     let parked_epoch = LeaderEpoch(jvm_epoch.0 + 1);
-    let forged = MetadataRecord::V1Partition(single_leader_record(&pr, SingleLeaderSetup {
-        topic: TOPIC,
-        leader: krabka_broker::NodeId(99),
-        epoch: parked_epoch,
-        partition_epoch_delta: PartitionEpochDelta(2),
-    }));
+    let forged = MetadataRecord::V1Partition(
+        single_leader_record()
+            .previous(&pr)
+            .topic(TOPIC)
+            .leader(99)
+            .epoch(parked_epoch)
+            .partition_epoch_delta(2)
+            .call(),
+    );
     c1.submit_metadata_record_for_test(forged)
         .await
         .expect("inject dead-leader PartitionRecord");
@@ -119,12 +125,14 @@ async fn kip320_jvm_follower_truncates_from_krabka_leader() {
     // Restore Krabka broker 1 as the leader at the next epoch with the JVM
     // follower (3) back in the replica set so it re-fetches and detects
     // divergence.
-    let restore = MetadataRecord::V1Partition(single_leader_record(&pr, SingleLeaderSetup {
-        topic: TOPIC,
-        epoch: LeaderEpoch(parked_epoch.0 + 1),
-        partition_epoch_delta: PartitionEpochDelta(3),
-        ..Default::default()
-    }));
+    let restore = MetadataRecord::V1Partition(
+        single_leader_record()
+            .previous(&pr)
+            .topic(TOPIC)
+            .epoch(parked_epoch.0 + 1)
+            .partition_epoch_delta(3)
+            .call(),
+    );
     c1.submit_metadata_record_for_test(restore)
         .await
         .expect("restore Krabka leader");

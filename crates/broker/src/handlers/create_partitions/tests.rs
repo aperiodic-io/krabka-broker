@@ -10,12 +10,12 @@ use {
         handlers::{
             RequestContext,
             create_partitions::test_support::{
-                PartitionMutation, PartitionTopicSetup, SeedTopicSetup, VERSION, assn,
-                expected_response, expected_result, request, seed_controller_quota, seed_topic,
-                topic_req,
+                PartitionMutation, VERSION, assn, expected_response, expected_result, request,
+                seed_controller_quota, seed_topic, topic_req,
             },
             test_support::{
-                TopicPartitionCount, replica_availability, replica_nodes_from_partitions,
+                ALL_BROKERS_FENCED_PARTITION_ERROR, assigned_partition_record,
+                invalid_manual_assignment, replica_availability,
             },
         },
         test_support::{
@@ -50,22 +50,44 @@ struct PartitionRowsCaseSetup {
     expected: Vec<CreatePartitionsTopicResult>,
 }
 
+#[bon::builder]
 async fn check_topic_rows(
     broker: &Broker,
     ctx: &RequestContext<'_>,
-    setup: PartitionRowsCaseSetup,
+    #[builder(default)] topics: Vec<
+        krabka_protocol::owned::create_partitions_request::CreatePartitionsTopic,
+    >,
+    #[builder(default)] mutation: PartitionMutation,
+    #[builder(default)] expected: Vec<CreatePartitionsTopicResult>,
 ) {
+    let setup = PartitionRowsCaseSetup {
+        topics,
+        mutation,
+        expected,
+    };
     let response = drive(broker, &request(setup.topics, setup.mutation), ctx).await;
     let expected = expected_response(setup.expected);
     assert!(response == expected);
 }
 
 macro_rules! seeded_partition_topic {
-    (($handle:ident, $directory:ident, $broker:ident), $setup:expr) => {
+    (($handle:ident, $directory:ident, $broker:ident), $name:expr $(, partitions = $partitions:expr)?) => {
         let ($handle, $directory) =
             start_broker(std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
-        seed_topic(&$handle, $setup).await;
+        seed_topic()
+            .handle(&$handle)
+            .name($name)
+            $(.partitions($partitions))?
+            .call()
+            .await;
         let $broker = $handle.broker_arc_for_test();
+    };
+}
+
+macro_rules! seeded_admin_partition_topic {
+    (($handle:ident, $directory:ident, $broker:ident), ($principal:ident, $peer:ident), $name:expr $(, partitions = $partitions:expr)?) => {
+        seeded_partition_topic!(($handle, $directory, $broker), $name $(, partitions = $partitions)?);
+        request_identity!(($principal, $peer), principal("admin"));
     };
 }
 
@@ -73,59 +95,42 @@ macro_rules! seeded_partition_topic {
 async fn handle_denies_topic_alter_for_each_topic() {
     broker_fixture!((broker_handle, _dir, broker), deny_all);
     request_identity!((p, peer), principal("alice"));
-    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
-        topics: vec![
-            topic_req(PartitionTopicSetup {
-                name: "orders",
-                count: crate::handlers::test_support::TopicPartitionCount(2),
-                ..Default::default()
-            }),
-            topic_req(PartitionTopicSetup {
-                name: "payments",
-                count: crate::handlers::test_support::TopicPartitionCount(2),
-                ..Default::default()
-            }),
-        ],
-        expected: vec![
+    check_topic_rows()
+        .broker(&broker)
+        .ctx(&test_context(&p, &peer))
+        .topics(vec![
+            topic_req().name("orders").count(2).call(),
+            topic_req().name("payments").count(2).call(),
+        ])
+        .expected(vec![
             expected_result("orders", codes::TOPIC_AUTHORIZATION_FAILED, None),
             expected_result("payments", codes::TOPIC_AUTHORIZATION_FAILED, None),
-        ],
-        ..Default::default()
-    })
-    .await;
+        ])
+        .call()
+        .await;
     broker_handle.shutdown().await;
 }
 
 #[tokio::test]
 async fn handle_reports_unknown_topic_and_rejects_same_partition_count() {
-    seeded_partition_topic!((broker_handle, _dir, broker), SeedTopicSetup {
-        name: "stable",
-        ..Default::default()
-    });
-    request_identity!((p, peer), principal("admin"));
-    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
-        topics: vec![
-            topic_req(PartitionTopicSetup {
-                name: "missing",
-                ..Default::default()
-            }),
-            topic_req(PartitionTopicSetup {
-                name: "stable",
-                count: crate::handlers::test_support::TopicPartitionCount(2),
-                ..Default::default()
-            }),
-        ],
-        expected: vec![
+    seeded_admin_partition_topic!((broker_handle, _dir, broker), (p, peer), "stable");
+    check_topic_rows()
+        .broker(&broker)
+        .ctx(&test_context(&p, &peer))
+        .topics(vec![
+            topic_req().name("missing").call(),
+            topic_req().name("stable").count(2).call(),
+        ])
+        .expected(vec![
             expected_result("missing", codes::UNKNOWN_TOPIC_OR_PARTITION, None),
             expected_result(
                 "stable",
                 codes::INVALID_PARTITIONS,
                 Some("Topic already has 2 partition(s).".into()),
             ),
-        ],
-        ..Default::default()
-    })
-    .await;
+        ])
+        .call()
+        .await;
     assert!(
         broker_handle
             .controller_image_for_test()
@@ -138,20 +143,20 @@ async fn handle_reports_unknown_topic_and_rejects_same_partition_count() {
 
 #[tokio::test]
 async fn validate_only_reports_success_without_adding_partitions() {
-    seeded_partition_topic!(
+    seeded_admin_partition_topic!(
         (broker_handle, _dir, broker),
-        SeedTopicSetup::single_partition("dry-run")
+        (p, peer),
+        "dry-run",
+        partitions = 1
     );
-    request_identity!((p, peer), principal("admin"));
-    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
-        topics: vec![topic_req(PartitionTopicSetup {
-            name: "dry-run",
-            ..Default::default()
-        })],
-        expected: vec![expected_result("dry-run", codes::NONE, None)],
-        mutation: PartitionMutation::Validate,
-    })
-    .await;
+    check_topic_rows()
+        .broker(&broker)
+        .ctx(&test_context(&p, &peer))
+        .topics(vec![topic_req().name("dry-run").call()])
+        .mutation(PartitionMutation::Validate)
+        .expected(vec![expected_result("dry-run", codes::NONE, None)])
+        .call()
+        .await;
     assert!(
         broker_handle
             .controller_image_for_test()
@@ -164,21 +169,24 @@ async fn validate_only_reports_success_without_adding_partitions() {
 
 #[tokio::test]
 async fn handle_adds_new_partitions_and_preserves_response_identity() {
-    seeded_partition_topic!(
+    seeded_admin_partition_topic!(
         (broker_handle, _dir, broker),
-        SeedTopicSetup::single_partition("grow")
+        (p, peer),
+        "grow",
+        partitions = 1
     );
-    request_identity!((p, peer), principal("admin"));
-    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
-        topics: vec![topic_req(PartitionTopicSetup {
-            name: "grow",
-            assignments: Some(vec![assn(&[1]), assn(&[1])]),
-            ..Default::default()
-        })],
-        expected: vec![expected_result("grow", codes::NONE, None)],
-        ..Default::default()
-    })
-    .await;
+    check_topic_rows()
+        .broker(&broker)
+        .ctx(&test_context(&p, &peer))
+        .topics(vec![
+            topic_req()
+                .name("grow")
+                .assignments(vec![assn(&[1]), assn(&[1])])
+                .call(),
+        ])
+        .expected(vec![expected_result("grow", codes::NONE, None)])
+        .call()
+        .await;
     assert!(
         broker_handle
             .controller_image_for_test()
@@ -193,7 +201,8 @@ async fn handle_adds_new_partitions_and_preserves_response_identity() {
 async fn handle_rejects_an_unplaceable_new_diskless_partition() {
     seeded_partition_topic!(
         (broker_handle, _dir, broker),
-        SeedTopicSetup::single_partition("diskless-grow")
+        "diskless-grow",
+        partitions = 1
     );
     broker_handle
         .broker_arc_for_test()
@@ -209,11 +218,13 @@ async fn handle_rejects_an_unplaceable_new_diskless_partition() {
         .await
         .expect("mark topic diskless");
     let req = request(
-        vec![topic_req(PartitionTopicSetup {
-            name: "diskless-grow",
-            count: crate::handlers::test_support::TopicPartitionCount(2),
-            assignments: Some(vec![assn(&[1])]),
-        })],
+        vec![
+            topic_req()
+                .name("diskless-grow")
+                .count(2)
+                .maybe_assignments(Some(vec![assn(&[1])]))
+                .call(),
+        ],
         PartitionMutation::Apply,
     );
 
@@ -236,31 +247,21 @@ async fn handle_rejects_an_unplaceable_new_diskless_partition() {
 
 #[tokio::test]
 async fn strict_create_partitions_rejects_after_quota_exhaustion() {
-    seeded_partition_topic!((broker_handle, _dir, broker), SeedTopicSetup {
-        name: "metered",
-        ..Default::default()
-    });
+    seeded_partition_topic!((broker_handle, _dir, broker), "metered");
     seed_controller_quota(&broker_handle, 2.0).await;
     request_identity!((p, peer), principal("admin"));
-    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
-        topics: vec![topic_req(PartitionTopicSetup {
-            name: "metered",
-            count: crate::handlers::test_support::TopicPartitionCount(5),
-            ..Default::default()
-        })],
-        expected: vec![expected_result("metered", codes::NONE, None)],
-        ..Default::default()
-    })
-    .await;
+    check_topic_rows()
+        .broker(&broker)
+        .ctx(&test_context(&p, &peer))
+        .topics(vec![topic_req().name("metered").count(5).call()])
+        .expected(vec![expected_result("metered", codes::NONE, None)])
+        .call()
+        .await;
 
     let rejected = drive(
         &broker,
         &request(
-            vec![topic_req(PartitionTopicSetup {
-                name: "metered",
-                count: crate::handlers::test_support::TopicPartitionCount(6),
-                ..Default::default()
-            })],
+            vec![topic_req().name("metered").count(6).call()],
             PartitionMutation::Apply,
         ),
         &test_context(&p, &peer),
@@ -294,12 +295,13 @@ async fn strict_create_partitions_rejects_after_quota_exhaustion() {
 #[tokio::test]
 async fn a_conflicting_growth_refunds_only_its_obsolete_partition_delta() {
     for concurrent_count in [9, 10] {
-        seeded_partition_topic!(
+        seeded_admin_partition_topic!(
             (broker_handle, _dir, broker),
-            SeedTopicSetup::single_partition("metered")
+            (p, peer),
+            "metered",
+            partitions = 1
         );
         seed_controller_quota(&broker_handle, 2.0).await;
-        request_identity!((p, peer), principal("admin"));
         let ctx = test_context(&p, &peer);
         let stale = broker.controller.current_image();
         let quota = Mutex::new(ctx.controller_mutation_quota(&broker, &stale, true));
@@ -311,20 +313,12 @@ async fn a_conflicting_growth_refunds_only_its_obsolete_partition_delta() {
             prior_delay: Time::ZERO,
             validate_only: false,
         };
-        let topic = topic_req(PartitionTopicSetup {
-            name: "metered",
-            count: TopicPartitionCount(10),
-            ..Default::default()
-        });
+        let topic = topic_req().name("metered").count(10).call();
         let concurrent = principal("unmetered");
         let response = drive(
             &broker,
             &request(
-                vec![topic_req(PartitionTopicSetup {
-                    name: "metered",
-                    count: TopicPartitionCount(concurrent_count),
-                    ..Default::default()
-                })],
+                vec![topic_req().name("metered").count(concurrent_count).call()],
                 PartitionMutation::Apply,
             ),
             &test_context(&concurrent, &peer),
@@ -360,11 +354,7 @@ async fn a_conflicting_growth_refunds_only_its_obsolete_partition_delta() {
             let answer = drive(
                 &broker,
                 &request(
-                    vec![topic_req(PartitionTopicSetup {
-                        name: "metered",
-                        count: TopicPartitionCount(count),
-                        ..Default::default()
-                    })],
+                    vec![topic_req().name("metered").count(count).call()],
                     PartitionMutation::Apply,
                 ),
                 &ctx,
@@ -438,17 +428,7 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
             (n(4), vec![n(4)]),
             (n(3), vec![n(3)]),
         ]),
-        (
-            &[2, 3],
-            &[],
-            &[&[2, 3]],
-            codes::INVALID_REPLICA_ASSIGNMENT,
-            Some(
-                "All brokers specified in the manual partition assignment for partition 1 are \
-                 fenced or in controlled shutdown.",
-            ),
-            vec![],
-        ),
+        invalid_manual_assignment(&[2, 3], &[&[2, 3]], ALL_BROKERS_FENCED_PARTITION_ERROR),
         (
             &[2],
             &[3],
@@ -481,11 +461,13 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
         let broker = broker_handle.broker_arc_for_test();
         let count = 1 + i32::try_from(lists.len()).expect("count");
         let req = request(
-            vec![topic_req(PartitionTopicSetup {
-                name: "grow",
-                count: crate::handlers::test_support::TopicPartitionCount(count),
-                assignments: Some(lists.iter().map(|ids| assn(ids)).collect()),
-            })],
+            vec![
+                topic_req()
+                    .name("grow")
+                    .count(count)
+                    .maybe_assignments(Some(lists.iter().map(|ids| assn(ids)).collect()))
+                    .call(),
+            ],
             PartitionMutation::Apply,
         );
 
@@ -506,20 +488,16 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
             .into_iter()
             .zip(lists)
             .zip(1..)
-            .map(
-                |(((leader, isr), replicas), partition)| krabka_metadata::PartitionRecord {
-                    topic: "grow".into(),
+            .map(|(((leader, isr), replicas), partition)| {
+                assigned_partition_record(
+                    "grow",
                     partition,
                     leader,
-                    replicas: replica_nodes_from_partitions(replicas),
+                    replicas,
                     isr,
-                    leader_epoch: krabka_metadata::LeaderEpoch(0),
-                    adding_replicas: vec![],
-                    removing_replicas: vec![],
-                    directories: vec![],
-                    partition_epoch: 0,
-                },
-            )
+                    krabka_metadata::LeaderEpoch(0),
+                )
+            })
             .collect::<Vec<_>>();
         check!(
             added == expected_records,
@@ -573,11 +551,7 @@ async fn automatic_growth_takes_fenced_brokers_last_and_words_refusals_like_the_
         let resp = drive(
             &broker,
             &request(
-                vec![topic_req(PartitionTopicSetup {
-                    name: "grow",
-                    count: crate::handlers::test_support::TopicPartitionCount(5),
-                    ..Default::default()
-                })],
+                vec![topic_req().name("grow").count(5).call()],
                 PartitionMutation::Apply,
             ),
             &test_context(&principal("admin"), &peer()),
@@ -641,10 +615,7 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
         expected_result(name, error_code, message.map(str::to_owned))
     }
     let duplicate = || row("t", codes::INVALID_REQUEST, Some("Duplicate topic name."));
-    let four_partition_growth = topic_req(PartitionTopicSetup {
-        count: TopicPartitionCount(4),
-        ..Default::default()
-    });
+    let four_partition_growth = topic_req().count(4).call();
     let duplicate_growth = vec![four_partition_growth.clone(), four_partition_growth.clone()];
     let cases = [
         (
@@ -655,13 +626,7 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
         ),
         (
             "two different growths",
-            vec![
-                four_partition_growth.clone(),
-                topic_req(PartitionTopicSetup {
-                    count: crate::handlers::test_support::TopicPartitionCount(6),
-                    ..Default::default()
-                }),
-            ],
+            vec![four_partition_growth.clone(), topic_req().count(6).call()],
             PartitionMutation::Apply,
             vec![duplicate()],
         ),
@@ -674,10 +639,7 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
         (
             "a duplicate answers ahead of the other rows",
             vec![
-                topic_req(PartitionTopicSetup {
-                    name: "u",
-                    ..Default::default()
-                }),
+                topic_req().name("u").call(),
                 four_partition_growth.clone(),
                 four_partition_growth.clone(),
             ],
@@ -689,10 +651,7 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
         ),
         (
             "a count below the current one",
-            vec![topic_req(PartitionTopicSetup {
-                count: crate::handlers::test_support::TopicPartitionCount(1),
-                ..Default::default()
-            })],
+            vec![topic_req().count(1).call()],
             PartitionMutation::Apply,
             vec![row(
                 "t",
@@ -702,11 +661,12 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
         ),
         (
             "fewer assignments than new partitions",
-            vec![topic_req(PartitionTopicSetup {
-                count: crate::handlers::test_support::TopicPartitionCount(4),
-                assignments: Some(vec![assn(&[1])]),
-                ..Default::default()
-            })],
+            vec![
+                topic_req()
+                    .count(4)
+                    .maybe_assignments(Some(vec![assn(&[1])]))
+                    .call(),
+            ],
             PartitionMutation::Apply,
             vec![row(
                 "t",
@@ -723,7 +683,7 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
     let mut expected = Vec::with_capacity(cases.len());
     for (label, topics, mutation, results) in cases {
         let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
-        seed_topic(&broker_handle, SeedTopicSetup::default()).await;
+        seed_topic().handle(&broker_handle).call().await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((p, peer), principal("admin"));
 
@@ -748,17 +708,11 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
 /// new indices; the other must see the committed count on its next attempt.
 #[tokio::test]
 async fn concurrent_growth_revalidates_partition_count_before_append() {
-    seeded_partition_topic!(
-        (handle, _dir, broker),
-        SeedTopicSetup::single_partition("t")
-    );
+    seeded_partition_topic!((handle, _dir, broker), "t", partitions = 1);
     let p = principal("admin");
     let h = peer();
     let ctx = test_context(&p, &h);
-    let req = request(
-        vec![topic_req(PartitionTopicSetup::default())],
-        PartitionMutation::Apply,
-    );
+    let req = request(vec![topic_req().call()], PartitionMutation::Apply);
     let (first, second) = tokio::join!(drive(&broker, &req, &ctx), drive(&broker, &req, &ctx));
     let mut got = [first, second];
     got.sort_unstable_by_key(|response| response.results[0].error_code);

@@ -22,8 +22,8 @@ mod support;
 use {
     crate::support::{
         classic::{
-            ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId,
-            classic_join_request, classic_sync_request, join_protocol, sync_assignment,
+            ClassicTimeouts, GenerationId, classic_join_request, classic_sync_request,
+            join_protocol, sync_assignment,
         },
         client::connect_owned,
     },
@@ -45,19 +45,28 @@ struct AssignedSyncSetup<'a> {
     assignment: &'static [u8],
 }
 
+#[bon::builder]
 fn sync_request(
-    setup: AssignedSyncSetup<'_>,
+    #[builder(default = "g")] group_id: &'_ str,
+    #[builder(into, default)] generation_id: GenerationId,
+    #[builder(default)] member_id: &'_ str,
+    #[builder(default)] assignment: &'static [u8],
 ) -> krabka_protocol::owned::sync_group_request::SyncGroupRequest {
-    classic_sync_request(ClassicSyncSetup {
-        group_id: setup.group_id.to_owned(),
-        generation_id: setup.generation_id,
-        member_id: setup.member_id.to_owned(),
-        assignments: vec![sync_assignment(
+    let setup = AssignedSyncSetup {
+        group_id,
+        generation_id,
+        member_id,
+        assignment,
+    };
+    classic_sync_request()
+        .group_id(setup.group_id.to_owned())
+        .generation_id(setup.generation_id)
+        .member_id(setup.member_id.to_owned())
+        .assignments(vec![sync_assignment(
             setup.member_id.to_owned(),
             Bytes::from_static(setup.assignment),
-        )],
-        ..Default::default()
-    })
+        )])
+        .call()
 }
 
 fn assert_described_group(resp: &DescribeGroupsResponse) {
@@ -134,19 +143,19 @@ use crate::support::start_group_coordinator as start_broker;
 fn join_request(group_id: &str, member_id: &str, metadata: &'static [u8]) -> JoinGroupRequest {
     JoinGroupRequest {
         group_instance_id: None,
-        ..classic_join_request(ClassicJoinSetup {
-            group_id: group_id.to_string(),
-            member_id: member_id.to_string(),
-            timeouts: ClassicTimeouts {
+        ..classic_join_request()
+            .group_id(group_id.to_string())
+            .member_id(member_id.to_string())
+            .timeouts(ClassicTimeouts {
                 session: krabka_units::millis(10_000),
                 ..Default::default()
-            },
-            protocol_type: "consumer".to_string(),
-            protocols: vec![join_protocol(
+            })
+            .protocol_type("consumer".to_string())
+            .protocols(vec![join_protocol(
                 "range".to_string(),
                 Bytes::from_static(metadata),
-            )],
-        })
+            )])
+            .call()
     }
 }
 
@@ -201,12 +210,14 @@ async fn describe_groups_reports_member_metadata_and_protocol_name() {
 
     // ── SyncGroup: leader supplies its own assignment. ──
     let r3 = client
-        .send(sync_request(AssignedSyncSetup {
-            group_id,
-            generation_id: GenerationId(generation_id),
-            member_id: &member_id,
-            assignment: ASSIGN,
-        }))
+        .send(
+            sync_request()
+                .group_id(group_id)
+                .generation_id(generation_id)
+                .member_id(&member_id)
+                .assignment(ASSIGN)
+                .call(),
+        )
         .await
         .expect("SyncGroup must round-trip");
     assert!(
@@ -279,12 +290,14 @@ async fn describe_groups_matches_real_kafka_range_subscription() {
 
     // SyncGroup: leader supplies the REAL captured assignment bytes.
     let r3 = client
-        .send(sync_request(AssignedSyncSetup {
-            group_id,
-            generation_id: GenerationId(generation_id),
-            member_id: &member_id,
-            assignment: REAL_KAFKA_ASSIGNMENT,
-        }))
+        .send(
+            sync_request()
+                .group_id(group_id)
+                .generation_id(generation_id)
+                .member_id(&member_id)
+                .assignment(REAL_KAFKA_ASSIGNMENT)
+                .call(),
+        )
         .await
         .expect("SyncGroup must round-trip");
     assert!(

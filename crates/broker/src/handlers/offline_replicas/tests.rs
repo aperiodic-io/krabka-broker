@@ -5,9 +5,9 @@
 
 use {
     super::*,
-    crate::test_support::{InSyncPartitionSetup, broker_registration, in_sync_partition},
+    crate::test_support::{broker_registration, in_sync_partition},
     assert2::assert,
-    krabka_metadata::{BrokerEndpoint, LeaderEpoch, MetadataRecord, TopicRecord},
+    krabka_metadata::{BrokerEndpoint, MetadataRecord, TopicRecord},
     uuid::Uuid,
 };
 
@@ -38,12 +38,11 @@ fn registration_on(node_id: NodeId, log_dirs: Vec<Uuid>, listener: &str) -> Meta
 }
 
 fn partition(replicas: &[NodeId], directories: &[Uuid]) -> PartitionRecord {
-    in_sync_partition(InSyncPartitionSetup {
-        replicas: replicas.to_vec(),
-        directories: directories.to_vec(),
-        leader_epoch: LeaderEpoch(3),
-        ..Default::default()
-    })
+    in_sync_partition()
+        .leader_epoch(3)
+        .replicas(replicas.to_vec())
+        .directories(directories.to_vec())
+        .call()
 }
 
 /// Image with `t-0` on `replicas`/`directories` and a registration for every
@@ -88,7 +87,25 @@ struct Case<E> {
     expected: E,
 }
 
-fn replica_case<E>(expected: E, setup: ReplicaCaseSetup) -> Case<E> { Case { setup, expected } }
+#[bon::builder]
+fn replica_case<E>(
+    expected: E,
+    #[builder(default = "healthy replicas")] name: &'static str,
+    #[builder(default = vec ! [(NodeId (1) , vec ! [dir (0x600d)]) , (NodeId (2) , vec ! [dir (0x600d)])])]
+    registrations: Vec<(NodeId, Vec<Uuid>)>,
+    #[builder(default = vec ! [NodeId (1) , NodeId (2)])] replicas: Vec<NodeId>,
+    #[builder(default = vec ! [dir (0x600d) , dir (0x600d)])] directories: Vec<Uuid>,
+    #[builder(default)] unavailable: Vec<NodeId>,
+) -> Case<E> {
+    let setup = ReplicaCaseSetup {
+        name,
+        registrations,
+        replicas,
+        directories,
+        unavailable,
+    };
+    Case { setup, expected }
+}
 
 impl<E> Case<E> {
     fn image(&self) -> MetadataImage {
@@ -120,55 +137,55 @@ fn check_replica_cases<E: std::fmt::Debug + PartialEq>(
 fn offline_replicas_matches_kafka_replica_state_rules() {
     let (good, bad) = (dir(0x600d), dir(0xbad));
     let cases = vec![
-        replica_case(vec![], ReplicaCaseSetup {
-            name: "every replica registered, online dir, unfenced",
-            registrations: vec![(NodeId(1), vec![good, bad]), (NodeId(2), vec![good])],
-            ..Default::default()
-        }),
-        replica_case(vec![1], ReplicaCaseSetup {
-            name: "replica on a dir the registration no longer lists",
-            directories: vec![bad, good],
-            ..Default::default()
-        }),
-        replica_case(vec![2], ReplicaCaseSetup {
-            name: "fenced broker",
-            unavailable: vec![NodeId(2)],
-            ..Default::default()
-        }),
-        replica_case(vec![2], ReplicaCaseSetup {
-            name: "unregistered broker",
-            registrations: vec![(NodeId(1), vec![good])],
-            ..Default::default()
-        }),
-        replica_case(vec![], ReplicaCaseSetup {
-            name: "unassigned directory id is online",
-            directories: vec![Uuid::nil(), Uuid::nil()],
-            ..Default::default()
-        }),
-        replica_case(vec![1], ReplicaCaseSetup {
-            name: "registration whose last online dir was retired offlines its replicas",
-            registrations: vec![(NodeId(1), vec![]), (NodeId(2), vec![good])],
-            directories: vec![bad, good],
-            ..Default::default()
-        }),
-        replica_case(vec![], ReplicaCaseSetup {
-            name: "registration with no online dir keeps an unassigned replica online",
-            registrations: vec![(NodeId(1), vec![]), (NodeId(2), vec![good])],
-            directories: vec![Uuid::nil(), good],
-            ..Default::default()
-        }),
-        replica_case(vec![], ReplicaCaseSetup {
-            name: "missing directory slot is online",
-            directories: vec![],
-            ..Default::default()
-        }),
-        replica_case(vec![2, 1], ReplicaCaseSetup {
-            name: "offline dir and fenced peer are both reported, in replica order",
-            replicas: vec![NodeId(2), NodeId(1)],
-            directories: vec![good, bad],
-            unavailable: vec![NodeId(2)],
-            ..Default::default()
-        }),
+        replica_case()
+            .expected(vec![])
+            .name("every replica registered, online dir, unfenced")
+            .registrations(vec![(NodeId(1), vec![good, bad]), (NodeId(2), vec![good])])
+            .call(),
+        replica_case()
+            .expected(vec![1])
+            .name("replica on a dir the registration no longer lists")
+            .directories(vec![bad, good])
+            .call(),
+        replica_case()
+            .expected(vec![2])
+            .name("fenced broker")
+            .unavailable(vec![NodeId(2)])
+            .call(),
+        replica_case()
+            .expected(vec![2])
+            .name("unregistered broker")
+            .registrations(vec![(NodeId(1), vec![good])])
+            .call(),
+        replica_case()
+            .expected(vec![])
+            .name("unassigned directory id is online")
+            .directories(vec![Uuid::nil(), Uuid::nil()])
+            .call(),
+        replica_case()
+            .expected(vec![1])
+            .name("registration whose last online dir was retired offlines its replicas")
+            .registrations(vec![(NodeId(1), vec![]), (NodeId(2), vec![good])])
+            .directories(vec![bad, good])
+            .call(),
+        replica_case()
+            .expected(vec![])
+            .name("registration with no online dir keeps an unassigned replica online")
+            .registrations(vec![(NodeId(1), vec![]), (NodeId(2), vec![good])])
+            .directories(vec![Uuid::nil(), good])
+            .call(),
+        replica_case()
+            .expected(vec![])
+            .name("missing directory slot is online")
+            .directories(vec![])
+            .call(),
+        replica_case()
+            .expected(vec![2, 1])
+            .name("offline dir and fenced peer are both reported, in replica order")
+            .replicas(vec![NodeId(2), NodeId(1)])
+            .directories(vec![good, bad])
+            .unavailable(vec![NodeId(2)])
+            .call(),
     ];
 
     check_replica_cases(cases, offline_replicas);
@@ -191,45 +208,39 @@ fn offline_replicas_matches_kafka_replica_state_rules() {
 fn a_replica_on_a_dead_log_dir_neither_leads_nor_stays_in_the_isr() {
     let (good, bad) = (dir(0x600d), dir(0xbad));
     let cases = vec![
-        replica_case(
-            availability(NO_LEADER_ID, vec![], vec![1]),
-            ReplicaCaseSetup {
-                name: "sole replica on a failed log dir",
-                registrations: vec![(NodeId(1), vec![good])],
-                replicas: vec![NodeId(1)],
-                directories: vec![bad],
-                ..Default::default()
-            },
-        ),
-        replica_case(
-            availability(NO_LEADER_ID, vec![2], vec![1]),
-            ReplicaCaseSetup {
-                name: "leader on a failed log dir, follower healthy",
-                directories: vec![bad, good],
-                ..Default::default()
-            },
-        ),
-        replica_case(availability(1, vec![1], vec![]), ReplicaCaseSetup {
-            name: "sole replica on a directory nobody has assigned yet",
-            registrations: vec![(NodeId(1), vec![good])],
-            replicas: vec![NodeId(1)],
-            directories: vec![Uuid::nil()],
-            ..Default::default()
-        }),
-        replica_case(availability(1, vec![1, 2], vec![2]), ReplicaCaseSetup {
-            name: "fenced follower keeps its ISR seat",
-            unavailable: vec![NodeId(2)],
-            ..Default::default()
-        }),
-        replica_case(availability(1, vec![1, 2], vec![2]), ReplicaCaseSetup {
-            name: "unregistered follower keeps its ISR seat",
-            registrations: vec![(NodeId(1), vec![good])],
-            ..Default::default()
-        }),
-        replica_case(availability(1, vec![1, 2], vec![]), ReplicaCaseSetup {
-            name: "healthy partition is untouched",
-            ..Default::default()
-        }),
+        replica_case()
+            .expected(availability(NO_LEADER_ID, vec![], vec![1]))
+            .name("sole replica on a failed log dir")
+            .registrations(vec![(NodeId(1), vec![good])])
+            .replicas(vec![NodeId(1)])
+            .directories(vec![bad])
+            .call(),
+        replica_case()
+            .expected(availability(NO_LEADER_ID, vec![2], vec![1]))
+            .name("leader on a failed log dir, follower healthy")
+            .directories(vec![bad, good])
+            .call(),
+        replica_case()
+            .expected(availability(1, vec![1], vec![]))
+            .name("sole replica on a directory nobody has assigned yet")
+            .registrations(vec![(NodeId(1), vec![good])])
+            .replicas(vec![NodeId(1)])
+            .directories(vec![Uuid::nil()])
+            .call(),
+        replica_case()
+            .expected(availability(1, vec![1, 2], vec![2]))
+            .name("fenced follower keeps its ISR seat")
+            .unavailable(vec![NodeId(2)])
+            .call(),
+        replica_case()
+            .expected(availability(1, vec![1, 2], vec![2]))
+            .name("unregistered follower keeps its ISR seat")
+            .registrations(vec![(NodeId(1), vec![good])])
+            .call(),
+        replica_case()
+            .expected(availability(1, vec![1, 2], vec![]))
+            .name("healthy partition is untouched")
+            .call(),
     ];
 
     check_replica_cases(cases, partition_availability);

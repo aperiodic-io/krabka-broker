@@ -124,12 +124,14 @@ pub(crate) async fn start_jepsen_cluster(object_dir: &Path) -> Vec<TestNode> {
             controller: controller_addrs[index],
         };
         let client_addr = addrs.client;
-        let config = broker_config(data_dir.path(), object_dir, DisklessNodeSetup {
-            index: NodeIndex(index),
-            addrs,
-            rlmm_bootstrap: &rlmm_bootstrap,
-            voters: voters.clone(),
-        });
+        let config = broker_config()
+            .log_dir(data_dir.path())
+            .object_dir(object_dir)
+            .index(index)
+            .addrs(addrs)
+            .rlmm_bootstrap(&rlmm_bootstrap)
+            .voters(voters.clone())
+            .call();
 
         let start_config = config.clone();
         starts.push(tokio::spawn(async move {
@@ -188,7 +190,21 @@ struct DisklessNodeSetup<'a> {
     voters: Vec<(NodeId, String)>,
 }
 
-fn broker_config(log_dir: &Path, object_dir: &Path, setup: DisklessNodeSetup<'_>) -> BrokerConfig {
+#[bon::builder]
+fn broker_config(
+    log_dir: &Path,
+    object_dir: &Path,
+    #[builder(into, default)] index: NodeIndex,
+    #[builder(default)] addrs: NodeAddrs,
+    #[builder(default = "127.0.0.1:0")] rlmm_bootstrap: &'_ str,
+    #[builder(default)] voters: Vec<(NodeId, String)>,
+) -> BrokerConfig {
+    let setup = DisklessNodeSetup {
+        index,
+        addrs,
+        rlmm_bootstrap,
+        voters,
+    };
     let DisklessNodeSetup {
         index,
         addrs,
@@ -196,11 +212,12 @@ fn broker_config(log_dir: &Path, object_dir: &Path, setup: DisklessNodeSetup<'_>
         voters,
     } = setup;
     let node = NodeId(u64::try_from(index.0 + 1).expect("small cluster"));
-    let mut config = support::addressed_node_config(log_dir, support::AddressedNodeSetup {
-        node,
-        client: addrs.inter,
-        controller: addrs.controller,
-    });
+    let mut config = support::addressed_node_config()
+        .log_dir(log_dir)
+        .node(node)
+        .client(addrs.inter)
+        .controller(addrs.controller)
+        .call();
     config.directory_id = uuid::Uuid::from_u128(u128::from(node.0));
     // `listen_addr` and `advertised_listener` name the inter-broker endpoint.
     // The broker self-registers that pair before it binds the data plane, and
@@ -229,19 +246,16 @@ fn broker_config(log_dir: &Path, object_dir: &Path, setup: DisklessNodeSetup<'_>
             ListenerProtocol::SaslPlaintext,
         ),
     ];
-    support::diskless::configure_authentication(
-        &mut config,
-        support::diskless::DisklessAuthenticationSetup {
-            listener: INTER_BROKER_LISTENER,
-            identity: support::diskless::DisklessIdentitySetup {
-                index,
-                node,
-                voters: support::diskless::WalVoterCount(VOTERS),
-                password: PASSWORD,
-            },
-            ..Default::default()
-        },
-    );
+    support::diskless::configure_authentication()
+        .config(&mut config)
+        .listener(INTER_BROKER_LISTENER)
+        .identity(support::diskless::DisklessIdentitySetup {
+            index,
+            node,
+            voters: support::diskless::WalVoterCount(VOTERS),
+            password: PASSWORD,
+        })
+        .call();
     config.diskless_wal_flush_interval = krabka_units::millis(100);
     config.diskless_wal_index_projection_timeout = krabka_units::secs(10);
     config.diskless_wal_trim_safety_lag = 1_024;

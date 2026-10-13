@@ -100,7 +100,20 @@ pub(super) struct TransactionSeedSetup<'a> {
     pub group_id: Option<&'a str>,
 }
 
-pub(super) async fn seed_transaction(broker: &Broker, setup: TransactionSeedSetup<'_>) {
+#[bon::builder]
+pub(super) async fn seed_transaction(
+    broker: &Broker,
+    #[builder(default = "tid")] transactional_id: &'_ str,
+    #[builder(default)] producer: super::test_support::TxnCommitProducer,
+    #[builder(default = crate :: txn :: state :: TxnState :: Ongoing)] state: TxnState,
+    group_id: Option<&'_ str>,
+) {
+    let setup = TransactionSeedSetup {
+        transactional_id,
+        producer,
+        state,
+        group_id,
+    };
     let image = broker.controller.current_image();
     let now_ms = now_millis();
     let mut entry = TxnEntry::new_empty(
@@ -132,14 +145,19 @@ async fn open_commit_request(
     broker: &Broker,
     setup: super::test_support::TxnCommitSetup<'_>,
 ) -> TxnOffsetCommitRequest {
-    seed_transaction(broker, TransactionSeedSetup {
-        transactional_id: &setup.transactional_id,
-        producer: setup.producer,
-        group_id: Some(setup.group_id),
-        ..Default::default()
-    })
-    .await;
-    super::test_support::request_for(setup)
+    seed_transaction()
+        .broker(broker)
+        .transactional_id(&setup.transactional_id)
+        .producer(setup.producer)
+        .maybe_group_id(Some(setup.group_id))
+        .call()
+        .await;
+    super::test_support::request_for()
+        .transactional_id(setup.transactional_id)
+        .group_id(setup.group_id)
+        .producer(setup.producer)
+        .topics(setup.topics)
+        .call()
 }
 
 pub(super) fn topic(name: &str, partitions: &[i32]) -> TxnOffsetCommitRequestTopic {
@@ -325,21 +343,20 @@ async fn unknown_rows_survive_a_group_fencing_failure() {
     let group_id = "group-fencing";
     let user = principal(READ_ON_STAR);
     let ctx = request_context(&user, &address, "txn-offset-commit-fencing");
-    seed_transaction(&broker, TransactionSeedSetup {
-        transactional_id: "tid-fencing",
-        group_id: Some(group_id),
-        ..Default::default()
-    })
-    .await;
+    seed_transaction()
+        .broker(&broker)
+        .transactional_id("tid-fencing")
+        .maybe_group_id(Some(group_id))
+        .call()
+        .await;
     let request = TxnOffsetCommitRequest {
         member_id: "never-registered-member".to_string(),
         generation_id_or_member_epoch: 0,
-        ..super::test_support::request_for(super::test_support::TxnCommitSetup {
-            transactional_id: "tid-fencing".to_string(),
-            group_id,
-            topics: vec![topic("a", &[0]), topic("missing", &[0])],
-            ..Default::default()
-        })
+        ..super::test_support::request_for()
+            .transactional_id("tid-fencing".to_string())
+            .group_id(group_id)
+            .topics(vec![topic("a", &[0]), topic("missing", &[0])])
+            .call()
     };
     let response = commit_response(&broker, &request, version, &ctx).await;
 
@@ -854,28 +871,29 @@ async fn txn_offset_commit_verifies_the_producer_with_the_transaction_coordinato
         let transactional_id = format!("tid-verified-{row}");
         let producer_id = 900 + i64::try_from(row).expect("small");
         if let Some((state, epoch, holds_offsets)) = case.held {
-            seed_transaction(&broker, TransactionSeedSetup {
-                transactional_id: &transactional_id,
-                producer: super::test_support::TxnCommitProducer {
+            seed_transaction()
+                .broker(&broker)
+                .transactional_id(&transactional_id)
+                .producer(super::test_support::TxnCommitProducer {
                     id: krabka_ids::ProducerId(producer_id),
                     epoch: super::test_support::ProducerEpoch(epoch),
-                },
-                state,
-                group_id: holds_offsets.then_some(group_id.as_str()),
-            })
-            .await;
+                })
+                .state(state)
+                .maybe_group_id(holds_offsets.then_some(group_id.as_str()))
+                .call()
+                .await;
         }
         let request = TxnOffsetCommitRequest {
             generation_id_or_member_epoch: -1,
-            ..super::test_support::request_for(super::test_support::TxnCommitSetup {
-                transactional_id,
-                group_id: &group_id,
-                producer: super::test_support::TxnCommitProducer {
+            ..super::test_support::request_for()
+                .transactional_id(transactional_id)
+                .group_id(&group_id)
+                .producer(super::test_support::TxnCommitProducer {
                     id: krabka_ids::ProducerId(producer_id),
                     epoch: super::test_support::ProducerEpoch(case.request_epoch),
-                },
-                topics: vec![topic("a", &[0])],
-            })
+                })
+                .topics(vec![topic("a", &[0])])
+                .call()
         };
         let response = commit_response(&broker, &request, case.version, &ctx).await;
         check!(
@@ -914,15 +932,15 @@ async fn a_v5_commit_adds_the_offsets_partition_on_a_transaction_version_1_clust
     read_context!(address, user, ctx; "txn-offset-commit-tv1");
 
     let group_id = "group-tv1";
-    seed_transaction(&broker, TransactionSeedSetup {
-        transactional_id: "tid-tv1",
-        producer: super::test_support::TxnCommitProducer {
+    seed_transaction()
+        .broker(&broker)
+        .transactional_id("tid-tv1")
+        .producer(super::test_support::TxnCommitProducer {
             id: krabka_ids::ProducerId(700),
             epoch: super::test_support::ProducerEpoch(5),
-        },
-        ..Default::default()
-    })
-    .await;
+        })
+        .call()
+        .await;
     let response =
         commit_topic_a_without_membership(&broker, "tid-tv1", group_id, (700, 5), &ctx).await;
     check!(response.topics[0].partitions[0].error_code == codes::NONE);
@@ -973,16 +991,16 @@ async fn a_v5_commit_records_the_topic_id_only_under_unstable_api_versions() {
         read_context!(address, user, ctx; "txn-offset-commit-topic-id");
 
         let group_id = "group-topic-id";
-        seed_transaction(&broker, TransactionSeedSetup {
-            transactional_id: "tid-topic-id",
-            producer: super::test_support::TxnCommitProducer {
+        seed_transaction()
+            .broker(&broker)
+            .transactional_id("tid-topic-id")
+            .producer(super::test_support::TxnCommitProducer {
                 id: krabka_ids::ProducerId(800),
                 ..Default::default()
-            },
-            group_id: Some(group_id),
-            ..Default::default()
-        })
-        .await;
+            })
+            .maybe_group_id(Some(group_id))
+            .call()
+            .await;
         let response =
             commit_topic_a_without_membership(&broker, "tid-topic-id", group_id, (800, 0), &ctx)
                 .await;
@@ -1016,12 +1034,12 @@ async fn commit_topic_a_without_membership(
 ) -> TxnOffsetCommitResponse {
     let request = TxnOffsetCommitRequest {
         generation_id_or_member_epoch: -1,
-        ..super::test_support::request_for(super::test_support::TxnCommitSetup {
-            transactional_id: transactional_id.to_owned(),
-            group_id,
-            producer: super::test_support::TxnCommitProducer::from_wire(producer),
-            topics: vec![topic("a", &[0])],
-        })
+        ..super::test_support::request_for()
+            .transactional_id(transactional_id.to_owned())
+            .group_id(group_id)
+            .producer(super::test_support::TxnCommitProducer::from_wire(producer))
+            .topics(vec![topic("a", &[0])])
+            .call()
     };
     commit_response(broker, &request, 5, context).await
 }

@@ -104,11 +104,10 @@ fn command_config() -> &'static std::path::Path { support::jvm_admin_config() }
 async fn kafka_configs(args: &[&str]) -> std::process::Output {
     let mount = format!("{}:/krabka-config", command_config().display());
     let node = NODE_ID.to_string();
-    let mut full = support::jvm_admin_args(support::JvmAdminSetup {
-        mount: &mount,
-        bootstrap: &listeners().advertised,
-        ..Default::default()
-    });
+    let mut full = support::jvm_admin_args()
+        .mount(&mount)
+        .bootstrap(&listeners().advertised)
+        .call();
     full.extend(
         ["--entity-type", "broker-loggers", "--entity-name", &node]
             .into_iter()

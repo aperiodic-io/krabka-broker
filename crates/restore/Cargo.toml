@@ -71,6 +71,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 assert2 = { workspace = true }
+yare = { workspace = true }
 # `large_archive` implements `object_store::ObjectStore` to synthesise a
 # listing far larger than any fixture could write to disk.
 async-trait = { workspace = true }

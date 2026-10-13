@@ -231,9 +231,7 @@ mod tests {
         super::{CommittedOffsets, checked_batch_advance, scan_pending_offset_entries},
         crate::coordinator::{
             persistence::OffsetCommitValue,
-            test_support::{
-                OffsetRecordSetup, offset_entry as entry, offset_record, replay_offset_batch,
-            },
+            test_support::{offset_entry as entry, offset_record, replay_offset_batch},
         },
         assert2::assert,
         krabka_log::{Offset, ProducerId},
@@ -242,12 +240,12 @@ mod tests {
     };
 
     fn commit(group: &str, topic: &str, partition: i32, offset: i64) -> Record {
-        offset_record(OffsetRecordSetup {
-            group,
-            topic,
-            partition: krabka_ids::PartitionIndex(partition),
-            offset: krabka_log::Offset(offset),
-        })
+        offset_record()
+            .group(group)
+            .topic(topic)
+            .partition(partition)
+            .offset(offset)
+            .call()
     }
 
     fn tombstone(group: &str, topic: &str, partition: i32) -> Record {

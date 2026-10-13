@@ -12,7 +12,6 @@ use {
         partition::{AppendedBatch, ProduceData, ProduceJob, WriterMessage},
         producer_state::ProducerState,
         replica_state::ReplicaState,
-        test_support::{EmptyPayloadBatchSetup, RecordCount},
         wal::{OffsetSequencer, SharedWal, WalStore},
     },
     krabka_ids::PartitionIndex,
@@ -147,10 +146,8 @@ impl WalStore for GatedWal {
 pub(super) fn open_log_with_records(path: &std::path::Path, records: i32) -> Log {
     let mut log = Log::open(path, LogConfig::default()).expect("open log");
     if records > 0 {
-        log.append(&mut sample_batch(EmptyPayloadBatchSetup {
-            count: RecordCount(records),
-        }))
-        .expect("append");
+        log.append(&mut sample_batch().count(records).call())
+            .expect("append");
     }
     log
 }

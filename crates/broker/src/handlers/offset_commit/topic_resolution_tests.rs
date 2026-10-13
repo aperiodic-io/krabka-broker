@@ -14,7 +14,6 @@ use {
         broker::BrokerHandle,
         codes,
         coordinator::unified::actor::GroupActorMessage,
-        handlers::test_support::CreateTopicSetup,
         test_support::{
             DenyAll, dispatch_wire, peer, principal, request_context, start_group_broker_no_audit,
         },
@@ -55,10 +54,9 @@ async fn create_known_topic(broker: &BrokerHandle) -> WireUuid {
         (client, response),
         broker,
         "offset-commit-resolution-test",
-        crate::handlers::test_support::configured_topic_request(CreateTopicSetup {
-            topic: KNOWN_NAME,
-            ..Default::default()
-        })
+        crate::handlers::test_support::configured_topic_request()
+            .topic(KNOWN_NAME)
+            .call()
     );
     broker.wait_until_partition_present(KNOWN_NAME, 0).await;
     let image = broker.controller_image_for_test();

@@ -5,16 +5,34 @@
 
 use {
     crate::{
-        barrier::marker::BarrierMarker,
+        barrier::{marker::BarrierMarker, state::TargetPartition},
         log_dir::partition_dir,
         partition_registry::PartitionRegistry,
         test_support::{FakeMetadataSource, StandalonePartitionSetup, spawn_standalone_partition},
     },
+    krabka_ids::PartitionIndex,
     krabka_log::{Log, LogConfig},
     krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord},
     std::path::Path,
     uuid::Uuid,
 };
+
+/// A target partition in the barrier tests.
+pub(crate) fn at(topic: &str, partition: i32) -> TargetPartition {
+    TargetPartition {
+        topic: topic.to_owned(),
+        partition: PartitionIndex(partition),
+    }
+}
+
+/// The fixed marker shared by the barrier handler and injection tests.
+pub(crate) fn marker() -> BarrierMarker {
+    BarrierMarker {
+        group: "orders-cut".to_owned(),
+        epoch: 4,
+        triggered_at: 1_724_500_000_000,
+    }
+}
 
 /// The topic and partition records of one topic, with one leader for every
 /// partition and a leader epoch of 3.
@@ -53,7 +71,13 @@ pub(crate) fn open_partition(
     let partition_dir = partition_dir(dir, topic, index.0);
     std::fs::create_dir_all(&partition_dir).expect("create the partition directory");
     let log = Log::open(&partition_dir, LogConfig::default()).expect("open the log");
-    let partition = spawn_standalone_partition(dir, log, setup);
+    let partition = spawn_standalone_partition()
+        .log_dir(dir)
+        .log(log)
+        .topic(setup.topic)
+        .partition(setup.partition)
+        .storage(setup.storage)
+        .call();
     registry.insert(topic.into(), index, partition);
 }
 

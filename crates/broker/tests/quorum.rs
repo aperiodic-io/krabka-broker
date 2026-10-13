@@ -21,9 +21,7 @@ use {
         client::connect_client,
         discovery::topic_metadata_request,
         shutdown_cluster,
-        topics::{
-            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
-        },
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::assert,
     krabka_broker::{BrokerConfig, BrokerHandle},
@@ -78,13 +76,9 @@ async fn create_topic_on_any_node_propagates() {
     // CreateTopics against node 0.
     let c = connect_client(cluster[0].1.listen_addr.to_string(), None).await;
     let resp = c
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("prop").into(),
-                partitions: TopicPartitionCount(3),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("prop").into()).partitions(3).call(),
+        ))
         .await
         .unwrap();
     assert!(resp.topics[0].error_code == 0);
@@ -145,12 +139,9 @@ async fn leader_kill_recovers() {
     // CreateTopics against a survivor succeeds.
     let c = connect_client(cluster[0].1.listen_addr.to_string(), None).await;
     let resp = c
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("post-kill").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("post-kill").into()).call(),
+        ))
         .await
         .unwrap();
     assert!(resp.topics[0].error_code == 0);
@@ -175,11 +166,12 @@ async fn follower_forwards_create_topic() {
     let follower_idx = follower_idx.expect("at least one follower");
 
     let c = connect_client(cluster[follower_idx].1.listen_addr.to_string(), None).await;
-    let req = create_topic_request(creatable_topic(ConfiguredTopicSetup {
-        name: ("via-follower").into(),
-        ..Default::default()
-    }));
-    let resp = c.send(req).await.unwrap();
+    let resp = c
+        .send(create_topic_request(
+            creatable_topic().name("via-follower".into()).call(),
+        ))
+        .await
+        .unwrap();
     assert!(resp.topics[0].error_code == 0);
 
     shutdown_cluster(cluster).await;
@@ -215,14 +207,9 @@ async fn concurrent_topic_creates_one_wins() {
     let mut joins = Vec::new();
     for c in clients {
         joins.push(tokio::spawn(async move {
-            use crate::support::topics::ConfiguredTopicSetup;
-
-            c.send(create_topic_request(creatable_topic(
-                ConfiguredTopicSetup {
-                    name: ("race").into(),
-                    ..Default::default()
-                },
-            )))
+            c.send(create_topic_request(
+                creatable_topic().name(("race").into()).call(),
+            ))
             .await
             .unwrap()
         }));

@@ -12,7 +12,7 @@ use {
     crate::support::{
         client::connect_client,
         records::value_record,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        topics::{creatable_topic, create_topic_request},
     },
     bytes::Bytes,
     krabka_broker::BrokerHandle,
@@ -22,12 +22,9 @@ use {
 pub(crate) async fn create_topic(broker: &BrokerHandle, bootstrap: &str, name: &str) {
     let client = connect_client(bootstrap.to_string(), None).await;
     let _ = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: (name).into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name((name).into()).call(),
+        ))
         .await
         .expect("CreateTopics");
     broker.wait_until_partition_present(name, 0).await;

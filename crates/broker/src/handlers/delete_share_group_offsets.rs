@@ -249,7 +249,7 @@ mod tests {
             coordinator::unified::{
                 ShareGroupSeed,
                 share::{
-                    actor::ShareGroupActorMessage,
+                    actor::{ShareGroupActorHandle, ShareGroupActorMessage},
                     persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
                 },
             },
@@ -258,9 +258,7 @@ mod tests {
                 handlers::test_support::lead_share_state_partitions,
                 persister_client::SharePersister,
             },
-            test_support::{
-                DenyAll, ShareApiSupport, ShareBrokerSetup, start_share_broker, test_ctx,
-            },
+            test_support::{DenyAll, ShareApiSupport, start_share_broker, test_ctx},
         },
         assert2::assert,
         krabka_metadata::{AclOperation, ResourceType},
@@ -279,6 +277,23 @@ mod tests {
         },
         std::{collections::HashSet, sync::Arc},
     };
+
+    async fn seed_initialized_topics(
+        actor: &ShareGroupActorHandle,
+        initialized: Vec<TopicPartitionsInfo>,
+    ) {
+        actor
+            .tx
+            .send(ShareGroupActorMessage::Seed(ShareGroupSeed {
+                state_partition_metadata: ShareGroupStatePartitionMetadataValue {
+                    initialized,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }))
+            .await
+            .expect("seed share actor");
+    }
 
     /// Denies `Read` on the named topics and allows everything else, so group
     /// `Delete` and topic creation still succeed and only the per-topic gate
@@ -319,11 +334,13 @@ mod tests {
         names: &'a [&'a str],
     }
 
+    #[bon::builder]
     async fn create_topics(
         broker_handle: &BrokerHandle,
         ctx: &RequestContext<'_>,
-        setup: ShareTopicsSetup<'_>,
+        #[builder(default = & ["t"])] names: &'_ [&'_ str],
     ) {
+        let setup = ShareTopicsSetup { names };
         let broker = broker_handle.broker_arc_for_test();
         let topic_names = setup.names;
         let version = create_topics_response::MAX_VERSION;
@@ -369,13 +386,20 @@ mod tests {
         assert!(resp == expected);
     }
 
+    #[bon::builder]
     async fn create_share_topics(
         handle: &BrokerHandle,
         ctx: &RequestContext<'_>,
-        setup: ShareTopicsSetup<'_>,
+        #[builder(default = & ["t"])] names: &'_ [&'_ str],
     ) -> Arc<SharePersister> {
+        let setup = ShareTopicsSetup { names };
         let broker = handle.broker_arc_for_test();
-        create_topics(handle, ctx, setup).await;
+        create_topics()
+            .broker_handle(handle)
+            .ctx(ctx)
+            .names(setup.names)
+            .call()
+            .await;
         lead_share_state_partitions(&broker).await;
         broker
             .group_coordinator
@@ -438,10 +462,12 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        create_topics(&broker_handle, &ctx, ShareTopicsSetup {
-            names: &["t", "elsewhere"],
-        })
-        .await;
+        create_topics()
+            .broker_handle(&broker_handle)
+            .ctx(&ctx)
+            .names(&["t", "elsewhere"])
+            .call()
+            .await;
         // `share-held` holds state for a topic the image has. The actor's
         // session tick drops the state of every topic the image lacks, as
         // Kafka's `maybeCleanupShareGroupState` does, and that tick can run
@@ -457,22 +483,14 @@ mod tests {
         coordinator.mark_share("share-empty");
         let _share = coordinator.get_or_create_share("share-empty");
         coordinator.mark_share("share-held");
-        coordinator
-            .get_or_create_share("share-held")
-            .tx
-            .send(ShareGroupActorMessage::Seed(ShareGroupSeed {
-                state_partition_metadata: ShareGroupStatePartitionMetadataValue {
-                    initialized: vec![TopicPartitionsInfo {
-                        topic_id: elsewhere_id,
-                        topic_name: "elsewhere".into(),
-                        partitions: vec![0],
-                    }],
-                    ..Default::default()
-                },
-                ..Default::default()
-            }))
-            .await
-            .expect("seed share-held");
+        seed_initialized_topics(&coordinator.get_or_create_share("share-held"), vec![
+            TopicPartitionsInfo {
+                topic_id: elsewhere_id,
+                topic_name: "elsewhere".into(),
+                partitions: vec![0],
+            },
+        ])
+        .await;
         let top_level = |error_code, message: &str| DeleteShareGroupOffsetsResponse {
             error_code,
             error_message: Some(message.into()),
@@ -548,10 +566,12 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        let persister = create_share_topics(&broker_handle, &ctx, ShareTopicsSetup {
-            names: &["delete-topic", "kept-topic"],
-        })
-        .await;
+        let persister = create_share_topics()
+            .handle(&broker_handle)
+            .ctx(&ctx)
+            .names(&["delete-topic", "kept-topic"])
+            .call()
+            .await;
         let image = broker.controller.current_image();
         let deleted_id = image
             .topic("delete-topic")
@@ -572,29 +592,19 @@ mod tests {
             .expect("seed kept state");
 
         let actor = broker.group_coordinator.get_or_create_share("g-delete");
-        actor
-            .tx
-            .send(ShareGroupActorMessage::Seed(ShareGroupSeed {
-                state_partition_metadata: ShareGroupStatePartitionMetadataValue {
-                    initializing: Vec::new(),
-                    initialized: vec![
-                        TopicPartitionsInfo {
-                            topic_id: deleted_id,
-                            topic_name: "deleted".into(),
-                            partitions: vec![0],
-                        },
-                        TopicPartitionsInfo {
-                            topic_id: kept_id,
-                            topic_name: "kept".into(),
-                            partitions: vec![0],
-                        },
-                    ],
-                    ..Default::default()
-                },
-                ..Default::default()
-            }))
-            .await
-            .expect("seed share actor");
+        seed_initialized_topics(&actor, vec![
+            TopicPartitionsInfo {
+                topic_id: deleted_id,
+                topic_name: "deleted".into(),
+                partitions: vec![0],
+            },
+            TopicPartitionsInfo {
+                topic_id: kept_id,
+                topic_name: "kept".into(),
+                partitions: vec![0],
+            },
+        ])
+        .await;
 
         // The first delete removes the state, and
         // `completeDeleteShareGroupOffsets` takes the topic out of the
@@ -663,17 +673,18 @@ mod tests {
 
         for (case, denied_names) in cases {
             let denied: HashSet<&'static str> = denied_names.iter().copied().collect();
-            let (broker_handle, _dir) = start_share_broker(
-                Arc::new(DenyReadOnTopics(denied.clone())),
-                ShareBrokerSetup::default(),
-            )
-            .await;
+            let (broker_handle, _dir) = start_share_broker()
+                .authorizer(Arc::new(DenyReadOnTopics(denied.clone())))
+                .call()
+                .await;
             let broker = broker_handle.broker_arc_for_test();
             test_ctx!(ctx, "alice");
-            let persister = create_share_topics(&broker_handle, &ctx, ShareTopicsSetup {
-                names: &["allow-topic", "deny-topic"],
-            })
-            .await;
+            let persister = create_share_topics()
+                .handle(&broker_handle)
+                .ctx(&ctx)
+                .names(&["allow-topic", "deny-topic"])
+                .call()
+                .await;
             let image = broker.controller.current_image();
             let allow_id = image.topic("allow-topic").expect("allow topic").topic_id;
             let deny_id = image.topic("deny-topic").expect("deny topic").topic_id;
@@ -689,29 +700,19 @@ mod tests {
                 .expect("seed deny-topic state");
 
             let actor = broker.group_coordinator.get_or_create_share("g-authz");
-            actor
-                .tx
-                .send(ShareGroupActorMessage::Seed(ShareGroupSeed {
-                    state_partition_metadata: ShareGroupStatePartitionMetadataValue {
-                        initializing: Vec::new(),
-                        initialized: vec![
-                            TopicPartitionsInfo {
-                                topic_id: allow_id,
-                                topic_name: "allow-topic".into(),
-                                partitions: vec![0],
-                            },
-                            TopicPartitionsInfo {
-                                topic_id: deny_id,
-                                topic_name: "deny-topic".into(),
-                                partitions: vec![0],
-                            },
-                        ],
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }))
-                .await
-                .expect("seed share actor");
+            seed_initialized_topics(&actor, vec![
+                TopicPartitionsInfo {
+                    topic_id: allow_id,
+                    topic_name: "allow-topic".into(),
+                    partitions: vec![0],
+                },
+                TopicPartitionsInfo {
+                    topic_id: deny_id,
+                    topic_name: "deny-topic".into(),
+                    partitions: vec![0],
+                },
+            ])
+            .await;
 
             let response = handle(
                 &broker,

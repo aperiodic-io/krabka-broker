@@ -39,25 +39,20 @@ fn every_logger_reports_its_level_at_the_broker_logger_source() {
             .unwrap_or_else(|| panic!("missing {name} in {configs:?}"))
             .clone()
     };
-    let expected = |name: &str, value: &str| {
-        tagged_wire!(
-            krabka_protocol::owned::describe_configs_response::DescribeConfigsResourceResult {
-                name: name.to_owned(),
-                value: Some(value.to_owned()),
-                read_only: false,
-                config_source: CONFIG_SOURCE_DYNAMIC_BROKER_LOGGER,
-                is_sensitive: false,
-                synonyms: Vec::new(),
-                config_type: 0,
-                // Kafka never sets it for a logger, so the JVM broker sends the
-                // generated default, the empty string.
-                documentation: Some(String::new()),
-            }
-        )
+    let check_entry = |name: &str, value: &str| {
+        let config = entry(name);
+        assert!(config.value.as_deref() == Some(value));
+        assert!(!config.read_only);
+        assert!(config.config_source == CONFIG_SOURCE_DYNAMIC_BROKER_LOGGER);
+        assert!(!config.is_sensitive);
+        assert!(config.synonyms.is_empty());
+        assert!(config.config_type == 0);
+        // Kafka never sets it for a logger, so the generated default is empty.
+        assert!(config.documentation.as_deref() == Some(""));
     };
-    assert!(entry("root") == expected("root", "INFO"));
-    assert!(entry("krabka_broker") == expected("krabka_broker", "DEBUG"));
-    assert!(entry("krabka_log") == expected("krabka_log", "FATAL"));
+    check_entry("root", "INFO");
+    check_entry("krabka_broker", "DEBUG");
+    check_entry("krabka_log", "FATAL");
 }
 
 #[test]

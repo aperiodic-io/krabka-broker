@@ -3,7 +3,7 @@ use super::{
     FeatureUpdateType as T, feature_update_decision,
 };
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct FeatureLevel(i16);
 
 #[derive(Clone, Copy, Default)]
@@ -47,7 +47,19 @@ struct FeatureRowSetup {
     kind: FeatureFixtureKind,
 }
 
-const fn row(setup: FeatureRowSetup) -> FeatureUpdateFacts {
+#[bon::builder]
+const fn row(
+    #[builder(default = T :: Upgrade)] update_type: T,
+    #[builder(into, default = FeatureLevel (1))] requested: FeatureLevel,
+    #[builder(into, default = FeatureLevel (0))] current: FeatureLevel,
+    #[builder(default)] kind: FeatureFixtureKind,
+) -> FeatureUpdateFacts {
+    let setup = FeatureRowSetup {
+        update_type,
+        requested,
+        current,
+        kind,
+    };
     FeatureUpdateFacts {
         update_type: Some(setup.update_type),
         levels: FeatureLevels {

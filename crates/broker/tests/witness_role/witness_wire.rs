@@ -11,7 +11,7 @@ use {
     crate::{
         TOPIC,
         support::{
-            client::{ValueBatchSetup, ValueRecordCount, create_replicated_topic, value_batch},
+            client::{create_replicated_topic, value_batch},
             discovery::{metadata_first_partition, named_topic_metadata},
             fetch::fetch_topic_row,
             produce::{ProduceTimeoutMillis, SinglePartitionProduceSetup, batch_request},
@@ -36,9 +36,7 @@ pub(crate) async fn create_topic(client: &Client) -> WireUuid {
 
 fn produce_request(topic_id: WireUuid, n: i32) -> ProduceRequest {
     batch_request(
-        value_batch(ValueBatchSetup {
-            records: ValueRecordCount(n),
-        }),
+        value_batch().records(n).call(),
         SinglePartitionProduceSetup {
             topic: (TOPIC).into(),
             topic_id,

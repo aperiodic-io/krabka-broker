@@ -15,7 +15,7 @@ use {
             request, test_context,
         },
         test_support::{
-            AllowAclSetup, DenyAll, allow_acl, start_broker_no_audit_with,
+            DenyAll, allow_acl, start_broker_no_audit_with,
             start_broker_with_authorizer_no_audit as start_broker, test_ctx,
         },
     },
@@ -36,6 +36,16 @@ fn committed() -> AclCreationResult {
         error_code: codes::NONE,
         error_message: Some(String::new()),
     })
+}
+
+async fn check_no_acls_created(
+    broker: BrokerHandle,
+    response: CreateAclsResponse,
+    expected: CreateAclsResponse,
+) {
+    assert!(response == expected);
+    assert!(all_acls(&broker).is_empty());
+    broker.shutdown().await;
 }
 
 /// Kafka puts no length limit on an ACL's resource name or principal, so a
@@ -61,11 +71,10 @@ async fn handle_stores_long_resource_names_and_principals() {
     });
     assert!(resp == expected);
     let stored = |resource_name: &str, principal: &str| {
-        allow_acl(AllowAclSetup {
-            resource_name,
-            principal,
-            ..Default::default()
-        })
+        allow_acl()
+            .resource_name(resource_name)
+            .principal(principal)
+            .call()
     };
     let mut acls = all_acls(&broker_handle);
     acls.sort_by_key(|acl| std::cmp::Reverse(acl.resource_name.len()));
@@ -94,9 +103,7 @@ async fn handle_denies_cluster_alter_for_each_creation() {
     let expected = unthrottled_wire!(CreateAclsResponse {
         results: vec![denied.clone(), denied],
     });
-    assert!(resp == expected);
-    assert!(all_acls(&broker_handle).is_empty());
-    broker_handle.shutdown().await;
+    check_no_acls_created(broker_handle, resp, expected).await;
 }
 
 #[tokio::test]
@@ -127,12 +134,11 @@ async fn handle_submits_valid_creations_and_reports_invalid_creations_in_order()
     assert!(resp == expected);
 
     let acls = all_acls(&broker_handle);
-    let expected_acls = vec![crate::test_support::allow_acl(
-        crate::test_support::AllowAclSetup {
-            resource_name: "topic-a",
-            ..Default::default()
-        },
-    )];
+    let expected_acls = vec![
+        crate::test_support::allow_acl()
+            .resource_name("topic-a")
+            .call(),
+    ];
     assert!(acls == expected_acls);
     broker_handle.shutdown().await;
 }
@@ -162,9 +168,7 @@ async fn handle_answers_security_disabled_for_each_creation_when_no_authorizer_i
     let expected = unthrottled_wire!(CreateAclsResponse {
         results: vec![disabled.clone(), disabled],
     });
-    assert!(resp == expected);
-    assert!(all_acls(&broker_handle).is_empty());
-    broker_handle.shutdown().await;
+    check_no_acls_created(broker_handle, resp, expected).await;
 }
 
 /// A broker with `unstable.feature.versions.enable`, the mode in which
@@ -357,13 +361,12 @@ async fn handle_pins_the_cluster_name_and_accepts_other_principal_types() {
         ],
     });
     assert!(resp == expected);
-    let expected_acls = vec![crate::test_support::allow_acl(
-        crate::test_support::AllowAclSetup {
-            resource_name: "topic-a",
-            principal: "Group:ops",
-            ..Default::default()
-        },
-    )];
+    let expected_acls = vec![
+        crate::test_support::allow_acl()
+            .resource_name("topic-a")
+            .principal("Group:ops")
+            .call(),
+    ];
     assert!(all_acls(&broker_handle) == expected_acls);
     broker_handle.shutdown().await;
 }
@@ -459,12 +462,7 @@ async fn handle_rejects_cidr_host_on_a_freshly_bootstrapped_cluster() {
 /// tens of billions of comparisons on an async worker.
 #[test]
 fn count_new_acls_counts_distinct_new_acls_in_linear_time() {
-    let acl = |n: usize| {
-        allow_acl(AllowAclSetup {
-            resource_name: &format!("topic-{n}"),
-            ..Default::default()
-        })
-    };
+    let acl = |n: usize| allow_acl().resource_name(&format!("topic-{n}")).call();
     let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
     for n in 0..2_000 {
         image.apply(&MetadataRecord::V1AccessControlEntry(acl(n)));

@@ -278,13 +278,13 @@ mod tests {
         }
     }
 
-    fn throttled_caught_up_follower() -> (Config, tempfile::TempDir) {
+    fn throttled_follower_at(leader_hw: i64, follower_offset: i64) -> (Config, tempfile::TempDir) {
         let (cfg, log_dir) = test_config(image_with_follower_throttle("*"));
         cfg.throttle_state
             .follower_in
             .set_byte_rate_with_burst(bytes_per_sec(1000), bytes(1000));
         cfg.lag.note_appended(1);
-        cfg.lag.update(10, 10);
+        cfg.lag.update(leader_hw, follower_offset);
         (cfg, log_dir)
     }
 
@@ -294,7 +294,7 @@ mod tests {
     /// in sync with nothing to draw.
     #[test]
     fn a_caught_up_follower_still_charges_the_quota() {
-        let (cfg, _log_dir) = throttled_caught_up_follower();
+        let (cfg, _log_dir) = throttled_follower_at(10, 10);
 
         // Caught up: the round is not throttled, and the batch that arrives
         // is recorded in full, past the 1000 bytes the bucket holds.
@@ -321,7 +321,7 @@ mod tests {
     /// would sit out all of it; bounded, it sits out 11 s at most.
     #[test]
     fn a_caught_up_follower_keeps_one_window_of_debt_at_most() {
-        let (cfg, _log_dir) = throttled_caught_up_follower();
+        let (cfg, _log_dir) = throttled_follower_at(10, 10);
 
         record_replicated(&cfg, 100_000);
 
@@ -334,12 +334,7 @@ mod tests {
     /// planned, so its bytes are not charged a second time as they arrive.
     #[test]
     fn a_follower_that_is_behind_is_not_charged_twice() {
-        let (cfg, _log_dir) = test_config(image_with_follower_throttle("*"));
-        cfg.throttle_state
-            .follower_in
-            .set_byte_rate_with_burst(bytes_per_sec(1000), bytes(1000));
-        cfg.lag.note_appended(1);
-        cfg.lag.update(10, 4);
+        let (cfg, _log_dir) = throttled_follower_at(10, 4);
 
         record_replicated(&cfg, 4_000);
 

@@ -46,7 +46,10 @@
 #[cfg(target_os = "linux")]
 mod linux {
     use {
-        criterion::{BatchSize, Criterion, black_box, criterion_group},
+        criterion::{
+            BatchSize, BenchmarkGroup, Criterion, black_box, criterion_group,
+            measurement::Measurement,
+        },
         krabka_units::prelude::{ByteSize, ByteSizeExt as _, kibibytes, mebibytes},
         rustix::{
             fs::{Advice, AtFlags, CWD, Mode, OFlags, StatxFlags},
@@ -346,21 +349,16 @@ mod linux {
                 });
             });
 
-            group.bench_function("pread_cold", |b| {
-                let mut walk = Walk::new(len);
-                b.iter_batched(
-                    || {
-                        let at = walk.step();
-                        evict(&file);
-                        at
-                    },
-                    |at| {
-                        file.read_exact_at(&mut buf, at).expect("pread");
-                        black_box(&buf);
-                    },
-                    BatchSize::PerIteration,
-                );
-            });
+            bench_cold_read(
+                &mut group,
+                "pread_cold",
+                &file,
+                len,
+                &mut buf,
+                |file, offset, buf| {
+                    file.read_exact_at(buf, offset).expect("pread");
+                },
+            );
 
             if fixture.dontcache {
                 group.bench_function("dontcache_warm", |b| {
@@ -374,21 +372,14 @@ mod linux {
                     });
                 });
 
-                group.bench_function("dontcache_cold", |b| {
-                    let mut walk = Walk::new(len);
-                    b.iter_batched(
-                        || {
-                            let at = walk.step();
-                            evict(&file);
-                            at
-                        },
-                        |at| {
-                            read_dontcache(&file, at, &mut buf);
-                            black_box(&buf);
-                        },
-                        BatchSize::PerIteration,
-                    );
-                });
+                bench_cold_read(
+                    &mut group,
+                    "dontcache_cold",
+                    &file,
+                    len,
+                    &mut buf,
+                    read_dontcache,
+                );
             }
 
             if let Some(align) = fixture.direct_align(len) {
@@ -407,6 +398,31 @@ mod linux {
 
             group.finish();
         }
+    }
+
+    fn bench_cold_read<M: Measurement>(
+        group: &mut BenchmarkGroup<'_, M>,
+        name: &str,
+        file: &File,
+        len: u64,
+        buf: &mut [u8],
+        read: impl Fn(&File, u64, &mut [u8]),
+    ) {
+        group.bench_function(name, |b| {
+            let mut walk = Walk::new(len);
+            b.iter_batched(
+                || {
+                    let at = walk.step();
+                    evict(file);
+                    at
+                },
+                |at| {
+                    read(file, at, buf);
+                    black_box(&*buf);
+                },
+                BatchSize::PerIteration,
+            );
+        });
     }
 
     /// How the write variants place their bytes.

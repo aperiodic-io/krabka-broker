@@ -89,7 +89,7 @@ mod tests {
         crate::{
             config_keys::RecoveryStrategy,
             handlers::broker_heartbeat::test_support::{
-                ElectionSetup, fake_source, image_with_dir_partition, liveness_with,
+                fake_source, image_with_dir_partition, liveness_with,
             },
             metadata_source::MetadataSource,
             metrics::BrokerMetrics,
@@ -118,14 +118,11 @@ mod tests {
             leader_epoch: krabka_metadata::LeaderEpoch(6),
             directories: vec![bad, good],
             partition_epoch: 1,
-            ..crate::handlers::test_support::replicated_partition(
-                crate::handlers::test_support::ReplicatedPartitionSetup {
-                    topic: "t",
-                    leader: krabka_audit::NodeId(2),
-                    replicas: &[krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
-                    ..Default::default()
-                },
-            )
+            ..crate::handlers::test_support::replicated_partition()
+                .topic("t")
+                .leader(2)
+                .replicas(&[krabka_audit::NodeId(1), krabka_audit::NodeId(2)])
+                .call()
         })];
         assert!(changes == expected_changes);
         // No unclean recovery needed (broker 2 is alive and in ISR).
@@ -280,12 +277,11 @@ mod tests {
     }
 
     fn two_replica_image(directories: &[Uuid]) -> krabka_metadata::MetadataImage {
-        image_with_dir_partition(ElectionSetup {
-            replicas: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
-            isr: &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
-            dirs: directories,
-            ..Default::default()
-        })
+        image_with_dir_partition()
+            .replicas(&[krabka_raft::NodeId(1), krabka_raft::NodeId(2)])
+            .isr(&[krabka_raft::NodeId(1), krabka_raft::NodeId(2)])
+            .dirs(directories)
+            .call()
     }
 
     async fn run_failover(

@@ -9,7 +9,7 @@ use {
     crate::{
         harness::start_two_dir_broker,
         support::{acl::use_simple_acl_authorizer, storage::two_dir_config},
-        two_dir_topic::{Setup, start},
+        two_dir_topic::start,
         wire::{CLIENT_ID, alter_replica_log_dirs},
     },
     assert2::assert,
@@ -18,11 +18,7 @@ use {
 
 #[tokio::test]
 async fn alter_replica_log_dirs_rejects_unknown_target() {
-    let (handle, _primary, _extra, addr) = start(Setup {
-        client_id: CLIENT_ID,
-        ..Default::default()
-    })
-    .await;
+    let (handle, _primary, _extra, addr) = start().client_id(CLIENT_ID).call().await;
 
     let bogus = tempfile::tempdir().unwrap();
     let resp = alter_replica_log_dirs(addr, bogus.path(), "t", vec![0]).await;

@@ -16,7 +16,7 @@ use {
         codes,
         config::BreakGlassConfig,
         operator_keys::{OperatorKeyEntry, OperatorKeys},
-        test_support::{OperatorKeyFileSetup, ed25519_public_key_file},
+        test_support::ed25519_public_key_file,
     },
     assert2::{assert, check},
     krabka_metadata::BreakGlassProposalRecord,
@@ -30,10 +30,11 @@ fn operator_key(
     key_id: &str,
     principal: &str,
 ) -> (Ed25519KeyPair, OperatorKeyEntry) {
-    let (pair, path) = ed25519_public_key_file(dir.path(), OperatorKeyFileSetup {
-        name: &format!("{key_id}.pub"),
-        context: "write key file",
-    });
+    let (pair, path) = ed25519_public_key_file()
+        .dir(dir.path())
+        .name(&format!("{key_id}.pub"))
+        .context("write key file")
+        .call();
     (pair, OperatorKeyEntry {
         key_id: key_id.to_owned(),
         principal: principal.to_owned(),

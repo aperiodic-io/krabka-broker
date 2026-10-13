@@ -57,6 +57,7 @@ pub struct ManifestSeq(pub u64);
 #[serde(transparent)]
 pub struct EpochId(pub Uuid);
 
+#[derive(derive_more::From, derive_more::Into)]
 /// Head of a partition's manifest hash chain.
 ///
 /// Serialises as a lowercase hex string.

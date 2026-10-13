@@ -35,7 +35,14 @@ use {
 
 // Put one live entry in the registry for the resolve below to find.
 fn frozen(image: &mut MetadataImage, setup: FreezeSetup<'_>) {
-    image.apply(&MetadataRecord::V1TopicFreeze(topic_freeze_record(setup)));
+    image.apply(&MetadataRecord::V1TopicFreeze(
+        topic_freeze_record()
+            .scope(setup.scope)
+            .pattern_type(setup.pattern_type)
+            .state(setup.state)
+            .reason(setup.reason)
+            .call(),
+    ));
 }
 
 fn verdict(scope: &str, pattern_type: PatternType, reason: &str) -> FreezeVerdict {
@@ -149,11 +156,7 @@ async fn a_frozen_topic_is_refused_and_its_log_end_offset_does_not_move() {
             .await;
         part.install_isr(&record.isr, &record.replicas, record.leader)
             .await;
-        part.log
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .append(&mut seed_batch())
-            .expect("seed the partition");
+        super::append_seed_batch(&part);
         fixture
             .partitions
             .insert(topic.into(), krabka_ids::PartitionIndex(0), part);

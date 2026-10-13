@@ -22,8 +22,8 @@ use {
                 retry_coordinator, settled_produce,
             },
             transactions::{
-                EndTransactionSetup, InitProducerSetup, ProducerIdentity, TransactionOutcome,
-                end_transaction_request, init_producer_request,
+                ProducerIdentity, TransactionOutcome, end_transaction_request,
+                init_producer_request,
             },
         },
         txnver_harness::{
@@ -62,11 +62,12 @@ async fn init_producer_id(
     identity: (i64, i16),
 ) -> InitProducerIdResponse {
     client
-        .send(init_producer_request(InitProducerSetup {
-            transactional_id: Some(transactional_id.into()),
-            producer: ProducerIdentity::from_wire((identity.0, identity.1)),
-            ..Default::default()
-        }))
+        .send(
+            init_producer_request()
+                .maybe_transactional_id(Some(transactional_id.into()))
+                .producer(ProducerIdentity::from_wire((identity.0, identity.1)))
+                .call(),
+        )
         .await
         .expect("InitProducerId")
 }
@@ -126,10 +127,14 @@ fn end_txn_request(
     producer: Identity,
     outcome: TransactionOutcome,
 ) -> EndTxnRequest {
-    end_transaction_request(transactional_id, EndTransactionSetup {
-        producer: ProducerIdentity::from_wire((producer.producer_id, producer.epoch)),
-        outcome,
-    })
+    end_transaction_request()
+        .transactional_id(transactional_id)
+        .producer(ProducerIdentity::from_wire((
+            producer.producer_id,
+            producer.epoch,
+        )))
+        .outcome(outcome)
+        .call()
 }
 
 /// Retry `EndTxn` the way a Kafka producer does after a lost answer, until

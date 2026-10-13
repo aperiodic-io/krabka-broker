@@ -393,7 +393,23 @@ mod tests {
         body: &'a [u8],
     }
 
-    fn request_frame(setup: ControllerFrameSetup<'_>) -> Vec<u8> {
+    #[bon::builder]
+    fn request_frame(
+        #[builder(into, default = ApiKey (52))] api_key: ApiKey,
+        #[builder(into, default = ApiVersion (2))] api_version: ApiVersion,
+        #[builder(into, default = FrameCorrelationId (123))] correlation_id: FrameCorrelationId,
+        #[builder(default = "raft-client")] client_id: &'_ str,
+        #[builder(default)] body: &'_ [u8],
+    ) -> Vec<u8> {
+        let setup = ControllerFrameSetup {
+            header: ControllerFrameHeader {
+                api_key,
+                api_version,
+                correlation_id,
+            },
+            client_id,
+            body,
+        };
         let ControllerFrameSetup {
             header,
             client_id,
@@ -401,12 +417,14 @@ mod tests {
         } = setup;
         let mut tagged_body = vec![0];
         tagged_body.extend_from_slice(body);
-        raw_request_frame(RawControllerFrameSetup {
-            header,
-            client_id_len: ClientIdLength(i16::try_from(client_id.len()).unwrap()),
-            client_id_bytes: client_id.as_bytes(),
-            tagged_or_body: &tagged_body,
-        })
+        raw_request_frame()
+            .api_key(header.api_key)
+            .api_version(header.api_version)
+            .correlation_id(header.correlation_id)
+            .client_id_len(i16::try_from(client_id.len()).unwrap())
+            .client_id_bytes(client_id.as_bytes())
+            .tagged_or_body(&tagged_body)
+            .call()
     }
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -420,7 +438,25 @@ mod tests {
         tagged_or_body: &'a [u8],
     }
 
-    fn raw_request_frame(setup: RawControllerFrameSetup<'_>) -> Vec<u8> {
+    #[bon::builder]
+    fn raw_request_frame(
+        #[builder(into, default = ApiKey (52))] api_key: ApiKey,
+        #[builder(into, default = ApiVersion (2))] api_version: ApiVersion,
+        #[builder(into, default = FrameCorrelationId (123))] correlation_id: FrameCorrelationId,
+        #[builder(into, default = ClientIdLength (- 1))] client_id_len: ClientIdLength,
+        #[builder(default)] client_id_bytes: &'_ [u8],
+        #[builder(default = & [0])] tagged_or_body: &'_ [u8],
+    ) -> Vec<u8> {
+        let setup = RawControllerFrameSetup {
+            header: ControllerFrameHeader {
+                api_key,
+                api_version,
+                correlation_id,
+            },
+            client_id_len,
+            client_id_bytes,
+            tagged_or_body,
+        };
         let RawControllerFrameSetup {
             header,
             client_id_len,
@@ -469,15 +505,12 @@ mod tests {
         let cases = [
             (
                 "flexible header with client id and body",
-                request_frame(ControllerFrameSetup {
-                    body: b"payload",
-                    ..Default::default()
-                }),
+                request_frame().body(b"payload").call(),
                 b"payload".as_slice(),
             ),
             (
                 "null client id with no body",
-                raw_request_frame(RawControllerFrameSetup::default()),
+                raw_request_frame().call(),
                 b"".as_slice(),
             ),
         ];
@@ -539,12 +572,11 @@ mod tests {
             // Client-id length declares 4 bytes; only 1 present.
             (
                 "client id bytes shortfall",
-                raw_request_frame(RawControllerFrameSetup {
-                    client_id_len: ClientIdLength(4),
-                    client_id_bytes: b"x",
-                    tagged_or_body: &[],
-                    ..Default::default()
-                }),
+                raw_request_frame()
+                    .client_id_len(4)
+                    .client_id_bytes(b"x")
+                    .tagged_or_body(&[])
+                    .call(),
                 3,
             ),
         ];
@@ -571,16 +603,12 @@ mod tests {
     #[tokio::test]
     async fn read_one_request_keeps_nonflexible_body_prefix() {
         let (mut client, mut server) = tokio::io::duplex(128);
-        let frame = raw_request_frame(RawControllerFrameSetup {
-            header: ControllerFrameHeader {
-                api_key: ApiKey(53),
-                api_version: ApiVersion(0),
-                ..Default::default()
-            },
-            client_id_len: ClientIdLength(0),
-            tagged_or_body: &[1, b'p', b'a', b'y'],
-            ..Default::default()
-        });
+        let frame = raw_request_frame()
+            .api_key(53)
+            .api_version(0)
+            .client_id_len(0)
+            .tagged_or_body(&[1, b'p', b'a', b'y'])
+            .call();
         let writer = tokio::spawn(async move {
             client.write_all(&frame).await.unwrap();
         });
@@ -637,62 +665,54 @@ mod tests {
                 "at the router's flexible minimum, the tagged-fields byte is consumed",
                 key,
                 ApiVersion(flexible_min),
-                request_frame(ControllerFrameSetup {
-                    header: ControllerFrameHeader {
-                        api_key: key,
-                        api_version: ApiVersion(flexible_min),
-                        correlation_id: FrameCorrelationId(7),
-                    },
-                    client_id,
-                    body: b"body",
-                }),
+                request_frame()
+                    .api_key(key)
+                    .api_version(flexible_min)
+                    .correlation_id(7)
+                    .client_id(client_id)
+                    .body(b"body")
+                    .call(),
                 true,
             ),
             (
                 "below it, the frame carries no tagged fields",
                 key,
                 ApiVersion(flexible_min - 1),
-                raw_request_frame(RawControllerFrameSetup {
-                    header: ControllerFrameHeader {
-                        api_key: key,
-                        api_version: ApiVersion(flexible_min - 1),
-                        correlation_id: FrameCorrelationId(7),
-                    },
-                    client_id_len: ClientIdLength(id_len),
-                    client_id_bytes: client_id.as_bytes(),
-                    tagged_or_body: b"body",
-                }),
+                raw_request_frame()
+                    .api_key(key)
+                    .api_version(flexible_min - 1)
+                    .correlation_id(7)
+                    .client_id_len(id_len)
+                    .client_id_bytes(client_id.as_bytes())
+                    .tagged_or_body(b"body")
+                    .call(),
                 false,
             ),
             (
                 "the listener's own table outranks the router's entry for it",
                 ApiKey(vote_request::API_KEY),
                 ApiVersion(vote_request::FLEXIBLE_MIN),
-                request_frame(ControllerFrameSetup {
-                    header: ControllerFrameHeader {
-                        api_key: ApiKey(vote_request::API_KEY),
-                        api_version: ApiVersion(vote_request::FLEXIBLE_MIN),
-                        correlation_id: FrameCorrelationId(7),
-                    },
-                    client_id,
-                    body: b"body",
-                }),
+                request_frame()
+                    .api_key(vote_request::API_KEY)
+                    .api_version(vote_request::FLEXIBLE_MIN)
+                    .correlation_id(7)
+                    .client_id(client_id)
+                    .body(b"body")
+                    .call(),
                 true,
             ),
             (
                 "an api neither the listener nor the router declares is never flexible",
                 unclaimed,
                 ApiVersion(flexible_min),
-                raw_request_frame(RawControllerFrameSetup {
-                    header: ControllerFrameHeader {
-                        api_key: unclaimed,
-                        api_version: ApiVersion(flexible_min),
-                        correlation_id: FrameCorrelationId(7),
-                    },
-                    client_id_len: ClientIdLength(id_len),
-                    client_id_bytes: client_id.as_bytes(),
-                    tagged_or_body: b"body",
-                }),
+                raw_request_frame()
+                    .api_key(unclaimed)
+                    .api_version(flexible_min)
+                    .correlation_id(7)
+                    .client_id_len(id_len)
+                    .client_id_bytes(client_id.as_bytes())
+                    .tagged_or_body(b"body")
+                    .call(),
                 false,
             ),
         ];

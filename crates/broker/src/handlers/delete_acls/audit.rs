@@ -48,20 +48,17 @@ mod tests {
 
     #[test]
     fn deleted_acl_resources_include_only_successful_matches() {
-        let ok = filter_result(codes::NONE, None, vec![matching_acl_result(&acl(
-            crate::test_support::AllowAclSetup::default(),
-        ))]);
+        let ok = filter_result(codes::NONE, None, vec![matching_acl_result(&acl().call())]);
         let failed = filter_result(
             codes::COORDINATOR_NOT_AVAILABLE,
             Some("submit failed".into()),
-            vec![matching_acl_result(&acl(
-                crate::test_support::AllowAclSetup {
-                    resource_name: "payments",
-                    principal: "User:bob",
-                    operation: AclOperation::Write,
-                    ..Default::default()
-                },
-            ))],
+            vec![matching_acl_result(
+                &acl()
+                    .resource_name("payments")
+                    .principal("User:bob")
+                    .operation(AclOperation::Write)
+                    .call(),
+            )],
         );
 
         let resources = deleted_acl_resources(&[ok, failed]);

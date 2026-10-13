@@ -117,9 +117,8 @@ mod tests {
             SessionDecision,
             order::MIN_EVICTION,
             test_support::{
-                NAME_FETCH_VERSION, RequestSessionEpoch, RequestSessionId, SessionAllocationSetup,
-                SessionPrivilege, SessionRequestSetup, SessionSlotCount, TICK, allocate_session,
-                manual_cache, req,
+                NAME_FETCH_VERSION, RequestSessionEpoch, RequestSessionId, SessionPrivilege,
+                SessionRequestSetup, SessionSlotCount, TICK, allocate_session, manual_cache, req,
             },
         },
         assert2::{assert, check},
@@ -130,8 +129,8 @@ mod tests {
     #[test]
     fn allocate_returns_nonzero_monotonic_ids() {
         let cache = FetchSessionCache::new(10);
-        let a = allocate_session(&cache, SessionAllocationSetup::default());
-        let b = allocate_session(&cache, SessionAllocationSetup::default());
+        let a = allocate_session().cache(&cache).call();
+        let b = allocate_session().cache(&cache).call();
         // Id allocation starts at 1 and increments monotonically.
         check!(a == 1);
         check!(b == 2);
@@ -143,20 +142,20 @@ mod tests {
         let cache = FetchSessionCache::new(10);
         // Force the next id to be 0 — the loop should skip and start from 1.
         cache.next_id.store(0, Ordering::Relaxed);
-        let id = allocate_session(&cache, SessionAllocationSetup::default());
+        let id = allocate_session().cache(&cache).call();
         assert!(id > 0);
     }
 
     #[test]
     fn allocate_skips_existing_session_id_collision() {
         let cache = FetchSessionCache::new(10);
-        let first = allocate_session(&cache, SessionAllocationSetup::default());
+        let first = allocate_session().cache(&cache).call();
 
         cache.next_id.store(first, Ordering::Relaxed);
-        let second = allocate_session(&cache, SessionAllocationSetup {
-            principal: "bob".into(),
-            ..Default::default()
-        });
+        let second = allocate_session()
+            .cache(&cache)
+            .principal("bob".into())
+            .call();
 
         assert!(second == first + 1);
         assert!(cache.len() == 2);
@@ -165,7 +164,7 @@ mod tests {
     #[test]
     fn allocate_returns_zero_when_max_slots_zero() {
         let cache = FetchSessionCache::new(0);
-        let id = allocate_session(&cache, SessionAllocationSetup::default());
+        let id = allocate_session().cache(&cache).call();
         assert!(id == INVALID_SESSION_ID);
     }
 
@@ -202,14 +201,24 @@ mod tests {
     fn use_session(cache: &FetchSessionCache, id: RequestSessionId, epoch: RequestSessionEpoch) {
         assert!(matches!(
             cache.classify(
-                &req(SessionRequestSetup {
-                    session_epoch: epoch,
-                    ..SessionRequestSetup::incremental(id)
-                }),
+                &req()
+                    .session_id(SessionRequestSetup::incremental(id).session_id)
+                    .session_epoch(epoch)
+                    .topics(SessionRequestSetup::incremental(id).topics)
+                    .forgotten(SessionRequestSetup::incremental(id).forgotten)
+                    .call(),
                 NAME_FETCH_VERSION
             ),
             SessionDecision::Incremental { .. }
         ));
+    }
+
+    fn allocate_newcomer(cache: &FetchSessionCache) -> i32 {
+        allocate_session()
+            .cache(cache)
+            .principal("newcomer".into())
+            .partitions(partitions(1))
+            .call()
     }
 
     /// A full cache hands a newcomer nothing while its sessions are in use.
@@ -218,24 +227,24 @@ mod tests {
     #[test]
     fn a_full_cache_refuses_a_newcomer_while_its_sessions_are_active() {
         let (cache, clock) = manual_cache(SessionSlotCount(2));
-        let a = allocate_session(&cache, SessionAllocationSetup {
-            principal: "a".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
+        let a = allocate_session()
+            .cache(&cache)
+            .principal("a".into())
+            .partitions(partitions(1))
+            .call();
         clock.advance(TICK).expect("manual time moves forward");
-        let b = allocate_session(&cache, SessionAllocationSetup {
-            principal: "b".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
+        let b = allocate_session()
+            .cache(&cache)
+            .principal("b".into())
+            .partitions(partitions(1))
+            .call();
         clock.advance(TICK).expect("manual time moves forward");
 
-        let newcomer = allocate_session(&cache, SessionAllocationSetup {
-            principal: "c".into(),
-            partitions: partitions(100),
-            ..Default::default()
-        });
+        let newcomer = allocate_session()
+            .cache(&cache)
+            .principal("c".into())
+            .partitions(partitions(100))
+            .call();
 
         check!(newcomer == INVALID_SESSION_ID);
         check!(cache.evictions_total() == 0);
@@ -271,30 +280,30 @@ mod tests {
         ];
         for (label, holder_is_follower, newcomer_is_follower) in cases {
             let (cache, clock) = manual_cache(SessionSlotCount(2));
-            let stale = allocate_session(&cache, SessionAllocationSetup {
-                privilege: holder_is_follower,
-                principal: "a".into(),
-                partitions: partitions(9),
-                ..Default::default()
-            });
+            let stale = allocate_session()
+                .cache(&cache)
+                .privilege(holder_is_follower)
+                .principal("a".into())
+                .partitions(partitions(9))
+                .call();
             clock
                 .advance(MIN_EVICTION / 2)
                 .expect("manual time moves forward");
-            let active = allocate_session(&cache, SessionAllocationSetup {
-                privilege: holder_is_follower,
-                principal: "b".into(),
-                partitions: partitions(9),
-                ..Default::default()
-            });
+            let active = allocate_session()
+                .cache(&cache)
+                .privilege(holder_is_follower)
+                .principal("b".into())
+                .partitions(partitions(9))
+                .call();
             clock
                 .advance(MIN_EVICTION / 2 + Duration::from_secs(1))
                 .expect("manual time moves forward");
 
-            let newcomer = allocate_session(&cache, SessionAllocationSetup {
-                privilege: newcomer_is_follower,
-                principal: "c".into(),
-                ..Default::default()
-            });
+            let newcomer = allocate_session()
+                .cache(&cache)
+                .privilege(newcomer_is_follower)
+                .principal("c".into())
+                .call();
 
             check!(cache.evictions_total() == 1, "{label}");
             check!(live_ids(&cache) == vec![active, newcomer], "{label}");
@@ -306,16 +315,16 @@ mod tests {
     #[test]
     fn an_incremental_fetch_keeps_a_session_from_going_stale() {
         let (cache, clock) = manual_cache(SessionSlotCount(2));
-        let busy = allocate_session(&cache, SessionAllocationSetup {
-            principal: "busy".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
-        let idle = allocate_session(&cache, SessionAllocationSetup {
-            principal: "idle".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
+        let busy = allocate_session()
+            .cache(&cache)
+            .principal("busy".into())
+            .partitions(partitions(1))
+            .call();
+        let idle = allocate_session()
+            .cache(&cache)
+            .principal("idle".into())
+            .partitions(partitions(1))
+            .call();
 
         clock
             .advance(Duration::from_secs(100))
@@ -325,11 +334,7 @@ mod tests {
             .advance(Duration::from_secs(30))
             .expect("manual time moves forward");
         // `idle` has gone 130 s unused and `busy` 30 s.
-        let newcomer = allocate_session(&cache, SessionAllocationSetup {
-            principal: "newcomer".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
+        let newcomer = allocate_newcomer(&cache);
 
         check!(cache.evictions_total() == 1);
         check!(live_ids(&cache) == vec![busy, newcomer]);
@@ -349,11 +354,11 @@ mod tests {
         ];
         for (label, newcomer_partitions, displaces) in cases {
             let (cache, clock) = manual_cache(SessionSlotCount(1));
-            let held = allocate_session(&cache, SessionAllocationSetup {
-                principal: "held".into(),
-                partitions: partitions(2),
-                ..Default::default()
-            });
+            let held = allocate_session()
+                .cache(&cache)
+                .principal("held".into())
+                .partitions(partitions(2))
+                .call();
             clock
                 .advance(PAST_MIN_EVICTION)
                 .expect("manual time moves forward");
@@ -361,11 +366,11 @@ mod tests {
             // and it keeps the session from being stale.
             use_session(&cache, RequestSessionId(held), RequestSessionEpoch(1));
 
-            let newcomer = allocate_session(&cache, SessionAllocationSetup {
-                principal: "new".into(),
-                partitions: partitions(newcomer_partitions),
-                ..Default::default()
-            });
+            let newcomer = allocate_session()
+                .cache(&cache)
+                .principal("new".into())
+                .partitions(partitions(newcomer_partitions))
+                .call();
 
             check!((newcomer != INVALID_SESSION_ID) == displaces, "{label}");
             check!(cache.evictions_total() == u64::from(displaces), "{label}");
@@ -387,17 +392,17 @@ mod tests {
     #[test]
     fn a_follower_displaces_a_consumer_session_that_is_still_active() {
         let (cache, _clock) = manual_cache(SessionSlotCount(1));
-        let consumer = allocate_session(&cache, SessionAllocationSetup {
-            principal: "consumer".into(),
-            partitions: partitions(5),
-            ..Default::default()
-        });
+        let consumer = allocate_session()
+            .cache(&cache)
+            .principal("consumer".into())
+            .partitions(partitions(5))
+            .call();
 
-        let follower = allocate_session(&cache, SessionAllocationSetup {
-            privilege: SessionPrivilege::Follower,
-            principal: "follower".into(),
-            ..Default::default()
-        });
+        let follower = allocate_session()
+            .cache(&cache)
+            .privilege(SessionPrivilege::Follower)
+            .principal("follower".into())
+            .call();
 
         check!(follower != INVALID_SESSION_ID);
         check!(follower != consumer);
@@ -408,17 +413,17 @@ mod tests {
     #[test]
     fn non_privileged_cannot_evict_privileged() {
         let cache = FetchSessionCache::new(1);
-        let p = allocate_session(&cache, SessionAllocationSetup {
-            privilege: SessionPrivilege::Follower,
-            principal: "follower".into(),
-            ..Default::default()
-        });
+        let p = allocate_session()
+            .cache(&cache)
+            .privilege(SessionPrivilege::Follower)
+            .principal("follower".into())
+            .call();
         assert!(p > 0);
         // Cache full, only session is privileged. Consumer alloc refused.
-        let c = allocate_session(&cache, SessionAllocationSetup {
-            principal: "consumer".into(),
-            ..Default::default()
-        });
+        let c = allocate_session()
+            .cache(&cache)
+            .principal("consumer".into())
+            .call();
         check!(c == INVALID_SESSION_ID);
         check!(cache.evictions_total() == 0);
         check!(cache.len() == 1);
@@ -429,20 +434,20 @@ mod tests {
     #[test]
     fn a_recent_follower_session_is_not_displaced_by_another_follower() {
         let (cache, clock) = manual_cache(SessionSlotCount(1));
-        let first = allocate_session(&cache, SessionAllocationSetup {
-            privilege: SessionPrivilege::Follower,
-            principal: "f1".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
+        let first = allocate_session()
+            .cache(&cache)
+            .privilege(SessionPrivilege::Follower)
+            .principal("f1".into())
+            .partitions(partitions(1))
+            .call();
         clock.advance(TICK).expect("manual time moves forward");
 
-        let second = allocate_session(&cache, SessionAllocationSetup {
-            privilege: SessionPrivilege::Follower,
-            principal: "f2".into(),
-            partitions: partitions(50),
-            ..Default::default()
-        });
+        let second = allocate_session()
+            .cache(&cache)
+            .privilege(SessionPrivilege::Follower)
+            .principal("f2".into())
+            .partitions(partitions(50))
+            .call();
 
         check!(second == INVALID_SESSION_ID);
         check!(cache.evictions_total() == 0);
@@ -456,34 +461,29 @@ mod tests {
         // session as the stale one and the next allocation into a full cache
         // would go looking for a session that is no longer there.
         let (cache, clock) = manual_cache(SessionSlotCount(2));
-        let closed = allocate_session(&cache, SessionAllocationSetup {
-            principal: "closed".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
+        let closed = allocate_session()
+            .cache(&cache)
+            .principal("closed".into())
+            .partitions(partitions(1))
+            .call();
         clock.advance(TICK).expect("manual time moves forward");
-        let oldest_live = allocate_session(&cache, SessionAllocationSetup {
-            principal: "oldest-live".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
+        let oldest_live = allocate_session()
+            .cache(&cache)
+            .principal("oldest-live".into())
+            .partitions(partitions(1))
+            .call();
         cache.close(closed);
 
         clock.advance(TICK).expect("manual time moves forward");
-        let refill = allocate_session(&cache, SessionAllocationSetup {
-            principal: "refill".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
+        let refill = allocate_session()
+            .cache(&cache)
+            .principal("refill".into())
+            .partitions(partitions(1))
+            .call();
         clock
             .advance(PAST_MIN_EVICTION)
             .expect("manual time moves forward");
-        let newcomer_setup = SessionAllocationSetup {
-            principal: "newcomer".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        };
-        let newcomer = allocate_session(&cache, newcomer_setup);
+        let newcomer = allocate_newcomer(&cache);
 
         // The cache refilled to {oldest_live, refill}; both are stale by now,
         // and `newcomer` displaced `oldest_live`, the one unused the longest.
@@ -495,22 +495,22 @@ mod tests {
     #[test]
     fn counters_track_eviction() {
         let (cache, clock) = manual_cache(SessionSlotCount(1));
-        allocate_session(&cache, SessionAllocationSetup {
-            principal: "a".into(),
-            partitions: partitions(2),
-            ..Default::default()
-        });
+        allocate_session()
+            .cache(&cache)
+            .principal("a".into())
+            .partitions(partitions(2))
+            .call();
         assert!(cache.total_partitions_cached() == 2);
         clock
             .advance(PAST_MIN_EVICTION)
             .expect("manual time moves forward");
         // Allocating into the full cache evicts the lone stale session (2
         // parts) and inserts a fresh one (1 part).
-        allocate_session(&cache, SessionAllocationSetup {
-            principal: "b".into(),
-            partitions: partitions(1),
-            ..Default::default()
-        });
+        allocate_session()
+            .cache(&cache)
+            .principal("b".into())
+            .partitions(partitions(1))
+            .call();
         assert!(cache.len() == 1);
         assert!(cache.total_partitions_cached() == 1);
     }

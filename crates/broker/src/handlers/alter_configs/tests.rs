@@ -24,7 +24,9 @@ use {
                 image_with_client_metrics_config, image_with_group_config, image_with_topic_config,
                 topic_resource,
             },
-            test_support::{assert_dispatch_response, ordered_rows},
+            test_support::{
+                assert_dispatch_response, duplicate_config_resource_response, ordered_rows,
+            },
         },
         test_support::{
             DenyAll, context_helper, start_broker_with_authorizer as start_broker, test_ctx,
@@ -46,12 +48,7 @@ context_helper!(client_id = "admin-client");
 #[tokio::test]
 async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
     broker_fixture!((handle, _dir, broker), allow_all, context(ctx, "admin"));
-    let duplicate_topic = tagged_wire!(AlterConfigsResourceResponse {
-        resource_type: RESOURCE_TYPE_TOPIC,
-        resource_name: "duplicate".into(),
-        error_code: codes::INVALID_REQUEST,
-        error_message: Some("Each resource must appear at most once.".into())
-    });
+    let duplicate_topic = duplicate_config_resource_response(RESOURCE_TYPE_TOPIC, "duplicate");
     let rows = [
         (
             broker_resource("2", &[]),
@@ -141,65 +138,67 @@ async fn handle_preserves_resource_identity_for_unsupported_type() {
     assert!(resp == expected);
 }
 
-#[tokio::test]
-async fn topic_resource_denial_uses_topic_authorization_error() {
-    let resp = Box::pin(drive_one(
-        Arc::new(DenyAll),
-        resource(RESOURCE_TYPE_TOPIC, "orders"),
-    ))
-    .await;
-
-    let expected = unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![tagged_wire!(AlterConfigsResourceResponse {
-            error_code: codes::TOPIC_AUTHORIZATION_FAILED,
-            error_message: Some("Topic authorization failed.".to_string()),
-            resource_type: RESOURCE_TYPE_TOPIC,
-            resource_name: "orders".to_string(),
-        })],
-    });
-    assert!(resp == expected);
+#[derive(Clone, Copy)]
+enum DeniedResourceCase {
+    Topic,
+    Group,
+    ClientMetrics,
+    Broker,
 }
 
-/// Legacy `AlterConfigs` authorizes GROUP resources against `AlterConfigs`
-/// on `Group(name)`, the same target `IncrementalAlterConfigs` uses.
-#[tokio::test]
-async fn group_resource_denial_uses_group_authorization_error() {
-    let resp = Box::pin(drive_one(
-        Arc::new(DenyAll),
-        group_resource("streams-app", &[]),
-    ))
-    .await;
+#[yare::parameterized(
+    topic = { DeniedResourceCase::Topic },
+    group = { DeniedResourceCase::Group },
+    client_metrics = { DeniedResourceCase::ClientMetrics },
+    broker = { DeniedResourceCase::Broker },
+)]
+#[test_macro(tokio::test)]
+async fn denied_resources_report_their_authorization_error(case: DeniedResourceCase) {
+    let (request, resource_type, resource_name, error_code, error_message) = match case {
+        DeniedResourceCase::Topic => (
+            resource(RESOURCE_TYPE_TOPIC, "orders"),
+            RESOURCE_TYPE_TOPIC,
+            "orders",
+            codes::TOPIC_AUTHORIZATION_FAILED,
+            "Topic authorization failed.",
+        ),
+        // Legacy AlterConfigs authorizes GROUP resources against
+        // AlterConfigs on Group(name), as IncrementalAlterConfigs does.
+        DeniedResourceCase::Group => (
+            group_resource("streams-app", &[]),
+            RESOURCE_TYPE_GROUP,
+            "streams-app",
+            codes::GROUP_AUTHORIZATION_FAILED,
+            "Group authorization failed.",
+        ),
+        // CLIENT_METRICS is authorized against the cluster, like BROKER, and
+        // takes its message from the controller path.
+        DeniedResourceCase::ClientMetrics => (
+            client_metrics_resource("sub-a", &[]),
+            RESOURCE_TYPE_CLIENT_METRICS,
+            "sub-a",
+            codes::CLUSTER_AUTHORIZATION_FAILED,
+            "Cluster authorization failed.",
+        ),
+        DeniedResourceCase::Broker => (
+            resource(RESOURCE_TYPE_BROKER, "1"),
+            RESOURCE_TYPE_BROKER,
+            "1",
+            codes::CLUSTER_AUTHORIZATION_FAILED,
+            "Cluster authorization failed.",
+        ),
+    };
+    let resp = drive_one(Arc::new(DenyAll), request).await;
 
     let expected = unthrottled_wire!(AlterConfigsResponse {
         responses: vec![tagged_wire!(AlterConfigsResourceResponse {
-            error_code: codes::GROUP_AUTHORIZATION_FAILED,
-            error_message: Some("Group authorization failed.".to_string()),
-            resource_type: RESOURCE_TYPE_GROUP,
-            resource_name: "streams-app".to_string(),
+            error_code,
+            error_message: Some(error_message.to_string()),
+            resource_type,
+            resource_name: resource_name.to_string(),
         })],
     });
-    assert!(resp == expected);
-}
-
-/// `CLIENT_METRICS` is authorized against the cluster, like `BROKER`, but goes
-/// through the controller path that carries `Errors.message()`.
-#[tokio::test]
-async fn client_metrics_resource_denial_uses_cluster_authorization_error_with_message() {
-    let resp = Box::pin(drive_one(
-        Arc::new(DenyAll),
-        client_metrics_resource("sub-a", &[]),
-    ))
-    .await;
-
-    let expected = unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![tagged_wire!(AlterConfigsResourceResponse {
-            error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-            error_message: Some("Cluster authorization failed.".to_string()),
-            resource_type: RESOURCE_TYPE_CLIENT_METRICS,
-            resource_name: "sub-a".to_string(),
-        })],
-    });
-    assert!(resp == expected);
+    assert2::assert!(resp == expected);
 }
 
 #[tokio::test]
@@ -326,25 +325,6 @@ async fn valid_resource_still_gets_an_authorization_check() {
         assert!(resp.responses.len() == 1);
         check!(resp.responses[0].error_code == want_code, "{label}");
     }
-}
-
-#[tokio::test]
-async fn broker_resource_denial_uses_cluster_authorization_error() {
-    let resp = Box::pin(drive_one(
-        Arc::new(DenyAll),
-        resource(RESOURCE_TYPE_BROKER, "1"),
-    ))
-    .await;
-
-    let expected = unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![tagged_wire!(AlterConfigsResourceResponse {
-            error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-            error_message: Some("Cluster authorization failed.".to_string()),
-            resource_type: RESOURCE_TYPE_BROKER,
-            resource_name: "1".to_string(),
-        })],
-    });
-    assert!(resp == expected);
 }
 
 #[tokio::test]

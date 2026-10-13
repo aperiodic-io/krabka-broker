@@ -78,12 +78,9 @@ pub(super) fn apply_submit_error<E: std::fmt::Display>(
 mod tests {
     use {
         super::*,
-        crate::{
-            handlers::{
-                acl_test_support::expected_deleted_orders_acl,
-                delete_acls::test_support::{OPERATION_WRITE, PATTERN_TYPE_PREFIXED, acl},
-            },
-            test_support::AllowAclSetup,
+        crate::handlers::{
+            acl_test_support::expected_deleted_orders_acl,
+            delete_acls::test_support::{OPERATION_WRITE, PATTERN_TYPE_PREFIXED, acl},
         },
         assert2::assert,
         krabka_metadata::{AclOperation, PatternType},
@@ -91,16 +88,15 @@ mod tests {
 
     #[test]
     fn helpers_preserve_matching_acl_and_submit_error_fields() {
-        let matched = matching_acl_result(&acl(AllowAclSetup::default()));
+        let matched = matching_acl_result(&acl().call());
         let expected_matched = expected_deleted_orders_acl();
         assert!(matched == expected_matched);
 
-        let mut prefixed_acl = acl(AllowAclSetup {
-            resource_name: "orders-",
-            principal: "User:bob",
-            operation: AclOperation::Write,
-            ..Default::default()
-        });
+        let mut prefixed_acl = acl()
+            .resource_name("orders-")
+            .principal("User:bob")
+            .operation(AclOperation::Write)
+            .call();
         prefixed_acl.pattern_type = PatternType::Prefixed;
         let matched = matching_acl_result(&prefixed_acl);
         assert!(matched.pattern_type == PATTERN_TYPE_PREFIXED);

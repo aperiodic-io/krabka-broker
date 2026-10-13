@@ -9,10 +9,7 @@
 use {
     crate::{
         harness::{fetch_legacy_raw, legacy_bytes, produce_batch},
-        support::{
-            self,
-            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
-        },
+        support::{self, topics::create_named_topic_request},
     },
     assert2::{assert, check},
     bytes::Bytes,
@@ -30,13 +27,13 @@ async fn fetch_v3_recompresses_zstd_as_snappy() {
     let p = support::start_legacy().await;
 
     // 1. Create topic.
-    let spec = creatable_topic(ConfiguredTopicSetup {
-        name: "legacy_fetch_zstd".into(),
-        ..ConfiguredTopicSetup::default()
-    });
     let cr = p
         .client
-        .send(create_topic_request(spec))
+        .send(
+            create_named_topic_request()
+                .name("legacy_fetch_zstd")
+                .call(),
+        )
         .await
         .expect("CreateTopics");
     assert!(

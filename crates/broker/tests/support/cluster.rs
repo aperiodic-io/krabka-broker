@@ -18,6 +18,7 @@ use {
     tempfile::TempDir,
 };
 
+#[derive(derive_more::From, derive_more::Into)]
 /// Set the one-based broker and node identities without changing cluster policy.
 ///
 /// # Panics
@@ -71,8 +72,19 @@ struct StaticVoterSetup {
     voters: Vec<(NodeId, String)>,
 }
 
-fn static_voter_broker_config(log_dir: &std::path::Path, setup: StaticVoterSetup) -> BrokerConfig {
-    let mut cfg = addressed_node_config(log_dir, setup.node);
+#[bon::builder]
+fn static_voter_broker_config(
+    log_dir: &std::path::Path,
+    #[builder(default)] node: AddressedNodeSetup,
+    #[builder(default)] voters: Vec<(NodeId, String)>,
+) -> BrokerConfig {
+    let setup = StaticVoterSetup { node, voters };
+    let mut cfg = addressed_node_config()
+        .log_dir(log_dir)
+        .node(setup.node.node.0)
+        .client(setup.node.client)
+        .controller(setup.node.controller)
+        .call();
     // Bind a concrete (pre-bound) client port. The broker self-registers its
     // `advertised_listener` host:port into the controller image *before* it
     // binds its listeners and rewrites a `:0` advertised port to the real one
@@ -151,15 +163,16 @@ pub async fn start_n_node_with(
         // Size the coordinator topics for the cluster, as Kafka's defaults
         // size them for a production one: replication factor `min(n, 3)`.
         // `customize` runs after, so a suite can still override them.
-        let mut cfg = static_voter_broker_config(dir.path(), StaticVoterSetup {
-            node: AddressedNodeSetup {
+        let mut cfg = static_voter_broker_config()
+            .log_dir(dir.path())
+            .node(AddressedNodeSetup {
                 node: NodeId(u64::try_from((i) + 1).expect("one-based node id")),
                 client: client_addrs[i],
                 controller: controller_addrs[i],
-            },
-            voters: controller_voters(&voters),
-        })
-        .with_internal_topics_for(n_usize);
+            })
+            .voters(controller_voters(&voters))
+            .call()
+            .with_internal_topics_for(n_usize);
         customize(i, &mut cfg);
         let cfg_for_spawn = cfg.clone();
         starts.push(tokio::spawn(async move {

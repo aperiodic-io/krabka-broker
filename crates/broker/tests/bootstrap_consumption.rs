@@ -26,14 +26,11 @@ mod support;
 
 use {
     crate::{
-        kafka_wire::{ExchangeSetup as WireExchangeSetup, ScramAuthenticationSetup},
-        support::wire::{
-            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-        },
+        kafka_wire::ScramAuthenticationSetup,
+        support::wire::HeaderEncoding as RequestHeaderEncoding,
     },
     assert2::assert,
     krabka_broker::{Broker, BrokerConfig},
-    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
     krabka_protocol::owned::{
         metadata_request::MetadataRequest, metadata_response::MetadataResponse,
     },
@@ -160,19 +157,16 @@ async fn drive_sasl_scram_session(
         ..Default::default()
     })
     .await?;
-    let md_resp: MetadataResponse = kafka_wire::exchange(
-        &mut stream,
-        &MetadataRequest::default(),
-        WireExchangeSetup {
-            api_key: WireApiKey(3),
-            version: WireApiVersion(12),
-            correlation: WireCorrelationId(5),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-    )
-    .await?;
+    let md_resp: MetadataResponse = kafka_wire::exchange()
+        .stream(&mut stream)
+        .request(&MetadataRequest::default())
+        .api_key(3)
+        .version(12)
+        .correlation(5)
+        .client_id(CLIENT_ID)
+        .header(RequestHeaderEncoding::Flexible)
+        .call()
+        .await?;
     if md_resp.brokers.is_empty() {
         return Err(io::Error::other("Metadata response carried no brokers"));
     }

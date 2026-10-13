@@ -245,7 +245,7 @@ mod tests {
         crate::{
             codes::{self, INVALID_REQUEST, UNSUPPORTED_VERSION},
             handlers::create_acls::test_support::{OPERATION_READ, creation, validate},
-            test_support::{AllowAclSetup, allow_acl},
+            test_support::allow_acl,
         },
         assert2::assert,
         krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType, ResourceType},
@@ -299,12 +299,11 @@ mod tests {
                     c.resource_name = "User:bob".into();
                     c.operation = 13;
                 },
-                allow_acl(AllowAclSetup {
-                    resource_type: ResourceType::User,
-                    resource_name: "User:bob",
-                    operation: AclOperation::CreateTokens,
-                    ..Default::default()
-                }),
+                allow_acl()
+                    .resource_type(ResourceType::User)
+                    .resource_name("User:bob")
+                    .operation(AclOperation::CreateTokens)
+                    .call(),
             ),
         ];
         for (shape, expected) in cases {

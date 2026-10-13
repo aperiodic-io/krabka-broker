@@ -9,8 +9,8 @@ use {
         harness::{ConsumptionFixture, join, produce_n, single_record_consumption_fixture, wire},
         share_rpc::{acquired_count, fetch_until_acquired, share_fetch_req},
         support::share::{
-            EmptySessionSetup, FetchByteLimit, ShareAck, ShareFetchSetup, ShareRecordsSetup,
-            ShareSessionEpoch, ShareSessionSetup, acknowledge_success, empty_session_request,
+            ShareAck, ShareFetchSetup, ShareSessionEpoch, ShareSessionSetup, acknowledge_success,
+            empty_session_request,
         },
     },
     assert2::assert,
@@ -33,9 +33,13 @@ async fn session_epoch_validation() {
 
     // Open (epoch 0) succeeds: top-level error_code 0.
     let opened: ShareFetchResponse = client
-        .send(share_fetch_req(ShareFetchSetup::from(
-            ShareSessionSetup::opening(&member, tid),
-        )))
+        .send(
+            share_fetch_req()
+                .session(ShareFetchSetup::from(ShareSessionSetup::opening(&member, tid)).session)
+                .max_wait(ShareFetchSetup::from(ShareSessionSetup::opening(&member, tid)).max_wait)
+                .acks(ShareFetchSetup::from(ShareSessionSetup::opening(&member, tid)).acks)
+                .call(),
+        )
         .await
         .expect("ShareFetch open");
     assert!(
@@ -47,11 +51,13 @@ async fn session_epoch_validation() {
     // The stored epoch is now 1. A non-matching positive epoch (say 9) →
     // INVALID_SHARE_SESSION_EPOCH (123) at the top level.
     let stale: ShareFetchResponse = client
-        .send(share_fetch_req(ShareFetchSetup::at_epoch(
-            &member,
-            tid,
-            ShareSessionEpoch(9),
-        )))
+        .send(
+            share_fetch_req()
+                .session(ShareFetchSetup::at_epoch(&member, tid, ShareSessionEpoch(9)).session)
+                .max_wait(ShareFetchSetup::at_epoch(&member, tid, ShareSessionEpoch(9)).max_wait)
+                .acks(ShareFetchSetup::at_epoch(&member, tid, ShareSessionEpoch(9)).acks)
+                .call(),
+        )
         .await
         .expect("ShareFetch stale");
     assert!(
@@ -64,11 +70,13 @@ async fn session_epoch_validation() {
     // SHARE_SESSION_NOT_FOUND (122).
     let (ghost, _) = join(&client, "g1", "t").await;
     let not_found: ShareFetchResponse = client
-        .send(share_fetch_req(ShareFetchSetup::at_epoch(
-            &ghost,
-            tid,
-            ShareSessionEpoch(5),
-        )))
+        .send(
+            share_fetch_req()
+                .session(ShareFetchSetup::at_epoch(&ghost, tid, ShareSessionEpoch(5)).session)
+                .max_wait(ShareFetchSetup::at_epoch(&ghost, tid, ShareSessionEpoch(5)).max_wait)
+                .acks(ShareFetchSetup::at_epoch(&ghost, tid, ShareSessionEpoch(5)).acks)
+                .call(),
+        )
         .await
         .expect("ShareFetch unknown session");
     assert!(
@@ -100,18 +108,15 @@ async fn incremental_session_uses_cached_and_forgotten_partitions() {
     )
     .await;
 
-    produce_n(&client, ShareRecordsSetup {
-        topic_id: tid,
-        ..Default::default()
-    })
-    .await;
+    produce_n().client(&client).topic_id(tid).call().await;
     let cached: ShareFetchResponse = client
-        .send(empty_session_request(EmptySessionSetup {
-            member: member.clone(),
-            epoch: ShareSessionEpoch(2),
-            max_bytes: FetchByteLimit(ONE_MB),
-            ..Default::default()
-        }))
+        .send(
+            empty_session_request()
+                .member(member.clone())
+                .epoch(2)
+                .max_bytes(ONE_MB)
+                .call(),
+        )
         .await
         .expect("incremental ShareFetch");
     assert!(cached.error_code == NONE);
@@ -121,43 +126,43 @@ async fn incremental_session_uses_cached_and_forgotten_partitions() {
     assert!(acquired_count(cached_partition) == 1);
     acknowledge_success(
         &client,
-        ShareAck::prefix(
-            ShareSessionSetup::at_epoch(&member, tid, ShareSessionEpoch(3)),
-            krabka_ids::Offset(1),
-        )
-        .starting_at(krabka_ids::Offset(1)),
+        ShareAck::prefix()
+            .member(&member)
+            .topic_id(tid)
+            .epoch(3)
+            .last(1)
+            .call()
+            .starting_at(krabka_ids::Offset(1)),
     )
     .await;
 
     let forgotten: ShareFetchResponse = client
-        .send(empty_session_request(EmptySessionSetup {
-            member: member.clone(),
-            epoch: ShareSessionEpoch(4),
-            max_bytes: FetchByteLimit(ONE_MB),
-            forgotten_topics_data: vec![ForgottenTopic {
-                topic_id: wire(tid),
-                partitions: vec![0],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }))
+        .send(
+            empty_session_request()
+                .member(member.clone())
+                .epoch(4)
+                .max_bytes(ONE_MB)
+                .forgotten_topics_data(vec![ForgottenTopic {
+                    topic_id: wire(tid),
+                    partitions: vec![0],
+                    ..Default::default()
+                }])
+                .call(),
+        )
         .await
         .expect("forget partition");
     assert!(forgotten.error_code == NONE);
     assert!(forgotten.responses.is_empty());
 
-    produce_n(&client, ShareRecordsSetup {
-        topic_id: tid,
-        ..Default::default()
-    })
-    .await;
+    produce_n().client(&client).topic_id(tid).call().await;
     let after_forget: ShareFetchResponse = client
-        .send(empty_session_request(EmptySessionSetup {
-            member,
-            epoch: ShareSessionEpoch(5),
-            max_bytes: FetchByteLimit(ONE_MB),
-            ..Default::default()
-        }))
+        .send(
+            empty_session_request()
+                .member(member)
+                .epoch(5)
+                .max_bytes(ONE_MB)
+                .call(),
+        )
         .await
         .expect("ShareFetch after forget");
     assert!(after_forget.error_code == NONE);

@@ -8,10 +8,10 @@
 
 use {
     crate::{
-        kafka_wire::{PlainAuthenticationSetup, SaslTopicSetup},
+        kafka_wire::PlainAuthenticationSetup,
         sasl::{create_topic_sasl_plain, drive_elect_leaders_sasl_plain},
         support::{
-            acl::{TopicAclSetup, topic_acl_record, use_simple_acl_authorizer},
+            acl::{topic_acl_record, use_simple_acl_authorizer},
             admin::ElectionSetup,
             retry::{all_cluster_authorization_failed, retry_until},
             sasl::sasl_temp_config,
@@ -57,26 +57,27 @@ async fn non_super_user_without_acl_denied() {
     let addr = handle.listen_addr();
 
     // Create the topic as admin (rf=1 fine for a single-broker cluster).
-    create_topic_sasl_plain(addr, SaslTopicSetup {
-        client_id: CLIENT_ID,
-        topic: ConfiguredTopicSetup {
+    create_topic_sasl_plain()
+        .addr(addr)
+        .client_id(CLIENT_ID)
+        .topic(ConfiguredTopicSetup {
             name: ("foo-auth-test").into(),
             ..Default::default()
-        },
-        ..Default::default()
-    })
-    .await;
+        })
+        .call()
+        .await;
     wait_partition_exists(&handle, "foo-auth-test", 0).await;
 
     // Seed a dummy ACL so the compat shim is disabled. The ACL itself
     // is irrelevant — any non-empty `image.acls` flips the shim off and
     // forces the authorizer to evaluate every request.
     handle
-        .submit_metadata_record_for_test(topic_acl_record(TopicAclSetup {
-            topic: "__compat_shim_disable__",
-            principal: "User:admin",
-            ..Default::default()
-        }))
+        .submit_metadata_record_for_test(
+            topic_acl_record()
+                .topic("__compat_shim_disable__")
+                .principal("User:admin")
+                .call(),
+        )
         .await
         .expect("seed dummy ACL");
 

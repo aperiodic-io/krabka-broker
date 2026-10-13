@@ -10,7 +10,7 @@
 
 use {
     crate::support::{
-        client::{ValueBatchSetup, ValueRecordCount, connect_client},
+        client::connect_client,
         offsets::{delete_records_partition, delete_records_request, delete_records_topic},
         produce::{SinglePartitionProduceSetup, batch_request},
         records::{batch_from_records, value_record},
@@ -96,9 +96,7 @@ async fn replication_factor_three_propagates_to_all_followers() {
         create_replicated_partition(&cluster, support::topic_on("repl", &[&[1, 2, 3]])).await;
 
     let producer = connect_client(leader_addr, None).await;
-    let batch = support::client::value_batch(ValueBatchSetup {
-        records: ValueRecordCount(20),
-    });
+    let batch = support::client::value_batch().records(20).call();
     produce_replicated(&producer, "repl", topic_id, batch).await;
 
     // Wait until every broker's local log shows log_end_offset >= 20.
@@ -246,16 +244,15 @@ async fn delete_records_moves_every_replica_log_start_before_it_answers() {
     // cluster[0] is node 1, and the topic pins it as the leader of partition 0.
     let leader_addr = cluster[0].1.listen_addr.to_string();
     let client = connect_client(leader_addr, None).await;
-    let topic_id = support::topics::create_assigned_partition(
-        &client,
-        AssignedTopicSetup::three_replicas("trimmed"),
-        cluster.iter().map(|(broker, _, _)| broker),
-    )
-    .await;
+    let topic_id = support::topics::create_assigned_partition()
+        .client(&client)
+        .name(AssignedTopicSetup::three_replicas("trimmed").name)
+        .replicas(AssignedTopicSetup::three_replicas("trimmed").replicas)
+        .brokers(cluster.iter().map(|(broker, _, _)| broker))
+        .call()
+        .await;
 
-    let batch = support::client::value_batch(ValueBatchSetup {
-        records: ValueRecordCount(20),
-    });
+    let batch = support::client::value_batch().records(20).call();
     produce_replicated(&client, "trimmed", topic_id, batch).await;
     for (h, _, _) in &cluster {
         h.wait_until_local_log_end_offset("trimmed", 0, 20).await;

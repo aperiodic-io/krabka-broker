@@ -264,7 +264,7 @@ mod tests {
             authorizer::AllowAllAuthorizer,
             coordinator::unified::classic_state::GroupState,
             handlers::acl_wire::CLUSTER_RESOURCE_NAME,
-            test_support::{AllowAclSetup, allow_acl, start_broker_no_audit_with, test_ctx},
+            test_support::{allow_acl, start_broker_no_audit_with, test_ctx},
         },
         assert2::assert,
         krabka_metadata::{AclOperation, MetadataRecord, ResourceType},
@@ -327,12 +327,14 @@ mod tests {
     }
 
     fn acl(resource_type: ResourceType, name: &str, user: &str) -> MetadataRecord {
-        MetadataRecord::V1AccessControlEntry(allow_acl(AllowAclSetup {
-            resource_type,
-            resource_name: name,
-            principal: &format!("User:{user}"),
-            operation: AclOperation::Describe,
-        }))
+        MetadataRecord::V1AccessControlEntry(
+            allow_acl()
+                .resource_type(resource_type)
+                .resource_name(name)
+                .principal(&format!("User:{user}"))
+                .operation(AclOperation::Describe)
+                .call(),
+        )
     }
 
     /// Kafka's `handleListGroupsRequest`: cluster `Describe` lists every group

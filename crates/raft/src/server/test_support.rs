@@ -7,14 +7,30 @@ use {
         ControllerFetchMissLimit, MetadataLogConfig, MetadataRaftCommandQueueCapacity,
         MetadataRaftFetchMax,
         error::RaftError,
-        kraft::{Activation, KraftController, NullPeerSender},
-        test_support::single_partition_topic,
+        kraft::{Activation, KraftController, NullPeerSender, transport::wire::PeerRequest},
+        test_support::{encode, single_partition_topic},
     },
     krabka_metadata::NodeId,
     krabka_units::prelude::{Time, TimeExt as _, millis, secs},
     tokio::io::AsyncReadExt,
     uuid::Uuid,
 };
+
+#[bon::builder]
+pub(super) fn begin_quorum_epoch_request(
+    voter_id: NodeId,
+    leader_id: NodeId,
+    leader_epoch: u32,
+) -> PeerRequest {
+    PeerRequest::BeginQuorumEpoch {
+        cluster_id: None,
+        voter_id,
+        voter_directory_id: Uuid::nil(),
+        leader_endpoints: Vec::new(),
+        leader_id,
+        leader_epoch,
+    }
+}
 
 /// Read a complete length-prefixed listener response.
 pub(super) async fn read_frame<R: AsyncReadExt + Unpin>(stream: &mut R) -> Vec<u8> {
@@ -120,9 +136,7 @@ pub(super) fn topic_record(name: &str) -> krabka_metadata::MetadataRecord {
 
 /// Encodes `message` at `version`.
 pub(super) fn encoded(message: &impl krabka_protocol::Encode, version: i16) -> bytes::Bytes {
-    let mut body = bytes::BytesMut::new();
-    message.encode(&mut body, version).expect("encode");
-    body.freeze()
+    encode(message, version)
 }
 
 /// Decodes a `T` at `version` from the front of `bytes`.

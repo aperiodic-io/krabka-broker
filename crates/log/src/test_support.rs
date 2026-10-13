@@ -78,7 +78,17 @@ pub(crate) struct AbortedTxnSetup {
     pub stable: Offset,
 }
 
-pub(crate) fn aborted_txn(setup: AbortedTxnSetup) -> AbortedTxn {
+#[bon::builder]
+pub(crate) fn aborted_txn(
+    #[builder(into, default = ProducerId (1000))] producer: ProducerId,
+    #[builder(default = Offset (0) ..= Offset (3))] bounds: RangeInclusive<Offset>,
+    #[builder(into, default = Offset (4))] stable: Offset,
+) -> AbortedTxn {
+    let setup = AbortedTxnSetup {
+        producer,
+        bounds,
+        stable,
+    };
     let AbortedTxnSetup {
         producer,
         bounds,

@@ -67,10 +67,11 @@ pub(crate) fn tier<'a>(
     rsm: &'a Arc<dyn RemoteStorageManager>,
     rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
 ) -> RemoteTier<'a> {
-    configured_tier(rsm, rlmm, TierSetup {
-        archive,
-        ..Default::default()
-    })
+    configured_tier()
+        .rsm(rsm)
+        .rlmm(rlmm)
+        .archive(archive)
+        .call()
 }
 
 /// Policies and resources for a test tier. Counter assertions override the shared metrics.
@@ -96,11 +97,26 @@ impl Default for TierSetup<'_> {
 }
 
 /// A tier borrowing its backends and the selected test resources.
+#[bon::builder]
 pub fn configured_tier<'a>(
     rsm: &'a Arc<dyn RemoteStorageManager>,
     rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
-    setup: TierSetup<'a>,
+    #[builder(default = TierSetup::default().archive)] archive: ArchiveMode,
+    #[builder(default = TierSetup::default().copy_timeout)] copy_timeout: krabka_units::Time,
+    #[builder(default = TierSetup::default().unstable_api_versions)]
+    unstable_api_versions: UnstableApiVersions,
+    #[builder(default = TierSetup::default().metrics)] metrics: &'a BrokerMetrics,
+    #[builder(default = TierSetup::default().index_cache)] index_cache: &'a Arc<
+        krabka_remote_storage::RemoteIndexCache,
+    >,
 ) -> RemoteTier<'a> {
+    let setup = TierSetup {
+        archive,
+        copy_timeout,
+        unstable_api_versions,
+        metrics,
+        index_cache,
+    };
     RemoteTier {
         archive: setup.archive,
         rsm,
@@ -381,7 +397,17 @@ pub struct SegmentExportSetup {
     pub size: ByteSize,
 }
 
-pub fn synth_export(setup: SegmentExportSetup) -> SegmentExport {
+#[bon::builder]
+pub fn synth_export(
+    #[builder(default = Offset (0) ..= Offset (9))] bounds: RangeInclusive<Offset>,
+    #[builder(into, default = UnixMillis (100))] timestamp: UnixMillis,
+    #[builder(default = bytes (64))] size: ByteSize,
+) -> SegmentExport {
+    let setup = SegmentExportSetup {
+        bounds,
+        timestamp,
+        size,
+    };
     let SegmentExportSetup {
         bounds,
         timestamp,
@@ -480,19 +506,18 @@ pub async fn copy_exports(tier: &RemoteTier<'_>, exports: Vec<SegmentExport>) ->
 }
 
 /// Three consecutive ten-offset fixture segments, each with 64 bytes of data.
-pub fn three_exports() -> Vec<SegmentExport> {
+#[bon::builder]
+pub fn three_exports(#[builder(default = 300)] last_timestamp: i64) -> Vec<SegmentExport> {
     vec![
-        synth_export(SegmentExportSetup::default()),
-        synth_export(SegmentExportSetup {
-            bounds: Offset(10)..=Offset(19),
-            timestamp: UnixMillis(200),
-            ..Default::default()
-        }),
-        synth_export(SegmentExportSetup {
-            bounds: Offset(20)..=Offset(29),
-            timestamp: UnixMillis(300),
-            ..Default::default()
-        }),
+        synth_export().call(),
+        synth_export()
+            .bounds(Offset(10)..=Offset(19))
+            .timestamp(200)
+            .call(),
+        synth_export()
+            .bounds(Offset(20)..=Offset(29))
+            .timestamp(last_timestamp)
+            .call(),
     ]
 }
 
@@ -656,15 +681,12 @@ pub fn two_exports() -> Vec<SegmentExport> { two_exports_with_size(bytes(64)) }
 /// Consecutive ten-offset exports sharing the caller's segment size.
 pub fn two_exports_with_size(size: ByteSize) -> Vec<SegmentExport> {
     vec![
-        synth_export(SegmentExportSetup {
-            size,
-            ..Default::default()
-        }),
-        synth_export(SegmentExportSetup {
-            bounds: Offset(10)..=Offset(19),
-            timestamp: UnixMillis(200),
-            size,
-        }),
+        synth_export().size(size).call(),
+        synth_export()
+            .bounds(Offset(10)..=Offset(19))
+            .timestamp(200)
+            .size(size)
+            .call(),
     ]
 }
 

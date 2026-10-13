@@ -176,30 +176,23 @@ mod tests {
     use {
         super::*,
         crate::{
-            handlers::encode_response, test_support::decode_response,
-            txn::handlers::txn_offset_commit::test_support::request,
+            handlers::encode_response,
+            test_support::decode_response,
+            txn::handlers::txn_offset_commit::test_support::{
+                request, request_topic as request_topic_fixture,
+            },
         },
         assert2::assert,
-        krabka_protocol::{
-            owned::txn_offset_commit_request::TxnOffsetCommitRequestPartition,
-            primitives::uuid::Uuid as WireUuid,
-        },
+        krabka_protocol::primitives::uuid::Uuid as WireUuid,
         std::collections::HashSet,
     };
 
     fn request_topic(name: &str, id: u128, partitions: &[i32]) -> TxnOffsetCommitRequestTopic {
-        TxnOffsetCommitRequestTopic {
-            name: name.into(),
-            topic_id: WireUuid(uuid::Uuid::from_u128(id).into_bytes()),
-            partitions: partitions
-                .iter()
-                .map(|&partition_index| TxnOffsetCommitRequestPartition {
-                    partition_index,
-                    ..Default::default()
-                })
-                .collect(),
-            ..Default::default()
-        }
+        request_topic_fixture()
+            .name(name)
+            .topic_id(WireUuid(uuid::Uuid::from_u128(id).into_bytes()))
+            .partitions(partitions.to_vec())
+            .call()
     }
 
     fn response_topic(name: &str, id: u128, rows: &[(i32, i16)]) -> TxnOffsetCommitResponseTopic {

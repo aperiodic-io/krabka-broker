@@ -175,9 +175,7 @@ mod tests {
     use {
         super::*,
         crate::{
-            auto_join::test_support::{
-                ResponseHeaderMode, ResponseWireSetup, params, voter_update_params,
-            },
+            auto_join::test_support::{ResponseHeaderMode, params, voter_update_params},
             test_support::FakeMetadataSource,
         },
         krabka_metadata::{KRaftVersionRange, VoterEndpoint},
@@ -384,11 +382,14 @@ mod tests {
                         error_code: response_code,
                         ..Default::default()
                     };
-                    let _ = write_response(&mut socket, &frame, &response, ResponseWireSetup {
-                        version: krabka_ids::ApiVersion(req::MAX_VERSION),
-                        header: ResponseHeaderMode::Flexible,
-                    })
-                    .await;
+                    let _ = write_response()
+                        .socket(&mut socket)
+                        .request(&frame)
+                        .response(&response)
+                        .version(req::MAX_VERSION)
+                        .header(ResponseHeaderMode::Flexible)
+                        .call()
+                        .await;
                 }
             }
         });

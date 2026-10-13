@@ -3,7 +3,7 @@
 
 use {
     super::*,
-    crate::metrics::QuotaEntityLabel,
+    crate::metrics::{QuotaEntityLabel, test_support::encode_metrics},
     assert2::check,
     krabka_metadata::EntityKey,
     krabka_units::{millis, secs},
@@ -34,12 +34,7 @@ fn alice_fixture() -> (QuotaBuckets, BrokerMetrics) {
 
 /// The series names a `/metrics` body carries for the per-entity throttle.
 fn throttle_series(metrics: &BrokerMetrics) -> Vec<String> {
-    let mut body = String::new();
-    prometheus_client::encoding::text::encode(
-        &mut body,
-        &metrics.registry.try_lock().expect("registry"),
-    )
-    .expect("encode");
+    let body = encode_metrics(metrics);
     body.lines()
         .filter(|line| line.starts_with("krabka_broker_quota_entity_throttle_seconds_total{"))
         .map(ToString::to_string)

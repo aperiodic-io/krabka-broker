@@ -149,7 +149,7 @@ mod tests {
         crate::{
             codes,
             share_coordinator::coordinator::test_support::{
-                DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+                DeliveryAttemptCount, FixtureDeliveryState, state_batch,
             },
             share_partition::{
                 dlq::{DlqError, DlqRequest, DlqSink, test_support::RecordingDlq},
@@ -157,8 +157,7 @@ mod tests {
                 state::{
                     AckType, AcquisitionState, DlqCause, DlqRange, RecordState,
                     test_support::{
-                        AcquiredWindowSetup, DeadLetterQueue, DeliveryCount, DlqRangeSetup,
-                        acquire_window, dlq_range as range,
+                        DeadLetterQueue, DeliveryCount, acquire_window, dlq_range as range,
                     },
                 },
             },
@@ -204,11 +203,12 @@ mod tests {
         let cell = mgr.insert_for_test("g1", tid, 0, AcquisitionState::new(Offset(0)));
         {
             let mut state = cell.lock().await;
-            acquire_window(&mut state, AcquiredWindowSetup {
-                end: Offset(i64::from(records.0)),
-                record_limit: RecordCount(100),
-                dead_letter_queue: DeadLetterQueue::Enabled,
-            });
+            acquire_window()
+                .state(&mut state)
+                .end(i64::from(records.0))
+                .record_limit(100)
+                .dead_letter_queue(DeadLetterQueue::Enabled)
+                .call();
         }
         cell
     }
@@ -261,7 +261,17 @@ mod tests {
         cause: DlqCause,
     }
 
-    fn request(setup: ExpectedDlqRequestSetup) -> DlqRequest {
+    #[bon::builder]
+    fn request(
+        #[builder(default = Offset (0) ..= Offset (1))] bounds: std::ops::RangeInclusive<Offset>,
+        #[builder(into, default = DeliveryCount (1))] delivery_count: DeliveryCount,
+        #[builder(default = DlqCause :: ClientReject)] cause: DlqCause,
+    ) -> DlqRequest {
+        let setup = ExpectedDlqRequestSetup {
+            bounds,
+            delivery_count,
+            cause,
+        };
         let ExpectedDlqRequestSetup {
             bounds,
             delivery_count,
@@ -330,7 +340,7 @@ mod tests {
             (states, dlq.requests(), cell.lock().await.start_offset)
                 == (
                     vec![(2, RecordState::Acquired)],
-                    vec![request(ExpectedDlqRequestSetup::default())],
+                    vec![request().call()],
                     Offset(2),
                 )
         );
@@ -344,88 +354,45 @@ mod tests {
     fn coalesce_joins_only_neighbours_with_one_count_and_cause() {
         let reject = Some(DlqCause::ClientReject);
         let exceeded = Some(DlqCause::DeliveryCountExceeded);
-        let rejected_offsets_0_0_delivery_1 = range(DlqRangeSetup {
-            cause: reject,
-            ..Default::default()
-        });
-        let rejected_offsets_0_2_delivery_1 = range(DlqRangeSetup {
-            last: Offset(2),
-            cause: reject,
-            ..Default::default()
-        });
-        let rejected_offsets_2_2_delivery_1 = range(DlqRangeSetup {
-            first: Offset(2),
-            last: Offset(2),
-            cause: reject,
-            ..Default::default()
-        });
-        let rejected_offsets_1_1_delivery_2 = range(DlqRangeSetup {
-            first: Offset(1),
-            last: Offset(1),
-            delivery_count: DeliveryCount(2),
-            cause: reject,
-        });
-        let rejected_offsets_0_0_delivery_5 = range(DlqRangeSetup {
-            delivery_count: DeliveryCount(5),
-            cause: reject,
-            ..Default::default()
-        });
-        let exceeded_offsets_1_1_delivery_5 = range(DlqRangeSetup {
-            first: Offset(1),
-            last: Offset(1),
-            delivery_count: DeliveryCount(5),
-            cause: exceeded,
-        });
-        let exceeded_offsets_0_0_delivery_5 = range(DlqRangeSetup {
-            delivery_count: DeliveryCount(5),
-            cause: exceeded,
-            ..Default::default()
-        });
-        let restored_offsets_1_1_delivery_5 = range(DlqRangeSetup {
-            first: Offset(1),
-            last: Offset(1),
-            delivery_count: DeliveryCount(5),
-            ..Default::default()
-        });
+        let rejected_offsets_0_0_delivery_1 = range().maybe_cause(reject).call();
+        let rejected_offsets_0_2_delivery_1 = range().last(2).maybe_cause(reject).call();
+        let rejected_offsets_2_2_delivery_1 = range().first(2).last(2).maybe_cause(reject).call();
+        let rejected_offsets_1_1_delivery_2 = range()
+            .first(1)
+            .last(1)
+            .delivery_count(2)
+            .maybe_cause(reject)
+            .call();
+        let rejected_offsets_0_0_delivery_5 = range().delivery_count(5).maybe_cause(reject).call();
+        let exceeded_offsets_1_1_delivery_5 = range()
+            .first(1)
+            .last(1)
+            .delivery_count(5)
+            .maybe_cause(exceeded)
+            .call();
+        let exceeded_offsets_0_0_delivery_5 =
+            range().delivery_count(5).maybe_cause(exceeded).call();
+        let restored_offsets_1_1_delivery_5 = range().first(1).last(1).delivery_count(5).call();
         let cases = [
             (vec![], vec![]),
             (
                 vec![
                     rejected_offsets_0_0_delivery_1,
-                    range(DlqRangeSetup {
-                        first: Offset(1),
-                        last: Offset(2),
-                        cause: reject,
-                        ..Default::default()
-                    }),
+                    range().first(1).last(2).maybe_cause(reject).call(),
                 ],
                 vec![rejected_offsets_0_2_delivery_1],
             ),
             (
                 vec![
-                    range(DlqRangeSetup {
-                        first: Offset(3),
-                        last: Offset(3),
-                        cause: reject,
-                        ..Default::default()
-                    }),
+                    range().first(3).last(3).maybe_cause(reject).call(),
                     rejected_offsets_0_2_delivery_1,
                 ],
-                vec![range(DlqRangeSetup {
-                    last: Offset(3),
-                    cause: reject,
-                    ..Default::default()
-                })],
+                vec![range().last(3).maybe_cause(reject).call()],
             ),
             (
                 vec![
                     rejected_offsets_0_0_delivery_1,
-                    range(DlqRangeSetup {
-                        first: Offset(1),
-                        last: Offset(1),
-                        cause: reject,
-                        ..Default::default()
-                    }),
+                    range().first(1).last(1).maybe_cause(reject).call(),
                     rejected_offsets_2_2_delivery_1,
                 ],
                 vec![rejected_offsets_0_2_delivery_1],
@@ -497,12 +464,9 @@ mod tests {
 
         assert!(
             (states, dlq.requests())
-                == (vec![(3, RecordState::Acquired)], vec![request(
-                    ExpectedDlqRequestSetup {
-                        bounds: Offset(0)..=Offset(2),
-                        ..Default::default()
-                    }
-                )],)
+                == (vec![(3, RecordState::Acquired)], vec![
+                    request().bounds(Offset(0)..=Offset(2)).call()
+                ],)
         );
     }
 
@@ -558,16 +522,16 @@ mod tests {
         let ranges = {
             let mut state = cell.lock().await;
             state.load_from(Offset(0), 1, 1, &[
-                state_batch(StateBatchSetup {
-                    bounds: Offset(0)..=Offset(0),
-                    delivery: FixtureDeliveryState::Archiving,
-                    attempts: DeliveryAttemptCount(5),
-                }),
-                state_batch(StateBatchSetup {
-                    bounds: Offset(1)..=Offset(1),
-                    delivery: FixtureDeliveryState::Archiving,
-                    attempts: DeliveryAttemptCount(2),
-                }),
+                state_batch()
+                    .bounds(Offset(0)..=Offset(0))
+                    .delivery(FixtureDeliveryState::Archiving)
+                    .attempts(DeliveryAttemptCount(5))
+                    .call(),
+                state_batch()
+                    .bounds(Offset(1)..=Offset(1))
+                    .delivery(FixtureDeliveryState::Archiving)
+                    .attempts(DeliveryAttemptCount(2))
+                    .call(),
             ]);
             state.take_pending_dlq()
         };
@@ -579,16 +543,15 @@ mod tests {
         assert!(
             (states, written)
                 == (Vec::new(), vec![
-                    request(ExpectedDlqRequestSetup {
-                        bounds: Offset(0)..=Offset(0),
-                        delivery_count: DeliveryCount(5),
-                        cause: DlqCause::DeliveryCountExceeded
-                    }),
-                    request(ExpectedDlqRequestSetup {
-                        bounds: Offset(1)..=Offset(1),
-                        delivery_count: DeliveryCount(2),
-                        ..Default::default()
-                    }),
+                    request()
+                        .bounds(Offset(0)..=Offset(0))
+                        .delivery_count(5)
+                        .cause(DlqCause::DeliveryCountExceeded)
+                        .call(),
+                    request()
+                        .bounds(Offset(1)..=Offset(1))
+                        .delivery_count(2)
+                        .call(),
                 ],)
         );
     }

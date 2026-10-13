@@ -233,32 +233,17 @@ mod tests {
             ),
         ];
         for (error, code) in cases {
-            let expected = TriggerBarrierResponse {
-                throttle_time_ms: 0,
-                error_code: code,
-                error_message: Some(error.to_string()),
-                epoch: NO_EPOCH,
-                status: CUT_STATUS_PARTIAL,
-                topics: Vec::new(),
-                missing: Vec::new(),
-                ..TriggerBarrierResponse::default()
-            };
+            let expected = refused(code, Some(error.to_string()));
             check!(error_response(&error) == expected, "{error}");
         }
     }
 
     #[test]
     fn a_denied_request_returns_cluster_authorization_failed_and_no_cut() {
-        let expected = TriggerBarrierResponse {
-            throttle_time_ms: 0,
-            error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-            error_message: Some("trigger-barrier denied".to_owned()),
-            epoch: NO_EPOCH,
-            status: CUT_STATUS_PARTIAL,
-            topics: Vec::new(),
-            missing: Vec::new(),
-            ..TriggerBarrierResponse::default()
-        };
+        let expected = refused(
+            codes::CLUSTER_AUTHORIZATION_FAILED,
+            Some("trigger-barrier denied".to_owned()),
+        );
         check!(denied_response("trigger-barrier denied") == expected);
     }
 }

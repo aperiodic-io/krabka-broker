@@ -9,10 +9,7 @@
 
 use {
     crate::support::{
-        configs::{
-            ConfigOperation, IncrementalConfigsSetup, incremental_config, incremental_request,
-            incremental_resource,
-        },
+        configs::{ConfigOperation, incremental_config, incremental_request, incremental_resource},
         wire::ApiRequestSetup,
     },
     bytes::BytesMut,
@@ -107,16 +104,15 @@ pub(crate) async fn set_broker_config(
 ) -> (i16, Option<String>) {
     use krabka_protocol::owned::incremental_alter_configs_response::IncrementalAlterConfigsResponse;
     let version: i16 = 1;
-    let req = incremental_request(IncrementalConfigsSetup {
-        resources: vec![incremental_resource(4, broker.to_string(), vec![
+    let req = incremental_request()
+        .resources(vec![incremental_resource(4, broker.to_string(), vec![
             incremental_config(
                 name.to_string(),
                 Some(value.to_string()),
                 ConfigOperation::Set,
             ),
-        ])],
-        ..Default::default()
-    });
+        ])])
+        .call();
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let resp: IncrementalAlterConfigsResponse =
         flexible_exchange(&mut stream, &req, ApiRequestSetup {

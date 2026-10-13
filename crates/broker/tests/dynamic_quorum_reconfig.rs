@@ -20,7 +20,7 @@
 //! and a fresh directory starts in `Bootstrap` mode.
 
 use {
-    crate::support::{AddressedNodeSetup, addressed_node_config},
+    crate::support::addressed_node_config,
     assert2::assert,
     krabka_broker::{BootstrapMode, Broker, BrokerHandle, NodeId, config::NodeRole},
     krabka_client_admin::{AdminClient, AdminError, RaftVoterEndpoint},
@@ -100,11 +100,12 @@ async fn start(
         None,
     )
     .expect("krabka-format wrote meta.properties");
-    let mut config = addressed_node_config(log_dir, AddressedNodeSetup {
-        node: krabka_broker::NodeId(node.id),
-        client: node.client_addr,
-        controller: node.controller_addr,
-    });
+    let mut config = addressed_node_config()
+        .log_dir(log_dir)
+        .node(node.id)
+        .client(node.client_addr)
+        .controller(node.controller_addr)
+        .call();
     config.controller_quorum_voters = vec![];
     config.bootstrap_servers = bootstrap.iter().map(ToString::to_string).collect();
     config.roles = roles;

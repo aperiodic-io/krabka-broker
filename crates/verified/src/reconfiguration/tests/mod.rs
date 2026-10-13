@@ -54,7 +54,19 @@ const fn target(membership: TargetMembership) -> TargetVoter {
     }
 }
 
-const fn plan(setup: ReconfigurationPlanSetup) -> D {
+#[bon::builder]
+const fn plan(
+    #[builder(into, default = ReconfigurationPlanSetup::default().count)] count: VoterCount,
+    #[builder(into, default = ReconfigurationPlanSetup::default().level)] level: KraftFeatureLevel,
+    #[builder(default = ReconfigurationPlanSetup::default().voters)] voters: ControlRecordWrite,
+    #[builder(default = ReconfigurationPlanSetup::default().kraft)] kraft: ControlRecordWrite,
+) -> D {
+    let setup = ReconfigurationPlanSetup {
+        count,
+        level,
+        voters,
+        kraft,
+    };
     D::Admit(VoterReconfigurationPlan {
         next_voter_count: setup.count.0,
         next_kraft_version: setup.level.0,

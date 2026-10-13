@@ -8,7 +8,7 @@
 //! `FetchRequest` directly.
 
 use {
-    crate::support::fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+    crate::support::fetch::single_partition_fetch,
     krabka_broker::coordinator::AUDIT_TOPIC,
     krabka_protocol::{owned::fetch_response::FetchResponse, records::Record},
 };
@@ -61,11 +61,12 @@ async fn fetch_audit(
 ) -> krabka_protocol::owned::fetch_response::FetchResponse {
     let topic_id = super::topic_id_for(client, AUDIT_TOPIC).await;
     client
-        .send(single_partition_fetch(SinglePartitionFetchSetup {
-            topic: AUDIT_TOPIC.into(),
-            topic_id,
-            ..Default::default()
-        }))
+        .send(
+            single_partition_fetch()
+                .topic(AUDIT_TOPIC.into())
+                .topic_id(topic_id)
+                .call(),
+        )
         .await
         .expect("FetchRequest for audit topic")
 }

@@ -91,7 +91,10 @@ impl ClientMetricsCollector {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, std::time::Duration};
+    use {
+        super::{super::test_support::data_point, *},
+        std::time::Duration,
+    };
 
     #[test]
     fn delta_points_accumulate_per_series() {
@@ -101,26 +104,20 @@ mod tests {
             (3.0, 3, 6.0, vec![(1.0, 2), (f64::MAX, 1)]),
         ] {
             sink.ingest(&[
-                DataPoint {
-                    metric: "requests".into(),
-                    client_instance_id: "i".into(),
-                    client_id: "c".into(),
-                    attributes: vec![],
-                    value: PointValue::Counter(counter),
-                    delta_start: Some(7),
-                },
-                DataPoint {
-                    metric: "latency".into(),
-                    client_instance_id: "i".into(),
-                    client_id: "c".into(),
-                    attributes: vec![],
-                    value: PointValue::Histogram {
+                data_point()
+                    .metric("requests".into())
+                    .value(PointValue::Counter(counter))
+                    .delta_start(7)
+                    .call(),
+                data_point()
+                    .metric("latency".into())
+                    .value(PointValue::Histogram {
                         count,
                         sum,
                         buckets,
-                    },
-                    delta_start: Some(7),
-                },
+                    })
+                    .delta_start(7)
+                    .call(),
             ]);
         }
         for (metric, first_start, second_start, expected) in [

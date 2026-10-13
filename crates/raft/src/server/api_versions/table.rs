@@ -10,6 +10,8 @@
 //! does not decode, and the connection closes.
 
 use crate::config::ControllerApiVersion;
+#[cfg(test)]
+use crate::server::test_support::begin_quorum_epoch_request as begin_quorum_epoch_request_setup;
 
 /// One advertised controller-listener range, taken whole from the generated
 /// `krabka_protocol::owned::$request` message.
@@ -252,14 +254,11 @@ mod tests {
             (
                 "begin quorum epoch",
                 api_key::BEGIN_QUORUM_EPOCH,
-                PeerRequest::BeginQuorumEpoch {
-                    cluster_id: None,
-                    voter_id: NodeId(2),
-                    voter_directory_id: uuid::Uuid::nil(),
-                    leader_endpoints: Vec::new(),
-                    leader_id: NodeId(1),
-                    leader_epoch: 4,
-                },
+                begin_quorum_epoch_request_setup()
+                    .voter_id(NodeId(2))
+                    .leader_id(NodeId(1))
+                    .leader_epoch(4)
+                    .call(),
                 decodes_whole::<BeginQuorumEpochRequest>,
             ),
             (

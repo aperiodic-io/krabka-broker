@@ -78,7 +78,7 @@ use {
         produce::{SinglePartitionProduceSetup, batch_request},
         records::value_record,
         standalone_broker,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::{assert, check},
     bytes::Bytes,
@@ -138,12 +138,9 @@ async fn produce(client: &Client, topic: &str, values: &[&str]) {
 
 async fn create_topic(client: &Client, name: &str) {
     let cr = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: (name).into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name((name).into()).call(),
+        ))
         .await
         .expect("CreateTopics");
     assert!(cr.topics[0].error_code == 0, "create_topic failed: {cr:?}");

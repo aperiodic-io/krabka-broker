@@ -13,7 +13,7 @@ use {
     },
     crate::{
         jvm_acceptance::wait_jvm_log_config,
-        support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_stdin_output},
+        support::{ContainerInput, jvm_docker_command, jvm_stdin_output},
     },
     assert2::assert,
 };
@@ -119,9 +119,9 @@ pub(crate) fn produce_records(topic: &str, n: usize) {
         use std::fmt::Write as _;
         let _ = writeln!(payload, "record-{i:04}");
     }
-    let mut child_command = jvm_docker_command(JvmDockerSetup {
-        image: KAFKA_IMAGE,
-        args: &[
+    let mut child_command = jvm_docker_command()
+        .image(KAFKA_IMAGE)
+        .args(&[
             "kafka-console-producer",
             "--bootstrap-server",
             broker0_advertised(),
@@ -133,10 +133,9 @@ pub(crate) fn produce_records(topic: &str, n: usize) {
             "linger.ms=0",
             "--producer-property",
             "max.in.flight.requests.per.connection=1",
-        ],
-        input: ContainerInput::Attached,
-        ..Default::default()
-    });
+        ])
+        .input(ContainerInput::Attached)
+        .call();
     let producer_out = jvm_stdin_output(&mut child_command, payload.as_bytes());
     assert!(
         producer_out.status.success(),

@@ -27,7 +27,25 @@ impl Default for AclSetup<'_> {
     }
 }
 
-pub(crate) fn acl(setup: AclSetup<'_>) -> AclEntry {
+#[bon::builder]
+pub(crate) fn acl(
+    #[builder(default = AclSetup::default().rt)] rt: ResourceType,
+    #[builder(default = AclSetup::default().permission)] permission: PermissionType,
+    #[builder(default = AclSetup::default().op)] op: AclOperation,
+    #[builder(default = AclSetup::default().principal)] principal: &'_ str,
+    #[builder(default = AclSetup::default().host)] host: &'_ str,
+    #[builder(default = AclSetup::default().pattern)] pattern: PatternType,
+    #[builder(default = AclSetup::default().name)] name: &'_ str,
+) -> AclEntry {
+    let setup = AclSetup {
+        rt,
+        permission,
+        op,
+        principal,
+        host,
+        pattern,
+        name,
+    };
     let AclSetup {
         rt,
         permission,

@@ -25,7 +25,7 @@ use {
             topics::metadata_topic,
             wire::{
                 CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-                SocketExchangeSetup, WireFrameSetup, request_frame as support_request_frame,
+                SocketExchangeSetup, request_frame as support_request_frame,
             },
         },
     },
@@ -84,16 +84,31 @@ struct RequestFrameSetup<'a> {
 }
 
 /// A sized request frame with the pre-authentication client's header.
-fn request_frame(setup: RequestFrameSetup<'_>) -> Vec<u8> {
-    let frame = support_request_frame(WireFrameSetup {
-        api_key: setup.api_key,
-        version: setup.version,
-        correlation: setup.correlation,
-        header: setup.header,
-        client_id: "c",
-        body: setup.body,
-        ..Default::default()
-    });
+#[bon::builder]
+fn request_frame(
+    #[builder(into, default = krabka_ids :: ApiKey (18))] api_key: krabka_ids::ApiKey,
+    #[builder(into, default = krabka_ids :: ApiVersion (3))] version: krabka_ids::ApiVersion,
+    #[builder(default = crate :: support :: wire :: CorrelationId (2))]
+    correlation: WireCorrelationId,
+    #[builder(default = crate :: support :: wire :: HeaderEncoding :: Flexible)]
+    header: RequestHeaderEncoding,
+    #[builder(default)] body: &'_ [u8],
+) -> Vec<u8> {
+    let setup = RequestFrameSetup {
+        api_key,
+        version,
+        correlation,
+        header,
+        body,
+    };
+    let frame = support_request_frame()
+        .api_key(setup.api_key)
+        .version(setup.version)
+        .correlation(setup.correlation)
+        .header(setup.header)
+        .client_id("c")
+        .body(setup.body)
+        .call();
     let mut out = BytesMut::new();
     out.put_i32(i32::try_from(frame.len()).expect("frame length fits i32"));
     out.put_slice(&frame);
@@ -277,12 +292,7 @@ async fn the_larger_request_limit_returns_once_the_peer_authenticated() {
     .await
     .expect("handshake");
     stream
-        .write_all(&request_frame(RequestFrameSetup {
-            api_key: krabka_ids::ApiKey(36),
-            version: krabka_ids::ApiVersion(2),
-            body: &vec![0u8; 2048],
-            ..Default::default()
-        }))
+        .write_all(&request_frame().api_key(36).body(&vec![0u8; 2048]).call())
         .await
         .unwrap();
     assert_closed_without_a_frame(&mut stream, "an oversize frame mid-exchange").await;
@@ -385,10 +395,11 @@ async fn a_second_api_versions_before_the_handshake_closes_the_connection() {
     let first = api_versions(&mut stream, 3, &named_client("krabka-test")).await;
     check!(first.error_code == 0);
     stream
-        .write_all(&request_frame(RequestFrameSetup {
-            body: &encode(&named_client("krabka-test"), 3),
-            ..Default::default()
-        }))
+        .write_all(
+            &request_frame()
+                .body(&encode(&named_client("krabka-test"), 3))
+                .call(),
+        )
         .await
         .unwrap();
     assert_closed_without_a_frame(&mut stream, "a second ApiVersions").await;

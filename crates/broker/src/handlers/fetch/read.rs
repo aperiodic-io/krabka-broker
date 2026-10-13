@@ -653,6 +653,16 @@ mod tests {
     /// `read_committed` case reads back.
     const PID: i64 = 1000;
 
+    async fn assert_zero_byte_read(
+        partition: &Partition,
+        request: super::ReadRequest,
+        out: &mut PartitionData,
+        label: &str,
+    ) {
+        let bytes = super::do_read(partition, request, &LogDirRegistry::default(), out).await;
+        assert!(bytes == 0, "{label}");
+    }
+
     fn empty_log() -> (tempfile::TempDir, Log) {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = Log::open(dir.path(), LogConfig::default()).expect("open log");
@@ -1035,9 +1045,13 @@ mod tests {
                     aborted_transactions: None,
                     ..PartitionData::default()
                 };
-                let bytes =
-                    super::do_read(&partition, request, &LogDirRegistry::default(), &mut out).await;
-                assert!(bytes == 0);
+                assert_zero_byte_read(
+                    &partition,
+                    request,
+                    &mut out,
+                    &format!("follower={follower}, committed={committed}, offset={offset}"),
+                )
+                .await;
                 assert!(
                     out == expected,
                     "follower={follower}, committed={committed}, offset={offset}"
@@ -1149,10 +1163,7 @@ mod tests {
                 aborted_transactions: Some(Vec::new()),
                 ..PartitionData::default()
             };
-            let bytes =
-                super::do_read(&partition, request, &LogDirRegistry::default(), &mut out).await;
-
-            assert!(bytes == 0, "{name}");
+            assert_zero_byte_read(&partition, request, &mut out, name).await;
             assert!(out == refused, "{name}");
         }
         assert!(

@@ -69,7 +69,19 @@ pub struct ProducerValuesSetup<'a> {
     pub values: &'a [&'a str],
 }
 
-pub fn producer_values_batch(setup: ProducerValuesSetup<'_>) -> RecordBatch {
+#[bon::builder]
+pub fn producer_values_batch(
+    #[builder(into, default = krabka_ids :: ProducerId (7))] pid: krabka_ids::ProducerId,
+    #[builder(into, default)] epoch: ProducerEpoch,
+    #[builder(into, default)] base_seq: ProducerSequence,
+    #[builder(default = & ["v"])] values: &'_ [&'_ str],
+) -> RecordBatch {
+    let setup = ProducerValuesSetup {
+        pid,
+        epoch,
+        base_seq,
+        values,
+    };
     let ProducerValuesSetup {
         pid,
         epoch,
@@ -122,6 +134,7 @@ pub fn metadata_batches(mut wire: &[u8]) -> impl Iterator<Item = RecordBatch> + 
     })
 }
 
+#[derive(derive_more::From, derive_more::Into)]
 /// Number of records in a transaction-version probe batch.
 #[derive(Clone, Copy)]
 pub struct ProbeRecordCount(pub i32);
@@ -143,7 +156,19 @@ pub struct TransactionProbeBatchSetup {
     pub transaction: BatchTransaction,
 }
 
-pub fn transaction_probe_batch(setup: TransactionProbeBatchSetup) -> RecordBatch {
+#[bon::builder]
+pub fn transaction_probe_batch(
+    #[builder(default)] producer: ProducerIdentity,
+    #[builder(into, default)] sequence: ProducerSequence,
+    #[builder(into, default = ProbeRecordCount (1))] records: ProbeRecordCount,
+    #[builder(default)] transaction: BatchTransaction,
+) -> RecordBatch {
+    let setup = TransactionProbeBatchSetup {
+        producer,
+        sequence,
+        records,
+        transaction,
+    };
     RecordBatch {
         attributes: krabka_protocol::records::Attributes::default()
             .with_transactional(setup.transaction == BatchTransaction::Transactional),

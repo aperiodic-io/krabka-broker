@@ -136,12 +136,10 @@ mod tests {
     use {
         super::*,
         crate::{
-            handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+            handlers::test_support::replicated_partition,
             log_dir::partition_dir,
             log_dir_status::LogDirRegistry,
-            test_support::{
-                StandalonePartitionSetup, spawn_standalone_partition, topic_partition_image,
-            },
+            test_support::{spawn_standalone_partition, topic_partition_image},
         },
         assert2::assert,
         krabka_metadata::MetadataImage,
@@ -150,12 +148,11 @@ mod tests {
 
     fn image_with_topic(topic: &str, leader: u64) -> MetadataImage {
         topic_partition_image(topic, 2, || {
-            replicated_partition(ReplicatedPartitionSetup {
-                topic,
-                leader: krabka_audit::NodeId(leader),
-                replicas: &[krabka_audit::NodeId(1), krabka_audit::NodeId(2)],
-                ..Default::default()
-            })
+            replicated_partition()
+                .topic(topic)
+                .leader(leader)
+                .replicas(&[krabka_audit::NodeId(1), krabka_audit::NodeId(2)])
+                .call()
         })
     }
 
@@ -165,7 +162,7 @@ mod tests {
             krabka_log::LogConfig::default(),
         )
         .expect("open log");
-        spawn_standalone_partition(dir, log, StandalonePartitionSetup::default())
+        spawn_standalone_partition().log_dir(dir).log(log).call()
     }
 
     #[derive(Clone, Copy, Default)]
@@ -182,14 +179,17 @@ mod tests {
         role: InstalledRole,
     }
 
+    #[bon::builder]
     async fn hosted_fixture(
-        setup: HostedPartitionSetup,
+        #[builder(into, default = krabka_audit :: NodeId (1))] image_leader: krabka_audit::NodeId,
+        #[builder(default)] role: InstalledRole,
     ) -> (
         tempfile::TempDir,
         MetadataImage,
         PartitionRegistry,
         Arc<Partition>,
     ) {
+        let setup = HostedPartitionSetup { image_leader, role };
         let dir = tempfile::tempdir().expect("tempdir");
         let image = image_with_topic("orders", setup.image_leader.0);
         let partitions = PartitionRegistry::new();
@@ -253,11 +253,7 @@ mod tests {
 
     #[tokio::test]
     async fn following_locally_is_not_leader_or_follower_unless_debugging() {
-        let (_dir, image, partitions, _partition) = hosted_fixture(HostedPartitionSetup {
-            image_leader: krabka_audit::NodeId(2),
-            ..Default::default()
-        })
-        .await;
+        let (_dir, image, partitions, _partition) = hosted_fixture().image_leader(2).call().await;
         partition_context!((log_dir_status, ctx), &partitions, &image);
 
         let refused = resolve_leadership("orders", 0, -1, -1, ctx).map(|_| ());
@@ -269,11 +265,8 @@ mod tests {
 
     #[tokio::test]
     async fn leading_locally_resolves_and_an_offline_log_dir_is_reported() {
-        let (_dir, image, partitions, partition) = hosted_fixture(HostedPartitionSetup {
-            role: InstalledRole::Leader,
-            ..Default::default()
-        })
-        .await;
+        let (_dir, image, partitions, partition) =
+            hosted_fixture().role(InstalledRole::Leader).call().await;
         partition_context!((log_dir_status, ctx), &partitions, &image);
         let resolved = resolve_leadership("orders", 0, -1, -1, ctx);
         assert!(resolved.is_ok());
@@ -290,8 +283,7 @@ mod tests {
         // `current_leader` atomic still names the old leader, and a request
         // arriving in that window must not be served from the not-yet-caught-up
         // local log.
-        let (_dir, image, partitions, partition) =
-            hosted_fixture(HostedPartitionSetup::default()).await;
+        let (_dir, image, partitions, partition) = hosted_fixture().call().await;
         partition_context!((log_dir_status, ctx), &partitions, &image);
 
         let got = resolve_leadership("orders", 0, -1, -1, ctx).map(|_| ());

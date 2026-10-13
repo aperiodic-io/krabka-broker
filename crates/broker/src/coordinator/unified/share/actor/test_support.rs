@@ -49,20 +49,29 @@ impl TopicMetadataSetup<'_> {
 }
 
 /// A share coordinator for a topic, with the requested group configuration.
+#[bon::builder]
 pub(super) fn topic_coordinator(
-    topic: TopicMetadataSetup<'_>,
+    #[builder(default = "t")] name: &'_ str,
+    #[builder(into, default)] partitions: PartitionCount,
     share: ShareGroupConfig,
 ) -> (Arc<GroupCoordinator>, Uuid) {
-    let (metadata, id) = metadata_with_topic(topic);
+    let topic = TopicMetadataSetup { name, partitions };
+    let (metadata, id) = metadata_with_topic()
+        .name(topic.name)
+        .partitions(topic.partitions)
+        .call();
     let (coordinator, _) =
         make_coordinator_with_config(metadata, NextGenConfig::assigning_at_once(), share);
     (coordinator, id)
 }
 
 /// Metadata snapshot with one named topic and the requested partition count.
+#[bon::builder]
 pub(super) fn metadata_with_topic(
-    setup: TopicMetadataSetup<'_>,
+    #[builder(default = "t")] name: &'_ str,
+    #[builder(into, default)] partitions: PartitionCount,
 ) -> (Arc<dyn MetadataProvider>, Uuid) {
+    let setup = TopicMetadataSetup { name, partitions };
     let id = Uuid([7; 16]);
     let input = ReconcileInput {
         topic_id_by_name: [(setup.name.to_string(), id)].into(),
@@ -73,10 +82,16 @@ pub(super) fn metadata_with_topic(
 }
 
 /// A persister with no share-state topic cannot reach a share coordinator.
+#[bon::builder]
 pub(super) fn unavailable_persister_coordinator(
-    setup: TopicMetadataSetup<'_>,
+    #[builder(default = "t")] name: &'_ str,
+    #[builder(into, default)] partitions: PartitionCount,
 ) -> (Arc<GroupCoordinator>, Arc<InMemoryOffsetsLog>, Uuid) {
-    let (metadata, topic_id) = metadata_with_topic(setup);
+    let setup = TopicMetadataSetup { name, partitions };
+    let (metadata, topic_id) = metadata_with_topic()
+        .name(setup.name)
+        .partitions(setup.partitions)
+        .call();
     let (coordinator, log) = make_coordinator(metadata);
     coordinator.set_share_persister(make_share_persister(fixed_source(
         krabka_metadata::MetadataImage::default(),
@@ -85,14 +100,20 @@ pub(super) fn unavailable_persister_coordinator(
 }
 
 /// Create the metadata, coordinator, log and first share actor in their usual order.
+#[bon::builder]
 pub(super) fn subscribed_group(
-    setup: TopicMetadataSetup<'_>,
+    #[builder(default = "t")] name: &'_ str,
+    #[builder(into, default)] partitions: PartitionCount,
 ) -> (
     Arc<GroupCoordinator>,
     Arc<InMemoryOffsetsLog>,
     Arc<ShareGroupActorHandle>,
 ) {
-    let (metadata, _) = metadata_with_topic(setup);
+    let setup = TopicMetadataSetup { name, partitions };
+    let (metadata, _) = metadata_with_topic()
+        .name(setup.name)
+        .partitions(setup.partitions)
+        .call();
     let (coordinator, log) = make_coordinator(metadata);
     let handle = coordinator.get_or_create_share("g");
     (coordinator, log, handle)
@@ -132,7 +153,12 @@ pub(super) struct ShareSubscriptionSetup<'a> {
 }
 
 /// Ordinary share heartbeat for the test topic, with every other wire field defaulted.
-pub(super) fn subscribed_request(setup: ShareSubscriptionSetup<'_>) -> ShareGroupHeartbeatRequest {
+#[bon::builder]
+pub(super) fn subscribed_request(
+    #[builder(default = "m1")] member_id: &'_ str,
+    #[builder(into, default)] epoch: MemberEpoch,
+) -> ShareGroupHeartbeatRequest {
+    let setup = ShareSubscriptionSetup { member_id, epoch };
     ShareGroupHeartbeatRequest {
         group_id: "g".into(),
         member_id: setup.member_id.into(),
@@ -172,13 +198,22 @@ pub(super) struct InitializedTopicSetup<'a> {
     pub partitions: Vec<PartitionIndex>,
 }
 
+#[bon::builder]
 pub(super) async fn seed_initialized(
     handle: &ShareGroupActorHandle,
-    setup: InitializedTopicSetup<'_>,
+    #[builder(default)] topic_id: Uuid,
+    #[builder(default = "t")] topic_name: &'_ str,
+    #[builder(default = vec ! [PartitionIndex (0)])] partitions: Vec<PartitionIndex>,
 ) {
     use crate::coordinator::unified::{
         ShareGroupSeed,
         share::persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
+    };
+
+    let setup = InitializedTopicSetup {
+        topic_id,
+        topic_name,
+        partitions,
     };
     let InitializedTopicSetup {
         topic_id,

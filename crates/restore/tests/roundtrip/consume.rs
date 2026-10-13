@@ -45,12 +45,11 @@ use {
     assert2::{assert, check},
     bytes::Bytes,
     krabka_audit::signing::FileEd25519Signer,
-    krabka_broker::{BrokerConfig, BrokerHandle},
+    krabka_broker::{BrokerConfig, BrokerHandle, testing::list_offsets_request},
     krabka_client_core::Client,
     krabka_protocol::{
         owned::{
             fetch_request::{FetchPartition, FetchRequest, FetchTopic},
-            list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
             offset_for_leader_epoch_request::{
                 OffsetForLeaderEpochRequest, OffsetForLeaderPartition, OffsetForLeaderTopic,
             },
@@ -68,9 +67,6 @@ use {
 const EARLIEST_TIMESTAMP: i64 = -2;
 /// `ListOffsetsRequest.LATEST_TIMESTAMP`.
 const LATEST_TIMESTAMP: i64 = -1;
-/// `ListOffsetsRequest.CONSUMER_REPLICA_ID`: an ordinary client, not a
-/// follower.
-const CONSUMER_REPLICA_ID: i32 = -1;
 /// `OffsetForLeaderEpochRequest`'s replica id for a consumer, the value
 /// KIP-320 position validation sends.
 const CONSUMER_OFLE_REPLICA_ID: i32 = -1;
@@ -182,21 +178,14 @@ async fn await_restored_partitions(broker: &BrokerHandle, fixture: &Fixture) {
 /// One `ListOffsets` row for `partition` at one timestamp sentinel.
 async fn list_offset(client: &Client, partition: &PartitionFixture, timestamp: i64) -> i64 {
     let mut response = client
-        .send(ListOffsetsRequest {
-            replica_id: CONSUMER_REPLICA_ID,
-            isolation_level: 0,
-            topics: vec![ListOffsetsTopic {
-                name: partition.topic.into(),
-                partitions: vec![ListOffsetsPartition {
-                    partition_index: partition.partition,
-                    timestamp,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            timeout_ms: 5_000,
-            ..Default::default()
-        })
+        .send(
+            list_offsets_request()
+                .topic(partition.topic.into())
+                .partition_index(partition.partition)
+                .timestamp(timestamp)
+                .isolation_level(0)
+                .call(),
+        )
         .await
         .expect("ListOffsets");
     let row = response.topics.remove(0).partitions.remove(0);

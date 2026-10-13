@@ -95,10 +95,7 @@ pub(super) fn finish_produce_response(
 #[cfg(test)]
 mod tests {
     use {
-        crate::quota::{
-            QuotaBuckets, consume_producer_quota,
-            test_support::{QuotaRecordSetup, QuotaValue, image_with_quota},
-        },
+        crate::quota::{QuotaBuckets, consume_producer_quota, test_support::image_with_quota},
         assert2::assert,
         krabka_units::secs,
     };
@@ -107,11 +104,10 @@ mod tests {
     fn consume_producer_quota_tuple_match_overage_throttles() {
         use krabka_units::{Time, convert::TimeExt};
 
-        let img = image_with_quota(QuotaRecordSetup {
-            entity: vec![("user", Some("alice")), ("client-id", Some("app-x"))],
-            value: QuotaValue(1024.0),
-            ..Default::default()
-        });
+        let img = image_with_quota()
+            .entity(vec![("user", Some("alice")), ("client-id", Some("app-x"))])
+            .value(1024.0)
+            .call();
         // A one-second window, so 4096 bytes at 1024 B/s is 3072 over the
         // burst rather than inside the default 11-second one.
         let buckets = QuotaBuckets::with_window(secs(1));

@@ -96,7 +96,7 @@ fn sanitize(metric: &str) -> String {
 #[cfg(test)]
 mod tests {
     use {
-        super::*,
+        super::{super::test_support::data_point, *},
         crate::client_metrics::prometheus_sink::{DataPoint, PointValue},
         std::time::Duration,
     };
@@ -141,26 +141,18 @@ mod tests {
     fn counter_and_histogram_keep_their_prometheus_types() {
         let sink = ClientMetricsCollector::new(Duration::from_mins(1));
         sink.ingest(&[
-            DataPoint {
-                metric: "requests".into(),
-                client_instance_id: "i".into(),
-                client_id: "c".into(),
-                attributes: vec![],
-                value: PointValue::Counter(7.0),
-                delta_start: None,
-            },
-            DataPoint {
-                metric: "latency".into(),
-                client_instance_id: "i".into(),
-                client_id: "c".into(),
-                attributes: vec![],
-                value: PointValue::Histogram {
+            data_point()
+                .metric("requests".into())
+                .value(PointValue::Counter(7.0))
+                .call(),
+            data_point()
+                .metric("latency".into())
+                .value(PointValue::Histogram {
                     count: 3,
                     sum: 9.5,
                     buckets: vec![(1.0, 1), (5.0, 2), (f64::INFINITY, 3)],
-                },
-                delta_start: None,
-            },
+                })
+                .call(),
         ]);
         let output = encode_collector(sink);
 

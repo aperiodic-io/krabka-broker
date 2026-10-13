@@ -1,7 +1,7 @@
 //! The sampler advances each counter by the increment the reader accrued
 //! since the last sample, and leaves the gauges at the newest reading.
 
-use {super::*, assert2::check};
+use {super::*, crate::metrics::test_support::encode_metrics, assert2::check};
 
 #[test]
 fn counters_advance_by_the_increment_since_the_last_sample() {
@@ -64,11 +64,6 @@ fn each_cold_read_is_recorded_in_the_fetch_duration_histogram() {
     metrics.observe_remote_reader_fetch(std::time::Duration::from_millis(12));
     metrics.observe_remote_reader_fetch(std::time::Duration::from_millis(30));
 
-    let mut body = String::new();
-    prometheus_client::encoding::text::encode(
-        &mut body,
-        &metrics.registry.try_lock().expect("registry"),
-    )
-    .expect("encode");
+    let body = encode_metrics(&metrics);
     check!(body.contains("remote_log_reader_fetch_duration_seconds_count 2"));
 }

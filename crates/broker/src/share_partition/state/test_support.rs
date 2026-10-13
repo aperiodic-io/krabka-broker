@@ -26,7 +26,7 @@ pub(crate) struct AcquiredWindowSetup {
     pub dead_letter_queue: DeadLetterQueue,
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub(crate) struct DeliveryCount(pub i16);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -47,15 +47,23 @@ pub(super) const LOCK: Duration = Duration::from_secs(30);
 /// A materialized zero-based window already held by m1 with the ordinary test lock.
 pub(crate) fn acquired_state(end: Offset) -> super::AcquisitionState {
     let mut state = super::AcquisitionState::new(krabka_log::Offset(0));
-    acquire_window(&mut state, AcquiredWindowSetup {
-        end,
-        ..Default::default()
-    });
+    acquire_window().state(&mut state).end(end).call();
     state
 }
 
 /// Populate an existing fixture under the caller's lock, using its original record limit.
-pub(crate) fn acquire_window(state: &mut super::AcquisitionState, setup: AcquiredWindowSetup) {
+#[bon::builder]
+pub(crate) fn acquire_window(
+    state: &mut super::AcquisitionState,
+    #[builder(into, default = Offset (3))] end: Offset,
+    #[builder(into, default = RecordCount (10))] record_limit: RecordCount,
+    #[builder(default)] dead_letter_queue: DeadLetterQueue,
+) {
+    let setup = AcquiredWindowSetup {
+        end,
+        record_limit,
+        dead_letter_queue,
+    };
     let AcquiredWindowSetup {
         end,
         record_limit,
@@ -75,7 +83,19 @@ pub(crate) fn acquire_window(state: &mut super::AcquisitionState, setup: Acquire
     );
 }
 
-pub(crate) fn dlq_range(setup: DlqRangeSetup) -> super::DlqRange {
+#[bon::builder]
+pub(crate) fn dlq_range(
+    #[builder(into, default = Offset (0))] first: Offset,
+    #[builder(into, default = Offset (0))] last: Offset,
+    #[builder(into, default = DeliveryCount (1))] delivery_count: DeliveryCount,
+    cause: Option<super::DlqCause>,
+) -> super::DlqRange {
+    let setup = DlqRangeSetup {
+        first,
+        last,
+        delivery_count,
+        cause,
+    };
     super::DlqRange {
         first: setup.first,
         last: setup.last,

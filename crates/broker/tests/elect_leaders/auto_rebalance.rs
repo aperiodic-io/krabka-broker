@@ -9,9 +9,7 @@
 use {
     crate::{
         cluster_lock,
-        support::{
-            self, ClusterNodeSetup, NodeIndex, controller_voters, topics::AssignedTopicSetup,
-        },
+        support::{self, controller_voters, topics::AssignedTopicSetup},
         wait::{wait_isr_contains, wait_partition_exists, wait_partition_leader},
         wire::create_topic_plaintext,
     },
@@ -57,33 +55,35 @@ async fn auto_rebalance_restores_preferred_leader() {
     let dir1 = tempfile::TempDir::new().unwrap();
     let dir2 = tempfile::TempDir::new().unwrap();
 
-    let mut cfg0 = support::broker_config(dir0.path(), ClusterNodeSetup {
-        client_addrs: &client_addrs,
-        controller_addrs: &controller_addrs,
-        voters: controller_voters(&voters),
-        mode: krabka_broker::BootstrapMode::Bootstrap,
-        ..Default::default()
-    });
+    let mut cfg0 = support::broker_config()
+        .log_dir(dir0.path())
+        .client_addrs(&client_addrs)
+        .controller_addrs(&controller_addrs)
+        .voters(controller_voters(&voters))
+        .mode(krabka_broker::BootstrapMode::Bootstrap)
+        .call();
     cfg0.features.auto_leader_rebalance_enable = true;
     cfg0.leader_imbalance_check_interval = krabka_units::secs(1);
 
-    let mut cfg1 = support::broker_config(dir1.path(), ClusterNodeSetup {
-        index: NodeIndex(1),
-        client_addrs: &client_addrs,
-        controller_addrs: &controller_addrs,
-        voters: controller_voters(&voters),
-        mode: krabka_broker::BootstrapMode::Bootstrap,
-    });
+    let mut cfg1 = support::broker_config()
+        .log_dir(dir1.path())
+        .index(1)
+        .client_addrs(&client_addrs)
+        .controller_addrs(&controller_addrs)
+        .voters(controller_voters(&voters))
+        .mode(krabka_broker::BootstrapMode::Bootstrap)
+        .call();
     cfg1.features.auto_leader_rebalance_enable = true;
     cfg1.leader_imbalance_check_interval = krabka_units::secs(1);
 
-    let mut cfg2 = support::broker_config(dir2.path(), ClusterNodeSetup {
-        index: NodeIndex(2),
-        client_addrs: &client_addrs,
-        controller_addrs: &controller_addrs,
-        voters: controller_voters(&voters),
-        mode: krabka_broker::BootstrapMode::Bootstrap,
-    });
+    let mut cfg2 = support::broker_config()
+        .log_dir(dir2.path())
+        .index(2)
+        .client_addrs(&client_addrs)
+        .controller_addrs(&controller_addrs)
+        .voters(controller_voters(&voters))
+        .mode(krabka_broker::BootstrapMode::Bootstrap)
+        .call();
     cfg2.features.auto_leader_rebalance_enable = true;
     cfg2.leader_imbalance_check_interval = krabka_units::secs(1);
 

@@ -49,7 +49,7 @@ use {
         owned::{
             create_topics_request::{CreatableTopic, CreateTopicsRequest},
             metadata_request::{MetadataRequest, MetadataRequestTopic},
-            produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+            produce_request::PartitionProduceData,
         },
         primitives::uuid::Uuid as WireUuid,
         records::{Record, RecordBatch},
@@ -415,23 +415,25 @@ async fn produce_across_partitions(
 ) {
     let response = fixture
         .client
-        .send(ProduceRequest {
-            acks,
-            timeout_ms: 5_000,
-            topic_data: vec![TopicProduceData {
-                name: ACKS_ALL_TOPIC.into(),
-                topic_id: fixture.topic_id,
-                partition_data: (0..partitions)
-                    .map(|index| PartitionProduceData {
-                        index,
-                        records: Some(krabka_protocol::records::RecordsPayload::Raw(wire.clone())),
-                        ..Default::default()
-                    })
-                    .collect(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        })
+        .send(
+            krabka_broker::testing::produce_partitions_request()
+                .acks(acks)
+                .timeout_ms(5_000)
+                .topic(ACKS_ALL_TOPIC.into())
+                .topic_id(fixture.topic_id)
+                .partitions(
+                    (0..partitions)
+                        .map(|index| PartitionProduceData {
+                            index,
+                            records: Some(krabka_protocol::records::RecordsPayload::Raw(
+                                wire.clone(),
+                            )),
+                            ..Default::default()
+                        })
+                        .collect(),
+                )
+                .call(),
+        )
         .await
         .expect("Produce");
     for row in &response.responses[0].partition_responses {

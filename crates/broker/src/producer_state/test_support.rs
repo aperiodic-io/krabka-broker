@@ -2,11 +2,11 @@
 
 use {super::ProducerState, crate::test_support::UnixMillis};
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Debug, Clone, Copy, Default)]
 pub(super) struct ProducerEpoch(pub i16);
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Debug, Clone, Copy, Default)]
 pub(super) struct ProducerSequence(pub i32);
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub(super) struct SequenceDelta(pub i32);
 impl Default for SequenceDelta {
     fn default() -> Self { Self(4) }
@@ -27,7 +27,28 @@ pub(super) struct ProducerCommitSetup<'a> {
     pub timestamp: UnixMillis,
 }
 
-pub(super) async fn commit_fixture(state: &ProducerState, setup: ProducerCommitSetup<'_>) {
+#[bon::builder]
+pub(super) async fn commit_fixture(
+    state: &ProducerState,
+    #[builder(default = "t")] topic: &'_ str,
+    #[builder(into, default)] partition: krabka_ids::PartitionIndex,
+    #[builder(into, default = krabka_log :: ProducerId (1000))] producer: krabka_log::ProducerId,
+    #[builder(into, default)] epoch: ProducerEpoch,
+    #[builder(into, default)] sequence: ProducerSequence,
+    #[builder(into, default)] delta: SequenceDelta,
+    #[builder(into, default)] offset: krabka_log::Offset,
+    #[builder(into, default = crate :: test_support :: UnixMillis (1))] timestamp: UnixMillis,
+) {
+    let setup = ProducerCommitSetup {
+        topic,
+        partition,
+        producer,
+        epoch,
+        sequence,
+        delta,
+        offset,
+        timestamp,
+    };
     state
         .commit(
             setup.topic,
@@ -59,8 +80,25 @@ pub(super) struct ProducerBatchSetup {
     pub offsets: RecordOffsets,
 }
 
-pub(super) fn producer_batch(setup: ProducerBatchSetup) -> krabka_protocol::records::RecordBatch {
+#[bon::builder]
+pub(super) fn producer_batch(
+    #[builder(into, default = krabka_log :: ProducerId (42))] producer: krabka_log::ProducerId,
+    #[builder(into, default = ProducerEpoch (7))] epoch: ProducerEpoch,
+    #[builder(into, default)] sequence: ProducerSequence,
+    #[builder(into, default = SequenceDelta (0))] delta: SequenceDelta,
+    #[builder(into, default)] timestamp: UnixMillis,
+    #[builder(default)] offsets: RecordOffsets,
+) -> krabka_protocol::records::RecordBatch {
     use krabka_protocol::records::{Record, RecordBatch};
+
+    let setup = ProducerBatchSetup {
+        producer,
+        epoch,
+        sequence,
+        delta,
+        timestamp,
+        offsets,
+    };
     let at_offset = |offset_delta| Record {
         offset_delta,
         ..Default::default()

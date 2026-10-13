@@ -6,7 +6,7 @@
 //! the producer state of the partition log, which a follower also updates
 //! (`krabka_log::Log::compact`).
 #[cfg(test)]
-use crate::producer_state::test_support::{ProducerCommitSetup, SequenceDelta, commit_fixture};
+use crate::producer_state::test_support::commit_fixture;
 use {
     super::{PartitionMap, PartitionProducerState, ProducerState},
     krabka_ids::PartitionIndex,
@@ -74,10 +74,7 @@ impl ProducerState {
 #[cfg(test)]
 mod tests {
     use {
-        super::*,
-        crate::{producer_state::Decision, test_support::UnixMillis},
-        assert2::check,
-        krabka_log::ProducerId,
+        super::*, crate::producer_state::Decision, assert2::check, krabka_log::ProducerId,
         krabka_units::millis,
     };
 
@@ -174,13 +171,13 @@ mod tests {
     #[tokio::test]
     async fn expire_drops_empty_partition_and_topic_slots() {
         let s = ProducerState::new();
-        commit_fixture(&s, ProducerCommitSetup {
-            producer: krabka_log::ProducerId(1),
-            delta: SequenceDelta(0),
-            timestamp: UnixMillis(0),
-            ..Default::default()
-        })
-        .await;
+        commit_fixture()
+            .state(&s)
+            .producer(1)
+            .delta(0)
+            .timestamp(0)
+            .call()
+            .await;
         let evicted = s.expire_older_than(1_000_000, millis(1)).await;
         // The empty partition and topic maps are pruned (the empty topic slot
         // must be removed), and a subsequent produce still works after pruning.

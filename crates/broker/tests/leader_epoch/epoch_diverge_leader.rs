@@ -11,10 +11,7 @@ use {
         epoch_harness::{boot_single, create_topic, record, topic_id_for},
         support::{
             client::connect_client,
-            fetch::{
-                FetchLimits, FetchPartitionSetup, RequestWaitMillis, SinglePartitionFetchSetup,
-                fetch_partition, single_partition_fetch,
-            },
+            fetch::{FetchLimits, RequestWaitMillis, fetch_partition, single_partition_fetch},
             produce::{SinglePartitionProduceSetup, batch_request},
         },
     },
@@ -117,18 +114,15 @@ async fn diverging_epoch_returned_on_stale_last_fetched_epoch() {
                 replica_id: 7,
                 ..Default::default()
             },
-            ..single_partition_fetch(SinglePartitionFetchSetup {
-                topic: "diverge".into(),
-                topic_id,
-                partition: FetchPartition {
+            ..single_partition_fetch()
+                .topic("diverge".into())
+                .topic_id(topic_id)
+                .partition(FetchPartition {
                     last_fetched_epoch: e0,
-                    ..fetch_partition(FetchPartitionSetup {
-                        offset: krabka_ids::Offset(n),
-                        ..Default::default()
-                    })
-                },
-                limits: FetchLimits::one_mebibyte(RequestWaitMillis(100)),
-            })
+                    ..fetch_partition().offset(n).call()
+                })
+                .limits(FetchLimits::one_mebibyte(RequestWaitMillis(100)))
+                .call()
         })
         .await
         .expect("fetch");

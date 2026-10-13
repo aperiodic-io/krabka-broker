@@ -462,7 +462,7 @@ mod tests {
             partition::{AppendedBatch, test_support::test_partition},
             partition_writer::storage_failure_error,
             producer_state::ProducerState,
-            test_support::{StandalonePartitionSetup, spawn_standalone_partition},
+            test_support::spawn_standalone_partition,
         },
         assert2::assert,
         krabka_log::Offset,
@@ -562,11 +562,13 @@ mod tests {
             let dir = tempfile::tempdir().expect("tempdir");
             let part_dir = partition_dir(dir.path(), "orders", 0);
             std::fs::create_dir_all(&part_dir).expect("partition dir");
-            let partition = spawn_standalone_partition(
-                dir.path(),
-                krabka_log::Log::open(&part_dir, krabka_log::LogConfig::default()).expect("log"),
-                StandalonePartitionSetup::default(),
-            );
+            let partition = spawn_standalone_partition()
+                .log_dir(dir.path())
+                .log(
+                    krabka_log::Log::open(&part_dir, krabka_log::LogConfig::default())
+                        .expect("log"),
+                )
+                .call();
             let isr: Vec<NodeId> = case.isr.iter().copied().map(NodeId).collect();
             partition
                 .install_isr(&isr, &[NodeId(1), NodeId(2), NodeId(3)], NodeId(1))

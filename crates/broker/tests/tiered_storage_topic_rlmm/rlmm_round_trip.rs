@@ -10,9 +10,7 @@
 use {
     crate::{
         support::{
-            fetch::{
-                FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
-            },
+            fetch::{FetchLimits, RequestWaitMillis, single_partition_fetch},
             topic_id_for,
         },
         topic_fixture::{create_configured_topic, tiered_configs},
@@ -99,12 +97,13 @@ pub(crate) async fn copy_then_fetch_round_trip(
     let fetch_deadline = Instant::now() + Duration::from_secs(30);
     let value = loop {
         let r = client
-            .send(single_partition_fetch(SinglePartitionFetchSetup {
-                topic: topic.into(),
-                topic_id,
-                limits: FetchLimits::wait_for_data(RequestWaitMillis(500)),
-                ..Default::default()
-            }))
+            .send(
+                single_partition_fetch()
+                    .topic(topic.into())
+                    .topic_id(topic_id)
+                    .limits(FetchLimits::wait_for_data(RequestWaitMillis(500)))
+                    .call(),
+            )
             .await
             .expect("Fetch");
         if let Some(batches) = r

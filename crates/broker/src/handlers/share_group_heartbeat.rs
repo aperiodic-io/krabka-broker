@@ -202,16 +202,16 @@ mod tests {
             handlers::{
                 encode_response,
                 group_heartbeat_test_support::{
-                    GroupTopicSetup, acl_authorizer, alice, describe_acl, grant_group_read,
-                    group_read_acl, subscribed_names_describe_denied_table as denied_table_fixture,
+                    acl_authorizer, alice, describe_acl, grant_group_read, group_read_acl,
+                    subscribed_names_describe_denied_table as denied_table_fixture,
                     topic_with_partitions,
                 },
                 group_read_denied,
             },
             task_util::ask,
             test_support::{
-                ControllerPeerAllowed, PartitionCount, finalize_share_version, peer, principal,
-                request_context, start_broker_with_authorizer as start_broker, test_ctx,
+                ControllerPeerAllowed, finalize_share_version, peer, principal, request_context,
+                start_broker_with_authorizer as start_broker, test_ctx,
             },
         },
         assert2::assert,
@@ -221,6 +221,21 @@ mod tests {
     };
 
     const VERSION: i16 = share_group_heartbeat_response::MAX_VERSION;
+
+    #[bon::builder]
+    fn heartbeat_request(
+        group_id: String,
+        member_id: String,
+        member_epoch: i32,
+    ) -> ShareGroupHeartbeatRequest {
+        ShareGroupHeartbeatRequest {
+            group_id,
+            member_id,
+            member_epoch,
+            subscribed_topic_names: Some(vec!["t".into()]),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn group_read_denied_yields_group_authorization_failed() {
@@ -386,13 +401,11 @@ mod tests {
             allow_all,
             context(ctx, "ANONYMOUS")
         );
-        let valid = ShareGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: "member-1".into(),
-            member_epoch: 0,
-            subscribed_topic_names: Some(vec!["t".into()]),
-            ..Default::default()
-        };
+        let valid = heartbeat_request()
+            .group_id("g".into())
+            .member_id("member-1".into())
+            .member_epoch(0)
+            .call();
         let invalid = |message: Option<&str>| ShareGroupHeartbeatResponse {
             error_code: codes::INVALID_REQUEST,
             error_message: message.map(str::to_owned),
@@ -541,12 +554,14 @@ mod tests {
         let allowed_id = uuid::Uuid::from_u128(1);
         let node = krabka_raft::NodeId(broker_handle.node_id());
         let mut records = vec![group_read_acl("g"), describe_acl("topic-a")];
-        records.extend(topic_with_partitions(GroupTopicSetup {
-            name: "topic-a",
-            topic_id: allowed_id,
-            partitions: PartitionCount(1),
-            node,
-        }));
+        records.extend(
+            topic_with_partitions()
+                .name("topic-a")
+                .topic_id(allowed_id)
+                .partitions(1)
+                .node(node)
+                .call(),
+        );
         broker
             .controller
             .submit_change(records)
@@ -578,13 +593,11 @@ mod tests {
         broker_handle.wait_until_group_coordinator_ready().await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((principal, peer, ctx), principal("ANONYMOUS"), test_context);
-        let heartbeat_req = ShareGroupHeartbeatRequest {
-            group_id: "identity-group".into(),
-            member_id: "member-1".into(),
-            member_epoch: 0,
-            subscribed_topic_names: Some(vec!["t".into()]),
-            ..Default::default()
-        };
+        let heartbeat_req = heartbeat_request()
+            .group_id("identity-group".into())
+            .member_id("member-1".into())
+            .member_epoch(0)
+            .call();
 
         let resp = handle(&broker, heartbeat_req, version, &ctx)
             .await
@@ -606,13 +619,11 @@ mod tests {
 
         let peer: SocketAddr = "127.0.0.2:9093".parse().unwrap();
         let ctx = request_context(&principal, &peer, "client-b");
-        let req = ShareGroupHeartbeatRequest {
-            group_id: "identity-group".into(),
-            member_id: view.members[0].member_id.clone(),
-            member_epoch: view.members[0].member_epoch,
-            subscribed_topic_names: Some(vec!["t".into()]),
-            ..Default::default()
-        };
+        let req = heartbeat_request()
+            .group_id("identity-group".into())
+            .member_id(view.members[0].member_id.clone())
+            .member_epoch(view.members[0].member_epoch)
+            .call();
         let resp = handle(&broker, req, version, &ctx)
             .await
             .expect("ShareGroupHeartbeat identity refresh");
@@ -684,13 +695,11 @@ mod tests {
         ];
 
         for (group_id, member_epoch, expected) in rows {
-            let req = ShareGroupHeartbeatRequest {
-                group_id: group_id.into(),
-                member_id: "m1".into(),
-                member_epoch,
-                subscribed_topic_names: Some(vec!["t".into()]),
-                ..Default::default()
-            };
+            let req = heartbeat_request()
+                .group_id(group_id.into())
+                .member_id("m1".into())
+                .member_epoch(member_epoch)
+                .call();
             let resp = handle(&broker, req, version, &ctx)
                 .await
                 .expect("ShareGroupHeartbeat handler");

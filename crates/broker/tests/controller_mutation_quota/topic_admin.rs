@@ -9,17 +9,13 @@
 use {
     crate::{
         CLIENT_ID,
-        kafka_wire::{self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+        kafka_wire::{self, PlainAuthenticationSetup},
         support::{
-            topics::{
-                ConfiguredTopicSetup, CreateTopicRequestSetup, CreateTopicsTimeoutMillis,
-                TopicPartitionCount, creatable_topic, create_topic_request_with_setup,
-            },
-            wire::HeaderEncoding as RequestHeaderEncoding,
+            topics::{creatable_topic, create_topic_request_with_setup},
+            wire::HeaderEncoding,
         },
     },
     bytes::BytesMut,
-    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
     krabka_protocol::{
         Decode, Encode,
         owned::{
@@ -42,16 +38,15 @@ pub(crate) async fn drive_create_topics_sasl(
 ) -> (i32, i16) {
     const VERSION: i16 = 7; // MAX_VERSION; flexible (>= 5)
 
-    let req = create_topic_request_with_setup(
-        creatable_topic(ConfiguredTopicSetup {
-            name: topic.to_string(),
-            partitions: TopicPartitionCount(partitions),
-            ..Default::default()
-        }),
-        CreateTopicRequestSetup {
-            timeout: CreateTopicsTimeoutMillis(30_000),
-        },
-    );
+    let req = create_topic_request_with_setup()
+        .topic(
+            creatable_topic()
+                .name(topic.to_owned())
+                .partitions(partitions)
+                .call(),
+        )
+        .timeout(30_000)
+        .call();
 
     let mut stream = kafka_wire::sasl_plain_authenticate(addr, &PlainAuthenticationSetup {
         client_id: CLIENT_ID,
@@ -62,19 +57,16 @@ pub(crate) async fn drive_create_topics_sasl(
     .expect("SASL authenticate for CreateTopics");
     let mut body = BytesMut::new();
     req.encode(&mut body, VERSION).expect("encode CreateTopics");
-    let resp_bytes = kafka_wire::round_trip(
-        &mut stream,
-        WireExchangeSetup {
-            api_key: WireApiKey(19),
-            version: WireApiVersion(VERSION),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .expect("CreateTopics round-trip");
+    let resp_bytes = kafka_wire::round_trip()
+        .stream(&mut stream)
+        .api_key(19)
+        .version(VERSION)
+        .client_id(CLIENT_ID)
+        .header(HeaderEncoding::Flexible)
+        .body(&body)
+        .call()
+        .await
+        .expect("CreateTopics round-trip");
     let mut cur: &[u8] = &resp_bytes;
     let resp =
         CreateTopicsResponse::decode(&mut cur, VERSION).expect("decode CreateTopicsResponse");
@@ -112,19 +104,16 @@ pub(crate) async fn drive_delete_topics_sasl(
         .expect("SASL authenticate for DeleteTopics");
     let mut body = BytesMut::new();
     req.encode(&mut body, VERSION).expect("encode DeleteTopics");
-    let resp_bytes = kafka_wire::round_trip(
-        &mut stream,
-        WireExchangeSetup {
-            api_key: WireApiKey(20),
-            version: WireApiVersion(VERSION),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .expect("DeleteTopics round-trip");
+    let resp_bytes = kafka_wire::round_trip()
+        .stream(&mut stream)
+        .api_key(20)
+        .version(VERSION)
+        .client_id(CLIENT_ID)
+        .header(HeaderEncoding::Flexible)
+        .body(&body)
+        .call()
+        .await
+        .expect("DeleteTopics round-trip");
     let mut cur: &[u8] = &resp_bytes;
     let resp =
         DeleteTopicsResponse::decode(&mut cur, VERSION).expect("decode DeleteTopicsResponse");

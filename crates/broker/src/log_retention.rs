@@ -23,7 +23,6 @@ use {
     krabka_units::convert::TimeExt as _,
     std::sync::Arc,
     tokio_util::sync::CancellationToken,
-    tracing::debug,
 };
 
 mod sweep;
@@ -64,18 +63,17 @@ pub(crate) async fn run(
     // rather than spinning on a timer that cannot be armed.
     const TASK: &str = "log retention";
     let timer = Arc::clone(&cfg.timer);
-    time_util::run_sweeps!(
+    time_util::run_metadata_sweeps!(
         &*timer,
-        (cfg.interval.to_std(), cfg.interval.to_std()),
+        cfg.interval.to_std(),
+        cfg.interval.to_std(),
         &shutdown,
         TASK,
+        cfg,
+        image,
         {
-            // Read one image at the start of a sweep, including its current freezes.
-            let image = cfg.current_image();
             tick_all(&partitions, image.as_deref(), &metrics).await;
         },
-        {
-            debug!("log retention task shutting down");
-        },
+        "log retention task shutting down",
     );
 }

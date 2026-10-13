@@ -237,7 +237,7 @@ mod tests {
         super::*,
         crate::{
             authorizer::{AllowAllAuthorizer, SimpleAclAuthorizer},
-            test_support::{AllowAclSetup, allow_acl, peer, sasl_principal},
+            test_support::{allow_acl, peer, sasl_principal},
             time_util::now_ms,
         },
         assert2::assert,
@@ -261,11 +261,12 @@ mod tests {
     fn alice() -> Principal { sasl_principal("alice") }
 
     fn describe_acl(topic: &str) -> MetadataRecord {
-        MetadataRecord::V1AccessControlEntry(allow_acl(AllowAclSetup {
-            resource_name: topic,
-            operation: AclOperation::Describe,
-            ..Default::default()
-        }))
+        MetadataRecord::V1AccessControlEntry(
+            allow_acl()
+                .resource_name(topic)
+                .operation(AclOperation::Describe)
+                .call(),
+        )
     }
 
     fn resolver(image: MetadataImage, authorizer: Arc<dyn Authorizer>) -> ImageTopicRegexResolver {

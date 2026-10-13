@@ -4,10 +4,10 @@
 use {
     crate::support::{
         InProcess,
-        client::{BatchProduceSetup, produce_batch as client_produce_batch},
+        client::produce_batch as client_produce_batch,
         records::{batch_from_records, value_record},
         start, topic_id_for,
-        topics::{CreateTopicSetup, configured_topic_request},
+        topics::configured_topic_request,
     },
     assert2::assert,
     bytes::Bytes,
@@ -50,11 +50,12 @@ pub(super) async fn create_topic(
     configs: &[(&str, &str)],
 ) -> WireUuid {
     let response = client
-        .send(configured_topic_request(CreateTopicSetup {
-            topic: name,
-            configs,
-            ..Default::default()
-        }))
+        .send(
+            configured_topic_request()
+                .topic(name)
+                .configs(configs)
+                .call(),
+        )
         .await
         .expect("CreateTopics");
     let created = &response.topics[0];
@@ -145,12 +146,13 @@ pub(super) async fn produce_batch(
     topic_id: WireUuid,
     batch: RecordBatch,
 ) -> PartitionProduceResponse {
-    client_produce_batch(client, batch, BatchProduceSetup {
-        topic,
-        topic_id,
-        ..Default::default()
-    })
-    .await
+    client_produce_batch()
+        .client(client)
+        .batch(batch)
+        .topic(topic)
+        .topic_id(topic_id)
+        .call()
+        .await
 }
 
 /// The partition row an accepted produce answers with, at `base_offset`, on a

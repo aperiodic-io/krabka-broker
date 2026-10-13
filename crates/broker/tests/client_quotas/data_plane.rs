@@ -6,14 +6,10 @@
 use {
     crate::{
         CLIENT_ID,
-        kafka_wire::{self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
-        support::{
-            topics::consumer_fetch_request,
-            wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
-        },
+        kafka_wire::{self, PlainAuthenticationSetup},
+        support::{topics::consumer_fetch_request, wire::HeaderEncoding as RequestHeaderEncoding},
     },
     bytes::BytesMut,
-    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
     krabka_protocol::{
         Decode, Encode,
         owned::{
@@ -58,20 +54,17 @@ pub async fn drive_add_offsets_to_txn(
     let mut body = BytesMut::new();
     req.encode(&mut body, ADD_OFFSETS_TO_TXN_VERSION)
         .expect("encode AddOffsetsToTxn");
-    let resp_bytes = kafka_wire::round_trip(
-        stream,
-        WireExchangeSetup {
-            api_key: WireApiKey(25),
-            version: WireApiVersion(ADD_OFFSETS_TO_TXN_VERSION),
-            correlation: WireCorrelationId(corr_id),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .expect("AddOffsetsToTxn round-trip");
+    let resp_bytes = kafka_wire::round_trip()
+        .stream(stream)
+        .api_key(25)
+        .version(ADD_OFFSETS_TO_TXN_VERSION)
+        .correlation(corr_id)
+        .client_id(CLIENT_ID)
+        .header(RequestHeaderEncoding::Flexible)
+        .body(&body)
+        .call()
+        .await
+        .expect("AddOffsetsToTxn round-trip");
     let mut cur: &[u8] = &resp_bytes;
     AddOffsetsToTxnResponse::decode(&mut cur, ADD_OFFSETS_TO_TXN_VERSION)
         .expect("decode AddOffsetsToTxnResponse")
@@ -85,12 +78,13 @@ pub async fn drive_produce_sasl(
     records: kafka_wire::ZeroFilledRecordsSetup,
     authentication: &PlainAuthenticationSetup<'_>,
 ) -> ProduceResponse {
-    kafka_wire::produce_sasl_with_ids(addr, kafka_wire::SaslProduceSetup {
-        authentication: authentication.clone(),
-        produce_client_id: CLIENT_ID,
-        records,
-    })
-    .await
+    kafka_wire::produce_sasl_with_ids()
+        .addr(addr)
+        .authentication(authentication.clone())
+        .produce_client_id(CLIENT_ID)
+        .records(records)
+        .call()
+        .await
 }
 
 /// Drives a consumer `Fetch` request with `replica_id=-1` over SASL.
@@ -115,19 +109,16 @@ pub async fn drive_fetch_sasl(
     .expect("SASL authenticate for Fetch");
     let mut body = BytesMut::new();
     req.encode(&mut body, version).expect("encode Fetch");
-    let resp_bytes = kafka_wire::round_trip(
-        &mut stream,
-        WireExchangeSetup {
-            api_key: WireApiKey(1),
-            version: WireApiVersion(version),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .expect("Fetch round-trip");
+    let resp_bytes = kafka_wire::round_trip()
+        .stream(&mut stream)
+        .api_key(1)
+        .version(version)
+        .client_id(CLIENT_ID)
+        .header(RequestHeaderEncoding::Flexible)
+        .body(&body)
+        .call()
+        .await
+        .expect("Fetch round-trip");
     let mut cur: &[u8] = &resp_bytes;
     FetchResponse::decode(&mut cur, version).expect("decode FetchResponse")
 }

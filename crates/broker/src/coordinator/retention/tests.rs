@@ -23,10 +23,7 @@ use {
                 group::{CoordinatorGroup, GroupKind},
             },
         },
-        handlers::{
-            offset_commit::handle,
-            test_support::{CreateTopicSetup, configured_topic_request},
-        },
+        handlers::{offset_commit::handle, test_support::configured_topic_request},
         test_support::{
             UnixMillis, dispatch_context, encode_request, peer, principal, request_context,
             start_broker_with_authorizer_no_audit,
@@ -97,10 +94,7 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
     let admin = principal("admin");
     let address = peer();
     let ctx = request_context(&admin, &address, "retention-admin");
-    let request = configured_topic_request(CreateTopicSetup {
-        topic: TOPIC,
-        ..Default::default()
-    });
+    let request = configured_topic_request().topic(TOPIC).call();
     dispatch_context(
         &broker.broker_arc_for_test(),
         create_topics_request::API_KEY,
@@ -154,7 +148,18 @@ struct ReplayedGroupSetup<'a> {
     commit_timestamp_ms: UnixMillis,
 }
 
-fn seed_replayed_group(broker: &Broker, setup: ReplayedGroupSetup<'_>) {
+#[bon::builder]
+fn seed_replayed_group(
+    broker: &Broker,
+    protocol_type: Option<&'_ str>,
+    #[builder(into)] empty_since_ms: Option<UnixMillis>,
+    #[builder(into, default = UnixMillis (0))] commit_timestamp_ms: UnixMillis,
+) {
+    let setup = ReplayedGroupSetup {
+        protocol_type,
+        empty_since_ms,
+        commit_timestamp_ms,
+    };
     let mut state = ClassicGroup::new(GROUP);
     state.protocol_type = setup.protocol_type.map(str::to_string);
     let mut group = CoordinatorGroup::seeded(
@@ -541,10 +546,10 @@ async fn a_simple_group_expires_from_its_commit_not_from_the_restart() {
     let (broker_handle, _dir) = start().await;
     let broker = broker_handle.broker_arc_for_test();
     let restarted_at = now_ms();
-    seed_replayed_group(&broker, ReplayedGroupSetup {
-        commit_timestamp_ms: UnixMillis(restarted_at - RETENTION_MS * 10),
-        ..Default::default()
-    });
+    seed_replayed_group()
+        .broker(&broker)
+        .commit_timestamp_ms(restarted_at - RETENTION_MS * 10)
+        .call();
 
     let swept = sweep_at(&broker, restarted_at).await;
 
@@ -562,11 +567,12 @@ async fn a_joined_group_expires_from_the_moment_it_emptied() {
     let (broker_handle, _dir) = start().await;
     let broker = broker_handle.broker_arc_for_test();
     let emptied_at = now_ms();
-    seed_replayed_group(&broker, ReplayedGroupSetup {
-        protocol_type: Some("consumer"),
-        empty_since_ms: Some(UnixMillis(emptied_at)),
-        commit_timestamp_ms: UnixMillis(emptied_at - RETENTION_MS * 10),
-    });
+    seed_replayed_group()
+        .broker(&broker)
+        .maybe_protocol_type(Some("consumer"))
+        .maybe_empty_since_ms(Some(emptied_at))
+        .commit_timestamp_ms(emptied_at - RETENTION_MS * 10)
+        .call();
 
     let early = sweep_at(&broker, emptied_at + RETENTION_MS - 1).await;
     assert!(early.is_empty());

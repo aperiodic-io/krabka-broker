@@ -67,6 +67,22 @@ pub(crate) use self::{
     request::QuotaCharge,
 };
 
+#[cfg(test)]
+macro_rules! assert_metric_counter_cases {
+    ($cases:expr) => {
+        for (family_name, family, label, want) in $cases {
+            let got = family.get_or_create(label).get();
+            ::assert2::assert!(
+                got == want,
+                "{family_name} for partition {}",
+                label.partition
+            );
+        }
+    };
+}
+#[cfg(test)]
+pub(crate) use assert_metric_counter_cases;
+
 /// Shared registry owning every metric the broker emits. Wrapped in
 /// `Arc<Mutex<…>>` because `prometheus-client` requires `&mut Registry`
 /// to register and we want lazy registration from multiple init paths.

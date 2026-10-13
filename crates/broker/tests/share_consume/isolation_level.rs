@@ -13,10 +13,10 @@ use {
         harness::{bootstrap_share_state, produce_n},
         share_rpc::{acquired_count, fetch_empty, share_fetch},
         support::{
-            producer::{ProducerRecordSetup, producer_record, transactional_producer},
+            producer::{producer_record, transactional_producer},
             share::{
-                ShareFetchSetup, ShareRecordsSetup, ShareSessionEpoch, ShareTopicSetup,
-                join_consume_member, permitted_topic_fixture, record_values,
+                ShareBrokerFixture, ShareFetchSetup, ShareSessionEpoch, join_consume_member,
+                permitted_topic_fixture, record_values,
             },
         },
     },
@@ -52,18 +52,8 @@ async fn set_isolation_level(broker: &BrokerHandle, group: &str, level: &str) {
 }
 
 /// Prepare a transaction-ready empty share group with its exact isolation override.
-async fn isolation_fixture(
-    level: Option<&str>,
-) -> (
-    tokio::sync::OwnedSemaphorePermit,
-    BrokerHandle,
-    std::sync::Arc<krabka_client_core::Client>,
-    tempfile::TempDir,
-    uuid::Uuid,
-    String,
-) {
-    let (permit, broker, client, dir, tid) =
-        Box::pin(permitted_topic_fixture(ShareTopicSetup::default(), |_| {})).await;
+async fn isolation_fixture(level: Option<&str>) -> ShareBrokerFixture {
+    let (permit, broker, client, dir, tid) = Box::pin(permitted_topic_fixture().call()).await;
     let bootstrap = broker.listen_addr().to_string();
     bootstrap_share_state(&broker, &client, "g1").await;
     if let Some(level) = level {
@@ -227,11 +217,7 @@ async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) ->
     } else {
         txn.abort().await.unwrap();
     }
-    produce_n(&client, ShareRecordsSetup {
-        topic_id: tid,
-        ..Default::default()
-    })
-    .await;
+    produce_n().client(&client).topic_id(tid).call().await;
 
     let (member, _member_epoch) = join_consume_member(&broker, &client, tid).await;
 
@@ -283,11 +269,12 @@ async fn enqueue_transaction_values(producer: &Producer) {
     for v in ["a", "b", "c"] {
         drop(
             producer
-                .enqueue(producer_record(ProducerRecordSetup {
-                    topic: ("t").into(),
-                    value: Some(bytes::Bytes::from(v.to_string())),
-                    ..Default::default()
-                }))
+                .enqueue(
+                    producer_record()
+                        .topic(("t").into())
+                        .maybe_value(Some(Some(bytes::Bytes::from(v.to_string()))))
+                        .call(),
+                )
                 .await
                 .expect("record is queued"),
         );

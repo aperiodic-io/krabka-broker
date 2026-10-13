@@ -2,12 +2,9 @@
 //! reloaded group goes on assigning its tasks.
 
 use {
-    crate::{
-        streams_harness::{
-            active_partitions_for, boot, connect, create_topic, finalize_streams_version,
-            first_join, follow_up, join_and_converge, topology,
-        },
-        support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
+    crate::streams_harness::{
+        active_partitions_for, boot, connect, create_topic, finalize_streams_version, first_join,
+        follow_up, join_and_converge, topology,
     },
     assert2::assert,
     krabka_broker::{BootstrapMode, Broker, BrokerConfig},
@@ -45,12 +42,14 @@ impl Member {
             }]
         };
         let resp = client
-            .send(follow_up(StreamsFollowUpSetup {
-                group: GROUP,
-                member_id: &self.id,
-                epoch: StreamsMemberEpoch(self.epoch),
-                active: Some(owned),
-            }))
+            .send(
+                follow_up()
+                    .group(GROUP)
+                    .member_id(&self.id)
+                    .epoch(self.epoch)
+                    .maybe_active(Some(owned))
+                    .call(),
+            )
             .await
             .expect("heartbeat");
         assert!(resp.error_code == 0, "heartbeat error: {resp:?}");

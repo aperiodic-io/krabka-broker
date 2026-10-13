@@ -10,7 +10,6 @@ use {
             admin::describe_producers_request,
             produce::{SinglePartitionProduceSetup, send_batch},
             records::ProducerValuesSetup,
-            topics::CreateTopicSetup,
             transactions::ProducerEpoch,
         },
     },
@@ -20,11 +19,7 @@ use {
 #[tokio::test]
 async fn empty_partition_returns_no_active_producers() {
     let p = support::start().await;
-    create_topic(&p.client, CreateTopicSetup {
-        topic: "fresh",
-        ..Default::default()
-    })
-    .await;
+    create_topic(&p.client, "fresh").await;
 
     let resp = p
         .client
@@ -53,11 +48,7 @@ async fn empty_partition_returns_no_active_producers() {
 #[tokio::test]
 async fn after_idempotent_produce_describe_returns_the_producer() {
     let p = support::start().await;
-    create_topic(&p.client, CreateTopicSetup {
-        topic: "t",
-        ..Default::default()
-    })
-    .await;
+    create_topic(&p.client, "t").await;
     let topic_id = topic_id_for(&p.client, "t").await;
 
     let (pid, epoch) = init_producer(&p).await;
@@ -112,11 +103,7 @@ async fn after_idempotent_produce_describe_returns_the_producer() {
 #[tokio::test]
 async fn multiple_producers_on_same_partition_all_surfaced() {
     let p = support::start().await;
-    create_topic(&p.client, CreateTopicSetup {
-        topic: "shared",
-        ..Default::default()
-    })
-    .await;
+    create_topic(&p.client, "shared").await;
     let topic_id = topic_id_for(&p.client, "shared").await;
 
     let (pid_a, epoch_a) = init_producer(&p).await;
@@ -167,6 +154,16 @@ async fn produce_values(
     values: ProducerValuesSetup<'_>,
     setup: SinglePartitionProduceSetup,
 ) {
-    let response = send_batch(client, batch(values), setup).await;
+    let response = send_batch(
+        client,
+        batch()
+            .pid(values.pid.0)
+            .epoch(values.epoch.0)
+            .base_seq(values.base_seq.0)
+            .values(values.values)
+            .call(),
+        setup,
+    )
+    .await;
     assert!(response.responses[0].partition_responses[0].error_code == 0);
 }

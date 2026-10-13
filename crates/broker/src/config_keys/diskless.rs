@@ -175,79 +175,55 @@ mod tests {
         assert!(error.contains(DISKLESS), "got: {error}");
     }
 
-    #[test]
-    fn diskless_and_tiered_storage_exclude_each_other() {
-        for (label, overrides, want_ok) in [
-            (
-                "both data paths on",
-                map(&[(DISKLESS, "true"), (REMOTE_STORAGE_ENABLE, "true")]),
-                false,
-            ),
-            (
-                "diskless with tiering explicitly off",
-                map(&[(DISKLESS, "true"), (REMOTE_STORAGE_ENABLE, "false")]),
-                true,
-            ),
-            (
-                "tiering with diskless explicitly off",
-                map(&[(DISKLESS, "false"), (REMOTE_STORAGE_ENABLE, "true")]),
-                true,
-            ),
-            ("diskless alone", map(&[(DISKLESS, "true")]), true),
-            (
-                "tiering alone",
-                map(&[(REMOTE_STORAGE_ENABLE, "true")]),
-                true,
-            ),
-        ] {
-            check!(
-                validate_topic_config_map(&overrides).is_ok() == want_ok,
-                "{label}"
-            );
-        }
-
-        let error =
-            validate_topic_config_map(&map(&[(DISKLESS, "true"), (REMOTE_STORAGE_ENABLE, "true")]))
-                .unwrap_err();
-        check!(error.contains(DISKLESS), "got: {error}");
-        check!(error.contains(REMOTE_STORAGE_ENABLE), "got: {error}");
+    #[derive(Clone, Copy)]
+    enum DisklessConflict {
+        TieredStorage,
+        ScheduledDelivery,
     }
 
-    #[test]
-    fn diskless_and_scheduled_delivery_exclude_each_other() {
-        for (label, overrides, want_ok) in [
-            (
-                "a scheduled diskless topic",
-                map(&[(DISKLESS, "true"), (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED)]),
-                false,
-            ),
-            (
-                "an immediate diskless topic",
-                map(&[(DISKLESS, "true"), (DELIVERY_MODE, "immediate")]),
-                true,
-            ),
-            (
-                "a scheduled local-log topic",
-                map(&[
-                    (DISKLESS, "false"),
-                    (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
-                ]),
-                true,
-            ),
-        ] {
-            check!(
-                validate_topic_config_map(&overrides).is_ok() == want_ok,
-                "{label}"
-            );
+    type DisklessValidCases = Vec<(&'static str, BTreeMap<String, String>)>;
+
+    #[yare::parameterized(
+        tiered_storage = { DisklessConflict::TieredStorage },
+        scheduled_delivery = { DisklessConflict::ScheduledDelivery },
+    )]
+    fn diskless_excludes_conflicting_topic_features(conflict: DisklessConflict) {
+        let (key, conflicting_value, valid_cases): (&str, &str, DisklessValidCases) = match conflict
+        {
+            DisklessConflict::TieredStorage => (REMOTE_STORAGE_ENABLE, "true", vec![
+                (
+                    "diskless with tiering explicitly off",
+                    map(&[(DISKLESS, "true"), (REMOTE_STORAGE_ENABLE, "false")]),
+                ),
+                (
+                    "tiering with diskless explicitly off",
+                    map(&[(DISKLESS, "false"), (REMOTE_STORAGE_ENABLE, "true")]),
+                ),
+                ("diskless alone", map(&[(DISKLESS, "true")])),
+                ("tiering alone", map(&[(REMOTE_STORAGE_ENABLE, "true")])),
+            ]),
+            DisklessConflict::ScheduledDelivery => (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, vec![
+                (
+                    "an immediate diskless topic",
+                    map(&[(DISKLESS, "true"), (DELIVERY_MODE, "immediate")]),
+                ),
+                (
+                    "a scheduled local-log topic",
+                    map(&[
+                        (DISKLESS, "false"),
+                        (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
+                    ]),
+                ),
+            ]),
+        };
+        for (label, overrides) in valid_cases {
+            assert2::check!(validate_topic_config_map(&overrides).is_ok(), "{label}");
         }
 
-        let error = validate_topic_config_map(&map(&[
-            (DISKLESS, "true"),
-            (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
-        ]))
-        .unwrap_err();
-        check!(error.contains(DISKLESS), "got: {error}");
-        check!(error.contains(DELIVERY_MODE), "got: {error}");
+        let overrides = map(&[(DISKLESS, "true"), (key, conflicting_value)]);
+        let error = validate_topic_config_map(&overrides).unwrap_err();
+        assert2::check!(error.contains(DISKLESS), "got: {error}");
+        assert2::check!(error.contains(key), "got: {error}");
     }
 
     #[test]

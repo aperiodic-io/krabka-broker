@@ -32,7 +32,19 @@ struct AddSegmentSetup {
     custom: Option<CustomMetadata>,
 }
 
-fn add(setup: AddSegmentSetup) -> RemoteLogSegmentMetadata {
+#[bon::builder]
+fn add(
+    #[builder(default = Uuid :: from_u128 (1))] id: Uuid,
+    #[builder(into, default = Offset (0))] start: Offset,
+    #[builder(into, default = Offset (99))] end: Offset,
+    #[builder(into)] custom: Option<CustomMetadata>,
+) -> RemoteLogSegmentMetadata {
+    let setup = AddSegmentSetup {
+        id,
+        start,
+        end,
+        custom,
+    };
     let AddSegmentSetup {
         id,
         start,
@@ -66,10 +78,7 @@ fn add(setup: AddSegmentSetup) -> RemoteLogSegmentMetadata {
 
 #[test]
 fn round_trip_add_with_custom_metadata() {
-    let event = MetadataEvent::AddSegment(add(AddSegmentSetup {
-        custom: Some(CustomMetadata(vec![1, 2, 3, 4])),
-        ..Default::default()
-    }));
+    let event = MetadataEvent::AddSegment(add().maybe_custom(Some(vec![1, 2, 3, 4])).call());
     let bytes = event.encode();
     let back = MetadataEvent::decode(&bytes).expect("decodes");
     assert!(back == event);
@@ -77,12 +86,7 @@ fn round_trip_add_with_custom_metadata() {
 
 #[test]
 fn round_trip_add_without_custom_metadata() {
-    let event = MetadataEvent::AddSegment(add(AddSegmentSetup {
-        id: Uuid::from_u128(2),
-        start: Offset(100),
-        end: Offset(199),
-        ..Default::default()
-    }));
+    let event = MetadataEvent::AddSegment(add().id(Uuid::from_u128(2)).start(100).end(199).call());
     let bytes = event.encode();
     assert!(MetadataEvent::decode(&bytes).unwrap() == event);
 }
@@ -133,12 +137,11 @@ fn round_trip_partition_delete_each_state() {
 
 #[test]
 fn add_round_trips_txn_index_empty_true() {
-    let md = add(AddSegmentSetup {
-        id: Uuid::from_u128(5),
-        end: Offset(49),
-        ..Default::default()
-    })
-    .with_txn_index_empty(true);
+    let md = add()
+        .id(Uuid::from_u128(5))
+        .end(49)
+        .call()
+        .with_txn_index_empty(true);
     let event = MetadataEvent::AddSegment(md);
     let bytes = event.encode();
     let back = MetadataEvent::decode(&bytes).expect("decodes");
@@ -150,12 +153,9 @@ fn add_round_trips_txn_index_empty_true() {
 
 #[test]
 fn truncated_buffer_is_rejected() {
-    let bytes = MetadataEvent::AddSegment(add(AddSegmentSetup {
-        end: Offset(1),
-        ..Default::default()
-    }))
-    .encode()
-    .to_vec();
+    let bytes = MetadataEvent::AddSegment(add().end(1).call())
+        .encode()
+        .to_vec();
     let err = MetadataEvent::decode(&bytes[..bytes.len() - 5]).unwrap_err();
     assert!(matches!(err, CodecError::Protocol(_)));
 }

@@ -2,7 +2,11 @@
 //! satisfies so that the real-log binary compiles the trait without also
 //! carrying the fake's implementation in the same file.
 
-use {super::node_log::SimNodeLog, krabka_raft::kraft::types::Epoch};
+use {
+    super::node_log::SimNodeLog,
+    krabka_kraft_core::simulation_support::{append_epochs, replicate_epochs, truncate_epochs},
+    krabka_raft::kraft::types::Epoch,
+};
 
 /// A growable in-memory replicated log.
 ///
@@ -20,27 +24,14 @@ krabka_macros::epoch_log_view!(SimLog, ::krabka_raft::kraft::types);
 
 impl SimNodeLog for SimLog {
     fn append_in_epoch(&mut self, epoch: Epoch, count: usize) {
-        for _ in 0..count {
-            self.epochs.push(epoch);
-        }
+        append_epochs(&mut self.epochs, epoch, count);
     }
 
-    fn truncate_to(&mut self, offset: i64) {
-        let offset = usize::try_from(offset.max(0)).unwrap_or(usize::MAX);
-        if offset < self.epochs.len() {
-            self.epochs.truncate(offset);
-        }
-    }
+    fn truncate_to(&mut self, offset: i64) { truncate_epochs(&mut self.epochs, offset); }
 
     fn replicate_from(&mut self, leader: &Self) {
-        let leader_epochs = &leader.epochs;
-        if self.epochs.len() < leader_epochs.len() {
-            // If the follower's existing prefix matches, extend it; otherwise the
-            // leader's divergence reply (TruncateTo) will fix it first. In this
-            // simulation followers never accept conflicting entries, so a simple
-            // suffix copy is sufficient and epoch-faithful.
-            self.epochs.clone_from(leader_epochs);
-        }
+        // Divergent prefixes are truncated before this method runs.
+        replicate_epochs(&mut self.epochs, &leader.epochs);
     }
 
     fn record_count(&self) -> usize { self.epochs.len() }

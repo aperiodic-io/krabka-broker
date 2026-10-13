@@ -7,9 +7,8 @@
 
 use {
     crate::harness::{
-        INVALID_RECORD, KNOWN_ID, OTHER_SUBJECT_ID, SchemaTopicSetup, UNKNOWN_ID, VALIDATED,
-        batch_with_values, boot, create_topic, framed, mock_topic_fixture, produce, produce_value,
-        registry,
+        INVALID_RECORD, KNOWN_ID, OTHER_SUBJECT_ID, UNKNOWN_ID, VALIDATED, batch_with_values, boot,
+        create_topic, framed, mock_topic_fixture, produce, produce_value, registry,
     },
     assert2::check,
     bytes::Bytes,
@@ -72,13 +71,14 @@ async fn records_that_fail_validation_are_rejected_and_not_appended() {
 async fn an_unvalidated_topic_accepts_what_a_validated_one_rejects() {
     let registry = registry().await;
     let (broker, client, _dir) = boot(&registry.uri()).await;
-    let control = create_topic(&broker, &client, SchemaTopicSetup {
-        name: "control",
-        configs: &[],
-        ..Default::default()
-    })
-    .await;
-    let validated = create_topic(&broker, &client, SchemaTopicSetup::default()).await;
+    let control = create_topic()
+        .broker(&broker)
+        .client(&client)
+        .name("control")
+        .configs(&[])
+        .call()
+        .await;
+    let validated = create_topic().broker(&broker).client(&client).call().await;
 
     let unframed = Bytes::from_static(b"plain text");
 

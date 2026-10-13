@@ -18,15 +18,10 @@ mod two_dir_topic;
 
 use {
     crate::{
-        kafka_wire::ExchangeSetup as WireExchangeSetup,
-        support::{
-            storage::count_partition_dirs, topics::TopicPartitionCount,
-            wire::HeaderEncoding as RequestHeaderEncoding,
-        },
-        two_dir_topic::{PartitionReadiness, Setup, start},
+        support::{storage::count_partition_dirs, wire::HeaderEncoding as RequestHeaderEncoding},
+        two_dir_topic::{PartitionReadiness, start},
     },
     assert2::assert,
-    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
     krabka_protocol::owned::{
         describe_log_dirs_request::DescribeLogDirsRequest,
         describe_log_dirs_response::DescribeLogDirsResponse,
@@ -39,22 +34,19 @@ const CLIENT_ID: &str = "krabka-jbod-test";
 
 async fn describe_log_dirs(addr: SocketAddr) -> DescribeLogDirsResponse {
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    kafka_wire::exchange(
-        &mut stream,
-        &DescribeLogDirsRequest {
+    kafka_wire::exchange()
+        .stream(&mut stream)
+        .request(&DescribeLogDirsRequest {
             topics: None,
             ..Default::default()
-        },
-        WireExchangeSetup {
-            api_key: WireApiKey(35),
-            version: WireApiVersion(4),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap()
+        })
+        .api_key(35)
+        .version(4)
+        .client_id(CLIENT_ID)
+        .header(RequestHeaderEncoding::Flexible)
+        .call()
+        .await
+        .unwrap()
 }
 
 /// Count `topic-partition` subdirs for `topic` directly under `dir`.
@@ -65,13 +57,12 @@ fn count_topic_dirs(dir: &std::path::Path, topic: &str) -> usize {
 #[tokio::test]
 async fn partitions_spread_across_dirs_and_describe_log_dirs_reports_them() {
     let n: i32 = 6;
-    let (handle, primary, extra, addr) = start(Setup {
-        client_id: CLIENT_ID,
-        partitions: TopicPartitionCount(n),
-        readiness: PartitionReadiness::LocalWriterPresent,
-        ..Default::default()
-    })
-    .await;
+    let (handle, primary, extra, addr) = start()
+        .client_id(CLIENT_ID)
+        .partitions(n)
+        .readiness(PartitionReadiness::LocalWriterPresent)
+        .call()
+        .await;
 
     // 1. Placement spread: both directories hold at least one partition of `t`.
     let in_primary = count_topic_dirs(primary.path(), "t");

@@ -48,9 +48,26 @@ pub struct AllowAclSetup<'a> {
     pub operation: AclOperation,
 }
 
-pub async fn seed_topic_acl(broker: &BrokerHandle, setup: TopicAclSetup<'_>) {
+#[bon::builder]
+pub async fn seed_topic_acl(
+    broker: &BrokerHandle,
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(default = "User:alice")] principal: &'_ str,
+    #[builder(default = AclOperation :: Read)] operation: AclOperation,
+) {
+    let setup = TopicAclSetup {
+        topic,
+        principal,
+        operation,
+    };
     broker
-        .submit_metadata_record_for_test(topic_acl_record(setup))
+        .submit_metadata_record_for_test(
+            topic_acl_record()
+                .topic(setup.topic)
+                .principal(setup.principal)
+                .operation(setup.operation)
+                .call(),
+        )
         .await
         .expect("seed topic ACL");
     // Preserve the fixtures' commit/application settle before their RPC retry checks.
@@ -58,27 +75,60 @@ pub async fn seed_topic_acl(broker: &BrokerHandle, setup: TopicAclSetup<'_>) {
 }
 
 /// A literal Allow ACL on one topic and principal, without committing or waiting.
-pub fn topic_acl_record(setup: TopicAclSetup<'_>) -> MetadataRecord {
-    literal_allow_acl(AllowAclSetup {
-        resource_name: setup.topic,
-        principal: setup.principal,
-        operation: setup.operation,
-        ..Default::default()
-    })
+#[bon::builder]
+pub fn topic_acl_record(
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(default = "User:alice")] principal: &'_ str,
+    #[builder(default = AclOperation :: Read)] operation: AclOperation,
+) -> MetadataRecord {
+    let setup = TopicAclSetup {
+        topic,
+        principal,
+        operation,
+    };
+    literal_allow_acl()
+        .resource_name(setup.topic)
+        .principal(setup.principal)
+        .operation(setup.operation)
+        .call()
 }
 
 /// A literal cluster Allow ACL, including the host the original request must match.
-pub fn cluster_acl_record(setup: ClusterAclSetup<'_>) -> MetadataRecord {
-    literal_allow_acl(AllowAclSetup {
-        resource_type: ResourceType::Cluster,
-        resource_name: "kafka-cluster",
-        principal: setup.principal,
-        host: setup.host,
-        operation: setup.operation,
-    })
+#[bon::builder]
+pub fn cluster_acl_record(
+    #[builder(default = "User:alice")] principal: &'_ str,
+    #[builder(default = "*")] host: &'_ str,
+    #[builder(default = AclOperation :: ClusterAction)] operation: AclOperation,
+) -> MetadataRecord {
+    let setup = ClusterAclSetup {
+        principal,
+        host,
+        operation,
+    };
+    literal_allow_acl()
+        .resource_type(ResourceType::Cluster)
+        .resource_name("kafka-cluster")
+        .principal(setup.principal)
+        .host(setup.host)
+        .operation(setup.operation)
+        .call()
 }
 
-fn literal_allow_acl(setup: AllowAclSetup<'_>) -> MetadataRecord {
+#[bon::builder]
+pub fn literal_allow_acl(
+    #[builder(default = ResourceType :: Topic)] resource_type: ResourceType,
+    #[builder(default = "orders")] resource_name: &'_ str,
+    #[builder(default = "User:alice")] principal: &'_ str,
+    #[builder(default = "*")] host: &'_ str,
+    #[builder(default = AclOperation :: Read)] operation: AclOperation,
+) -> MetadataRecord {
+    let setup = AllowAclSetup {
+        resource_type,
+        resource_name,
+        principal,
+        host,
+        operation,
+    };
     MetadataRecord::V1AccessControlEntry(AclEntry {
         resource_type: setup.resource_type,
         resource_name: setup.resource_name.into(),
@@ -111,35 +161,34 @@ pub const TOPIC_FULL_MASK: i32 = BIT_READ
     | BIT_DESCRIBE_CONFIGS
     | BIT_ALTER_CONFIGS;
 
-/// A literal `Allow` binding on any resource, with the original wildcard host.
-pub fn resource_allow_acl(setup: AllowAclSetup<'_>) -> MetadataRecord { literal_allow_acl(setup) }
-
 pub async fn seed_compat_shim_disable_acl(handle: &BrokerHandle) {
-    seed_topic_acl(handle, TopicAclSetup {
-        topic: "__compat_shim_disable__",
-        principal: "User:admin",
-        ..Default::default()
-    })
-    .await;
+    seed_topic_acl()
+        .broker(handle)
+        .topic("__compat_shim_disable__")
+        .principal("User:admin")
+        .call()
+        .await;
 }
 
 pub async fn seed_alice_write_acl(handle: &BrokerHandle, topic: &str) {
-    seed_topic_acl(handle, TopicAclSetup {
-        topic,
-        operation: AclOperation::Write,
-        ..Default::default()
-    })
-    .await;
+    seed_topic_acl()
+        .broker(handle)
+        .topic(topic)
+        .operation(AclOperation::Write)
+        .call()
+        .await;
 }
 
 /// Populate an irrelevant binding so the permissive empty-image shim is disabled.
 pub async fn seed_dummy_acl(handle: &krabka_broker::BrokerHandle) {
     handle
-        .submit_metadata_record_for_test(topic_acl_record(TopicAclSetup {
-            topic: "_nothing",
-            principal: "User:admin",
-            operation: krabka_metadata::AclOperation::Read,
-        }))
+        .submit_metadata_record_for_test(
+            topic_acl_record()
+                .topic("_nothing")
+                .principal("User:admin")
+                .operation(krabka_metadata::AclOperation::Read)
+                .call(),
+        )
         .await
         .expect("seed dummy ACL");
 }

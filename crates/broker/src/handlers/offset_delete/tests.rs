@@ -21,9 +21,7 @@ use {
                 group::{CoordinatorGroup, GroupKind},
             },
         },
-        handlers::test_support::{
-            ClientTopicSetup, create_topic as create_topic_from_test_support,
-        },
+        handlers::test_support::create_topic as create_topic_from_test_support,
         test_support::{DenyAll, peer, start_group_broker_no_audit},
         time_util::now_ms,
     },
@@ -34,12 +32,12 @@ use {
 };
 
 async fn create_topic(broker: &BrokerHandle, name: &str) {
-    create_topic_from_test_support(broker, ClientTopicSetup {
-        client_id: "offset-delete-test",
-        name,
-        ..Default::default()
-    })
-    .await;
+    create_topic_from_test_support()
+        .broker(broker)
+        .client_id("offset-delete-test")
+        .name(name)
+        .call()
+        .await;
 }
 
 use crate::coordinator::unified::actor::test_support::subscription_blob as subscription;

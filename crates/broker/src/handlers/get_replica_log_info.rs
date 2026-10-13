@@ -9,8 +9,6 @@
 //! sentinel offset `-1`. That matches the JVM behaviour for a replica that the
 //! broker is not a member of.
 
-#[cfg(test)]
-use crate::test_support::StandalonePartitionSetup;
 use {
     crate::{
         codes,
@@ -195,7 +193,10 @@ mod tests {
         let part_dir = partition_dir(dir.path(), "orders", 0);
         std::fs::create_dir_all(&part_dir).unwrap();
         let log = krabka_log::Log::open(&part_dir, krabka_log::LogConfig::default()).unwrap();
-        let part = spawn_standalone_partition(dir.path(), log, StandalonePartitionSetup::default());
+        let part = spawn_standalone_partition()
+            .log_dir(dir.path())
+            .log(log)
+            .call();
         part.current_leader_epoch.store(11, Ordering::Release);
         broker
             .partitions

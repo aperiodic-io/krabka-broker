@@ -1,10 +1,10 @@
 //! Shared credential fields of the runtime and file GCS configurations.
 
 use {
-    crate::meta::{mode, named_body},
+    crate::meta::{edit_named_body, mode},
     moxy::{
         ast::ParseError,
-        token::{LitStr, Span, TokenStream, TokenTree},
+        token::{LitStr, Span, TokenStream},
     },
 };
 
@@ -27,10 +27,6 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
         _ => unreachable!(),
     }
     .map(|doc| LitStr::new(doc, Span::call_site()));
-    let (mut tokens, body) = named_body(item, "gcs_fields")?;
-    let TokenTree::Group(group) = &mut tokens[body] else {
-        unreachable!()
-    };
     let fields = moxy::template! {
         /// GCS bucket name.
         pub bucket: String,
@@ -48,6 +44,7 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
         #[doc = {{ endpoint_doc }}]
         pub endpoint: Option<String>,
     };
-    group.tokens = fields.into_iter().chain(group.tokens.clone()).collect();
-    Ok(tokens.into())
+    edit_named_body(item, "gcs_fields", |body| {
+        Ok(fields.into_iter().chain(body).collect())
+    })
 }

@@ -11,10 +11,7 @@ pub(crate) use crate::support::topic_id_for;
 use {
     crate::support::{
         client::connect_owned,
-        fetch::{
-            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
-        },
+        fetch::{FetchLimits, RequestWaitMillis, fetch_partition, single_partition_fetch},
     },
     assert2::assert,
     krabka_protocol::primitives::uuid::Uuid as WireUuid,
@@ -55,16 +52,20 @@ pub(crate) async fn fetch_all_records(
 
     loop {
         let resp = client
-            .send(single_partition_fetch(SinglePartitionFetchSetup {
-                topic: topic.into(),
-                topic_id,
-                partition: fetch_partition(FetchPartitionSetup {
-                    partition: krabka_ids::PartitionIndex(partition),
-                    offset: krabka_ids::Offset(fetch_offset),
-                    maximum: FetchByteLimit(2_097_152),
-                }),
-                limits: FetchLimits::wait_for_data(RequestWaitMillis(1_000)),
-            }))
+            .send(
+                single_partition_fetch()
+                    .topic(topic.into())
+                    .topic_id(topic_id)
+                    .partition(
+                        fetch_partition()
+                            .partition(partition)
+                            .offset(fetch_offset)
+                            .maximum(2_097_152)
+                            .call(),
+                    )
+                    .limits(FetchLimits::wait_for_data(RequestWaitMillis(1_000)))
+                    .call(),
+            )
             .await
             .expect("Fetch");
 

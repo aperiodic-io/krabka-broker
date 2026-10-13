@@ -22,6 +22,7 @@
 
 pub mod quotas;
 
+#[allow(unused_imports)]
 pub use topics::creatable_topic as topic;
 use {
     crate::support::{
@@ -31,11 +32,10 @@ use {
             self, AssignedTopicSetup, ConfiguredTopicSetup, CreateTopicSetup, assigned_topic,
             configured_topic_request,
         },
-        wire::{self as frames, ApiRequestSetup, CorrelationId},
+        wire::{self as frames, ApiRequestSetup},
     },
     assert2::assert,
     bytes::{Buf, Bytes, BytesMut},
-    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
     krabka_protocol::{
         Decode, Encode,
         owned::{
@@ -55,6 +55,18 @@ use {
         net::TcpStream,
     },
 };
+
+macro_rules! configured_topic_request {
+    ($topic:expr) => {{
+        let topic = $topic;
+        topics::creatable_topic()
+            .name(topic.name)
+            .partitions(topic.partitions)
+            .replicas(topic.replicas)
+            .configs(topic.configs)
+            .call()
+    }};
+}
 
 /// The `ApiVersions` API key, whose response header is v0 at every version.
 const API_VERSIONS_KEY: i16 = 18;
@@ -84,14 +96,28 @@ pub struct ExchangeSetup<'a> {
 ///
 /// # Errors
 /// Returns failed reads/writes or malformed response header errors.
+#[bon::builder]
 pub async fn round_trip<S>(
     stream: &mut S,
-    setup: ExchangeSetup<'_>,
+    #[builder(into, default = krabka_ids :: ApiKey (18))] api_key: krabka_ids::ApiKey,
+    #[builder(into, default)] version: krabka_ids::ApiVersion,
+    #[builder(into, default = frames :: CorrelationId (1))] correlation: frames::CorrelationId,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default)] header: frames::HeaderEncoding,
+    #[builder(default)] response_header: ResponseHeaderSelection,
     body: &[u8],
 ) -> io::Result<Vec<u8>>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let setup = ExchangeSetup {
+        api_key,
+        version,
+        correlation,
+        client_id,
+        header,
+        response_header,
+    };
     let ExchangeSetup {
         api_key,
         version: api_version,
@@ -107,20 +133,20 @@ where
         ResponseHeaderSelection::ByProtocol => header,
         ResponseHeaderSelection::Exact(header) => header,
     };
-    let frame = frames::request_frame(frames::WireFrameSetup {
-        api_key,
-        version: api_version,
-        correlation: corr_id,
-        header,
-        client_id,
-        body,
-        capacity: Some(
+    let frame = frames::request_frame()
+        .api_key(api_key)
+        .version(api_version)
+        .correlation(corr_id)
+        .header(header)
+        .client_id(client_id)
+        .body(body)
+        .maybe_capacity(Some(
             <krabka_units::ByteSize as krabka_units::convert::ByteSizeExt>::from_bytes(
                 u64::try_from(16 + client_id.len() + body.len()).expect("frame capacity fits u64"),
             ),
-        ),
-        length_context: Some("client_id fits in i16"),
-    });
+        ))
+        .maybe_length_context(Some("client_id fits in i16"))
+        .call();
 
     frames::write_frame(stream, &frame, Some("frame fits in u32")).await?;
 
@@ -147,6 +173,27 @@ where
     Ok(cur.to_vec())
 }
 
+pub async fn exchange_round_trip<S>(
+    stream: &mut S,
+    exchange: ExchangeSetup<'_>,
+    body: &[u8],
+) -> io::Result<Vec<u8>>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    round_trip()
+        .stream(stream)
+        .api_key(exchange.api_key.0)
+        .version(exchange.version.0)
+        .correlation(exchange.correlation.0)
+        .client_id(exchange.client_id)
+        .header(exchange.header)
+        .response_header(exchange.response_header)
+        .body(body)
+        .call()
+        .await
+}
+
 #[derive(Clone, krabka_macros::FieldDefaults)]
 pub struct PlainAuthenticationSetup<'a> {
     #[default("krabka-broker-test")]
@@ -155,6 +202,19 @@ pub struct PlainAuthenticationSetup<'a> {
     pub user: &'a str,
     #[default(crate::support::sasl::alice_password().into_bytes())]
     pub password: Vec<u8>,
+}
+
+#[bon::builder]
+pub fn plain_authentication_setup<'a>(
+    #[builder(default = "krabka-broker-test")] client_id: &'a str,
+    #[builder(default = "alice")] user: &'a str,
+    #[builder(default = crate::support::sasl::alice_password().into_bytes())] password: Vec<u8>,
+) -> PlainAuthenticationSetup<'a> {
+    PlainAuthenticationSetup {
+        client_id,
+        user,
+        password,
+    }
 }
 
 impl<'a> PlainAuthenticationSetup<'a> {
@@ -224,19 +284,16 @@ where
     request
         .encode(&mut body, version)
         .map_err(|e| io::Error::other(format!("{operation} encode: {e}")))?;
-    let response = round_trip(
-        &mut stream,
-        ExchangeSetup {
-            api_key: api.api_key,
-            version: WireApiVersion(version),
-            correlation: frames::CorrelationId(4),
-            client_id: authentication.client_id,
-            header: frames::HeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await?;
+    let response = round_trip()
+        .stream(&mut stream)
+        .api_key(api.api_key)
+        .version(version)
+        .correlation(4)
+        .client_id(authentication.client_id)
+        .header(frames::HeaderEncoding::Flexible)
+        .body(&body)
+        .call()
+        .await?;
     R::decode(&mut &response[..], version)
         .map_err(|e| io::Error::other(format!("{operation} decode: {e}")))
 }
@@ -262,9 +319,15 @@ pub async fn drive_produce_as_plain(
 ///
 /// # Panics
 /// Panics if authentication or creation fails, or the response has no unique topic row.
-pub async fn create_topic_as_super_user(addr: SocketAddr, setup: AutomaticTopicSetup<'_>) {
+#[bon::builder]
+pub async fn create_topic_as_super_user(
+    addr: SocketAddr,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default)] topic: ConfiguredTopicSetup,
+) {
+    let setup = AutomaticTopicSetup { client_id, topic };
     let name = setup.topic.name.clone();
-    let request = topics::create_topic_request(topic(setup.topic));
+    let request = topics::create_topic_request(configured_topic_request!(setup.topic));
     let response: krabka_protocol::owned::create_topics_response::CreateTopicsResponse =
         request_as_plain(addr, &request, &PlainRequestSetup {
             authentication: PlainAuthenticationSetup::admin(setup.client_id),
@@ -305,16 +368,13 @@ where
         password,
     } = setup;
     let av_body = encode_named(&ApiVersionsRequest::default(), 0, "ApiVersions")?;
-    let av_resp = round_trip(
-        stream,
-        ExchangeSetup {
-            api_key: WireApiKey(API_VERSIONS_KEY),
-            client_id,
-            ..Default::default()
-        },
-        &av_body,
-    )
-    .await?;
+    let av_resp = round_trip()
+        .stream(stream)
+        .api_key(API_VERSIONS_KEY)
+        .client_id(client_id)
+        .body(&av_body)
+        .call()
+        .await?;
     decode_named::<ApiVersionsResponse>(&av_resp, 0, "ApiVersions")?;
 
     let sh_body = encode_named(
@@ -325,18 +385,15 @@ where
         1,
         "SaslHandshake",
     )?;
-    let sh_resp = round_trip(
-        stream,
-        ExchangeSetup {
-            api_key: WireApiKey(17),
-            version: WireApiVersion(1),
-            correlation: frames::CorrelationId(2),
-            client_id,
-            ..Default::default()
-        },
-        &sh_body,
-    )
-    .await?;
+    let sh_resp = round_trip()
+        .stream(stream)
+        .api_key(17)
+        .version(1)
+        .correlation(2)
+        .client_id(client_id)
+        .body(&sh_body)
+        .call()
+        .await?;
     let sh_resp = decode_named::<SaslHandshakeResponse>(&sh_resp, 1, "SaslHandshake")?;
     if sh_resp.error_code != 0 {
         return Err(io::Error::other(format!(
@@ -354,19 +411,16 @@ where
         2,
         "SaslAuthenticate",
     )?;
-    let auth_resp = round_trip(
-        stream,
-        ExchangeSetup {
-            api_key: WireApiKey(36),
-            version: WireApiVersion(2),
-            correlation: frames::CorrelationId(3),
-            client_id,
-            header: frames::HeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &auth_body,
-    )
-    .await?;
+    let auth_resp = round_trip()
+        .stream(stream)
+        .api_key(36)
+        .version(2)
+        .correlation(3)
+        .client_id(client_id)
+        .header(frames::HeaderEncoding::Flexible)
+        .body(&auth_body)
+        .call()
+        .await?;
     let auth_resp = decode_named::<SaslAuthenticateResponse>(&auth_resp, 2, "SaslAuthenticate")?;
     if auth_resp.error_code != 0 {
         return Err(io::Error::other(format!(
@@ -430,42 +484,73 @@ pub struct LegacyExchangeSetup<'a> {
 ///
 /// # Panics
 /// Panics if socket I/O or response header decoding fails.
+#[bon::builder]
 pub async fn legacy_round_trip(
     stream: &mut TcpStream,
-    setup: LegacyExchangeSetup<'_>,
+    #[builder(into, default)] api_key: krabka_ids::ApiKey,
+    #[builder(into, default)] version: krabka_ids::ApiVersion,
+    #[builder(into, default = frames :: CorrelationId (1))] correlation: frames::CorrelationId,
+    #[builder(default = "legacy-fetch-test")] client_id: &'_ str,
     body: &[u8],
 ) -> Vec<u8> {
-    round_trip(
-        stream,
-        ExchangeSetup {
-            api_key: setup.api_key,
-            version: setup.version,
-            correlation: setup.correlation,
-            client_id: setup.client_id,
-            ..Default::default()
-        },
-        body,
-    )
-    .await
-    .expect("non-flexible round trip")
+    let setup = LegacyExchangeSetup {
+        api_key,
+        version,
+        correlation,
+        client_id,
+    };
+    round_trip()
+        .stream(stream)
+        .api_key(setup.api_key)
+        .version(setup.version)
+        .correlation(setup.correlation)
+        .client_id(setup.client_id)
+        .body(body)
+        .call()
+        .await
+        .expect("non-flexible round trip")
 }
 
 /// Encode, exchange and decode a typed request using the caller's exact wire version.
+#[bon::builder]
 pub async fn exchange<S, Q, R>(
     stream: &mut S,
     request: &Q,
-    setup: ExchangeSetup<'_>,
+    #[builder(into, default = krabka_ids :: ApiKey (18))] api_key: krabka_ids::ApiKey,
+    #[builder(into, default)] version: krabka_ids::ApiVersion,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default)] response_header: ResponseHeaderSelection,
+    #[builder(default)] header: frames::HeaderEncoding,
+    #[builder(into, default = frames :: CorrelationId (1))] correlation: frames::CorrelationId,
 ) -> io::Result<R>
 where
     S: AsyncRead + AsyncWrite + Unpin,
     Q: Encode,
     R: for<'de> Decode<'de>,
 {
+    let setup = ExchangeSetup {
+        api_key,
+        version,
+        correlation,
+        client_id,
+        header,
+        response_header,
+    };
     let mut body = BytesMut::new();
     request
         .encode(&mut body, setup.version.0)
         .map_err(io::Error::other)?;
-    let bytes = round_trip(stream, setup, &body).await?;
+    let bytes = round_trip()
+        .stream(stream)
+        .api_key(setup.api_key)
+        .version(setup.version)
+        .correlation(setup.correlation)
+        .client_id(setup.client_id)
+        .header(setup.header)
+        .response_header(setup.response_header)
+        .body(&body)
+        .call()
+        .await?;
     R::decode(&mut &bytes[..], setup.version.0).map_err(io::Error::other)
 }
 
@@ -489,20 +574,17 @@ where
     let mut body = BytesMut::new();
     request.encode(&mut body, version).unwrap();
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let response = round_trip(
-        &mut stream,
-        ExchangeSetup {
-            api_key: WireApiKey(api_key),
-            version: WireApiVersion(version),
-            correlation: frames::CorrelationId(correlation_id),
-            client_id,
-            header: frames::HeaderEncoding::from_wire(flexible),
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .unwrap();
+    let response = round_trip()
+        .stream(&mut stream)
+        .api_key(api_key)
+        .version(version)
+        .correlation(correlation_id)
+        .client_id(client_id)
+        .header(frames::HeaderEncoding::from_wire(flexible))
+        .body(&body)
+        .call()
+        .await
+        .unwrap();
     let response = R::decode(&mut &response[..], version).unwrap();
     (body.len(), response)
 }
@@ -518,14 +600,14 @@ pub async fn create_topic_on(
 ) {
     let name = topic.name.clone();
     let request = topics::create_topic_request(topic);
-    let response: krabka_protocol::owned::create_topics_response::CreateTopicsResponse =
-        exchange(stream, &request, ExchangeSetup {
-            api_key: WireApiKey(19),
-            version: WireApiVersion(7),
-            client_id,
-            header: frames::HeaderEncoding::Flexible,
-            ..Default::default()
-        })
+    let response: krabka_protocol::owned::create_topics_response::CreateTopicsResponse = exchange()
+        .stream(stream)
+        .request(&request)
+        .api_key(19)
+        .version(7)
+        .client_id(client_id)
+        .header(frames::HeaderEncoding::Flexible)
+        .call()
         .await
         .expect("CreateTopics round-trip");
     assert2::assert!(response.topics.len() == 1);
@@ -571,28 +653,28 @@ pub async fn sasl_scram_authenticate_on(
         setup.mechanism,
     );
     // ── 1. ApiVersions (v0, non-flexible). Same as PLAIN: pre-auth allowlist.
-    let _av_resp: ApiVersionsResponse =
-        exchange(stream, &ApiVersionsRequest::default(), ExchangeSetup {
-            client_id,
-            ..Default::default()
-        })
+    let _av_resp: ApiVersionsResponse = exchange()
+        .stream(stream)
+        .request(&ApiVersionsRequest::default())
+        .client_id(client_id)
+        .call()
         .await?;
 
     // ── 2. SaslHandshake v1 (non-flexible).
-    sasl_handshake_on(stream, SaslHandshakeSetup {
-        client_id,
-        mechanism: mechanism.wire_name(),
-        ..Default::default()
-    })
-    .await?;
+    sasl_handshake_on()
+        .stream(stream)
+        .client_id(client_id)
+        .mechanism(mechanism.wire_name())
+        .call()
+        .await?;
 
     // ── 3. SCRAM client-first → server-first.
     let (client_first, client) = krabka_macros::scram_client_first!(user, password, mechanism)?;
-    let scram_first_response =
-        sasl_authenticate_on(stream, Bytes::from(client_first), SaslAuthenticateSetup {
-            client_id,
-            ..Default::default()
-        })
+    let scram_first_response = sasl_authenticate_on()
+        .stream(stream)
+        .auth_bytes(Bytes::from(client_first))
+        .client_id(client_id)
+        .call()
         .await?;
     if scram_first_response.error_code != 0 {
         return Err(io::Error::other(format!(
@@ -606,11 +688,12 @@ pub async fn sasl_scram_authenticate_on(
     let (client_final, client) = client
         .step(&server_first)
         .map_err(|e| io::Error::other(format!("scram client step: {e:?}")))?;
-    let scram_final_response =
-        sasl_authenticate_on(stream, Bytes::from(client_final), SaslAuthenticateSetup {
-            client_id,
-            correlation: CorrelationId(4),
-        })
+    let scram_final_response = sasl_authenticate_on()
+        .stream(stream)
+        .auth_bytes(Bytes::from(client_final))
+        .client_id(client_id)
+        .correlation(4)
+        .call()
         .await?;
     if scram_final_response.error_code != 0 {
         return Err(io::Error::other(format!(
@@ -646,25 +729,33 @@ pub struct SaslAuthenticateSetup<'a> {
 }
 
 /// A successful v1 handshake on an existing SASL session.
-pub async fn sasl_handshake_on<S>(stream: &mut S, setup: SaslHandshakeSetup<'_>) -> io::Result<()>
+#[bon::builder]
+pub async fn sasl_handshake_on<S>(
+    stream: &mut S,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(into, default = frames :: CorrelationId (2))] correlation: frames::CorrelationId,
+    #[builder(default = "PLAIN")] mechanism: &'_ str,
+) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let response: SaslHandshakeResponse = exchange(
-        stream,
-        &SaslHandshakeRequest {
+    let setup = SaslHandshakeSetup {
+        client_id,
+        correlation,
+        mechanism,
+    };
+    let response: SaslHandshakeResponse = exchange()
+        .stream(stream)
+        .request(&SaslHandshakeRequest {
             mechanism: setup.mechanism.to_string(),
             ..Default::default()
-        },
-        ExchangeSetup {
-            api_key: WireApiKey(17),
-            version: WireApiVersion(1),
-            correlation: setup.correlation,
-            client_id: setup.client_id,
-            ..Default::default()
-        },
-    )
-    .await?;
+        })
+        .api_key(17)
+        .version(1)
+        .correlation(setup.correlation)
+        .client_id(setup.client_id)
+        .call()
+        .await?;
     if response.error_code != 0 {
         return Err(io::Error::other(format!(
             "SaslHandshake failed: error_code={}",
@@ -675,30 +766,33 @@ where
 }
 
 /// One SASL Authenticate v2 message; callers decide whether an error is expected.
+#[bon::builder]
 pub async fn sasl_authenticate_on<S>(
     stream: &mut S,
     auth_bytes: Bytes,
-    setup: SaslAuthenticateSetup<'_>,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(into, default = frames :: CorrelationId (3))] correlation: frames::CorrelationId,
 ) -> io::Result<SaslAuthenticateResponse>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    exchange(
-        stream,
-        &SaslAuthenticateRequest {
+    let setup = SaslAuthenticateSetup {
+        client_id,
+        correlation,
+    };
+    exchange()
+        .stream(stream)
+        .request(&SaslAuthenticateRequest {
             auth_bytes,
             ..Default::default()
-        },
-        ExchangeSetup {
-            api_key: WireApiKey(36),
-            version: WireApiVersion(2),
-            correlation: setup.correlation,
-            client_id: setup.client_id,
-            header: frames::HeaderEncoding::Flexible,
-            ..Default::default()
-        },
-    )
-    .await
+        })
+        .api_key(36)
+        .version(2)
+        .correlation(setup.correlation)
+        .client_id(setup.client_id)
+        .header(frames::HeaderEncoding::Flexible)
+        .call()
+        .await
 }
 
 pub async fn sasl_plain_reauthenticate_on(
@@ -707,29 +801,31 @@ pub async fn sasl_plain_reauthenticate_on(
     setup: &PlainAuthenticationSetup<'_>,
 ) -> Result<SaslAuthenticateResponse, io::Error> {
     corr.0 += 1;
-    sasl_handshake_on(stream, SaslHandshakeSetup {
-        client_id: setup.client_id,
-        correlation: *corr,
-        ..Default::default()
-    })
-    .await?;
+    sasl_handshake_on()
+        .stream(stream)
+        .client_id(setup.client_id)
+        .correlation(*corr)
+        .call()
+        .await?;
 
     let payload = plain_payload(setup.user, &setup.password);
     corr.0 += 1;
-    sasl_authenticate_on(stream, payload, SaslAuthenticateSetup {
-        client_id: setup.client_id,
-        correlation: *corr,
-    })
-    .await
+    sasl_authenticate_on()
+        .stream(stream)
+        .auth_bytes(payload)
+        .client_id(setup.client_id)
+        .correlation(*corr)
+        .call()
+        .await
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct ProduceValueBytes(pub usize);
 impl Default for ProduceValueBytes {
     fn default() -> Self { Self(1024) }
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct ProduceRecordCount(pub usize);
 impl Default for ProduceRecordCount {
     fn default() -> Self { Self(1) }
@@ -752,9 +848,17 @@ pub struct SaslProduceSetup<'a> {
 }
 
 /// A Produce v11-compatible batch of zero-filled records for quota tests.
+#[bon::builder]
 pub fn produce_records(
-    setup: ZeroFilledRecordsSetup,
+    #[builder(default = "quota-topic" . to_string ())] topic: String,
+    #[builder(into, default)] value_bytes: ProduceValueBytes,
+    #[builder(into, default)] count: ProduceRecordCount,
 ) -> krabka_protocol::owned::produce_request::ProduceRequest {
+    let setup = ZeroFilledRecordsSetup {
+        topic,
+        value_bytes,
+        count,
+    };
     let value = vec![0u8; setup.value_bytes.0];
     let records: Vec<Record> = (0..setup.count.0)
         .map(|i| Record {
@@ -807,15 +911,16 @@ pub async fn elect_leaders_response(
     request: &ElectLeadersRequest,
     client_id: &str,
 ) -> ElectLeadersResponse {
-    exchange(stream, request, ExchangeSetup {
-        api_key: WireApiKey(43),
-        version: WireApiVersion(2),
-        client_id,
-        header: frames::HeaderEncoding::Flexible,
-        ..Default::default()
-    })
-    .await
-    .expect("ElectLeaders round-trip")
+    exchange()
+        .stream(stream)
+        .request(request)
+        .api_key(43)
+        .version(2)
+        .client_id(client_id)
+        .header(frames::HeaderEncoding::Flexible)
+        .call()
+        .await
+        .expect("ElectLeaders round-trip")
 }
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -825,12 +930,22 @@ pub struct ElectionExchangeSetup<'a> {
     pub election: ElectionSetup,
 }
 
+#[bon::builder]
 pub async fn elect_leaders(
     stream: &mut TcpStream,
-    setup: ElectionExchangeSetup<'_>,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default)] election: ElectionSetup,
 ) -> Vec<(i32, i16)> {
+    let setup = ElectionExchangeSetup {
+        client_id,
+        election,
+    };
     let topic = setup.election.topic.clone();
-    let req = election_request(setup.election);
+    let req = election_request()
+        .topic(setup.election.topic)
+        .partitions(setup.election.partitions)
+        .kind(setup.election.kind)
+        .call();
     let resp = elect_leaders_response(stream, &req, setup.client_id).await;
 
     assert!(
@@ -856,7 +971,13 @@ pub async fn create_topic_from_setup(
     client_id: &str,
     setup: CreateTopicSetup<'_>,
 ) {
-    let mut req = configured_topic_request(setup);
+    let mut req = configured_topic_request()
+        .topic(setup.topic)
+        .configs(setup.configs)
+        .num_partitions(setup.num_partitions)
+        .replication_factor(setup.replication_factor)
+        .timeout(setup.timeout)
+        .call();
     let topic = req.topics.pop().expect("configured topic");
     create_topic_plaintext(addr, client_id, topic).await;
 }
@@ -881,23 +1002,46 @@ pub struct SaslTopicSetup<'a> {
     pub topic: ConfiguredTopicSetup,
 }
 
-pub async fn create_configured_topic_sasl(addr: SocketAddr, setup: SaslTopicSetup<'_>) {
-    create_topic_sasl(addr, topic(setup.topic), &PlainAuthenticationSetup {
-        client_id: setup.client_id,
-        user: setup.user,
-        password: (setup.password).to_vec(),
-    })
+#[bon::builder]
+pub async fn create_configured_topic_sasl(
+    addr: SocketAddr,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default = "admin")] user: &'_ str,
+    #[builder(default = b"admin-secret")] password: &'_ [u8],
+    #[builder(default)] topic: ConfiguredTopicSetup,
+) {
+    let setup = SaslTopicSetup {
+        client_id,
+        user,
+        password,
+        topic,
+    };
+    create_topic_sasl(
+        addr,
+        configured_topic_request!(setup.topic),
+        &PlainAuthenticationSetup {
+            client_id: setup.client_id,
+            user: setup.user,
+            password: (setup.password).to_vec(),
+        },
+    )
     .await;
 }
 
 /// Create an automatically placed topic as the native admin fixture principal.
-pub async fn create_topic_as_admin(addr: SocketAddr, setup: AutomaticTopicSetup<'_>) {
-    create_configured_topic_sasl(addr, SaslTopicSetup {
-        client_id: setup.client_id,
-        topic: setup.topic,
-        ..Default::default()
-    })
-    .await;
+#[bon::builder]
+pub async fn create_topic_as_admin(
+    addr: SocketAddr,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default)] topic: ConfiguredTopicSetup,
+) {
+    let setup = AutomaticTopicSetup { client_id, topic };
+    create_configured_topic_sasl()
+        .addr(addr)
+        .client_id(setup.client_id)
+        .topic(setup.topic)
+        .call()
+        .await;
 }
 
 /// Create a topic on a fresh plaintext connection with the original connect diagnostic.
@@ -914,8 +1058,19 @@ pub async fn create_topic_on_fresh_connection(
 }
 
 /// Create an automatically placed topic over plaintext.
-pub async fn create_automatic_topic_plaintext(addr: SocketAddr, setup: AutomaticTopicSetup<'_>) {
-    create_topic_on_fresh_connection(addr, setup.client_id, topic(setup.topic)).await;
+#[bon::builder]
+pub async fn create_automatic_topic_plaintext(
+    addr: SocketAddr,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default)] topic: ConfiguredTopicSetup,
+) {
+    let setup = AutomaticTopicSetup { client_id, topic };
+    create_topic_on_fresh_connection(
+        addr,
+        setup.client_id,
+        configured_topic_request!(setup.topic),
+    )
+    .await;
 }
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -926,59 +1081,97 @@ pub struct AssignedTopicExchangeSetup<'a> {
 }
 
 /// Create one partition with an explicit ordered assignment over plaintext.
+#[bon::builder]
 pub async fn create_assigned_topic_plaintext(
     addr: SocketAddr,
-    setup: AssignedTopicExchangeSetup<'_>,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default)] topic: AssignedTopicSetup,
 ) {
-    create_topic_on_fresh_connection(addr, setup.client_id, assigned_topic(setup.topic)).await;
+    let setup = AssignedTopicExchangeSetup { client_id, topic };
+    create_topic_on_fresh_connection(
+        addr,
+        setup.client_id,
+        assigned_topic()
+            .name(setup.topic.name)
+            .replicas(setup.topic.replicas)
+            .call(),
+    )
+    .await;
 }
 
 /// Elect named partitions over a new plaintext connection and retain the top-level oracle.
 ///
 /// # Panics
 /// Panics if the connection, election round-trip or top-level election check fails.
+#[bon::builder]
 pub async fn elect_leaders_plaintext(
     addr: SocketAddr,
-    setup: ElectionExchangeSetup<'_>,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default)] election: ElectionSetup,
 ) -> Vec<(i32, i16)> {
     let mut stream = TcpStream::connect(addr).await.expect("connect");
-    elect_leaders(&mut stream, setup).await
+    elect_leaders()
+        .stream(&mut stream)
+        .client_id(client_id)
+        .election(election)
+        .call()
+        .await
 }
 
 /// Authenticate with one client id and send Produce v11 with the requested wire id.
 ///
 /// # Panics
 /// Panics if record construction, SASL authentication, encoding or the wire exchange fails.
+#[bon::builder]
 pub async fn produce_sasl_with_ids(
     addr: SocketAddr,
-    setup: SaslProduceSetup<'_>,
+    #[builder(default)] authentication: PlainAuthenticationSetup<'_>,
+    #[builder(default = "krabka-broker-test")] produce_client_id: &'_ str,
+    #[builder(default)] records: ZeroFilledRecordsSetup,
 ) -> krabka_protocol::owned::produce_response::ProduceResponse {
     const VERSION: i16 = 11;
-    let req = produce_records(setup.records);
+    let setup = SaslProduceSetup {
+        authentication,
+        produce_client_id,
+        records,
+    };
+    let req = produce_records()
+        .topic(setup.records.topic)
+        .value_bytes(setup.records.value_bytes.0)
+        .count(setup.records.count.0)
+        .call();
     let mut stream = sasl_plain_authenticate(addr, &setup.authentication)
         .await
         .expect("SASL authenticate for Produce");
     let mut body = BytesMut::new();
     req.encode(&mut body, VERSION).expect("encode Produce");
-    let resp_bytes = round_trip(
-        &mut stream,
-        ExchangeSetup {
-            api_key: WireApiKey(0),
-            version: WireApiVersion(VERSION),
-            client_id: setup.produce_client_id,
-            header: frames::HeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .expect("Produce round-trip");
+    let resp_bytes = round_trip()
+        .stream(&mut stream)
+        .api_key(0)
+        .version(VERSION)
+        .client_id(setup.produce_client_id)
+        .header(frames::HeaderEncoding::Flexible)
+        .body(&body)
+        .call()
+        .await
+        .expect("Produce round-trip");
     let mut cur: &[u8] = &resp_bytes;
     krabka_protocol::owned::produce_response::ProduceResponse::decode(&mut cur, VERSION)
         .expect("decode ProduceResponse")
 }
 
 /// Automatic plaintext creation with the original JBOD fixtures' connect unwrap policy.
-pub async fn create_configured_topic_plaintext(addr: SocketAddr, setup: AutomaticTopicSetup<'_>) {
-    create_topic_plaintext(addr, setup.client_id, topic(setup.topic)).await;
+#[bon::builder]
+pub async fn create_configured_topic_plaintext(
+    addr: SocketAddr,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default)] topic: ConfiguredTopicSetup,
+) {
+    let setup = AutomaticTopicSetup { client_id, topic };
+    create_topic_plaintext(
+        addr,
+        setup.client_id,
+        configured_topic_request!(setup.topic),
+    )
+    .await;
 }

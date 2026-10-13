@@ -7,9 +7,7 @@ use {
         api_catalog::UnstableApiVersions,
         config_keys::MIN_INSYNC_REPLICAS,
         freeze::resolve::FreezeMutationResolution,
-        handlers::test_support::{
-            PartitionSpawnSetup, ReplicatedPartitionSetup, replicated_partition, spawn_partition,
-        },
+        handlers::test_support::{replicated_partition, spawn_partition},
         log_dir_status::LogDirRegistry,
         metrics::{BrokerMetrics, RequestPhases},
         partition::Partition,
@@ -79,13 +77,13 @@ impl PipelineFixture {
         setup: PipelinePartitionSetup<'_>,
     ) -> Arc<Partition> {
         let PipelinePartitionSetup { topic, log_config } = setup;
-        let partition = spawn_partition(root, PartitionSpawnSetup {
-            topic,
-            log_dir_status: self.log_dir_status.clone(),
-            producer_state: Arc::clone(&self.producer_state),
-            log_config,
-            ..Default::default()
-        });
+        let partition = spawn_partition()
+            .root(root)
+            .topic(topic)
+            .log_dir_status(self.log_dir_status.clone())
+            .producer_state(Arc::clone(&self.producer_state))
+            .log_config(log_config)
+            .call();
         let record = image.partition(topic, 0).expect("partition");
         let topic_id = image.topic(topic).expect("topic").topic_id;
         partition
@@ -167,12 +165,11 @@ pub(super) fn pipeline_input(
 
 pub(crate) fn image_with_topic(topic: &str, isr: &[u64]) -> MetadataImage {
     topic_partition_image(topic, i16::try_from(isr.len().max(1)).unwrap(), || {
-        replicated_partition(ReplicatedPartitionSetup {
-            topic,
-            leader: krabka_audit::NodeId(*isr.first().unwrap_or(&1)),
-            replicas: &replica_nodes(isr),
-            ..Default::default()
-        })
+        replicated_partition()
+            .topic(topic)
+            .leader(*isr.first().unwrap_or(&1))
+            .replicas(&replica_nodes(isr))
+            .call()
     })
 }
 

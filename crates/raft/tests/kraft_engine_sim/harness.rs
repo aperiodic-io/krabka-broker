@@ -7,7 +7,7 @@
 //! than repeated per test module.
 
 use {
-    crate::{harness::SimEngineSetup as HarnessSimEngineSetup, sim_net::SimNet},
+    crate::sim_net::SimNet,
     krabka_units::prelude::{Time, millis},
 };
 pub(crate) use {
@@ -59,7 +59,18 @@ pub(crate) struct SimClusterSetup<'a> {
     pub timeouts: &'a [Time],
 }
 
-pub(crate) fn start_engines(net: &SimNet, setup: SimClusterSetup<'_>) -> Vec<tempfile::TempDir> {
+#[bon::builder]
+pub(crate) fn start_engines(
+    net: &SimNet,
+    #[builder(default = & [NodeId (1) , NodeId (2) , NodeId (3)])] ids: &'_ [NodeId],
+    #[builder(default)] cluster_id: uuid::Uuid,
+    #[builder(default = & STAGGERED_TIMEOUTS)] timeouts: &'_ [Time],
+) -> Vec<tempfile::TempDir> {
+    let setup = SimClusterSetup {
+        ids,
+        cluster_id,
+        timeouts,
+    };
     let SimClusterSetup {
         ids,
         cluster_id,
@@ -67,13 +78,13 @@ pub(crate) fn start_engines(net: &SimNet, setup: SimClusterSetup<'_>) -> Vec<tem
     } = setup;
     let mut dirs = Vec::new();
     for (i, &id) in ids.iter().enumerate() {
-        let (ctrl, dir) = build_engine(net, HarnessSimEngineSetup {
-            me: id,
-            ids,
-            cluster_id,
-            election_timeout: timeouts[i],
-            ..Default::default()
-        });
+        let (ctrl, dir) = build_engine()
+            .net(net)
+            .me(id)
+            .ids(ids)
+            .cluster_id(cluster_id)
+            .election_timeout(timeouts[i])
+            .call();
         net.register(id, ctrl);
         dirs.push(dir);
     }
@@ -88,11 +99,13 @@ pub(crate) fn start_cluster(
 ) -> HashMap<NodeId, tempfile::TempDir> {
     ids.iter()
         .copied()
-        .zip(start_engines(net, SimClusterSetup {
-            ids,
-            cluster_id,
-            ..Default::default()
-        }))
+        .zip(
+            start_engines()
+                .net(net)
+                .ids(ids)
+                .cluster_id(cluster_id)
+                .call(),
+        )
         .collect()
 }
 
@@ -135,10 +148,22 @@ pub(crate) struct SimEngineSetup<'a> {
     pub snapshot_interval_records: SnapshotRecordCount,
 }
 
+#[bon::builder]
 pub(crate) fn build_engine(
     net: &SimNet,
-    setup: SimEngineSetup<'_>,
+    #[builder(into, default = NodeId (1))] me: NodeId,
+    #[builder(default = & [NodeId (1) , NodeId (2) , NodeId (3)])] ids: &'_ [NodeId],
+    #[builder(default)] cluster_id: uuid::Uuid,
+    #[builder(default = STAGGERED_TIMEOUTS [0])] election_timeout: Time,
+    #[builder(into, default)] snapshot_interval_records: SnapshotRecordCount,
 ) -> (KraftController, tempfile::TempDir) {
+    let setup = SimEngineSetup {
+        me,
+        ids,
+        cluster_id,
+        election_timeout,
+        snapshot_interval_records,
+    };
     let SimEngineSetup {
         me,
         ids,

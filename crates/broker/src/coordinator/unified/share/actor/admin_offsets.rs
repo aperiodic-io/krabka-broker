@@ -345,7 +345,7 @@ mod tests {
                     actor::{
                         records::PendingShareRecords,
                         test_support::{
-                            TopicMetadataSetup, make_coordinator, metadata_with_topic,
+                            make_coordinator, metadata_with_topic,
                             unavailable_persister_coordinator,
                         },
                     },
@@ -359,7 +359,6 @@ mod tests {
                     fixed_source, make_share_persister,
                 },
             },
-            test_support::PartitionCount,
         },
         assert2::check,
         std::collections::HashSet,
@@ -389,7 +388,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_persister_fails_without_mutation() {
-        let (metadata, _topic_id) = metadata_with_topic(TopicMetadataSetup::default());
+        let (metadata, _topic_id) = metadata_with_topic().call();
         let (coordinator, _log) = make_coordinator(metadata);
         let mut state = ShareGroupState::new("g");
 
@@ -401,7 +400,7 @@ mod tests {
 
     #[tokio::test]
     async fn nonempty_gate_precedes_persister_access() {
-        let (metadata, _topic_id) = metadata_with_topic(TopicMetadataSetup::default());
+        let (metadata, _topic_id) = metadata_with_topic().call();
         let (coordinator, _log) = make_coordinator(metadata);
         let mut state = ShareGroupState::new("g");
         state.members.insert(
@@ -426,10 +425,7 @@ mod tests {
     /// reaches no share coordinator, so every call fails.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn alter_records_initializing_and_keeps_it_when_the_persister_fails() {
-        let (coordinator, log, topic_id) = unavailable_persister_coordinator(TopicMetadataSetup {
-            partitions: PartitionCount(2),
-            ..Default::default()
-        });
+        let (coordinator, log, topic_id) = unavailable_persister_coordinator().partitions(2).call();
         let topic_uuid = uuid::Uuid::from_bytes(topic_id.0);
         let mut state = ShareGroupState::new("g");
         state.group_epoch = 4;
@@ -462,10 +458,7 @@ mod tests {
     /// returns before it looks at the request.
     #[tokio::test]
     async fn delete_without_state_answers_no_row() {
-        let (metadata, _topic_id) = metadata_with_topic(TopicMetadataSetup {
-            partitions: PartitionCount(2),
-            ..Default::default()
-        });
+        let (metadata, _topic_id) = metadata_with_topic().partitions(2).call();
         let (coordinator, log) = make_coordinator(metadata);
         coordinator.set_share_persister(make_share_persister(fixed_source(
             krabka_metadata::MetadataImage::default(),
@@ -489,8 +482,7 @@ mod tests {
     /// ones in request order.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_failed_delete_leaves_the_topic_deleting_for_a_retry() {
-        let (coordinator, log, topic_id) =
-            unavailable_persister_coordinator(TopicMetadataSetup::default());
+        let (coordinator, log, topic_id) = unavailable_persister_coordinator().call();
         let topic_uuid = uuid::Uuid::from_bytes(topic_id.0);
         let other = krabka_protocol::primitives::uuid::Uuid([8; 16]);
         let mut state = ShareGroupState::new("g");

@@ -13,7 +13,7 @@ use {
         },
         support::{
             self,
-            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+            topics::{creatable_topic, create_topic_request},
         },
     },
     assert2::check,
@@ -118,12 +118,9 @@ async fn the_kfc9_gauges_and_counters_move_on_real_requests() {
 
     // A gated Kafka transition with no approval behind it.
     let created = alice
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("doomed").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("doomed").into()).call(),
+        ))
         .await
         .expect("CreateTopics");
     check!(created.topics[0].error_code == 0);

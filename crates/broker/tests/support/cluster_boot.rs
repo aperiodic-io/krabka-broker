@@ -52,12 +52,28 @@ pub struct ClusterNodeSetup<'a> {
     pub mode: BootstrapMode,
 }
 
-pub fn broker_config(log_dir: &std::path::Path, setup: ClusterNodeSetup<'_>) -> BrokerConfig {
-    let mut config = addressed_node_config(log_dir, AddressedNodeSetup {
-        node: NodeId(u64::try_from(setup.index.0 + 1).expect("one-based node id")),
-        client: setup.client_addrs[setup.index.0],
-        controller: setup.controller_addrs[setup.index.0],
-    });
+#[bon::builder]
+pub fn broker_config(
+    log_dir: &std::path::Path,
+    #[builder(into, default)] index: NodeIndex,
+    #[builder(default = & DEFAULT_ENDPOINTS)] client_addrs: &'_ [SocketAddr],
+    #[builder(default = & DEFAULT_ENDPOINTS)] controller_addrs: &'_ [SocketAddr],
+    #[builder(default)] voters: Vec<(NodeId, String)>,
+    #[builder(default = BootstrapMode :: Bootstrap)] mode: BootstrapMode,
+) -> BrokerConfig {
+    let setup = ClusterNodeSetup {
+        index,
+        client_addrs,
+        controller_addrs,
+        voters,
+        mode,
+    };
+    let mut config = addressed_node_config()
+        .log_dir(log_dir)
+        .node(u64::try_from(setup.index.0 + 1).expect("one-based node id"))
+        .client(setup.client_addrs[setup.index.0])
+        .controller(setup.controller_addrs[setup.index.0])
+        .call();
     config.controller_quorum_voters = setup.voters;
     config.bootstrap_mode = setup.mode;
     config
@@ -74,7 +90,18 @@ pub struct AddressedNodeSetup {
     pub controller: SocketAddr,
 }
 
-pub fn addressed_node_config(log_dir: &std::path::Path, setup: AddressedNodeSetup) -> BrokerConfig {
+#[bon::builder]
+pub fn addressed_node_config(
+    log_dir: &std::path::Path,
+    #[builder(into, default = NodeId (1))] node: NodeId,
+    #[builder(default = DEFAULT_ENDPOINTS [0])] client: SocketAddr,
+    #[builder(default = DEFAULT_ENDPOINTS [0])] controller: SocketAddr,
+) -> BrokerConfig {
+    let setup = AddressedNodeSetup {
+        node,
+        client,
+        controller,
+    };
     let mut config = BrokerConfig::for_tests(log_dir.to_path_buf());
     config.broker_id = i32::try_from(setup.node.0).expect("node id");
     config.node_id = setup.node;
@@ -170,13 +197,18 @@ impl<'a> RoleTopology<'a> {
     /// # Panics
     /// Panics if the node index or checked broker id is out of range.
     pub fn config(&self, log_dir: &std::path::Path, setup: RoleNodeSetup) -> BrokerConfig {
-        let mut config = broker_config(
-            log_dir,
-            self.node_setup(ClusterBootstrapSetup {
-                index: setup.index,
-                mode: setup.mode,
-            }),
-        );
+        let node = self.node_setup(ClusterBootstrapSetup {
+            index: setup.index,
+            mode: setup.mode,
+        });
+        let mut config = broker_config()
+            .log_dir(log_dir)
+            .index(node.index.0)
+            .client_addrs(node.client_addrs)
+            .controller_addrs(node.controller_addrs)
+            .voters(node.voters)
+            .mode(node.mode)
+            .call();
         config.roles = vec![setup.role];
         config
     }

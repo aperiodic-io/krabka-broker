@@ -21,79 +21,70 @@ use {
     },
 };
 
-#[test]
-fn an_unusable_scope_is_refused_as_an_invalid_scope() {
-    for (label, pattern_type, scope, expected) in [
-        ("a topic name", PatternType::Literal, "orders", None),
-        (
-            "a namespace prefix",
-            PatternType::Prefixed,
-            "tenant-a.",
-            None,
-        ),
-        (
-            "an empty literal scope",
-            PatternType::Literal,
-            "",
-            Some(codes::FREEZE_SCOPE_INVALID),
-        ),
-        (
-            "an empty prefix scope",
-            PatternType::Prefixed,
-            "",
-            Some(codes::FREEZE_SCOPE_INVALID),
-        ),
-        (
-            "a literal internal topic",
-            PatternType::Literal,
-            "__consumer_offsets",
-            Some(codes::FREEZE_SCOPE_INVALID),
-        ),
-        (
-            "a prefix that reaches the internal namespace",
-            PatternType::Prefixed,
-            "_",
-            Some(codes::FREEZE_SCOPE_INVALID),
-        ),
-        (
-            "a prefix inside the internal namespace",
-            PatternType::Prefixed,
-            "__con",
-            Some(codes::FREEZE_SCOPE_INVALID),
-        ),
-    ] {
-        let outcome = check_scope(pattern_type, scope);
-        check!(outcome.err().map(|r| r.code) == expected, "{label}");
-    }
+#[yare::parameterized(
+    topic_name = { PatternType::Literal, "orders", None },
+    namespace_prefix = { PatternType::Prefixed, "tenant-a.", None },
+    empty_literal_scope = {
+        PatternType::Literal,
+        "",
+        Some(codes::FREEZE_SCOPE_INVALID),
+    },
+    empty_prefix_scope = {
+        PatternType::Prefixed,
+        "",
+        Some(codes::FREEZE_SCOPE_INVALID),
+    },
+    literal_internal_topic = {
+        PatternType::Literal,
+        "__consumer_offsets",
+        Some(codes::FREEZE_SCOPE_INVALID),
+    },
+    prefix_reaching_internal_namespace = {
+        PatternType::Prefixed,
+        "_",
+        Some(codes::FREEZE_SCOPE_INVALID),
+    },
+    prefix_inside_internal_namespace = {
+        PatternType::Prefixed,
+        "__con",
+        Some(codes::FREEZE_SCOPE_INVALID),
+    },
+)]
+fn unusable_scopes_are_refused_as_invalid(
+    pattern_type: PatternType,
+    scope: &str,
+    expected: Option<i16>,
+) {
+    let outcome = check_scope(pattern_type, scope);
+    check!(outcome.err().map(|r| r.code) == expected);
 }
 
-#[test]
-fn the_registry_ceiling_refuses_one_entry_past_it() {
+#[yare::parameterized(
+    room_for_another_entry = { 3, None },
+    registry_full = { 2, Some(codes::FREEZE_LIMIT_EXCEEDED) },
+    lowered_ceiling = { 1, Some(codes::FREEZE_LIMIT_EXCEEDED) },
+)]
+fn the_registry_ceiling_refuses_one_entry_past_it(max_entries: usize, expected: Option<i16>) {
     let image = image(&[
         ("orders", PatternType::Literal),
         ("payments", PatternType::Literal),
     ]);
 
-    for (label, max_entries, expected) in [
-        ("room for another entry", 3, None),
-        (
-            "the registry is full",
-            2,
-            Some(codes::FREEZE_LIMIT_EXCEEDED),
-        ),
-        (
-            "the registry is over a lowered ceiling",
-            1,
-            Some(codes::FREEZE_LIMIT_EXCEEDED),
-        ),
-    ] {
-        let outcome = check_limit(&image, max_entries);
-        check!(outcome.err().map(|r| r.code) == expected, "{label}");
-    }
+    let outcome = check_limit(&image, max_entries);
+    check!(outcome.err().map(|r| r.code) == expected);
 }
 
-#[test]
-fn a_freeze_that_replaces_a_live_entry_does_not_meet_the_ceiling() {
+#[yare::parameterized(
+    same_scope_replaces = { "orders", None },
+    second_scope_exceeds_ceiling = {
+        "payments",
+        Some(codes::FREEZE_LIMIT_EXCEEDED),
+    },
+)]
+fn a_freeze_that_replaces_a_live_entry_does_not_meet_the_ceiling(
+    scope: &str,
+    expected: Option<i16>,
+) {
     let (_dir, config, _) = alice_key_configuration();
     let config = BrokerConfig {
         freeze: FreezeConfig {
@@ -104,70 +95,42 @@ fn a_freeze_that_replaces_a_live_entry_does_not_meet_the_ceiling() {
     };
     freeze_fixture!(image, principal, peer, ctx; &[("orders", PatternType::Literal)] ; env, config);
 
-    for (label, scope, expected) in [
-        ("the same scope replaces its entry", "orders", None),
-        (
-            "a second scope meets the ceiling",
-            "payments",
-            Some(codes::FREEZE_LIMIT_EXCEEDED),
-        ),
-    ] {
-        let outcome = prepare(&env, &freeze_request(scope, PATTERN_TYPE_LITERAL));
-        check!(outcome.err().map(|r| r.code) == expected, "{label}");
-    }
+    let outcome = prepare(&env, &freeze_request(scope, PATTERN_TYPE_LITERAL));
+    check!(outcome.err().map(|r| r.code) == expected);
 }
 
-#[test]
-fn a_live_entry_is_found_by_its_scope_and_its_pattern_type_together() {
+#[yare::parameterized(
+    literal_entry = {
+        PatternType::Literal,
+        "orders",
+        Some(PatternType::Literal),
+    },
+    prefixed_entry_same_name = {
+        PatternType::Prefixed,
+        "orders",
+        Some(PatternType::Prefixed),
+    },
+    prefixed_entry = {
+        PatternType::Prefixed,
+        "tenant-a.",
+        Some(PatternType::Prefixed),
+    },
+    literal_entry_covered_by_prefix = { PatternType::Literal, "tenant-a.", None },
+    absent_scope = { PatternType::Literal, "absent", None },
+    exact_lookup_not_longer_name = { PatternType::Prefixed, "tenant-a.orders", None },
+)]
+fn a_live_entry_is_found_by_its_scope_and_its_pattern_type_together(
+    pattern_type: PatternType,
+    scope: &str,
+    expected: Option<PatternType>,
+) {
     let image = image(&[
         ("orders", PatternType::Literal),
         ("orders", PatternType::Prefixed),
         ("tenant-a.", PatternType::Prefixed),
     ]);
 
-    for (label, pattern_type, scope, expected) in [
-        (
-            "a literal entry",
-            PatternType::Literal,
-            "orders",
-            Some(PatternType::Literal),
-        ),
-        (
-            "a prefixed entry of the same name",
-            PatternType::Prefixed,
-            "orders",
-            Some(PatternType::Prefixed),
-        ),
-        (
-            "a prefixed entry",
-            PatternType::Prefixed,
-            "tenant-a.",
-            Some(PatternType::Prefixed),
-        ),
-        (
-            "a literal entry that the prefix would cover",
-            PatternType::Literal,
-            "tenant-a.",
-            None,
-        ),
-        (
-            "a scope no entry carries",
-            PatternType::Literal,
-            "absent",
-            None,
-        ),
-        (
-            "an exact lookup never matches a longer name",
-            PatternType::Prefixed,
-            "tenant-a.orders",
-            None,
-        ),
-    ] {
-        check!(
-            live_entry(&image, pattern_type, scope).map(|entry| entry.pattern_type) == expected,
-            "{label}"
-        );
-    }
+    check!(live_entry(&image, pattern_type, scope).map(|entry| entry.pattern_type) == expected);
 }
 
 #[test]

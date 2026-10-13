@@ -30,7 +30,14 @@ impl Default for TopicConfigSetup<'_> {
     }
 }
 
-pub(super) fn set_topic_config(image: &mut MetadataImage, setup: TopicConfigSetup<'_>) {
+#[bon::builder]
+pub(super) fn set_topic_config(
+    image: &mut MetadataImage,
+    #[builder(default = TopicConfigSetup::default().topic)] topic: &'_ str,
+    #[builder(default = TopicConfigSetup::default().key)] key: &'_ str,
+    #[builder(default = TopicConfigSetup::default().value)] value: &'_ str,
+) {
+    let setup = TopicConfigSetup { topic, key, value };
     let TopicConfigSetup { topic, key, value } = setup;
     image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
         topic: topic.into(),

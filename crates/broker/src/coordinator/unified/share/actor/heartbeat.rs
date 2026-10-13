@@ -224,13 +224,11 @@ mod tests {
             config::NextGenConfig,
             offsets_log::fake::InMemoryOffsetsLog,
             share::actor::test_support::{
-                InitializedTopicSetup, ShareSubscriptionSetup, TopicMetadataSetup, heartbeat,
-                make_coordinator, metadata_with_topic, seed_initialized, subscribed_group,
-                subscribed_request,
+                TopicMetadataSetup, heartbeat, make_coordinator, metadata_with_topic,
+                seed_initialized, subscribed_group, subscribed_request,
             },
             test_support::{
-                MemberEpoch, assert_single_member_limit, assignment_interval_fixture,
-                heartbeat_write_failures,
+                assert_single_member_limit, assignment_interval_fixture, heartbeat_write_failures,
             },
         },
         assert2::{assert, check},
@@ -249,7 +247,10 @@ mod tests {
             share_group_heartbeat_response::Assignment,
         };
 
-        let (metadata, id) = metadata_with_topic(TopicMetadataSetup::four_partitions());
+        let (metadata, id) = metadata_with_topic()
+            .name(TopicMetadataSetup::four_partitions().name)
+            .partitions(TopicMetadataSetup::four_partitions().partitions)
+            .call();
         let response =
             |member: &str, epoch: i32, partitions: Option<Vec<i32>>| ShareGroupHeartbeatResponse {
                 member_id: Some(member.into()),
@@ -298,15 +299,17 @@ mod tests {
             let (coord, _log) = make_coordinator(metadata.clone());
             let handle = coord.get_or_create_share("g");
             if let Some(partitions) = initialized {
-                seed_initialized(&handle, InitializedTopicSetup {
-                    topic_id: id,
-                    partitions: partitions
-                        .into_iter()
-                        .map(krabka_ids::PartitionIndex)
-                        .collect(),
-                    ..Default::default()
-                })
-                .await;
+                seed_initialized()
+                    .handle(&handle)
+                    .topic_id(id)
+                    .partitions(
+                        partitions
+                            .into_iter()
+                            .map(krabka_ids::PartitionIndex)
+                            .collect(),
+                    )
+                    .call()
+                    .await;
             }
             for (step, (req, expected)) in steps.into_iter().enumerate() {
                 let resp = heartbeat(&handle, req).await;
@@ -317,7 +320,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn member_limit_rejects_only_new_members() {
-        let (metadata, _id) = metadata_with_topic(TopicMetadataSetup::default());
+        let (metadata, _id) = metadata_with_topic().call();
         let log = Arc::new(InMemoryOffsetsLog::default());
         let coord = Arc::new(GroupCoordinator::new(
             NextGenConfig::assigning_at_once(),
@@ -333,10 +336,10 @@ mod tests {
         assert_single_member_limit(
             &handle,
             |member_id, epoch| {
-                subscribed_request(ShareSubscriptionSetup {
-                    member_id,
-                    epoch: MemberEpoch(epoch),
-                })
+                subscribed_request()
+                    .member_id(member_id)
+                    .epoch(epoch)
+                    .call()
             },
             heartbeat,
         )
@@ -374,14 +377,13 @@ mod tests {
             ),
         ];
         for (member_id, expected, new_batches, group_epoch) in rows {
-            let (metadata, _id) = metadata_with_topic(TopicMetadataSetup::four_partitions());
+            let (metadata, _id) = metadata_with_topic()
+                .name(TopicMetadataSetup::four_partitions().name)
+                .partitions(TopicMetadataSetup::four_partitions().partitions)
+                .call();
             let (coord, log) = make_coordinator(metadata);
             let handle = coord.get_or_create_share("g");
-            let joined = heartbeat(
-                &handle,
-                subscribed_request(ShareSubscriptionSetup::default()),
-            )
-            .await;
+            let joined = heartbeat(&handle, subscribed_request().call()).await;
             check!(joined.error_code == codes::NONE);
             let pre_leave = log.batches().await.len();
 
@@ -412,22 +414,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stale_epoch_is_fenced() {
-        let (_coord, _log, handle) = subscribed_group(TopicMetadataSetup::four_partitions());
-        let joined = heartbeat(
-            &handle,
-            subscribed_request(ShareSubscriptionSetup::default()),
-        )
-        .await;
+        let (_coord, _log, handle) = subscribed_group()
+            .name(TopicMetadataSetup::four_partitions().name)
+            .partitions(TopicMetadataSetup::four_partitions().partitions)
+            .call();
+        let joined = heartbeat(&handle, subscribed_request().call()).await;
         assert!(joined.member_epoch == 2);
         // Re-send with an epoch ahead of the server → fenced.
-        let resp = heartbeat(
-            &handle,
-            subscribed_request(ShareSubscriptionSetup {
-                epoch: MemberEpoch(99),
-                ..Default::default()
-            }),
-        )
-        .await;
+        let resp = heartbeat(&handle, subscribed_request().epoch(99).call()).await;
         assert!(resp.error_code == codes::FENCED_MEMBER_EPOCH);
     }
 
@@ -438,7 +432,6 @@ mod tests {
     /// whole response.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn member_epoch_rule_matches_kafka() {
-        let request = subscribed_request;
         // (member id, request epoch, accepted)
         let rows = [
             ("m1", 0, true),
@@ -450,53 +443,37 @@ mod tests {
         ];
 
         for (index, (member_id, member_epoch, accepted)) in rows.into_iter().enumerate() {
-            let (_coord, _log, handle) = subscribed_group(TopicMetadataSetup::four_partitions());
+            let (_coord, _log, handle) = subscribed_group()
+                .name(TopicMetadataSetup::four_partitions().name)
+                .partitions(TopicMetadataSetup::four_partitions().partitions)
+                .call();
             check!(
-                heartbeat(&handle, request(ShareSubscriptionSetup::default()))
+                heartbeat(&handle, subscribed_request().call())
                     .await
                     .member_epoch
                     == 2
             );
             check!(
-                heartbeat(
-                    &handle,
-                    request(ShareSubscriptionSetup {
-                        member_id: "m2",
-                        ..Default::default()
-                    })
-                )
-                .await
-                .member_epoch
+                heartbeat(&handle, subscribed_request().member_id("m2").call())
+                    .await
+                    .member_epoch
                     == 3
             );
             check!(
-                heartbeat(
-                    &handle,
-                    request(ShareSubscriptionSetup {
-                        member_id: "m3",
-                        ..Default::default()
-                    })
-                )
-                .await
-                .member_epoch
+                heartbeat(&handle, subscribed_request().member_id("m3").call())
+                    .await
+                    .member_epoch
                     == 4
             );
-            let advanced = heartbeat(
-                &handle,
-                request(ShareSubscriptionSetup {
-                    epoch: MemberEpoch(2),
-                    ..Default::default()
-                }),
-            )
-            .await;
+            let advanced = heartbeat(&handle, subscribed_request().epoch(2).call()).await;
             check!(advanced.member_epoch == 4);
 
             let resp = heartbeat(
                 &handle,
-                request(ShareSubscriptionSetup {
-                    member_id,
-                    epoch: MemberEpoch(member_epoch),
-                }),
+                subscribed_request()
+                    .member_id(member_id)
+                    .epoch(member_epoch)
+                    .call(),
             )
             .await;
 
@@ -524,7 +501,7 @@ mod tests {
     /// A heartbeat without a rack id keeps it (`maybeUpdateRackId`).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn heartbeat_updates_the_rack_id() {
-        let (metadata, _id) = metadata_with_topic(TopicMetadataSetup::default());
+        let (metadata, _id) = metadata_with_topic().call();
         let (coord, _log) = make_coordinator(metadata);
         let handle = coord.get_or_create_share("g");
         let request = |member_epoch, rack_id: Option<&str>| ShareGroupHeartbeatRequest {
@@ -563,16 +540,12 @@ mod tests {
     async fn a_failed_write_answers_its_code_and_writes_no_partial_batch() {
         for case in heartbeat_write_failures() {
             let fixture = case.coordinator(|| {
-                let (metadata, _id) = metadata_with_topic(TopicMetadataSetup::default());
+                let (metadata, _id) = metadata_with_topic().call();
                 make_coordinator(metadata)
             });
             let handle = fixture.coordinator.get_or_create_share("g");
 
-            let response = heartbeat(
-                &handle,
-                subscribed_request(ShareSubscriptionSetup::default()),
-            )
-            .await;
+            let response = heartbeat(&handle, subscribed_request().call()).await;
 
             check!(
                 response
@@ -600,13 +573,14 @@ mod tests {
         let (rows, mut cases) = assignment_interval_fixture();
 
         for (case, ago, wanted) in rows {
-            let (coordinator, _) = super::super::test_support::topic_coordinator(
-                TopicMetadataSetup::four_partitions(),
-                ShareGroupConfig {
+            let (coordinator, _) = super::super::test_support::topic_coordinator()
+                .name(TopicMetadataSetup::four_partitions().name)
+                .partitions(TopicMetadataSetup::four_partitions().partitions)
+                .share(ShareGroupConfig {
                     assignment_interval: std::time::Duration::from_mins(1),
                     ..ShareGroupConfig::default()
-                },
-            );
+                })
+                .call();
             let handle = coordinator.get_or_create_share("g");
             let stored = ago.map_or(0, |ago| wall_clock_ms() - ago);
             handle
@@ -620,11 +594,7 @@ mod tests {
                 .await
                 .unwrap();
             let before = wall_clock_ms();
-            let joined = heartbeat(
-                &handle,
-                subscribed_request(ShareSubscriptionSetup::default()),
-            )
-            .await;
+            let joined = heartbeat(&handle, subscribed_request().call()).await;
             let after = wall_clock_ms();
             let written = coordinator
                 .cached_share_seed("g")

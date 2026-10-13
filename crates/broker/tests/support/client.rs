@@ -7,7 +7,7 @@ use {
         records::{batch_from_records, value_record},
         topics::{
             CreateTopicRequestSetup, CreateTopicSetup, CreateTopicsTimeoutMillis,
-            TopicPartitionCount, TopicReplicationFactor, configured_topic_request,
+            TopicPartitionCount, TopicReplicationFactor, configured_topic_request_from,
             create_topic_request_with_setup,
         },
     },
@@ -36,6 +36,16 @@ pub async fn connect(bootstrap: &str, client_id: &str) -> Arc<Client> {
 /// Panics if the client cannot connect to the bootstrap broker.
 pub async fn connect_client(bootstrap: impl AsRef<str>, client_id: Option<&str>) -> Client {
     build_client(bootstrap.as_ref(), client_id).await.unwrap()
+}
+
+/// Connect the shared integration-test client to a running broker.
+pub async fn connect_to_broker(broker: &BrokerHandle) -> Client {
+    connect_owned(
+        broker.listen_addr().to_string(),
+        "krabka-broker-test",
+        "client build",
+    )
+    .await
 }
 
 async fn build_client(
@@ -111,7 +121,7 @@ pub async fn http_get(addr: SocketAddr, path: &str, flush: bool) -> String {
 }
 
 pub async fn create_topic_with(client: &Client, setup: CreateTopicSetup<'_>) -> WireUuid {
-    let mut request = configured_topic_request(setup);
+    let mut request = configured_request(setup);
     create_topic_spec(client, request.topics.remove(0), CreateTopicRequestSetup {
         timeout: CreateTopicsTimeoutMillis(request.timeout_ms),
     })
@@ -136,7 +146,12 @@ pub async fn create_topic_spec(
     setup: CreateTopicRequestSetup,
 ) -> WireUuid {
     let resp = client
-        .send(create_topic_request_with_setup(topic, setup))
+        .send(
+            create_topic_request_with_setup()
+                .topic(topic)
+                .timeout(setup.timeout)
+                .call(),
+        )
         .await
         .expect("CreateTopics");
     assert!(
@@ -146,6 +161,7 @@ pub async fn create_topic_spec(
     resp.topics[0].topic_id
 }
 
+#[derive(derive_more::From, derive_more::Into)]
 /// Number of sequential vN records in a fixture batch.
 #[derive(Clone, Copy)]
 pub struct ValueRecordCount(pub i32);
@@ -157,7 +173,11 @@ pub struct ValueBatchSetup {
 }
 
 /// One vN record per offset, starting at zero within the batch.
-pub fn value_batch(setup: ValueBatchSetup) -> RecordBatch {
+#[bon::builder]
+pub fn value_batch(
+    #[builder(into, default = ValueRecordCount (1))] records: ValueRecordCount,
+) -> RecordBatch {
+    let setup = ValueBatchSetup { records };
     let n = setup.records.0;
     RecordBatch {
         base_offset: 0,
@@ -181,11 +201,21 @@ pub struct BatchProduceSetup<'a> {
 }
 
 /// Produce one batch, preserving the caller's acknowledgement and deadline.
+#[bon::builder]
 pub async fn produce_batch(
     client: &Client,
     batch: RecordBatch,
-    setup: BatchProduceSetup<'_>,
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(default)] topic_id: WireUuid,
+    #[builder(default)] acknowledgements: ProduceAcknowledgements,
+    #[builder(default)] timeout: ProduceTimeoutMillis,
 ) -> PartitionProduceResponse {
+    let setup = BatchProduceSetup {
+        topic,
+        topic_id,
+        acknowledgements,
+        timeout,
+    };
     let response = send_batch(&client, batch, SinglePartitionProduceSetup {
         topic: setup.topic.to_owned(),
         topic_id: setup.topic_id,
@@ -265,10 +295,7 @@ pub async fn metadata_fetch(
 /// Panics if the request fails, its topic row is missing, or creation is rejected.
 pub async fn create_configured_topic(client: &Client, setup: CreateTopicSetup<'_>) {
     let topic = setup.topic;
-    let response = client
-        .send(configured_topic_request(setup))
-        .await
-        .expect("CreateTopics");
+    let response = send_topic_creation(client, configured_request(setup)).await;
     let created = response.topics.first().expect("one topic result");
     assert!(
         created.error_code == 0,
@@ -299,10 +326,18 @@ pub struct BrokerClientSetup<'a> {
 ///
 /// # Panics
 /// Panics if startup or client construction fails, with each caller's diagnostic.
+#[bon::builder]
 pub async fn start_broker_client(
     config: BrokerConfig,
-    setup: BrokerClientSetup<'_>,
+    #[builder(default = "krabka-broker-test")] client_id: &'_ str,
+    #[builder(default = "broker start")] broker_context: &'_ str,
+    #[builder(default = "client build")] client_context: &'_ str,
 ) -> (BrokerHandle, Client) {
+    let setup = BrokerClientSetup {
+        client_id,
+        broker_context,
+        client_context,
+    };
     let broker = configured_broker(config, Some(setup.broker_context)).await;
     let client = connect_owned(
         broker.listen_addr().to_string(),
@@ -349,26 +384,32 @@ pub async fn standalone_topic(topic: &str) -> (tempfile::TempDir, BrokerHandle, 
 /// Named-topic creation with the original producer and topic-description success diagnostic.
 pub async fn create_topic_named(client: &Client, setup: CreateTopicSetup<'_>) {
     let name = setup.topic;
-    let response = send_topic_creation(client, setup).await;
+    let response = send_topic_creation(client, configured_request(setup)).await;
     assert!(
         response.topics[0].error_code == 0,
         "{name} create: {response:?}"
     );
 }
 
-/// Connect through the fixture broker and create a topic with scenario-specific placement.
-pub async fn create_topic_for_broker(broker: &BrokerHandle, setup: CreateTopicSetup<'_>) {
+/// Connect through the fixture broker and send a configured topic request.
+pub async fn create_topic_for_broker(
+    broker: &BrokerHandle,
+    request: krabka_protocol::owned::create_topics_request::CreateTopicsRequest,
+) {
     let client = connect_with_context(broker.listen_addr().to_string(), None, "client").await;
-    let response = send_topic_creation(&client, setup).await;
+    let response = send_topic_creation(&client, request).await;
     assert!(response.topics[0].error_code == 0, "{response:?}");
 }
 
-async fn send_topic_creation(
+pub async fn send_topic_creation(
     client: &Client,
-    setup: CreateTopicSetup<'_>,
+    request: krabka_protocol::owned::create_topics_request::CreateTopicsRequest,
 ) -> krabka_protocol::owned::create_topics_response::CreateTopicsResponse {
-    client
-        .send(configured_topic_request(setup))
-        .await
-        .expect("CreateTopics")
+    client.send(request).await.expect("CreateTopics")
+}
+
+fn configured_request(
+    setup: CreateTopicSetup<'_>,
+) -> krabka_protocol::owned::create_topics_request::CreateTopicsRequest {
+    configured_topic_request_from(setup)
 }

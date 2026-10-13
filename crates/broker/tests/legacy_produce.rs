@@ -4,13 +4,7 @@
 //! value that the test sent.
 
 use {
-    crate::{
-        kafka_wire::LegacyExchangeSetup,
-        support::{
-            fetch::{SinglePartitionFetchSetup, single_partition_fetch},
-            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
-        },
-    },
+    crate::support::{fetch::single_partition_fetch, topics::create_named_topic_request},
     assert2::assert,
 };
 mod kafka_wire;
@@ -70,13 +64,9 @@ async fn produce_v0_upconverts_and_is_readable_via_fetch() {
     let p = support::start_legacy().await;
 
     // 1. Create topic "legacy_v0" with 1 partition using the typed client.
-    let topic_setup = ConfiguredTopicSetup {
-        name: "legacy_v0".into(),
-        ..Default::default()
-    };
     let cr = p
         .client
-        .send(create_topic_request(creatable_topic(topic_setup)))
+        .send(create_named_topic_request().name("legacy_v0").call())
         .await
         .expect("CreateTopics");
     assert!(
@@ -117,15 +107,12 @@ async fn produce_v0_upconverts_and_is_readable_via_fetch() {
 
     // 5. Round-trip over raw TCP.
     // Produce v0, correlation ID 1 and legacy headers are the setup defaults.
-    let resp_body = round_trip_v0(
-        &mut stream,
-        LegacyExchangeSetup {
-            client_id: "legacy-produce-test",
-            ..Default::default()
-        },
-        &body,
-    )
-    .await;
+    let resp_body = round_trip_v0()
+        .stream(&mut stream)
+        .client_id("legacy-produce-test")
+        .body(&body)
+        .call()
+        .await;
 
     // 6. Decode the ProduceResponse v0.
     let mut cur: &[u8] = &resp_body;
@@ -147,11 +134,12 @@ async fn produce_v0_upconverts_and_is_readable_via_fetch() {
     let topic_id = topic_id_for(&p.client, "legacy_v0").await;
     let fetch_resp = p
         .client
-        .send(single_partition_fetch(SinglePartitionFetchSetup {
-            topic: "legacy_v0".to_owned(),
-            topic_id,
-            ..Default::default()
-        }))
+        .send(
+            single_partition_fetch()
+                .topic("legacy_v0".to_owned())
+                .topic_id(topic_id)
+                .call(),
+        )
         .await
         .expect("Fetch");
 

@@ -10,15 +10,10 @@ use {
         handlers::describe_transactions::transaction_state_row,
         partition_registry::PartitionRegistry,
         producer_id_manager::ProducerIdManager,
-        test_support::{FakeMetadataSource, StandalonePartitionSetup, open_partition},
+        test_support::{FakeMetadataSource, open_partition},
         txn::{
-            bootstrap,
-            coordinator::test_support::{StateImageSetup, state_image},
-            id_expiration::sweep_once,
-            log_record::decode_key,
-            state::TxnEntry,
-            two_pc::NO_TIMEOUT_MS,
-            version::TxnVersion,
+            bootstrap, coordinator::test_support::state_image, id_expiration::sweep_once,
+            log_record::decode_key, state::TxnEntry, two_pc::NO_TIMEOUT_MS, version::TxnVersion,
         },
     },
     assert2::{assert, check},
@@ -139,12 +134,11 @@ fn prepared_two_pc_entry(last_update_ms: i64) -> TxnEntry {
 /// A metadata image where `__transaction_state` has one partition, led by
 /// `leader`.
 fn image_with_leader(leader: NodeId, leader_epoch: krabka_metadata::LeaderEpoch) -> MetadataImage {
-    state_image(StateImageSetup {
-        leader,
-        leader_epoch,
-        replicas: &[leader],
-        ..Default::default()
-    })
+    state_image()
+        .leader(leader)
+        .leader_epoch(leader_epoch)
+        .replicas(&[leader])
+        .call()
 }
 
 /// A coordinator that persisted `entry` as the leader of the single
@@ -157,10 +151,10 @@ async fn seeded_coordinator(entry: TxnEntry, leader: NodeId) -> (Arc<TxnCoordina
     partitions.insert(
         bootstrap::TOPIC.into(),
         PartitionIndex(0),
-        open_partition(dir.path(), StandalonePartitionSetup {
-            topic: bootstrap::TOPIC,
-            ..Default::default()
-        }),
+        open_partition()
+            .log_dir(dir.path())
+            .topic(bootstrap::TOPIC)
+            .call(),
     );
     let coordinator = Arc::new(TxnCoordinator::new(
         NodeId(1),

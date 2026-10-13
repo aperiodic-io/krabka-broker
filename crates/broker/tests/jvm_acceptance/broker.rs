@@ -6,7 +6,7 @@
 
 use {
     super::ports::{broker0_advertised, broker0_listen, controller_addr_0},
-    crate::support::{JvmBrokerSetup, controller_voters, init_jvm_tracing, jvm_broker_config},
+    crate::support::{controller_voters, init_jvm_tracing, jvm_broker_config},
     krabka_broker::{BootstrapMode, Broker, BrokerConfig},
     std::path::Path,
 };
@@ -17,13 +17,13 @@ pub(crate) type HostBroker = (krabka_broker::BrokerHandle, tempfile::TempDir);
 pub(crate) fn host_broker_config(dir: &Path, client_context: &str) -> BrokerConfig {
     let listen = broker0_listen().parse().expect(client_context);
     let controller = controller_addr_0().parse().expect("allocated addr");
-    jvm_broker_config(dir.to_path_buf(), JvmBrokerSetup {
-        listen,
-        controller,
-        advertised: (broker0_advertised()).to_owned(),
-        voters: controller_voters(&[(1, controller)]),
-        ..Default::default()
-    })
+    jvm_broker_config()
+        .log_dir(dir.to_path_buf())
+        .listen(listen)
+        .controller(controller)
+        .advertised((broker0_advertised()).to_owned())
+        .voters(controller_voters(&[(1, controller)]))
+        .call()
 }
 
 /// A plain broker and one topic created by the stock JVM admin client.

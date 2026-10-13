@@ -6,10 +6,7 @@ use {
     crate::{
         N_RECORDS, NODE_A, NODE_B, NODE_C, TOPIC, WITNESS,
         support::{
-            client::{
-                ValueBatchSetup, ValueRecordCount, connect_owned, create_replicated_topic,
-                value_batch,
-            },
+            client::{connect_owned, create_replicated_topic, value_batch},
             produce::{ProduceTimeoutMillis, SinglePartitionProduceSetup, batch_request},
         },
         view::wait_for_leader_and_isr,
@@ -34,9 +31,7 @@ pub async fn create_topic(client: &Client) -> WireUuid {
 pub async fn produce_once(client: &Client, topic_id: WireUuid, timeout_ms: i32) -> i16 {
     let resp = client
         .send(batch_request(
-            value_batch(ValueBatchSetup {
-                records: ValueRecordCount(N_RECORDS),
-            }),
+            value_batch().records(N_RECORDS).call(),
             SinglePartitionProduceSetup {
                 topic: (TOPIC).into(),
                 topic_id,

@@ -135,7 +135,7 @@ mod tests {
             config_keys::{BROKER_WITNESS, UNCLEAN_RECOVERY_STRATEGY, WITNESS_TRUE},
             handlers::{
                 alter_configs::test_support::{broker_resource, image_with_broker},
-                test_support::{BrokerConfigMutationSetup, broker_config_context},
+                test_support::broker_config_context,
             },
             test_support::{broker_registration, finalize_elr_version},
             throttle::{FOLLOWER_THROTTLED_RATE_KEY, LEADER_THROTTLED_RATE_KEY},
@@ -162,7 +162,7 @@ mod tests {
     ) -> Result<Vec<MetadataRecord>, (i16, String)> {
         broker_config_records(
             &broker_resource(name, configs),
-            broker_config_context(image, BrokerConfigMutationSetup::default()),
+            broker_config_context().image(image).call(),
         )
     }
 

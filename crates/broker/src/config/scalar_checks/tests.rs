@@ -331,26 +331,34 @@ fn rejects_expiry_settings_outside_the_kafka_int_millisecond_range() {
     assert_invalid_runtime_cases(cases.iter().copied());
 }
 
-/// A zero cadence disables the sweep, so it is a value the whole-config check
-/// must accept, and the default expiry has to pass its own bound.
-#[test]
-fn a_disabled_expiry_sweep_and_the_kafka_defaults_validate() {
-    let config = BrokerConfig {
-        txn_id_expiration_cleanup_interval: <Time as TimeExt>::ZERO,
-        ..base()
-    };
-    assert!(config.validate().is_ok());
+#[derive(Clone, Copy)]
+enum AcceptedZeroScalar {
+    DisabledExpirySweep,
+    ClassicGroupInitialRebalanceDelay,
 }
 
-/// Kafka's `group.initial.rebalance.delay.ms` is `atLeast(0)`, and its sample
-/// `server.properties` sets zero for development.
-#[test]
-fn a_zero_classic_group_initial_rebalance_delay_validates() {
-    let config = BrokerConfig {
-        classic_group_initial_rebalance_delay: <Time as TimeExt>::ZERO,
-        ..base()
+#[yare::parameterized(
+    disabled_expiry_sweep = { AcceptedZeroScalar::DisabledExpirySweep },
+    classic_group_initial_rebalance_delay = {
+        AcceptedZeroScalar::ClassicGroupInitialRebalanceDelay
+    },
+)]
+fn accepted_zero_valued_runtime_scalars_validate(case: AcceptedZeroScalar) {
+    let config = match case {
+        // A zero cadence disables the sweep, and the default expiry must pass
+        // its own bound.
+        AcceptedZeroScalar::DisabledExpirySweep => BrokerConfig {
+            txn_id_expiration_cleanup_interval: <Time as TimeExt>::ZERO,
+            ..base()
+        },
+        // Kafka's `group.initial.rebalance.delay.ms` is `atLeast(0)`, and its
+        // sample `server.properties` sets zero for development.
+        AcceptedZeroScalar::ClassicGroupInitialRebalanceDelay => BrokerConfig {
+            classic_group_initial_rebalance_delay: <Time as TimeExt>::ZERO,
+            ..base()
+        },
     };
-    assert!(config.validate().is_ok());
+    assert2::assert!(config.validate().is_ok());
 }
 
 #[test]

@@ -22,12 +22,13 @@ async fn delete_records_truncates_wal_and_maps_outcome() {
     let producer = default_producer(&bootstrap).await;
     for offset in 0..100 {
         producer
-            .send(producer_record(ProducerRecordSetup {
-                topic: "wal".to_string(),
-                partition: Some(krabka_ids::PartitionIndex(0)),
-                value: Some(format!("frame-{offset}").into_bytes().into()),
-                ..Default::default()
-            }))
+            .send(
+                producer_record()
+                    .topic("wal".to_string())
+                    .maybe_partition(Some(0))
+                    .maybe_value(Some(Some(format!("frame-{offset}").into_bytes().into())))
+                    .call(),
+            )
             .await
             .unwrap();
     }

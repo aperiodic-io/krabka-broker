@@ -13,10 +13,7 @@ use {
         streams_harness::{
             connect, create_topic, finalize_streams_version, first_join, follow_up, topology,
         },
-        support::{
-            start_group_coordinator_with_config,
-            streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
-        },
+        support::start_group_coordinator_with_config,
     },
     assert2::assert,
     krabka_broker::{BrokerConfig, file_config::FileConfig},
@@ -170,12 +167,13 @@ async fn one_member_is_asked_and_its_push_is_described() {
     );
     for member in [&first, &second] {
         let again = client
-            .send(follow_up(StreamsFollowUpSetup {
-                group: GROUP,
-                member_id: &member.member_id,
-                epoch: StreamsMemberEpoch(member.member_epoch),
-                ..Default::default()
-            }))
+            .send(
+                follow_up()
+                    .group(GROUP)
+                    .member_id(&member.member_id)
+                    .epoch(member.member_epoch)
+                    .call(),
+            )
             .await
             .expect("heartbeat");
         assert!(again.error_code == 0, "{again:?}");
@@ -208,12 +206,13 @@ async fn a_deleted_and_recreated_group_is_asked_again() {
         .expect("StreamsGroupTopologyDescriptionUpdate");
     assert!(pushed.error_code == 0, "{pushed:?}");
     let left = client
-        .send(follow_up(StreamsFollowUpSetup {
-            group: GROUP,
-            member_id: &member.member_id,
-            epoch: StreamsMemberEpoch(-1),
-            ..Default::default()
-        }))
+        .send(
+            follow_up()
+                .group(GROUP)
+                .member_id(&member.member_id)
+                .epoch(-1)
+                .call(),
+        )
         .await
         .expect("leave");
     assert!(left.error_code == 0, "{left:?}");

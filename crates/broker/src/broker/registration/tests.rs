@@ -476,13 +476,13 @@ mod unclean_restart {
             config::BrokerConfig,
             elr::{TopicElr, state::PartitionElr},
             test_support::{
-                IsrResponseCheck, LiveIsrSetup, accepted_isr_proposal, elr_topic_records,
+                IsrResponseCheck, elr_topic_records, metadata_partition_record, propose_isr,
                 start_broker_with_authorizer, started_controller_broker,
                 wait_for_controller_leader,
             },
         },
         assert2::assert,
-        krabka_metadata::{LeaderEpoch, MetadataRecord, NodeId, PartitionRecord},
+        krabka_metadata::{MetadataRecord, NodeId},
         std::sync::Arc,
     };
 
@@ -495,24 +495,16 @@ mod unclean_restart {
     /// The restarting broker. Node 1 is the controller and stays up.
     const RESTARTING: NodeId = NodeId(2);
 
-    fn nodes(ids: &[u64]) -> Vec<NodeId> { ids.iter().copied().map(NodeId).collect() }
-
     /// One RF=3 partition with a full ISR, and a `min.insync.replicas` of 2,
     /// which is what gives the partition an ELR to fall below.
     fn seed_records() -> Vec<MetadataRecord> {
         elr_topic_records(
-            PartitionRecord {
-                topic: TOPIC.into(),
-                partition: 0,
-                leader: NodeId(1),
-                replicas: nodes(&[1, 2, 3]),
-                isr: nodes(&[1, 2, 3]),
-                leader_epoch: LeaderEpoch(LEADER_EPOCH),
-                adding_replicas: vec![],
-                removing_replicas: vec![],
-                directories: vec![uuid::Uuid::nil(); 3],
-                partition_epoch: 4,
-            },
+            metadata_partition_record()
+                .topic(TOPIC.to_owned())
+                .replica_ids(vec![1, 2, 3])
+                .isr_ids(vec![1, 2, 3])
+                .leader_epoch(LEADER_EPOCH)
+                .call(),
             uuid::Uuid::from_bytes(TOPIC_ID_BYTES),
             "2",
         )
@@ -554,12 +546,11 @@ mod unclean_restart {
         config.node_id = RESTARTING;
         boot(broker, &mut config).await;
 
-        accepted_isr_proposal(
-            broker,
-            LiveIsrSetup::default(),
-            IsrResponseCheck::PartitionOnly,
-        )
-        .await;
+        propose_isr()
+            .broker(broker)
+            .response_check(IsrResponseCheck::PartitionOnly)
+            .call()
+            .await;
         assert!(
             published_elr(broker)
                 == PartitionElr {

@@ -17,6 +17,7 @@ categories = ["database-implementations", "encoding"]
 workspace = true
 
 [dependencies]
+bon = { workspace = true }
 assert2 = { workspace = true }
 maplit = { workspace = true }
 krabka-remote-storage = { version = "1.0.3", path = "../remote-storage" }

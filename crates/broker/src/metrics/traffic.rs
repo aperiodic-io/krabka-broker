@@ -199,18 +199,7 @@ mod tests {
             ("bytes_out", &m.partition_bytes_out, &lbl_p0, 2048),
             ("cpu_micros", &m.partition_cpu_micros, &lbl_p0, 500),
         ];
-        for (family_name, family, label, want) in cases {
-            // Each read is its own statement: `get_or_create` returns a
-            // read guard, and a first-materialization on the same family
-            // takes the write lock — holding several guards in one
-            // expression self-deadlocks.
-            let got = family.get_or_create(label).get();
-            assert!(
-                got == want,
-                "{family_name} for partition {}",
-                label.partition
-            );
-        }
+        crate::metrics::assert_metric_counter_cases!(cases);
         // `partition_disk_bytes` is a Gauge family (i64), so it stays
         // out of the Counter table above.
         let disk_p0 = m.partition_disk_bytes.get_or_create(&lbl_p0).get();

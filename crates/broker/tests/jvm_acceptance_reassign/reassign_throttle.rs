@@ -11,7 +11,7 @@ use {
             assert_reassigned, assignment, execute_plan, reassignment_cluster, removed_replica,
         },
         jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised, verify_console_reassignment},
-        support::{JvmDockerSetup, jvm_docker_command},
+        support::jvm_docker_command,
     },
     assert2::assert,
 };
@@ -27,10 +27,10 @@ async fn jvm_kafka_reassign_partitions_with_throttle_end_to_end() {
     let (_json_file, json_mount) = execute_plan(&admin_mount, TOPIC, staying, new_node, true);
 
     // Verify throttle configs were applied via kafka-configs --describe.
-    let desc = jvm_docker_command(JvmDockerSetup {
-        image: KAFKA_IMAGE_TXN,
-        mounts: &[&admin_mount],
-        args: &[
+    let desc = jvm_docker_command()
+        .image(KAFKA_IMAGE_TXN)
+        .mounts(&[&admin_mount])
+        .args(&[
             "kafka-configs",
             "--describe",
             "--entity-type",
@@ -41,11 +41,10 @@ async fn jvm_kafka_reassign_partitions_with_throttle_end_to_end() {
             broker0_advertised(),
             "--command-config",
             "/client.properties",
-        ],
-        ..Default::default()
-    })
-    .output()
-    .expect("spawn kafka-configs --describe");
+        ])
+        .call()
+        .output()
+        .expect("spawn kafka-configs --describe");
     eprintln!(
         "KRABKA[test] kafka-configs describe status={} stdout={} stderr={}",
         desc.status,

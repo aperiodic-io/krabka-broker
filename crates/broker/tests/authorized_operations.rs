@@ -27,13 +27,8 @@ use {
         },
         client::connect_owned,
         discovery::named_topic_metadata,
-        topics::{
-            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
-            metadata_topic,
-        },
-        wire::{
-            CorrelationId, HeaderEncoding, WireFrameSetup, request_body_capacity, request_frame,
-        },
+        topics::{creatable_topic, create_topic_request, metadata_topic},
+        wire::{HeaderEncoding, request_body_capacity, request_frame},
     },
     assert2::assert,
     bytes::{Buf, BytesMut},
@@ -120,13 +115,12 @@ fn boot_with_super_user(super_user: &str) -> impl std::future::Future<Output = H
 
 async fn create_topic(client: &Client, name: &str, partitions: i32) {
     let resp = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: name.to_string(),
-                partitions: TopicPartitionCount(partitions),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic()
+                .name(name.to_string())
+                .partitions(partitions)
+                .call(),
+        ))
         .await
         .expect("CreateTopics");
     assert!(resp.topics[0].error_code == 0, "topic create: {resp:?}");
@@ -327,16 +321,15 @@ async fn metadata_cluster_authorized_operations_super_user_gets_full_mask_v9() {
 
     // Build the v2 request header (flexible — Metadata went flexible at
     // v9). One TCP round-trip, plaintext, no SASL.
-    let frame = request_frame(WireFrameSetup {
-        api_key: krabka_ids::ApiKey(3),
-        version: krabka_ids::ApiVersion(version),
-        correlation: CorrelationId(7),
-        header: HeaderEncoding::Flexible,
-        client_id: "krabka-kip-430-v9",
-        body: &body,
-        capacity: Some(request_body_capacity(&body)),
-        ..Default::default()
-    });
+    let frame = request_frame()
+        .api_key(3)
+        .version(version)
+        .correlation(7)
+        .header(HeaderEncoding::Flexible)
+        .client_id("krabka-kip-430-v9")
+        .body(&body)
+        .maybe_capacity(Some(request_body_capacity(&body)))
+        .call();
 
     let mut stream = tokio::net::TcpStream::connect(h.handle.listen_addr())
         .await

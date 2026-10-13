@@ -179,20 +179,44 @@ async fn assert_connection_closed(stream: &mut TcpStream) {
     assert!(is_closed(stream).await);
 }
 
-/// Scenario 1: a connection that sends nothing is closed once the window
-/// passes, and the close lands on the idle reason of the close counter.
-#[tokio::test(flavor = "current_thread")]
-async fn silent_plaintext_connection_is_closed_past_the_idle_window() {
-    let (idle_cfg, log_dir) = config_with_idle_window(krabka_units::secs(60));
-    let fixture = Box::pin(Fixture::start(idle_cfg, log_dir, "PLAINTEXT")).await;
+/// A connection that sends nothing closes once either the broker-wide window
+/// or the named listener override passes, and the close is counted as idle.
+#[yare::parameterized(
+    broker_wide = { 60, false },
+    listener_override = { 20, true },
+)]
+#[test_macro(tokio::test(flavor = "current_thread"))]
+async fn silent_plaintext_connection_closes_past_its_idle_window(
+    window_secs: u32,
+    per_listener: bool,
+) {
+    let (mut cfg, log_dir) = if per_listener {
+        let log_dir = tempfile::tempdir().expect("tempdir");
+        (
+            BrokerConfig::for_tests(log_dir.path().to_path_buf()),
+            log_dir,
+        )
+    } else {
+        config_with_idle_window(krabka_units::secs(window_secs))
+    };
+    if per_listener {
+        cfg.connections_max_idle_overrides =
+            std::iter::once(("EXTERNAL".to_string(), krabka_units::secs(window_secs))).collect();
+    }
+    let listener = if per_listener {
+        "EXTERNAL"
+    } else {
+        "PLAINTEXT"
+    };
+    let fixture = Fixture::start(cfg, log_dir, listener).await;
 
     let mut stream = fixture.connect().await;
-    assert!(fixture.idle_closes() == 0);
+    assert2::assert!(fixture.idle_closes() == 0);
 
-    advance(Duration::from_secs(61)).await;
+    advance(Duration::from_secs(u64::from(window_secs) + 1)).await;
 
     assert_connection_closed(&mut stream).await;
-    assert!(fixture.idle_closes() == 1);
+    assert2::assert!(fixture.idle_closes() == 1);
 
     fixture.handle.shutdown().await;
 }
@@ -203,7 +227,7 @@ async fn silent_plaintext_connection_is_closed_past_the_idle_window() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_connection_speaking_each_half_window_is_never_closed() {
     let (cfg, log_dir) = config_with_idle_window(krabka_units::secs(60));
-    let fixture = Box::pin(Fixture::start(cfg, log_dir, "PLAINTEXT")).await;
+    let fixture = Fixture::start(cfg, log_dir, "PLAINTEXT").await;
 
     let mut stream = fixture.connect().await;
     for corr_id in 0..4 {
@@ -215,28 +239,6 @@ async fn a_connection_speaking_each_half_window_is_never_closed() {
     }
 
     assert!(fixture.idle_closes() == 0);
-    fixture.handle.shutdown().await;
-}
-
-/// Scenario 3: a per-listener override governs the listener it names, over
-/// the broker-wide value. `EXTERNAL` carries a 20-second window while the
-/// broker-wide value stays at Kafka's ten-minute default, so a connection
-/// silent for 21 seconds is gone. The fall-back for a listener the override
-/// map does not name is covered by the `BrokerConfig` unit tests.
-#[tokio::test(flavor = "current_thread")]
-async fn a_per_listener_override_expires_its_listener_before_the_broker_wide_window() {
-    let log_dir = tempfile::tempdir().expect("tempdir");
-    let mut cfg = BrokerConfig::for_tests(log_dir.path().to_path_buf());
-    cfg.connections_max_idle_overrides =
-        std::iter::once(("EXTERNAL".to_string(), krabka_units::secs(20))).collect();
-    let fixture = Box::pin(Fixture::start(cfg, log_dir, "EXTERNAL")).await;
-
-    let mut stream = fixture.connect().await;
-    advance(Duration::from_secs(21)).await;
-
-    assert_connection_closed(&mut stream).await;
-    assert!(fixture.idle_closes() == 1);
-
     fixture.handle.shutdown().await;
 }
 

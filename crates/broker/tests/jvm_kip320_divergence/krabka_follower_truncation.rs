@@ -32,15 +32,14 @@ async fn kip320_krabka_follower_truncates_from_jvm_leader() {
     // metadata is still propagating, making its authoritative prefix longer.
     set_container_paused(&container, true);
 
-    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(single_leader_record(
-        &partition,
-        SingleLeaderSetup {
-            topic: TOPIC,
-            leader: krabka_broker::NodeId(99),
-            epoch: parked_epoch,
-            ..Default::default()
-        },
-    )))
+    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(
+        single_leader_record()
+            .previous(&partition)
+            .topic(TOPIC)
+            .leader(99)
+            .epoch(parked_epoch)
+            .call(),
+    ))
     .await
     .expect("park reverse-direction replicas behind phantom leader");
     c1.wait_until_local_partition_target(TOPIC, 0, krabka_broker::NodeId(99), parked_epoch)
@@ -61,15 +60,15 @@ async fn kip320_krabka_follower_truncates_from_jvm_leader() {
     // 4. Promote the JVM replica at the next epoch. Its log still ends at the
     //    shared prefix, so the Krabka follower must truncate before fetching.
     let jvm_epoch = LeaderEpoch(parked_epoch.0 + 1);
-    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(single_leader_record(
-        &partition,
-        SingleLeaderSetup {
-            topic: TOPIC,
-            leader: krabka_broker::NodeId(3),
-            epoch: jvm_epoch,
-            partition_epoch_delta: PartitionEpochDelta(2),
-        },
-    )))
+    c1.submit_metadata_record_for_test(MetadataRecord::V1Partition(
+        single_leader_record()
+            .previous(&partition)
+            .topic(TOPIC)
+            .leader(3)
+            .epoch(jvm_epoch)
+            .partition_epoch_delta(2)
+            .call(),
+    ))
     .await
     .expect("promote JVM broker for reverse-direction recovery");
 

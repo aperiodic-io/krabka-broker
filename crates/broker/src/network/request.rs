@@ -67,20 +67,19 @@ fn protocol_invalid(message: &'static str) -> BrokerError {
 mod tests {
     use {
         super::*,
-        crate::network::test_support::{FrameCorrelationId, RequestFrameSetup, request_frame},
+        crate::network::test_support::request_frame,
         assert2::{assert, check},
         bytes::{BufMut, BytesMut},
     };
 
     fn legacy_metadata_frame() -> BytesMut {
-        request_frame(RequestFrameSetup {
-            api_key: krabka_ids::ApiKey(3),
-            api_version: krabka_ids::ApiVersion(8),
-            correlation_id: FrameCorrelationId(42),
-            client_id: Some(b"client-a"),
-            body: b"body",
-            ..Default::default()
-        })
+        request_frame()
+            .api_key(3)
+            .api_version(8)
+            .correlation_id(42)
+            .maybe_client_id(Some(b"client-a"))
+            .body(b"body")
+            .call()
     }
 
     fn assert_flexible_client_body(parsed: &ParsedRequest<'_>) {
@@ -105,14 +104,13 @@ mod tests {
 
     #[test]
     fn parse_request_flexible_header_consumes_tagged_fields_byte() {
-        let frame = request_frame(RequestFrameSetup {
-            api_version: krabka_ids::ApiVersion(3),
-            correlation_id: FrameCorrelationId(7),
-            client_id: Some(b"client-a"),
-            tagged: Some(&[0]),
-            body: b"body",
-            ..Default::default()
-        });
+        let frame = request_frame()
+            .api_version(3)
+            .correlation_id(7)
+            .maybe_client_id(Some(b"client-a"))
+            .maybe_tagged(Some(&[0]))
+            .body(b"body")
+            .call();
 
         let parsed =
             parse_request(&frame, |key, version| key == 18 && version >= 3).expect("parse request");
@@ -126,14 +124,13 @@ mod tests {
     #[test]
     fn parse_request_flexible_header_skips_non_empty_tagged_fields() {
         let tagged_bytes = [1, 1, 3, b't', b'a', b'g'];
-        let frame = request_frame(RequestFrameSetup {
-            api_version: krabka_ids::ApiVersion(3),
-            correlation_id: FrameCorrelationId(7),
-            client_id: Some(b"client-a"),
-            tagged: Some(&tagged_bytes),
-            body: b"body",
-            ..Default::default()
-        });
+        let frame = request_frame()
+            .api_version(3)
+            .correlation_id(7)
+            .maybe_client_id(Some(b"client-a"))
+            .maybe_tagged(Some(&tagged_bytes))
+            .body(b"body")
+            .call();
 
         let is_flex = |key: i16, version: i16| key == 18 && version >= 3;
         let parsed = parse_request(&frame, is_flex).expect("parse request");
@@ -143,14 +140,12 @@ mod tests {
 
     #[test]
     fn parse_request_preserves_empty_client_id() {
-        let frame = request_frame(RequestFrameSetup {
-            api_key: krabka_ids::ApiKey(3),
-            api_version: krabka_ids::ApiVersion(8),
-            correlation_id: FrameCorrelationId(42),
-            client_id: Some(b""),
-            body: b"body",
-            ..Default::default()
-        });
+        let frame = request_frame()
+            .api_key(3)
+            .api_version(8)
+            .maybe_client_id(Some(b""))
+            .body(b"body")
+            .call();
 
         let parsed = parse_request(&frame, |_, _| false).expect("parse request");
 
@@ -160,14 +155,12 @@ mod tests {
 
     #[test]
     fn parse_request_rejects_invalid_utf8_client_id() {
-        let frame = request_frame(RequestFrameSetup {
-            api_key: krabka_ids::ApiKey(3),
-            api_version: krabka_ids::ApiVersion(8),
-            correlation_id: FrameCorrelationId(42),
-            client_id: Some(&[0xff, 0xfe]),
-            body: b"body",
-            ..Default::default()
-        });
+        let frame = request_frame()
+            .api_key(3)
+            .api_version(8)
+            .maybe_client_id(Some(&[0xff, 0xfe]))
+            .body(b"body")
+            .call();
 
         let err = parse_request(&frame, |_, _| false).expect_err("invalid utf8 client id");
 
@@ -184,19 +177,15 @@ mod tests {
         missing_client_id_len.put_i16(8);
         missing_client_id_len.put_i32(42);
 
-        let truncated_client_id = request_frame(RequestFrameSetup {
-            api_key: krabka_ids::ApiKey(3),
-            api_version: krabka_ids::ApiVersion(8),
-            correlation_id: FrameCorrelationId(42),
-            client_id: Some(b"client"),
-            ..Default::default()
-        });
-        let flexible_without_tag = request_frame(RequestFrameSetup {
-            api_version: krabka_ids::ApiVersion(3),
-            correlation_id: FrameCorrelationId(42),
-            client_id: Some(b"client"),
-            ..Default::default()
-        });
+        let truncated_client_id = request_frame()
+            .api_key(3)
+            .api_version(8)
+            .maybe_client_id(Some(b"client"))
+            .call();
+        let flexible_without_tag = request_frame()
+            .api_version(3)
+            .maybe_client_id(Some(b"client"))
+            .call();
 
         let cases = [
             ("missing fixed header", vec![0_u8; 7]),

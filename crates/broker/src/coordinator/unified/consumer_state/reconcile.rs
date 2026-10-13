@@ -502,7 +502,20 @@ mod tests {
         pending: &'a [PartitionIndex],
     }
 
-    fn held(setup: HeldSetup<'_>) -> Held {
+    #[bon::builder]
+    fn held(
+        #[builder(into, default = MemberEpoch (5))] epoch: MemberEpoch,
+        #[builder(default = MemberAssignmentState :: Stable)] state: MemberAssignmentState,
+        #[builder(default = & [PartitionIndex (0) , PartitionIndex (1)])]
+        assigned: &'_ [PartitionIndex],
+        #[builder(default)] pending: &'_ [PartitionIndex],
+    ) -> Held {
+        let setup = HeldSetup {
+            epoch,
+            state,
+            assigned,
+            pending,
+        };
         let HeldSetup {
             epoch,
             state,
@@ -590,12 +603,12 @@ mod tests {
             fn default() -> Self {
                 Self {
                     name: "assignment row",
-                    before: held(HeldSetup::default()),
+                    before: held().call(),
                     other: (&[], &[]),
                     target: &[PartitionIndex(0), PartitionIndex(1)],
                     owned: None,
                     subscription: SubscriptionChange::Unchanged,
-                    after: held(HeldSetup::default()),
+                    after: held().call(),
                     state_change: StateChange::Unchanged,
                 }
             }
@@ -688,25 +701,23 @@ mod tests {
             Row {
                 state_change: StateChange::Changed,
                 name: "a revocation waits, and so does a free partition",
-                before: held(HeldSetup::default()),
+                before: held().call(),
                 target: &[PartitionIndex(1), PartitionIndex(2)],
-                after: held(HeldSetup {
-                    state: U,
-                    assigned: &[PartitionIndex(1)],
-                    pending: &[PartitionIndex(0)],
-                    ..Default::default()
-                }),
+                after: held()
+                    .state(U)
+                    .assigned(&[PartitionIndex(1)])
+                    .pending(&[PartitionIndex(0)])
+                    .call(),
                 ..Default::default()
             },
             Row {
                 state_change: StateChange::Changed,
                 name: "a partition the member gave up is free for it again",
-                before: held(HeldSetup {
-                    state: U,
-                    assigned: &[PartitionIndex(0)],
-                    pending: &[PartitionIndex(1)],
-                    ..Default::default()
-                }),
+                before: held()
+                    .state(U)
+                    .assigned(&[PartitionIndex(0)])
+                    .pending(&[PartitionIndex(1)])
+                    .call(),
                 owned: Some(&[PartitionIndex(0)]),
                 after: settled_expected(),
                 ..Default::default()
@@ -717,16 +728,14 @@ mod tests {
             Row {
                 subscription: SubscriptionChange::Changed,
                 name: "a subscription change alone leaves a member at the target epoch",
-                before: held(HeldSetup {
-                    epoch: MemberEpoch(6),
-                    assigned: &[PartitionIndex(0), PartitionIndex(1), PartitionIndex(2)],
-                    ..Default::default()
-                }),
-                after: held(HeldSetup {
-                    epoch: MemberEpoch(6),
-                    assigned: &[PartitionIndex(0), PartitionIndex(1), PartitionIndex(2)],
-                    ..Default::default()
-                }),
+                before: held()
+                    .epoch(6)
+                    .assigned(&[PartitionIndex(0), PartitionIndex(1), PartitionIndex(2)])
+                    .call(),
+                after: held()
+                    .epoch(6)
+                    .assigned(&[PartitionIndex(0), PartitionIndex(1), PartitionIndex(2)])
+                    .call(),
                 ..Default::default()
             },
         ];
@@ -754,10 +763,9 @@ mod tests {
     /// it in its own heartbeat, and it keeps its epoch until it revokes.
     #[test]
     fn install_target_does_not_reconcile_any_member() {
-        let before = held(HeldSetup {
-            assigned: &[PartitionIndex(0), PartitionIndex(1), PartitionIndex(2)],
-            ..Default::default()
-        });
+        let before = held()
+            .assigned(&[PartitionIndex(0), PartitionIndex(1), PartitionIndex(2)])
+            .call();
         let mut g = group(&before, (&[], &[]), &[PartitionIndex(0), PartitionIndex(1)]);
 
         check!(held_by(&g, "a") == before);
@@ -766,11 +774,10 @@ mod tests {
         g.reconcile_member("a", None, false, &topics());
         check!(
             held_by(&g, "a")
-                == held(HeldSetup {
-                    state: MemberAssignmentState::UnrevokedPartitions,
-                    pending: &[PartitionIndex(2)],
-                    ..Default::default()
-                })
+                == held()
+                    .state(MemberAssignmentState::UnrevokedPartitions)
+                    .pending(&[PartitionIndex(2)])
+                    .call()
         );
     }
 
@@ -778,12 +785,11 @@ mod tests {
     /// granted at that epoch is assigned at it, even one the member gave up.
     #[test]
     fn a_granted_partition_is_assigned_at_the_new_epoch() {
-        let before = held(HeldSetup {
-            state: MemberAssignmentState::UnrevokedPartitions,
-            assigned: &[PartitionIndex(0)],
-            pending: &[PartitionIndex(1)],
-            ..Default::default()
-        });
+        let before = held()
+            .state(MemberAssignmentState::UnrevokedPartitions)
+            .assigned(&[PartitionIndex(0)])
+            .pending(&[PartitionIndex(1)])
+            .call();
         let mut g = group(&before, (&[], &[]), &[PartitionIndex(0), PartitionIndex(1)]);
 
         g.reconcile_member("a", Some(&parts(&[PartitionIndex(0)])), false, &topics());
@@ -838,7 +844,19 @@ mod tests {
         }
     }
 
-    fn shape(setup: ShapeSetup<'_>) -> Shape {
+    #[bon::builder]
+    fn shape(
+        #[builder(default)] epochs: MemberEpochs,
+        #[builder(default = MemberAssignmentState :: Stable)] state: MemberAssignmentState,
+        #[builder(default)] assigned: &'_ [(Uuid, &'_ [PartitionIndex])],
+        #[builder(default)] pending: &'_ [(Uuid, &'_ [PartitionIndex])],
+    ) -> Shape {
+        let setup = ShapeSetup {
+            epochs,
+            state,
+            assigned,
+            pending,
+        };
         let ShapeSetup {
             epochs,
             state,
@@ -893,12 +911,12 @@ mod tests {
                 name: "subscription row",
                 names: &["t"],
                 regex: None,
-                before: shape(ShapeSetup::default()),
+                before: shape().call(),
                 other: Partitions::new(),
                 target: Partitions::new(),
                 owned: None,
                 subscription: SubscriptionChange::Unchanged,
-                after: shape(ShapeSetup::default()),
+                after: shape().call(),
             }
         }
     }
@@ -910,15 +928,19 @@ mod tests {
         history: MemberEpochs,
     }
 
-    fn waiting_subscription_row(setup: WaitingSubscriptionSetup) -> SubscriptionRow {
+    #[bon::builder]
+    fn waiting_subscription_row(
+        #[builder(default = "unreleased member waiting")] name: &'static str,
+        #[builder(default)] history: MemberEpochs,
+    ) -> SubscriptionRow {
+        let setup = WaitingSubscriptionSetup { name, history };
         SubscriptionRow {
             name: setup.name,
-            before: shape(ShapeSetup {
-                epochs: setup.history,
-                state: MemberAssignmentState::UnreleasedPartitions,
-                assigned: &[(T, &[PartitionIndex(0)])],
-                ..Default::default()
-            }),
+            before: shape()
+                .epochs(setup.history)
+                .state(MemberAssignmentState::UnreleasedPartitions)
+                .assigned(&[(T, &[PartitionIndex(0)])])
+                .call(),
             other: topic_parts(&[(T, &[PartitionIndex(1)])]),
             target: topic_parts(&[(T, &[PartitionIndex(0), PartitionIndex(1)])]),
             after: withheld_6_6_expected(),
@@ -940,10 +962,36 @@ mod tests {
                 target: topic_parts(ONE_PARTITION_PER_TOPIC),
                 owned: Some(owning_everything.clone()),
                 subscription: SubscriptionChange::Changed,
-                after: shape(ShapeSetup::revoking_current_epoch(&[
-                    (T, &[PartitionIndex(1)]),
-                    (U, &[PartitionIndex(0)]),
-                ])),
+                after: shape()
+                    .epochs(
+                        ShapeSetup::revoking_current_epoch(&[
+                            (T, &[PartitionIndex(1)]),
+                            (U, &[PartitionIndex(0)]),
+                        ])
+                        .epochs,
+                    )
+                    .state(
+                        ShapeSetup::revoking_current_epoch(&[
+                            (T, &[PartitionIndex(1)]),
+                            (U, &[PartitionIndex(0)]),
+                        ])
+                        .state,
+                    )
+                    .assigned(
+                        ShapeSetup::revoking_current_epoch(&[
+                            (T, &[PartitionIndex(1)]),
+                            (U, &[PartitionIndex(0)]),
+                        ])
+                        .assigned,
+                    )
+                    .pending(
+                        ShapeSetup::revoking_current_epoch(&[
+                            (T, &[PartitionIndex(1)]),
+                            (U, &[PartitionIndex(0)]),
+                        ])
+                        .pending,
+                    )
+                    .call(),
                 ..Default::default()
             },
             SubscriptionRow {
@@ -951,15 +999,15 @@ mod tests {
                 before: revoking_5_4_input(),
                 target: topic_parts(ONE_PARTITION_PER_TOPIC),
                 owned: Some(owning_everything.clone()),
-                after: shape(ShapeSetup {
-                    epochs: MemberEpochs {
+                after: shape()
+                    .epochs(MemberEpochs {
                         current: MemberEpoch(5),
                         previous: MemberEpoch(4),
-                    },
-                    state: UnrevokedPartitions,
-                    assigned: ONE_PARTITION_PER_TOPIC,
-                    pending: &[(T, &[PartitionIndex(1)])],
-                }),
+                    })
+                    .state(UnrevokedPartitions)
+                    .assigned(ONE_PARTITION_PER_TOPIC)
+                    .pending(&[(T, &[PartitionIndex(1)])])
+                    .call(),
                 ..Default::default()
             },
             SubscriptionRow {
@@ -967,15 +1015,15 @@ mod tests {
                 before: stable_6_5_input(),
                 target: topic_parts(TWO_PARTITIONS_PER_TOPIC),
                 subscription: SubscriptionChange::Changed,
-                after: shape(ShapeSetup {
-                    epochs: MemberEpochs {
+                after: shape()
+                    .epochs(MemberEpochs {
                         previous: MemberEpoch(6),
                         ..Default::default()
-                    },
-                    state: UnrevokedPartitions,
-                    assigned: &[(T, &[PartitionIndex(0), PartitionIndex(1)])],
-                    pending: &[(U, &[PartitionIndex(0), PartitionIndex(1)])],
-                }),
+                    })
+                    .state(UnrevokedPartitions)
+                    .assigned(&[(T, &[PartitionIndex(0), PartitionIndex(1)])])
+                    .pending(&[(U, &[PartitionIndex(0), PartitionIndex(1)])])
+                    .call(),
                 ..Default::default()
             },
             SubscriptionRow {
@@ -984,34 +1032,29 @@ mod tests {
                 target: topic_parts(TWO_PARTITIONS_PER_TOPIC),
                 owned: Some(topic_parts(&[(T, &[PartitionIndex(0), PartitionIndex(1)])])),
                 subscription: SubscriptionChange::Changed,
-                after: shape(ShapeSetup {
-                    epochs: MemberEpochs {
+                after: shape()
+                    .epochs(MemberEpochs {
                         previous: MemberEpoch(6),
                         ..Default::default()
-                    },
-                    assigned: &[(T, &[PartitionIndex(0), PartitionIndex(1)])],
-                    ..Default::default()
-                }),
+                    })
+                    .assigned(&[(T, &[PartitionIndex(0), PartitionIndex(1)])])
+                    .call(),
                 ..Default::default()
             },
             SubscriptionRow {
                 name: "a member with no subscription revokes everything",
                 names: &[],
-                before: shape(ShapeSetup {
-                    assigned: ONE_PARTITION_PER_TOPIC,
-                    ..Default::default()
-                }),
+                before: shape().assigned(ONE_PARTITION_PER_TOPIC).call(),
                 target: topic_parts(ONE_PARTITION_PER_TOPIC),
                 subscription: SubscriptionChange::Changed,
-                after: shape(ShapeSetup {
-                    epochs: MemberEpochs {
+                after: shape()
+                    .epochs(MemberEpochs {
                         previous: MemberEpoch(6),
                         ..Default::default()
-                    },
-                    state: UnrevokedPartitions,
-                    pending: ONE_PARTITION_PER_TOPIC,
-                    ..Default::default()
-                }),
+                    })
+                    .state(UnrevokedPartitions)
+                    .pending(ONE_PARTITION_PER_TOPIC)
+                    .call(),
                 ..Default::default()
             },
             SubscriptionRow {
@@ -1026,18 +1069,24 @@ mod tests {
             },
             SubscriptionRow {
                 name: "a partition of a topic the member left is revoked though the target holds it",
-                before: shape(ShapeSetup {
-                    epochs: MemberEpochs {
+                before: shape()
+                    .epochs(MemberEpochs {
                         current: MemberEpoch(5),
                         previous: MemberEpoch(4),
-                    },
-                    assigned: ONE_PARTITION_PER_TOPIC,
-                    ..Default::default()
-                }),
+                    })
+                    .assigned(ONE_PARTITION_PER_TOPIC)
+                    .call(),
                 target: topic_parts(ONE_PARTITION_PER_TOPIC),
-                after: shape(ShapeSetup::revoking_current_epoch(&[(U, &[
-                    PartitionIndex(0),
-                ])])),
+                after: shape()
+                    .epochs(ShapeSetup::revoking_current_epoch(&[(U, &[PartitionIndex(0)])]).epochs)
+                    .state(ShapeSetup::revoking_current_epoch(&[(U, &[PartitionIndex(0)])]).state)
+                    .assigned(
+                        ShapeSetup::revoking_current_epoch(&[(U, &[PartitionIndex(0)])]).assigned,
+                    )
+                    .pending(
+                        ShapeSetup::revoking_current_epoch(&[(U, &[PartitionIndex(0)])]).pending,
+                    )
+                    .call(),
                 ..Default::default()
             },
             SubscriptionRow {
@@ -1054,10 +1103,7 @@ mod tests {
                 names: &[],
                 before: stable_5_4_input_two_topics(),
                 target: topic_parts(&[(U, &[PartitionIndex(0)])]),
-                after: shape(ShapeSetup {
-                    assigned: &[(U, &[PartitionIndex(0)])],
-                    ..Default::default()
-                }),
+                after: shape().assigned(&[(U, &[PartitionIndex(0)])]).call(),
                 ..Default::default()
             },
             SubscriptionRow {
@@ -1066,21 +1112,20 @@ mod tests {
                 names: &[],
                 before: stable_5_4_input_two_topics(),
                 target: topic_parts(&[(U, &[PartitionIndex(0)])]),
-                after: shape(ShapeSetup::default()),
+                after: shape().call(),
                 ..Default::default()
             },
             // A member that keeps its epoch still records it as its previous epoch.
-            waiting_subscription_row(WaitingSubscriptionSetup {
-                name: "an unreleased member that keeps waiting records the epoch it stays in",
-                ..Default::default()
-            }),
-            waiting_subscription_row(WaitingSubscriptionSetup {
-                name: "an unreleased member that already recorded it changes nothing",
-                history: MemberEpochs {
+            waiting_subscription_row()
+                .name("an unreleased member that keeps waiting records the epoch it stays in")
+                .call(),
+            waiting_subscription_row()
+                .name("an unreleased member that already recorded it changes nothing")
+                .history(MemberEpochs {
                     previous: MemberEpoch(6),
                     ..Default::default()
-                },
-            }),
+                })
+                .call(),
         ]
     }
 
@@ -1180,113 +1225,84 @@ mod tests {
         check!(g.held_by_others("a", &Partitions::new()).is_empty());
     }
     fn revoking_input() -> Held {
-        held(HeldSetup {
-            state: MemberAssignmentState::UnrevokedPartitions,
-            pending: &[PartitionIndex(2)],
-            ..Default::default()
-        })
+        held()
+            .state(MemberAssignmentState::UnrevokedPartitions)
+            .pending(&[PartitionIndex(2)])
+            .call()
     }
     fn expanded_input() -> Held {
-        held(HeldSetup {
-            assigned: &[PartitionIndex(0), PartitionIndex(1), PartitionIndex(2)],
-            ..Default::default()
-        })
+        held()
+            .assigned(&[PartitionIndex(0), PartitionIndex(1), PartitionIndex(2)])
+            .call()
     }
-    fn single_partition_input() -> Held {
-        held(HeldSetup {
-            assigned: &[PartitionIndex(0)],
-            ..Default::default()
-        })
-    }
+    fn single_partition_input() -> Held { held().assigned(&[PartitionIndex(0)]).call() }
     fn unreleased_input() -> Held {
-        held(HeldSetup {
-            epoch: MemberEpoch(6),
-            state: MemberAssignmentState::UnreleasedPartitions,
-            assigned: &[PartitionIndex(0)],
-            ..Default::default()
-        })
+        held()
+            .epoch(6)
+            .state(MemberAssignmentState::UnreleasedPartitions)
+            .assigned(&[PartitionIndex(0)])
+            .call()
     }
-    fn current_input() -> Held {
-        held(HeldSetup {
-            epoch: MemberEpoch(6),
-            ..Default::default()
-        })
-    }
+    fn current_input() -> Held { held().epoch(6).call() }
     fn revoking_expected() -> Held {
-        held(HeldSetup {
-            state: MemberAssignmentState::UnrevokedPartitions,
-            pending: &[PartitionIndex(2)],
-            ..Default::default()
-        })
+        held()
+            .state(MemberAssignmentState::UnrevokedPartitions)
+            .pending(&[PartitionIndex(2)])
+            .call()
     }
-    fn settled_expected() -> Held {
-        held(HeldSetup {
-            epoch: MemberEpoch(6),
-            ..Default::default()
-        })
-    }
+    fn settled_expected() -> Held { held().epoch(6).call() }
     fn withheld_expected() -> Held {
-        held(HeldSetup {
-            epoch: MemberEpoch(6),
-            state: MemberAssignmentState::UnreleasedPartitions,
-            assigned: &[PartitionIndex(0)],
-            ..Default::default()
-        })
+        held()
+            .epoch(6)
+            .state(MemberAssignmentState::UnreleasedPartitions)
+            .assigned(&[PartitionIndex(0)])
+            .call()
     }
     fn revoking_5_4_input() -> Shape {
-        shape(ShapeSetup {
-            epochs: MemberEpochs {
+        shape()
+            .epochs(MemberEpochs {
                 current: MemberEpoch(5),
                 previous: MemberEpoch(4),
-            },
-            state: MemberAssignmentState::UnrevokedPartitions,
-            assigned: ONE_PARTITION_PER_TOPIC,
-            pending: &[(T, &[PartitionIndex(1)])],
-        })
+            })
+            .state(MemberAssignmentState::UnrevokedPartitions)
+            .assigned(ONE_PARTITION_PER_TOPIC)
+            .pending(&[(T, &[PartitionIndex(1)])])
+            .call()
     }
     fn stable_6_5_input() -> Shape {
-        shape(ShapeSetup {
-            assigned: &[
+        shape()
+            .assigned(&[
                 (T, &[PartitionIndex(0), PartitionIndex(1)]),
                 (U, &[PartitionIndex(0), PartitionIndex(1)]),
-            ],
-            ..Default::default()
-        })
+            ])
+            .call()
     }
     fn stable_5_4_input() -> Shape {
-        shape(ShapeSetup {
-            epochs: MemberEpochs {
+        shape()
+            .epochs(MemberEpochs {
                 current: MemberEpoch(5),
                 previous: MemberEpoch(4),
-            },
-            assigned: &[(T, &[PartitionIndex(0)])],
-            ..Default::default()
-        })
+            })
+            .assigned(&[(T, &[PartitionIndex(0)])])
+            .call()
     }
-    fn stable_6_5_expected() -> Shape {
-        shape(ShapeSetup {
-            assigned: &[(T, &[PartitionIndex(0)])],
-            ..Default::default()
-        })
-    }
+    fn stable_6_5_expected() -> Shape { shape().assigned(&[(T, &[PartitionIndex(0)])]).call() }
     fn stable_5_4_input_two_topics() -> Shape {
-        shape(ShapeSetup {
-            epochs: MemberEpochs {
+        shape()
+            .epochs(MemberEpochs {
                 current: MemberEpoch(5),
                 previous: MemberEpoch(4),
-            },
-            ..Default::default()
-        })
+            })
+            .call()
     }
     fn withheld_6_6_expected() -> Shape {
-        shape(ShapeSetup {
-            epochs: MemberEpochs {
+        shape()
+            .epochs(MemberEpochs {
                 previous: MemberEpoch(6),
                 ..Default::default()
-            },
-            state: MemberAssignmentState::UnreleasedPartitions,
-            assigned: &[(T, &[PartitionIndex(0)])],
-            ..Default::default()
-        })
+            })
+            .state(MemberAssignmentState::UnreleasedPartitions)
+            .assigned(&[(T, &[PartitionIndex(0)])])
+            .call()
     }
 }

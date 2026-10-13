@@ -445,12 +445,8 @@ mod tests {
             *,
         },
         crate::{
-            diskless::{
-                index_log::test_support::RacingAppendSetup,
-                wal_index::{WalFlushRecord, WalIndexEntry},
-            },
+            diskless::wal_index::{WalFlushRecord, WalIndexEntry},
             metrics::BrokerMetrics,
-            test_support::UnixMillis,
         },
         assert2::assert,
         async_trait::async_trait,
@@ -521,7 +517,7 @@ mod tests {
         }
     }
 
-    use super::test_support::{WalFlushSetup, flush_record};
+    use super::test_support::{flush_record, second_object_flush_record};
 
     async fn seeded_index(
         event_log: Arc<dyn MetadataEventLog>,
@@ -530,14 +526,15 @@ mod tests {
     ) -> DisklessIndexLog {
         let seed = DisklessIndexLog::start(event_log).await.unwrap();
         for &(key, first, last) in ranges {
-            seed.publish_flush(&flush_record(WalFlushSetup {
-                object_key: key,
-                topic_id,
-                first_offset: krabka_log::Offset(first),
-                last_offset: krabka_log::Offset(last),
-                max_timestamp: UnixMillis(0),
-                ..Default::default()
-            }))
+            seed.publish_flush(
+                &flush_record()
+                    .topic_id(topic_id)
+                    .object_key(key)
+                    .first_offset(first)
+                    .last_offset(last)
+                    .max_timestamp(0)
+                    .call(),
+            )
             .await
             .unwrap();
         }
@@ -582,10 +579,7 @@ mod tests {
     #[tokio::test]
     async fn incompatible_index_record_fails_replay_and_increments_metric() {
         let event_log = InProcessMetadataEventLog::new(1);
-        let mut old = flush_record(WalFlushSetup {
-            object_key: "old-object",
-            ..Default::default()
-        });
+        let mut old = flush_record().object_key("old-object").call();
         old.format_version = WalFlushRecord::FORMAT_VERSION - 1;
         let bytes =
             <serde_wincode::SerdeCompat<WalFlushRecord> as wincode::Serialize>::serialize(&old)
@@ -633,10 +627,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_index_record_of_an_unknown_key_version_fails_replay_and_increments_metric() {
-        let record = flush_record(WalFlushSetup {
-            object_key: "future-key",
-            ..Default::default()
-        });
+        let record = flush_record().object_key("future-key").call();
         let mut future_key = WalIndexKey::from(&record.entries[0]).to_bytes().to_vec();
         future_key[..2].copy_from_slice(&7_i16.to_be_bytes());
         for (name, payload) in [
@@ -656,10 +647,7 @@ mod tests {
     #[tokio::test]
     async fn an_unkeyed_index_record_fails_replay_and_increments_metric() {
         let event_log = InProcessMetadataEventLog::new(1);
-        let record = flush_record(WalFlushSetup {
-            object_key: "unkeyed",
-            ..Default::default()
-        });
+        let record = flush_record().object_key("unkeyed").call();
         event_log
             .publish(0, record.to_bytes().unwrap())
             .await
@@ -725,16 +713,18 @@ mod tests {
         // The previous leader's in-flight flush lands while this projection is
         // subscribing. Pacing the replay keeps the assertion off the pump's
         // heels, so a gate that stopped one record short stays caught short.
-        let racing = flush_record(WalFlushSetup::second_object(topic_id));
+        let racing = second_object_flush_record(topic_id);
         let racing_key = WalIndexKey::from(&racing.entries[0]).to_bytes();
-        let restarted = DisklessIndexLog::start(RacingAppendLog::new(
-            PacedReplayLog::new(event_log, ReplayPace::OneEvery(Duration::from_millis(40))),
-            RacingAppendSetup {
-                key: racing_key,
-                event: racing.to_bytes().unwrap(),
-                ..Default::default()
-            },
-        ))
+        let restarted = DisklessIndexLog::start(
+            RacingAppendLog::build()
+                .inner(PacedReplayLog::new(
+                    event_log,
+                    ReplayPace::OneEvery(Duration::from_millis(40)),
+                ))
+                .key(racing_key)
+                .event(racing.to_bytes().unwrap())
+                .call(),
+        )
         .await
         .unwrap();
 
@@ -864,10 +854,7 @@ mod tests {
     ) -> (DisklessIndexLog, Uuid, WalFlushRecord) {
         let index = DisklessIndexLog::start(transport).await.unwrap();
         let topic_id = Uuid::from_u128(7);
-        let record = flush_record(WalFlushSetup {
-            topic_id,
-            ..Default::default()
-        });
+        let record = flush_record().topic_id(topic_id).call();
         index.publish_flush(&record).await.unwrap();
         assert!(
             index
@@ -886,7 +873,7 @@ mod tests {
         transport.set_outcome(PublishOutcome::Fail);
 
         let publish_error = index
-            .publish_flush(&flush_record(WalFlushSetup::second_object(topic_id)))
+            .publish_flush(&second_object_flush_record(topic_id))
             .await
             .unwrap_err();
         assert!(publish_error.to_string().contains("diskless index publish"));

@@ -44,6 +44,7 @@ use {
 
 pub mod acl;
 pub mod admin;
+pub mod api_versions;
 mod audit;
 pub mod classic;
 pub mod client;

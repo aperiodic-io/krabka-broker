@@ -7,7 +7,7 @@
 use {
     crate::support::{
         discovery::topic_metadata_request,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request, metadata_topic},
+        topics::{creatable_topic, create_topic_request, metadata_topic},
     },
     assert2::assert,
 };
@@ -62,12 +62,9 @@ async fn metadata_name_and_id_of_different_topics_describes_the_id() {
     let p = support::start().await;
     for n in ["m_a", "m_b"] {
         p.client
-            .send(create_topic_request(creatable_topic(
-                ConfiguredTopicSetup {
-                    name: (n).into(),
-                    ..Default::default()
-                },
-            )))
+            .send(create_topic_request(
+                creatable_topic().name((n).into()).call(),
+            ))
             .await
             .expect("create topic");
     }

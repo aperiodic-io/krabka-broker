@@ -9,9 +9,9 @@
 
 use {
     crate::jvm_acceptance::{
-        ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, SaslClusterSetup, broker0_advertised,
-        describe_console_entity, docker_run_kafka_tool_with_image_and_mount,
-        start_registered_sasl_cluster, write_plain_props,
+        ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised, describe_console_entity,
+        docker_run_kafka_tool_with_image_and_mount, start_three_broker_sasl_plaintext_jvm_cluster,
+        write_plain_props,
     },
     assert2::assert,
 };
@@ -110,12 +110,13 @@ async fn quota_round_trip(case: QuotaCase<'_>) {
         users,
     } = case;
 
-    let (h1, h2, h3, _cfg1, _cfg2, _cfg3, _d1, _d2, _d3) =
-        Box::pin(start_registered_sasl_cluster(SaslClusterSetup {
-            extra_users: users,
-            ..Default::default()
-        }))
-        .await;
+    let (h1, h2, h3, _cfg1, _cfg2, _cfg3, _d1, _d2, _d3) = Box::pin(
+        start_three_broker_sasl_plaintext_jvm_cluster()
+            .extra_users(users)
+            .wait_until_registered(true)
+            .call(),
+    )
+    .await;
 
     let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
     let admin_mount = admin_props.mount_str();

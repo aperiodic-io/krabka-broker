@@ -46,7 +46,17 @@ struct AlterGroupSetup<'a> {
     mutation: GroupMutation,
 }
 
-fn entry(setup: AlterGroupSetup<'_>) -> AlterableBarrierGroup {
+#[bon::builder]
+fn entry(
+    #[builder(default = "short")] group: &'_ str,
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(default)] mutation: GroupMutation,
+) -> AlterableBarrierGroup {
+    let setup = AlterGroupSetup {
+        group,
+        topic,
+        mutation,
+    };
     let AlterGroupSetup {
         group,
         topic,
@@ -69,19 +79,9 @@ async fn alter_barrier_groups_refuses_a_name_of_32768_bytes_and_creates_nothing(
     let long = "n".repeat(MAX_STRING_BYTES + 1);
     let request = AlterBarrierGroupsRequest {
         groups: vec![
-            entry(AlterGroupSetup {
-                group: &long,
-                ..Default::default()
-            }),
-            entry(AlterGroupSetup {
-                topic: &long,
-                ..Default::default()
-            }),
-            entry(AlterGroupSetup {
-                group: &long,
-                mutation: GroupMutation::Delete,
-                ..Default::default()
-            }),
+            entry().group(&long).call(),
+            entry().topic(&long).call(),
+            entry().group(&long).mutation(GroupMutation::Delete).call(),
         ],
         ..AlterBarrierGroupsRequest::default()
     };

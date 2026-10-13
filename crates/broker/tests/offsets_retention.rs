@@ -18,10 +18,7 @@ use {
             offset_delete_topic,
         },
         standalone_broker,
-        topics::{
-            ConfiguredTopicSetup, CreateTopicRequestSetup, CreateTopicsTimeoutMillis,
-            creatable_topic, create_topic_request_with_setup,
-        },
+        topics::{creatable_topic, create_topic_request_with_setup},
     },
     assert2::{assert, check},
     krabka_broker::{Broker, BrokerConfig, codes},
@@ -57,6 +54,24 @@ const CONFIG_TYPE_INT: i8 = 3;
 const CONFIG_TYPE_LONG: i8 = 5;
 const OFFSETS_RETENTION_MINUTES: &str = "offsets.retention.minutes";
 const OFFSETS_RETENTION_CHECK_INTERVAL_MS: &str = "offsets.retention.check.interval.ms";
+
+#[bon::builder]
+fn expected_config(
+    name: &str,
+    value: &str,
+    config_source: i8,
+    config_type: i8,
+) -> DescribeConfigsResourceResult {
+    DescribeConfigsResourceResult {
+        name: name.into(),
+        value: Some(value.into()),
+        read_only: true,
+        config_source,
+        config_type,
+        documentation: None,
+        ..Default::default()
+    }
+}
 
 async fn client_for(broker: &krabka_broker::BrokerHandle) -> Arc<Client> {
     Arc::new(
@@ -95,31 +110,25 @@ async fn describe_configs_reports_the_retention_knobs() {
     let entry = |name: &str| result.configs.iter().find(|c| c.name == name).cloned();
     check!(
         entry(OFFSETS_RETENTION_MINUTES)
-            == Some(DescribeConfigsResourceResult {
-                name: OFFSETS_RETENTION_MINUTES.into(),
-                // Kafka's default: 10080 minutes, seven days.
-                value: Some("10080".into()),
-                read_only: true,
-                config_source: CONFIG_SOURCE_DEFAULT,
-                config_type: CONFIG_TYPE_INT,
-                // Not requested, so null, as Kafka sends it.
-                documentation: None,
-                ..Default::default()
-            })
+            == Some(
+                expected_config()
+                    .name(OFFSETS_RETENTION_MINUTES)
+                    .value("10080")
+                    .config_source(CONFIG_SOURCE_DEFAULT)
+                    .config_type(CONFIG_TYPE_INT)
+                    .call(),
+            )
     );
     check!(
         entry(OFFSETS_RETENTION_CHECK_INTERVAL_MS)
-            == Some(DescribeConfigsResourceResult {
-                name: OFFSETS_RETENTION_CHECK_INTERVAL_MS.into(),
-                // Kafka's default: ten minutes.
-                value: Some("600000".into()),
-                read_only: true,
-                config_source: CONFIG_SOURCE_DEFAULT,
-                config_type: CONFIG_TYPE_LONG,
-                // Not requested, so null, as Kafka sends it.
-                documentation: None,
-                ..Default::default()
-            })
+            == Some(
+                expected_config()
+                    .name(OFFSETS_RETENTION_CHECK_INTERVAL_MS)
+                    .value("600000")
+                    .config_source(CONFIG_SOURCE_DEFAULT)
+                    .config_type(CONFIG_TYPE_LONG)
+                    .call(),
+            )
     );
 
     broker.shutdown().await;
@@ -152,27 +161,18 @@ async fn describe_configs_reports_a_named_knob_as_static() {
     check!(
         result.configs
             == vec![
-                DescribeConfigsResourceResult {
-                    name: OFFSETS_RETENTION_CHECK_INTERVAL_MS.into(),
-                    value: Some("600000".into()),
-                    read_only: true,
-                    // Untouched, so still inherited.
-                    config_source: CONFIG_SOURCE_DEFAULT,
-                    config_type: CONFIG_TYPE_LONG,
-                    // Not requested, so null, as Kafka sends it.
-                    documentation: None,
-                    ..Default::default()
-                },
-                DescribeConfigsResourceResult {
-                    name: OFFSETS_RETENTION_MINUTES.into(),
-                    value: Some("10080".into()),
-                    read_only: true,
-                    config_source: CONFIG_SOURCE_STATIC_BROKER,
-                    config_type: CONFIG_TYPE_INT,
-                    // Not requested, so null, as Kafka sends it.
-                    documentation: None,
-                    ..Default::default()
-                },
+                expected_config()
+                    .name(OFFSETS_RETENTION_CHECK_INTERVAL_MS)
+                    .value("600000")
+                    .config_source(CONFIG_SOURCE_DEFAULT)
+                    .config_type(CONFIG_TYPE_LONG)
+                    .call(),
+                expected_config()
+                    .name(OFFSETS_RETENTION_MINUTES)
+                    .value("10080")
+                    .config_source(CONFIG_SOURCE_STATIC_BROKER)
+                    .config_type(CONFIG_TYPE_INT)
+                    .call(),
             ]
     );
 
@@ -202,15 +202,12 @@ async fn the_broker_sweep_reaps_a_dead_group_on_its_own() {
     // `OffsetDelete` resolves each partition against the metadata image, so
     // the topic has to exist for the delete to reach the log.
     let created = client
-        .send(create_topic_request_with_setup(
-            creatable_topic(ConfiguredTopicSetup {
-                name: TOPIC.to_string(),
-                ..Default::default()
-            }),
-            CreateTopicRequestSetup {
-                timeout: CreateTopicsTimeoutMillis(10_000),
-            },
-        ))
+        .send(
+            create_topic_request_with_setup()
+                .topic(creatable_topic().name(TOPIC.to_string()).call())
+                .timeout(10_000)
+                .call(),
+        )
         .await
         .expect("CreateTopics");
     assert!(created.topics[0].error_code == codes::NONE);

@@ -14,7 +14,7 @@ use {
             ClusterNodeSetup, NodeIndex, broker_config,
             client::connect_client,
             controller_voters, init_tracing_with,
-            produce::{batch_request, replicated_topic_produce_setup},
+            produce::{batch_request, replicated_topic_produce_for},
             records::{batch_from_records, value_record},
             shutdown_cluster,
         },
@@ -57,10 +57,26 @@ struct SaslNodeSetup<'a> {
     sasl_addrs: &'a [SocketAddr],
 }
 
-fn sasl_two_listener_config(log_dir: &std::path::Path, setup: SaslNodeSetup<'_>) -> BrokerConfig {
+#[bon::builder]
+fn sasl_two_listener_config(
+    log_dir: &std::path::Path,
+    #[builder(default)] cluster: ClusterNodeSetup<'_>,
+    #[builder(default = & DEFAULT_SASL_ENDPOINTS)] sasl_addrs: &'_ [SocketAddr],
+) -> BrokerConfig {
+    let setup = SaslNodeSetup {
+        cluster,
+        sasl_addrs,
+    };
     let listen = setup.cluster.client_addrs[setup.cluster.index.0];
     let sasl = setup.sasl_addrs[setup.cluster.index.0];
-    let mut cfg = broker_config(log_dir, setup.cluster);
+    let mut cfg = broker_config()
+        .log_dir(log_dir)
+        .index(setup.cluster.index.0)
+        .client_addrs(setup.cluster.client_addrs)
+        .controller_addrs(setup.cluster.controller_addrs)
+        .voters(setup.cluster.voters)
+        .mode(setup.cluster.mode)
+        .call();
     cfg.listeners = vec![
         crate::support::listeners::listener("PLAINTEXT", listen, ListenerProtocol::Plaintext),
         crate::support::listeners::listener(
@@ -98,26 +114,28 @@ async fn start_two_node_sasl() -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
         .collect();
 
     let dir0 = TempDir::new().unwrap();
-    let cfg0 = sasl_two_listener_config(dir0.path(), SaslNodeSetup {
-        cluster: ClusterNodeSetup {
+    let cfg0 = sasl_two_listener_config()
+        .log_dir(dir0.path())
+        .cluster(ClusterNodeSetup {
             client_addrs: &plaintext_addrs,
             controller_addrs: &controller_addrs,
             voters: controller_voters(&voters),
             ..Default::default()
-        },
-        sasl_addrs: &sasl_addrs,
-    });
+        })
+        .sasl_addrs(&sasl_addrs)
+        .call();
     let dir1 = TempDir::new().unwrap();
-    let cfg1 = sasl_two_listener_config(dir1.path(), SaslNodeSetup {
-        cluster: ClusterNodeSetup {
+    let cfg1 = sasl_two_listener_config()
+        .log_dir(dir1.path())
+        .cluster(ClusterNodeSetup {
             index: NodeIndex(1),
             client_addrs: &plaintext_addrs,
             controller_addrs: &controller_addrs,
             voters: controller_voters(&voters),
             ..Default::default()
-        },
-        sasl_addrs: &sasl_addrs,
-    });
+        })
+        .sasl_addrs(&sasl_addrs)
+        .call();
     // KIP-595 static-quorum bootstrap: both brokers boot with the same
     // static voter set and elect among themselves over the SASL controller
     // wire — no add_learner / change_membership (KIP-853 dynamic voter reconfiguration). Start
@@ -188,10 +206,7 @@ async fn two_broker_sasl_plaintext_replication() {
     let prod = producer
         .send(batch_request(
             batch,
-            replicated_topic_produce_setup()
-                .topic("sasl-repl".into())
-                .topic_id(topic_id.0)
-                .call(),
+            replicated_topic_produce_for("sasl-repl", topic_id.0),
         ))
         .await
         .unwrap();

@@ -563,6 +563,9 @@ function_macros! {
     /// Generate a topic record builder for one partition and one replica.
     topic_record_fixture => wire_fixtures::topic_record;
 
+    /// Generate the loopback ephemeral-port helper used by container tests.
+    ephemeral_port_fixture => wire_fixtures::ephemeral_port;
+
     /// Generate projection-based Eq and Hash, and optionally Debug, for model state.
     projection_identity => projection_identity::expand;
 

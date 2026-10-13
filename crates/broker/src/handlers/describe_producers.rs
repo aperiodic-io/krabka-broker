@@ -354,12 +354,12 @@ mod tests {
 
             let resp = drive(&broker, &req, &test_context(&p, &peer));
 
-            let expected = empty_producer_response(EmptyProducerResponseSetup {
-                topic: name,
-                partition: krabka_ids::PartitionIndex(0),
-                error_code: KafkaErrorCode(expected_code),
-                message: expected_message.clone(),
-            });
+            let expected = empty_producer_response()
+                .topic(name)
+                .partition(0)
+                .error_code(expected_code)
+                .maybe_message(expected_message.clone())
+                .call();
             assert!(resp == expected, "topic {name:?}");
             broker_handle.shutdown().await;
         }
@@ -375,7 +375,19 @@ mod tests {
     }
 
     /// Independent wire oracle for a partition that exposes no producer state.
-    fn empty_producer_response(setup: EmptyProducerResponseSetup<'_>) -> DescribeProducersResponse {
+    #[bon::builder]
+    fn empty_producer_response(
+        #[builder(default = "orders")] topic: &'_ str,
+        #[builder(into, default)] partition: krabka_ids::PartitionIndex,
+        #[builder(into, default)] error_code: KafkaErrorCode,
+        message: Option<String>,
+    ) -> DescribeProducersResponse {
+        let setup = EmptyProducerResponseSetup {
+            topic,
+            partition,
+            error_code,
+            message,
+        };
         DescribeProducersResponse {
             topics: vec![TopicResponse {
                 name: setup.topic.to_owned(),
@@ -434,12 +446,12 @@ mod tests {
         ];
         for (name, error_message) in cases {
             let resp = drive(&broker, &request(name, &[5]), &test_context(&p, &peer));
-            let expected = empty_producer_response(EmptyProducerResponseSetup {
-                topic: name,
-                partition: krabka_ids::PartitionIndex(5),
-                error_code: KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
-                message: error_message,
-            });
+            let expected = empty_producer_response()
+                .topic(name)
+                .partition(5)
+                .error_code(codes::UNKNOWN_TOPIC_OR_PARTITION)
+                .maybe_message(error_message)
+                .call();
             assert!(resp == expected, "topic {name:?}");
         }
         broker_handle.shutdown().await;
@@ -495,10 +507,18 @@ mod tests {
         replicas: Vec<NodeId>,
     }
 
+    #[bon::builder]
     async fn seed_partition(
         broker: &Broker,
-        setup: HostedProducerPartitionSetup<'_>,
+        #[builder(default = "orders")] topic: &'_ str,
+        #[builder(into, default = krabka_metadata :: NodeId (1))] leader: krabka_metadata::NodeId,
+        #[builder(default = vec ! [krabka_metadata :: NodeId (1)])] replicas: Vec<NodeId>,
     ) -> Option<Arc<Partition>> {
+        let setup = HostedProducerPartitionSetup {
+            topic,
+            leader,
+            replicas,
+        };
         let HostedProducerPartitionSetup {
             topic,
             leader,
@@ -554,21 +574,8 @@ mod tests {
 
     krabka_macros::producer_batch_fixture!(producer_batch, Bytes::from_static(b"v"));
 
-    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
-    struct DataBatchSetup {
-        batch: ProducerBatchSetup,
-        base_offset: krabka_log::Offset,
-    }
-
     /// A data batch of `producer` (`(id, epoch)`) with `records` records from
     /// sequence 0, at `base_offset`, whose max timestamp is `max_timestamp`.
-    fn data_batch(setup: DataBatchSetup) -> krabka_protocol::records::RecordBatch {
-        krabka_protocol::records::RecordBatch {
-            base_offset: setup.base_offset.0,
-            ..producer_batch(setup.batch)
-        }
-    }
-
     /// `DescribeProducers` widens the persisted producer epoch to an i32.
     #[derive(
         Debug,
@@ -610,7 +617,26 @@ mod tests {
         current_txn_start_offset: krabka_log::Offset,
     }
 
-    fn producer_row(setup: ExpectedProducerSetup) -> ProducerState {
+    #[bon::builder]
+    fn producer_row(
+        #[builder(into, default = krabka_ids :: ProducerId (7))]
+        producer_id: krabka_ids::ProducerId,
+        #[builder(into, default)] producer_epoch: ReportedProducerEpoch,
+        #[builder(into, default)] last_sequence: BatchSequence,
+        #[builder(into, default = BatchTimestamp (1_000))] last_timestamp: BatchTimestamp,
+        #[builder(into, default = ProducerCoordinatorEpoch (- 1))]
+        coordinator_epoch: ProducerCoordinatorEpoch,
+        #[builder(into, default = krabka_log :: Offset (- 1))]
+        current_txn_start_offset: krabka_log::Offset,
+    ) -> ProducerState {
+        let setup = ExpectedProducerSetup {
+            producer_id,
+            producer_epoch,
+            last_sequence,
+            last_timestamp,
+            coordinator_epoch,
+            current_txn_start_offset,
+        };
         let ExpectedProducerSetup {
             producer_id,
             producer_epoch,
@@ -657,54 +683,53 @@ mod tests {
         let local = broker.config.node_id;
         let remote = krabka_metadata::NodeId(local.0 + 1);
 
-        let leads = seed_partition(&broker, HostedProducerPartitionSetup {
-            topic: "leads",
-            leader: local,
-            replicas: vec![local],
-        })
-        .await
-        .expect("hosted leader");
-        let follows = seed_partition(&broker, HostedProducerPartitionSetup {
-            topic: "follows",
-            leader: remote,
-            replicas: vec![remote, local],
-        })
-        .await
-        .expect("hosted follower");
-        assert!(
-            seed_partition(&broker, HostedProducerPartitionSetup {
-                topic: "moved",
-                leader: remote,
-                replicas: vec![remote]
-            })
+        let leads = seed_partition()
+            .broker(&broker)
+            .topic("leads")
+            .leader(local)
+            .replicas(vec![local])
+            .call()
             .await
-            .is_none()
+            .expect("hosted leader");
+        let follows = seed_partition()
+            .broker(&broker)
+            .topic("follows")
+            .leader(remote)
+            .replicas(vec![remote, local])
+            .call()
+            .await
+            .expect("hosted follower");
+        assert!(
+            seed_partition()
+                .broker(&broker)
+                .topic("moved")
+                .leader(remote)
+                .replicas(vec![remote])
+                .call()
+                .await
+                .is_none()
         );
 
         leads
             .log
             .lock()
             .expect("log lock")
-            .append(&mut data_batch(DataBatchSetup {
-                batch: ProducerBatchSetup {
-                    producer: BatchProducer::from_wire((10, 0)),
-                    records: BatchRecordCount(3),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }))
+            .append(
+                &mut producer_batch()
+                    .producer(BatchProducer::from_wire((10, 0)))
+                    .records(3)
+                    .call(),
+            )
             .expect("append on the leader");
         follows
-            .replicate_batch(data_batch(DataBatchSetup {
-                batch: ProducerBatchSetup {
-                    producer: BatchProducer::from_wire((20, 3)),
-                    records: BatchRecordCount(2),
-                    max_timestamp: BatchTimestamp(2_000),
-                    transaction: BatchTransactionMode::Transactional,
-                    ..Default::default()
-                },
-                ..Default::default()
-            }))
+            .replicate_batch(
+                producer_batch()
+                    .producer(BatchProducer::from_wire((20, 3)))
+                    .records(2)
+                    .max_timestamp(2_000)
+                    .transaction(BatchTransactionMode::Transactional)
+                    .call(),
+            )
             .await
             .expect("replicate a transactional batch");
         let mut marker = build_marker_batch(
@@ -721,15 +746,14 @@ mod tests {
             .await
             .expect("replicate the commit marker");
         follows
-            .replicate_batch(data_batch(DataBatchSetup {
-                batch: ProducerBatchSetup {
-                    producer: BatchProducer::from_wire((21, 0)),
-                    max_timestamp: BatchTimestamp(4_000),
-                    transaction: BatchTransactionMode::Transactional,
-                    ..Default::default()
-                },
-                base_offset: krabka_log::Offset(3),
-            }))
+            .replicate_batch(
+                producer_batch()
+                    .producer(BatchProducer::from_wire((21, 0)))
+                    .max_timestamp(4_000)
+                    .transaction(BatchTransactionMode::Transactional)
+                    .base_offset(3)
+                    .call(),
+            )
             .await
             .expect("replicate an open transaction");
 
@@ -758,29 +782,25 @@ mod tests {
             topics: vec![
                 topic(
                     "leads",
-                    partition_row(codes::NONE, vec![producer_row(ExpectedProducerSetup {
-                        producer_id: krabka_ids::ProducerId(10),
-                        last_sequence: BatchSequence(2),
-                        ..Default::default()
-                    })]),
+                    partition_row(codes::NONE, vec![
+                        producer_row().producer_id(10).last_sequence(2).call(),
+                    ]),
                 ),
                 topic(
                     "follows",
                     partition_row(codes::NONE, vec![
-                        producer_row(ExpectedProducerSetup {
-                            producer_id: krabka_ids::ProducerId(20),
-                            producer_epoch: ReportedProducerEpoch(3),
-                            last_sequence: BatchSequence(1),
-                            last_timestamp: BatchTimestamp(3_000),
-                            coordinator_epoch: ProducerCoordinatorEpoch(9),
-                            ..Default::default()
-                        }),
-                        producer_row(ExpectedProducerSetup {
-                            producer_id: krabka_ids::ProducerId(21),
-                            last_timestamp: BatchTimestamp(4_000),
-                            current_txn_start_offset: krabka_log::Offset(3),
-                            ..Default::default()
-                        }),
+                        producer_row()
+                            .producer_id(20)
+                            .producer_epoch(3)
+                            .last_sequence(1)
+                            .last_timestamp(3_000)
+                            .coordinator_epoch(9)
+                            .call(),
+                        producer_row()
+                            .producer_id(21)
+                            .last_timestamp(4_000)
+                            .current_txn_start_offset(3)
+                            .call(),
                     ]),
                 ),
                 topic(

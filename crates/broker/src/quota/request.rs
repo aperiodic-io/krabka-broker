@@ -62,9 +62,7 @@ pub(super) fn request_percentage_token_rate(rate_pct: f64) -> f64 { rate_pct * 1
 mod tests {
     use {
         super::*,
-        crate::quota::test_support::{
-            QuotaRecordSetup, QuotaValue, image_with_quotas, quota_record,
-        },
+        crate::quota::test_support::{image_with_quotas, quota_record},
         assert2::assert,
         krabka_units::{millis, secs},
     };
@@ -164,11 +162,11 @@ mod tests {
                 ("client-id", None),
             ]]
             .map(|entity| {
-                quota_record(QuotaRecordSetup {
-                    entity,
-                    key: "request_percentage",
-                    value: QuotaValue(0.001),
-                })
+                quota_record()
+                    .entity(entity)
+                    .key("request_percentage")
+                    .value(0.001)
+                    .call()
             })
             .to_vec(),
         );

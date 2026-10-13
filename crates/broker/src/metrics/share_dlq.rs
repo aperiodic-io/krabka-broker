@@ -55,21 +55,8 @@ fn label(group_id: &str) -> ShareGroupIdLabel {
 mod tests {
     use {super::*, assert2::assert};
 
-    /// The three counts of a group: records written, produce attempts, and
-    /// failed writes.
-    fn counts(metrics: &BrokerMetrics, group_id: &str) -> (u64, u64, u64) {
-        let label = label(group_id);
-        (
-            metrics.share_group_dlq_records.get_or_create(&label).get(),
-            metrics
-                .share_group_dlq_produce_requests
-                .get_or_create(&label)
-                .get(),
-            metrics
-                .share_group_dlq_failed_produce_requests
-                .get_or_create(&label)
-                .get(),
-        )
+    krabka_macros::share_dlq_meters! {
+        counts, BrokerMetrics, ShareGroupIdLabel
     }
 
     /// Each meter counts for its own group, and eviction takes one group's

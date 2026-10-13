@@ -40,12 +40,15 @@ pub(super) struct ResponseWireSetup {
     pub header: ResponseHeaderMode,
 }
 
+#[bon::builder]
 pub(super) async fn write_response(
     socket: &mut TcpStream,
     request: &[u8],
     response: &impl Encode,
-    setup: ResponseWireSetup,
+    #[builder(into, default)] version: krabka_ids::ApiVersion,
+    #[builder(default)] header: ResponseHeaderMode,
 ) -> std::io::Result<()> {
+    let setup = ResponseWireSetup { version, header };
     let mut body = bytes::BytesMut::new();
     response
         .encode(&mut body, setup.version.0)
@@ -81,7 +84,12 @@ pub(super) async fn negotiate_versions(
             .collect(),
         ..Default::default()
     };
-    write_response(socket, &request, &response, ResponseWireSetup::default()).await
+    write_response()
+        .socket(socket)
+        .request(&request)
+        .response(&response)
+        .call()
+        .await
 }
 
 pub(super) fn voter_update_params(addr: SocketAddr, leader: Option<NodeId>) -> AutoJoinParams {

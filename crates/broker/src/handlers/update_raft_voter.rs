@@ -27,6 +27,8 @@
 //! `KafkaRaftClient.hasValidClusterId` returns true for a null cluster id. The
 //! add and remove paths already read it that way.
 
+#[cfg(test)]
+use crate::handlers::raft_voter::add_voter_request;
 use {
     crate::{
         codes,
@@ -336,7 +338,6 @@ mod tests {
             assert2::check,
             krabka_metadata::AclOperation,
             krabka_protocol::owned::{
-                add_raft_voter_request::{self, AddRaftVoterRequest},
                 add_raft_voter_response::AddRaftVoterResponse,
                 remove_raft_voter_request::RemoveRaftVoterRequest,
                 remove_raft_voter_response::RemoveRaftVoterResponse,
@@ -392,20 +393,7 @@ mod tests {
                     decode_response(&resp, version).error_code
                 }
                 Api::Add => {
-                    let req = AddRaftVoterRequest {
-                        cluster_id: Some("cluster".into()),
-                        timeout_ms: 1_000,
-                        voter_id: 2,
-                        voter_directory_id: ProtoUuid([2; 16]),
-                        listeners: vec![add_raft_voter_request::Listener {
-                            name: "CONTROLLER".into(),
-                            host: "127.0.0.1".into(),
-                            port: 9093,
-                            ..Default::default()
-                        }],
-                        ack_when_committed: true,
-                        ..Default::default()
-                    };
+                    let req = add_voter_request().voter_id(2).call();
                     let req_bytes = encode_other_request(&req, version);
                     let resp = add_raft_voter_handle(&broker, version, &req_bytes, &ctx)
                         .await

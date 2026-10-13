@@ -100,6 +100,20 @@ pub(crate) fn named_body(
     item_body(item, macro_name, moxy::token::TokenTree::is_keyword_struct)
 }
 
+/// Transform a named struct's brace-delimited body and preserve the item header.
+pub(crate) fn edit_named_body(
+    item: TokenStream,
+    macro_name: &str,
+    edit: impl FnOnce(TokenStream) -> Result<TokenStream, ParseError>,
+) -> Result<TokenStream, ParseError> {
+    let (mut tokens, body) = named_body(item, macro_name)?;
+    let TokenTree::Group(group) = &mut tokens[body] else {
+        unreachable!()
+    };
+    group.tokens = edit(group.tokens.clone())?;
+    Ok(tokens.into())
+}
+
 /// Require a nonempty token argument without changing its tokens or error span.
 pub(crate) fn required_tokens(
     tokens: TokenStream,

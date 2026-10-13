@@ -331,10 +331,19 @@ mod tests {
         }
     }
 
+    #[bon::builder]
     async fn mark_pending_offsets(
         broker: &Broker,
-        setup: PendingOffsetsSetup<'_>,
+        #[builder(default = PendingOffsetsSetup::default().group_id)] group_id: &'_ str,
+        #[builder(default = PendingOffsetsSetup::default().topic)] topic: &'_ str,
+        #[builder(into, default = PendingOffsetsSetup::default().partition)]
+        partition: krabka_ids::PartitionIndex,
     ) -> std::sync::Arc<GroupActorHandle> {
+        let setup = PendingOffsetsSetup {
+            group_id,
+            topic,
+            partition,
+        };
         let PendingOffsetsSetup {
             group_id,
             topic,
@@ -697,11 +706,11 @@ mod tests {
 
         // The actor takes the transaction's pending marks and then exits,
         // leaving a closed handle behind in the registry.
-        let handle = mark_pending_offsets(&broker, PendingOffsetsSetup {
-            group_id,
-            ..Default::default()
-        })
-        .await;
+        let handle = mark_pending_offsets()
+            .broker(&broker)
+            .group_id(group_id)
+            .call()
+            .await;
         rpc::shutdown(&handle).await;
         for _ in 0..1000 {
             if handle.tx.is_closed() {
@@ -794,12 +803,13 @@ mod tests {
         // Both groups hold the transaction's pending marks, the way
         // `TxnOffsetCommit` leaves them.
         for (group_id, topic, partition) in [(first, "orders", 2), (second, "payments", 5)] {
-            mark_pending_offsets(&broker, PendingOffsetsSetup {
-                group_id,
-                topic,
-                partition: krabka_ids::PartitionIndex(partition),
-            })
-            .await;
+            mark_pending_offsets()
+                .broker(&broker)
+                .group_id(group_id)
+                .topic(topic)
+                .partition(partition)
+                .call()
+                .await;
         }
 
         commit_offsets_marker(&broker, offsets_partition).await;

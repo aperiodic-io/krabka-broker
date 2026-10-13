@@ -50,9 +50,7 @@ async fn inject_due(coordinator: &BarrierCoordinator, controller: &dyn MetadataS
 mod tests {
     use {
         super::*,
-        crate::barrier::coordinator::test_support::{
-            Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec,
-        },
+        crate::barrier::coordinator::test_support::{Fixture, GROUP, spec},
         krabka_units::millis,
     };
 
@@ -63,11 +61,10 @@ mod tests {
         coordinator
             .create_group(
                 GROUP,
-                spec(GroupSpecSetup {
-                    interval: Some(millis(1)),
-                    retained_cuts: RetainedCutCount(5),
-                    ..Default::default()
-                }),
+                spec()
+                    .maybe_interval(Some(millis(1)))
+                    .retained_cuts(5)
+                    .call(),
             )
             .await
             .expect("create group");

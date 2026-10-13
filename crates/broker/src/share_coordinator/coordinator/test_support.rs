@@ -81,7 +81,7 @@ pub(crate) struct StateBatchSetup {
     pub attempts: DeliveryAttemptCount,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 pub(crate) struct StateSeedEpoch(pub i32);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -94,14 +94,21 @@ pub(super) struct StateSeedSetup {
 }
 
 pub(super) fn batch(bounds: RangeInclusive<Offset>) -> StateBatch {
-    state_batch(StateBatchSetup {
-        bounds,
-        ..Default::default()
-    })
+    state_batch().bounds(bounds).call()
 }
 
 /// A literal batch fixture shared by wire-layout and state-combination tests.
-pub(crate) fn state_batch(setup: StateBatchSetup) -> StateBatch {
+#[bon::builder]
+pub(crate) fn state_batch(
+    #[builder(default = Offset (0) ..= Offset (9))] bounds: RangeInclusive<Offset>,
+    #[builder(default)] delivery: FixtureDeliveryState,
+    #[builder(default = DeliveryAttemptCount (1))] attempts: DeliveryAttemptCount,
+) -> StateBatch {
+    let setup = StateBatchSetup {
+        bounds,
+        delivery,
+        attempts,
+    };
     let StateBatchSetup {
         bounds,
         delivery,
@@ -149,10 +156,18 @@ pub(crate) fn open_state_partition(reg: &PartitionRegistry, log_dir: &Path, p: i
 }
 
 /// Lead the open state logs, then initialize partition zero of group `g`.
+#[bon::builder]
 pub(super) async fn initialize_led_group(
     coordinator: &ShareCoordinator,
-    setup: StateSeedSetup,
+    #[builder(default = uuid :: Uuid :: from_bytes ([5 ; 16]))] topic: uuid::Uuid,
+    #[builder(into, default = StateSeedEpoch (1))] epoch: StateSeedEpoch,
+    #[builder(into, default)] offset: Offset,
 ) -> krabka_metadata::MetadataImage {
+    let setup = StateSeedSetup {
+        topic,
+        epoch,
+        offset,
+    };
     lead_all(coordinator).await;
     let image = image_with_topic(setup.topic, 1);
     coordinator

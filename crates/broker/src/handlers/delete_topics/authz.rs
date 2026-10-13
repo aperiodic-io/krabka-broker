@@ -17,10 +17,9 @@
 use {
     super::{request::TopicNameRequest, wire::delete_topic_result},
     crate::{
-        authorizer::{AuthorizationResult, authorize_topics},
         broker::Broker,
         codes,
-        handlers::{RequestContext, cluster_shortcut_denied},
+        handlers::{RequestContext, allowed_topics, cluster_shortcut_denied},
     },
     krabka_metadata::AclOperation,
     krabka_protocol::{
@@ -75,14 +74,20 @@ pub(super) fn topic_access<'a>(
         return TopicAccess::Cluster;
     }
     TopicAccess::Topics {
-        describable: allowed(
-            broker,
+        describable: allowed_topics(
+            broker.config.authorizer.as_ref(),
             image,
             context,
             AclOperation::Describe,
             names.clone(),
         ),
-        deletable: allowed(broker, image, context, AclOperation::Delete, names),
+        deletable: allowed_topics(
+            broker.config.authorizer.as_ref(),
+            image,
+            context,
+            AclOperation::Delete,
+            names,
+        ),
     }
 }
 
@@ -156,26 +161,4 @@ pub(super) fn admit_row(
             codes::TOPIC_AUTHORIZATION_FAILED,
         )
     }
-}
-
-/// The names in `names` that `operation` on `Topic(name)` allows.
-fn allowed<'a>(
-    broker: &Broker,
-    image: &krabka_metadata::MetadataImage,
-    context: &RequestContext<'_>,
-    operation: AclOperation,
-    names: impl IntoIterator<Item = &'a str>,
-) -> HashSet<String> {
-    authorize_topics(
-        broker.config.authorizer.as_ref(),
-        image,
-        context.principal,
-        context.peer,
-        operation,
-        names,
-    )
-    .into_iter()
-    .filter(|(_, result)| *result == AuthorizationResult::Allow)
-    .map(|(name, _)| name.to_string())
-    .collect()
 }

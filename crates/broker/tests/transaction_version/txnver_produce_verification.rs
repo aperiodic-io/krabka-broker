@@ -15,18 +15,14 @@ use {
             discovery::coordinator_lookup_request,
             offsets::{list_offset_partition, single_partition_list_offsets},
             produce::{SinglePartitionProduceSetup, batch_request},
-            records::{
-                BatchTransaction, ProducerSequence, TransactionProbeBatchSetup,
-                transaction_probe_batch,
-            },
+            records::{BatchTransaction, ProducerSequence, transaction_probe_batch},
             topics::TopicPartitionCount,
             transaction_wire::{
-                TransactionPartitionsSetup, initialize_transactional, partition_error,
-                partitions_request, retry_coordinator, transaction_topic,
+                initialize_transactional, partition_error, partitions_request, retry_coordinator,
+                transaction_topic,
             },
             transactions::{
-                EndTransactionSetup, ProducerEpoch, ProducerEpochOffset, ProducerIdentity,
-                end_transaction_request,
+                ProducerEpoch, ProducerEpochOffset, ProducerIdentity, end_transaction_request,
             },
             wire::At,
         },
@@ -206,12 +202,16 @@ async fn add_partition(client: &Client, producer: Producer, topic: &str) {
     let code = until_ready(
         || async {
             let response = client
-                .send(partitions_request(TransactionPartitionsSetup {
-                    transactional_id: producer.transactional_id,
-                    producer: ProducerIdentity::from_wire((producer.id.0, producer.epoch.0)),
-                    topics: vec![added.clone()],
-                    ..Default::default()
-                }))
+                .send(
+                    partitions_request()
+                        .transactional_id(producer.transactional_id)
+                        .producer(ProducerIdentity::from_wire((
+                            producer.id.0,
+                            producer.epoch.0,
+                        )))
+                        .topics(vec![added.clone()])
+                        .call(),
+                )
                 .await
                 .expect("AddPartitionsToTxn");
             partition_error(&response, true)
@@ -239,25 +239,29 @@ async fn set_up(client: &Client, case: &Case) -> Producer {
             ProduceVersion(11),
             case.name,
             Some(case.name),
-            transaction_probe_batch(TransactionProbeBatchSetup {
-                producer: ProducerIdentity {
+            transaction_probe_batch()
+                .producer(ProducerIdentity {
                     id: producer.id,
                     epoch: producer.epoch,
-                },
-                sequence: ProducerSequence(0),
-                transaction: BatchTransaction::Transactional,
-                ..Default::default()
-            }),
+                })
+                .sequence(0)
+                .transaction(BatchTransaction::Transactional)
+                .call(),
         )
         .await;
         assert!(row.error_code == 0, "{}: setup produce {row:?}", case.name);
     }
     if matches!(case.setup, Setup::Committed) {
         let end = client
-            .send(end_transaction_request(case.name, EndTransactionSetup {
-                producer: ProducerIdentity::from_wire((producer.id.0, producer.epoch.0)),
-                ..Default::default()
-            }))
+            .send(
+                end_transaction_request()
+                    .transactional_id(case.name)
+                    .producer(ProducerIdentity::from_wire((
+                        producer.id.0,
+                        producer.epoch.0,
+                    )))
+                    .call(),
+            )
             .await
             .expect("EndTxn");
         assert!(end.error_code == 0, "{}: EndTxn {end:?}", case.name);
@@ -381,15 +385,14 @@ async fn a_transactional_produce_needs_a_verified_transaction() {
             case.name,
             matches!(case.probe.transaction_id, TransactionIdPresence::Included)
                 .then_some(case.name),
-            transaction_probe_batch(TransactionProbeBatchSetup {
-                producer: ProducerIdentity {
+            transaction_probe_batch()
+                .producer(ProducerIdentity {
                     id: producer.id,
                     epoch: ProducerEpoch(producer.epoch.0 + case.probe.epoch_offset.0),
-                },
-                sequence: case.probe.base_sequence,
-                transaction: case.probe.transaction,
-                ..Default::default()
-            }),
+                })
+                .sequence(case.probe.base_sequence)
+                .transaction(case.probe.transaction)
+                .call(),
         )
         .await;
         let after = log_end(&client, case.name).await;

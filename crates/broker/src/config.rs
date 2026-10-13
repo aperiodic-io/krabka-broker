@@ -28,7 +28,6 @@ mod test_support;
 mod tiered_storage;
 mod validate;
 
-pub(crate) use self::kafka_static_keys::KAFKA_STATIC_KEYS;
 pub use self::{
     break_glass::{BackgroundUncleanRecovery, BreakGlassConfig},
     broker_config::{BrokerConfig, PlainCredentials},
@@ -43,6 +42,9 @@ pub use self::{
     },
     stretch::StretchProfile,
     tiered_storage::{KafkaRlmmConfig, RemoteStorageBackend, RlmmKind},
+};
+pub(crate) use self::{
+    kafka_static_keys::KAFKA_STATIC_KEYS, listener::validate_oauthbearer_token_file,
 };
 
 /// The node id of a broker that neither `--broker-id` nor the file's

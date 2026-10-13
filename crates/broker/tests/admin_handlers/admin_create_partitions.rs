@@ -7,9 +7,7 @@ use {
         admin_harness::{build_client, create_topic_helper},
         support::{
             registered_cluster, start_n_node_client,
-            topics::{
-                ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, create_topic_request,
-            },
+            topics::{creatable_topic, create_topic_request},
         },
     },
     assert2::assert,
@@ -41,13 +39,12 @@ async fn automatic_placement_takes_a_fenced_broker_only_as_a_last_resort() {
         .await;
 
     let created = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("t-usable-brokers").into(),
-                replicas: TopicReplicationFactor(2),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic()
+                .name(("t-usable-brokers").into())
+                .replicas(2)
+                .call(),
+        ))
         .await
         .unwrap();
     assert!(created.topics[0].error_code == 0);
@@ -85,13 +82,12 @@ async fn automatic_placement_takes_a_fenced_broker_only_as_a_last_resort() {
     // takes it last, so a replication factor of 3 on the 3 registered brokers
     // succeeds. The fenced replica stays out of the ISR and never leads.
     let last_resort = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("t-last-resort").into(),
-                replicas: TopicReplicationFactor(3),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic()
+                .name(("t-last-resort").into())
+                .replicas(3)
+                .call(),
+        ))
         .await
         .unwrap();
     assert!(last_resort.topics[0].error_code == 0);
@@ -107,13 +103,12 @@ async fn automatic_placement_takes_a_fenced_broker_only_as_a_last_resort() {
     assert!(record.leader == record.replicas[0]);
 
     let rejected = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("t-too-many-replicas").into(),
-                replicas: TopicReplicationFactor(4),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic()
+                .name(("t-too-many-replicas").into())
+                .replicas(4)
+                .call(),
+        ))
         .await
         .unwrap();
     assert!(rejected.topics[0].error_code == 38);

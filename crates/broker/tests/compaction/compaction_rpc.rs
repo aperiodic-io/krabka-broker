@@ -8,8 +8,7 @@
 
 use {
     crate::{
-        CLIENT_ID,
-        kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
+        CLIENT_ID, kafka_wire,
         support::{
             discovery::named_topic_metadata,
             produce::{SinglePartitionProduceSetup, batch_request},
@@ -20,7 +19,6 @@ use {
     },
     assert2::assert,
     bytes::Bytes,
-    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
     krabka_protocol::{
         owned::{metadata_response::MetadataResponse, produce_response::ProduceResponse},
         primitives::uuid::Uuid,
@@ -40,15 +38,16 @@ pub(crate) async fn get_topic_id(addr: SocketAddr, topic: &str) -> Uuid {
     let req = named_topic_metadata(topic.to_string());
     let version: i16 = 12; // flexible
     let mut stream = TcpStream::connect(addr).await.expect("connect");
-    let resp: MetadataResponse = kafka_wire::exchange(&mut stream, &req, WireExchangeSetup {
-        api_key: WireApiKey(3),
-        version: WireApiVersion(version),
-        client_id: CLIENT_ID,
-        header: RequestHeaderEncoding::Flexible,
-        ..Default::default()
-    })
-    .await
-    .expect("Metadata round-trip");
+    let resp: MetadataResponse = kafka_wire::exchange()
+        .stream(&mut stream)
+        .request(&req)
+        .api_key(3)
+        .version(version)
+        .client_id(CLIENT_ID)
+        .header(RequestHeaderEncoding::Flexible)
+        .call()
+        .await
+        .expect("Metadata round-trip");
     resp.topics
         .iter()
         .find(|t| t.name.as_deref() == Some(topic))
@@ -69,7 +68,20 @@ pub(crate) struct ProduceRecordSetup<'a> {
 }
 
 /// Produce one record with an explicit key and value to (topic, partition 0).
-pub(crate) async fn produce_record(addr: SocketAddr, setup: ProduceRecordSetup<'_>) {
+#[bon::builder]
+pub(crate) async fn produce_record(
+    addr: SocketAddr,
+    #[builder(default = "compacted")] topic: &'_ str,
+    #[builder(default)] topic_id: Uuid,
+    #[builder(default = b"k")] key: &'_ [u8],
+    #[builder(default = b"v")] value: &'_ [u8],
+) {
+    let setup = ProduceRecordSetup {
+        topic,
+        topic_id,
+        key,
+        value,
+    };
     let ProduceRecordSetup {
         topic,
         topic_id,
@@ -93,15 +105,16 @@ pub(crate) async fn produce_record(addr: SocketAddr, setup: ProduceRecordSetup<'
 
     let version: i16 = 9; // flexible, pre-KIP-516 (no topic_id required on the wire at v9)
     let mut stream = TcpStream::connect(addr).await.expect("connect");
-    let resp: ProduceResponse = kafka_wire::exchange(&mut stream, &req, WireExchangeSetup {
-        api_key: WireApiKey(0),
-        version: WireApiVersion(version),
-        client_id: CLIENT_ID,
-        header: RequestHeaderEncoding::Flexible,
-        ..Default::default()
-    })
-    .await
-    .expect("Produce round-trip");
+    let resp: ProduceResponse = kafka_wire::exchange()
+        .stream(&mut stream)
+        .request(&req)
+        .api_key(0)
+        .version(version)
+        .client_id(CLIENT_ID)
+        .header(RequestHeaderEncoding::Flexible)
+        .call()
+        .await
+        .expect("Produce round-trip");
     let part = &resp.responses[0].partition_responses[0];
     assert!(
         part.error_code == 0,

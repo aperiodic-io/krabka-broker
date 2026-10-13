@@ -4,10 +4,7 @@
 
 use {
     super::*,
-    crate::{
-        partition_writer::test_support::{ObservedWriter, observed_writer, sample_batch},
-        test_support::{EmptyPayloadBatchSetup, RecordCount},
-    },
+    crate::partition_writer::test_support::{ObservedWriter, observed_writer, sample_batch},
     assert2::assert,
     tempfile::tempdir,
 };
@@ -36,13 +33,7 @@ async fn writer_fires_hw_notify_after_produce_when_rf_one() {
     let waiter = observed.hw_advance_notify.notified();
     tokio::pin!(waiter);
 
-    let _ack_rx = queue_batch(
-        &tx,
-        sample_batch(EmptyPayloadBatchSetup {
-            count: RecordCount(2),
-        }),
-    )
-    .await;
+    let _ack_rx = queue_batch(&tx, sample_batch().count(2).call()).await;
 
     tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
         .await
@@ -61,7 +52,7 @@ async fn writer_does_not_notify_hw_when_append_leaves_hw_unchanged() {
     let waiter = observed.hw_advance_notify.notified();
     tokio::pin!(waiter);
 
-    let ack_rx = queue_batch(&tx, sample_batch(EmptyPayloadBatchSetup::default())).await;
+    let ack_rx = queue_batch(&tx, sample_batch().call()).await;
     ack_rx.await.expect("ack").expect("append ok");
 
     assert!(observed.replica_state.lock().await.hw == 0);
@@ -79,13 +70,7 @@ async fn writer_does_not_notify_hw_when_append_leaves_hw_unchanged() {
 async fn writer_does_not_advance_hw_when_followers_lagging() {
     let (_dir, tx, observed) = fixture(&[1, 2, 3]).await;
 
-    let ack_rx = queue_batch(
-        &tx,
-        sample_batch(EmptyPayloadBatchSetup {
-            count: RecordCount(3),
-        }),
-    )
-    .await;
+    let ack_rx = queue_batch(&tx, sample_batch().count(3).call()).await;
     ack_rx.await.expect("ack").expect("append ok");
 
     assert!(observed.replica_state.lock().await.hw == 0);

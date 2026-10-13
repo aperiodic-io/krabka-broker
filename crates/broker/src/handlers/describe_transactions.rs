@@ -418,12 +418,12 @@ mod tests {
             broker
                 .controller
                 .submit_change(vec![krabka_metadata::MetadataRecord::V1AccessControlEntry(
-                    crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
-                        resource_type: krabka_metadata::ResourceType::TransactionalId,
-                        resource_name: tid,
-                        principal: &format!("User:{user}"),
-                        operation: AclOperation::Describe,
-                    }),
+                    crate::test_support::allow_acl()
+                        .resource_type(krabka_metadata::ResourceType::TransactionalId)
+                        .resource_name(tid)
+                        .principal(&format!("User:{user}"))
+                        .operation(AclOperation::Describe)
+                        .call(),
                 )])
                 .await
                 .expect("commit transactional id acl");

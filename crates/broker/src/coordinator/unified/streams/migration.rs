@@ -174,6 +174,14 @@ fn streams_tombstone_keys(
 mod tests {
     use super::*;
 
+    fn record_contents(batch: &RecordBatch) -> Vec<(Option<bytes::Bytes>, Option<bytes::Bytes>)> {
+        batch
+            .records
+            .iter()
+            .map(|record| (record.key.clone(), record.value.clone()))
+            .collect()
+    }
+
     #[test]
     fn tombstone_batch_has_one_null_value_k2_record() {
         let batch = classic_group_metadata_tombstone_batch("g", 123).unwrap();
@@ -212,12 +220,7 @@ mod tests {
         ];
         for (name, members, keys) in rows {
             let batch = streams_records_tombstone_batch(g, &members, 123).unwrap();
-
-            let records: Vec<_> = batch
-                .records
-                .into_iter()
-                .map(|record| (record.key, record.value))
-                .collect();
+            let records = record_contents(&batch);
             let expected: Vec<_> = keys.into_iter().map(|key| (Some(key), None)).collect();
             assert2::check!(records == expected, "{name}");
             assert2::check!(batch.max_timestamp == 123, "{name}");
@@ -233,11 +236,7 @@ mod tests {
 
         let batch = streams_to_classic_batch("g", 123).unwrap();
 
-        let records: Vec<_> = batch
-            .records
-            .into_iter()
-            .map(|record| (record.key, record.value))
-            .collect();
+        let records = record_contents(&batch);
         let empty = GroupMetadataValue {
             protocol_type: String::new(),
             generation: 0,

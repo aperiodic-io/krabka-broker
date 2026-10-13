@@ -299,10 +299,10 @@ fn transaction_marker(pid: i64, epoch: i16, marker_type: i16) -> RecordBatch {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct BarrierEpoch(pub i64);
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct ProducerEpoch(pub i16);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -341,7 +341,12 @@ pub fn barrier_value(group: &str, epoch: BarrierEpoch) -> Bytes {
 /// `producer_id` of -1, a `producer_epoch` of -1, and a `base_sequence`
 /// of -1. The attributes set the control bit and leave the transactional
 /// bit clear. `Log::append` rewrites the offsets.
-pub fn barrier_marker(setup: BarrierMarkerSetup<'_>) -> RecordBatch {
+#[bon::builder]
+pub fn barrier_marker(
+    #[builder(default = "nightly")] group: &'_ str,
+    #[builder(into, default = BarrierEpoch (1))] epoch: BarrierEpoch,
+) -> RecordBatch {
+    let setup = BarrierMarkerSetup { group, epoch };
     RecordBatch {
         base_offset: 0,
         last_offset_delta: 0,
@@ -360,11 +365,24 @@ pub fn barrier_marker(setup: BarrierMarkerSetup<'_>) -> RecordBatch {
 /// `producer_epoch`. The wire format sets both to -1, so this shape is
 /// hostile input. It exists to state that the log decides by
 /// control-record type alone.
-pub fn barrier_marker_from_producer(setup: HostileBarrierSetup<'_>) -> RecordBatch {
+#[bon::builder]
+pub fn barrier_marker_from_producer(
+    #[builder(default)] marker: BarrierMarkerSetup<'_>,
+    #[builder(into, default = ProducerId (1000))] producer: ProducerId,
+    #[builder(into, default = ProducerEpoch (2))] producer_epoch: ProducerEpoch,
+) -> RecordBatch {
+    let setup = HostileBarrierSetup {
+        marker,
+        producer,
+        producer_epoch,
+    };
     RecordBatch {
         producer_id: setup.producer.0,
         producer_epoch: setup.producer_epoch.0,
-        ..barrier_marker(setup.marker)
+        ..barrier_marker()
+            .group(setup.marker.group)
+            .epoch(setup.marker.epoch.0)
+            .call()
     }
 }
 

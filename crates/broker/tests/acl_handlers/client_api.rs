@@ -9,9 +9,7 @@ pub use crate::kafka_wire::{drive_produce_as_plain, single_record_produce_reques
 use {
     crate::{
         FETCH_VERSION, INIT_PRODUCER_ID_VERSION, JOIN_GROUP_VERSION, METADATA_VERSION,
-        support::classic::{
-            ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol,
-        },
+        support::classic::{ClassicTimeouts, classic_join_request, join_protocol},
     },
     krabka_protocol::owned::{
         fetch_request::FetchRequest, fetch_response::FetchResponse,
@@ -69,15 +67,17 @@ crate::plain_request_driver_fixture!(pub drive_init_producer_id_as_plain {
 pub fn join_group_request(group_id: &str) -> JoinGroupRequest {
     JoinGroupRequest {
         group_instance_id: None,
-        ..classic_join_request(ClassicJoinSetup {
-            group_id: group_id.to_string(),
-            timeouts: ClassicTimeouts {
+        ..classic_join_request()
+            .group_id(group_id.to_string())
+            .timeouts(ClassicTimeouts {
                 rebalance: krabka_units::millis(60_000),
                 ..Default::default()
-            },
-            protocol_type: "consumer".to_string(),
-            protocols: vec![join_protocol("range".to_string(), bytes::Bytes::new())],
-            ..Default::default()
-        })
+            })
+            .protocol_type("consumer".to_string())
+            .protocols(vec![join_protocol(
+                "range".to_string(),
+                bytes::Bytes::new(),
+            )])
+            .call()
     }
 }

@@ -155,12 +155,11 @@ async fn election_retry_replans_the_original_operation_against_fresh_metadata() 
         isr: vec![NodeId(3)],
         leader_epoch: LeaderEpoch(10),
         partition_epoch: 8,
-        ..replicated_partition(ReplicatedPartitionSetup {
-            topic: TOPIC,
-            leader: NodeId(3),
-            replicas: &[NodeId(1), NodeId(3)],
-            ..Default::default()
-        })
+        ..replicated_partition()
+            .topic(TOPIC)
+            .leader(3)
+            .replicas(&[NodeId(1), NodeId(3)])
+            .call()
     };
     assert!(result == expected);
     let submitted = source.submitted();

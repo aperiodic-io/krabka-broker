@@ -199,75 +199,66 @@ async fn cluster_alter_configs_gates_the_quota_write() {
     broker_handle.shutdown().await;
 }
 
-#[tokio::test]
-async fn handle_returns_entry_results_and_submits_valid_changes() {
+#[yare::parameterized(
+    submits_valid_changes = { false },
+    validate_only = { true },
+)]
+#[test_macro(tokio::test)]
+async fn handle_reports_entry_results_and_obeys_validate_only(validate_only: bool) {
     let version = 1;
     broker_fixture!(
         (broker_handle, _dir, broker),
         allow_all,
         context(ctx, "admin")
     );
-    let req = request(
-        vec![
-            entry(vec![("user", Some("alice"))], vec![(
+    let (entries, expected_entries, stored) = if validate_only {
+        (
+            vec![entry(vec![("user", Some("carol"))], vec![(
                 "producer_byte_rate",
-                1024.0,
+                2048.0,
                 false,
-            )]),
-            entry(vec![("user", Some("bob"))], vec![(
-                "unknown_quota_key",
-                1.0,
-                false,
-            )]),
-        ],
-        false,
-    );
-
-    let resp = handle(&broker, req, version, &ctx).await.expect("handle");
-
-    let expected = expected_response(vec![
-        expected_entry(("user", Some("alice")), 0, None),
-        expected_entry(
-            ("user", Some("bob")),
-            INVALID_REQUEST,
-            Some("Invalid configuration key unknown_quota_key".into()),
-        ),
-    ]);
-    assert!(resp == expected);
-    for (user, quota_key, want) in [
-        ("alice", "producer_byte_rate", Some(1024.0)),
-        ("bob", "unknown_quota_key", None),
-    ] {
-        assert!(
+            )])],
+            vec![expected_entry(("user", Some("carol")), 0, None)],
+            vec![("carol", "producer_byte_rate", None)],
+        )
+    } else {
+        (
+            vec![
+                entry(vec![("user", Some("alice"))], vec![(
+                    "producer_byte_rate",
+                    1024.0,
+                    false,
+                )]),
+                entry(vec![("user", Some("bob"))], vec![(
+                    "unknown_quota_key",
+                    1.0,
+                    false,
+                )]),
+            ],
+            vec![
+                expected_entry(("user", Some("alice")), 0, None),
+                expected_entry(
+                    ("user", Some("bob")),
+                    INVALID_REQUEST,
+                    Some("Invalid configuration key unknown_quota_key".into()),
+                ),
+            ],
+            vec![
+                ("alice", "producer_byte_rate", Some(1024.0)),
+                ("bob", "unknown_quota_key", None),
+            ],
+        )
+    };
+    let resp = handle(&broker, request(entries, validate_only), version, &ctx)
+        .await
+        .expect("handle");
+    assert2::assert!(resp == expected_response(expected_entries));
+    for (user, quota_key, want) in stored {
+        assert2::assert!(
             quota_value(&broker_handle, user, quota_key) == want,
             "user {user}"
         );
     }
-    broker_handle.shutdown().await;
-}
-
-#[tokio::test]
-async fn handle_validate_only_reports_success_without_submitting() {
-    let version = 1;
-    broker_fixture!(
-        (broker_handle, _dir, broker),
-        allow_all,
-        context(ctx, "admin")
-    );
-    let req = request(
-        vec![entry(vec![("user", Some("carol"))], vec![(
-            "producer_byte_rate",
-            2048.0,
-            false,
-        )])],
-        true,
-    );
-
-    let resp = handle(&broker, req, version, &ctx).await.expect("handle");
-
-    let expected = expected_response(vec![expected_entry(("user", Some("carol")), 0, None)]);
-    assert!(resp == expected);
-    assert!(quota_value(&broker_handle, "carol", "producer_byte_rate") == None);
     broker_handle.shutdown().await;
 }
 

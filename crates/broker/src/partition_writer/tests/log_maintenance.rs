@@ -3,10 +3,7 @@
 
 use {
     super::*,
-    crate::{
-        partition_writer::test_support::{sample_batch, spawn_default_writer},
-        test_support::{EmptyPayloadBatchSetup, RecordCount},
-    },
+    crate::partition_writer::test_support::{sample_batch, spawn_default_writer},
     assert2::assert,
     krabka_log::{LogConfig, Offset},
     tempfile::tempdir,
@@ -46,9 +43,7 @@ async fn writer_trim_to_offset_advances_log_start() {
     for _ in 0..2 {
         log.lock()
             .expect("lock")
-            .append(&mut sample_batch(EmptyPayloadBatchSetup {
-                count: RecordCount(2),
-            }))
+            .append(&mut sample_batch().count(2).call())
             .expect("append");
     }
 
@@ -96,10 +91,7 @@ async fn writer_flush_timer_runs_after_a_live_config_change_without_another_appe
         let flushed = std::sync::Arc::new(tokio::sync::Notify::new());
         {
             let mut log = log.lock().unwrap();
-            log.append(&mut sample_batch(EmptyPayloadBatchSetup {
-                count: RecordCount(2),
-            }))
-            .unwrap();
+            log.append(&mut sample_batch().count(2).call()).unwrap();
             log.test_set_io(std::sync::Arc::new(ObserveFlush(flushed.clone())));
         }
         let (tx, writer) = spawn_default_writer(dir.path(), log.clone());

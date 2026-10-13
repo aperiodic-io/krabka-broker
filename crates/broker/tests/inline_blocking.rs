@@ -13,9 +13,7 @@
 
 use {
     crate::support::{
-        fetch::{
-            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
-        },
+        fetch::{FetchLimits, RequestWaitMillis, single_partition_fetch},
         produce::{SinglePartitionProduceSetup, send_batch},
         records::{batch_from_records, value_record},
     },
@@ -84,12 +82,13 @@ async fn produce_and_fetch(client: &krabka_client_core::Client) -> usize {
     assert!(produced.responses[0].partition_responses[0].error_code == 0);
 
     let fetched = client
-        .send(single_partition_fetch(SinglePartitionFetchSetup {
-            topic: TOPIC.into(),
-            topic_id,
-            limits: FetchLimits::one_mebibyte(RequestWaitMillis(100)),
-            ..Default::default()
-        }))
+        .send(
+            single_partition_fetch()
+                .topic(TOPIC.into())
+                .topic_id(topic_id)
+                .limits(FetchLimits::one_mebibyte(RequestWaitMillis(100)))
+                .call(),
+        )
         .await
         .expect("Fetch");
     let partition = &fetched.responses[0].partitions[0];

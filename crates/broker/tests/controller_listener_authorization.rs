@@ -15,12 +15,12 @@ mod support;
 
 use {
     crate::support::{
-        acl::{ClusterAclSetup, cluster_acl_record},
+        acl::cluster_acl_record,
         controller_listener::*,
         quorum::describe_quorum_request as support_describe_quorum_request,
         start_with_bound_listeners,
         tls::{PinnedCertVerifier, fixture_signature_schemes},
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::{assert, check},
     krabka_metadata::{MetadataRecord, TopicRecord},
@@ -95,11 +95,12 @@ async fn start_with(
 
 async fn allow(broker: &BrokerHandle, principal: &str, operation: AclOperation) {
     broker
-        .submit_metadata_record_for_test(cluster_acl_record(ClusterAclSetup {
-            principal,
-            operation,
-            ..Default::default()
-        }))
+        .submit_metadata_record_for_test(
+            cluster_acl_record()
+                .principal(principal)
+                .operation(operation)
+                .call(),
+        )
         .await
         .expect("seed ACL");
 }
@@ -371,10 +372,11 @@ async fn a_sasl_controller_listener_authorizes_each_request_for_its_principal() 
         create_version,
         true,
         &encode(
-            &create_topic_request(creatable_topic(ConfiguredTopicSetup {
-                name: "created-by-creator".to_owned(),
-                ..Default::default()
-            })),
+            &create_topic_request(
+                creatable_topic()
+                    .name("created-by-creator".to_owned())
+                    .call(),
+            ),
             create_version,
         ),
     )

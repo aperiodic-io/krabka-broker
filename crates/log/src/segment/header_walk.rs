@@ -118,8 +118,7 @@ mod tests {
         crate::{
             config::DEFAULT_INDEX_INTERVAL,
             segment::test_support::{
-                DENSE_INDEX, FIRST_HEADER_WALK_BATCH, RecordCount, RecordTimestamp,
-                SECOND_HEADER_WALK_BATCH, SampleBatchSetup, SeededSegmentSetup, sample_batch,
+                DENSE_INDEX, FIRST_HEADER_WALK_BATCH, SECOND_HEADER_WALK_BATCH, sample_batch,
                 seeded_fixture,
             },
         },
@@ -129,14 +128,20 @@ mod tests {
 
     #[test]
     fn position_for_and_walk_batch_headers_semantics() {
-        let (_dir, mut seg) = seeded_fixture(SeededSegmentSetup {
-            offset: Offset(10),
-            batches: &[FIRST_HEADER_WALK_BATCH],
-            ..Default::default()
-        });
+        let (_dir, mut seg) = seeded_fixture()
+            .offset(10)
+            .batches(&[FIRST_HEADER_WALK_BATCH])
+            .call();
         let pos2 = seg.log_size;
-        seg.append(&sample_batch(SECOND_HEADER_WALK_BATCH), DENSE_INDEX)
-            .unwrap();
+        seg.append(
+            &sample_batch()
+                .offset(SECOND_HEADER_WALK_BATCH.offset.0)
+                .records(SECOND_HEADER_WALK_BATCH.records.0)
+                .timestamp(SECOND_HEADER_WALK_BATCH.timestamp.0)
+                .call(),
+            DENSE_INDEX,
+        )
+        .unwrap();
 
         // position_for uses the sparse offset index, whose entries hold each
         // indexed batch's last offset. The first batch takes none (Kafka's
@@ -195,18 +200,13 @@ mod tests {
     /// it, so a small byte budget is not spent stepping over the indexed one.
     #[test]
     fn a_read_past_an_indexed_batch_starts_at_the_batch_after_it() {
-        let (_dir, mut seg) = seeded_fixture(SeededSegmentSetup {
-            offset: Offset(10),
-            batches: &[FIRST_HEADER_WALK_BATCH, SECOND_HEADER_WALK_BATCH],
-            ..Default::default()
-        });
+        let (_dir, mut seg) = seeded_fixture()
+            .offset(10)
+            .batches(&[FIRST_HEADER_WALK_BATCH, SECOND_HEADER_WALK_BATCH])
+            .call();
         let third = seg.log_size;
         seg.append(
-            &sample_batch(SampleBatchSetup {
-                offset: Offset(20),
-                records: RecordCount(5),
-                timestamp: RecordTimestamp(3_000),
-            }),
+            &sample_batch().offset(20).records(5).timestamp(3_000).call(),
             DENSE_INDEX,
         )
         .unwrap();
@@ -221,12 +221,12 @@ mod tests {
         use krabka_units::prelude::bytes;
 
         let window = DEFAULT_TIMESTAMP_SCAN_WINDOW.bytes_usize();
-        let batch_size = sample_batch(SampleBatchSetup {
-            offset: Offset(10),
-            records: RecordCount(3),
-            timestamp: RecordTimestamp(1_000),
-        })
-        .encoded_len();
+        let batch_size = sample_batch()
+            .offset(10)
+            .records(3)
+            .timestamp(1_000)
+            .call()
+            .encoded_len();
         let count = 3 * window / batch_size + 2;
         let mut actual = Vec::new();
         let mut expected = Vec::new();
@@ -241,11 +241,11 @@ mod tests {
                 positions.push(seg.log_size);
                 let base = 10 + 3 * i64::try_from(batch).unwrap();
                 seg.append(
-                    &sample_batch(SampleBatchSetup {
-                        offset: Offset(base),
-                        records: RecordCount(3),
-                        timestamp: RecordTimestamp(1_000),
-                    }),
+                    &sample_batch()
+                        .offset(base)
+                        .records(3)
+                        .timestamp(1_000)
+                        .call(),
                     interval,
                 )
                 .unwrap();
@@ -279,11 +279,7 @@ mod tests {
         let mut seg = Segment::create(dir.path(), Offset(10)).unwrap();
         let window = DEFAULT_TIMESTAMP_SCAN_WINDOW.bytes_usize();
         let interval = bytes(u32::try_from(4 * window).unwrap());
-        let mut first = sample_batch(SampleBatchSetup {
-            offset: Offset(10),
-            timestamp: RecordTimestamp(1_000),
-            ..Default::default()
-        });
+        let mut first = sample_batch().offset(10).timestamp(1_000).call();
         first.records[0].value = Some(Bytes::from(vec![b'x'; window]));
         let overhead = first.encoded_len() - window;
         let first_size = window - HEADER_LEN / 2;
@@ -291,33 +287,15 @@ mod tests {
         assert2::assert!(first.encoded_len() == first_size);
         seg.append(&first, interval).unwrap();
         let split_header = seg.log_size;
-        seg.append(
-            &sample_batch(SampleBatchSetup {
-                offset: Offset(11),
-                timestamp: RecordTimestamp(1_000),
-                ..Default::default()
-            }),
-            interval,
-        )
-        .unwrap();
+        seg.append(&sample_batch().offset(11).timestamp(1_000).call(), interval)
+            .unwrap();
         let large_position = seg.log_size;
-        let mut large = sample_batch(SampleBatchSetup {
-            offset: Offset(12),
-            timestamp: RecordTimestamp(1_000),
-            ..Default::default()
-        });
+        let mut large = sample_batch().offset(12).timestamp(1_000).call();
         large.records[0].value = Some(Bytes::from(vec![b'x'; 2 * window]));
         seg.append(&large, interval).unwrap();
         let tail = seg.log_size;
-        seg.append(
-            &sample_batch(SampleBatchSetup {
-                offset: Offset(13),
-                timestamp: RecordTimestamp(1_000),
-                ..Default::default()
-            }),
-            interval,
-        )
-        .unwrap();
+        seg.append(&sample_batch().offset(13).timestamp(1_000).call(), interval)
+            .unwrap();
 
         let actual: Vec<_> = (0..=4)
             .map(|relative| seg.read_start_position(relative).unwrap())

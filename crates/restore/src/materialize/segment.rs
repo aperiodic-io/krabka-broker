@@ -233,13 +233,16 @@ mod tests {
 
     // Preserve each archived batch's span even when filtering empties it.
     fn read_restored_pair(log: &Log) -> krabka_log::ReadOutput {
-        let read = log
-            .read(Offset(0), LogConfig::default().segment_size)
-            .expect("read back");
+        let read = read_from_start(log);
         check!(read.batches.len() == 2);
         check!(read.batches[0].base_offset == 0);
         check!(read.batches[0].last_offset_delta == 2);
         read
+    }
+
+    fn read_from_start(log: &Log) -> krabka_log::ReadOutput {
+        log.read(Offset(0), LogConfig::default().segment_size)
+            .expect("read back")
     }
 
     #[tokio::test]
@@ -264,9 +267,7 @@ mod tests {
         check!(outcome.end_offset == Offset(4));
 
         let log = reopen_orders(&args);
-        let read = log
-            .read(Offset(0), LogConfig::default().segment_size)
-            .expect("read back");
+        let read = read_from_start(&log);
         check!(read.batches == batches);
     }
 
@@ -328,9 +329,7 @@ mod tests {
         check!(outcome.end_offset == Offset(2));
 
         let log = reopen_orders(&args);
-        let read = log
-            .read(Offset(0), LogConfig::default().segment_size)
-            .expect("read back");
+        let read = read_from_start(&log);
         let expected = RecordBatch {
             last_offset_delta: 2,
             records: vec![record(0, "keep0"), record(2, "keep2")],

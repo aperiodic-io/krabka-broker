@@ -7,8 +7,8 @@
 use {
     super::ports::host_port,
     crate::support::{
-        ContainerInput, JvmDockerSetup, combined_output, docker_tool_command, jvm_docker_command,
-        jvm_stdin_output, jvm_tool_output,
+        ContainerInput, combined_output, docker_tool_command, jvm_docker_command, jvm_stdin_output,
+        jvm_tool_output,
     },
     assert2::assert,
     std::process::Stdio,
@@ -101,12 +101,12 @@ pub(crate) fn produce_console(
         args.extend(["--producer.config", "/client.properties"]);
     }
     jvm_stdin_output(
-        &mut jvm_docker_command(JvmDockerSetup {
-            image,
-            mounts,
-            args: &args,
-            input: ContainerInput::Attached,
-        }),
+        &mut jvm_docker_command()
+            .image(image)
+            .mounts(mounts)
+            .args(&args)
+            .input(ContainerInput::Attached)
+            .call(),
         payload,
     )
 }
@@ -388,14 +388,13 @@ pub(crate) fn consume_console(
     if !mounts.is_empty() {
         args.extend(["--consumer.config", "/client.properties"]);
     }
-    let out = jvm_docker_command(JvmDockerSetup {
-        image,
-        mounts,
-        args: &args,
-        ..Default::default()
-    })
-    .output()
-    .expect("console consumer");
+    let out = jvm_docker_command()
+        .image(image)
+        .mounts(mounts)
+        .args(&args)
+        .call()
+        .output()
+        .expect("console consumer");
     if require_success {
         assert!(
             out.status.success(),
@@ -484,9 +483,9 @@ pub(crate) const KAFKA_IMAGE_ELR: &str = "mirror.gcr.io/apache/kafka:4.3.1";
 /// Verify TCP connectivity from inside a bridge-network container with
 /// `--add-host=host.docker.internal:host-gateway`.
 pub(crate) fn nc_check_connectivity() {
-    let out = jvm_docker_command(JvmDockerSetup {
-        image: "alpine",
-        args: &[
+    let out = jvm_docker_command()
+        .image("alpine")
+        .args(&[
             "sh",
             "-c",
             &format!(
@@ -494,11 +493,10 @@ pub(crate) fn nc_check_connectivity() {
                 "host.docker.internal",
                 host_port()
             ),
-        ],
-        ..Default::default()
-    })
-    .output()
-    .expect("spawn nc check");
+        ])
+        .call()
+        .output()
+        .expect("spawn nc check");
     eprintln!(
         "NC CHECK status={} stdout={} stderr={}",
         out.status,
@@ -961,10 +959,10 @@ pub(crate) fn denied_console_consumer(
     group: &str,
     context: &str,
 ) -> std::process::Output {
-    jvm_docker_command(JvmDockerSetup {
-        image: KAFKA_IMAGE_TXN,
-        mounts: &[mount],
-        args: &[
+    jvm_docker_command()
+        .image(KAFKA_IMAGE_TXN)
+        .mounts(&[mount])
+        .args(&[
             "kafka-console-consumer",
             "--bootstrap-server",
             super::ports::broker0_advertised(),
@@ -979,13 +977,12 @@ pub(crate) fn denied_console_consumer(
             "15000",
             "--consumer.config",
             "/client.properties",
-        ],
-        ..Default::default()
-    })
-    .stderr(Stdio::piped())
-    .stdout(Stdio::piped())
-    .output()
-    .expect(context)
+        ])
+        .call()
+        .stderr(Stdio::piped())
+        .stdout(Stdio::piped())
+        .output()
+        .expect(context)
 }
 
 /// Provision a SCRAM credential through the single-mounted-file tool variant.

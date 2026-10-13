@@ -5,8 +5,6 @@
 //! picks up a move that a crash interrupted. Both end in `spawn_move`, which
 //! registers the `FutureLogState` and spawns the replicator.
 
-#[cfg(test)]
-use crate::future_log::test_support::FutureSourceSetup;
 use {
     super::{
         FutureLogState, MoveError, MovePolicy, canonicalize_or_self,
@@ -485,7 +483,7 @@ mod tests {
             extra.path().to_path_buf(),
             third.path().to_path_buf(),
         ];
-        let source = registered_source_fixture(primary.path(), FutureSourceSetup::default());
+        let source = registered_source_fixture().primary(primary.path()).call();
 
         // Plant a registry entry pointing at `extra`.
         let PlantedFutureLog {

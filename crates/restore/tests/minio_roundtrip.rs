@@ -64,17 +64,7 @@ const TOPIC: &str = "orders";
 // call does not race the container's startup.
 krabka_macros::minio_fixture!(minio_process);
 
-/// A free ephemeral port on the loopback interface.
-///
-/// The port is published by the container, so two container suites running at
-/// once do not fight over a fixed 9000.
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
-    listener
-        .local_addr()
-        .expect("the bound listener has an address")
-        .port()
-}
+krabka_macros::ephemeral_port_fixture!(free_port);
 
 /// A `docker run -d` `MinIO` container, removed on drop so an aborted test
 /// leaves nothing behind.

@@ -11,7 +11,7 @@
 use {
     crate::{
         harness::start_two_dir_broker,
-        two_dir_topic::{Setup, start},
+        two_dir_topic::start,
         wire::{CLIENT_ID, alter_replica_log_dirs, describe_log_dirs_at, set_broker_config},
     },
     assert2::{assert, check},
@@ -88,11 +88,7 @@ fn move_result(topic: &str, error_code: i16) -> AlterReplicaLogDirsResponse {
 /// the same move succeeds once it is uncordoned.
 #[tokio::test]
 async fn a_cordoned_dir_is_flagged_and_refuses_replica_moves() {
-    let (handle, primary, extra, addr) = start(Setup {
-        client_id: CLIENT_ID,
-        ..Default::default()
-    })
-    .await;
+    let (handle, primary, extra, addr) = start().client_id(CLIENT_ID).call().await;
     let (first, second) = (canonical(primary.path()), canonical(extra.path()));
     let extra_str = std::fs::canonicalize(extra.path())
         .unwrap()

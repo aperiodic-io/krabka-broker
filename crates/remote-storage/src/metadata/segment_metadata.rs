@@ -15,6 +15,7 @@ use {
     std::collections::BTreeMap,
 };
 
+#[derive(derive_more::From, derive_more::Into)]
 /// Opaque bytes that an [`RemoteStorageManager`](crate::RemoteStorageManager)
 /// can return from `copy_log_segment_data`, for example an object-store key
 /// or a version id. The caller sends the bytes back on every later call for

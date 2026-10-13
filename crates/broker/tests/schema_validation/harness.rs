@@ -8,10 +8,10 @@
 
 use {
     crate::support::{
-        client::{BrokerClientSetup, start_broker_client},
+        client::start_broker_client,
         produce::{SinglePartitionProduceSetup, send_batch},
         records::value_record,
-        topics::{ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, topic_configs},
+        topics::{TopicReplicationFactor, creatable_topic, topic_configs},
     },
     assert2::assert,
     bytes::Bytes,
@@ -171,12 +171,13 @@ pub fn mock_topic_fixture(
     Box::pin(async move {
         let registry = registry().await;
         let (broker, client, dir) = boot(&registry.uri()).await;
-        let id = create_topic(&broker, &client, SchemaTopicSetup {
-            name: topic,
-            configs,
-            ..Default::default()
-        })
-        .await;
+        let id = create_topic()
+            .broker(&broker)
+            .client(&client)
+            .name(topic)
+            .configs(configs)
+            .call()
+            .await;
         (registry, broker, client, dir, id)
     })
 }
@@ -204,17 +205,25 @@ pub struct SchemaTopicSetup<'a> {
 
 /// The committed `CreateTopics` response supplies the identity, even when another
 /// bootstrap broker's Metadata image has not caught up with the commit yet.
+#[bon::builder]
 pub async fn create_topic(
     broker: &BrokerHandle,
     client: &Client,
-    setup: SchemaTopicSetup<'_>,
+    #[builder(default = "validated")] name: &'_ str,
+    #[builder(default = VALIDATED)] configs: &'_ [(&'_ str, &'_ str)],
+    #[builder(default = crate :: support :: topics :: TopicReplicationFactor (1))]
+    replicas: TopicReplicationFactor,
 ) -> WireUuid {
-    let topic = creatable_topic(ConfiguredTopicSetup {
-        name: setup.name.into(),
-        replicas: setup.replicas,
-        configs: topic_configs(setup.configs.iter().copied()),
-        ..Default::default()
-    });
+    let setup = SchemaTopicSetup {
+        name,
+        configs,
+        replicas,
+    };
+    let topic = creatable_topic()
+        .name(setup.name.into())
+        .replicas(setup.replicas)
+        .configs(topic_configs(setup.configs.iter().copied()))
+        .call();
     let name = topic.name.clone();
     let name = name.as_str();
     let resp = client
@@ -263,11 +272,11 @@ pub fn boot_config(
     config: BrokerConfig,
 ) -> impl std::future::Future<Output = (BrokerHandle, Client)> {
     Box::pin(async move {
-        start_broker_client(config, BrokerClientSetup {
-            client_id: "schema-validation-test",
-            ..Default::default()
-        })
-        .await
+        start_broker_client()
+            .config(config)
+            .client_id("schema-validation-test")
+            .call()
+            .await
     })
 }
 

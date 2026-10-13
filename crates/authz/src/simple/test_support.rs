@@ -43,11 +43,12 @@ impl AliceAuthorizer {
     ) -> AuthorizationResult {
         self.authorizer.authorize(
             image,
-            &req(&self.principal, &self.host, QuerySetup {
-                name,
-                op: operation,
-                ..Default::default()
-            }),
+            &req()
+                .p(&self.principal)
+                .host(&self.host)
+                .name(name)
+                .op(operation)
+                .call(),
         )
     }
 
@@ -97,11 +98,13 @@ impl AliceAuthorizer {
     ) -> AuthorizationResult {
         self.authorizer.authorize(
             image,
-            &req(&self.principal, &self.host, QuerySetup {
-                rt: resource_type,
-                name,
-                op: operation,
-            }),
+            &req()
+                .p(&self.principal)
+                .host(&self.host)
+                .rt(resource_type)
+                .name(name)
+                .op(operation)
+                .call(),
         )
     }
 }
@@ -189,11 +192,15 @@ impl Default for QuerySetup<'_> {
     }
 }
 
+#[bon::builder]
 pub(super) fn req<'a>(
     p: &'a Principal,
     host: &'a SocketAddr,
-    setup: QuerySetup<'a>,
+    #[builder(default = QuerySetup::default().rt)] rt: ResourceType,
+    #[builder(default = QuerySetup::default().name)] name: &'a str,
+    #[builder(default = QuerySetup::default().op)] op: AclOperation,
 ) -> AuthorizationRequest<'a> {
+    let setup = QuerySetup { rt, name, op };
     let QuerySetup { rt, name, op } = setup;
     AuthorizationRequest {
         principal: p,

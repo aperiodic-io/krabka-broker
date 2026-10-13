@@ -24,28 +24,17 @@ pub(super) async fn check(
         .await
 }
 
-use super::test_support::{
-    ProducerBatchSetup, ProducerSequence, SequenceDelta, opened_log, producer_batch as batch,
-};
+use super::test_support::{opened_log, producer_batch as batch};
 
 #[tokio::test]
 async fn reopening_rebuilds_only_the_snapshot_seed_and_uncovered_tail() {
     for count in 0..=7 {
         let (dir, config, mut log) = opened_log();
-        log.append(&mut batch(ProducerBatchSetup::default()))
-            .unwrap();
-        log.append(&mut batch(ProducerBatchSetup {
-            sequence: ProducerSequence(1),
-            ..Default::default()
-        }))
-        .unwrap();
+        log.append(&mut batch().call()).unwrap();
+        log.append(&mut batch().sequence(1).call()).unwrap();
         log.take_producer_snapshot().unwrap();
         for sequence in 2..2 + count {
-            log.append(&mut batch(ProducerBatchSetup {
-                sequence: ProducerSequence(sequence),
-                ..Default::default()
-            }))
-            .unwrap();
+            log.append(&mut batch().sequence(sequence).call()).unwrap();
         }
         drop(log);
         let reopened = Log::open(dir.path(), config).unwrap();
@@ -107,16 +96,8 @@ async fn a_surviving_snapshot_preserves_a_retry_below_the_local_floor() {
         ..LogConfig::default()
     };
     let mut log = Log::open(dir.path(), config.clone()).unwrap();
-    log.append(&mut batch(ProducerBatchSetup {
-        delta: SequenceDelta(1),
-        ..Default::default()
-    }))
-    .unwrap();
-    log.append(&mut batch(ProducerBatchSetup {
-        producer: krabka_log::ProducerId(99),
-        ..Default::default()
-    }))
-    .unwrap();
+    log.append(&mut batch().delta(1).call()).unwrap();
+    log.append(&mut batch().producer(99).call()).unwrap();
     log.take_producer_snapshot().unwrap();
     assert!(log.trim_to_offset(Offset(2)).unwrap() == Offset(2));
     drop(log);

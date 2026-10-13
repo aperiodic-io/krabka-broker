@@ -231,9 +231,9 @@ mod tests {
             handlers::{
                 encode_response,
                 group_heartbeat_test_support::{
-                    GroupAclSetup, GroupFeatureLevel, GroupTopicSetup, acl_authorizer, alice,
-                    check_group_read_denied, describe_acl, grant_group_read, group_read_acl,
-                    image_with_group_version, set_group_version,
+                    GroupFeatureLevel, acl_authorizer, alice, check_group_read_denied,
+                    describe_acl, grant_group_read, group_read_acl, image_with_group_version,
+                    set_group_version,
                     subscribed_names_describe_denied_table as subscribed_names_describe_denied_cases,
                     topic_with_partitions, versioned_group_broker,
                 },
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn group_read_denied_yields_group_authorization_failed() {
-        check_group_read_denied(GroupAclSetup::default());
+        check_group_read_denied().call();
 
         let bytes = encode_response(
             &ConsumerGroupHeartbeatResponse::error(codes::GROUP_AUTHORIZATION_FAILED, None),
@@ -726,18 +726,20 @@ mod tests {
         let denied_id = uuid::Uuid::from_u128(2);
         let node = krabka_raft::NodeId(broker_handle.node_id());
         let mut records = vec![group_read_acl("g"), describe_acl("orders-eu")];
-        records.extend(topic_with_partitions(GroupTopicSetup {
-            name: "orders-eu",
-            topic_id: allowed_id,
-            node,
-            ..Default::default()
-        }));
-        records.extend(topic_with_partitions(GroupTopicSetup {
-            name: "orders-us",
-            topic_id: denied_id,
-            node,
-            ..Default::default()
-        }));
+        records.extend(
+            topic_with_partitions()
+                .name("orders-eu")
+                .topic_id(allowed_id)
+                .node(node)
+                .call(),
+        );
+        records.extend(
+            topic_with_partitions()
+                .name("orders-us")
+                .topic_id(denied_id)
+                .node(node)
+                .call(),
+        );
         broker
             .controller
             .submit_change(records)
@@ -876,12 +878,13 @@ mod tests {
         let mut records = vec![group_read_acl("g")];
         for (name, id) in topics {
             records.push(describe_acl(name));
-            records.extend(topic_with_partitions(GroupTopicSetup {
-                name,
-                topic_id: *id,
-                node,
-                ..Default::default()
-            }));
+            records.extend(
+                topic_with_partitions()
+                    .name(name)
+                    .topic_id(*id)
+                    .node(node)
+                    .call(),
+            );
         }
         broker
             .controller
@@ -918,12 +921,13 @@ mod tests {
 
         let node = krabka_raft::NodeId(broker_handle.node_id());
         let mut records = vec![describe_acl("orders-us")];
-        records.extend(topic_with_partitions(GroupTopicSetup {
-            name: "orders-us",
-            topic_id: second,
-            node,
-            ..Default::default()
-        }));
+        records.extend(
+            topic_with_partitions()
+                .name("orders-us")
+                .topic_id(second)
+                .node(node)
+                .call(),
+        );
         broker
             .controller
             .submit_change(records)

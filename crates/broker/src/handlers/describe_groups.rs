@@ -208,8 +208,8 @@ mod tests {
                 acl_wire::operation_to_wire, authorized_operations::authorized_operations_bits,
             },
             test_support::{
-                AllowAclSetup, DenyAll, KafkaErrorCode, allow_acl, peer, principal,
-                request_context, start_group_broker_no_audit, test_ctx,
+                DenyAll, KafkaErrorCode, allow_acl, peer, principal, request_context,
+                start_group_broker_no_audit, test_ctx,
             },
         },
         assert2::assert,
@@ -236,7 +236,12 @@ mod tests {
         operations: OperationsDisclosure,
     }
 
-    fn request(setup: GroupDescribeSetup<'_>) -> DescribeGroupsRequest {
+    #[bon::builder]
+    fn request(
+        #[builder(default = & ["classic-a"])] groups: &'_ [&'_ str],
+        #[builder(default)] operations: OperationsDisclosure,
+    ) -> DescribeGroupsRequest {
+        let setup = GroupDescribeSetup { groups, operations };
         DescribeGroupsRequest {
             groups: setup.groups.iter().map(|g| (*g).to_string()).collect(),
             include_authorized_operations: matches!(
@@ -284,10 +289,7 @@ mod tests {
         let resp = drive(
             &broker,
             VERSION,
-            &request(GroupDescribeSetup {
-                groups: &["group-a", "group-b"],
-                ..Default::default()
-            }),
+            &request().groups(&["group-a", "group-b"]).call(),
         )
         .await;
 
@@ -308,6 +310,7 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
+    #[derive(derive_more::From, derive_more::Into)]
     /// A `Dead` row as `GroupMetadataManager.describeGroups` answers a group
     /// its `classicGroup` lookup rejects.
     #[derive(Clone, Copy)]
@@ -323,7 +326,20 @@ mod tests {
         operations: AuthorizedGroupOperations,
     }
 
-    fn dead(setup: DeadGroupSetup<'_>) -> DescribedGroup {
+    #[bon::builder]
+    fn dead(
+        #[builder(default = "never-seen")] group: &'_ str,
+        #[builder(into, default)] error: KafkaErrorCode,
+        message: Option<&'_ str>,
+        #[builder(into, default = AuthorizedGroupOperations (i32 :: MIN))]
+        operations: AuthorizedGroupOperations,
+    ) -> DescribedGroup {
+        let setup = DeadGroupSetup {
+            group,
+            error,
+            message,
+            operations,
+        };
         DescribedGroup {
             group_state: "Dead".into(),
             error_message: setup.message.map(str::to_string),
@@ -354,46 +370,38 @@ mod tests {
                 krabka_ids::ApiVersion(5),
                 "never-seen",
                 OperationsDisclosure::Omit,
-                dead(DeadGroupSetup::default()),
+                dead().call(),
             ),
             (
                 krabka_ids::ApiVersion(5),
                 "never-seen",
                 OperationsDisclosure::Include,
-                dead(DeadGroupSetup {
-                    operations: AuthorizedGroupOperations(all_bits),
-                    ..Default::default()
-                }),
+                dead().operations(all_bits).call(),
             ),
             (
                 krabka_ids::ApiVersion(6),
                 "never-seen",
                 OperationsDisclosure::Include,
-                dead(DeadGroupSetup {
-                    error: KafkaErrorCode(codes::GROUP_ID_NOT_FOUND),
-                    message: Some("Group never-seen not found."),
-                    ..Default::default()
-                }),
+                dead()
+                    .error(codes::GROUP_ID_NOT_FOUND)
+                    .maybe_message(Some("Group never-seen not found."))
+                    .call(),
             ),
             (
                 krabka_ids::ApiVersion(5),
                 "next-gen",
                 OperationsDisclosure::Omit,
-                dead(DeadGroupSetup {
-                    group: "next-gen",
-                    ..Default::default()
-                }),
+                dead().group("next-gen").call(),
             ),
             (
                 krabka_ids::ApiVersion(6),
                 "next-gen",
                 OperationsDisclosure::Omit,
-                dead(DeadGroupSetup {
-                    group: "next-gen",
-                    error: KafkaErrorCode(codes::GROUP_ID_NOT_FOUND),
-                    message: Some("Group next-gen is not a classic group."),
-                    ..Default::default()
-                }),
+                dead()
+                    .group("next-gen")
+                    .error(codes::GROUP_ID_NOT_FOUND)
+                    .maybe_message(Some("Group next-gen is not a classic group."))
+                    .call(),
             ),
         ];
         broker_fixture!((broker_handle, _dir, broker), group_allow_all);
@@ -403,10 +411,7 @@ mod tests {
             let resp = drive(
                 &broker,
                 version,
-                &request(GroupDescribeSetup {
-                    groups: &[group],
-                    operations: include_ops,
-                }),
+                &request().groups(&[group]).operations(include_ops).call(),
             )
             .await;
 
@@ -495,7 +500,7 @@ mod tests {
         broker_fixture!((broker_handle, _dir, broker), group_allow_all);
         let _ = broker.group_coordinator.get_or_create_classic("classic-a");
 
-        let resp = drive(&broker, VERSION, &request(GroupDescribeSetup::default())).await;
+        let resp = drive(&broker, VERSION, &request().call()).await;
 
         assert!(
             resp == unthrottled_wire!(DescribeGroupsResponse {
@@ -527,10 +532,7 @@ mod tests {
         let resp = drive(
             &broker,
             VERSION,
-            &request(GroupDescribeSetup {
-                operations: OperationsDisclosure::Include,
-                ..Default::default()
-            }),
+            &request().operations(OperationsDisclosure::Include).call(),
         )
         .await;
 
@@ -554,12 +556,14 @@ mod tests {
     }
 
     fn allow(group: &str, operation: AclOperation) -> krabka_metadata::MetadataRecord {
-        krabka_metadata::MetadataRecord::V1AccessControlEntry(allow_acl(AllowAclSetup {
-            resource_type: ResourceType::Group,
-            resource_name: group,
-            principal: "User:admin",
-            operation,
-        }))
+        krabka_metadata::MetadataRecord::V1AccessControlEntry(
+            allow_acl()
+                .resource_type(ResourceType::Group)
+                .resource_name(group)
+                .principal("User:admin")
+                .operation(operation)
+                .call(),
+        )
     }
 
     fn bit(op: AclOperation) -> i32 { 1_i32 << operation_to_wire(op) }
@@ -642,10 +646,10 @@ mod tests {
             let resp = drive(
                 &broker,
                 VERSION,
-                &request(GroupDescribeSetup {
-                    groups: &["allowed", "denied"],
-                    operations: include_ops,
-                }),
+                &request()
+                    .groups(&["allowed", "denied"])
+                    .operations(include_ops)
+                    .call(),
             )
             .await;
 

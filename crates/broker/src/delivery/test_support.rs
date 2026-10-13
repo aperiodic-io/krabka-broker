@@ -99,11 +99,21 @@ impl Default for ScheduleSetup<'_> {
     }
 }
 
+#[bon::builder]
 pub(crate) fn scheduled_partition(
     dir: &tempfile::TempDir,
     clock: &Arc<dyn WallClock>,
-    setup: ScheduleSetup<'_>,
+    #[builder(default = ScheduleSetup::default().topic)] topic: &'_ str,
+    #[builder(default = ScheduleSetup::default().policy)] policy: DeliveryPolicy,
+    #[builder(default = ScheduleSetup::default().activations)] activations: Vec<UnixMillis>,
+    #[builder(into, default = ScheduleSetup::default().leader)] leader: krabka_ids::NodeId,
 ) -> Arc<Partition> {
+    let setup = ScheduleSetup {
+        topic,
+        policy,
+        activations,
+        leader,
+    };
     let ScheduleSetup {
         topic,
         policy,
@@ -117,12 +127,14 @@ pub(crate) fn scheduled_partition(
     let batches = activations
         .iter()
         .map(|activation_ms| batch_at(activation_ms.0));
-    partition_with_batches(dir, clock, DeliveryPartitionSetup {
-        topic,
-        config,
-        batches: batches.collect(),
-        leader,
-    })
+    partition_with_batches()
+        .dir(dir)
+        .clock(clock)
+        .topic(topic)
+        .config(config)
+        .batches(batches.collect())
+        .leader(leader)
+        .call()
 }
 
 /// A partition over a log with `config` that holds `batches`, registered
@@ -146,11 +158,21 @@ impl Default for DeliveryPartitionSetup<'_> {
     }
 }
 
+#[bon::builder]
 pub(crate) fn partition_with_batches(
     dir: &tempfile::TempDir,
     clock: &Arc<dyn WallClock>,
-    setup: DeliveryPartitionSetup<'_>,
+    #[builder(default = DeliveryPartitionSetup::default().topic)] topic: &'_ str,
+    #[builder(default = DeliveryPartitionSetup::default().config)] config: LogConfig,
+    #[builder(default = DeliveryPartitionSetup::default().batches)] batches: Vec<RecordBatch>,
+    #[builder(into, default = DeliveryPartitionSetup::default().leader)] leader: krabka_ids::NodeId,
 ) -> Arc<Partition> {
+    let setup = DeliveryPartitionSetup {
+        topic,
+        config,
+        batches,
+        leader,
+    };
     let DeliveryPartitionSetup {
         topic,
         config,

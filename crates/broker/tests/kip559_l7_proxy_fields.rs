@@ -10,8 +10,8 @@
 
 use {
     crate::support::classic::{
-        ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId, classic_join_request,
-        classic_sync_request, join_protocol, sync_assignment,
+        ClassicJoinSetup, ClassicTimeouts, classic_join_request, classic_sync_request,
+        join_protocol, sync_assignment,
     },
     assert2::{assert, check},
 };
@@ -52,7 +52,7 @@ async fn bootstrap_member(p: &support::InProcess) -> (String, i32) {
     // hasn't recorded a protocol yet).
     let r1 = p
         .client
-        .send(classic_join_request(join_setup()))
+        .send(crate::classic_join_request_from!(join_setup()))
         .await
         .expect("JoinGroup (bootstrap)");
     assert!(r1.error_code == 79, "expected MEMBER_ID_REQUIRED");
@@ -64,7 +64,15 @@ async fn bootstrap_member(p: &support::InProcess) -> (String, i32) {
     rejoin.member_id = member_id.clone();
     let r2 = p
         .client
-        .send(classic_join_request(rejoin))
+        .send(
+            classic_join_request()
+                .group_id(rejoin.group_id)
+                .member_id(rejoin.member_id)
+                .timeouts(rejoin.timeouts)
+                .protocol_type(rejoin.protocol_type)
+                .protocols(rejoin.protocols)
+                .call(),
+        )
         .await
         .expect("JoinGroup");
     check!(r2.error_code == 0, "JoinGroup must succeed: {r2:?}");
@@ -97,17 +105,19 @@ async fn sync_group_response_carries_protocol_type_and_name_on_success() {
 
     let r3 = p
         .client
-        .send(classic_sync_request(ClassicSyncSetup {
-            group_id: (GROUP).into(),
-            generation_id: GenerationId(generation),
-            member_id: mid.clone(),
-            protocol_type: Some(PROTOCOL_TYPE.into()),
-            protocol_name: Some(PROTOCOL_NAME.into()),
-            assignments: vec![sync_assignment(
-                mid.clone(),
-                bytes::Bytes::from_static(b"asgn"),
-            )],
-        }))
+        .send(
+            classic_sync_request()
+                .group_id((GROUP).into())
+                .generation_id(generation)
+                .member_id(mid.clone())
+                .maybe_protocol_type(Some(Some(PROTOCOL_TYPE.into())))
+                .maybe_protocol_name(Some(Some(PROTOCOL_NAME.into())))
+                .assignments(vec![sync_assignment(
+                    mid.clone(),
+                    bytes::Bytes::from_static(b"asgn"),
+                )])
+                .call(),
+        )
         .await
         .expect("SyncGroup");
     check!(r3.error_code == 0, "SyncGroup must succeed: {r3:?}");
@@ -137,11 +147,15 @@ async fn join_group_inconsistent_protocol_error_carries_no_protocol_fields() {
     // fields stay null, as in every `JoinGroup` error Kafka sends.
     let r = p
         .client
-        .send(classic_join_request(ClassicJoinSetup {
-            protocol_type: ("stream").into(),
-            protocols: vec![join_protocol("doesnt-matter", bytes::Bytes::new())],
-            ..join_setup()
-        }))
+        .send(
+            classic_join_request()
+                .group_id(join_setup().group_id)
+                .member_id(join_setup().member_id)
+                .timeouts(join_setup().timeouts)
+                .protocol_type(("stream").into())
+                .protocols(vec![join_protocol("doesnt-matter", bytes::Bytes::new())])
+                .call(),
+        )
         .await
         .expect("JoinGroup");
     assert!(
@@ -166,14 +180,15 @@ async fn sync_group_error_carries_no_protocol_fields() {
 
     let r = p
         .client
-        .send(classic_sync_request(ClassicSyncSetup {
-            group_id: (GROUP).into(),
-            generation_id: GenerationId(generation),
-            member_id: ("ghost-member").into(),
-            protocol_type: Some(PROTOCOL_TYPE.into()),
-            protocol_name: Some(PROTOCOL_NAME.into()),
-            ..Default::default()
-        }))
+        .send(
+            classic_sync_request()
+                .group_id((GROUP).into())
+                .generation_id(generation)
+                .member_id(("ghost-member").into())
+                .maybe_protocol_type(Some(Some(PROTOCOL_TYPE.into())))
+                .maybe_protocol_name(Some(Some(PROTOCOL_NAME.into())))
+                .call(),
+        )
         .await
         .expect("SyncGroup");
     check!(

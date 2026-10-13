@@ -10,9 +10,9 @@ use {
         NONE, RENEW,
         harness::wire,
         support::share::{
-            AcknowledgeRequestSetup, FetchSessionMode, RenewalMode, ShareAck, ShareFetchSetup,
-            ShareSessionEpoch, ShareSessionSetup, acknowledge_partition, acknowledge_request,
-            acknowledge_success, acknowledge_topic, acknowledgement, fetch_row,
+            FetchSessionMode, RenewalMode, ShareAck, ShareFetchSetup, ShareSessionEpoch,
+            ShareSessionSetup, acknowledge_partition, acknowledge_request, acknowledge_success,
+            acknowledge_topic, acknowledgement, fetch_row,
         },
     },
     assert2::assert,
@@ -31,7 +31,11 @@ pub async fn share_fetch(
 ) -> krabka_protocol::owned::share_fetch_response::PartitionData {
     fetch_row(
         client,
-        share_fetch_req(setup),
+        share_fetch_req()
+            .session(setup.session)
+            .max_wait(setup.max_wait)
+            .acks(setup.acks)
+            .call(),
         FetchSessionMode::Incremental,
     )
     .await
@@ -100,23 +104,31 @@ pub struct ShareRenewSetup<'a> {
 /// A renew-ack `ShareAcknowledge` (`is_renew_ack = true`) over `[first, last]`
 /// with *empty* ack types. The broker renew path extends each batch's lock
 /// without changing record state. Returns the partition row.
+#[bon::builder]
 pub async fn share_renew(
     client: &Client,
-    setup: ShareRenewSetup<'_>,
+    #[builder(default)] session: ShareSessionSetup<'_>,
+    #[builder(into, default)] first: krabka_ids::Offset,
+    #[builder(into, default)] last: krabka_ids::Offset,
 ) -> krabka_protocol::owned::share_acknowledge_response::PartitionData {
-    let req = acknowledge_request(AcknowledgeRequestSetup {
-        group_id: Some(setup.session.group.into()),
-        member_id: Some(setup.session.member.into()),
-        epoch: setup.session.epoch,
-        mode: RenewalMode::Renew,
-        topics: vec![acknowledge_topic(wire(setup.session.topic_id), vec![
+    let setup = ShareRenewSetup {
+        session,
+        first,
+        last,
+    };
+    let req = acknowledge_request()
+        .maybe_group_id(Some(Some(setup.session.group.into())))
+        .maybe_member_id(Some(Some(setup.session.member.into())))
+        .epoch(setup.session.epoch)
+        .mode(RenewalMode::Renew)
+        .topics(vec![acknowledge_topic(wire(setup.session.topic_id), vec![
             acknowledge_partition(setup.session.partition.0, vec![acknowledgement(
                 setup.first.0,
                 setup.last.0,
                 vec![RENEW],
             )]),
-        ])],
-    });
+        ])])
+        .call();
     let resp: ShareAcknowledgeResponse = client.send(req).await.expect("ShareAcknowledge renew");
     assert!(
         resp.error_code == NONE,

@@ -178,6 +178,21 @@ mod tests {
         };
     }
 
+    fn append_and_checkpoint(
+        follower: &mut Log,
+        directory: &std::path::Path,
+        batch: &mut RecordBatch,
+        end: Offset,
+    ) {
+        follower.append(batch).unwrap();
+        follower.sync().unwrap();
+        write_durable_offset(&directory.join(DURABLE_OFFSET_FILE), DurableRange {
+            start: Offset(0),
+            end,
+        })
+        .unwrap();
+    }
+
     #[test]
     fn promotion_preserves_control_marker_state_before_and_after_reopen() {
         use {krabka_ids::ProducerId, krabka_protocol::records::Attributes};
@@ -363,9 +378,7 @@ mod tests {
             last_offset_delta: 1,
             ..RecordBatch::default()
         };
-        follower.append(&mut durable).unwrap();
-        follower.sync().unwrap();
-        checkpoint_follower!(follower_dir, Offset(0), Offset(2));
+        append_and_checkpoint(&mut follower, &follower_dir, &mut durable, Offset(2));
         let mut uncertain = RecordBatch {
             records: vec![Record {
                 value: Some(Bytes::from_static(b"uncertain")),
@@ -425,9 +438,7 @@ mod tests {
             }],
             ..RecordBatch::default()
         };
-        follower.append(&mut durable).unwrap();
-        follower.sync().unwrap();
-        checkpoint_follower!(follower_dir, Offset(0), Offset(1));
+        append_and_checkpoint(&mut follower, &follower_dir, &mut durable, Offset(1));
         let source_bytes = follower
             .read_raw(Offset(0), Offset(1), mebibytes(1))
             .unwrap()

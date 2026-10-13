@@ -146,7 +146,19 @@ mod tests {
         metadata: &'a [Bytes],
     }
 
-    fn classic(setup: ClassicOffsetSetup<'_>) -> ClassicState {
+    #[bon::builder]
+    fn classic(
+        #[builder(default = ClassicGroupState :: Empty)] state: ClassicGroupState,
+        #[builder(required, default = Some ("consumer"))] protocol_type: Option<&'_ str>,
+        protocol_name: Option<&'_ str>,
+        #[builder(default)] metadata: &'_ [Bytes],
+    ) -> ClassicState {
+        let setup = ClassicOffsetSetup {
+            state,
+            protocol_type,
+            protocol_name,
+            metadata,
+        };
         let ClassicOffsetSetup {
             state,
             protocol_type,
@@ -179,64 +191,57 @@ mod tests {
         let rows = [
             (
                 "empty consumer group subscribes to nothing",
-                classic(ClassicOffsetSetup::default()),
+                classic().call(),
                 Ok(named(&[])),
             ),
             (
                 "empty connect group subscribes to nothing",
-                classic(ClassicOffsetSetup {
-                    protocol_type: Some("connect"),
-                    ..Default::default()
-                }),
+                classic().maybe_protocol_type(Some(Some("connect"))).call(),
                 Ok(named(&[])),
             ),
             (
                 "stable connect group is not empty",
-                classic(ClassicOffsetSetup {
-                    state: ClassicGroupState::Stable,
-                    protocol_type: Some("connect"),
-                    protocol_name: Some("default"),
-                    metadata: &[Bytes::from_static(b"x")],
-                }),
+                classic()
+                    .state(ClassicGroupState::Stable)
+                    .maybe_protocol_type(Some(Some("connect")))
+                    .maybe_protocol_name(Some("default"))
+                    .metadata(&[Bytes::from_static(b"x")])
+                    .call(),
                 Err(codes::NON_EMPTY_GROUP),
             ),
             (
                 "preparing group without a protocol type is not empty",
-                classic(ClassicOffsetSetup {
-                    state: ClassicGroupState::PreparingRebalance,
-                    protocol_type: None,
-                    metadata: &[Bytes::new()],
-                    ..Default::default()
-                }),
+                classic()
+                    .state(ClassicGroupState::PreparingRebalance)
+                    .protocol_type(None)
+                    .metadata(&[Bytes::new()])
+                    .call(),
                 Err(codes::NON_EMPTY_GROUP),
             ),
             (
                 "consumer group unions its members' topics, any version",
-                classic(ClassicOffsetSetup {
-                    state: ClassicGroupState::Stable,
-                    protocol_name: Some("range"),
-                    metadata: &[subscription(0, &["a", "b"]), subscription(3, &["c"])],
-                    ..Default::default()
-                }),
+                classic()
+                    .state(ClassicGroupState::Stable)
+                    .maybe_protocol_name(Some("range"))
+                    .metadata(&[subscription(0, &["a", "b"]), subscription(3, &["c"])])
+                    .call(),
                 Ok(named(&["a", "b", "c"])),
             ),
             (
                 "undecodable metadata subscribes to every topic",
-                classic(ClassicOffsetSetup {
-                    state: ClassicGroupState::CompletingRebalance,
-                    protocol_name: Some("range"),
-                    metadata: &[subscription(1, &["a"]), Bytes::from_static(b"\x00")],
-                    ..Default::default()
-                }),
+                classic()
+                    .state(ClassicGroupState::CompletingRebalance)
+                    .maybe_protocol_name(Some("range"))
+                    .metadata(&[subscription(1, &["a"]), Bytes::from_static(b"\x00")])
+                    .call(),
                 Ok(SubscribedTopics::All),
             ),
             (
                 "no protocol selected yet subscribes to every topic",
-                classic(ClassicOffsetSetup {
-                    state: ClassicGroupState::PreparingRebalance,
-                    metadata: &[subscription(0, &["a"])],
-                    ..Default::default()
-                }),
+                classic()
+                    .state(ClassicGroupState::PreparingRebalance)
+                    .metadata(&[subscription(0, &["a"])])
+                    .call(),
                 Ok(SubscribedTopics::All),
             ),
         ];

@@ -355,13 +355,12 @@ mod tests {
             codes,
             coordinator::unified::streams::config::KEY_SHARE_AUTO_OFFSET_RESET,
             handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
-            partition::test_support::test_partition,
+            partition::test_support::{test_partition, update_log_config},
             partition_registry::PartitionRegistry,
             remote_reader::test_support::{sparse_remote_segment_reader_with_max_timestamp, tp},
             share_partition::{
                 manager::test_support::{
-                    DataPartitionSetup, manager, manager_with_image_and_partitions,
-                    open_data_partition,
+                    manager, manager_with_image_and_partitions, open_data_partition,
                 },
                 source::test_support::diskless_partition,
                 state::AcquisitionState,
@@ -475,8 +474,10 @@ mod tests {
         let now = now_ms();
         let hour = 60 * 60 * 1_000;
         let reg = std::sync::Arc::new(PartitionRegistry::new());
-        open_data_partition(&reg, dir.path(), DataPartitionSetup {
-            batches: vec![
+        open_data_partition()
+            .reg(&reg)
+            .log_dir(dir.path())
+            .batches(vec![
                 crate::share_partition::manager::test_support::TimedValues {
                     timestamp: crate::test_support::UnixMillis(now - 3 * hour),
                     values: &[b"stale-0", b"stale-1"],
@@ -485,11 +486,10 @@ mod tests {
                     timestamp: crate::test_support::UnixMillis(now - hour - hour / 2),
                     values: &[b"recent-0", b"recent-1"],
                 },
-            ],
-            high_watermark: Offset(4),
-            ..Default::default()
-        })
-        .await;
+            ])
+            .high_watermark(4)
+            .call()
+            .await;
 
         // `default` carries no override at all, so the broker default decides.
         let strategies = [
@@ -572,11 +572,12 @@ mod tests {
         let now = now_ms();
         let hour = 60 * 60 * 1_000;
         let reg = Arc::new(PartitionRegistry::new());
-        open_data_partition(&reg, dir.path(), DataPartitionSetup {
-            high_watermark: Offset(2),
-            ..Default::default()
-        })
-        .await;
+        open_data_partition()
+            .reg(&reg)
+            .log_dir(dir.path())
+            .high_watermark(2)
+            .call()
+            .await;
         let partition = reg
             .get("t", krabka_ids::PartitionIndex(0))
             .expect("partition");
@@ -620,14 +621,9 @@ mod tests {
             ),
             ("no limit", "two-hours", None, Ok(Offset(1))),
         ] {
-            {
-                let log = partition.log.lock().expect("partition log lock");
-                let config = krabka_log::LogConfig {
-                    max_decompressed_record: limit,
-                    ..log.config_snapshot()
-                };
-                log.set_config(config);
-            }
+            update_log_config(&partition, |config| {
+                config.max_decompressed_record = limit;
+            });
             let got = mgr.initial_start_offset(group, tid, 0).await;
             assert!(got == want, "{name}: got {got:?}, want {want:?}");
         }

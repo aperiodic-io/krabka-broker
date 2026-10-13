@@ -234,7 +234,14 @@ fn broker_config(log_dir: &Path, remote_dir: &Path, setup: ClusterNodeSetup<'_>)
     let client = setup.client_addrs[index];
     let rlmm_bootstrap = setup.client_addrs[0].to_string();
     let node = NodeId(u64::try_from(index + 1).expect("small cluster"));
-    let mut config = support::broker_config(log_dir, setup);
+    let mut config = support::broker_config()
+        .log_dir(log_dir)
+        .index(setup.index)
+        .client_addrs(setup.client_addrs)
+        .controller_addrs(setup.controller_addrs)
+        .voters(setup.voters)
+        .mode(setup.mode)
+        .call();
     config.directory_id = uuid::Uuid::from_u128(u128::try_from(index + 1).expect("small cluster"));
     config.bootstrap_mode = BootstrapMode::Bootstrap;
     config.auto_join = false;
@@ -250,19 +257,17 @@ fn broker_config(log_dir: &Path, remote_dir: &Path, setup: ClusterNodeSetup<'_>)
         client,
         ListenerProtocol::SaslPlaintext,
     )];
-    support::diskless::configure_authentication(
-        &mut config,
-        support::diskless::DisklessAuthenticationSetup {
-            listener: LISTENER,
-            identity: support::diskless::DisklessIdentitySetup {
-                index: NodeIndex(index),
-                node,
-                voters: support::diskless::WalVoterCount(VOTERS),
-                password: PASSWORD,
-            },
-            additional_credentials: vec![(CLIENT_PRINCIPAL.to_owned(), PASSWORD.to_owned())],
-        },
-    );
+    support::diskless::configure_authentication()
+        .config(&mut config)
+        .listener(LISTENER)
+        .identity(support::diskless::DisklessIdentitySetup {
+            index: NodeIndex(index),
+            node,
+            voters: support::diskless::WalVoterCount(VOTERS),
+            password: PASSWORD,
+        })
+        .additional_credentials(vec![(CLIENT_PRINCIPAL.to_owned(), PASSWORD.to_owned())])
+        .call();
     // One shared object store for all three brokers: a flush written by the
     // leader has to be readable by whichever broker serves the cold read.
     config.remote_storage_backend = Some(RemoteStorageBackend::Local {

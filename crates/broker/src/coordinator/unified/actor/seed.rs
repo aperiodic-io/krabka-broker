@@ -201,7 +201,23 @@ mod tests {
         pending: Vec<PartitionIndex>,
     }
 
-    fn hosted_classic_seed(setup: HostedClassicSetup) -> GroupSeed {
+    #[bon::builder]
+    fn hosted_classic_seed(
+        #[builder(default = vec ! [PartitionIndex (0) , PartitionIndex (1)])] target: Vec<
+            PartitionIndex,
+        >,
+        #[builder(default)] current: HostedCurrentSetup,
+        #[builder(default = vec ! [PartitionIndex (0) , PartitionIndex (1)])] assigned: Vec<
+            PartitionIndex,
+        >,
+        #[builder(default)] pending: Vec<PartitionIndex>,
+    ) -> GroupSeed {
+        let setup = HostedClassicSetup {
+            target,
+            current,
+            assigned,
+            pending,
+        };
         let HostedClassicSetup {
             target,
             current:
@@ -261,10 +277,7 @@ mod tests {
     #[test]
     fn seed_restores_the_per_member_target() {
         let mut state = GroupState::new("g");
-        apply_seed(
-            &mut state,
-            hosted_classic_seed(HostedClassicSetup::default()),
-        );
+        apply_seed(&mut state, hosted_classic_seed().call());
 
         let restored: HashMap<Uuid, Vec<i32>> = [(TOPIC, vec![0, 1])].into();
         check!(state.target.epoch == 5);
@@ -306,15 +319,14 @@ mod tests {
             let mut state = GroupState::new("g");
             apply_seed(
                 &mut state,
-                hosted_classic_seed(HostedClassicSetup {
-                    current: HostedCurrentSetup {
+                hosted_classic_seed()
+                    .current(HostedCurrentSetup {
                         epoch: MemberEpoch(current.0),
                         state: current.1,
-                    },
-                    assigned: assigned.iter().copied().map(PartitionIndex).collect(),
-                    pending: pending.iter().copied().map(PartitionIndex).collect(),
-                    ..Default::default()
-                }),
+                    })
+                    .assigned(assigned.iter().copied().map(PartitionIndex).collect())
+                    .pending(pending.iter().copied().map(PartitionIndex).collect())
+                    .call(),
             );
             let request = HeartbeatRequest {
                 group_id: "g".into(),

@@ -9,7 +9,7 @@ mod support;
 
 use {
     crate::support::{
-        classic::{ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol},
+        classic::{ClassicTimeouts, classic_join_request, join_protocol},
         client::connect_owned,
     },
     assert2::assert,
@@ -55,25 +55,39 @@ struct ProtocolJoinSetup<'a> {
     protocols: &'a [(&'a str, &'a [u8])],
 }
 
-fn join_group_request(setup: ProtocolJoinSetup<'_>) -> JoinGroupRequest {
+#[bon::builder]
+fn join_group_request(
+    #[builder(default = "g")] group_id: &'_ str,
+    #[builder(default)] member_id: &'_ str,
+    #[builder(default = "consumer")] protocol_type: &'_ str,
+    #[builder(default)] protocols: &'_ [(&'_ str, &'_ [u8])],
+) -> JoinGroupRequest {
+    let setup = ProtocolJoinSetup {
+        group_id,
+        member_id,
+        protocol_type,
+        protocols,
+    };
     JoinGroupRequest {
         group_instance_id: None,
-        ..classic_join_request(ClassicJoinSetup {
-            group_id: setup.group_id.to_string(),
-            member_id: setup.member_id.to_string(),
-            timeouts: ClassicTimeouts {
+        ..classic_join_request()
+            .group_id(setup.group_id.to_string())
+            .member_id(setup.member_id.to_string())
+            .timeouts(ClassicTimeouts {
                 rebalance: krabka_units::millis(60_000),
                 ..Default::default()
-            },
-            protocol_type: setup.protocol_type.to_string(),
-            protocols: setup
-                .protocols
-                .iter()
-                .map(|(name, meta)| {
-                    join_protocol((*name).to_string(), Bytes::copy_from_slice(meta))
-                })
-                .collect(),
-        })
+            })
+            .protocol_type(setup.protocol_type.to_string())
+            .protocols(
+                setup
+                    .protocols
+                    .iter()
+                    .map(|(name, meta)| {
+                        join_protocol((*name).to_string(), Bytes::copy_from_slice(meta))
+                    })
+                    .collect(),
+            )
+            .call()
     }
 }
 
@@ -87,12 +101,11 @@ async fn bootstrap_member_id(
     protocol_type: &str,
     protocols: &[(&str, &[u8])],
 ) -> String {
-    let req = join_group_request(ProtocolJoinSetup {
-        group_id,
-        protocol_type,
-        protocols,
-        ..Default::default()
-    });
+    let req = join_group_request()
+        .group_id(group_id)
+        .protocol_type(protocol_type)
+        .protocols(protocols)
+        .call();
     let resp = client
         .send(req)
         .await
@@ -118,12 +131,12 @@ async fn second_join(
     protocol_type: &str,
     protocols: &[(&str, &[u8])],
 ) -> JoinGroupResponse {
-    let req = join_group_request(ProtocolJoinSetup {
-        group_id,
-        member_id,
-        protocol_type,
-        protocols,
-    });
+    let req = join_group_request()
+        .group_id(group_id)
+        .member_id(member_id)
+        .protocol_type(protocol_type)
+        .protocols(protocols)
+        .call();
     client
         .send(req)
         .await
@@ -306,12 +319,13 @@ async fn protocol_type_mismatch_rejected() {
     // `supportsProtocols` gate runs before a member id is handed out, so
     // the first join already fails, under the unknown member id.
     let resp_b = client_b
-        .send(join_group_request(ProtocolJoinSetup {
-            group_id,
-            protocol_type: "stream",
-            protocols: &[("range", b"")],
-            ..Default::default()
-        }))
+        .send(
+            join_group_request()
+                .group_id(group_id)
+                .protocol_type("stream")
+                .protocols(&[("range", b"")])
+                .call(),
+        )
         .await
         .expect("JoinGroup must round-trip");
     handle.shutdown().await;

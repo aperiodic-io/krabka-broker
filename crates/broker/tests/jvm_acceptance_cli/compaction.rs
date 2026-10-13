@@ -11,9 +11,7 @@ use {
             KAFKA_IMAGE, broker0_advertised, broker0_listen, docker_run_kafka_tool,
             host_broker_config, nc_check_connectivity, wait_jvm_log_config,
         },
-        support::{
-            ContainerInput, JvmDockerSetup, init_jvm_tracing, jvm_docker_command, jvm_stdin_output,
-        },
+        support::{ContainerInput, init_jvm_tracing, jvm_docker_command, jvm_stdin_output},
     },
     assert2::assert,
     krabka_broker::{Broker, BrokerConfig},
@@ -133,9 +131,9 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
 
     // 2. Produce 5 records under 3 keys — k1 has three values (v1, v2, v4);
     //    only v4 should survive compaction.
-    let mut child_command = jvm_docker_command(JvmDockerSetup {
-        image: KAFKA_IMAGE,
-        args: &[
+    let mut child_command = jvm_docker_command()
+        .image(KAFKA_IMAGE)
+        .args(&[
             "kafka-console-producer",
             "--bootstrap-server",
             broker0_advertised(),
@@ -157,10 +155,9 @@ async fn jvm_kafka_console_consumer_sees_compacted_topic_end_to_end() {
             "linger.ms=0",
             "--producer-property",
             "max.in.flight.requests.per.connection=1",
-        ],
-        input: ContainerInput::Attached,
-        ..Default::default()
-    });
+        ])
+        .input(ContainerInput::Attached)
+        .call();
     // First 5 records: the actual workload. After that, a burst of "pad"
     // records under a sentinel key forces the active segment past
     // `SEGMENT_SIZE` so v5 ends up sealed (otherwise the compactor

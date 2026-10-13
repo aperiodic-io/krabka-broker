@@ -135,7 +135,20 @@ impl Default for BatchSetup {
     }
 }
 
-fn batch(setup: BatchSetup) -> RecordBatch {
+#[bon::builder]
+fn batch(
+    #[builder(into, default = BatchSetup::default().base_offset)] base_offset: krabka_ids::Offset,
+    #[builder(into, default = BatchSetup::default().base_timestamp)]
+    base_timestamp: RecordTimestamp,
+    #[builder(into, default = BatchSetup::default().max_timestamp)] max_timestamp: RecordTimestamp,
+    #[builder(into, default = BatchSetup::default().record_count)] record_count: RecordCount,
+) -> RecordBatch {
+    let setup = BatchSetup {
+        base_offset,
+        base_timestamp,
+        max_timestamp,
+        record_count,
+    };
     let BatchSetup {
         base_offset,
         base_timestamp,
@@ -163,13 +176,21 @@ struct SingleRecordSetup {
 }
 
 /// A framed one-record batch for segment-boundary verification cases.
-fn single_record_bytes(setup: SingleRecordSetup) -> Bytes {
-    encode_all(&[batch(BatchSetup {
-        base_offset: setup.base_offset,
-        base_timestamp: setup.timestamp,
-        max_timestamp: setup.timestamp,
-        record_count: RecordCount(1),
-    })])
+#[bon::builder]
+fn single_record_bytes(
+    #[builder(into, default = krabka_ids :: Offset (100))] base_offset: krabka_ids::Offset,
+    #[builder(into, default = RecordTimestamp (1_000))] timestamp: RecordTimestamp,
+) -> Bytes {
+    let setup = SingleRecordSetup {
+        base_offset,
+        timestamp,
+    };
+    encode_all(&[batch()
+        .base_offset(setup.base_offset)
+        .base_timestamp(setup.timestamp)
+        .max_timestamp(setup.timestamp)
+        .record_count(1)
+        .call()])
 }
 
 fn encode_all(batches: &[RecordBatch]) -> Bytes {
@@ -268,17 +289,16 @@ struct SegmentBytes {
 }
 
 fn segment_bytes(batch1_max_ts: i64, batch2_max_ts: i64) -> SegmentBytes {
-    let batch1 = batch(BatchSetup {
-        base_timestamp: RecordTimestamp(1000),
-        max_timestamp: RecordTimestamp(batch1_max_ts),
-        ..Default::default()
-    });
-    let batch2 = batch(BatchSetup {
-        base_offset: krabka_ids::Offset(103),
-        base_timestamp: RecordTimestamp(1030),
-        max_timestamp: RecordTimestamp(batch2_max_ts),
-        record_count: RecordCount(2),
-    });
+    let batch1 = batch()
+        .base_timestamp(1000)
+        .max_timestamp(batch1_max_ts)
+        .call();
+    let batch2 = batch()
+        .base_offset(103)
+        .base_timestamp(1030)
+        .max_timestamp(batch2_max_ts)
+        .record_count(2)
+        .call();
     let batch1_len = batch1.encoded_len();
     let log = encode_all(&[batch1, batch2]);
     let max_timestamp_ms = [batch1_max_ts, batch2_max_ts]
@@ -423,26 +443,51 @@ async fn missing_mandatory_artifacts_are_torn_copies_in_written_order() {
     }
 }
 
-#[tokio::test]
-async fn a_flipped_crc_covered_byte_is_a_checksum_mismatch() {
+#[derive(Clone, Copy)]
+enum CorruptedArtifact {
+    Log,
+    Snapshot,
+}
+
+#[yare::parameterized(
+    log = { CorruptedArtifact::Log },
+    snapshot = { CorruptedArtifact::Snapshot },
+)]
+#[test_macro(tokio::test)]
+async fn a_corrupted_crc_covered_artifact_is_a_checksum_mismatch(artifact: CorruptedArtifact) {
     let (dir, store, partition) = verification_context();
     let mut fixture = valid_segment_bytes();
 
-    // Byte 62 sits inside the first batch's body, well past its 61-byte
-    // header and the CRC field it carries.
-    let mut corrupted = fixture.log.to_vec();
-    corrupted[62] ^= 0xFF;
-    fixture.log = Bytes::from(corrupted);
+    match artifact {
+        CorruptedArtifact::Log => {
+            // Byte 62 sits in the first batch body, past its header and CRC.
+            let mut corrupted = fixture.log.to_vec();
+            corrupted[62] ^= 0xFF;
+            fixture.log = Bytes::from(corrupted);
+        }
+        CorruptedArtifact::Snapshot => {
+            let mut corrupted = fixture.snapshot.to_vec();
+            corrupted[2] ^= 0xFF;
+            fixture.snapshot = Bytes::from(corrupted);
+        }
+    }
 
     let segment = write_segment(dir.path(), &fixture, &[]);
     let error = verify_segment(&store, &partition, &segment)
         .await
         .expect_err("checksum mismatch");
-    let RestoreError::ChecksumMismatch { key, position, .. } = error else {
-        panic!("expected ChecksumMismatch, got {error:?}");
-    };
-    check!(key == "orders-0/seg.log");
-    check!(position == 0);
+    match artifact {
+        CorruptedArtifact::Log => {
+            let RestoreError::ChecksumMismatch { key, position, .. } = error else {
+                panic!("expected ChecksumMismatch, got {error:?}");
+            };
+            check!(key == "orders-0/seg.log");
+            check!(position == 0);
+        }
+        CorruptedArtifact::Snapshot => {
+            check!(matches!(error, RestoreError::ChecksumMismatch { .. }));
+        }
+    }
 }
 
 #[tokio::test]
@@ -468,17 +513,13 @@ async fn a_gap_between_crc_valid_batches_is_accepted() {
     // The first batch ends at 102, but the second starts at 104. Both batches
     // are independently well-framed and carry valid CRCs.
     fixture.log = encode_all(&[
-        batch(BatchSetup {
-            base_timestamp: RecordTimestamp(1000),
-            max_timestamp: RecordTimestamp(1020),
-            ..Default::default()
-        }),
-        batch(BatchSetup {
-            base_offset: krabka_ids::Offset(104),
-            base_timestamp: RecordTimestamp(1040),
-            max_timestamp: RecordTimestamp(1040),
-            record_count: RecordCount(1),
-        }),
+        batch().base_timestamp(1000).max_timestamp(1020).call(),
+        batch()
+            .base_offset(104)
+            .base_timestamp(1040)
+            .max_timestamp(1040)
+            .record_count(1)
+            .call(),
     ]);
 
     let segment = write_segment(dir.path(), &fixture, &[]);
@@ -493,10 +534,7 @@ async fn first_batch_must_match_the_segment_base_offset() {
     let (dir, store, partition) = verification_context();
     let mut fixture = valid_segment_bytes();
 
-    fixture.log = single_record_bytes(SingleRecordSetup {
-        base_offset: krabka_ids::Offset(101),
-        ..Default::default()
-    });
+    fixture.log = single_record_bytes().base_offset(101).call();
 
     let segment = write_segment(dir.path(), &fixture, &[]);
     let error = verify_segment(&store, &partition, &segment)
@@ -511,10 +549,7 @@ async fn a_batch_whose_exclusive_end_overflows_is_rejected() {
     let mut fixture = valid_segment_bytes();
 
     fixture.base_offset = Offset(i64::MAX);
-    fixture.log = single_record_bytes(SingleRecordSetup {
-        base_offset: krabka_ids::Offset(i64::MAX),
-        ..Default::default()
-    });
+    fixture.log = single_record_bytes().base_offset(i64::MAX).call();
 
     let target_segment = write_segment(dir.path(), &fixture, &[]);
     let err = verify_segment(&store, &partition, &target_segment)
@@ -623,22 +658,6 @@ async fn transaction_index_accepts_kafka_marker_order() {
         let verified = verify_segment(&store, &partition, &segment).await;
         check!(verified.is_ok(), "{name}: {:?}", verified.as_ref().err());
     }
-}
-
-#[tokio::test]
-async fn a_corrupt_snapshot_crc_is_rejected() {
-    let (dir, store, partition) = verification_context();
-    let mut fixture = valid_segment_bytes();
-
-    let mut corrupted = fixture.snapshot.to_vec();
-    corrupted[2] ^= 0xFF;
-    fixture.snapshot = Bytes::from(corrupted);
-
-    let segment = write_segment(dir.path(), &fixture, &[]);
-    let error = verify_segment(&store, &partition, &segment)
-        .await
-        .expect_err("corrupt snapshot CRC");
-    check!(matches!(error, RestoreError::ChecksumMismatch { .. }));
 }
 
 #[tokio::test]

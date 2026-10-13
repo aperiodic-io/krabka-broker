@@ -50,6 +50,15 @@ impl QuorumForwarder {
         krabka_raft::private_request_version(rpc, Some(&self.image.borrow()))
     }
 
+    fn connection_options(&self) -> krabka_client_core::ConnectionOptions {
+        krabka_client_core::ConnectionOptions {
+            client_id: self.client_id.clone(),
+            dispatch_queue_capacity: self.client_dispatch_queue_capacity,
+            frame_max: self.client_frame_max,
+            ..krabka_client_core::ConnectionOptions::default()
+        }
+    }
+
     async fn try_submit(
         &self,
         target: NodeId,
@@ -58,15 +67,9 @@ impl QuorumForwarder {
         body: &[u8],
     ) -> Result<krabka_raft::KrabkaSubmitChangeResponse, RaftError> {
         let version = self.request_version(rpc);
-        let opts = krabka_client_core::ConnectionOptions {
-            client_id: self.client_id.clone(),
-            dispatch_queue_capacity: self.client_dispatch_queue_capacity,
-            frame_max: self.client_frame_max,
-            ..krabka_client_core::ConnectionOptions::default()
-        };
         let conn = self
             .dialer
-            .dial(target, addr, opts)
+            .dial(target, addr, self.connection_options())
             .await
             .map_err(RaftError::Network)?;
         let resp_body = conn
@@ -180,13 +183,11 @@ impl MetadataWriter for QuorumForwarder {
             current_leader: leader_hint,
         };
         for (target, addr) in &forward_order {
-            let opts = krabka_client_core::ConnectionOptions {
-                client_id: self.client_id.clone(),
-                dispatch_queue_capacity: self.client_dispatch_queue_capacity,
-                frame_max: self.client_frame_max,
-                ..krabka_client_core::ConnectionOptions::default()
-            };
-            let conn = match self.dialer.dial(*target, addr, opts).await {
+            let conn = match self
+                .dialer
+                .dial(*target, addr, self.connection_options())
+                .await
+            {
                 Ok(c) => c,
                 Err(e) => {
                     last_err = RaftError::Network(e);

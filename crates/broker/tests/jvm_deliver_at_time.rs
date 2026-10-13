@@ -40,9 +40,7 @@ mod jvm_acceptance;
 mod support;
 
 use {
-    crate::support::{
-        ContainerInput, JvmDockerSetup, jvm_docker_command, topics::CreateTopicSetup,
-    },
+    crate::support::{ContainerInput, jvm_docker_command, topics::CreateTopicSetup},
     assert2::{assert, check},
     jvm_acceptance::{
         KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image, start_host_broker,
@@ -192,7 +190,7 @@ async fn wait_for_delivery_policy(broker: &BrokerHandle, topic: &str, policy: De
 
 // Compile and run the probe in the container, and return everything it printed.
 fn run_probe(bootstrap: &str) -> String {
-    let mut probe = jvm_docker_command(JvmDockerSetup { image: "--entrypoint", args: &["bash",
+    let mut probe = jvm_docker_command().image("--entrypoint").args(&["bash",
             KAFKA_IMAGE_TXN,
             "-c",
             r#"set -e; cat >/tmp/DeliverAtTimeProbe.java; \
@@ -204,7 +202,7 @@ fn run_probe(bootstrap: &str) -> String {
             SCHEDULED_TOPIC,
             IMMEDIATE_TOPIC,
             &DELAY_MS.to_string(),
-        ], input: ContainerInput::Attached, ..Default::default() })
+        ]).input(ContainerInput::Attached).call()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

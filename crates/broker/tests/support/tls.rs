@@ -1,8 +1,16 @@
 //! Fixture-pinned TLS verification, with each suite's advertised signature schemes.
-use tokio_rustls::rustls::{
-    DigitallySignedStruct, SignatureScheme,
-    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    pki_types::{CertificateDer, ServerName, UnixTime},
+#[allow(unused_imports)]
+pub use krabka_security::{ClientAuthMode, TlsConfig};
+#[allow(unused_imports)]
+pub use tokio::net::TcpStream;
+#[allow(unused_imports)]
+pub use tokio_rustls::{
+    TlsConnector,
+    rustls::{
+        ClientConfig, DigitallySignedStruct, SignatureScheme,
+        client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+        pki_types::{CertificateDer, ServerName, UnixTime, pem::PemObject},
+    },
 };
 pub const DEV_CERT: &str = include_str!("../fixtures/security/dev_cert.pem");
 pub const DEV_KEY: &str = include_str!("../fixtures/security/dev_key.pem");

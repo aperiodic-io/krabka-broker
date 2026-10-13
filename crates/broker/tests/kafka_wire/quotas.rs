@@ -5,12 +5,11 @@
 use {
     super::{round_trip, sasl_plain_authenticate},
     crate::{
-        kafka_wire::{ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+        kafka_wire::PlainAuthenticationSetup,
         support::wire::HeaderEncoding as RequestHeaderEncoding,
     },
     assert2::assert,
     bytes::BytesMut,
-    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
     krabka_protocol::{Decode, Encode},
     std::net::SocketAddr,
 };
@@ -47,7 +46,7 @@ pub struct QuotaDescribeSetup<'a> {
     pub matching: QuotaFilterMatching,
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct QuotaValue(pub f64);
 impl Default for QuotaValue {
     fn default() -> Self { Self(1024.0) }
@@ -140,19 +139,16 @@ pub async fn drive_alter_client_quotas_sasl(
     let mut body = BytesMut::new();
     req.encode(&mut body, version)
         .expect("encode AlterClientQuotas");
-    let resp_bytes = round_trip(
-        &mut stream,
-        WireExchangeSetup {
-            api_key: WireApiKey(49),
-            version: WireApiVersion(version),
-            client_id: setup.authentication.client_id,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .expect("AlterClientQuotas round-trip");
+    let resp_bytes = round_trip()
+        .stream(&mut stream)
+        .api_key(49)
+        .version(version)
+        .client_id(setup.authentication.client_id)
+        .header(RequestHeaderEncoding::Flexible)
+        .body(&body)
+        .call()
+        .await
+        .expect("AlterClientQuotas round-trip");
     let mut cur: &[u8] = &resp_bytes;
     let resp = AlterClientQuotasResponse::decode(&mut cur, version)
         .expect("decode AlterClientQuotasResponse");
@@ -208,19 +204,16 @@ pub async fn drive_describe_client_quotas_sasl(
     let mut body = BytesMut::new();
     req.encode(&mut body, version)
         .expect("encode DescribeClientQuotas");
-    let resp_bytes = round_trip(
-        &mut stream,
-        WireExchangeSetup {
-            api_key: WireApiKey(48),
-            version: WireApiVersion(version),
-            client_id: setup.authentication.client_id,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .expect("DescribeClientQuotas round-trip");
+    let resp_bytes = round_trip()
+        .stream(&mut stream)
+        .api_key(48)
+        .version(version)
+        .client_id(setup.authentication.client_id)
+        .header(RequestHeaderEncoding::Flexible)
+        .body(&body)
+        .call()
+        .await
+        .expect("DescribeClientQuotas round-trip");
     let mut cur: &[u8] = &resp_bytes;
     let resp = DescribeClientQuotasResponse::decode(&mut cur, version)
         .expect("decode DescribeClientQuotasResponse");
@@ -243,11 +236,22 @@ pub async fn drive_describe_client_quotas_sasl(
 }
 
 /// Set one named user's quota through the authenticated admin API, then await its image.
+#[bon::builder]
 pub async fn set_user_quota(
-    broker: &krabka_broker::BrokerHandle,
     addr: SocketAddr,
-    setup: UserQuotaSetup<'_>,
+    #[builder(default = PlainAuthenticationSetup :: admin ("krabka-broker-test"))]
+    authentication: PlainAuthenticationSetup<'_>,
+    broker: &krabka_broker::BrokerHandle,
+    #[builder(default = "alice")] user: &'_ str,
+    #[builder(default = "producer_byte_rate")] key: &'_ str,
+    #[builder(into, default)] value: QuotaValue,
 ) {
+    let setup = UserQuotaSetup {
+        authentication,
+        user,
+        key,
+        value,
+    };
     let entity: krabka_metadata::EntityKey = vec![("user".into(), Some(setup.user.into()))];
     let response = drive_alter_client_quotas_sasl(
         addr,
@@ -271,10 +275,21 @@ pub async fn set_user_quota(
 ///
 /// # Panics
 /// Panics if the original authentication, encoding or wire exchange fails.
+#[bon::builder]
 pub async fn alter_user_quota(
     addr: SocketAddr,
-    setup: UserQuotaSetup<'_>,
+    #[builder(default = PlainAuthenticationSetup :: admin ("krabka-broker-test"))]
+    authentication: PlainAuthenticationSetup<'_>,
+    #[builder(default = "alice")] user: &'_ str,
+    #[builder(default = "producer_byte_rate")] key: &'_ str,
+    #[builder(into, default)] value: QuotaValue,
 ) -> Vec<(QuotaEntity, i16)> {
+    let setup = UserQuotaSetup {
+        authentication,
+        user,
+        key,
+        value,
+    };
     drive_alter_client_quotas_sasl(
         addr,
         setup.alteration_entries(),

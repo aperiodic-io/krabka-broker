@@ -44,10 +44,7 @@ fn uncheckpointed_downgrade() -> (Engine, tempfile::TempDir) {
 
 #[test]
 fn metadata_version_downgrade_retries_mandatory_snapshot_and_prune() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, _dir) = build_engine_only().ids(&[NodeId(1)]).call();
     let published_image = engine.image_tx.subscribe();
     elect_single_voter_engine(&mut engine);
     let mut rx =
@@ -153,10 +150,7 @@ fn metadata_version_downgrade_retries_mandatory_snapshot_and_prune() {
 
 #[tokio::test]
 async fn restart_finishes_downgrade_checkpoint_before_exposing_the_image() {
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only().ids(&[NodeId(1)]).call();
     let data_dir = dir.path().to_path_buf();
     elect_single_voter_engine(&mut engine);
 

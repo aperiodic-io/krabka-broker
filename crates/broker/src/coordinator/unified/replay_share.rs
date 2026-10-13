@@ -341,8 +341,8 @@ mod tests {
                 ShareGroupTargetAssignmentMetadataValue, TopicPartitionsInfo,
             },
             test_support::{
-                AssignmentDeletionSetup, check_replay_cases, proto_uuid, replay_fixtures,
-                replay_tombstone_constructor, share_member,
+                check_replay_cases, proto_uuid, replay_fixtures, replay_tombstone_constructor,
+                share_member,
             },
         },
     };
@@ -454,11 +454,10 @@ mod tests {
     fn share_records_replay_as_kafka() {
         let tombstone = replay_tombstone_constructor(key, Record::Tombstone);
         // Kafka's `ShareGroup.createGroupTombstoneRecords` for member `m`.
-        let (group, kafka_deletion) = replay_fixtures(
-            ShareGroupSeed::new_group,
-            tombstone,
-            AssignmentDeletionSetup::default(),
-        );
+        let (group, kafka_deletion) = replay_fixtures()
+            .seed(ShareGroupSeed::new_group)
+            .tombstone(tombstone)
+            .call();
         let rows: Vec<(&str, Vec<Record>, Outcome)> = vec![
             (
                 "every record of a group",

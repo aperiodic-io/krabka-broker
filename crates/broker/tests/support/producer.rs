@@ -16,7 +16,19 @@ pub struct ProducerRecordSetup {
     pub value: Option<Bytes>,
 }
 
-pub fn producer_record(setup: ProducerRecordSetup) -> ProducerRecord {
+#[bon::builder]
+pub fn producer_record(
+    #[builder(default = "orders" . into ())] topic: String,
+    #[builder(into)] partition: Option<PartitionIndex>,
+    key: Option<Bytes>,
+    #[builder(required, default = Some (Bytes :: from_static (b"v")))] value: Option<Bytes>,
+) -> ProducerRecord {
+    let setup = ProducerRecordSetup {
+        topic,
+        partition,
+        key,
+        value,
+    };
     let ProducerRecordSetup {
         topic,
         partition,
@@ -67,11 +79,10 @@ pub async fn no_retry_acks_all_producer(
 
 /// A value-only record with the transaction fixtures' original owned string bytes.
 pub fn string_record(topic: &str, value: &str) -> ProducerRecord {
-    producer_record(ProducerRecordSetup {
-        topic: (topic).into(),
-        value: Some(Bytes::from(value.to_string())),
-        ..Default::default()
-    })
+    producer_record()
+        .topic((topic).into())
+        .maybe_value(Some(Some(Bytes::from(value.to_string()))))
+        .call()
 }
 
 /// Build and initialize a transactional producer with otherwise default settings.
@@ -105,11 +116,12 @@ pub async fn enqueue_unkeyed_values(
     for value in values {
         drop(
             producer
-                .enqueue(producer_record(ProducerRecordSetup {
-                    topic: (topic).into(),
-                    value: Some(value),
-                    ..Default::default()
-                }))
+                .enqueue(
+                    producer_record()
+                        .topic((topic).into())
+                        .maybe_value(Some(Some(value)))
+                        .call(),
+                )
                 .await
                 .expect("record is queued"),
         );

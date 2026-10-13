@@ -5,6 +5,19 @@ use {
     krabka_ids::PartitionIndex,
 };
 
+async fn commit_physical_batch(state: &ProducerState, partition: PartitionIndex, sequence: i32) {
+    let offset = i64::from(sequence) * 10;
+    state
+        .commit(
+            "t",
+            partition,
+            (42, 3),
+            (sequence, 0),
+            (offset, i64::from(sequence), false),
+        )
+        .await;
+}
+
 #[tokio::test]
 async fn late_completions_merge_retries_without_regressing_the_latest_batch() {
     let state = ProducerState::new();
@@ -60,30 +73,14 @@ async fn all_completion_orders_keep_the_same_five_physical_batches() {
             let index = remaining % choices.len();
             remaining /= choices.len();
             let sequence = choices.remove(index);
-            state
-                .commit(
-                    "t",
-                    partition,
-                    (42, 3),
-                    (sequence, 0),
-                    (i64::from(sequence) * 10, i64::from(sequence), false),
-                )
-                .await;
+            commit_physical_batch(&state, partition, sequence).await;
         }
         let before = state.snapshot("t", partition).await;
         assert!(before[0].1.last_sequence == 5 && before[0].1.last_offset == 50);
         // Completing an evicted batch again must not bring it back or evict
         // a newer batch. Completing retained batches again is idempotent.
         for sequence in 0..6 {
-            state
-                .commit(
-                    "t",
-                    partition,
-                    (42, 3),
-                    (sequence, 0),
-                    (i64::from(sequence) * 10, i64::from(sequence), false),
-                )
-                .await;
+            commit_physical_batch(&state, partition, sequence).await;
             assert!(state.snapshot("t", partition).await == before);
             let checked = state
                 .check_batch(

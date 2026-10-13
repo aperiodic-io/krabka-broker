@@ -20,6 +20,9 @@ ignore = [
     # pprof_util on the optional jemalloc profiling path; neither upstream has
     # removed it yet and no fixed paste release exists.
     "RUSTSEC-2024-0436",
+    # unsafe-libyaml is unmaintained and has no safe upgrade. It is pulled in
+    # by serde_yaml, which the bench driver uses to parse benchmark scenarios.
+    "RUSTSEC-2024-0449",
 ]
 
 [licenses]

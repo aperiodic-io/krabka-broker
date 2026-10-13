@@ -13,13 +13,13 @@ const COMPLETE_ABORT: i8 = 5;
 
 use krabka_ids::ProducerId;
 
-#[derive(Clone, Copy, Default, derive_more::Display, derive_more::From, derive_more::Into)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 struct ProducerEpoch(i16);
 
-#[derive(Clone, Copy, Default, derive_more::Display, derive_more::From, derive_more::Into)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 struct CoordinatorEpoch(i32);
 
-#[derive(Clone, Copy, derive_more::Display, derive_more::From, derive_more::Into)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct TransactionStateCode(i8);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -75,7 +75,21 @@ struct TransactionSnapshotSetup {
     state: TransactionStateCode,
 }
 
-fn marker(setup: MarkerSetup) -> TransactionMarkerRequest {
+#[bon::builder]
+fn marker(
+    #[builder(into, default = ProducerId (1))] producer_id: ProducerId,
+    #[builder(into, default)] producer_epoch: ProducerEpoch,
+    #[builder(into, default)] coordinator_epoch: CoordinatorEpoch,
+    #[builder(default)] outcome: TransactionOutcome,
+    #[builder(default)] target: MarkerTarget,
+) -> TransactionMarkerRequest {
+    let setup = MarkerSetup {
+        producer_id,
+        producer_epoch,
+        coordinator_epoch,
+        outcome,
+        target,
+    };
     TransactionMarkerRequest {
         producer_id: setup.producer_id.0,
         producer_epoch: setup.producer_epoch.0,
@@ -86,15 +100,20 @@ fn marker(setup: MarkerSetup) -> TransactionMarkerRequest {
 }
 
 fn committed_marker() -> TransactionMarkerRequest {
-    marker(
-        MarkerSetup::builder()
-            .producer_epoch(3)
-            .coordinator_epoch(8)
-            .build(),
-    )
+    marker().producer_epoch(3).coordinator_epoch(8).call()
 }
 
-fn partition(setup: MarkerPartitionSetup) -> TransactionMarkerPartitionState {
+#[bon::builder]
+fn partition(
+    #[builder(into, default)] producer_epoch: ProducerEpoch,
+    #[builder(into, default)] coordinator_epoch: CoordinatorEpoch,
+    #[builder(default)] pending: PendingTransaction,
+) -> TransactionMarkerPartitionState {
+    let setup = MarkerPartitionSetup {
+        producer_epoch,
+        coordinator_epoch,
+        pending,
+    };
     TransactionMarkerPartitionState {
         producer_epoch: setup.producer_epoch.0,
         coordinator_epoch: setup.coordinator_epoch.0,
@@ -102,7 +121,17 @@ fn partition(setup: MarkerPartitionSetup) -> TransactionMarkerPartitionState {
     }
 }
 
-fn snapshot(setup: TransactionSnapshotSetup) -> TransactionSnapshot {
+#[bon::builder]
+fn snapshot(
+    #[builder(into, default = ProducerId (7))] producer_id: ProducerId,
+    #[builder(into, default = ProducerEpoch (3))] producer_epoch: ProducerEpoch,
+    #[builder(into, default = TransactionStateCode (PREPARE_ABORT))] state: TransactionStateCode,
+) -> TransactionSnapshot {
+    let setup = TransactionSnapshotSetup {
+        producer_id,
+        producer_epoch,
+        state,
+    };
     TransactionSnapshot {
         pid: setup.producer_id.0,
         epoch: setup.producer_epoch.0,

@@ -12,7 +12,7 @@ use {
         fetch::{FetchLimits, RequestWaitMillis, named_topic_fetch},
         produce::{SinglePartitionProduceSetup, single_partition_produce},
         records::{batch_from_records, value_record},
-        wire::{WireFrameSetup, read_frame, request_body_capacity, request_frame, write_frame},
+        wire::{read_frame, request_body_capacity, request_frame, write_frame},
     },
     assert2::assert,
     bytes::Buf,
@@ -62,19 +62,16 @@ pub async fn produce_plaintext(addr: SocketAddr, topic: &str, record_bytes: usiz
     // leadership errors of that window as any Kafka client does.
     let mut attempts = 0;
     let error_code = loop {
-        let resp_bytes = kafka_wire::round_trip(
-            &mut stream,
-            WireExchangeSetup {
-                api_key: WireApiKey(0),
-                version: WireApiVersion(VERSION),
-                client_id: CLIENT_ID,
-                header: RequestHeaderEncoding::Flexible,
-                ..Default::default()
-            },
-            &body,
-        )
-        .await
-        .expect("Produce round-trip");
+        let resp_bytes = kafka_wire::round_trip()
+            .stream(&mut stream)
+            .api_key(0)
+            .version(VERSION)
+            .client_id(CLIENT_ID)
+            .header(RequestHeaderEncoding::Flexible)
+            .body(&body)
+            .call()
+            .await
+            .expect("Produce round-trip");
         let mut cur: &[u8] = &resp_bytes;
         let resp = ProduceResponse::decode(&mut cur, VERSION).expect("decode ProduceResponse");
         let error_code = resp.responses[0].partition_responses[0].error_code;
@@ -111,15 +108,14 @@ pub async fn fetch_plaintext_replica(addr: SocketAddr, topic: &str, replica_id: 
 
     // Send raw frame and capture the full raw response (before decode) so we
     // can measure response bytes.
-    let frame = request_frame(WireFrameSetup {
-        api_key: krabka_ids::ApiKey(1),
-        version: krabka_ids::ApiVersion(VERSION),
-        header: RequestHeaderEncoding::Flexible,
-        client_id: "krabka-throttle-test",
-        body: &body,
-        capacity: Some(request_body_capacity(&body)),
-        ..Default::default()
-    });
+    let frame = request_frame()
+        .api_key(1)
+        .version(VERSION)
+        .header(RequestHeaderEncoding::Flexible)
+        .client_id("krabka-throttle-test")
+        .body(&body)
+        .maybe_capacity(Some(request_body_capacity(&body)))
+        .call();
 
     write_frame(&mut stream, &frame, None).await.unwrap();
 

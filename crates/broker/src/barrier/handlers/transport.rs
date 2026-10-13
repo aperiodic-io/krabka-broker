@@ -232,12 +232,14 @@ mod tests {
     use {
         super::{build_request, endpoint_of, placements},
         crate::{
-            barrier::{injection::MarkerPlacement, marker::BarrierMarker, state::TargetPartition},
+            barrier::{
+                injection::MarkerPlacement,
+                test_support::{at, marker},
+            },
             codes,
             test_support::broker_registration,
         },
         assert2::check,
-        krabka_ids::PartitionIndex,
         krabka_log::Offset,
         krabka_metadata::{BrokerEndpoint, BrokerRegistrationRecord, MetadataImage},
         krabka_protocol::krabka::barrier::{
@@ -246,21 +248,6 @@ mod tests {
         },
         krabka_security::ListenerProtocol,
     };
-
-    fn marker() -> BarrierMarker {
-        BarrierMarker {
-            group: "orders-cut".to_owned(),
-            epoch: 4,
-            triggered_at: 1_724_500_000_000,
-        }
-    }
-
-    fn at(topic: &str, partition: i32) -> TargetPartition {
-        TargetPartition {
-            topic: topic.to_owned(),
-            partition: PartitionIndex(partition),
-        }
-    }
 
     fn registration(endpoints: Vec<BrokerEndpoint>) -> BrokerRegistrationRecord {
         BrokerRegistrationRecord {

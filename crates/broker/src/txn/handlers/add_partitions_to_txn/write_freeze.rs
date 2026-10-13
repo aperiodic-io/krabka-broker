@@ -76,8 +76,8 @@ mod tests {
             authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
             broker::{Broker, BrokerHandle},
             test_support::{
-                FreezeSetup, FrozenTopicsImageSetup, configure_single_partition_transactions,
-                start_broker_no_audit_with, test_ctx, topic_freeze_record,
+                configure_single_partition_transactions, start_broker_no_audit_with, test_ctx,
+                topic_freeze_record,
             },
             txn::{
                 bootstrap::TOPIC,
@@ -114,24 +114,22 @@ mod tests {
     const UNFROZEN_TOPIC: &str = "events";
 
     fn freeze_record(scope: &str, pattern_type: PatternType) -> TopicFreezeRecord {
-        topic_freeze_record(FreezeSetup {
-            scope,
-            pattern_type,
-            ..Default::default()
-        })
+        topic_freeze_record()
+            .scope(scope)
+            .pattern_type(pattern_type)
+            .call()
     }
 
     use crate::test_support::frozen_topics_image as image_with_freezes;
 
     #[test]
     fn frozen_topics_keeps_the_covered_names_and_nothing_else() {
-        let image = image_with_freezes(
-            &[
+        let image = image_with_freezes()
+            .scopes(&[
                 ("orders", PatternType::Literal),
                 ("tenant-a.", PatternType::Prefixed),
-            ],
-            FrozenTopicsImageSetup::default(),
-        );
+            ])
+            .call();
 
         // (label, the topics the request names, the names the gate keeps)
         let cases: [(&str, &[&str], &[&str]); 5] = [
@@ -170,7 +168,7 @@ mod tests {
 
     #[test]
     fn frozen_topics_is_empty_on_a_cluster_with_no_freeze() {
-        let image = image_with_freezes(&[], FrozenTopicsImageSetup::default());
+        let image = image_with_freezes().scopes(&[]).call();
         let topics = [topic("orders", &[0]), topic("tenant-a.billing", &[1])];
 
         check!(frozen_topics(&image, &topics, &HashSet::new()) == HashSet::new());

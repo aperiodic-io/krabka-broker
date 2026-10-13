@@ -66,7 +66,7 @@
 mod support;
 
 use {
-    crate::support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_stdin_output},
+    crate::support::{ContainerInput, jvm_docker_command, jvm_stdin_output},
     assert2::assert,
     krabka_broker::BrokerHandle,
     std::process::Command,
@@ -405,18 +405,17 @@ impl Cluster {
     /// Fill the topic with [`RECORDS`] records over the console producer's
     /// stdin.
     fn produce(&self) {
-        let mut child_command = jvm_docker_command(JvmDockerSetup {
-            image: KAFKA_IMAGE,
-            args: &[
+        let mut child_command = jvm_docker_command()
+            .image(KAFKA_IMAGE)
+            .args(&[
                 CONSOLE_PRODUCER,
                 "--bootstrap-server",
                 &self.bootstrap,
                 "--topic",
                 TOPIC,
-            ],
-            input: ContainerInput::Attached,
-            ..Default::default()
-        });
+            ])
+            .input(ContainerInput::Attached)
+            .call();
         // One record per line, and a final newline so the producer sends the
         // last one rather than holding a partial line.
         let lines: Vec<String> = (0..RECORDS).map(|i| format!("record-{i}")).collect();

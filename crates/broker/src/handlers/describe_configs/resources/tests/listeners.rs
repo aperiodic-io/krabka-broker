@@ -47,7 +47,19 @@ struct ListenerSetup<'a> {
     protocol: ListenerProtocol,
 }
 
-fn listener(setup: ListenerSetup<'_>) -> ListenerSpec {
+#[bon::builder]
+fn listener(
+    #[builder(default = "CLIENT")] name: &'_ str,
+    #[builder(default = "0.0.0.0:9092")] bind: &'_ str,
+    #[builder(default = "broker-1.example:9092")] advertised: &'_ str,
+    #[builder(default = SaslSsl)] protocol: ListenerProtocol,
+) -> ListenerSpec {
+    let setup = ListenerSetup {
+        name,
+        bind,
+        advertised,
+        protocol,
+    };
     let ListenerSetup {
         name,
         bind,
@@ -72,13 +84,13 @@ fn two_listener_node(roles: &[NodeRole], inter_broker: Option<&str>) -> BrokerCo
     let mut config = BrokerConfig {
         roles: roles.to_vec(),
         listeners: vec![
-            listener(ListenerSetup::default()),
-            listener(ListenerSetup {
-                name: "INTERNAL",
-                bind: "10.0.0.1:9094",
-                advertised: "broker-1.internal:9094",
-                protocol: SaslPlaintext,
-            }),
+            listener().call(),
+            listener()
+                .name("INTERNAL")
+                .bind("10.0.0.1:9094")
+                .advertised("broker-1.internal:9094")
+                .protocol(SaslPlaintext)
+                .call(),
         ],
         controller_listen_addr: "0.0.0.0:9093".parse().expect("a socket address"),
         controller_listener_protocol: Ssl,
@@ -121,26 +133,41 @@ struct NamedConfigSetup<'a> {
     builtin_default: Option<&'a str>,
 }
 
-fn named(setup: NamedConfigSetup<'_>) -> DescribeConfigsResourceResult {
-    expected_config_entry(ExpectedConfigSetup {
-        name: setup.name,
-        value: Some(setup.value),
-        mutability: setup.mutability,
-        source: ConfigSourceCode(CONFIG_SOURCE_STATIC_BROKER),
-        synonyms: std::iter::once(synonym(
-            setup.name,
-            setup.value,
-            CONFIG_SOURCE_STATIC_BROKER,
-        ))
-        .chain(
-            setup
-                .builtin_default
-                .map(|default| synonym(setup.name, default, CONFIG_SOURCE_DEFAULT)),
+#[bon::builder]
+fn named(
+    #[builder(default = "listeners")] name: &'_ str,
+    #[builder(default)] value: &'_ str,
+    #[builder(default)] mutability: ConfigMutability,
+    #[builder(default = ConfigType :: List)] config_type: ConfigType,
+    builtin_default: Option<&'_ str>,
+) -> DescribeConfigsResourceResult {
+    let setup = NamedConfigSetup {
+        name,
+        value,
+        mutability,
+        config_type,
+        builtin_default,
+    };
+    expected_config_entry()
+        .name(setup.name)
+        .maybe_value(Some(Some(setup.value)))
+        .mutability(setup.mutability)
+        .source(CONFIG_SOURCE_STATIC_BROKER)
+        .synonyms(
+            std::iter::once(synonym(
+                setup.name,
+                setup.value,
+                CONFIG_SOURCE_STATIC_BROKER,
+            ))
+            .chain(
+                setup
+                    .builtin_default
+                    .map(|default| synonym(setup.name, default, CONFIG_SOURCE_DEFAULT)),
+            )
+            .collect(),
         )
-        .collect(),
-        config_type: ConfigTypeCode(setup.config_type.wire()),
-        ..Default::default()
-    })
+        .config_type(setup.config_type.wire())
+        .call()
 }
 
 // A key that `server.properties` does not name and that has no built-in
@@ -159,49 +186,44 @@ fn unset(name: &str, config_type: ConfigType) -> DescribeConfigsResourceResult {
 }
 
 fn listeners(value: &str) -> DescribeConfigsResourceResult {
-    named(NamedConfigSetup {
-        value,
-        builtin_default: Some(DEFAULT_LISTENERS),
-        ..Default::default()
-    })
+    named()
+        .value(value)
+        .maybe_builtin_default(Some(DEFAULT_LISTENERS))
+        .call()
 }
 
 fn advertised(value: &str) -> DescribeConfigsResourceResult {
-    named(NamedConfigSetup {
-        name: "advertised.listeners",
-        value,
-        mutability: ConfigMutability::ReadOnly,
-        ..Default::default()
-    })
+    named()
+        .name("advertised.listeners")
+        .value(value)
+        .mutability(ConfigMutability::ReadOnly)
+        .call()
 }
 
 fn protocol_map(value: &str) -> DescribeConfigsResourceResult {
-    named(NamedConfigSetup {
-        name: "listener.security.protocol.map",
-        value,
-        config_type: ConfigType::String,
-        builtin_default: Some(DEFAULT_PROTOCOL_MAP),
-        ..Default::default()
-    })
+    named()
+        .name("listener.security.protocol.map")
+        .value(value)
+        .config_type(ConfigType::String)
+        .maybe_builtin_default(Some(DEFAULT_PROTOCOL_MAP))
+        .call()
 }
 
 fn controller_listener_names() -> DescribeConfigsResourceResult {
-    named(NamedConfigSetup {
-        name: "controller.listener.names",
-        value: "CONTROLLER",
-        mutability: ConfigMutability::ReadOnly,
-        ..Default::default()
-    })
+    named()
+        .name("controller.listener.names")
+        .value("CONTROLLER")
+        .mutability(ConfigMutability::ReadOnly)
+        .call()
 }
 
 fn inter_broker(value: &str) -> DescribeConfigsResourceResult {
-    named(NamedConfigSetup {
-        name: "inter.broker.listener.name",
-        value,
-        mutability: ConfigMutability::ReadOnly,
-        config_type: ConfigType::String,
-        ..Default::default()
-    })
+    named()
+        .name("inter.broker.listener.name")
+        .value(value)
+        .mutability(ConfigMutability::ReadOnly)
+        .config_type(ConfigType::String)
+        .call()
 }
 
 // Kafka's `listeners` is what the node opens: the controller listener alone on

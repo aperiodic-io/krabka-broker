@@ -58,10 +58,10 @@ enum Role {
 
 krabka_macros::compacted_batch!(Kept);
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct ProducerEpoch(i16);
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 struct ProducerSequence(i32);
 
 #[derive(Clone, Copy)]
@@ -100,7 +100,19 @@ struct RecordSetup<'a> {
 }
 
 /// A one-record data batch, ordinary and anonymous by default.
-fn record(setup: RecordSetup<'_>) -> RecordBatch {
+#[bon::builder]
+fn record(
+    producer: Option<ProducerBatchIdentity>,
+    #[builder(default)] transaction: BatchTransaction,
+    #[builder(default = ("k" , "v"))] payload: (&'_ str, &'_ str),
+    #[builder(into, default)] timestamp: UnixMillis,
+) -> RecordBatch {
+    let setup = RecordSetup {
+        producer,
+        transaction,
+        payload,
+        timestamp,
+    };
     let RecordSetup {
         producer,
         transaction,
@@ -151,44 +163,30 @@ fn histories(now_ms: UnixMillis) -> Vec<History> {
         })
     };
     let superseded = vec![
-        record(RecordSetup {
-            producer: idempotent(ProducerSequence(0)),
-            payload: ("a", "p-a"),
-            timestamp: now_ms,
-            ..Default::default()
-        }),
-        record(RecordSetup {
-            producer: idempotent(ProducerSequence(1)),
-            payload: ("b", "p-b"),
-            timestamp: now_ms,
-            ..Default::default()
-        }),
-        record(RecordSetup {
-            payload: ("a", "a-2"),
-            timestamp: now_ms,
-            ..Default::default()
-        }),
-        record(RecordSetup {
-            payload: ("b", "b-3"),
-            timestamp: now_ms,
-            ..Default::default()
-        }),
-        record(RecordSetup {
-            payload: ("c", "c-4"),
-            timestamp: now_ms,
-            ..Default::default()
-        }),
+        record()
+            .maybe_producer(idempotent(ProducerSequence(0)))
+            .payload(("a", "p-a"))
+            .timestamp(now_ms)
+            .call(),
+        record()
+            .maybe_producer(idempotent(ProducerSequence(1)))
+            .payload(("b", "p-b"))
+            .timestamp(now_ms)
+            .call(),
+        record().payload(("a", "a-2")).timestamp(now_ms).call(),
+        record().payload(("b", "b-3")).timestamp(now_ms).call(),
+        record().payload(("c", "c-4")).timestamp(now_ms).call(),
     ];
     let committed = vec![
-        record(RecordSetup {
-            producer: Some(ProducerBatchIdentity {
+        record()
+            .maybe_producer(Some(ProducerBatchIdentity {
                 identity: TRANSACTIONAL,
                 sequence: ProducerSequence::default(),
-            }),
-            transaction: BatchTransaction::Transactional,
-            payload: ("a", "t-a"),
-            timestamp: now_ms,
-        }),
+            }))
+            .transaction(BatchTransaction::Transactional)
+            .payload(("a", "t-a"))
+            .timestamp(now_ms)
+            .call(),
         build_marker_batch(
             TRANSACTIONAL.id,
             TRANSACTIONAL.epoch.0 + 1,
@@ -196,16 +194,8 @@ fn histories(now_ms: UnixMillis) -> Vec<History> {
             MarkerType::Commit,
             17,
         ),
-        record(RecordSetup {
-            payload: ("a", "a-2"),
-            timestamp: now_ms,
-            ..Default::default()
-        }),
-        record(RecordSetup {
-            payload: ("c", "c-3"),
-            timestamp: now_ms,
-            ..Default::default()
-        }),
+        record().payload(("a", "a-2")).timestamp(now_ms).call(),
+        record().payload(("c", "c-3")).timestamp(now_ms).call(),
     ];
     vec![
         // Kafka keeps the batch that holds the last sequence of an active

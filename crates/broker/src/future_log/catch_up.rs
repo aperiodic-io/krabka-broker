@@ -118,10 +118,7 @@ mod tests {
     use {
         super::*,
         crate::{
-            future_log::test_support::{
-                FutureSourceSetup, fixture_partition, open_future_log, source_fixture,
-            },
-            test_support::RecordCount,
+            future_log::test_support::{fixture_partition, open_future_log, source_fixture},
             throttle::TokenBucket,
         },
         assert2::assert,
@@ -142,7 +139,7 @@ mod tests {
 
     #[tokio::test]
     async fn catch_up_resets_after_source_retention_without_dropping_batch_data() {
-        let fixture = source_fixture(FutureSourceSetup::default());
+        let fixture = source_fixture().call();
         let _primary = fixture.primary;
         let target = fixture.target;
         let part = fixture.partition;
@@ -184,10 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn catch_up_waits_when_move_throttle_is_exhausted() {
-        let fixture = source_fixture(FutureSourceSetup {
-            count: RecordCount(1),
-            ..Default::default()
-        });
+        let fixture = source_fixture().count(1).call();
         let _primary = fixture.primary;
         let target = fixture.target;
         let part = fixture.partition;

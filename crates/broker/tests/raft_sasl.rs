@@ -29,7 +29,7 @@ fn oauth_token() -> String {
 
 use crate::support::{NodeIndex, controller_voters, init_tracing, node_config};
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 struct BrokerSlot(usize);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -54,7 +54,27 @@ struct SaslBrokerSetup<'a> {
     credentials: (&'a str, &'a str),
 }
 
-fn sasl_broker_config(log_dir: &std::path::Path, setup: SaslBrokerSetup<'_>) -> BrokerConfig {
+#[bon::builder]
+fn sasl_broker_config(
+    log_dir: &std::path::Path,
+    #[builder(into, default)] slot: BrokerSlot,
+    #[builder(default = data_listen_addr ())] data_addr: SocketAddr,
+    #[builder(default = (ListenerProtocol :: SaslPlaintext , data_listen_addr ()))] controller: (
+        ListenerProtocol,
+        SocketAddr,
+    ),
+    #[builder(default)] voters: &'_ [(NodeId, SocketAddr)],
+    #[builder(default = BootstrapMode :: Bootstrap)] mode: BootstrapMode,
+    #[builder(default = ("raft-user" , "raft-password"))] credentials: (&'_ str, &'_ str),
+) -> BrokerConfig {
+    let setup = SaslBrokerSetup {
+        slot,
+        data_addr,
+        controller,
+        voters,
+        mode,
+        credentials,
+    };
     let SaslBrokerSetup {
         slot,
         data_addr,
@@ -134,19 +154,19 @@ async fn start_two_brokers_with_controller_protocol(
     let dir0 = TempDir::new().unwrap();
     let dir1 = TempDir::new().unwrap();
 
-    let cfg0 = sasl_broker_config(dir0.path(), SaslBrokerSetup {
-        controller: (ctrl, ctrl_addrs[0]),
-        voters: &voters,
-        credentials: (plain_user, plain_pass),
-        ..Default::default()
-    });
-    let cfg1 = sasl_broker_config(dir1.path(), SaslBrokerSetup {
-        slot: BrokerSlot(1),
-        controller: (ctrl, ctrl_addrs[1]),
-        voters: &voters,
-        credentials: (plain_user, plain_pass),
-        ..Default::default()
-    });
+    let cfg0 = sasl_broker_config()
+        .log_dir(dir0.path())
+        .controller((ctrl, ctrl_addrs[0]))
+        .voters(&voters)
+        .credentials((plain_user, plain_pass))
+        .call();
+    let cfg1 = sasl_broker_config()
+        .log_dir(dir1.path())
+        .slot(1)
+        .controller((ctrl, ctrl_addrs[1]))
+        .voters(&voters)
+        .credentials((plain_user, plain_pass))
+        .call();
 
     // KIP-595 static-quorum bootstrap: both brokers boot with the same
     // static voter set and elect among themselves over the (SASL/plaintext)
@@ -177,13 +197,13 @@ async fn assert_disconnected_controllers(
     // A shared two-voter quorum would never elect with these failures and would
     // block Broker::start on its leader wait. Each node instead bootstraps itself.
     let config = |index: usize, dir: &TempDir| {
-        let mut config = sasl_broker_config(dir.path(), SaslBrokerSetup {
-            slot: BrokerSlot(index),
-            controller: (ListenerProtocol::SaslPlaintext, ctrl_addrs[index]),
-            voters: &[(NodeId(u64::try_from(index).unwrap() + 1), ctrl_addrs[index])],
-            credentials: credentials[index],
-            ..Default::default()
-        });
+        let mut config = sasl_broker_config()
+            .log_dir(dir.path())
+            .slot(index)
+            .controller((ListenerProtocol::SaslPlaintext, ctrl_addrs[index]))
+            .voters(&[(NodeId(u64::try_from(index).unwrap() + 1), ctrl_addrs[index])])
+            .credentials(credentials[index])
+            .call();
         if authorization == ControllerAuthorization::Denied {
             // Valid SASL credentials are still denied CLUSTER_ACTION without
             // super users or ACLs. Construct each authorizer independently.
@@ -250,19 +270,19 @@ async fn controller_listener_oauthbearer_two_broker_quorum() {
     let token_path = token_dir.path().join("oauth-token");
     std::fs::write(&token_path, oauth_token()).unwrap();
 
-    let mut cfg0 = sasl_broker_config(dir0.path(), SaslBrokerSetup {
-        controller: (ListenerProtocol::SaslPlaintext, controller_addrs[0]),
-        voters: &voters,
-        credentials: ("unused", "unused"),
-        ..Default::default()
-    });
-    let mut cfg1 = sasl_broker_config(dir1.path(), SaslBrokerSetup {
-        slot: BrokerSlot(1),
-        controller: (ListenerProtocol::SaslPlaintext, controller_addrs[1]),
-        voters: &voters,
-        credentials: ("unused", "unused"),
-        ..Default::default()
-    });
+    let mut cfg0 = sasl_broker_config()
+        .log_dir(dir0.path())
+        .controller((ListenerProtocol::SaslPlaintext, controller_addrs[0]))
+        .voters(&voters)
+        .credentials(("unused", "unused"))
+        .call();
+    let mut cfg1 = sasl_broker_config()
+        .log_dir(dir1.path())
+        .slot(1)
+        .controller((ListenerProtocol::SaslPlaintext, controller_addrs[1]))
+        .voters(&voters)
+        .credentials(("unused", "unused"))
+        .call();
     for config in [&mut cfg0, &mut cfg1] {
         config.enabled_sasl_mechanisms = vec![SaslMechanism::OAuthBearer];
         config.plain_credentials.clear();

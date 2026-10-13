@@ -70,10 +70,11 @@ pub async fn drive_elect_all_partitions(
 /// which broker leads it and which one they can elect: an automatic placement
 /// starts at a random broker.
 pub async fn create_topic_plaintext(addr: SocketAddr, topic: AssignedTopicSetup) {
-    kafka_wire::create_assigned_topic_plaintext(addr, kafka_wire::AssignedTopicExchangeSetup {
-        client_id: CLIENT_ID,
-        topic,
-    })
-    .await;
+    kafka_wire::create_assigned_topic_plaintext()
+        .addr(addr)
+        .client_id(CLIENT_ID)
+        .topic(topic)
+        .call()
+        .await;
 }
 pub use crate::kafka_wire::elect_leaders_plaintext as drive_elect_leaders;

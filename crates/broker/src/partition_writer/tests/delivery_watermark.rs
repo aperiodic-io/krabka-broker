@@ -3,10 +3,7 @@
 
 use {
     super::*,
-    crate::{
-        partition_writer::test_support::sample_batch,
-        test_support::{EmptyPayloadBatchSetup, RecordCount},
-    },
+    crate::partition_writer::test_support::sample_batch,
     assert2::check,
     krabka_log::{LogConfig, Offset},
     tempfile::tempdir,
@@ -86,13 +83,7 @@ async fn a_produce_to_an_immediate_topic_keeps_the_mirror_at_the_log_end() {
         ..Default::default()
     });
 
-    let ack_rx = queue_batch(
-        &tx,
-        sample_batch(EmptyPayloadBatchSetup {
-            count: RecordCount(3),
-        }),
-    )
-    .await;
+    let ack_rx = queue_batch(&tx, sample_batch().count(3).call()).await;
     ack_rx.await.expect("ack").expect("append ok");
 
     check!(crate::delivery::test_support::wait_until(|| delivery.watermark() == Offset(3)).await);

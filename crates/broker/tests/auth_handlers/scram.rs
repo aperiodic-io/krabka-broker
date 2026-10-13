@@ -6,8 +6,8 @@ use {
     crate::{
         harness::{alice_password, metadata_probe, start_scram_alice, wrong_scram_password},
         kafka_wire::{
-            SaslAuthenticateSetup, SaslHandshakeSetup, ScramAuthenticationSetup,
-            sasl_authenticate_on, sasl_handshake_on, sasl_scram_authenticate_on,
+            ScramAuthenticationSetup, sasl_authenticate_on, sasl_handshake_on,
+            sasl_scram_authenticate_on,
         },
         reauth_cases::{
             capped_session_closes, different_principal_closes, repeated_expired_reauth,
@@ -132,25 +132,24 @@ pub async fn scram_authenticate(
     setup: &ScramAuthenticationSetup<'_>,
 ) -> Result<SaslAuthenticateResponse, io::Error> {
     corr.0 += 1;
-    sasl_handshake_on(stream, SaslHandshakeSetup {
-        client_id: setup.client_id,
-        correlation: *corr,
-        mechanism: setup.mechanism.wire_name(),
-    })
-    .await?;
+    sasl_handshake_on()
+        .stream(stream)
+        .client_id(setup.client_id)
+        .correlation(*corr)
+        .mechanism(setup.mechanism.wire_name())
+        .call()
+        .await?;
 
     let (client_first, client) =
         krabka_macros::scram_client_first!(setup.user, setup.password.as_str(), setup.mechanism)?;
     corr.0 += 1;
-    let first = sasl_authenticate_on(
-        stream,
-        bytes::Bytes::from(client_first),
-        SaslAuthenticateSetup {
-            client_id: setup.client_id,
-            correlation: *corr,
-        },
-    )
-    .await?;
+    let first = sasl_authenticate_on()
+        .stream(stream)
+        .auth_bytes(bytes::Bytes::from(client_first))
+        .client_id(setup.client_id)
+        .correlation(*corr)
+        .call()
+        .await?;
     if first.error_code != 0 {
         return Ok(first);
     }
@@ -159,15 +158,13 @@ pub async fn scram_authenticate(
         .step(&first.auth_bytes)
         .map_err(|e| io::Error::other(format!("scram client step: {e:?}")))?;
     corr.0 += 1;
-    sasl_authenticate_on(
-        stream,
-        bytes::Bytes::from(client_final),
-        SaslAuthenticateSetup {
-            client_id: setup.client_id,
-            correlation: *corr,
-        },
-    )
-    .await
+    sasl_authenticate_on()
+        .stream(stream)
+        .auth_bytes(bytes::Bytes::from(client_final))
+        .client_id(setup.client_id)
+        .correlation(*corr)
+        .call()
+        .await
 }
 
 /// KIP-368: a SCRAM session under `connections.max.reauth.ms` reports the

@@ -229,8 +229,7 @@ mod tests {
     use {
         super::*,
         crate::{
-            broker::test_support::{LocalPartitionSetup, local_partition_with_records},
-            test_support::start_broker_with,
+            broker::test_support::local_partition_with_records, test_support::start_broker_with,
         },
         assert2::check,
         krabka_units::{kibibytes, mebibytes, secs},
@@ -243,10 +242,10 @@ mod tests {
         let broker = handle.broker_arc_for_test();
 
         let helper_topic = "handle-partition-helper-mutant-topic";
-        let helper_part = local_partition_with_records(dir.path(), LocalPartitionSetup {
-            topic: helper_topic,
-            ..Default::default()
-        });
+        let helper_part = local_partition_with_records()
+            .log_dir(dir.path())
+            .topic(helper_topic)
+            .call();
         let helper_config = krabka_log::LogConfig {
             retention: Some(secs(123)),
             segment_size: kibibytes(4),

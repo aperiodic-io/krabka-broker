@@ -72,11 +72,7 @@ pub(crate) fn apply_incremental(
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::fetch_session::test_support::{ForgottenTopicSetup, forgotten_topic},
-        assert2::assert,
-    };
+    use {super::*, crate::fetch_session::test_support::forgotten_topic, assert2::assert};
 
     #[test]
     fn forgotten_topic_name_drops_only_matching_topic_partition() {
@@ -91,7 +87,7 @@ mod tests {
                 topic_id: WireUuid::ZERO,
                 partition: 0,
             } => CachedPartitionState::default()};
-        let forgotten = vec![forgotten_topic(ForgottenTopicSetup::default())];
+        let forgotten = vec![forgotten_topic().call()];
 
         apply_incremental(&mut partitions, &forgotten, &[]);
 
@@ -122,11 +118,7 @@ mod tests {
                 topic_id: other_tid,
                 partition: 0,
             } => CachedPartitionState::default()};
-        let forgotten = vec![forgotten_topic(ForgottenTopicSetup {
-            topic: String::new(),
-            topic_id: tid,
-            ..Default::default()
-        })];
+        let forgotten = vec![forgotten_topic().topic(String::new()).topic_id(tid).call()];
 
         apply_incremental(&mut partitions, &forgotten, &[]);
 
@@ -152,7 +144,7 @@ mod tests {
 mod fuzz {
     use {
         super::{CachedPartitionState, FetchSessionKey, apply_incremental},
-        crate::fetch_session::test_support::{ForgottenTopicSetup, forgotten_topic},
+        crate::fetch_session::test_support::forgotten_topic,
         krabka_protocol::{
             owned::fetch_request::{FetchPartition, FetchTopic},
             primitives::uuid::Uuid as WireUuid,
@@ -186,7 +178,11 @@ mod fuzz {
                 let forgotten = if fname == 0 && fid == 0 {
                     vec![]
                 } else {
-                    vec![forgotten_topic(ForgottenTopicSetup {topic: name_of(fname), topic_id: id_of(fid), partitions: vec![krabka_ids::PartitionIndex(fp)]})]
+                    vec![forgotten_topic()
+                        .topic(name_of(fname))
+                        .topic_id(id_of(fid))
+                        .partitions(vec![krabka_ids::PartitionIndex(fp)])
+                        .call()]
                 };
                 let subscribe = do_sub && !(sname == 0 && sid == 0);
                 let topics = if subscribe {

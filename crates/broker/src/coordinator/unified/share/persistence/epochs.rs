@@ -69,7 +69,7 @@ mod tests {
             share::persistence::{
                 KEY_SHARE_GROUP_METADATA, KEY_SHARE_TARGET_ASSIGNMENT_METADATA, ShareGroupKey,
             },
-            test_support::{AssignmentMetadataGoldenSetup, assignment_metadata_golden_cases},
+            test_support::assignment_metadata_golden_cases,
         },
         assert2::{assert, check},
     };
@@ -129,7 +129,7 @@ mod tests {
     /// the default 0.
     #[test]
     fn target_assignment_metadata_bytes_match_kafka_schema() {
-        let rows = assignment_metadata_golden_cases(AssignmentMetadataGoldenSetup::default());
+        let rows = assignment_metadata_golden_cases().call();
         for row in rows {
             let case = row.description;
             let bytes = row.bytes;

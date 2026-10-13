@@ -285,7 +285,7 @@ mod tests {
                 STATE_TOPIC,
                 coordinator::{
                     BarrierCoordinator, GroupDescription, RetainedCut,
-                    test_support::{Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec},
+                    test_support::{Fixture, GROUP, spec},
                 },
                 error::BarrierError,
                 persistence::{
@@ -307,11 +307,10 @@ mod tests {
         let coordinator = fixture
             .coordinator_with_group(
                 GROUP,
-                spec(GroupSpecSetup {
-                    topics: &["orders", "payments"],
-                    retained_cuts: RetainedCutCount(8),
-                    ..Default::default()
-                }),
+                spec()
+                    .topics(&["orders", "payments"])
+                    .retained_cuts(8)
+                    .call(),
             )
             .await;
         let first = coordinator
@@ -407,9 +406,7 @@ mod tests {
     #[tokio::test]
     async fn recovery_finalises_an_interrupted_injection_as_partial() {
         let fixture = Fixture::new();
-        let coordinator = fixture
-            .coordinator_with_group(GROUP, spec(GroupSpecSetup::default()))
-            .await;
+        let coordinator = fixture.coordinator_with_group(GROUP, spec().call()).await;
 
         // A coordinator that crashed after the injection-start record leaves
         // exactly this behind.
@@ -470,9 +467,7 @@ mod tests {
             }),
         ] {
             let fixture = Fixture::new();
-            let coordinator = fixture
-                .coordinator_with_group(group, spec(GroupSpecSetup::default()))
-                .await;
+            let coordinator = fixture.coordinator_with_group(group, spec().call()).await;
             coordinator
                 .append_records(group, vec![(
                     RecordKey::injection_start(group, 1),
@@ -498,9 +493,7 @@ mod tests {
     #[tokio::test]
     async fn recovery_consumes_the_maximum_epoch_without_wrapping() {
         let fixture = Fixture::new();
-        let coordinator = fixture
-            .coordinator_with_group(GROUP, spec(GroupSpecSetup::default()))
-            .await;
+        let coordinator = fixture.coordinator_with_group(GROUP, spec().call()).await;
         let start = interrupted_injection(BarrierPartitionCount(1));
         append_interrupted_start(
             &coordinator,
@@ -523,7 +516,7 @@ mod tests {
         let fixture = Fixture::new();
         let writer = fixture.coordinator().await;
         writer
-            .create_group(GROUP, spec(GroupSpecSetup::default()))
+            .create_group(GROUP, spec().call())
             .await
             .expect("the group is created");
         let start = interrupted_injection(BarrierPartitionCount(1));

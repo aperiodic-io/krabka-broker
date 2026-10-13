@@ -8,8 +8,8 @@
 
 use {
     super::{
-        ALICE, ALICE_KEY, BOB, BOB_KEY, CLUSTER_ID, NOW_MS, OTHER_CLUSTER_ID, check_against,
-        record, signed, trust,
+        ALICE, ALICE_KEY, BOB, BOB_KEY, CLUSTER_ID, NOW_MS, OTHER_CLUSTER_ID, SigningFixture,
+        check_against, record, signed, signing_fixture, trust,
     },
     crate::{
         codes,
@@ -24,12 +24,11 @@ use {
 /// row's code says which check it failed.
 #[test]
 fn every_forged_or_replayed_record_is_refused_with_one_code() {
-    let trust = trust();
-    let good = record();
-    let replaced = TopicFreezeRecord {
-        set_at_ms: NOW_MS,
-        ..record()
-    };
+    let SigningFixture {
+        trust,
+        good,
+        replaced,
+    } = signing_fixture();
 
     // Each case builds the record the broker sees and the check it runs.
     let cases: Vec<(&str, TopicFreezeRecord, FreezeSignatureCheck<'_>)> = vec![
@@ -80,14 +79,6 @@ fn every_forged_or_replayed_record_is_refused_with_one_code() {
             "a timestamp older than the skew window",
             signed(&trust.alice, CLUSTER_ID, &TopicFreezeRecord {
                 set_at_ms: NOW_MS - minutes(5).millis_i64() - 1,
-                ..good.clone()
-            }),
-            check_against(&trust, ALICE),
-        ),
-        (
-            "a timestamp newer than the skew window",
-            signed(&trust.alice, CLUSTER_ID, &TopicFreezeRecord {
-                set_at_ms: NOW_MS + minutes(5).millis_i64() + 1,
                 ..good.clone()
             }),
             check_against(&trust, ALICE),

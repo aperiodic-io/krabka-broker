@@ -179,7 +179,7 @@ fn a_registration_change_applies_only_at_the_epoch_it_names() {
 async fn a_registration_change_waits_for_an_uncommitted_registration() {
     use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord};
 
-    let (ctrl, _dir) = build(ControllerSetup::default());
+    let (ctrl, _dir) = build().call();
     elect_leader_with_helper(&ctrl, NodeId(1), NodeId(2)).await;
     let commit = || async {
         super::test_support::commit_pending(&ctrl, NodeId(2)).await;

@@ -3,7 +3,7 @@ mod support;
 use {
     crate::support::{
         client::standalone_topic,
-        producer::{ProducerRecordSetup, default_producer, producer_record},
+        producer::{default_producer, producer_record},
     },
     krabka_client_consumer::{AutoOffsetReset, Consumer, Header as ConsumerHeader},
     krabka_client_producer::{Header, ProducerRecord},
@@ -20,11 +20,10 @@ async fn consumer_record_carries_headers() {
                 key: "trace".into(),
                 value: Some("abc".into()),
             }],
-            ..producer_record(ProducerRecordSetup {
-                topic: ("h").into(),
-                value: Some("v".into()),
-                ..Default::default()
-            })
+            ..producer_record()
+                .topic(("h").into())
+                .value(Some(bytes::Bytes::from_static(b"v")))
+                .call()
         })
         .await
         .unwrap();

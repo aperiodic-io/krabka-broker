@@ -6,7 +6,7 @@
 
 use crate::{
     event::LogEnd,
-    simulation_support::{append_epochs, truncate_epochs},
+    simulation_support::{append_epochs, replicate_epochs, truncate_epochs},
     types::{Epoch, LogView},
 };
 
@@ -30,10 +30,7 @@ impl SimLog {
     pub(super) fn truncate_to(&mut self, offset: i64) { truncate_epochs(&mut self.epochs, offset); }
 
     pub(super) fn replicate_from(&mut self, leader: &Self) {
-        let leader_epochs = &leader.epochs;
-        if self.epochs.len() < leader_epochs.len() {
-            self.epochs.clone_from(leader_epochs);
-        }
+        replicate_epochs(&mut self.epochs, &leader.epochs);
     }
 
     pub(super) fn record_count(&self) -> usize { self.epochs.len() }

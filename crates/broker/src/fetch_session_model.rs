@@ -303,40 +303,46 @@ fn run(model: FsModel, label: &str, pinned_unique_states: usize) {
     checker.assert_properties();
 }
 
-#[test]
-fn fetch_session_basic() {
-    // One partition; the core rename/half-identity churn alphabet.
-    run(
-        one_partition_model(vec![
-            Ref::Both(NAME_A, 1),
-            Ref::NameOnly(NAME_A),
-            Ref::IdOnly(1),
-            Ref::Both(NAME_B, 1),
-        ]),
-        "fetch_session_basic",
-        PINNED_UNIQUE_STATES_BASIC,
-    );
+#[derive(Clone, Copy)]
+enum FetchSessionModelCase {
+    Basic,
+    Wide,
 }
 
-#[test]
-fn fetch_session_wide() {
-    // One partition, the full identity-churn alphabet: both halves of topic A
-    // (id U), its rename to B (same id U), a name-only and id-only form of each,
-    // and a second id V (a stale/conflicting identity). forget and merge are both
-    // partition-scoped (`k.partition == p`), so a single partition exercises all
-    // the shadow logic; the `two_keys` witness still fires via two distinct-
-    // identity topics coexisting on the one partition.
-    run(
-        one_partition_model(vec![
-            Ref::Both(NAME_A, 1),
-            Ref::NameOnly(NAME_A),
-            Ref::IdOnly(1),
-            Ref::Both(NAME_B, 1),
-            Ref::NameOnly(NAME_B),
-            Ref::Both(NAME_A, 2),
-            Ref::IdOnly(2),
-        ]),
-        "fetch_session_wide",
-        PINNED_UNIQUE_STATES_WIDE,
-    );
+#[yare::parameterized(
+    basic = { FetchSessionModelCase::Basic },
+    wide = { FetchSessionModelCase::Wide },
+)]
+fn fetch_session_model(case: FetchSessionModelCase) {
+    let (history, label, pinned_unique_states) = match case {
+        // One partition; the core rename/half-identity churn alphabet.
+        FetchSessionModelCase::Basic => (
+            vec![
+                Ref::Both(NAME_A, 1),
+                Ref::NameOnly(NAME_A),
+                Ref::IdOnly(1),
+                Ref::Both(NAME_B, 1),
+            ],
+            "fetch_session_basic",
+            PINNED_UNIQUE_STATES_BASIC,
+        ),
+        // The full identity-churn alphabet: both halves of topic A (id U),
+        // its rename to B, name-only and id-only forms, and a second id V.
+        // forget and merge remain partition-scoped; two distinct identities
+        // may coexist on that partition.
+        FetchSessionModelCase::Wide => (
+            vec![
+                Ref::Both(NAME_A, 1),
+                Ref::NameOnly(NAME_A),
+                Ref::IdOnly(1),
+                Ref::Both(NAME_B, 1),
+                Ref::NameOnly(NAME_B),
+                Ref::Both(NAME_A, 2),
+                Ref::IdOnly(2),
+            ],
+            "fetch_session_wide",
+            PINNED_UNIQUE_STATES_WIDE,
+        ),
+    };
+    run(one_partition_model(history), label, pinned_unique_states);
 }

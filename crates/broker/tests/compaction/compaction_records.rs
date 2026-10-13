@@ -8,18 +8,16 @@
 
 use {
     crate::{
-        CLIENT_ID,
-        kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
+        CLIENT_ID, kafka_wire,
         support::{
             fetch::{
-                FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-                SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+                FetchByteLimit, FetchLimits, RequestWaitMillis, fetch_partition,
+                single_partition_fetch,
             },
             wire::HeaderEncoding as RequestHeaderEncoding,
         },
     },
     assert2::assert,
-    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
     krabka_protocol::{
         owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
         primitives::uuid::Uuid,
@@ -51,30 +49,32 @@ pub(crate) async fn fetch_all(addr: SocketAddr, topic: &str, topic_id: Uuid) -> 
     loop {
         let req = FetchRequest {
             replica_id: -1,
-            ..single_partition_fetch(SinglePartitionFetchSetup {
-                topic: topic.to_string(),
-                topic_id,
-                partition: fetch_partition(FetchPartitionSetup {
-                    offset: krabka_ids::Offset(next_offset),
-                    maximum: FetchByteLimit(1 << 22),
-                    ..Default::default()
-                }),
-                limits: FetchLimits::wait_for_data_with_maximum(
+            ..single_partition_fetch()
+                .topic(topic.to_string())
+                .topic_id(topic_id)
+                .partition(
+                    fetch_partition()
+                        .offset(next_offset)
+                        .maximum(1 << 22)
+                        .call(),
+                )
+                .limits(FetchLimits::wait_for_data_with_maximum(
                     RequestWaitMillis(100),
                     FetchByteLimit(1 << 22),
-                ),
-            })
+                ))
+                .call()
         };
         let mut stream = TcpStream::connect(addr).await.expect("connect");
-        let resp: FetchResponse = kafka_wire::exchange(&mut stream, &req, WireExchangeSetup {
-            api_key: WireApiKey(1),
-            version: WireApiVersion(version),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        })
-        .await
-        .expect("Fetch round-trip");
+        let resp: FetchResponse = kafka_wire::exchange()
+            .stream(&mut stream)
+            .request(&req)
+            .api_key(1)
+            .version(version)
+            .client_id(CLIENT_ID)
+            .header(RequestHeaderEncoding::Flexible)
+            .call()
+            .await
+            .expect("Fetch round-trip");
 
         let mut got_any = false;
         for topic_resp in &resp.responses {

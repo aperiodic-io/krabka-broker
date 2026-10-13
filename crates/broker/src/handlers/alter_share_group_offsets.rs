@@ -274,15 +274,13 @@ mod tests {
             handlers::{
                 RequestContext,
                 create_topics::handle as create_topics_handle,
-                test_support::{CreateTopicSetup, configured_topic_request},
+                test_support::{CreateTopicSetup, configured_topic_request_from},
             },
             share_coordinator::{
                 coordinator::message::UNKNOWN_TOPIC_OR_PARTITION,
                 handlers::test_support::lead_share_state_partitions,
             },
-            test_support::{
-                DenyAll, ShareApiSupport, ShareBrokerSetup, start_share_broker, test_ctx,
-            },
+            test_support::{DenyAll, ShareApiSupport, start_share_broker, test_ctx},
         },
         assert2::assert,
         krabka_protocol::{
@@ -395,7 +393,7 @@ mod tests {
         let broker = broker_handle.broker_arc_for_test();
         let topic_name = setup.topic;
         let version = create_topics_response::MAX_VERSION;
-        let request = configured_topic_request(setup);
+        let request = configured_topic_request_from(setup);
         let response = create_topics_handle(&broker, request, version, ctx)
             .await
             .expect("create topic");
@@ -538,8 +536,7 @@ mod tests {
                     Vec::new()
                 },
             });
-            let (broker_handle, _dir) =
-                start_share_broker(authorizer, ShareBrokerSetup::default()).await;
+            let (broker_handle, _dir) = start_share_broker().authorizer(authorizer).call().await;
             let broker = broker_handle.broker_arc_for_test();
             test_ctx!(ctx, "alice");
             if topic_exists {

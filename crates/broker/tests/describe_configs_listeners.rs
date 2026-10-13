@@ -165,15 +165,29 @@ impl ConfigKind {
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 struct NamedConfigSetup<'a> {
+    kind: ConfigKind,
     #[default("listeners")]
     name: &'a str,
     value: &'a str,
     mutability: ConfigMutability,
-    kind: ConfigKind,
     builtin_default: Option<&'a str>,
 }
 
-fn named(setup: NamedConfigSetup<'_>) -> DescribeConfigsResourceResult {
+#[bon::builder]
+fn named(
+    #[builder(default)] kind: ConfigKind,
+    #[builder(default = "listeners")] name: &'_ str,
+    #[builder(default)] value: &'_ str,
+    #[builder(default)] mutability: ConfigMutability,
+    builtin_default: Option<&'_ str>,
+) -> DescribeConfigsResourceResult {
+    let setup = NamedConfigSetup {
+        kind,
+        name,
+        value,
+        mutability,
+        builtin_default,
+    };
     DescribeConfigsResourceResult {
         name: setup.name.to_owned(),
         value: Some(setup.value.to_owned()),
@@ -220,7 +234,19 @@ struct ExpectedListenersSetup<'a> {
     protocol_map: &'a str,
 }
 
-fn expected(setup: ExpectedListenersSetup<'_>) -> DescribeConfigsResult {
+#[bon::builder]
+fn expected(
+    #[builder(into, default = NodeId (1))] node: NodeId,
+    #[builder(default = DEFAULT_LISTENERS)] listeners: &'_ str,
+    advertised: Option<&'_ str>,
+    #[builder(default = DEFAULT_PROTOCOL_MAP)] protocol_map: &'_ str,
+) -> DescribeConfigsResult {
+    let setup = ExpectedListenersSetup {
+        node,
+        listeners,
+        advertised,
+        protocol_map,
+    };
     DescribeConfigsResult {
         error_code: 0,
         error_message: None,
@@ -230,33 +256,29 @@ fn expected(setup: ExpectedListenersSetup<'_>) -> DescribeConfigsResult {
             setup.advertised.map_or_else(
                 || unset("advertised.listeners", ConfigKind::List),
                 |advertised| {
-                    named(NamedConfigSetup {
-                        name: "advertised.listeners",
-                        value: advertised,
-                        mutability: ConfigMutability::ReadOnly,
-                        ..Default::default()
-                    })
+                    named()
+                        .name("advertised.listeners")
+                        .value(advertised)
+                        .mutability(ConfigMutability::ReadOnly)
+                        .call()
                 },
             ),
-            named(NamedConfigSetup {
-                name: "controller.listener.names",
-                value: "CONTROLLER",
-                mutability: ConfigMutability::ReadOnly,
-                ..Default::default()
-            }),
+            named()
+                .name("controller.listener.names")
+                .value("CONTROLLER")
+                .mutability(ConfigMutability::ReadOnly)
+                .call(),
             unset("inter.broker.listener.name", ConfigKind::String),
-            named(NamedConfigSetup {
-                name: "listener.security.protocol.map",
-                value: setup.protocol_map,
-                kind: ConfigKind::String,
-                builtin_default: Some(DEFAULT_PROTOCOL_MAP),
-                ..Default::default()
-            }),
-            named(NamedConfigSetup {
-                value: setup.listeners,
-                builtin_default: Some(DEFAULT_LISTENERS),
-                ..Default::default()
-            }),
+            named()
+                .name("listener.security.protocol.map")
+                .value(setup.protocol_map)
+                .kind(ConfigKind::String)
+                .maybe_builtin_default(Some(DEFAULT_PROTOCOL_MAP))
+                .call(),
+            named()
+                .value(setup.listeners)
+                .maybe_builtin_default(Some(DEFAULT_LISTENERS))
+                .call(),
         ],
         unknown_tagged_fields: UnknownTaggedFields::default(),
     }
@@ -278,11 +300,10 @@ async fn each_role_reports_the_listener_keys_through_the_listener_a_client_uses(
             Roles::ControllerOnly => {
                 let node = start_node(NodeId(1), &[NodeRole::Controller], None).await;
                 let controller = node.handle.controller_addr();
-                let want = expected(ExpectedListenersSetup {
-                    listeners: &format!("CONTROLLER://{controller}"),
-                    protocol_map: "CONTROLLER:PLAINTEXT",
-                    ..Default::default()
-                });
+                let want = expected()
+                    .listeners(&format!("CONTROLLER://{controller}"))
+                    .protocol_map("CONTROLLER:PLAINTEXT")
+                    .call();
                 (vec![node], 1, vec![("controller", controller)], want)
             }
             Roles::BrokerOnly => {
@@ -290,12 +311,12 @@ async fn each_role_reports_the_listener_keys_through_the_listener_a_client_uses(
                 let broker =
                     start_node(NodeId(2), &[NodeRole::Broker], Some(&controller.handle)).await;
                 let data = broker.data_addr;
-                let want = expected(ExpectedListenersSetup {
-                    node: NodeId(2),
-                    listeners: &format!("PLAINTEXT://{data}"),
-                    advertised: Some(&format!("PLAINTEXT://{data}")),
-                    protocol_map: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT",
-                });
+                let want = expected()
+                    .node(2)
+                    .listeners(&format!("PLAINTEXT://{data}"))
+                    .maybe_advertised(Some(&format!("PLAINTEXT://{data}")))
+                    .protocol_map("PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT")
+                    .call();
                 (
                     vec![broker, controller],
                     2,
@@ -308,12 +329,11 @@ async fn each_role_reports_the_listener_keys_through_the_listener_a_client_uses(
                     start_node(NodeId(1), &[NodeRole::Controller, NodeRole::Broker], None).await;
                 let data = node.data_addr;
                 let controller = node.handle.controller_addr();
-                let want = expected(ExpectedListenersSetup {
-                    listeners: &format!("PLAINTEXT://{data},CONTROLLER://{controller}"),
-                    advertised: Some(&format!("PLAINTEXT://{data}")),
-                    protocol_map: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT",
-                    ..Default::default()
-                });
+                let want = expected()
+                    .listeners(&format!("PLAINTEXT://{data},CONTROLLER://{controller}"))
+                    .maybe_advertised(Some(&format!("PLAINTEXT://{data}")))
+                    .protocol_map("PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT")
+                    .call();
                 (
                     vec![node],
                     1,

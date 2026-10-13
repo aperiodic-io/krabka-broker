@@ -4,7 +4,7 @@ use {
         offsets::{
             offset_commit_topic, offset_fetch_group, offset_fetch_request, offset_fetch_topic,
         },
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::{assert, check},
 };
@@ -32,29 +32,41 @@ const UNKNOWN_TOPIC_ID: i16 = 100;
 
 use crate::support::start_ready_group as start;
 
-#[tokio::test]
-async fn offset_commit_and_fetch_by_topic_id_round_trip() {
+#[derive(Clone, Copy)]
+enum FetchTopicShape {
+    Listed,
+    All,
+}
+
+#[yare::parameterized(
+    listed_topic = { "g1", "o_topic", 42, FetchTopicShape::Listed },
+    fetch_all = { "g3", "fa_topic", 7, FetchTopicShape::All },
+)]
+#[test_macro(tokio::test)]
+async fn offset_commit_and_fetch_by_topic_id_round_trip(
+    group_id: &str,
+    topic_name: &str,
+    committed_offset: i64,
+    shape: FetchTopicShape,
+) {
     let p = start().await;
     p.client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("o_topic").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(topic_name.into()).call(),
+        ))
         .await
         .expect("create topic");
-    let id = topic_id_for(&p.client, "o_topic").await;
+    let id = topic_id_for(&p.client, topic_name).await;
 
-    // Commit offset 42 by topic_id (v10: name empty, id set). Empty member_id
+    // Commit by topic_id (v10: name empty, id set). Empty member_id
     // skips the membership check.
     p.client
         .send(OffsetCommitRequest {
-            group_id: "g1".into(),
+            group_id: group_id.into(),
             topics: vec![offset_commit_topic(String::new(), id, vec![
                 OffsetCommitRequestPartition {
                     partition_index: 0,
-                    committed_offset: 42,
+                    committed_offset,
                     ..Default::default()
                 },
             ])],
@@ -63,28 +75,28 @@ async fn offset_commit_and_fetch_by_topic_id_round_trip() {
         .await
         .expect("offset commit");
 
-    // Fetch back via v8+ multi-group shape keyed by topic_id.
+    let topics = match shape {
+        FetchTopicShape::Listed => Some(vec![offset_fetch_topic(String::new(), id, vec![0])]),
+        FetchTopicShape::All => None,
+    };
     let resp = p
         .client
-        .send(offset_fetch_request(offset_fetch_group(
-            "g1",
-            Some(vec![offset_fetch_topic(String::new(), id, vec![0])]),
-        )))
+        .send(offset_fetch_request(offset_fetch_group(group_id, topics)))
         .await
         .expect("offset fetch");
 
     let grp = resp
         .groups
         .iter()
-        .find(|g| g.group_id == "g1")
-        .expect("group g1");
+        .find(|g| g.group_id == group_id)
+        .expect("requested group");
     let t = grp
         .topics
         .iter()
         .find(|t| t.topic_id == id)
         .expect("topic by id");
     let part = t.partitions.first().expect("partition 0");
-    check!(part.committed_offset == 42);
+    check!(part.committed_offset == committed_offset);
     check!(part.error_code == 0);
     check!(t.topic_id == id); // id echoed
 }
@@ -144,12 +156,9 @@ async fn offset_fetch_unresolved_topic_id_returns_unknown_topic_id() {
 async fn offset_commit_unresolved_topic_id_returns_unknown_topic_id() {
     let p = start().await;
     p.client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("oc_known").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("oc_known").into()).call(),
+        ))
         .await
         .expect("create topic");
     let known = topic_id_for(&p.client, "oc_known").await;
@@ -199,54 +208,4 @@ async fn offset_commit_unresolved_topic_id_returns_unknown_topic_id() {
         }));
     }
     assert!(actual == expected);
-}
-
-/// A fetch-all with null `topics` at v10 must echo each topic's `topic_id`,
-/// because v10 drops the name from the wire and the client matches by id.
-#[tokio::test]
-async fn offset_fetch_all_echoes_topic_id() {
-    let p = start().await;
-    p.client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("fa_topic").into(),
-                ..Default::default()
-            },
-        )))
-        .await
-        .expect("create topic");
-    let id = topic_id_for(&p.client, "fa_topic").await;
-
-    p.client
-        .send(OffsetCommitRequest {
-            group_id: "g3".into(),
-            topics: vec![offset_commit_topic(String::new(), id, vec![
-                OffsetCommitRequestPartition {
-                    partition_index: 0,
-                    committed_offset: 7,
-                    ..Default::default()
-                },
-            ])],
-            ..Default::default()
-        })
-        .await
-        .expect("offset commit");
-
-    // Fetch-all: `topics: None` for the group.
-    let resp = p
-        .client
-        .send(offset_fetch_request(offset_fetch_group("g3", None)))
-        .await
-        .expect("offset fetch");
-    let grp = resp
-        .groups
-        .iter()
-        .find(|g| g.group_id == "g3")
-        .expect("group g3");
-    let t = grp
-        .topics
-        .iter()
-        .find(|t| t.topic_id == id)
-        .expect("topic row with echoed id");
-    assert!(t.partitions.first().expect("a partition").committed_offset == 7);
 }

@@ -191,6 +191,25 @@ mod tests {
     /// bound.
     const UNBOUNDED: i64 = i64::MAX;
 
+    fn assert_run_floor_and_hit(
+        cache: &HotTailCache,
+        topic_id: Uuid,
+        first_partition: PartitionIndex,
+        second_partition: PartitionIndex,
+        first: &Bytes,
+        second: Bytes,
+    ) {
+        cache.insert_run(topic_id, first_partition, first);
+        cache.insert_run(topic_id, second_partition, &second);
+
+        check!(
+            cache
+                .get(topic_id, first_partition, 0, UNBOUNDED, usize::MAX)
+                .is_none()
+        );
+        check!(cache.get(topic_id, second_partition, 2, UNBOUNDED, usize::MAX) == Some(second));
+    }
+
     #[test]
     fn hot_tail_cache_floor_lookup_and_bound() {
         let topic_id = Uuid::from_u128(7);
@@ -198,15 +217,14 @@ mod tests {
         let second = batch_bytes(2, 2);
         let cache = HotTailCache::new(second.len());
 
-        cache.insert_run(topic_id, PartitionIndex(0), &first);
-        cache.insert_run(topic_id, PartitionIndex(0), &second);
-
-        check!(
-            cache
-                .get(topic_id, PartitionIndex(0), 0, UNBOUNDED, usize::MAX)
-                .is_none()
+        assert_run_floor_and_hit(
+            &cache,
+            topic_id,
+            PartitionIndex(0),
+            PartitionIndex(0),
+            &first,
+            second,
         );
-        check!(cache.get(topic_id, PartitionIndex(0), 2, UNBOUNDED, usize::MAX) == Some(second));
         check!(
             cache
                 .get(topic_id, PartitionIndex(0), 3, UNBOUNDED, usize::MAX)
@@ -262,15 +280,14 @@ mod tests {
         let first = batch_bytes(0, 1);
         let second = batch_bytes(2, 1);
 
-        cache.insert_run(topic_id, PartitionIndex(0), &first);
-        cache.insert_run(topic_id, PartitionIndex(1), &second);
-
-        check!(
-            cache
-                .get(topic_id, PartitionIndex(0), 0, UNBOUNDED, usize::MAX)
-                .is_none()
+        assert_run_floor_and_hit(
+            &cache,
+            topic_id,
+            PartitionIndex(0),
+            PartitionIndex(1),
+            &first,
+            second,
         );
-        check!(cache.get(topic_id, PartitionIndex(1), 2, UNBOUNDED, usize::MAX) == Some(second));
     }
 
     #[test]

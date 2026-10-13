@@ -15,17 +15,17 @@ use {
         codes,
         error::BrokerError,
         handlers::test_support::{
-            AcknowledgementCode, AcknowledgementPartitionSetup, AcknowledgementSetup,
-            ClientTopicSetup, ProduceRecordsSetup, RecordCount, ShareSessionEpoch, ShareWireSetup,
-            create_topic as create_topic_from_test_support, produce_records, send_acknowledgements,
-            share_fetch_partition_rows, single_replica_partition,
+            AcknowledgementCode, AcknowledgementPartitionSetup, acknowledge_batches_request,
+            create_topic as create_topic_from_test_support, metadata_topic_record, produce_records,
+            send_acknowledgements, share_fetch_partition_rows, share_fetch_wire,
+            single_replica_partition,
         },
         share_coordinator::bootstrap::TOPIC,
         test_support::initialize_share_state,
     },
     assert2::assert,
     krabka_log::Offset,
-    krabka_metadata::{MetadataRecord, NodeId, TopicRecord},
+    krabka_metadata::{MetadataRecord, NodeId},
     krabka_protocol::{
         owned::{
             share_fetch_request::{
@@ -52,22 +52,22 @@ enum Api {
 use crate::handlers::test_support::start_allow_all_no_audit as start;
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    create_topic_from_test_support(broker, ClientTopicSetup {
-        client_id: "share-persister-error-test",
-        name,
-        ..Default::default()
-    })
-    .await
+    create_topic_from_test_support()
+        .broker(broker)
+        .client_id("share-persister-error-test")
+        .name(name)
+        .call()
+        .await
 }
 
 /// Appends one batch of two records to partition 0 of `topic`.
 async fn produce_two_records(broker: &BrokerHandle, topic: &str) {
-    produce_records(broker, ProduceRecordsSetup {
-        topic,
-        count: RecordCount(2),
-        ..Default::default()
-    })
-    .await;
+    produce_records()
+        .broker(broker)
+        .topic(topic)
+        .count(2)
+        .call()
+        .await;
 }
 
 /// Sends a `ShareFetch` for partition 0 of `topic_id`. With `accept`, the row
@@ -106,8 +106,15 @@ async fn share_fetch(
         }],
         ..Default::default()
     };
-    let rows = share_fetch_partition_rows(broker, &request, ShareWireSetup::default()).await;
-    rows.into_iter().next().unwrap_or_default()
+    let response = share_fetch_wire()
+        .broker(broker)
+        .request(&request)
+        .call()
+        .await;
+    share_fetch_partition_rows(response)
+        .into_iter()
+        .next()
+        .unwrap_or_default()
 }
 
 /// Sends a `ShareAcknowledge` that accepts `[first, last]` on partition 0 of
@@ -119,14 +126,20 @@ async fn share_acknowledge(
     topic_id: WireUuid,
     (first_offset, last_offset): (i64, i64),
 ) -> i16 {
-    let response = send_acknowledgements(broker, AcknowledgementSetup {
-        partition: AcknowledgementPartitionSetup::single_batch(
+    let request = acknowledge_batches_request()
+        .group(group)
+        .epoch(epoch)
+        .topic_id(topic_id)
+        .partition(AcknowledgementPartitionSetup::single_batch(
             krabka_log::Offset(first_offset)..=krabka_log::Offset(last_offset),
             AcknowledgementCode(ACCEPT),
-        ),
-        ..AcknowledgementSetup::for_topic_session(group, ShareSessionEpoch(epoch), topic_id)
-    })
-    .await;
+        ))
+        .call();
+    let response = send_acknowledgements()
+        .broker(broker)
+        .request(&request)
+        .call()
+        .await;
 
     response.responses[0].partitions[0].error_code
 }
@@ -245,12 +258,12 @@ async fn a_fenced_state_write_fails_the_acknowledgement_and_drops_the_partition(
 async fn state_topic_led_by_an_unknown_broker(broker: &BrokerHandle) {
     let shared = broker.broker_arc_for_test();
     let partitions = shared.config.share_coordinator.state_topic_num_partitions;
-    let mut records = vec![MetadataRecord::V1Topic(TopicRecord {
-        name: crate::share_coordinator::bootstrap::TOPIC.to_string(),
-        topic_id: uuid::Uuid::new_v4(),
+    let mut records = vec![MetadataRecord::V1Topic(metadata_topic_record(
+        TOPIC,
+        uuid::Uuid::new_v4(),
         partitions,
-        replication_factor: 1,
-    })];
+        1,
+    ))];
     records.extend((0..partitions).map(|partition| {
         MetadataRecord::V1Partition(single_replica_partition(
             TOPIC,

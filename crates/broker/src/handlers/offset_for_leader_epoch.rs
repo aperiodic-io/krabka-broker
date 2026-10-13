@@ -45,8 +45,6 @@
 //!    installed role can lag the other way while a promotion prepares the
 //!    log.
 
-#[cfg(test)]
-use crate::test_support::StandalonePartitionSetup;
 use {
     crate::{
         broker::Broker,
@@ -261,8 +259,7 @@ mod tests {
             authorizer::AuthorizationResult,
             broker::BrokerHandle,
             handlers::{
-                produce::test_support::image_with_topic,
-                test_support::{ReplicatedTopicSetup, seed_partition_replicas},
+                produce::test_support::image_with_topic, test_support::seed_partition_replicas,
             },
             test_support::{
                 append_partition_batch, peer, principal, start_broker_no_audit,
@@ -341,17 +338,7 @@ mod tests {
     /// so the schema defaults put `-1` in both `leader_epoch` and
     /// `end_offset`.
     fn unknown_topic_row(topic: &str) -> OffsetForLeaderTopicResult {
-        OffsetForLeaderTopicResult {
-            topic: topic.into(),
-            partitions: vec![EpochEndOffset {
-                partition: 0,
-                leader_epoch: -1,
-                end_offset: -1,
-                error_code: codes::UNKNOWN_TOPIC_OR_PARTITION,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
+        error_topic_row(topic, codes::UNKNOWN_TOPIC_OR_PARTITION)
     }
 
     /// The row a `Describe`-denied topic gets: only the partition index and
@@ -359,13 +346,17 @@ mod tests {
     /// default puts `-1` in both `leader_epoch` and `end_offset` rather than
     /// echoing the request.
     fn denied_row(topic: &str) -> OffsetForLeaderTopicResult {
+        error_topic_row(topic, codes::TOPIC_AUTHORIZATION_FAILED)
+    }
+
+    fn error_topic_row(topic: &str, error_code: i16) -> OffsetForLeaderTopicResult {
         OffsetForLeaderTopicResult {
             topic: topic.into(),
             partitions: vec![EpochEndOffset {
                 partition: 0,
                 leader_epoch: -1,
                 end_offset: -1,
-                error_code: codes::TOPIC_AUTHORIZATION_FAILED,
+                error_code,
                 ..Default::default()
             }],
             ..Default::default()
@@ -444,7 +435,7 @@ mod tests {
     async fn leader_check_needs_the_installed_role_and_the_image_to_name_this_node() {
         let image = image_with_topic("orders", &[1, 2]);
 
-        let (_dir, partition) = temporary_partition(StandalonePartitionSetup::default());
+        let (_dir, partition) = temporary_partition().call();
 
         // (this node, installed leader, refused)
         let cases = [
@@ -495,23 +486,33 @@ mod tests {
         leader_epoch: LeaderEpoch,
     }
 
+    #[bon::builder]
     async fn seeded_topic(
         broker_handle: &BrokerHandle,
-        setup: SeededEpochTopicSetup<'_>,
+        #[builder(default = "orders")] topic: &'_ str,
+        #[builder(default = uuid :: Uuid :: from_u128 (1))] topic_id: uuid::Uuid,
+        #[builder(into, default = NodeId (1))] leader: NodeId,
+        #[builder(into, default = LeaderEpoch (0))] leader_epoch: LeaderEpoch,
     ) -> std::sync::Arc<Partition> {
+        let setup = SeededEpochTopicSetup {
+            topic,
+            topic_id,
+            leader,
+            leader_epoch,
+        };
         let SeededEpochTopicSetup {
             topic,
             topic_id,
             leader,
             leader_epoch,
         } = setup;
-        seed_partition_replicas(broker_handle, ReplicatedTopicSetup {
-            topic,
-            topic_id,
-            leader,
-            ..Default::default()
-        })
-        .await;
+        seed_partition_replicas()
+            .broker(broker_handle)
+            .topic(topic)
+            .topic_id(topic_id)
+            .leader(leader)
+            .call()
+            .await;
 
         let shared = broker_handle.broker_arc_for_test();
         let partition = tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -615,25 +616,25 @@ mod tests {
 
         let (broker, _dir) = start_broker_no_audit().await;
 
-        let leader_topic = seeded_topic(&broker, SeededEpochTopicSetup {
-            topic: "ofle-leader",
-            ..Default::default()
-        })
-        .await;
-        seeded_topic(&broker, SeededEpochTopicSetup {
-            topic: "ofle-follower",
-            topic_id: uuid::Uuid::from_u128(2),
-            leader: NodeId(2),
-            ..Default::default()
-        })
-        .await;
-        seeded_topic(&broker, SeededEpochTopicSetup {
-            topic: "ofle-epoch",
-            topic_id: uuid::Uuid::from_u128(3),
-            leader_epoch: LeaderEpoch(3),
-            ..Default::default()
-        })
-        .await;
+        let leader_topic = seeded_topic()
+            .broker_handle(&broker)
+            .topic("ofle-leader")
+            .call()
+            .await;
+        seeded_topic()
+            .broker_handle(&broker)
+            .topic("ofle-follower")
+            .topic_id(uuid::Uuid::from_u128(2))
+            .leader(2)
+            .call()
+            .await;
+        seeded_topic()
+            .broker_handle(&broker)
+            .topic("ofle-epoch")
+            .topic_id(uuid::Uuid::from_u128(3))
+            .leader_epoch(3)
+            .call()
+            .await;
 
         let refused = |error_code| EpochEndOffset {
             partition: 0,
@@ -770,25 +771,26 @@ mod tests {
             crate::test_support::start_broker_no_audit()
         );
 
-        let offline = seeded_topic(&broker, SeededEpochTopicSetup {
-            topic: "ofle-offline",
-            leader_epoch: LeaderEpoch(3),
-            ..Default::default()
-        })
-        .await;
+        let offline = seeded_topic()
+            .broker_handle(&broker)
+            .topic("ofle-offline")
+            .leader_epoch(3)
+            .call()
+            .await;
         shared
             .log_dir_status
             .mark_offline(&offline.log_dir.load(), "test: EIO");
 
         // Node 1 is not a replica of this partition, so it never hosts it.
-        seed_partition_replicas(&broker, ReplicatedTopicSetup {
-            topic: "ofle-moved",
-            topic_id: uuid::Uuid::from_u128(9),
-            leader: krabka_audit::NodeId(2),
-            replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
-            leader_epoch: krabka_ids::LeaderEpoch(3),
-        })
-        .await;
+        seed_partition_replicas()
+            .broker(&broker)
+            .topic("ofle-moved")
+            .topic_id(uuid::Uuid::from_u128(9))
+            .leader(2)
+            .replicas(&[krabka_audit::NodeId(2), krabka_audit::NodeId(3)])
+            .leader_epoch(3)
+            .call()
+            .await;
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             while shared
                 .controller

@@ -6,7 +6,7 @@ use krabka_protocol::owned::{
     txn_offset_commit_request::{TxnOffsetCommitRequestPartition, TxnOffsetCommitRequestTopic},
 };
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct TransactionTimeoutMillis(pub i32);
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -18,7 +18,18 @@ pub struct InitProducerSetup {
     pub producer: ProducerIdentity,
 }
 
-pub fn init_producer_request(setup: InitProducerSetup) -> InitProducerIdRequest {
+#[bon::builder]
+pub fn init_producer_request(
+    transactional_id: Option<String>,
+    #[builder(into, default = TransactionTimeoutMillis (60_000))] timeout: TransactionTimeoutMillis,
+    #[builder(default = ProducerIdentity :: from_wire ((InitProducerIdRequest :: default () . producer_id , InitProducerIdRequest :: default () . producer_epoch)))]
+    producer: ProducerIdentity,
+) -> InitProducerIdRequest {
+    let setup = InitProducerSetup {
+        transactional_id,
+        timeout,
+        producer,
+    };
     InitProducerIdRequest {
         transactional_id: setup.transactional_id,
         transaction_timeout_ms: setup.timeout.0,
@@ -34,10 +45,13 @@ pub struct EndTransactionSetup {
     pub outcome: TransactionOutcome,
 }
 
+#[bon::builder]
 pub fn end_transaction_request(
     transactional_id: impl Into<String>,
-    setup: EndTransactionSetup,
+    #[builder(default)] producer: ProducerIdentity,
+    #[builder(default)] outcome: TransactionOutcome,
 ) -> EndTxnRequest {
+    let setup = EndTransactionSetup { producer, outcome };
     EndTxnRequest {
         transactional_id: transactional_id.into(),
         producer_id: setup.producer.id.0,
@@ -69,11 +83,6 @@ pub fn txn_offset_topic(
         partitions,
         ..Default::default()
     }
-}
-
-/// New producer identity with the protocol's exact default id and epoch fields.
-pub fn new_producer_request(setup: InitProducerSetup) -> InitProducerIdRequest {
-    init_producer_request(setup)
 }
 
 /// Return the complete idempotent allocation response without replacing caller assertions.
@@ -165,9 +174,21 @@ pub struct TransactionMarkerSetup {
     pub topics: Vec<WritableTxnMarkerTopic>,
 }
 
+#[bon::builder]
 pub fn transaction_marker(
-    setup: TransactionMarkerSetup,
+    #[builder(default)] producer: ProducerIdentity,
+    #[builder(default)] outcome: TransactionOutcome,
+    #[builder(into, default)] coordinator_epoch: CoordinatorEpoch,
+    #[builder(into, default)] transaction_version: TransactionVersion,
+    #[builder(default)] topics: Vec<WritableTxnMarkerTopic>,
 ) -> krabka_protocol::owned::write_txn_markers_request::WritableTxnMarker {
+    let setup = TransactionMarkerSetup {
+        producer,
+        outcome,
+        coordinator_epoch,
+        transaction_version,
+        topics,
+    };
     let TransactionMarkerSetup {
         producer,
         outcome,

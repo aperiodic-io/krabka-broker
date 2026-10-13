@@ -13,6 +13,7 @@ use {
     crate::{
         api_catalog::UnstableApiVersions,
         coordinator::unified::{
+            GroupCoordinator,
             offsets_log::fake::InMemoryOffsetsLog,
             persistence::parse_key,
             streams::{
@@ -23,9 +24,9 @@ use {
                 },
                 state::{StreamsGroupState, StreamsMemberState},
             },
-            test_support::{MemberEpoch, assert_single_member_limit, heartbeat_write_failures},
+            test_support::{assert_single_member_limit_with_log, heartbeat_write_failures},
         },
-        test_support::{StreamsJoinSetup, streams_join_request},
+        test_support::{FakeMetadataSource, streams_join_request},
     },
     assert2::{assert, check},
 };
@@ -36,6 +37,31 @@ fn epoch_five_member() -> StreamsMemberState {
     let mut member = StreamsMemberState::joining("m1", "client", "/127.0.0.1");
     member.member_epoch = 5;
     member
+}
+
+fn input_topic_source(partitions: u32) -> Arc<FakeMetadataSource> {
+    Arc::new(
+        FakeMetadataSource::builder()
+            .image(image_of(None, &[(
+                "in",
+                1,
+                i32::try_from(partitions).expect("partition count fits i32"),
+            )]))
+            .build(),
+    )
+}
+
+fn coordinator_with_source(
+    source: Arc<FakeMetadataSource>,
+    max_size: Option<usize>,
+) -> Arc<GroupCoordinator> {
+    let mut config = undelayed();
+    if let Some(max_size) = max_size {
+        config.max_size = max_size;
+    }
+    let coordinator = coordinator_with_log(config, Arc::new(InMemoryOffsetsLog::default()));
+    coordinator.set_metadata_source(source);
+    coordinator
 }
 
 #[test]
@@ -121,16 +147,21 @@ async fn second_heartbeat_at_right_epoch_accepted() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn member_limit_rejects_only_new_members() {
-    let log = Arc::new(InMemoryOffsetsLog::default());
-    let coord = coordinator_with_log(
-        StreamsGroupConfig {
-            max_size: 1,
-            ..undelayed()
+    assert_single_member_limit_with_log(
+        |log| {
+            coordinator_with_log(
+                StreamsGroupConfig {
+                    max_size: 1,
+                    ..undelayed()
+                },
+                log,
+            )
+            .get_or_create_streams("g")
         },
-        log,
-    );
-    let handle = coord.get_or_create_streams("g");
-    assert_single_member_limit(&handle, member_request, heartbeat).await;
+        member_request,
+        heartbeat,
+    )
+    .await;
 }
 
 /// Kafka 4.3.1's `throwIfStreamsGroupIsFull(group)` runs on every join and
@@ -507,14 +538,16 @@ struct SingleSubtopologySetup {
 
 /// A topology with one subtopology `0` that reads `in` and, with a state store,
 /// keeps the changelog topic `store-changelog`.
+#[bon::builder]
 fn one_subtopology(
-    setup: SingleSubtopologySetup,
+    #[builder(default)] storage: TopologyStorage,
 ) -> krabka_protocol::owned::streams_group_heartbeat_request::Topology {
     use krabka_protocol::owned::{
         common::streams_group_heartbeat_request::topic_info::TopicInfo,
         streams_group_heartbeat_request::{Subtopology, Topology},
     };
 
+    let setup = SingleSubtopologySetup { storage };
     Topology {
         epoch: 1,
         subtopologies: vec![Subtopology {
@@ -543,9 +576,7 @@ fn one_subtopology(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() {
     use {
-        crate::{
-            coordinator::unified::streams::topology::status, test_support::FakeMetadataSource,
-        },
+        crate::coordinator::unified::streams::topology::status,
         krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status,
     };
 
@@ -651,9 +682,7 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
             ..Default::default()
         };
         let joined = heartbeat(&handle, StreamsGroupHeartbeatRequest {
-            topology: Some(one_subtopology(SingleSubtopologySetup {
-                storage: row.storage,
-            })),
+            topology: Some(one_subtopology().storage(row.storage).call()),
             ..request(0, "rack-a", "process-a")
         })
         .await;
@@ -684,19 +713,16 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         })
         .await;
 
-        let expected = super::test_support::expected_active_response(
-            super::test_support::ActiveResponseSetup {
-                epoch: MemberEpoch(row.epoch),
-                status: row.status,
-                active: row.active.map(|partitions| {
-                    partitions
-                        .into_iter()
-                        .map(krabka_ids::PartitionIndex)
-                        .collect()
-                }),
-                ..Default::default()
-            },
-        );
+        let expected = super::test_support::expected_active_response()
+            .epoch(row.epoch)
+            .maybe_status(row.status)
+            .maybe_active(row.active.map(|partitions| {
+                partitions
+                    .into_iter()
+                    .map(krabka_ids::PartitionIndex)
+                    .collect()
+            }))
+            .call();
         check!(resp == expected, "{}", row.name);
     }
 }
@@ -708,16 +734,9 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
 /// replay pairs the new assignment epoch with old member targets.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_new_target_persists_the_target_of_every_member() {
-    use crate::{
-        coordinator::unified::{persistence::Key, streams::persistence::StreamsGroupKey},
-        test_support::FakeMetadataSource,
-    };
+    use crate::coordinator::unified::{persistence::Key, streams::persistence::StreamsGroupKey};
 
-    let source = Arc::new(
-        FakeMetadataSource::builder()
-            .image(image_of(None, &[("in", 1, 2)]))
-            .build(),
-    );
+    let source = input_topic_source(2);
     let (coord, log) = make_coordinator();
     coord.set_metadata_source(source.clone());
     let handle = coord.get_or_create_streams("g");
@@ -726,7 +745,7 @@ async fn a_new_target_persists_the_target_of_every_member() {
         member_id: member_id.into(),
         member_epoch,
         rebalance_timeout_ms: 1_000,
-        topology: (member_epoch == 0).then(|| one_subtopology(SingleSubtopologySetup::default())),
+        topology: (member_epoch == 0).then(|| one_subtopology().call()),
         ..Default::default()
     };
     let m1 = heartbeat(&handle, request("m1", 0)).await;
@@ -782,9 +801,11 @@ async fn a_seeded_group_asks_for_its_missing_internal_topics_again() {
             member_id: "m1".into(),
             member_epoch: 0,
             rebalance_timeout_ms: 1_000,
-            topology: Some(one_subtopology(SingleSubtopologySetup {
-                storage: TopologyStorage::StoreChangelog,
-            })),
+            topology: Some(
+                one_subtopology()
+                    .storage(TopologyStorage::StoreChangelog)
+                    .call(),
+            ),
             ..Default::default()
         },
     )
@@ -834,10 +855,7 @@ async fn a_seeded_group_asks_for_its_missing_internal_topics_again() {
 /// the loaded member revokes both of its tasks instead.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_group_loaded_before_the_metadata_source_connects_assigns_its_tasks() {
-    use {
-        crate::test_support::FakeMetadataSource,
-        krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds as OwnedTaskIds,
-    };
+    use krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds as OwnedTaskIds;
 
     struct Row {
         member_id: &'static str,
@@ -862,7 +880,7 @@ async fn a_group_loaded_before_the_metadata_source_connects_assigns_its_tasks() 
         member_epoch,
         process_id: Some(format!("process-{member_id}")),
         rebalance_timeout_ms: 60_000,
-        topology: (member_epoch == 0).then(|| one_subtopology(SingleSubtopologySetup::default())),
+        topology: (member_epoch == 0).then(|| one_subtopology().call()),
         active_tasks: Some(if owned.is_empty() {
             vec![]
         } else {
@@ -877,17 +895,17 @@ async fn a_group_loaded_before_the_metadata_source_connects_assigns_its_tasks() 
         ..Default::default()
     };
     let expected = |member_id: &str, epoch, active: Option<Vec<i32>>| {
-        super::test_support::expected_active_response(super::test_support::ActiveResponseSetup {
-            member_id,
-            epoch: MemberEpoch(epoch),
-            status: Some(vec![]),
-            active: active.map(|partitions| {
+        super::test_support::expected_active_response()
+            .member_id(member_id)
+            .epoch(epoch)
+            .maybe_status(Some(vec![]))
+            .maybe_active(active.map(|partitions| {
                 partitions
                     .into_iter()
                     .map(krabka_ids::PartitionIndex)
                     .collect()
-            }),
-        })
+            }))
+            .call()
     };
 
     let (before, _log) = make_coordinator();
@@ -1081,9 +1099,7 @@ async fn a_join_sizes_the_internal_topics_as_kafka_does() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_heartbeat_status_list_follows_kafka() {
     use {
-        crate::{
-            coordinator::unified::streams::topology::status, test_support::FakeMetadataSource,
-        },
+        crate::coordinator::unified::streams::topology::status,
         krabka_protocol::owned::{
             common::streams_group_heartbeat_response::status::Status,
             streams_group_heartbeat_request::{Subtopology, Topology},
@@ -1205,13 +1221,8 @@ async fn the_heartbeat_status_list_follows_kafka() {
     ];
 
     for row in rows {
-        let source = Arc::new(
-            FakeMetadataSource::builder()
-                .image(image_of(None, &[("in", 1, 1)]))
-                .build(),
-        );
-        let (coord, _log) = make_coordinator();
-        coord.set_metadata_source(source);
+        let source = input_topic_source(1);
+        let coord = coordinator_with_source(source, None);
         let handle = coord.get_or_create_streams("g");
         let mut epochs: HashMap<&str, i32> = HashMap::new();
         let mut last = None;
@@ -1244,28 +1255,26 @@ async fn the_heartbeat_status_list_follows_kafka() {
             last = Some(resp);
         }
 
-        let expected = super::test_support::expected_active_response(
-            super::test_support::ActiveResponseSetup {
-                member_id: row.member,
-                epoch: MemberEpoch(row.epoch),
-                status: Some(
-                    row.status
-                        .iter()
-                        .map(|(status_code, detail)| Status {
-                            status_code: *status_code,
-                            status_detail: (*detail).into(),
-                            ..Default::default()
-                        })
-                        .collect(),
-                ),
-                active: row.active.map(|partitions| {
-                    partitions
-                        .into_iter()
-                        .map(krabka_ids::PartitionIndex)
-                        .collect()
-                }),
-            },
-        );
+        let expected = super::test_support::expected_active_response()
+            .member_id(row.member)
+            .epoch(row.epoch)
+            .maybe_status(Some(
+                row.status
+                    .iter()
+                    .map(|(status_code, detail)| Status {
+                        status_code: *status_code,
+                        status_detail: (*detail).into(),
+                        ..Default::default()
+                    })
+                    .collect(),
+            ))
+            .maybe_active(row.active.map(|partitions| {
+                partitions
+                    .into_iter()
+                    .map(krabka_ids::PartitionIndex)
+                    .collect()
+            }))
+            .call();
         check!(last == Some(expected), "{}", row.name);
     }
 }
@@ -1414,14 +1423,7 @@ async fn the_heartbeat_response_carries_what_kafka_sends() {
                 .image(image_of(None, &[("in", 1, partitions)]))
                 .build(),
         );
-        let coord = coordinator_with_log(
-            StreamsGroupConfig {
-                max_size,
-                ..undelayed()
-            },
-            Arc::new(InMemoryOffsetsLog::default()),
-        );
-        coord.set_metadata_source(source);
+        let coord = coordinator_with_source(source, Some(max_size));
         let handle = coord.get_or_create_streams("g");
         let mut epochs: HashMap<&str, i32> = HashMap::new();
         let mut last = None;
@@ -1443,8 +1445,7 @@ async fn the_heartbeat_response_carries_what_kafka_sends() {
                     port,
                     ..Default::default()
                 }),
-                topology: (member_epoch == 0)
-                    .then(|| one_subtopology(SingleSubtopologySetup::default())),
+                topology: (member_epoch == 0).then(|| one_subtopology().call()),
                 ..Default::default()
             })
             .await;
@@ -1464,10 +1465,7 @@ async fn the_heartbeat_response_carries_what_kafka_sends() {
 /// heartbeat of `m1` and then of `m2`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_member_keeps_its_epoch_until_it_revokes_and_is_fenced_after_its_timeout() {
-    use {
-        crate::test_support::FakeMetadataSource,
-        krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds as OwnedTaskIds,
-    };
+    use krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds as OwnedTaskIds;
 
     let accepted = accepted_tasks;
     // (name, rebalance timeout of m1, m1 revokes task 1, expected last m1 and
@@ -1500,11 +1498,7 @@ async fn a_member_keeps_its_epoch_until_it_revokes_and_is_fenced_after_its_timeo
     ];
 
     for (name, rebalance_timeout_ms, revokes, expected_m1, expected_m2) in rows {
-        let source = Arc::new(
-            FakeMetadataSource::builder()
-                .image(image_of(None, &[("in", 1, 2)]))
-                .build(),
-        );
+        let source = input_topic_source(2);
         let (coord, _log) = make_coordinator();
         coord.set_metadata_source(source);
         let handle = coord.get_or_create_streams("g");
@@ -1514,8 +1508,7 @@ async fn a_member_keeps_its_epoch_until_it_revokes_and_is_fenced_after_its_timeo
                 member_id: member_id.into(),
                 member_epoch,
                 rebalance_timeout_ms,
-                topology: (member_epoch == 0)
-                    .then(|| one_subtopology(SingleSubtopologySetup::default())),
+                topology: (member_epoch == 0).then(|| one_subtopology().call()),
                 active_tasks: owned.map(|partitions| {
                     vec![OwnedTaskIds {
                         subtopology_id: "0".into(),
@@ -1573,13 +1566,13 @@ async fn a_topology_update_or_an_invalid_owned_task_is_refused() {
     };
 
     let join = |member_id: &str, epoch, source: &str| {
-        let mut topology = one_subtopology(SingleSubtopologySetup::default());
+        let mut topology = one_subtopology().call();
         topology.epoch = epoch;
         topology.subtopologies[0].source_topics = vec![source.into()];
-        streams_join_request(topology, StreamsJoinSetup {
-            member_id,
-            ..Default::default()
-        })
+        streams_join_request()
+            .topology(topology)
+            .member_id(member_id)
+            .call()
     };
     let owning = |subtopology: &str, partition| StreamsGroupHeartbeatRequest {
         group_id: "g".into(),
@@ -1656,8 +1649,6 @@ async fn a_topology_update_or_an_invalid_owned_task_is_refused() {
 /// trunk's: 4.3.1 refuses an instance id before the group sees the request.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_static_member_follows_kafka_static_membership() {
-    use crate::test_support::FakeMetadataSource;
-
     let config = StreamsGroupConfig {
         max_size: 2,
         unstable_api_versions: UnstableApiVersions::Enabled,
@@ -1672,7 +1663,7 @@ async fn a_static_member_follows_kafka_static_membership() {
         active_tasks: Some(vec![]),
         standby_tasks: Some(vec![]),
         warmup_tasks: Some(vec![]),
-        topology: Some(one_subtopology(SingleSubtopologySetup::default())),
+        topology: Some(one_subtopology().call()),
         ..Default::default()
     };
     let beat = |member_id: &str, member_epoch, instance_id: &str| StreamsGroupHeartbeatRequest {
@@ -1774,11 +1765,7 @@ async fn a_static_member_follows_kafka_static_membership() {
     ];
 
     for (name, beats, expected, members) in rows {
-        let source = Arc::new(
-            FakeMetadataSource::builder()
-                .image(image_of(None, &[("in", 1, 1)]))
-                .build(),
-        );
+        let source = input_topic_source(1);
         let coord = coordinator_with_log(config.clone(), Arc::new(InMemoryOffsetsLog::default()));
         coord.set_metadata_source(source);
         let handle = coord.get_or_create_streams("g");
@@ -2020,9 +2007,7 @@ fn older_epoch_commit_checks_each_tasks_assignment_epoch() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_member_missing_a_rack_aware_tag_gets_missing_client_tags_at_version_1() {
     use {
-        crate::{
-            coordinator::unified::streams::topology::status, test_support::FakeMetadataSource,
-        },
+        crate::coordinator::unified::streams::topology::status,
         krabka_protocol::owned::common::{
             streams_group_heartbeat_request::key_value::KeyValue,
             streams_group_heartbeat_response::status::Status,
@@ -2109,22 +2094,13 @@ async fn a_member_missing_a_rack_aware_tag_gets_missing_client_tags_at_version_1
             },
             log,
         );
-        coord.set_metadata_source(Arc::new(
-            FakeMetadataSource::builder()
-                .image(image_of(None, &[("in", 1, 1)]))
-                .build(),
-        ));
+        coord.set_metadata_source(input_topic_source(1));
         let handle = coord.get_or_create_streams("g");
         let mut epoch = 0;
         let mut last = None;
         for beat in row.beats {
             let (version, member_epoch, tags, topology) = match *beat {
-                Beat::Join(version, tags) => (
-                    version,
-                    0,
-                    tags,
-                    Some(one_subtopology(SingleSubtopologySetup::default())),
-                ),
+                Beat::Join(version, tags) => (version, 0, tags, Some(one_subtopology().call())),
                 Beat::Heartbeat(version, tags) => (version, epoch, tags, None),
                 Beat::Leave(version) => (version, -1, None, None),
             };
@@ -2665,7 +2641,7 @@ async fn a_bump_records_the_validated_topology_epoch() {
             member_id: "m1".into(),
             member_epoch: 0,
             rebalance_timeout_ms: 1_000,
-            topology: Some(one_subtopology(SingleSubtopologySetup::default())),
+            topology: Some(one_subtopology().call()),
             ..Default::default()
         })
         .await;

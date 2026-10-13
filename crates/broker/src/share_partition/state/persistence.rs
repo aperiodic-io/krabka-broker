@@ -153,8 +153,7 @@ mod tests {
         super::*,
         crate::{
             share_coordinator::coordinator::test_support::{
-                DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup,
-                state_batch as persisted,
+                DeliveryAttemptCount, FixtureDeliveryState, state_batch as persisted,
             },
             share_partition::state::{
                 AckType, AcquiredRange,
@@ -173,13 +172,7 @@ mod tests {
         check!(start == 0);
         check!(dcc == 0); // nothing terminal yet
         // Acquired persists as Available(0) but retains its delivery_count.
-        check!(
-            batches
-                == vec![persisted(StateBatchSetup {
-                    bounds: Offset(0)..=Offset(4),
-                    ..Default::default()
-                })]
-        );
+        check!(batches == vec![persisted().bounds(Offset(0)..=Offset(4)).call()]);
     }
 
     #[test]
@@ -328,20 +321,16 @@ mod tests {
                 "initialization counts the persisted terminal batches",
                 |s| {
                     s.load_from(Offset(2), 1, 0, &[
-                        persisted(StateBatchSetup {
-                            bounds: Offset(2)..=Offset(3),
-                            ..Default::default()
-                        }),
-                        persisted(StateBatchSetup {
-                            bounds: Offset(4)..=Offset(5),
-                            delivery: FixtureDeliveryState::Acknowledged,
-                            ..Default::default()
-                        }),
-                        persisted(StateBatchSetup {
-                            bounds: Offset(6)..=Offset(6),
-                            delivery: FixtureDeliveryState::Archived,
-                            attempts: DeliveryAttemptCount(2),
-                        }),
+                        persisted().bounds(Offset(2)..=Offset(3)).call(),
+                        persisted()
+                            .bounds(Offset(4)..=Offset(5))
+                            .delivery(FixtureDeliveryState::Acknowledged)
+                            .call(),
+                        persisted()
+                            .bounds(Offset(6)..=Offset(6))
+                            .delivery(FixtureDeliveryState::Archived)
+                            .attempts(DeliveryAttemptCount(2))
+                            .call(),
                     ]);
                 },
                 (2, 7, 3),
@@ -350,20 +339,15 @@ mod tests {
                 "initialization moves the SPSO past a terminal prefix",
                 |s| {
                     s.load_from(Offset(0), 1, 0, &[
-                        persisted(StateBatchSetup {
-                            bounds: Offset(0)..=Offset(1),
-                            delivery: FixtureDeliveryState::Acknowledged,
-                            ..Default::default()
-                        }),
-                        persisted(StateBatchSetup {
-                            bounds: Offset(2)..=Offset(3),
-                            ..Default::default()
-                        }),
-                        persisted(StateBatchSetup {
-                            bounds: Offset(4)..=Offset(4),
-                            delivery: FixtureDeliveryState::Archived,
-                            ..Default::default()
-                        }),
+                        persisted()
+                            .bounds(Offset(0)..=Offset(1))
+                            .delivery(FixtureDeliveryState::Acknowledged)
+                            .call(),
+                        persisted().bounds(Offset(2)..=Offset(3)).call(),
+                        persisted()
+                            .bounds(Offset(4)..=Offset(4))
+                            .delivery(FixtureDeliveryState::Archived)
+                            .call(),
                     ]);
                 },
                 (2, 5, 1),
@@ -371,11 +355,10 @@ mod tests {
             (
                 "initialization of an all-terminal window empties it",
                 |s| {
-                    s.load_from(Offset(0), 1, 0, &[persisted(StateBatchSetup {
-                        bounds: Offset(0)..=Offset(3),
-                        delivery: FixtureDeliveryState::Acknowledged,
-                        ..Default::default()
-                    })]);
+                    s.load_from(Offset(0), 1, 0, &[persisted()
+                        .bounds(Offset(0)..=Offset(3))
+                        .delivery(FixtureDeliveryState::Acknowledged)
+                        .call()]);
                 },
                 (4, 4, 0),
             ),

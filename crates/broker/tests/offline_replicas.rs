@@ -25,11 +25,8 @@ mod kafka_wire;
 
 use {
     crate::support::{
-        discovery::named_topic_metadata,
-        registered_cluster, shutdown_cluster,
-        storage::two_dir_config,
-        topics::{ConfiguredTopicSetup, TopicPartitionCount, TopicReplicationFactor},
-        wire::ApiRequestSetup,
+        discovery::named_topic_metadata, registered_cluster, shutdown_cluster,
+        storage::two_dir_config, wire::ApiRequestSetup,
     },
     assert2::assert,
     bytes::BytesMut,
@@ -107,12 +104,11 @@ async fn create_topic_named(addr: SocketAddr, name: &str, partitions: i32, repli
     kafka_wire::create_topic_on(
         &mut stream,
         CLIENT_ID,
-        kafka_wire::topic(ConfiguredTopicSetup {
-            name: (name).into(),
-            partitions: TopicPartitionCount(partitions),
-            replicas: TopicReplicationFactor(replication),
-            ..Default::default()
-        }),
+        kafka_wire::topic()
+            .name((name).into())
+            .partitions(partitions)
+            .replicas(replication)
+            .call(),
     )
     .await;
 }

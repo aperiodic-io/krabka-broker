@@ -870,7 +870,25 @@ pub(crate) mod fixture {
         }
     }
 
-    pub(crate) fn empty_run(setup: RunSetup<'_>) -> RunOutput {
+    #[bon::builder]
+    pub(crate) fn empty_run(
+        #[builder(default = RunSetup::default().scenario)] scenario: &'_ str,
+        #[builder(default = RunSetup::default().stack)] stack: Stack,
+        #[builder(default = RunSetup::default().topology)] topology: Topology,
+        #[builder(default = RunSetup::default().producer_rate)] producer_rate: Frequency,
+        #[builder(default = RunSetup::default().samples)] samples: Vec<Sample>,
+        #[builder(default = RunSetup::default().broker_samples)] broker_samples: Vec<BrokerSample>,
+        #[builder(default = RunSetup::default().p99)] p99: Time,
+    ) -> RunOutput {
+        let setup = RunSetup {
+            scenario,
+            stack,
+            topology,
+            producer_rate,
+            samples,
+            broker_samples,
+            p99,
+        };
         let RunSetup {
             scenario: name,
             stack,
@@ -884,7 +902,7 @@ pub(crate) mod fixture {
             mode_tag: ModeTag::Cluster,
             partitions: topology.partitions,
             replication_factor: topology.replication_factor,
-            ..scenario(name)
+            ..self::scenario(name)
         };
         RunOutput {
             scenario,

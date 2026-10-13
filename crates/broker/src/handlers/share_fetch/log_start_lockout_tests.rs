@@ -24,10 +24,9 @@ use {
         handlers::{
             delete_records::handle,
             test_support::{
-                ClientTopicSetup, ProduceRecordsSetup, RecordCount, ShareWireSetup,
-                TopicPartitionCount, create_topic as create_topic_from_test_support,
+                RecordCount, create_topic as create_topic_from_test_support,
                 produce_records as produce_records_from_test_support, share_fetch_partition_rows,
-                share_fetch_topics,
+                share_fetch_topics, share_fetch_wire,
             },
         },
         test_support::{initialize_share_state, peer, principal, start_broker_no_audit_with},
@@ -58,22 +57,24 @@ async fn start() -> (BrokerHandle, tempfile::TempDir) {
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str, num_partitions: i32) -> WireUuid {
-    create_topic_from_test_support(broker, ClientTopicSetup {
-        client_id: "share-log-start-lockout-test",
-        name,
-        partitions: TopicPartitionCount(num_partitions),
-    })
-    .await
+    create_topic_from_test_support()
+        .broker(broker)
+        .client_id("share-log-start-lockout-test")
+        .name(name)
+        .partitions(num_partitions)
+        .call()
+        .await
 }
 
 /// Appends `count` one-record batches to `partition_index` of `topic`.
 async fn produce_records(broker: &BrokerHandle, topic: &str, partition_index: i32, count: i32) {
-    produce_records_from_test_support(broker, ProduceRecordsSetup {
-        topic,
-        partition_index: krabka_ids::PartitionIndex(partition_index),
-        count: RecordCount(count),
-    })
-    .await;
+    produce_records_from_test_support()
+        .broker(broker)
+        .topic(topic)
+        .partition_index(partition_index)
+        .count(count)
+        .call()
+        .await;
 }
 
 /// Trims `partition_index` of `topic` to `new_log_start` with a real
@@ -109,24 +110,6 @@ async fn delete_records(
     response.topics[0].partitions[0].error_code
 }
 
-#[derive(bon::Builder)]
-struct ShareFetchOutcomeCheck<'a> {
-    broker: &'a BrokerHandle,
-    group: &'a str,
-    topic_id: [u8; 16],
-}
-
-impl ShareFetchOutcomeCheck<'_> {
-    async fn expect(&self, expected: Vec<PartitionOutcome>) {
-        let rows = share_fetch_rows(
-            self.broker,
-            ShareFetchRowsSetup::incremental_pair(self.group, WireUuid(self.topic_id)),
-        )
-        .await;
-        assert!(sorted_partition_outcomes(&rows) == expected);
-    }
-}
-
 use crate::handlers::test_support::ShareSessionEpoch;
 /// Sends a `ShareFetch` naming every partition index of `topic_id` with
 /// `max_records`, and returns each row's `PartitionData` in request order.
@@ -158,10 +141,22 @@ impl<'a> ShareFetchRowsSetup<'a> {
     }
 }
 
+#[bon::builder]
 async fn share_fetch_rows(
     broker: &BrokerHandle,
-    setup: ShareFetchRowsSetup<'_>,
+    #[builder(default = "g")] group: &'_ str,
+    #[builder(into, default = ShareSessionEpoch (0))] epoch: ShareSessionEpoch,
+    #[builder(default = WireUuid :: ZERO)] topic_id: WireUuid,
+    #[builder(default = & [PartitionIndex (0)])] partitions: &'_ [PartitionIndex],
+    #[builder(into, default = RecordCount (500))] max_records: RecordCount,
 ) -> Vec<PartitionData> {
+    let setup = ShareFetchRowsSetup {
+        group,
+        epoch,
+        topic_id,
+        partitions,
+        max_records,
+    };
     let request = ShareFetchRequest {
         group_id: Some(setup.group.into()),
         member_id: Some("member".into()),
@@ -182,20 +177,30 @@ async fn share_fetch_rows(
         ),
         ..Default::default()
     };
-    share_fetch_partition_rows(broker, &request, ShareWireSetup::default()).await
+    let response = share_fetch_wire()
+        .broker(broker)
+        .request(&request)
+        .call()
+        .await;
+    share_fetch_partition_rows(response)
 }
 
-async fn share_fetch_one(broker: &BrokerHandle, setup: ShareFetchRowsSetup<'_>) -> PartitionData {
-    assert!(setup.partitions.len() == 1, "one partition requested");
-    let partition_index = setup.partitions[0].0;
-    share_fetch_rows(broker, setup)
+async fn share_fetch_one(
+    broker: &BrokerHandle,
+    group: &str,
+    epoch: i32,
+    topic_id: WireUuid,
+) -> PartitionData {
+    share_fetch_rows()
+        .broker(broker)
+        .group(group)
+        .epoch(epoch)
+        .topic_id(topic_id)
+        .call()
         .await
         .into_iter()
         .next()
-        .unwrap_or(PartitionData {
-            partition_index,
-            ..Default::default()
-        })
+        .unwrap_or_default()
 }
 
 use crate::handlers::test_support::acquired_share_records as acquired;
@@ -297,13 +302,7 @@ async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
         // later `DeleteRecords` moves the log start out from under a cell
         // that is already cached, exactly as issue #948 describes.
         let mut epoch = 0;
-        let opened = share_fetch_one(&broker, ShareFetchRowsSetup {
-            group: &group,
-            epoch: ShareSessionEpoch(epoch),
-            topic_id,
-            ..Default::default()
-        })
-        .await;
+        let opened = share_fetch_one(&broker, &group, epoch, topic_id).await;
         assert!(opened.error_code == codes::NONE, "{}: {opened:?}", row.name);
 
         produce_records(&broker, &topic, 0, 5).await;
@@ -315,14 +314,14 @@ async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
         // exactly as `initialize_share_state` left it.
         if row.prime_max_records > 0 {
             epoch += 1;
-            let priming = share_fetch_rows(&broker, ShareFetchRowsSetup {
-                group: &group,
-                epoch: ShareSessionEpoch(epoch),
-                topic_id,
-                max_records: RecordCount(row.prime_max_records),
-                ..Default::default()
-            })
-            .await;
+            let priming = share_fetch_rows()
+                .broker(&broker)
+                .group(&group)
+                .epoch(epoch)
+                .topic_id(topic_id)
+                .max_records(row.prime_max_records)
+                .call()
+                .await;
             assert!(
                 priming[0].error_code == codes::NONE,
                 "{}: priming fetch {:?}",
@@ -335,22 +334,10 @@ async fn share_fetch_survives_the_log_start_moving_past_the_spso() {
         assert!(delete_error == codes::NONE, "{}: {delete_error}", row.name);
 
         epoch += 1;
-        let lockout = share_fetch_one(&broker, ShareFetchRowsSetup {
-            group: &group,
-            epoch: ShareSessionEpoch(epoch),
-            topic_id,
-            ..Default::default()
-        })
-        .await;
+        let lockout = share_fetch_one(&broker, &group, epoch, topic_id).await;
         let after_lockout_spso = spso(&broker, &group, topic_id, 0).await;
         epoch += 1;
-        let next = share_fetch_one(&broker, ShareFetchRowsSetup {
-            group: &group,
-            epoch: ShareSessionEpoch(epoch),
-            topic_id,
-            ..Default::default()
-        })
-        .await;
+        let next = share_fetch_one(&broker, &group, epoch, topic_id).await;
 
         actual.push((
             row.name,
@@ -395,16 +382,15 @@ async fn an_unreadable_partition_fails_alone() {
     bytes[8..12].copy_from_slice(&0_i32.to_be_bytes());
     std::fs::write(&segment, bytes).expect("corrupt the segment");
 
-    ShareFetchOutcomeCheck::builder()
-        .broker(&broker)
-        .group(group)
-        .topic_id(topic_id.0)
-        .build()
-        .expect(vec![
-            (0, codes::CORRUPT_MESSAGE, vec![]),
-            (1, codes::NONE, vec![(0, 4)]),
-        ])
-        .await;
+    let by_partition = fetch_incremental_pair(&broker, group, topic_id).await;
+
+    assert!(
+        by_partition
+            == vec![
+                (0, codes::CORRUPT_MESSAGE, vec![]),
+                (1, codes::NONE, vec![(0, 4)]),
+            ]
+    );
     broker.shutdown().await;
 }
 
@@ -422,17 +408,17 @@ async fn a_healthy_partition_in_the_same_request_is_unaffected() {
     let delete_error = delete_records(&broker, topic, 0, 3).await;
     assert!(delete_error == codes::NONE, "{delete_error}");
 
-    // The partitions rotate by session epoch, so the helper sorts their rows.
-    ShareFetchOutcomeCheck::builder()
-        .broker(&broker)
-        .group(group)
-        .topic_id(topic_id.0)
-        .build()
-        .expect(vec![
-            (0, codes::NONE, vec![(3, 4)]),
-            (1, codes::NONE, vec![(0, 4)]),
-        ])
-        .await;
+    // The partitions rotate by session epoch, so the rows come in either
+    // order.
+    let by_partition = fetch_incremental_pair(&broker, group, topic_id).await;
+
+    assert!(
+        by_partition
+            == vec![
+                (0, codes::NONE, vec![(3, 4)]),
+                (1, codes::NONE, vec![(0, 4)]),
+            ]
+    );
     broker.shutdown().await;
 }
 
@@ -452,24 +438,13 @@ async fn a_member_that_does_not_acknowledge_gets_no_more_than_the_record_lock_li
     let group = "g-record-lock-limit";
     let topic_id = create_topic(&broker, topic, 1).await;
     initialize_share_state(&broker, group, topic_uuid(topic_id), 0).await;
-    let opened = share_fetch_one(&broker, ShareFetchRowsSetup {
-        group,
-        topic_id,
-        ..Default::default()
-    })
-    .await;
+    let opened = share_fetch_one(&broker, group, 0, topic_id).await;
     assert!(opened.error_code == codes::NONE, "{opened:?}");
     produce_records(&broker, topic, 0, 250).await;
 
     let mut per_fetch = Vec::new();
     for epoch in 1..=3 {
-        let row = share_fetch_one(&broker, ShareFetchRowsSetup {
-            group,
-            epoch: ShareSessionEpoch(epoch),
-            topic_id,
-            ..Default::default()
-        })
-        .await;
+        let row = share_fetch_one(&broker, group, epoch, topic_id).await;
         per_fetch.push((row.error_code, acquired(&row)));
     }
     let end_offset = broker
@@ -501,13 +476,13 @@ async fn primed_pair(broker: &BrokerHandle, topic: &str, group: &str) -> WireUui
     let topic_id = create_topic(broker, topic, 2).await;
     initialize_share_state(broker, group, topic_uuid(topic_id), 0).await;
     initialize_share_state(broker, group, topic_uuid(topic_id), 1).await;
-    let opened = share_fetch_rows(broker, ShareFetchRowsSetup {
-        group,
-        topic_id,
-        partitions: &[PartitionIndex(0), PartitionIndex(1)],
-        ..Default::default()
-    })
-    .await;
+    let opened = share_fetch_rows()
+        .broker(broker)
+        .group(group)
+        .topic_id(topic_id)
+        .partitions(&[PartitionIndex(0), PartitionIndex(1)])
+        .call()
+        .await;
     assert!(
         opened.iter().all(|row| row.error_code == codes::NONE),
         "{opened:?}"
@@ -524,4 +499,22 @@ fn sorted_partition_outcomes(rows: &[PartitionData]) -> Vec<PartitionOutcome> {
         .collect();
     outcomes.sort_unstable();
     outcomes
+}
+
+async fn fetch_incremental_pair(
+    broker: &BrokerHandle,
+    group: &str,
+    topic_id: WireUuid,
+) -> Vec<PartitionOutcome> {
+    let setup = ShareFetchRowsSetup::incremental_pair(group, topic_id);
+    let rows = share_fetch_rows()
+        .broker(broker)
+        .group(setup.group)
+        .epoch(setup.epoch.0)
+        .topic_id(setup.topic_id)
+        .partitions(setup.partitions)
+        .max_records(setup.max_records.0)
+        .call()
+        .await;
+    sorted_partition_outcomes(&rows)
 }

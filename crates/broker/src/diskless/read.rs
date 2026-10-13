@@ -305,6 +305,7 @@ mod tests {
             broker::spawn_partition,
             config::{RemoteStorageBackend, RlmmKind},
             diskless::wal_index::{WalFlushRecord, WalIndexEntry},
+            testing::single_value_batch,
         },
         assert2::assert,
         bytes::BytesMut,
@@ -315,7 +316,7 @@ mod tests {
             Decode, Encode,
             owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
             primitives::uuid::Uuid as WireUuid,
-            records::{Attributes, Record, RecordBatch},
+            records::{Record, RecordBatch},
         },
         object_store::{ObjectStoreExt, PutPayload, path::Path},
     };
@@ -334,25 +335,10 @@ mod tests {
     }
 
     fn batch(base_offset: i64, value: &'static [u8]) -> RecordBatch {
-        RecordBatch {
-            base_offset,
-            partition_leader_epoch: 0,
-            attributes: Attributes::default(),
-            last_offset_delta: 0,
-            base_timestamp: 0,
-            max_timestamp: 0,
-            producer_id: -1,
-            producer_epoch: -1,
-            base_sequence: -1,
-            records: vec![Record {
-                attributes: 0,
-                offset_delta: 0,
-                timestamp_delta: 0,
-                key: None,
-                value: Some(Bytes::from_static(value)),
-                headers: vec![],
-            }],
-        }
+        single_value_batch()
+            .base_offset(base_offset)
+            .value(Bytes::from_static(value))
+            .call()
     }
 
     fn encode_batches(batches: &[RecordBatch]) -> Bytes {

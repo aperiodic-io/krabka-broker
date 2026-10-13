@@ -1,15 +1,15 @@
 use {super::*, assert2::check};
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct RetentionMillis(i64);
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct RetentionBytes(u64);
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 struct LogicalOffset(i64);
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct UnixMillis(i64);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -21,7 +21,19 @@ struct DisklessRetentionSetup {
     now: UnixMillis,
 }
 
-fn policy(setup: DisklessRetentionSetup) -> DisklessRetentionPolicy {
+#[bon::builder]
+fn policy(
+    #[builder(into)] retention: Option<RetentionMillis>,
+    #[builder(into)] bytes: Option<RetentionBytes>,
+    #[builder(into, default)] start: LogicalOffset,
+    #[builder(into, default = UnixMillis (1_000))] now: UnixMillis,
+) -> DisklessRetentionPolicy {
+    let setup = DisklessRetentionSetup {
+        retention,
+        bytes,
+        start,
+        now,
+    };
     DisklessRetentionPolicy {
         retention_ms: setup.retention.map(|duration| duration.0),
         retention_bytes: setup.bytes.map(|limit| limit.0),

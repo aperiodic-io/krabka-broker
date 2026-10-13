@@ -15,7 +15,7 @@ use {
         client::connect_owned,
         share::crash_follower,
         shutdown_cluster,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::assert,
     base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
@@ -97,9 +97,7 @@ async fn client(handle: &BrokerHandle) -> Client {
 /// metadata image does not hold.
 async fn create_orders(client: &Client) -> uuid::Uuid {
     let created = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup::default(),
-        )))
+        .send(create_topic_request(creatable_topic().call()))
         .await
         .expect("CreateTopics");
     assert!(created.topics[0].error_code == 0, "{created:?}");

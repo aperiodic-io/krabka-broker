@@ -15,7 +15,7 @@ use {
             self,
             produce::{SinglePartitionProduceSetup, send_batch},
             records::value_record,
-            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+            topics::{creatable_topic, create_topic_request},
         },
     },
     assert2::assert,
@@ -43,12 +43,9 @@ krabka_macros::unix_millis_fixture!(
 /// Create a one-partition topic and wait for its partition to exist locally.
 pub(super) async fn create_topic(broker: &BrokerHandle, client: &Client, name: &str) -> WireUuid {
     let resp = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: (name).into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name((name).into()).call(),
+        ))
         .await
         .expect("CreateTopics");
     let created = &resp.topics[0];

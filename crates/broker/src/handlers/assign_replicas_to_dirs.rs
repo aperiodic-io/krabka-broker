@@ -239,14 +239,11 @@ mod tests {
                 }),
                 MetadataRecord::V1Partition(PartitionRecord {
                     directories: vec![uuid::Uuid::nil()],
-                    ..crate::handlers::test_support::replicated_partition(
-                        crate::handlers::test_support::ReplicatedPartitionSetup {
-                            topic: "t",
-                            leader: krabka_audit::NodeId(1),
-                            replicas: &[krabka_audit::NodeId(1)],
-                            ..Default::default()
-                        },
-                    )
+                    ..crate::handlers::test_support::replicated_partition()
+                        .topic("t")
+                        .leader(1)
+                        .replicas(&[krabka_audit::NodeId(1)])
+                        .call()
                 }),
             ])
             .await

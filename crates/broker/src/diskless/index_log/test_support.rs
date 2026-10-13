@@ -81,10 +81,22 @@ pub(crate) struct RacingAppendLog {
     racing: StdMutex<Option<RacingAppendSetup>>,
 }
 
+#[bon::bon]
 impl RacingAppendLog {
     /// Race the setup's keyed record onto its partition, as the flusher
     /// publishes every index record.
-    pub(crate) fn new(inner: Arc<dyn MetadataEventLog>, setup: RacingAppendSetup) -> Arc<Self> {
+    #[builder]
+    pub(crate) fn build(
+        inner: Arc<dyn MetadataEventLog>,
+        #[builder(into, default)] partition: PartitionIndex,
+        #[builder(default)] key: Bytes,
+        #[builder(default)] event: Bytes,
+    ) -> Arc<Self> {
+        let setup = RacingAppendSetup {
+            partition,
+            key,
+            event,
+        };
         Arc::new(Self {
             inner,
             racing: StdMutex::new(Some(setup)),
@@ -163,10 +175,26 @@ impl WalFlushSetup<'_> {
     }
 }
 
-pub(crate) fn flush_record(setup: WalFlushSetup<'_>) -> WalFlushRecord {
-    use {
-        crate::diskless::wal_index::{WalFlushRecord, WalIndexEntry},
-        krabka_units::convert::ByteSizeExt,
+#[bon::builder]
+pub(crate) fn flush_record(
+    #[builder(default = WalFlushSetup::default().topic_id)] topic_id: uuid::Uuid,
+    #[builder(default = WalFlushSetup::default().object_key)] object_key: &'_ str,
+    #[builder(into, default = WalFlushSetup::default().first_offset)]
+    first_offset: krabka_log::Offset,
+    #[builder(into, default = WalFlushSetup::default().last_offset)]
+    last_offset: krabka_log::Offset,
+    #[builder(into, default = WalFlushSetup::default().max_timestamp)] max_timestamp: UnixMillis,
+    #[builder(default = WalFlushSetup::default().byte_len)] byte_len: krabka_units::ByteSize,
+) -> WalFlushRecord {
+    use {crate::diskless::wal_index::WalIndexEntry, krabka_units::convert::ByteSizeExt};
+
+    let setup = WalFlushSetup {
+        topic_id,
+        object_key,
+        first_offset,
+        last_offset,
+        max_timestamp,
+        byte_len,
     };
     let WalFlushSetup {
         topic_id,
@@ -190,4 +218,28 @@ pub(crate) fn flush_record(setup: WalFlushSetup<'_>) -> WalFlushRecord {
             max_timestamp_ms: max_timestamp.0,
         }],
     }
+}
+
+pub(crate) fn second_object_flush_record(topic_id: uuid::Uuid) -> WalFlushRecord {
+    let setup = WalFlushSetup::second_object(topic_id);
+    flush_record()
+        .topic_id(setup.topic_id)
+        .object_key(setup.object_key)
+        .first_offset(setup.first_offset)
+        .last_offset(setup.last_offset)
+        .max_timestamp(setup.max_timestamp)
+        .byte_len(setup.byte_len)
+        .call()
+}
+
+pub(crate) fn three_record_flush(topic_id: uuid::Uuid, object_key: &str) -> WalFlushRecord {
+    let setup = WalFlushSetup::three_records();
+    flush_record()
+        .topic_id(topic_id)
+        .object_key(object_key)
+        .first_offset(setup.first_offset)
+        .last_offset(setup.last_offset)
+        .max_timestamp(setup.max_timestamp)
+        .byte_len(setup.byte_len)
+        .call()
 }

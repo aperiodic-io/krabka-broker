@@ -17,8 +17,9 @@ use {
                 },
                 test_support::{
                     CapturedPeerSend, EngineSetup, build_engine_only, elect_single_voter_engine,
-                    one_offset_batch, record_peer_sends, recv_peer_send, recv_peer_send_with_api,
-                    submit_change_with_timeout, topic_record,
+                    elect_test_engine_with_helper, one_offset_batch, record_peer_sends,
+                    recv_peer_send, recv_peer_send_with_api, submit_change_with_timeout,
+                    topic_record,
                 },
             },
             event::SuccessorRank,
@@ -233,20 +234,29 @@ fn inbound_fetch(
     let (reply, receiver) = oneshot::channel();
     engine.on_inbound(Inbound::Fetch {
         version: FETCH_VERSION,
-        req: wire::PeerRequest::Fetch {
-            cluster_id: None,
-            max_wait_ms: 0,
-            high_watermark: -1,
-            from: peer,
-            current_leader_epoch: i32::try_from(engine.core.quorum_state().leader_epoch).unwrap(),
-            fetch_epoch,
-            fetch_offset,
-            replica_directory_id: directory,
-        }
-        .encode(),
+        req: fetch_from_engine(engine, peer, fetch_epoch, fetch_offset, directory).encode(),
         reply,
     });
     receiver
+}
+
+fn fetch_from_engine(
+    engine: &Engine,
+    from: NodeId,
+    fetch_epoch: u32,
+    fetch_offset: i64,
+    directory_id: uuid::Uuid,
+) -> wire::PeerRequest {
+    wire::PeerRequest::Fetch {
+        cluster_id: None,
+        max_wait_ms: 0,
+        high_watermark: -1,
+        from,
+        current_leader_epoch: i32::try_from(engine.core.quorum_state().leader_epoch).unwrap(),
+        fetch_epoch,
+        fetch_offset,
+        replica_directory_id: directory_id,
+    }
 }
 
 /// A Fetch response from a newer epoch moves a follower or an observer to the
@@ -265,10 +275,7 @@ enum TwoVoterRole {
 }
 
 fn two_voter_engine(role: TwoVoterRole) -> (Engine, tempfile::TempDir) {
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only().ids(&[NodeId(1), NodeId(2)]).call();
     match role {
         TwoVoterRole::Leader => elect_with_peer(&mut engine, NodeId(2)),
         TwoVoterRole::Follower => become_follower(&mut engine, NodeId(2), 3),
@@ -282,10 +289,7 @@ async fn a_fetch_response_from_a_newer_epoch_moves_the_node_to_that_leader() {
         ("an observer that joins later", NodeId(4)),
         ("a voter that follows", NodeId(2)),
     ] {
-        let (mut engine, _dir) = build_engine_only(EngineSetup {
-            me,
-            ..Default::default()
-        });
+        let (mut engine, _dir) = build_engine_only().me(me).call();
         engine.on_event(Event::ReceiveBeginQuorumEpoch {
             leader_id: NodeId(1),
             leader_epoch: 1,
@@ -372,7 +376,7 @@ async fn a_replica_that_cannot_serve_a_fetch_names_the_leader_it_knows() {
             refusal(NOT_LEADER_OR_FOLLOWER, None, 0),
         ),
     ] {
-        let (mut replica, _dir) = build_engine_only(EngineSetup::default());
+        let (mut replica, _dir) = build_engine_only().call();
         if let Some(leader_id) = leader {
             become_follower(&mut replica, leader_id, 1);
         }
@@ -396,19 +400,8 @@ async fn a_replica_that_cannot_serve_a_fetch_names_the_leader_it_knows() {
 /// the fetcher moves to its epoch (`maybeHandleCommonResponse`).
 #[tokio::test]
 async fn a_leader_refuses_a_fetch_from_another_epoch_and_names_itself() {
-    let (mut leader, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
-    leader.on_event(Event::ElectionTimeout);
-    for epoch in [0, 1] {
-        leader.on_event(Event::ReceiveVoteResponse {
-            from: NodeId(2),
-            epoch,
-            vote_granted: true,
-        });
-    }
-    assert!(leader.core.role().is_leader());
+    let (mut leader, _dir) = build_engine_only().ids(&[NodeId(1), NodeId(2)]).call();
+    elect_test_engine_with_helper(&mut leader, NodeId(2));
     let epoch = leader.core.quorum_state().leader_epoch;
     let (reply, mut response) = oneshot::channel();
 
@@ -476,7 +469,7 @@ fn broadcast_fixture() -> (
     tempfile::TempDir,
     tokio::sync::mpsc::UnboundedReceiver<CapturedPeerSend>,
 ) {
-    let (mut engine, dir) = build_engine_only(EngineSetup::default());
+    let (mut engine, dir) = build_engine_only().call();
     let sends = record_peer_sends(&mut engine, wire::PeerResponse::Ack { epoch: 4 }.encode());
     (engine, dir, sends)
 }
@@ -611,7 +604,7 @@ async fn quorum_epoch_requests_teach_the_leader_endpoints() {
             Vec::new(),
         ),
     ] {
-        let (mut replica, _dir) = build_engine_only(EngineSetup::default());
+        let (mut replica, _dir) = build_engine_only().call();
         let recorder = std::sync::Arc::new(EndpointRecorder::default());
         replica.peers = recorder.clone();
         let (reply, mut answer) = oneshot::channel();
@@ -657,10 +650,7 @@ async fn check_sent_fetch(
 
 #[tokio::test]
 async fn send_fetch_uses_snapshot_epoch_only_until_log_extends_past_boundary() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
+    let (mut engine, _dir) = build_engine_only().ids(&[NodeId(1), NodeId(2)]).call();
     engine
         .log
         .install_snapshot(Offset(10))
@@ -688,12 +678,13 @@ async fn send_fetch_uses_snapshot_epoch_only_until_log_extends_past_boundary() {
 
 #[test]
 fn serve_fetch_records_returns_batches_only_for_offsets_inside_log() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        metadata_raft_fetch_max: MetadataRaftFetchMax::try_from(krabka_units::bytes(1))
-            .expect("one byte still serves the first batch"),
-        ..Default::default()
-    });
+    let (mut engine, _dir) = build_engine_only()
+        .ids(&[NodeId(1)])
+        .metadata_raft_fetch_max(
+            MetadataRaftFetchMax::try_from(krabka_units::bytes(1))
+                .expect("one byte still serves the first batch"),
+        )
+        .call();
     let mut batch = one_offset_batch(0, 1, b"a");
     engine.log.append(&mut batch, 0).expect("append");
     let mut batch = one_offset_batch(1, 1, b"b");
@@ -714,12 +705,13 @@ fn serve_fetch_records_returns_batches_only_for_offsets_inside_log() {
 
 #[tokio::test]
 async fn fetch_response_snapshot_hint_starts_once_and_ignores_stale_hint() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1), NodeId(2)],
-        metadata_raft_fetch_max: MetadataRaftFetchMax::try_from(krabka_units::bytes(512))
-            .expect("positive fetch maximum"),
-        ..Default::default()
-    });
+    let (mut engine, _dir) = build_engine_only()
+        .ids(&[NodeId(1), NodeId(2)])
+        .metadata_raft_fetch_max(
+            MetadataRaftFetchMax::try_from(krabka_units::bytes(512))
+                .expect("positive fetch maximum"),
+        )
+        .call();
     let fetch_snapshot_response = wire::PeerResponse::FetchSnapshot {
         snapshot_id: (11, 3),
         size: 0,
@@ -791,11 +783,10 @@ async fn fetch_response_snapshot_hint_starts_once_and_ignores_stale_hint() {
 /// leader endpoints, and applies content only once node 2 itself answers.
 #[tokio::test]
 async fn leaderless_observer_discovers_the_leader_through_a_follower_redirect() {
-    let (mut observer, _dir) = build_engine_only(EngineSetup {
-        me: NodeId(3),
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
+    let (mut observer, _dir) = build_engine_only()
+        .me(3)
+        .ids(&[NodeId(1), NodeId(2)])
+        .call();
     let transport = Arc::new(EndpointRecorder::default());
     observer.peers = transport.clone();
     assert2::assert!(matches!(observer.core.role(), Role::Observer {
@@ -862,7 +853,7 @@ async fn rejected_fetch_responses_leave_log_watermark_and_snapshot_unchanged() {
         ("wrong sender", 1, NodeId(3)),
         ("changed role", 2, NodeId(2)),
     ] {
-        let (mut engine, _dir) = build_engine_only(EngineSetup::default());
+        let (mut engine, _dir) = build_engine_only().call();
         become_follower(&mut engine, NodeId(2), if setup == 0 { 4 } else { 3 });
         if setup == 2 {
             engine.on_event(Event::ReceiveEndQuorumEpoch {
@@ -884,10 +875,7 @@ async fn rejected_fetch_responses_leave_log_watermark_and_snapshot_unchanged() {
 #[tokio::test]
 async fn admitted_fetch_selects_truncate_append_or_high_watermark_path() {
     // Truncation does not also append or advance the HWM.
-    let (mut truncating, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
+    let (mut truncating, _dir) = build_engine_only().ids(&[NodeId(1), NodeId(2)]).call();
     for offset in 0..2 {
         let mut batch = one_offset_batch(offset, 2, b"local");
         truncating
@@ -912,10 +900,7 @@ async fn admitted_fetch_selects_truncate_append_or_high_watermark_path() {
     assert2::assert!(truncating.log.hwm() == Offset(0));
 
     // Append advances the HWM only after the carried batch reaches the log.
-    let (mut appending, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
+    let (mut appending, _dir) = build_engine_only().ids(&[NodeId(1), NodeId(2)]).call();
     become_follower(&mut appending, NodeId(2), 3);
     let append = wire::PeerResponse::Fetch(wire::FetchAnswer {
         diverging: None,
@@ -930,10 +915,7 @@ async fn admitted_fetch_selects_truncate_append_or_high_watermark_path() {
     assert2::assert!(appending.log.hwm() == Offset(1));
 
     // An empty response can advance only the watermark over existing data.
-    let (mut advancing, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
+    let (mut advancing, _dir) = build_engine_only().ids(&[NodeId(1), NodeId(2)]).call();
     let mut local = one_offset_batch(0, 2, b"already-replicated");
     advancing
         .log
@@ -955,10 +937,7 @@ async fn admitted_fetch_selects_truncate_append_or_high_watermark_path() {
 
 #[tokio::test]
 async fn fetch_snapshot_response_error_or_wrong_leader_aborts_transfer() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
+    let (mut engine, _dir) = build_engine_only().ids(&[NodeId(1), NodeId(2)]).call();
     let fetch_response = wire::PeerResponse::Fetch(wire::FetchAnswer {
         diverging: None,
         snapshot_id: None,
@@ -1004,10 +983,7 @@ async fn fetch_snapshot_response_error_or_wrong_leader_aborts_transfer() {
 /// backwards when a later response reports a lower one.
 #[tokio::test]
 async fn quorum_high_watermark_keeps_the_leader_s_watermark_past_the_local_clamp() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
+    let (mut engine, _dir) = build_engine_only().ids(&[NodeId(1), NodeId(2)]).call();
 
     // A node that has heard from nobody reports its own watermark.
     assert!(engine.quorum_state_snapshot().quorum_high_watermark == 0);
@@ -1154,7 +1130,7 @@ async fn a_metadata_fetch_below_the_pruned_log_start_returns_the_snapshot_id() {
 /// back.
 #[tokio::test]
 async fn a_leader_answers_a_diverging_fetch_without_truncating_its_own_log() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup::default());
+    let (mut engine, _dir) = build_engine_only().call();
     for offset in 0..5 {
         engine
             .log
@@ -1266,17 +1242,7 @@ fn fetch_at(
     let (reply, _rx) = oneshot::channel();
     engine.on_inbound(Inbound::Fetch {
         version: FETCH_VERSION,
-        req: wire::PeerRequest::Fetch {
-            cluster_id: None,
-            max_wait_ms: 0,
-            high_watermark: -1,
-            from,
-            current_leader_epoch: i32::try_from(engine.core.quorum_state().leader_epoch).unwrap(),
-            fetch_epoch,
-            fetch_offset,
-            replica_directory_id: directory_id,
-        }
-        .encode(),
+        req: fetch_from_engine(engine, from, fetch_epoch, fetch_offset, directory_id).encode(),
         reply,
     });
 }

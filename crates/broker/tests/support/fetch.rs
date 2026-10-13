@@ -67,7 +67,17 @@ pub struct FetchPartitionSetup {
     pub maximum: FetchByteLimit,
 }
 
-pub fn fetch_partition(setup: FetchPartitionSetup) -> FetchPartition {
+#[bon::builder]
+pub fn fetch_partition(
+    #[builder(into, default)] partition: PartitionIndex,
+    #[builder(into, default)] offset: Offset,
+    #[builder(into, default = FetchByteLimit (1 << 20))] maximum: FetchByteLimit,
+) -> FetchPartition {
+    let setup = FetchPartitionSetup {
+        partition,
+        offset,
+        maximum,
+    };
     FetchPartition {
         partition: setup.partition.0,
         fetch_offset: setup.offset.0,
@@ -82,13 +92,25 @@ pub struct SinglePartitionFetchSetup {
     pub topic: String,
     #[default(Uuid::ZERO)]
     pub topic_id: Uuid,
-    #[default(fetch_partition(FetchPartitionSetup::default()))]
+    #[default(fetch_partition().call())]
     pub partition: FetchPartition,
     #[default(FetchLimits::one_mebibyte(RequestWaitMillis(500)))]
     pub limits: FetchLimits,
 }
 
-pub fn single_partition_fetch(setup: SinglePartitionFetchSetup) -> FetchRequest {
+#[bon::builder]
+pub fn single_partition_fetch(
+    #[builder(default = "orders" . into ())] topic: String,
+    #[builder(default = Uuid :: ZERO)] topic_id: Uuid,
+    #[builder(default = fetch_partition().call())] partition: FetchPartition,
+    #[builder(default = FetchLimits :: one_mebibyte (RequestWaitMillis (500)))] limits: FetchLimits,
+) -> FetchRequest {
+    let setup = SinglePartitionFetchSetup {
+        topic,
+        topic_id,
+        partition,
+        limits,
+    };
     fetch_request_for(
         vec![fetch_topic_row(setup.topic, setup.topic_id, vec![
             setup.partition,
@@ -99,11 +121,10 @@ pub fn single_partition_fetch(setup: SinglePartitionFetchSetup) -> FetchRequest 
 
 /// Legacy requests identify the topic by name and leave the wire UUID zero.
 pub fn named_topic_fetch(topic: impl Into<String>, limits: FetchLimits) -> FetchRequest {
-    single_partition_fetch(SinglePartitionFetchSetup {
-        topic: topic.into(),
-        limits,
-        ..Default::default()
-    })
+    single_partition_fetch()
+        .topic(topic.into())
+        .limits(limits)
+        .call()
 }
 
 pub fn fetch_topic_row(
@@ -132,10 +153,10 @@ pub fn fetch_request_for(topics: Vec<FetchTopic>, limits: FetchLimits) -> FetchR
 /// Preserve the protocol's ordinary limits for session-only requests.
 pub fn default_fetch_limits() -> FetchLimits { FetchLimits::default() }
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 pub struct FetchSessionId(pub i32);
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct FetchSessionEpoch(pub i32);
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -159,17 +180,39 @@ impl FetchSessionSetup {
     }
 }
 
-pub fn empty_session_fetch(limits: FetchLimits, session: FetchSessionSetup) -> FetchRequest {
-    session_fetch_request(fetch_request_for(Vec::new(), limits), session)
-}
-
-pub fn session_fetch_request(request: FetchRequest, setup: FetchSessionSetup) -> FetchRequest {
+#[bon::builder]
+pub fn build_fetch_session_request(
+    request: Option<FetchRequest>,
+    #[builder(default = FetchLimits :: default())] limits: FetchLimits,
+    #[builder(into, default)] id: FetchSessionId,
+    #[builder(into, default = FetchSessionEpoch (FetchRequest :: default () . session_epoch))]
+    epoch: FetchSessionEpoch,
+    #[builder(default)] forgotten: Vec<ForgottenTopic>,
+) -> FetchRequest {
+    let request = request.unwrap_or_else(|| fetch_request_for(Vec::new(), limits));
+    let session = FetchSessionSetup {
+        id,
+        epoch,
+        forgotten,
+    };
     FetchRequest {
-        session_id: setup.id.0,
-        session_epoch: setup.epoch.0,
-        forgotten_topics_data: setup.forgotten,
+        session_id: session.id.0,
+        session_epoch: session.epoch.0,
+        forgotten_topics_data: session.forgotten,
         ..request
     }
+}
+
+#[bon::builder]
+pub fn incremental_session_fetch(
+    #[builder(into)] id: FetchSessionId,
+    limits: FetchLimits,
+) -> FetchRequest {
+    build_fetch_session_request()
+        .limits(limits)
+        .id(id)
+        .epoch(FetchSessionEpoch(1))
+        .call()
 }
 
 /// Check a successful partition's v2 record count against the caller's expected count.

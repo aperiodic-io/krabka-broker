@@ -55,7 +55,7 @@ pub fn first_join(group: &str, topo: Topology) -> StreamsGroupHeartbeatRequest {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct StreamsMemberEpoch(pub i32);
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -69,7 +69,19 @@ pub struct StreamsFollowUpSetup<'a> {
     pub active: Option<Vec<ReqTaskIds>>,
 }
 
-pub fn follow_up(setup: StreamsFollowUpSetup<'_>) -> StreamsGroupHeartbeatRequest {
+#[bon::builder]
+pub fn follow_up(
+    #[builder(default = "g")] group: &'_ str,
+    #[builder(default = "m")] member_id: &'_ str,
+    #[builder(into, default = StreamsMemberEpoch (1))] epoch: StreamsMemberEpoch,
+    active: Option<Vec<ReqTaskIds>>,
+) -> StreamsGroupHeartbeatRequest {
+    let setup = StreamsFollowUpSetup {
+        group,
+        member_id,
+        epoch,
+        active,
+    };
     StreamsGroupHeartbeatRequest {
         group_id: setup.group.into(),
         member_id: setup.member_id.into(),
@@ -123,12 +135,14 @@ pub async fn streams_join_and_converge(
         tokio::time::sleep(Duration::from_millis(200)).await;
         let active = request_active_tasks(&resp);
         resp = client
-            .send(follow_up(StreamsFollowUpSetup {
-                group,
-                member_id: &member_id,
-                epoch: StreamsMemberEpoch(resp.member_epoch),
-                active,
-            }))
+            .send(
+                follow_up()
+                    .group(group)
+                    .member_id(&member_id)
+                    .epoch(resp.member_epoch)
+                    .maybe_active(active)
+                    .call(),
+            )
             .await
             .expect("follow-up streams heartbeat");
         member_id = resp.member_id.clone();

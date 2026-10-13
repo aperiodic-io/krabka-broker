@@ -97,6 +97,32 @@ macro_rules! test_dispatch {
 #[cfg(test)]
 pub(super) use test_dispatch;
 
+/// The valid `AddRaftVoter` fixture shared by the voter handler tests.
+#[cfg(test)]
+#[bon::builder]
+pub(crate) fn add_voter_request(
+    voter_id: i32,
+) -> krabka_protocol::owned::add_raft_voter_request::AddRaftVoterRequest {
+    use krabka_protocol::{
+        owned::add_raft_voter_request::Listener, primitives::uuid::Uuid as ProtoUuid,
+    };
+
+    krabka_protocol::owned::add_raft_voter_request::AddRaftVoterRequest {
+        cluster_id: Some("cluster".into()),
+        timeout_ms: 1_000,
+        voter_id,
+        voter_directory_id: ProtoUuid([2; 16]),
+        listeners: vec![Listener {
+            name: "CONTROLLER".into(),
+            host: "127.0.0.1".into(),
+            port: 9093,
+            ..Default::default()
+        }],
+        ack_when_committed: true,
+        ..Default::default()
+    }
+}
+
 /// Drive the shared denial scenario while keeping each API's optional message check.
 #[cfg(test)]
 macro_rules! check_denied_reconfiguration {

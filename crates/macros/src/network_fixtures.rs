@@ -12,7 +12,7 @@ use {
 pub(crate) fn request_frame(input: TokenStream) -> Result<TokenStream, ParseError> {
     named_items(input, |name| {
         moxy::template! {
-            #[derive(Clone, Copy)]
+            #[derive(Clone, Copy, ::derive_more::From, ::derive_more::Into)]
             pub(crate) struct FrameCorrelationId(pub i32);
             #[derive(Clone, Copy)]
             pub(crate) struct RequestFrameSetup<'a> {
@@ -28,7 +28,16 @@ pub(crate) fn request_frame(input: TokenStream) -> Result<TokenStream, ParseErro
                     Self { api_key: ::krabka_ids::ApiKey(18), api_version: ::krabka_ids::ApiVersion(0), correlation_id: FrameCorrelationId(1), client_id: None, tagged: None, body: &[] }
                 }
             }
-            pub(crate) fn {{ name }}(setup: RequestFrameSetup<'_>) -> ::bytes::BytesMut {
+            #[bon::builder]
+            pub(crate) fn {{ name }}(
+                #[builder(into, default = ::krabka_ids::ApiKey(18))] api_key: ::krabka_ids::ApiKey,
+                #[builder(into, default = ::krabka_ids::ApiVersion(0))] api_version: ::krabka_ids::ApiVersion,
+                #[builder(into, default = FrameCorrelationId(1))] correlation_id: FrameCorrelationId,
+                client_id: Option<&'_ [u8]>,
+                tagged: Option<&'_ [u8]>,
+                #[builder(default = b"")] body: &'_ [u8],
+            ) -> ::bytes::BytesMut {
+                let setup = RequestFrameSetup { api_key, api_version, correlation_id, client_id, tagged, body };
                 let RequestFrameSetup { api_key, api_version, correlation_id, client_id, tagged, body } = setup;
                 use ::bytes::BufMut as _;
                 let mut buf = ::bytes::BytesMut::new();

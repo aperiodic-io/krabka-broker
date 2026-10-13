@@ -102,6 +102,23 @@ mod recovery;
 pub(crate) mod registry;
 mod schema;
 mod topic_scope;
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    #[bon::builder]
+    pub(crate) fn topic_config_record(
+        overrides: &[(&str, &str)],
+        #[builder(default = String::from("t"))] topic: String,
+    ) -> krabka_metadata::TopicConfigRecord {
+        krabka_metadata::TopicConfigRecord {
+            topic,
+            overrides: overrides
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+        }
+    }
+}
 mod trunk_log;
 mod validation;
 

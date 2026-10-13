@@ -6,15 +6,17 @@ use {
     super::*,
     crate::{
         api_catalog::UnstableApiVersions,
-        network::{client::InterBrokerClient, request::parse_request},
+        network::{
+            client::InterBrokerClient, request::parse_request, test_support::raw_request_frame,
+        },
         test_support::{
-            ControllerPeerAllowed, DescribedCreationSetup, FakeMetadataSource,
-            GrantsInPrincipalName, described_creation_configs, principal, request_context,
-            start_broker_no_audit, start_broker_no_audit_with,
+            ControllerPeerAllowed, FakeMetadataSource, GrantsInPrincipalName,
+            described_creation_configs, principal, request_context, start_broker_no_audit,
+            start_broker_with_authorizer_no_audit,
         },
     },
     assert2::{assert, check},
-    bytes::{BufMut as _, Bytes, BytesMut},
+    bytes::{Bytes, BytesMut},
     krabka_client_core::{MockBroker, MockReply},
     krabka_protocol::{
         Encode as _, UnknownTaggedFields,
@@ -135,11 +137,12 @@ async fn without_principal_creates_a_topic_and_then_reports_that_it_exists() {
     // KIP-525 (v5+): the row carries the effective configs of the new topic.
     // The request set no overrides, so they are the defaults.
     let image = broker.controller.current_image();
-    let configs = described_creation_configs(&image, DescribedCreationSetup {
-        node: broker.config.node_id,
-        topic: "fresh",
-        overrides: &std::collections::BTreeMap::new(),
-    });
+    let configs = described_creation_configs()
+        .image(&image)
+        .node(broker.config.node_id)
+        .topic("fresh")
+        .overrides(&std::collections::BTreeMap::new())
+        .call();
     let created = response(CreatableTopicResult {
         name: "fresh".to_owned(),
         topic_id: committed_topic_id(&broker, "fresh"),
@@ -175,9 +178,9 @@ async fn without_principal_creates_a_topic_and_then_reports_that_it_exists() {
 /// through it, and a principal that holds `Create` can.
 #[tokio::test]
 async fn the_controller_authorizes_the_forwarded_principal() {
-    let (handle, _dir) = start_broker_no_audit_with(|cfg| {
-        cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
-    })
+    let (handle, _dir) = start_broker_with_authorizer_no_audit(Arc::new(ControllerPeerAllowed(
+        GrantsInPrincipalName,
+    )))
     .await;
     let broker = handle.broker_arc_for_test();
     let creator = TopicCreator::new(&broker);
@@ -240,7 +243,7 @@ async fn the_controller_authorizes_the_forwarded_principal() {
 #[tokio::test]
 async fn an_envelope_from_a_broker_without_cluster_action_is_refused() {
     let (handle, _dir) =
-        start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(GrantsInPrincipalName)).await;
+        start_broker_with_authorizer_no_audit(Arc::new(GrantsInPrincipalName)).await;
     let broker = handle.broker_arc_for_test();
     let creator = TopicCreator::new(&broker);
 
@@ -454,11 +457,7 @@ impl FakeController {
                     return MockReply::Respond(encode_body(&answer, version, false));
                 }
                 let answer = state.script.answers.pop_front().unwrap_or(Answer::Created);
-                let mut frame = BytesMut::new();
-                frame.put_i16(api_key);
-                frame.put_i16(version);
-                frame.put_i32(correlation_id);
-                frame.put_slice(body);
+                let frame = raw_request_frame(api_key, version, correlation_id, body);
                 let parsed = parse_request(&frame, flexible_for).expect("a request header");
                 let client_id = parsed.client_id.map(ToOwned::to_owned);
                 if api_key == envelope_request::API_KEY {

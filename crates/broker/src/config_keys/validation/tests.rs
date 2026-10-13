@@ -259,30 +259,27 @@ fn the_remaining_kafka_topic_config_names_are_accepted() {
     }
 }
 
-/// The Streams `RepartitionTopicConfig` override set, which every Streams
-/// application sends on its internal repartition topics.
-#[test]
-fn the_streams_repartition_topic_override_set_is_accepted() {
-    let overrides = maplit::btreemap! {
-    CLEANUP_POLICY.to_string() => "delete".to_string(),
-    SEGMENT_BYTES.to_string() => "52428800".to_string(),
-    RETENTION_MS.to_string() => "-1".to_string(),
-    MESSAGE_TIMESTAMP_TYPE.to_string() => "CreateTime".to_string()};
-
-    assert!(validate_topic_config_map(&overrides) == Ok(()));
-}
-
-/// The Streams `WindowedChangelogTopicConfig` override set, whose
-/// `cleanup.policy` is exactly `compact,delete`.
-#[test]
-fn the_streams_windowed_changelog_override_set_is_accepted() {
-    let overrides = maplit::btreemap! {
-    CLEANUP_POLICY.to_string() => "compact,delete".to_string(),
-    RETENTION_MS.to_string() => "86400000".to_string(),
-    MIN_COMPACTION_LAG_MS.to_string() => "0".to_string(),
-    MESSAGE_TIMESTAMP_TYPE.to_string() => "CreateTime".to_string()};
-
-    assert!(validate_topic_config_map(&overrides) == Ok(()));
+/// Streams applications send both override sets on their internal topics.
+#[yare::parameterized(
+    repartition_topic = {
+        maplit::btreemap! {
+            CLEANUP_POLICY.to_string() => "delete".to_string(),
+            SEGMENT_BYTES.to_string() => "52428800".to_string(),
+            RETENTION_MS.to_string() => "-1".to_string(),
+            MESSAGE_TIMESTAMP_TYPE.to_string() => "CreateTime".to_string(),
+        }
+    },
+    windowed_changelog = {
+        maplit::btreemap! {
+            CLEANUP_POLICY.to_string() => "compact,delete".to_string(),
+            RETENTION_MS.to_string() => "86400000".to_string(),
+            MIN_COMPACTION_LAG_MS.to_string() => "0".to_string(),
+            MESSAGE_TIMESTAMP_TYPE.to_string() => "CreateTime".to_string(),
+        }
+    },
+)]
+fn streams_topic_override_set_is_accepted(overrides: std::collections::BTreeMap<String, String>) {
+    assert2::assert!(validate_topic_config_map(&overrides) == Ok(()));
 }
 
 #[test]

@@ -15,9 +15,8 @@ use {
             share_fetch,
         },
         support::share::{
-            ConsumptionSetup, RefetchSetup, RetryEpochs, ShareAck, ShareRecordCount,
-            ShareRecordSeedSetup, ShareRecordsSetup, ShareSessionEpoch, ShareSessionSetup,
-            ShareTopicSetup, acknowledge_success, refetch_while_empty, rejoin_group, start_topic,
+            ConsumptionSetup, RetryEpochs, ShareAck, ShareSessionEpoch, ShareSessionSetup,
+            acknowledge_success, refetch_while_empty, rejoin_group, start_topic,
         },
     },
     assert2::{assert, check},
@@ -34,8 +33,10 @@ async fn consume_accept_restart() {
 
     let tid;
     {
-        let (broker, client, topic) =
-            start_topic(broker_config(log_dir.clone()), ShareTopicSetup::default()).await;
+        let (broker, client, topic) = start_topic()
+            .cfg(broker_config(log_dir.clone()))
+            .call()
+            .await;
         tid = topic;
         let (member, _) = initialize_consumption(&broker, &client, ConsumptionSetup {
             topic_id: tid,
@@ -146,24 +147,26 @@ async fn reject_archives() {
 
     // Produce one more (offset 2). The SPSO advanced past the rejected pair, so
     // only the new offset is acquired — proving the rejected ones were skipped.
-    produce_n(&fixture.client, ShareRecordsSetup {
-        topic_id: fixture.tid,
-        ..Default::default()
-    })
-    .await;
+    produce_n()
+        .client(&fixture.client)
+        .topic_id(fixture.tid)
+        .call()
+        .await;
     let row3 = share_fetch(&fixture.client, session.fetch_at(ShareSessionEpoch(3))).await;
-    let row3 = refetch_while_empty(&fixture.client, row3, RefetchSetup {
-        session: ShareSessionSetup {
+    let row3 = refetch_while_empty()
+        .client(&fixture.client)
+        .row(row3)
+        .session(ShareSessionSetup {
             member: &fixture.member,
             topic_id: fixture.tid,
             ..Default::default()
-        },
-        epochs: RetryEpochs {
+        })
+        .epochs(RetryEpochs {
             start: ShareSessionEpoch(4),
             ..Default::default()
-        },
-    })
-    .await;
+        })
+        .call()
+        .await;
     assert!(
         acquired_count(&row3) == 1,
         "only the new offset must be acquired, got {:?}",
@@ -182,10 +185,7 @@ struct AcquiredPair {
 }
 
 async fn acquired_pair() -> AcquiredPair {
-    let fixture = consumption_fixture(ShareRecordSeedSetup {
-        count: ShareRecordCount(2),
-    })
-    .await;
+    let fixture = consumption_fixture().count(2).call().await;
     let row = acquire_both(&fixture.client, &fixture.member, fixture.tid).await;
     AcquiredPair { fixture, row }
 }

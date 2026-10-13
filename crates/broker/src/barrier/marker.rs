@@ -322,22 +322,20 @@ mod tests {
         assert!(parse_barrier_marker(&no_value).is_err());
     }
 
-    #[test]
-    fn parsing_rejects_a_wrong_value_version() {
+    #[yare::parameterized(
+        wrong_value_version = { true },
+        trailing_bytes = { false },
+    )]
+    fn parsing_rejects_malformed_values(wrong_version: bool) {
         let mut built = batch();
         let mut value = built.records[0].value.as_ref().unwrap().to_vec();
-        value[1] = 1;
+        if wrong_version {
+            value[1] = 1;
+        } else {
+            value.push(0);
+        }
         built.records[0].value = Some(Bytes::from(value));
-        assert!(parse_barrier_marker(&built.records[0]).is_err());
-    }
-
-    #[test]
-    fn parsing_rejects_trailing_bytes() {
-        let mut built = batch();
-        let mut value = built.records[0].value.as_ref().unwrap().to_vec();
-        value.push(0);
-        built.records[0].value = Some(Bytes::from(value));
-        assert!(parse_barrier_marker(&built.records[0]).is_err());
+        assert2::assert!(parse_barrier_marker(&built.records[0]).is_err());
     }
 
     #[test]

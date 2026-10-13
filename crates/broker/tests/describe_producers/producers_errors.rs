@@ -10,7 +10,7 @@ use {
         producers_harness::create_topic,
         support::{
             self, admin::describe_producers_request, client::connect_with_context,
-            registered_cluster, shutdown_cluster, topics::CreateTopicSetup,
+            registered_cluster, shutdown_cluster,
         },
     },
     assert2::{assert, check},
@@ -42,11 +42,7 @@ async fn unknown_topic_returns_unknown_topic_or_partition() {
 #[tokio::test]
 async fn out_of_range_partition_returns_unknown_topic_or_partition() {
     let p = support::start().await;
-    create_topic(&p.client, CreateTopicSetup {
-        topic: "small",
-        ..Default::default()
-    })
-    .await;
+    create_topic(&p.client, "small").await;
 
     // Partition 5 doesn't exist (topic was created with 1 partition).
     let resp = p
@@ -80,11 +76,7 @@ async fn metadata_known_partition_not_hosted_locally_returns_not_leader() {
 
     let admin =
         connect_with_context(cluster[0].0.listen_addr().to_string(), None, "admin client").await;
-    create_topic(&admin, CreateTopicSetup {
-        topic: "remote",
-        ..Default::default()
-    })
-    .await;
+    create_topic(&admin, "remote").await;
     cluster[0].0.wait_until_partition_present("remote", 0).await;
 
     let leader = cluster[0]

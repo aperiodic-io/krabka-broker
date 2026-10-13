@@ -5,9 +5,9 @@
 //! versions, so the cluster that mints a token and the reader that recovers it
 //! stay together.
 
-use {crate::jvm_acceptance::SaslClusterSetup, krabka_broker::BrokerConfig};
+use krabka_broker::BrokerConfig;
 
-/// Like [`start_three_broker_sasl_plaintext_jvm_cluster_with_users`] but
+/// Like [`super::three_broker_cluster::start_three_broker_sasl_plaintext_jvm_cluster`] but
 /// also enables `SCRAM-SHA-256` on the listener and installs the given
 /// `secret_key` as the HMAC master for KIP-48 delegation tokens on every
 /// broker. The admin user is provisioned as PLAIN, so the JVM CLI's
@@ -35,20 +35,17 @@ pub(crate) async fn start_three_broker_sasl_plaintext_jvm_cluster_with_delegatio
 ) {
     use krabka_security::{SaslMechanism, SecretBytes};
 
-    super::three_broker_cluster::start_three_broker_sasl_plaintext_jvm_cluster_configured(
-        SaslClusterSetup {
-            admin,
-            admin_pass,
-            ..Default::default()
-        },
-        |config| {
+    super::three_broker_cluster::start_three_broker_sasl_plaintext_jvm_cluster_configured()
+        .admin(admin)
+        .admin_pass(admin_pass)
+        .adjust(|config| {
             config
                 .enabled_sasl_mechanisms
                 .push(SaslMechanism::ScramSha256);
             config.delegation_token_secret_key = Some(SecretBytes::new(secret_key.to_vec()));
-        },
-    )
-    .await
+        })
+        .call()
+        .await
 }
 
 /// Parse the JVM `kafka-delegation-tokens --create` stdout for a line

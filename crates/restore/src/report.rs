@@ -418,10 +418,10 @@ mod tests {
         uuid::Uuid,
     };
 
-    #[derive(Clone, Copy, Default)]
+    #[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
     struct RestoredRecordCount(u64);
 
-    #[derive(Clone, Copy, Default)]
+    #[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
     struct RestoredBatchCount(u64);
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -443,7 +443,23 @@ mod tests {
         DryRun,
     }
 
-    fn segment(setup: SegmentOutcomeSetup) -> SegmentOutcome {
+    #[bon::builder]
+    fn segment(
+        #[builder(into, default = Offset (0))] base: Offset,
+        #[builder(into, default = Offset (402))] end: Offset,
+        #[builder(into, default = RestoredRecordCount (402))] kept: RestoredRecordCount,
+        #[builder(into, default)] dropped: RestoredRecordCount,
+        #[builder(into, default)] rewritten: RestoredBatchCount,
+        #[builder(into, default)] emptied: RestoredBatchCount,
+    ) -> SegmentOutcome {
+        let setup = SegmentOutcomeSetup {
+            base,
+            end,
+            kept,
+            dropped,
+            rewritten,
+            emptied,
+        };
         let SegmentOutcomeSetup {
             base,
             end,
@@ -487,39 +503,32 @@ mod tests {
                     partition: 0,
                     topic_id: Uuid::from_u128(0x0001),
                     segments: vec![
-                        segment(SegmentOutcomeSetup {
-                            end: Offset(4999),
-                            kept: RestoredRecordCount(4995),
-                            dropped: RestoredRecordCount(5),
-                            rewritten: RestoredBatchCount(1),
-                            ..Default::default()
-                        }),
-                        segment(SegmentOutcomeSetup {
-                            base: Offset(5000),
-                            end: Offset(12489),
-                            kept: RestoredRecordCount(7485),
-                            dropped: RestoredRecordCount(4),
-                            emptied: RestoredBatchCount(1),
-                            ..Default::default()
-                        }),
+                        segment()
+                            .end(4999)
+                            .kept(4995)
+                            .dropped(5)
+                            .rewritten(1)
+                            .call(),
+                        segment()
+                            .base(5000)
+                            .end(12489)
+                            .kept(7485)
+                            .dropped(4)
+                            .emptied(1)
+                            .call(),
                     ],
                 },
                 PartitionReport {
                     topic: "orders".to_owned(),
                     partition: 1,
                     topic_id: Uuid::from_u128(0x0001),
-                    segments: vec![segment(SegmentOutcomeSetup {
-                        end: Offset(8021),
-                        kept: RestoredRecordCount(8015),
-                        dropped: RestoredRecordCount(6),
-                        ..Default::default()
-                    })],
+                    segments: vec![segment().end(8021).kept(8015).dropped(6).call()],
                 },
                 PartitionReport {
                     topic: "orders-archive".to_owned(),
                     partition: 0,
                     topic_id: Uuid::from_u128(0x0002),
-                    segments: vec![segment(SegmentOutcomeSetup::default())],
+                    segments: vec![segment().call()],
                 },
             ],
             skipped: vec![SkippedSegment {
@@ -598,7 +607,7 @@ mod tests {
                 topic: "orders-archive".to_owned(),
                 partition: 0,
                 topic_id: Uuid::nil(),
-                segments: vec![segment(SegmentOutcomeSetup::default())],
+                segments: vec![segment().call()],
             }],
             skipped: vec![],
         };

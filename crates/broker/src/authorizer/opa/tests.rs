@@ -26,14 +26,19 @@ fn opa_decision_response(allow: bool) -> wiremock::ResponseTemplate {
 }
 
 #[bon::builder]
-async fn mount_decision(mock: &MockServer, allow: bool, body: Option<serde_json::Value>) {
+async fn mount_decision(
+    mock: &MockServer,
+    allow: bool,
+    body: Option<serde_json::Value>,
+    #[builder(default = 1)] expected_calls: u64,
+) {
     let mut request = Mock::given(method("POST"));
     if let Some(body) = body {
         request = request.and(body_json(body));
     }
     request
         .respond_with(opa_decision_response(allow))
-        .expect(1)
+        .expect(expected_calls)
         .mount(mock)
         .await;
 }
@@ -80,12 +85,11 @@ fn check_alice_authorization(auth: &OpaAuthorizer, expected: AuthorizationResult
 async fn super_user_bypasses_opa_call() {
     let mock = MockServer::start().await;
     // expect(0) verifies on drop that no HTTP call landed.
-    Mock::given(method("POST"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({"result": false})),
-        )
-        .expect(0)
-        .mount(&mock)
+    mount_decision()
+        .mock(&mock)
+        .allow(false)
+        .expected_calls(0)
+        .call()
         .await;
 
     let auth = authorizer(supers(&["admin"]), opa_url(&mock), false);

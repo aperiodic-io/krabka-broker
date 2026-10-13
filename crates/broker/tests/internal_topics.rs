@@ -29,9 +29,7 @@
 
 use {
     crate::support::{
-        client::connect_owned,
-        discovery::topic_metadata_request,
-        topics::{ConfiguredTopicSetup, creatable_topic},
+        client::connect_owned, discovery::topic_metadata_request, topics::creatable_topic,
     },
     assert2::{assert, check},
 };
@@ -94,12 +92,7 @@ async fn create_every_topic(p: &support::InProcess) {
         .send(CreateTopicsRequest {
             topics: TOPICS
                 .iter()
-                .map(|(name, _)| {
-                    creatable_topic(ConfiguredTopicSetup {
-                        name: (*name).into(),
-                        ..Default::default()
-                    })
-                })
+                .map(|(name, _)| creatable_topic().name((*name).into()).call())
                 .collect(),
             timeout_ms: 10_000,
             ..Default::default()

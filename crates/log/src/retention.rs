@@ -146,9 +146,14 @@ pub(crate) fn retire_files(
 }
 
 pub(crate) fn remove_optional(io: &dyn LogIo, path: &Path) -> Result<(), LogError> {
+    remove_optional_counted(io, path).map(|_| ())
+}
+
+/// Remove an optional file and report whether it existed.
+pub(crate) fn remove_optional_counted(io: &dyn LogIo, path: &Path) -> Result<bool, LogError> {
     match io.remove_file(IoTarget::SegmentDeletion, path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(LogError::Io(error)),
     }
 }

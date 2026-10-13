@@ -22,7 +22,7 @@ use {
         },
         handlers::{
             streams_group_heartbeat::handle as heartbeat_handle,
-            test_support::single_replica_partition,
+            test_support::{metadata_topic_record, single_replica_partition},
         },
         test_support::{
             controller_peer_allowed, dispatch_wire, peer, principal, request_context,
@@ -274,15 +274,13 @@ pub(super) fn error_group(group_id: &str, error_code: i16) -> DescribedGroup {
 /// Creates a topic with `partitions` partitions on the one-broker test
 /// cluster.
 pub(super) async fn create_topic(broker: &Broker, name: &str, partitions: i32) {
-    use krabka_metadata::TopicRecord;
-
     let node_id = krabka_audit::NodeId(broker.config.node_id.0);
-    let mut records = vec![MetadataRecord::V1Topic(TopicRecord {
-        name: name.into(),
-        topic_id: uuid::Uuid::new_v4(),
+    let mut records = vec![MetadataRecord::V1Topic(metadata_topic_record(
+        name,
+        uuid::Uuid::new_v4(),
         partitions,
-        replication_factor: 1,
-    })];
+        1,
+    ))];
     records.extend((0..partitions).map(|partition| {
         MetadataRecord::V1Partition(single_replica_partition(
             name,

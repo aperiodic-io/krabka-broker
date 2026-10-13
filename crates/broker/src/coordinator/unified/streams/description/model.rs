@@ -245,9 +245,21 @@ mod tests {
         stores: &'a [&'a str],
     }
 
+    #[bon::builder]
     fn describe_node(
-        setup: DescribedNodeSetup<'_>,
+        #[builder(default = "node")] name: &'_ str,
+        #[builder(default)] kind: DescribedNodeKind,
+        #[builder(default)] source_topics: &'_ [&'_ str],
+        sink_topic: Option<&'_ str>,
+        #[builder(default)] stores: &'_ [&'_ str],
     ) -> describe::topology_description_node::TopologyDescriptionNode {
+        let setup = DescribedNodeSetup {
+            name,
+            kind,
+            source_topics,
+            sink_topic,
+            stores,
+        };
         let DescribedNodeSetup {
             name,
             kind,
@@ -302,40 +314,35 @@ mod tests {
                 describe::topology_description_subtopology::TopologyDescriptionSubtopology {
                     subtopology_id: "0".into(),
                     nodes: vec![
-                        describe_node(DescribedNodeSetup {
-                            name: "KSTREAM-SOURCE-0000000000",
-                            source_topics: &["in", "in-b"],
-                            ..Default::default()
-                        }),
-                        describe_node(DescribedNodeSetup {
-                            name: "KSTREAM-MAPVALUES-0000000001",
-                            kind: DescribedNodeKind::Processor,
-                            stores: &["store"],
-                            ..Default::default()
-                        }),
-                        describe_node(DescribedNodeSetup {
-                            name: "KSTREAM-SINK-0000000002",
-                            kind: DescribedNodeKind::Sink,
-                            sink_topic: Some("out"),
-                            ..Default::default()
-                        }),
+                        describe_node()
+                            .name("KSTREAM-SOURCE-0000000000")
+                            .source_topics(&["in", "in-b"])
+                            .call(),
+                        describe_node()
+                            .name("KSTREAM-MAPVALUES-0000000001")
+                            .kind(DescribedNodeKind::Processor)
+                            .stores(&["store"])
+                            .call(),
+                        describe_node()
+                            .name("KSTREAM-SINK-0000000002")
+                            .kind(DescribedNodeKind::Sink)
+                            .maybe_sink_topic(Some("out"))
+                            .call(),
                     ],
                     ..Default::default()
                 },
             ],
             global_stores: vec![
                 describe::topology_description_global_store::TopologyDescriptionGlobalStore {
-                    source: describe_node(DescribedNodeSetup {
-                        name: "KSTREAM-SOURCE-0000000003",
-                        source_topics: &["in", "in-b"],
-                        ..Default::default()
-                    }),
-                    processor: describe_node(DescribedNodeSetup {
-                        name: "KTABLE-SOURCE-0000000004",
-                        kind: DescribedNodeKind::Processor,
-                        stores: &["store"],
-                        ..Default::default()
-                    }),
+                    source: describe_node()
+                        .name("KSTREAM-SOURCE-0000000003")
+                        .source_topics(&["in", "in-b"])
+                        .call(),
+                    processor: describe_node()
+                        .name("KTABLE-SOURCE-0000000004")
+                        .kind(DescribedNodeKind::Processor)
+                        .stores(&["store"])
+                        .call(),
                     ..Default::default()
                 },
             ],

@@ -103,6 +103,23 @@ mod tests {
     const PROTOCOL_TYPE: &str = "consumer";
     const PROTOCOL_NAME: &str = "range";
 
+    #[bon::builder]
+    fn sync_request(
+        member_id: String,
+        generation_id: i32,
+        #[builder(default)] assignments: Vec<SyncGroupRequestAssignment>,
+    ) -> SyncGroupRequest {
+        SyncGroupRequest {
+            group_id: GROUP.into(),
+            member_id,
+            generation_id,
+            protocol_type: Some(PROTOCOL_TYPE.into()),
+            protocol_name: Some(PROTOCOL_NAME.into()),
+            assignments,
+            ..Default::default()
+        }
+    }
+
     fn context<'a>(principal: &'a Principal, peer: &'a SocketAddr) -> RequestContext<'a> {
         request_context(principal, peer, "sync-group-client")
     }
@@ -274,14 +291,10 @@ mod tests {
         let (broker_handle, _dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((principal, peer, ctx), principal("alice"), context);
-        let req = SyncGroupRequest {
-            group_id: GROUP.into(),
-            member_id: "member-a".into(),
-            generation_id: 1,
-            protocol_type: Some(PROTOCOL_TYPE.into()),
-            protocol_name: Some(PROTOCOL_NAME.into()),
-            ..Default::default()
-        };
+        let req = sync_request()
+            .member_id("member-a".into())
+            .generation_id(1)
+            .call();
 
         let resp = handle(&broker, req, version, &ctx)
             .await
@@ -304,19 +317,15 @@ mod tests {
         request_identity!((principal, peer, ctx), principal("alice"), context);
         let (member_id, generation_id) = bootstrap_member(&broker, &ctx).await;
         let assignment = Bytes::from_static(b"assignment-payload");
-        let req = SyncGroupRequest {
-            group_id: GROUP.into(),
-            generation_id,
-            member_id: member_id.clone(),
-            protocol_type: Some(PROTOCOL_TYPE.into()),
-            protocol_name: Some(PROTOCOL_NAME.into()),
-            assignments: vec![SyncGroupRequestAssignment {
+        let req = sync_request()
+            .member_id(member_id.clone())
+            .generation_id(generation_id)
+            .assignments(vec![SyncGroupRequestAssignment {
                 member_id,
                 assignment: assignment.clone(),
                 ..Default::default()
-            }],
-            ..Default::default()
-        };
+            }])
+            .call();
 
         let resp = handle(&broker, req, version, &ctx)
             .await

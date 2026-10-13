@@ -269,6 +269,8 @@ pub mod telemetry;
 /// pass duplicated across ~40 handlers.
 #[cfg(test)]
 pub(crate) mod test_support;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod testing;
 pub mod throttle;
 pub(crate) mod time_util;
 pub(crate) mod tls_reload;

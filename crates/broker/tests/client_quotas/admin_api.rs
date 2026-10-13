@@ -12,7 +12,7 @@ use {
         cluster::wait_alice_quota,
         kafka_wire::{
             PlainAuthenticationSetup,
-            quotas::{QuotaAlterSetup, QuotaDescribeSetup, UserQuotaSetup, alter_user_quota},
+            quotas::{QuotaAlterSetup, QuotaDescribeSetup, alter_user_quota},
         },
         support::retry::{all_cluster_authorization_failed, retry_until},
     },
@@ -32,11 +32,11 @@ async fn alter_then_describe_round_trip() {
     .await;
 
     // Alter: set producer_byte_rate=1024 for (user=alice).
-    let alter_resp = alter_user_quota(addr, UserQuotaSetup {
-        authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
-        ..Default::default()
-    })
-    .await;
+    let alter_resp = alter_user_quota()
+        .addr(addr)
+        .authentication(PlainAuthenticationSetup::admin(CLIENT_ID))
+        .call()
+        .await;
     assert!(alter_resp.len() == 1, "one entry in response");
     assert!(
         alter_resp[0].1 == 0,

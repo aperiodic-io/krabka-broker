@@ -5,7 +5,7 @@
 //! answers `UNKNOWN_TOPIC_ID` on every partition row of a topic whose id does
 //! not resolve to a name. The zero id is such an id.
 use {
-    crate::support::topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    crate::support::topics::{creatable_topic, create_topic_request},
     assert2::assert,
 };
 mod support;
@@ -22,12 +22,9 @@ const UNKNOWN_TOPIC_ID: i16 = 100;
 async fn produce_unresolved_topic_id_returns_unknown_topic_id() {
     let p = support::start().await;
     p.client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("p_known").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("p_known").into()).call(),
+        ))
         .await
         .expect("create topic");
 

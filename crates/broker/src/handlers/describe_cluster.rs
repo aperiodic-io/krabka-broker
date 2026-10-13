@@ -408,12 +408,11 @@ mod tests {
             .broker_arc_for_test()
             .controller
             .submit_change(vec![MetadataRecord::V1AccessControlEntry(
-                crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
-                    resource_type: ResourceType::Cluster,
-                    resource_name: CLUSTER_RESOURCE_NAME,
-                    operation: AclOperation::AlterConfigs,
-                    ..Default::default()
-                }),
+                crate::test_support::allow_acl()
+                    .resource_type(ResourceType::Cluster)
+                    .resource_name(CLUSTER_RESOURCE_NAME)
+                    .operation(AclOperation::AlterConfigs)
+                    .call(),
             )])
             .await
             .expect("seed ACL");

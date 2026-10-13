@@ -32,9 +32,7 @@ async fn a_replicated_marker_bumps_the_tracked_epoch() {
     // append goes through `Partition::produce_batch`: this is exactly the
     // `WriterMessage::Replicate` path a follower's Fetch loop drives.
     partition
-        .replicate_batch(super::restart_agreement::data_batch(
-            super::restart_agreement::DataBatchSetup::default(),
-        ))
+        .replicate_batch(super::restart_agreement::data_batch().call())
         .await
         .expect("replicate data batch");
 

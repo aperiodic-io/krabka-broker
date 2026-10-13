@@ -12,7 +12,7 @@ use {
             active_partitions_for, boot, connect, create_topic, finalize_streams_version,
             first_join, follow_up, status_codes, topology,
         },
-        support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch, request_active_tasks},
+        support::streams::request_active_tasks,
     },
     assert2::assert,
     krabka_protocol::owned::common::streams_group_heartbeat_request::topic_info::TopicInfo,
@@ -72,12 +72,12 @@ async fn stateful_member_triggers_internal_topic_creation() {
         tokio::time::sleep(Duration::from_millis(300)).await;
         let active = request_active_tasks(&resp);
         // A heartbeat after the join carries no topology: Kafka refuses one.
-        let hb = follow_up(StreamsFollowUpSetup {
-            group: "streams-app-2",
-            member_id: &member_id,
-            epoch: StreamsMemberEpoch(resp.member_epoch),
-            active,
-        });
+        let hb = follow_up()
+            .group("streams-app-2")
+            .member_id(&member_id)
+            .epoch(resp.member_epoch)
+            .maybe_active(active)
+            .call();
         resp = client.send(hb).await.expect("follow-up heartbeat");
         member_id = resp.member_id.clone();
     }

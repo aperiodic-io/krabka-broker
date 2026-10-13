@@ -35,7 +35,7 @@ crate::test_support::codec_helpers!(
 const GZIP: i8 = 1;
 const NONE: i8 = 0;
 
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 struct SubscriptionId(i32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

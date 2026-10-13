@@ -11,7 +11,7 @@ use {
         heartbeat::controller_state::ControllerLivenessState,
         leader_election::{
             compute_unclean_restart_changes,
-            test_support::{ElectionSetup, img_with_partition, mark_witnesses_in_image},
+            test_support::{img_with_partition, mark_witnesses_in_image},
         },
         metadata_source::MetadataSource,
         metrics::{
@@ -51,12 +51,11 @@ fn source_with(leader: Option<u64>, image: MetadataImage) -> Arc<FakeMetadataSou
 const NODE: u64 = 10;
 
 fn image_with_partition(leader: u64, replicas: &[u64]) -> MetadataImage {
-    img_with_partition(ElectionSetup {
-        leader: krabka_raft::NodeId(leader),
-        replicas: &replica_nodes(replicas),
-        isr: &replica_nodes(replicas),
-        ..Default::default()
-    })
+    img_with_partition()
+        .leader(leader)
+        .replicas(&replica_nodes(replicas))
+        .isr(&replica_nodes(replicas))
+        .call()
 }
 
 /// Rewrite the ISR the record for partition 0 of topic `t` names, leaving
@@ -234,31 +233,22 @@ async fn commit_fixture_election(
         .await
 }
 
-#[tokio::test]
-async fn not_controller_leader_is_not_needed() {
+#[yare::parameterized(
+    not_controller_leader = { Some(99), image_with_partition(1, &[1, 2]), vec![] },
+    missing_partition = { Some(NODE), MetadataImage::new(Uuid::nil()), vec![] },
+    live_leader = { Some(NODE), image_with_partition(1, &[1, 2]), vec![1] },
+)]
+#[test_macro(tokio::test)]
+async fn recovery_is_not_needed_when_its_preconditions_are_not_met(
+    controller: Option<u64>,
+    image: MetadataImage,
+    alive: Vec<u64>,
+) {
     let mgr = manager(
-        source_with(Some(99), image_with_partition(1, &[1, 2])),
-        liveness_with_alive(&[]).await,
+        source_with(controller, image),
+        liveness_with_alive(&alive).await,
     );
-    assert!(mgr.run_recovery(&job()).await == RecoveryOutcome::NotNeeded);
-}
-
-#[tokio::test]
-async fn missing_partition_is_not_needed() {
-    let mgr = manager(
-        source_with(Some(NODE), MetadataImage::new(Uuid::nil())),
-        liveness_with_alive(&[]).await,
-    );
-    assert!(mgr.run_recovery(&job()).await == RecoveryOutcome::NotNeeded);
-}
-
-#[tokio::test]
-async fn live_leader_is_not_needed() {
-    let mgr = manager(
-        source_with(Some(NODE), image_with_partition(1, &[1, 2])),
-        liveness_with_alive(&[1]).await,
-    );
-    assert!(mgr.run_recovery(&job()).await == RecoveryOutcome::NotNeeded);
+    assert2::assert!(mgr.run_recovery(&job()).await == RecoveryOutcome::NotNeeded);
 }
 
 #[tokio::test]

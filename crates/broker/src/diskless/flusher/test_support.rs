@@ -9,9 +9,7 @@ use {
         log_dir_status::LogDirRegistry,
         partition::Partition,
         producer_state::ProducerState,
-        test_support::{
-            RecordCount, RepeatedRecordsSetup, StorageMode, UnixMillis, repeated_records_batch,
-        },
+        test_support::{StorageMode, repeated_records_batch},
         time_util::now_ms,
     },
     krabka_log::{Log, LogConfig},
@@ -30,16 +28,14 @@ use {
 fn batch(count: i32) -> RecordBatch {
     RecordBatch {
         partition_leader_epoch: 0,
-        ..repeated_records_batch(RepeatedRecordsSetup {
-            count: RecordCount(count),
-            timestamp: UnixMillis(now_ms()),
-        })
+        ..repeated_records_batch()
+            .count(count)
+            .timestamp(now_ms())
+            .call()
     }
 }
 
-pub(super) fn orders_partition(root: &Path) -> Arc<Partition> {
-    test_partition(root, FlusherPartitionSetup::default())
-}
+pub(super) fn orders_partition(root: &Path) -> Arc<Partition> { test_partition().root(root).call() }
 
 #[derive(Clone, Copy)]
 pub(super) struct FlusherPartitionSetup<'a> {
@@ -60,7 +56,21 @@ impl Default for FlusherPartitionSetup<'_> {
     }
 }
 
-pub(super) fn test_partition(root: &Path, setup: FlusherPartitionSetup<'_>) -> Arc<Partition> {
+#[bon::builder]
+pub(super) fn test_partition(
+    root: &Path,
+    #[builder(default = FlusherPartitionSetup::default().topic)] topic: &'_ str,
+    #[builder(into, default = FlusherPartitionSetup::default().partition)]
+    partition: krabka_ids::PartitionIndex,
+    #[builder(default = FlusherPartitionSetup::default().storage)] storage: StorageMode,
+    #[builder(into, default = FlusherPartitionSetup::default().leader)] leader: NodeId,
+) -> Arc<Partition> {
+    let setup = FlusherPartitionSetup {
+        topic,
+        partition,
+        storage,
+        leader,
+    };
     let FlusherPartitionSetup {
         topic,
         partition,

@@ -150,27 +150,24 @@ mod tests {
         super::*,
         crate::{
             share_coordinator::coordinator::test_support::{
-                DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch as batch,
+                DeliveryAttemptCount, FixtureDeliveryState, state_batch as batch,
             },
             share_partition::state::{
                 AckType, AcquiredRange,
-                test_support::{
-                    AcquiredWindowSetup, DeadLetterQueue, DlqRangeSetup, LOCK, acquire_window,
-                    dlq_range as range, t0,
-                },
+                test_support::{DeadLetterQueue, LOCK, acquire_window, dlq_range as range, t0},
             },
-            test_support::RecordCount,
         },
         assert2::assert,
     };
 
     fn state_with_dlq(end: Offset) -> AcquisitionState {
         let mut s = AcquisitionState::new(Offset(0));
-        acquire_window(&mut s, AcquiredWindowSetup {
-            end,
-            record_limit: RecordCount(100),
-            dead_letter_queue: DeadLetterQueue::Enabled,
-        });
+        acquire_window()
+            .state(&mut s)
+            .end(end)
+            .record_limit(100)
+            .dead_letter_queue(DeadLetterQueue::Enabled)
+            .call();
         s
     }
 
@@ -202,11 +199,12 @@ mod tests {
             ) == (
                 Offset(0),
                 2,
-                vec![range(DlqRangeSetup {
-                    last: Offset(1),
-                    cause: Some(DlqCause::ClientReject),
-                    ..Default::default()
-                })],
+                vec![
+                    range()
+                        .last(1)
+                        .maybe_cause(Some(DlqCause::ClientReject))
+                        .call()
+                ],
                 vec![
                     (0, RecordState::Archiving),
                     (1, RecordState::Archiving),
@@ -257,11 +255,12 @@ mod tests {
                     s.record_states(),
                     s.delivery_complete_count(),
                 ) == (
-                    vec![range(DlqRangeSetup {
-                        last: Offset(1),
-                        cause: Some(DlqCause::DeliveryCountExceeded),
-                        ..Default::default()
-                    })],
+                    vec![
+                        range()
+                            .last(1)
+                            .maybe_cause(Some(DlqCause::DeliveryCountExceeded))
+                            .call()
+                    ],
                     vec![(0, RecordState::Archiving), (1, RecordState::Archiving)],
                     0,
                 ),
@@ -287,10 +286,11 @@ mod tests {
             (acquired, s.take_pending_dlq(), s.record_states())
                 == (
                     Vec::<AcquiredRange>::new(),
-                    vec![range(DlqRangeSetup {
-                        cause: Some(DlqCause::DeliveryCountExceeded),
-                        ..Default::default()
-                    })],
+                    vec![
+                        range()
+                            .maybe_cause(Some(DlqCause::DeliveryCountExceeded))
+                            .call()
+                    ],
                     vec![(0, RecordState::Archiving)],
                 )
         );
@@ -353,16 +353,14 @@ mod tests {
         assert!(
             batches
                 == vec![
-                    batch(StateBatchSetup {
-                        bounds: Offset(0)..=Offset(1),
-                        delivery: FixtureDeliveryState::Archiving,
-                        ..Default::default()
-                    }),
-                    batch(StateBatchSetup {
-                        bounds: Offset(2)..=Offset(2),
-                        delivery: FixtureDeliveryState::Available,
-                        ..Default::default()
-                    }),
+                    batch()
+                        .bounds(Offset(0)..=Offset(1))
+                        .delivery(FixtureDeliveryState::Archiving)
+                        .call(),
+                    batch()
+                        .bounds(Offset(2)..=Offset(2))
+                        .delivery(FixtureDeliveryState::Available)
+                        .call(),
                 ]
         );
 
@@ -374,18 +372,12 @@ mod tests {
 
         assert!(
             (pending, spso, after)
-                == (
-                    vec![range(DlqRangeSetup {
-                        last: Offset(1),
-                        ..Default::default()
-                    })],
-                    Offset(2),
-                    vec![batch(StateBatchSetup {
-                        bounds: Offset(2)..=Offset(2),
-                        delivery: FixtureDeliveryState::Available,
-                        ..Default::default()
-                    })],
-                )
+                == (vec![range().last(1).call()], Offset(2), vec![
+                    batch()
+                        .bounds(Offset(2)..=Offset(2))
+                        .delivery(FixtureDeliveryState::Available)
+                        .call()
+                ],)
         );
     }
 
@@ -395,11 +387,11 @@ mod tests {
     #[test]
     fn an_archiving_run_holds_the_spso() {
         let mut s = AcquisitionState::new(Offset(0));
-        s.load_from(Offset(0), 1, 1, &[batch(StateBatchSetup {
-            bounds: Offset(0)..=Offset(0),
-            delivery: FixtureDeliveryState::Archiving,
-            attempts: DeliveryAttemptCount(5),
-        })]);
+        s.load_from(Offset(0), 1, 1, &[batch()
+            .bounds(Offset(0)..=Offset(0))
+            .delivery(FixtureDeliveryState::Archiving)
+            .attempts(DeliveryAttemptCount(5))
+            .call()]);
 
         assert!((s.start_offset, s.delivery_complete_count()) == (Offset(0), 0));
     }

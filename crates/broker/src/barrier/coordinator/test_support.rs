@@ -38,7 +38,7 @@ fn config() -> BarrierConfig {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub(crate) struct RetainedCutCount(pub i32);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -50,7 +50,17 @@ pub(crate) struct GroupSpecSetup<'a> {
     pub(crate) retained_cuts: RetainedCutCount,
 }
 
-pub(crate) fn spec(setup: GroupSpecSetup<'_>) -> GroupSpec {
+#[bon::builder]
+pub(crate) fn spec(
+    #[builder(default = & ["orders"])] topics: &'_ [&'_ str],
+    interval: Option<Time>,
+    #[builder(into, default = RetainedCutCount (4))] retained_cuts: RetainedCutCount,
+) -> GroupSpec {
+    let setup = GroupSpecSetup {
+        topics,
+        interval,
+        retained_cuts,
+    };
     GroupSpec {
         topics: setup.topics.iter().map(|t| (*t).to_owned()).collect(),
         interval: setup.interval,

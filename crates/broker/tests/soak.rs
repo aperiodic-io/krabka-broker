@@ -126,11 +126,7 @@ use {
     crate::{
         cluster::SoakCluster,
         drift::{Bound, Series},
-        support::{
-            load_test::*,
-            producer::{ProducerRecordSetup, producer_record},
-            topics::topic_configs,
-        },
+        support::{load_test::*, producer::producer_record, topics::topic_configs},
     },
     assert2::{assert, check},
 };
@@ -245,12 +241,11 @@ fn soak_duration() -> Duration {
 
 /// One record of `PAYLOAD_BYTES` bytes on `topic`.
 fn record(topic: &str, key: String, value: Vec<u8>) -> ProducerRecord {
-    producer_record(ProducerRecordSetup {
-        topic: topic.to_owned(),
-        key: Some(key.into()),
-        value: Some(value.into()),
-        ..Default::default()
-    })
+    producer_record()
+        .topic(topic.to_owned())
+        .maybe_key(Some(key.into()))
+        .value(Some(bytes::Bytes::from(value)))
+        .call()
 }
 
 /// A producer for the load tasks.

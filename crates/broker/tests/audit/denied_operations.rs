@@ -9,11 +9,8 @@
 use {
     crate::support::{
         self,
-        fetch::{
-            FetchByteLimit, FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup,
-            single_partition_fetch,
-        },
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        fetch::{FetchByteLimit, FetchLimits, RequestWaitMillis, single_partition_fetch},
+        topics::{creatable_topic, create_topic_request},
     },
     krabka_broker::coordinator::AUDIT_TOPIC,
 };
@@ -55,12 +52,9 @@ async fn denied_operation_returns_topic_authorization_failed() {
     // Attempt a create that will be denied.
     let resp = p
         .client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("denied-topic").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("denied-topic").into()).call(),
+        ))
         .await
         .unwrap();
 
@@ -77,16 +71,17 @@ async fn denied_operation_returns_topic_authorization_failed() {
     let topic_id = support::topic_id_for(&p.client, AUDIT_TOPIC).await;
     let fr = p
         .client
-        .send(single_partition_fetch(SinglePartitionFetchSetup {
-            topic: AUDIT_TOPIC.into(),
-            topic_id,
-            limits: FetchLimits {
-                wait: RequestWaitMillis(100),
-                minimum: FetchByteLimit(0),
-                maximum: FetchByteLimit(1 << 20),
-            },
-            ..Default::default()
-        }))
+        .send(
+            single_partition_fetch()
+                .topic(AUDIT_TOPIC.into())
+                .topic_id(topic_id)
+                .limits(FetchLimits {
+                    wait: RequestWaitMillis(100),
+                    minimum: FetchByteLimit(0),
+                    maximum: FetchByteLimit(1 << 20),
+                })
+                .call(),
+        )
         .await
         .unwrap();
     // The broker responded to the Fetch request without crashing.

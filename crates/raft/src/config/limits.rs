@@ -18,6 +18,7 @@ use {
     refined_type::rule::{GreaterI32, GreaterU32, GreaterUsize},
 };
 
+#[derive(derive_more::From, derive_more::Into)]
 /// The number of consecutive fetch misses a controller tolerates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RefinedNewtype)]
 #[refined(
@@ -31,6 +32,7 @@ use {
 )]
 pub struct ControllerFetchMissLimit(u32);
 
+#[derive(derive_more::From, derive_more::Into)]
 /// The capacity of the metadata Raft command queue.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RefinedNewtype)]
 #[refined(
@@ -44,6 +46,7 @@ pub struct ControllerFetchMissLimit(u32);
 )]
 pub struct MetadataRaftCommandQueueCapacity(usize);
 
+#[derive(derive_more::From, derive_more::Into)]
 /// The most bytes one metadata Raft fetch carries, a whole byte count that
 /// fits the protocol's `int32` field.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RefinedNewtype)]

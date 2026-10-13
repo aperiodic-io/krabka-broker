@@ -47,8 +47,8 @@ mod tests {
         super::{ObjectOps, RemoteStorageError, S3RemoteStorage, WormError},
         crate::{
             s3::test_support::{
-                SeededCopySetup, StampedMetadataSetup, counting_rsm, memory_worm_archive, rsm,
-                sample_data, sample_metadata, seeded_blocking, stamped_metadata,
+                counting_rsm, memory_worm_archive, rsm, sample_data, sample_metadata,
+                seeded_blocking, stamped_metadata,
             },
             storage_manager::{IndexType, RemoteStorageManager},
             test_support::TransactionIndex,
@@ -73,13 +73,10 @@ mod tests {
     async fn delete_issues_one_request_per_current_key() {
         let (store, counter) = counting_rsm();
         let md = sample_metadata(uuid::Uuid::from_u128(14));
-        seeded_blocking(
-            store,
-            SeededCopySetup {
-                metadata: md,
-                ..Default::default()
-            },
-            move |store, md| {
+        seeded_blocking()
+            .store(store)
+            .metadata(md)
+            .then(move |store, md| {
                 let expected = {
                     let mut keys = vec![
                         store.log_key(&md).to_string(),
@@ -102,31 +99,28 @@ mod tests {
                 // Six requests, one per artifact: no second layout to sweep.
                 check!(counter.attempts(StoreOp::Delete) - before == 6);
                 check!(all_keys(&store) == Vec::<String>::new());
-            },
-        )
-        .await;
+            })
+            .call()
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn delete_is_idempotent() {
         let store = rsm(None);
         let md = sample_metadata(uuid::Uuid::from_u128(13));
-        seeded_blocking(
-            store,
-            SeededCopySetup {
-                metadata: md,
-                ..Default::default()
-            },
-            move |store, md| {
+        seeded_blocking()
+            .store(store)
+            .metadata(md)
+            .then(move |store, md| {
                 store.delete_log_segment_data(&md).unwrap();
                 store.delete_log_segment_data(&md).unwrap();
                 assert!(matches!(
                     store.fetch_log_segment(&md, 0, None).unwrap_err(),
                     RemoteStorageError::SegmentNotFound(_)
                 ));
-            },
-        )
-        .await;
+            })
+            .call()
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -135,37 +129,31 @@ mod tests {
         let src = TempDir::new().unwrap();
         let a = sample_metadata(uuid::Uuid::from_u128(20));
         let b = sample_metadata(uuid::Uuid::from_u128(21));
-        seeded_blocking(
-            store,
-            SeededCopySetup {
-                metadata: a,
-                transaction_index: TransactionIndex::Omitted,
-            },
-            move |store, a| {
+        seeded_blocking()
+            .store(store)
+            .metadata(a)
+            .transaction_index(TransactionIndex::Omitted)
+            .then(move |store, a| {
                 store
                     .copy_log_segment_data(&b, &sample_data(src.path(), TransactionIndex::Omitted))
                     .unwrap();
                 store.delete_log_segment_data(&a).unwrap();
                 assert!(store.fetch_log_segment(&b, 0, None).unwrap() == b"0123456789");
-            },
-        )
-        .await;
+            })
+            .call()
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn worm_delete_is_refused() {
         let (_keys, store) = memory_worm_archive();
-        let md = stamped_metadata(StampedMetadataSetup {
-            segment_id: uuid::Uuid::from_u128(55),
-            ..Default::default()
-        });
-        seeded_blocking(
-            store,
-            SeededCopySetup {
-                metadata: md,
-                ..Default::default()
-            },
-            move |store, md| {
+        let md = stamped_metadata()
+            .segment_id(uuid::Uuid::from_u128(55))
+            .call();
+        seeded_blocking()
+            .store(store)
+            .metadata(md)
+            .then(move |store, md| {
                 let before = all_keys(&store);
 
                 assert!(let Err(err) = store.delete_log_segment_data(&md));
@@ -177,8 +165,8 @@ mod tests {
                 // Not one object left the archive.
                 check!(all_keys(&store) == before);
                 check!(before.len() == 7, "six objects plus the manifest");
-            },
-        )
-        .await;
+            })
+            .call()
+            .await;
     }
 }

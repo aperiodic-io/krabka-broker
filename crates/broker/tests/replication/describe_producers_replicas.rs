@@ -172,22 +172,18 @@ async fn end_transaction(
 ) -> i16 {
     let response = leader
         .send(WriteTxnMarkersRequest {
-            markers: vec![crate::support::transactions::transaction_marker(
-                crate::support::transactions::TransactionMarkerSetup {
-                    producer: ProducerIdentity::from_wire((producer_id, producer_epoch)),
-                    outcome: commit,
-                    coordinator_epoch: crate::support::transactions::CoordinatorEpoch(
-                        COORDINATOR_EPOCH,
-                    ),
-                    transaction_version: crate::support::transactions::TransactionVersion(
-                        transaction_version,
-                    ),
-                    topics: vec![crate::support::transactions::marker_topic(
+            markers: vec![
+                crate::support::transactions::transaction_marker()
+                    .producer(ProducerIdentity::from_wire((producer_id, producer_epoch)))
+                    .outcome(commit)
+                    .coordinator_epoch(COORDINATOR_EPOCH)
+                    .transaction_version(transaction_version)
+                    .topics(vec![crate::support::transactions::marker_topic(
                         TOPIC.into(),
                         vec![0],
-                    )],
-                },
-            )],
+                    )])
+                    .call(),
+            ],
             ..Default::default()
         })
         .await
@@ -275,24 +271,22 @@ async fn every_replica_describes_the_producers_of_its_log() {
         produce(
             &leader,
             topic_id,
-            batch(ProducerBatchSetup {
-                producer: BatchProducer::from_wire(IDEMPOTENT),
-                records: BatchRecordCount(3),
-                max_timestamp: BatchTimestamp(BASE_TIMESTAMP),
-                ..Default::default()
-            }),
+            batch()
+                .producer(BatchProducer::from_wire(IDEMPOTENT))
+                .records(3)
+                .max_timestamp(BASE_TIMESTAMP)
+                .call(),
         )
         .await,
         produce(
             &leader,
             topic_id,
-            batch(ProducerBatchSetup {
-                producer: BatchProducer::from_wire(IDEMPOTENT),
-                base_sequence: BatchSequence(3),
-                records: BatchRecordCount(2),
-                max_timestamp: BatchTimestamp(BASE_TIMESTAMP + 1),
-                ..Default::default()
-            }),
+            batch()
+                .producer(BatchProducer::from_wire(IDEMPOTENT))
+                .base_sequence(3)
+                .records(2)
+                .max_timestamp(BASE_TIMESTAMP + 1)
+                .call(),
         )
         .await,
     ];
@@ -300,25 +294,23 @@ async fn every_replica_describes_the_producers_of_its_log() {
     // and 9 are the markers below.
     let committed = produce_transactional(
         &leader,
-        batch(ProducerBatchSetup {
-            producer: BatchProducer::from_wire(COMMITTED),
-            records: BatchRecordCount(2),
-            max_timestamp: BatchTimestamp(BASE_TIMESTAMP + 2),
-            transaction: BatchTransactionMode::Transactional,
-            ..Default::default()
-        }),
+        batch()
+            .producer(BatchProducer::from_wire(COMMITTED))
+            .records(2)
+            .max_timestamp(BASE_TIMESTAMP + 2)
+            .transaction(BatchTransactionMode::Transactional)
+            .call(),
     )
     .await;
     let before_markers = now_ms();
     let commit = end_transaction(&leader, COMMITTED, TransactionOutcome::Commit, 1).await;
     let aborted = produce_transactional(
         &leader,
-        batch(ProducerBatchSetup {
-            producer: BatchProducer::from_wire(ABORTED),
-            max_timestamp: BatchTimestamp(BASE_TIMESTAMP + 3),
-            transaction: BatchTransactionMode::Transactional,
-            ..Default::default()
-        }),
+        batch()
+            .producer(BatchProducer::from_wire(ABORTED))
+            .max_timestamp(BASE_TIMESTAMP + 3)
+            .transaction(BatchTransactionMode::Transactional)
+            .call(),
     )
     .await;
     let (aborted_id, aborted_epoch) = ABORTED;
@@ -332,13 +324,12 @@ async fn every_replica_describes_the_producers_of_its_log() {
     let after_markers = now_ms();
     let open = produce_transactional(
         &leader,
-        batch(ProducerBatchSetup {
-            producer: BatchProducer::from_wire(OPEN),
-            records: BatchRecordCount(2),
-            max_timestamp: BatchTimestamp(BASE_TIMESTAMP + 4),
-            transaction: BatchTransactionMode::Transactional,
-            ..Default::default()
-        }),
+        batch()
+            .producer(BatchProducer::from_wire(OPEN))
+            .records(2)
+            .max_timestamp(BASE_TIMESTAMP + 4)
+            .transaction(BatchTransactionMode::Transactional)
+            .call(),
     )
     .await;
     assert!(

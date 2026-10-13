@@ -5,9 +5,9 @@
 
 use {
     crate::{
-        Cli,
+        Cli, RestoreError,
         args::RestoreArgs,
-        backend::ArchiveStore,
+        backend::{ArchiveStore, open_archive},
         discover::{ArchiveObject, SegmentInventory},
     },
     clap::Parser as _,
@@ -44,6 +44,11 @@ pub(super) fn args_from(archive_dir: &std::path::Path, extra: &[&str]) -> Restor
     ];
     argv.extend(extra.iter().map(|s| (*s).to_owned()));
     Cli::parse_from(argv).args
+}
+
+pub(super) async fn inventory_error(args: &RestoreArgs) -> RestoreError {
+    let store = open_archive(args).expect("store");
+    super::inventory(&store, args).await.unwrap_err()
 }
 
 /// The directory-naming identity of one partition, factored out of
@@ -84,7 +89,18 @@ pub(super) struct SnapshotSegmentSetup<'a> {
 }
 
 /// Write one artifact at the exact KIP-405 archive key layout, by hand.
-pub(super) fn write_artifact(root: &std::path::Path, setup: ArtifactSetup<'_>) {
+#[bon::builder]
+pub(super) fn write_artifact(
+    root: &std::path::Path,
+    prefix: Option<&'_ str>,
+    #[builder(default)] segment: SegmentSetup<'_>,
+    #[builder(default = ".log")] suffix: &'_ str,
+) {
+    let setup = ArtifactSetup {
+        prefix,
+        segment,
+        suffix,
+    };
     let ArtifactSetup {
         prefix,
         segment,
@@ -113,22 +129,60 @@ pub(super) fn write_artifact(root: &std::path::Path, setup: ArtifactSetup<'_>) {
 }
 
 /// Write every artifact of one complete segment copy.
-pub(super) fn write_full_segment(root: &std::path::Path, setup: SegmentSetup<'_>) {
+#[bon::builder]
+pub(super) fn write_full_segment(
+    root: &std::path::Path,
+    #[builder(default)] partition: PartitionKey<'_>,
+    #[builder(into, default = Offset (0))] base_offset: Offset,
+    #[builder(default = Uuid :: from_u128 (10))] segment_id: Uuid,
+) {
+    let setup = SegmentSetup {
+        partition,
+        base_offset,
+        segment_id,
+    };
     for suffix in FULL_SEGMENT_SUFFIXES {
-        write_artifact(root, ArtifactSetup {
-            segment: setup,
-            suffix,
-            ..Default::default()
-        });
+        write_artifact()
+            .root(root)
+            .segment(setup)
+            .suffix(suffix)
+            .call();
     }
+}
+
+#[bon::builder]
+pub(super) fn write_topic_segment(
+    root: &std::path::Path,
+    topic: &'_ str,
+    #[builder(into, default = PartitionIndex (0))] partition: PartitionIndex,
+    topic_id: Uuid,
+    segment_id: Uuid,
+) {
+    write_full_segment()
+        .root(root)
+        .partition(PartitionKey {
+            topic,
+            partition,
+            topic_id,
+        })
+        .segment_id(segment_id)
+        .call();
 }
 
 /// The [`SegmentInventory`] a call to [`write_full_segment`] with the same
 /// arguments produces.
+#[bon::builder]
 pub(super) fn expected_full_segment(
     store: &ArchiveStore,
-    setup: SegmentSetup<'_>,
+    #[builder(default)] partition: PartitionKey<'_>,
+    #[builder(into, default = Offset (0))] base_offset: Offset,
+    #[builder(default = Uuid :: from_u128 (10))] segment_id: Uuid,
 ) -> SegmentInventory {
+    let setup = SegmentSetup {
+        partition,
+        base_offset,
+        segment_id,
+    };
     let SegmentSetup {
         partition,
         base_offset,
@@ -164,7 +218,12 @@ pub(super) fn expected_full_segment(
 }
 
 /// One RLMM-tracked segment, for a `--rlmm-snapshot` fixture.
-pub(super) fn snapshot_segment(setup: SnapshotSegmentSetup<'_>) -> RemoteLogSegmentMetadata {
+#[bon::builder]
+pub(super) fn snapshot_segment(
+    #[builder(default)] segment: SegmentSetup<'_>,
+    #[builder(default = RemoteLogSegmentState :: CopySegmentFinished)] state: RemoteLogSegmentState,
+) -> RemoteLogSegmentMetadata {
+    let setup = SnapshotSegmentSetup { segment, state };
     let SnapshotSegmentSetup {
         segment: setup,
         state,
@@ -214,13 +273,14 @@ pub(super) fn single_segment_archive(base_offset: Offset) -> (tempfile::TempDir,
     let archive = tempfile::tempdir().expect("temp dir");
     let topic_id = Uuid::from_u128(1);
     let segment_id = Uuid::from_u128(10);
-    write_full_segment(archive.path(), SegmentSetup {
-        partition: PartitionKey {
+    write_full_segment()
+        .root(archive.path())
+        .partition(PartitionKey {
             topic_id,
             ..Default::default()
-        },
-        base_offset,
-        segment_id,
-    });
+        })
+        .base_offset(base_offset)
+        .segment_id(segment_id)
+        .call();
     (archive, topic_id, segment_id)
 }

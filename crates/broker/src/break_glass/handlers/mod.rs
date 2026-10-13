@@ -296,10 +296,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_connection_principal_takes_its_kafka_string_form() {
-        let principal = principal("alice");
+        let p = principal("alice");
         let peer = peer();
 
-        check!(principal_name(&context(&principal, &peer)) == "User:alice");
+        check!(principal_name(&context(&p, &peer)) == "User:alice");
     }
 
     #[test]

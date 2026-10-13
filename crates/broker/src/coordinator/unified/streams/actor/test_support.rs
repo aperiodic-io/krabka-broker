@@ -113,9 +113,20 @@ pub(super) struct ActiveResponseSetup<'a> {
     pub active: Option<Vec<PartitionIndex>>,
 }
 
+#[bon::builder]
 pub(super) fn expected_active_response(
-    setup: ActiveResponseSetup<'_>,
+    #[builder(default = "m1")] member_id: &'_ str,
+    #[builder(into, default = crate :: coordinator :: unified :: test_support :: MemberEpoch (1))]
+    epoch: MemberEpoch,
+    status: Option<Vec<Status>>,
+    active: Option<Vec<PartitionIndex>>,
 ) -> krabka_protocol::owned::streams_group_heartbeat_response::StreamsGroupHeartbeatResponse {
+    let setup = ActiveResponseSetup {
+        member_id,
+        epoch,
+        status,
+        active,
+    };
     let ActiveResponseSetup {
         member_id,
         epoch,

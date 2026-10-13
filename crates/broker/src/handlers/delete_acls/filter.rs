@@ -50,12 +50,9 @@ pub(super) fn exact_filter(entry: &AclEntry) -> AclEntryFilter {
 mod tests {
     use {
         super::*,
-        crate::{
-            handlers::{
-                acl_test_support::expected_empty_match_filter,
-                delete_acls::test_support::{acl, filter},
-            },
-            test_support::AllowAclSetup,
+        crate::handlers::{
+            acl_test_support::expected_empty_match_filter,
+            delete_acls::test_support::{acl, filter},
         },
         assert2::{assert, check},
         krabka_metadata::{AclOperation, PatternType, PermissionType},
@@ -96,7 +93,7 @@ mod tests {
 
     #[test]
     fn exact_filter_matches_only_its_entry() {
-        let entry = acl(AllowAclSetup::default());
+        let entry = acl().call();
         let neighbours = [
             AclEntry {
                 pattern_type: PatternType::Prefixed,
@@ -110,18 +107,9 @@ mod tests {
                 host: "10.0.0.1".into(),
                 ..entry.clone()
             },
-            acl(AllowAclSetup {
-                operation: AclOperation::Write,
-                ..Default::default()
-            }),
-            acl(AllowAclSetup {
-                principal: "User:bob",
-                ..Default::default()
-            }),
-            acl(AllowAclSetup {
-                resource_name: "order",
-                ..Default::default()
-            }),
+            acl().operation(AclOperation::Write).call(),
+            acl().principal("User:bob").call(),
+            acl().resource_name("order").call(),
         ];
 
         let exact = exact_filter(&entry);

@@ -12,9 +12,9 @@ use {
         control_plane::freeze_scope,
         support::{
             self,
-            client::{connect_owned, scrape_metrics},
+            client::{connect_to_broker, scrape_metrics},
             discovery::named_topic_metadata,
-            fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+            fetch::single_partition_fetch,
             offsets::{offset_commit_partition, offset_commit_topic},
             records::record_count,
         },
@@ -39,12 +39,7 @@ async fn start_with_metrics() -> (BrokerHandle, Client, tempfile::TempDir) {
     let mut config = BrokerConfig::for_tests(tempdir.path().to_path_buf());
     config.metrics_listen_addr = Some("127.0.0.1:0".parse().expect("a loopback address"));
     let broker = Broker::start(config).await.expect("broker start");
-    let client = connect_owned(
-        broker.listen_addr().to_string(),
-        "krabka-broker-test",
-        "client build",
-    )
-    .await;
+    let client = connect_to_broker(&broker).await;
     (broker, client, tempdir)
 }
 
@@ -54,11 +49,12 @@ async fn scrape(addr: std::net::SocketAddr) -> String { scrape_metrics(addr).awa
 /// The number of records a fetch from offset zero returns.
 async fn fetch_record_count(client: &Client, topic: &str, topic_id: WireUuid) -> usize {
     let response = client
-        .send(single_partition_fetch(SinglePartitionFetchSetup {
-            topic: topic.into(),
-            topic_id,
-            ..Default::default()
-        }))
+        .send(
+            single_partition_fetch()
+                .topic(topic.into())
+                .topic_id(topic_id)
+                .call(),
+        )
         .await
         .expect("Fetch");
     assert!(response.error_code == codes::NONE, "Fetch: {response:?}");

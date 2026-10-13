@@ -12,10 +12,7 @@ use {
         CLIENT_PRINCIPAL, PASSWORD, TOPIC,
         support::{
             self,
-            fetch::{
-                FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-                SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
-            },
+            fetch::{FetchLimits, RequestWaitMillis, fetch_partition, single_partition_fetch},
             offsets::{
                 delete_records_partition, delete_records_request, delete_records_topic,
                 list_offset_partition, single_partition_list_offsets,
@@ -136,16 +133,17 @@ fn data_fetch(
     topic_id: WireUuid,
     offset: krabka_ids::Offset,
 ) -> krabka_protocol::owned::fetch_request::FetchRequest {
-    single_partition_fetch(SinglePartitionFetchSetup {
-        topic: TOPIC.into(),
-        topic_id,
-        partition: fetch_partition(FetchPartitionSetup {
-            offset,
-            maximum: FetchByteLimit(4 * 1024 * 1024),
-            ..Default::default()
-        }),
-        limits: FetchLimits::wait_for_data(RequestWaitMillis(500)),
-    })
+    single_partition_fetch()
+        .topic(TOPIC.into())
+        .topic_id(topic_id)
+        .partition(
+            fetch_partition()
+                .offset(offset.0)
+                .maximum(4 * 1024 * 1024)
+                .call(),
+        )
+        .limits(FetchLimits::wait_for_data(RequestWaitMillis(500)))
+        .call()
 }
 
 /// Read `expected` records back from `bootstrap`, starting at `start_offset`.

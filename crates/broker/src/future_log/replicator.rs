@@ -202,9 +202,8 @@ mod tests {
             future_log::{
                 canonicalize_or_self, resume_move,
                 test_support::{
-                    FutureRecordSetup, FutureSourceSetup, RecordValueBytes, TestStampSource,
-                    append_epoch_batch, append_records, append_value_batch, fixture_partition,
-                    open_future_log, registered_source_fixture, test_policy,
+                    TestStampSource, append_epoch_batch, append_records, append_value_batch,
+                    fixture_partition, open_future_log, registered_source_fixture, test_policy,
                 },
             },
             log_dir,
@@ -282,10 +281,10 @@ mod tests {
         let target = tempdir().unwrap();
         let stamp_source: Arc<dyn krabka_log::StampSource> =
             Arc::new(TestStampSource(AtomicU64::new(100)));
-        let source = registered_source_fixture(primary.path(), FutureSourceSetup {
-            stamp_source: Some(stamp_source),
-            ..Default::default()
-        });
+        let source = registered_source_fixture()
+            .primary(primary.path())
+            .maybe_stamp_source(Some(stamp_source))
+            .call();
 
         resume_and_wait(
             &source.partition,
@@ -315,10 +314,10 @@ mod tests {
         let future_logs = Arc::new(DashMap::new());
         let part = fixture_partition(primary.path(), "t", PartitionIndex(0));
         for _ in 0..4 {
-            append_value_batch(&part, FutureRecordSetup {
-                value_size: RecordValueBytes(400 * 1024),
-                ..Default::default()
-            });
+            append_value_batch()
+                .part(&part)
+                .value_size(400 * 1024)
+                .call();
         }
         partitions.insert("t".into(), PartitionIndex(0), part.clone());
 
@@ -343,10 +342,7 @@ mod tests {
     ) -> (Arc<Partition>, Arc<Mutex<Log>>, PathBuf) {
         let part = fixture_partition(primary, "t", PartitionIndex(0));
         for _ in 0..5 {
-            append_value_batch(&part, FutureRecordSetup {
-                value_size: RecordValueBytes(10),
-                ..Default::default()
-            });
+            append_value_batch().part(&part).value_size(10).call();
         }
         let (future_path, future_log) = open_future_log(target);
         let policy = test_policy();
@@ -366,12 +362,11 @@ mod tests {
         _primary: tempfile::TempDir,
     }
 
-    async fn truncated_copied_future() -> TruncatedFutureFixture {
+    fn copied_future() -> TruncatedFutureFixture {
         let primary = tempdir().unwrap();
         let target = tempdir().unwrap();
         let (part, future_log, future_path) =
             partition_with_copied_future_log(primary.path(), target.path());
-        part.truncate_to(Offset(3)).await.unwrap();
         TruncatedFutureFixture {
             future_path,
             future_log,
@@ -379,6 +374,12 @@ mod tests {
             target,
             _primary: primary,
         }
+    }
+
+    async fn truncated_copied_future() -> TruncatedFutureFixture {
+        let fixture = copied_future();
+        fixture.part.truncate_to(Offset(3)).await.unwrap();
+        fixture
     }
 
     /// The value size of each record of `log` from offset 0.
@@ -414,7 +415,7 @@ mod tests {
         let fixture = truncated_copied_future().await;
         let part = fixture.part;
         for _ in 0..2 {
-            append_value_batch(&part, FutureRecordSetup::default());
+            append_value_batch().part(&part).call();
         }
         assert!(part.log_end_offset() == Offset(5));
         assert!(value_sizes(&part.log) == [10, 10, 10, 20, 20]);
@@ -441,10 +442,7 @@ mod tests {
         // The restart: nothing remembers the cut.
         assert!(part.take_future_truncation().await.unwrap() == Some(Offset(3)));
         for _ in 0..2 {
-            append_epoch_batch(&part, FutureRecordSetup {
-                leader_epoch: krabka_ids::LeaderEpoch(2),
-                ..Default::default()
-            });
+            append_epoch_batch().part(&part).leader_epoch(2).call();
         }
         assert!(part.log_end_offset() == fixture.future_log.lock().unwrap().log_end_offset());
 
@@ -461,15 +459,16 @@ mod tests {
     /// refuses a swap until it has.
     #[tokio::test]
     async fn a_swap_waits_for_the_cut_the_writer_has_not_reported() {
-        let primary = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        let (part, future_log, future_path) =
-            partition_with_copied_future_log(primary.path(), target.path());
+        let fixture = copied_future();
+        let part = fixture.part;
+        let target = fixture.target;
+        let future_log = fixture.future_log;
+        let future_path = fixture.future_path;
         assert!(part.take_future_truncation().await.unwrap() == None);
         part.truncate_to(Offset(4)).await.unwrap();
         part.truncate_to(Offset(2)).await.unwrap();
         for _ in 0..3 {
-            append_value_batch(&part, FutureRecordSetup::default());
+            append_value_batch().part(&part).call();
         }
         assert!(part.log_end_offset() == Offset(5));
         let (ack, outcome) = oneshot::channel();

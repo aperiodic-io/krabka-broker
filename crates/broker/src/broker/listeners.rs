@@ -211,7 +211,7 @@ mod tests {
                 NodeRole::{Broker, Controller},
             },
         },
-        assert2::{assert, check},
+        assert2::assert,
         krabka_security::ListenerProtocol,
     };
 
@@ -309,90 +309,83 @@ mod tests {
     /// whether the port of the supplied listener still answers a connect.
     type DataPlane = (Vec<String>, Option<SocketAddr>, bool);
 
-    /// A node with the broker role serves its data plane on the listener the
-    /// caller supplied. A node without it closes that listener and binds
-    /// nothing, as Kafka's controller-only node opens only the listeners that
-    /// `controller.listener.names` names.
-    #[tokio::test]
-    async fn only_a_node_with_the_broker_role_opens_the_data_plane() {
-        // (roles, whether the node opens the data plane)
-        let cases = [
-            (vec![Controller], false),
-            (vec![Broker], true),
-            (vec![Controller, Broker], true),
-        ];
-        for (roles, opens) in cases {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let supplied = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-            let address = supplied.local_addr().expect("local address");
-            let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
-            config.listen_addr = address;
-            config.advertised_listener = address.to_string();
-            config.roles.clone_from(&roles);
-
-            let startup = bind_listeners_and_recover_moves(
-                &mut config,
-                vec![supplied],
-                &Arc::new(PartitionRegistry::new()),
-                &Arc::new(ThrottleState::new()),
-            )
-            .await
-            .expect("bind the data plane");
-            let names = startup
-                .bound
-                .iter()
-                .map(|(spec, _, _)| spec.name.clone())
-                .collect();
-            let answers = tokio::net::TcpStream::connect(address).await.is_ok();
-
-            let expected: DataPlane = if opens {
-                (vec!["PLAINTEXT".to_owned()], Some(address), true)
-            } else {
-                (Vec::new(), None, false)
-            };
-            check!(
-                (names, startup.listen_addr, answers) == expected,
-                "{roles:?}"
-            );
-        }
+    #[derive(Clone, Copy, Debug)]
+    enum RoleCase {
+        ControllerOnly,
+        BrokerOnly,
+        Combined,
     }
 
-    /// A configured port 0 binds an ephemeral data-plane listener before the
-    /// broker registers, and only a node with the broker role registers. A
-    /// controller-only node binds nothing and keeps its config.
-    #[tokio::test]
-    async fn only_a_node_with_the_broker_role_binds_an_ephemeral_data_plane_port() {
-        // (roles, whether the node binds a listener)
-        let cases = [
-            (vec![Controller], false),
-            (vec![Broker], true),
-            (vec![Controller, Broker], true),
-        ];
-        for (roles, binds) in cases {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
-            config.listen_addr = "127.0.0.1:0".parse().expect("literal");
-            config.advertised_listener = "127.0.0.1:0".to_owned();
-            config.roles.clone_from(&roles);
-            let mut listeners = Vec::new();
+    /// A broker role opens a data plane with either a supplied listener or an
+    /// ephemeral configured port. Controller-only nodes do neither.
+    #[yare::parameterized(
+        controller_only = { RoleCase::ControllerOnly },
+        broker_only = { RoleCase::BrokerOnly },
+        combined = { RoleCase::Combined },
+    )]
+    #[test_macro(tokio::test)]
+    async fn only_broker_roles_open_the_data_plane(case: RoleCase) {
+        let (roles, opens) = match case {
+            RoleCase::ControllerOnly => (vec![Controller], false),
+            RoleCase::BrokerOnly => (vec![Broker], true),
+            RoleCase::Combined => (vec![Controller, Broker], true),
+        };
 
-            bind_ephemeral_data_plane_listener(&mut config, &mut listeners)
-                .await
-                .expect("bind the ephemeral port");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let supplied = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let address = supplied.local_addr().expect("local address");
+        let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
+        config.listen_addr = address;
+        config.advertised_listener = address.to_string();
+        config.roles.clone_from(&roles);
 
-            let bound: Vec<SocketAddr> = listeners
-                .iter()
-                .map(|listener| listener.local_addr().expect("local address"))
-                .collect();
-            let expected = if binds {
-                (
-                    vec![config.listen_addr],
-                    format!("127.0.0.1:{}", config.listen_addr.port()),
-                )
-            } else {
-                (Vec::new(), "127.0.0.1:0".to_owned())
-            };
-            check!((bound, config.advertised_listener) == expected, "{roles:?}");
-        }
+        let startup = bind_listeners_and_recover_moves(
+            &mut config,
+            vec![supplied],
+            &Arc::new(PartitionRegistry::new()),
+            &Arc::new(ThrottleState::new()),
+        )
+        .await
+        .expect("bind the supplied data plane");
+        let names = startup
+            .bound
+            .iter()
+            .map(|(spec, _, _)| spec.name.clone())
+            .collect();
+        let answers = tokio::net::TcpStream::connect(address).await.is_ok();
+        let expected: DataPlane = if opens {
+            (vec!["PLAINTEXT".to_owned()], Some(address), true)
+        } else {
+            (Vec::new(), None, false)
+        };
+        assert2::assert!(
+            (names, startup.listen_addr, answers) == expected,
+            "{roles:?}"
+        );
+        drop(startup);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
+        config.listen_addr = "127.0.0.1:0".parse().expect("literal");
+        config.advertised_listener = "127.0.0.1:0".to_owned();
+        config.roles.clone_from(&roles);
+        let mut listeners = Vec::new();
+        bind_ephemeral_data_plane_listener(&mut config, &mut listeners)
+            .await
+            .expect("bind the ephemeral port");
+
+        let bound: Vec<SocketAddr> = listeners
+            .iter()
+            .map(|listener| listener.local_addr().expect("local address"))
+            .collect();
+        let expected = if opens {
+            (
+                vec![config.listen_addr],
+                format!("127.0.0.1:{}", config.listen_addr.port()),
+            )
+        } else {
+            (Vec::new(), "127.0.0.1:0".to_owned())
+        };
+        assert2::assert!((bound, config.advertised_listener) == expected, "{roles:?}");
     }
 }

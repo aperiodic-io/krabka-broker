@@ -10,10 +10,7 @@ use {
         epoch_harness::{boot_single, create_topic, record, set_leader_epoch, topic_id_for},
         support::{
             client::connect_client,
-            fetch::{
-                FetchLimits, FetchPartitionSetup, RequestWaitMillis, SinglePartitionFetchSetup,
-                fetch_partition, single_partition_fetch,
-            },
+            fetch::{FetchLimits, RequestWaitMillis, fetch_partition, single_partition_fetch},
             produce::{SinglePartitionProduceSetup, batch_request},
         },
     },
@@ -30,15 +27,15 @@ async fn fetch_with_epoch(
     client
         .send(FetchRequest {
             replica_id: 99,
-            ..single_partition_fetch(SinglePartitionFetchSetup {
-                topic: topic.into(),
-                topic_id,
-                partition: FetchPartition {
+            ..single_partition_fetch()
+                .topic(topic.into())
+                .topic_id(topic_id)
+                .partition(FetchPartition {
                     current_leader_epoch: epoch,
-                    ..fetch_partition(FetchPartitionSetup::default())
-                },
-                limits: FetchLimits::one_mebibyte(RequestWaitMillis(100)),
-            })
+                    ..fetch_partition().call()
+                })
+                .limits(FetchLimits::one_mebibyte(RequestWaitMillis(100)))
+                .call()
         })
         .await
         .expect("fetch")

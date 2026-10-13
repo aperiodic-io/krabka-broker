@@ -120,8 +120,8 @@ fn start_broker_with_opa_authorizer(
 
 use crate::{
     kafka_wire::{
-        AutomaticTopicSetup, PlainAuthenticationSetup, create_topic_as_super_user,
-        drive_produce_as_plain,
+        PlainAuthenticationSetup, create_topic_as_super_user, drive_produce_as_plain,
+        plain_authentication_setup,
     },
     support::{
         produce::single_partition_response,
@@ -134,14 +134,15 @@ use crate::{
 /// session. Admin is the super-user in both tests, so the call bypasses the OPA
 /// mock and the topic materialises whatever OPA answers.
 async fn create_topic_as_admin(addr: SocketAddr, name: &str) {
-    create_topic_as_super_user(addr, AutomaticTopicSetup {
-        client_id: CLIENT_ID,
-        topic: ConfiguredTopicSetup {
+    create_topic_as_super_user()
+        .addr(addr)
+        .client_id(CLIENT_ID)
+        .topic(ConfiguredTopicSetup {
             name: name.to_string(),
             ..Default::default()
-        },
-    })
-    .await;
+        })
+        .call()
+        .await;
 }
 
 /// Waits on `handle`, event-driven, until the local writer-actor of `topic`
@@ -205,11 +206,10 @@ async fn produce_blocked_by_opa_returns_topic_authorization_failed() {
     let resp = drive_produce_as_plain(
         addr,
         single_record_produce_request("blocked-topic", 0, b"hello"),
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            password: alice_password(),
-            ..Default::default()
-        },
+        &plain_authentication_setup()
+            .client_id(CLIENT_ID)
+            .password(alice_password())
+            .call(),
     )
     .await
     .expect("Produce must round-trip");

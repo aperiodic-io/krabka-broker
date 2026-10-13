@@ -22,7 +22,7 @@ use {
         coordinator::unified::streams::actor::StreamsGroupActorMessage,
         handlers::{
             authorized_operations::authorized_operations_bits,
-            group_heartbeat_test_support::{StreamsTopologySetup, streams_request_with_topology},
+            group_heartbeat_test_support::streams_request_with_topology,
         },
         test_support::{DenyAll, peer, principal, request_context, start_broker_with},
     },
@@ -46,12 +46,12 @@ async fn grant(
         .broker_arc_for_test()
         .controller
         .submit_change(vec![MetadataRecord::V1AccessControlEntry(
-            crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
-                resource_type,
-                resource_name,
-                principal: &format!("User:{user}"),
-                operation,
-            }),
+            crate::test_support::allow_acl()
+                .resource_type(resource_type)
+                .resource_name(resource_name)
+                .principal(&format!("User:{user}"))
+                .operation(operation)
+                .call(),
         )])
         .await
         .expect("commit acl");
@@ -366,14 +366,13 @@ async fn ready_group_describes_the_configured_topology_and_every_member_field() 
             value: "z1".into(),
             ..Default::default()
         }]),
-        ..streams_request_with_topology(StreamsTopologySetup {
-            group_id: "app",
-            state_changelog_topics: vec![hb::topic_info::TopicInfo {
+        ..streams_request_with_topology()
+            .group_id("app")
+            .state_changelog_topics(vec![hb::topic_info::TopicInfo {
                 name: "app-store-changelog".into(),
                 ..Default::default()
-            }],
-            ..Default::default()
-        })
+            }])
+            .call()
     };
     let joined = heartbeat(&broker, &join).await;
     check!(joined.error_code == codes::NONE, "{joined:?}");
@@ -493,15 +492,14 @@ async fn empty_group_is_empty_and_another_group_type_is_not_found() {
     broker_fixture!((broker_handle, _dir, broker), start_broker(true));
     finalize_streams_version(&broker).await;
     broker.group_coordinator.mark_share("share");
-    let join = streams_request_with_topology(StreamsTopologySetup {
-        group_id: "left",
-        source_topic: "absent",
-        state_changelog_topics: vec![hb::topic_info::TopicInfo {
+    let join = streams_request_with_topology()
+        .group_id("left")
+        .source_topic("absent")
+        .state_changelog_topics(vec![hb::topic_info::TopicInfo {
             name: "left-changelog".into(),
             ..Default::default()
-        }],
-        ..Default::default()
-    });
+        }])
+        .call();
     check!(heartbeat(&broker, &join).await.error_code == codes::NONE);
     let leave = StreamsGroupHeartbeatRequest {
         group_id: "left".into(),

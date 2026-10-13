@@ -4,7 +4,7 @@ use {
         broker::{
             Broker,
             test_support::{
-                LocalPartitionSetup, MetadataPartitionSetup, local_partition_with_records,
+                LocalPartitionSetup, local_partition_with_records, metadata_partition_record,
                 submit_metadata_topic_partition,
             },
         },
@@ -137,23 +137,31 @@ async fn single_broker_handle_helpers_observe_real_state_and_errors() {
     let topic = "handle-mutant-topic";
     let partition_leader = handle.node_id() + 1;
     let partition_isr = [partition_leader, handle.node_id()];
-    submit_metadata_topic_partition(&handle, MetadataPartitionSetup {
-        topic,
-        topic_id: uuid::Uuid::from_u128(0xCAFE),
-        leader: krabka_ids::NodeId(partition_leader),
-        replicas: partition_isr
-            .iter()
-            .copied()
-            .map(krabka_ids::NodeId)
-            .collect(),
-        isr: partition_isr
-            .iter()
-            .copied()
-            .map(krabka_ids::NodeId)
-            .collect(),
-        ..Default::default()
-    })
-    .await;
+    submit_metadata_topic_partition()
+        .handle(&handle)
+        .topic_id(uuid::Uuid::from_u128(0xCAFE))
+        .partition_record(
+            metadata_partition_record()
+                .topic(topic)
+                .leader(partition_leader)
+                .replicas(
+                    partition_isr
+                        .iter()
+                        .copied()
+                        .map(krabka_ids::NodeId)
+                        .collect(),
+                )
+                .isr(
+                    partition_isr
+                        .iter()
+                        .copied()
+                        .map(krabka_ids::NodeId)
+                        .collect(),
+                )
+                .call(),
+        )
+        .call()
+        .await;
     handle.wait_until_partition_present(topic, 0).await;
     check!(handle.has_partition(topic, 0));
     check!(handle.partition_leader_for_test(topic, 0) == Some(partition_leader));
@@ -217,11 +225,11 @@ async fn single_broker_handle_helpers_observe_real_state_and_errors() {
     assert!(!snapshot.bytes.is_empty());
 
     let local_topic = "handle-local-log-mutant-topic";
-    let local_part = local_partition_with_records(dir.path(), LocalPartitionSetup {
-        topic: local_topic,
-        values: &[b"a", b"b"],
-        ..Default::default()
-    });
+    let local_part = local_partition_with_records()
+        .log_dir(dir.path())
+        .topic(local_topic)
+        .values(&[b"a", b"b"])
+        .call();
     assert!(!handle.partition_exists_for_test(local_topic, 0));
     broker.partitions.insert(
         local_topic.into(),
@@ -267,7 +275,12 @@ async fn shutdown_fixture(
 ) -> ShutdownFixture {
     let (handle, broker, addr) = start_default_broker(root).await;
     let (topic, index) = (setup.topic, setup.partition);
-    let partition = local_partition_with_records(root, setup);
+    let partition = local_partition_with_records()
+        .log_dir(root)
+        .topic(setup.topic)
+        .partition(setup.partition)
+        .values(setup.values)
+        .call();
     broker
         .partitions
         .insert(topic.into(), index, partition.clone());

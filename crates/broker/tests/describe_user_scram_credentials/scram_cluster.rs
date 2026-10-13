@@ -7,7 +7,7 @@
 
 use {
     crate::support::{
-        acl::{ClusterAclSetup, cluster_acl_record, use_simple_acl_authorizer},
+        acl::{cluster_acl_record, use_simple_acl_authorizer},
         sasl::{sasl_temp_config, start_broker},
     },
     krabka_broker::BrokerHandle,
@@ -63,11 +63,12 @@ pub(crate) async fn seed_cluster_acl(
     operation: AclOperation,
 ) {
     handle
-        .submit_metadata_record_for_test(cluster_acl_record(ClusterAclSetup {
-            principal: &format!("User:{principal}"),
-            operation,
-            ..Default::default()
-        }))
+        .submit_metadata_record_for_test(
+            cluster_acl_record()
+                .principal(&format!("User:{principal}"))
+                .operation(operation)
+                .call(),
+        )
         .await
         .expect("seed cluster ACL");
     handle

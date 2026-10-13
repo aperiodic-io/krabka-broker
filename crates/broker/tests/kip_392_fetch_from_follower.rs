@@ -20,7 +20,7 @@
 
 use {
     crate::support::{
-        client::{ValueBatchSetup, ValueRecordCount, connect_client},
+        client::connect_client,
         fetch::fetch_topic_row,
         produce::{SinglePartitionProduceSetup, send_batch},
         shutdown_cluster,
@@ -118,7 +118,19 @@ struct ConsumerFetchSetup<'a> {
     rack: &'a str,
 }
 
-fn consumer_fetch(setup: ConsumerFetchSetup<'_>) -> FetchRequest {
+#[bon::builder]
+fn consumer_fetch(
+    #[builder(default = "t")] topic: &'_ str,
+    #[builder(default = WireUuid :: ZERO)] topic_id: WireUuid,
+    #[builder(into, default)] offset: krabka_ids::Offset,
+    #[builder(default = RACK_B)] rack: &'_ str,
+) -> FetchRequest {
+    let setup = ConsumerFetchSetup {
+        topic,
+        topic_id,
+        offset,
+        rack,
+    };
     let ConsumerFetchSetup {
         topic,
         topic_id,
@@ -148,10 +160,7 @@ async fn fetch_all_from_follower(client: &Client, topic_id: WireUuid) -> usize {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let response = client
-            .send(consumer_fetch(ConsumerFetchSetup {
-                topic_id,
-                ..Default::default()
-            }))
+            .send(consumer_fetch().topic_id(topic_id).call())
             .await
             .expect("Fetch to follower (rack-b)");
         let partition = &response.responses[0].partitions[0];
@@ -176,11 +185,7 @@ async fn fetch_all_from_follower(client: &Client, topic_id: WireUuid) -> usize {
 
 async fn assert_leader_serves_same_rack(client: &Client, topic_id: WireUuid) {
     let response = client
-        .send(consumer_fetch(ConsumerFetchSetup {
-            topic_id,
-            rack: RACK_A,
-            ..Default::default()
-        }))
+        .send(consumer_fetch().topic_id(topic_id).rack(RACK_A).call())
         .await
         .expect("Fetch to leader (rack-a)");
     assert!(
@@ -238,9 +243,7 @@ async fn rack_aware_consumer_is_redirected_to_same_rack_follower() {
     let producer = connect_client(leader_addr.clone(), None).await;
     let prod = send_batch(
         &producer,
-        record_batch(ValueBatchSetup {
-            records: ValueRecordCount(N_RECORDS),
-        }),
+        record_batch().records(N_RECORDS).call(),
         SinglePartitionProduceSetup {
             topic: ("t").into(),
             topic_id,
@@ -264,10 +267,7 @@ async fn rack_aware_consumer_is_redirected_to_same_rack_follower() {
     // selector should redirect to the same-rack follower (node 2).
     let leader_client = connect_client(leader_addr.clone(), None).await;
     let r_leader = leader_client
-        .send(consumer_fetch(ConsumerFetchSetup {
-            topic_id,
-            ..Default::default()
-        }))
+        .send(consumer_fetch().topic_id(topic_id).call())
         .await
         .expect("Fetch to leader (rack-b)");
     let part = &r_leader.responses[0].partitions[0];

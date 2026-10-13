@@ -35,38 +35,45 @@ pub struct ConsensusModel {
     pub enable_check_quorum: bool,
 }
 
+#[bon::builder]
+fn bounded_model(
+    voter_ids: &[NodeId],
+    #[builder(default)] max_appends: u32,
+    #[builder(default = 3)] max_inflight: usize,
+    #[builder(default = 2)] max_epoch: Epoch,
+    #[builder(default)] enable_loss_dup: bool,
+    #[builder(default)] max_crashes: usize,
+    #[builder(default)] enable_append_via: bool,
+    #[builder(default = true)] enable_check_quorum: bool,
+) -> ConsensusModel {
+    ConsensusModel {
+        voter_ids: voter_ids.to_vec(),
+        max_appends,
+        max_inflight,
+        max_epoch,
+        enable_loss_dup,
+        max_crashes,
+        enable_append_via,
+        enable_check_quorum,
+    }
+}
+
 impl ConsensusModel {
     /// Election and log-matching focus. There are NO client appends, so the
     /// space stays the small, fast one from the scaffolding task. This exercises
     /// leader election and log replication safety across N voters.
-    pub fn elections(voter_ids: &[NodeId]) -> Self {
-        Self {
-            voter_ids: voter_ids.to_vec(),
-            max_appends: 0,
-            max_inflight: 3,
-            max_epoch: 2,
-            enable_loss_dup: false,
-            max_crashes: 0,
-            enable_append_via: false,
-            enable_check_quorum: true,
-        }
-    }
+    pub fn elections(voter_ids: &[NodeId]) -> Self { bounded_model().voter_ids(voter_ids).call() }
 
     /// Linearizability focus. Client appends are ENABLED, but the bounds are
     /// tight, because the linearizability tester keeps the history in the
     /// fingerprinted state and so makes the space far larger. The bounds stay
     /// small enough to exhaust the space exactly.
     pub fn linearizable(voter_ids: &[NodeId], max_appends: u32) -> Self {
-        Self {
-            voter_ids: voter_ids.to_vec(),
-            max_appends,
-            max_inflight: 3,
-            max_epoch: 2,
-            enable_loss_dup: false,
-            max_crashes: 0,
-            enable_append_via: false,
-            enable_check_quorum: false,
-        }
+        bounded_model()
+            .voter_ids(voter_ids)
+            .max_appends(max_appends)
+            .enable_check_quorum(false)
+            .call()
     }
 
     /// Fault-injection focus: message loss, message duplication, and a single
@@ -75,16 +82,12 @@ impl ConsensusModel {
     /// log-matching safety under an adversarial network, which is where the
     /// bounded space stays exhaustible.
     pub fn faults(voter_ids: &[NodeId]) -> Self {
-        Self {
-            voter_ids: voter_ids.to_vec(),
-            max_appends: 0,
-            max_inflight: 2,
-            max_epoch: 2,
-            enable_loss_dup: true,
-            max_crashes: 1,
-            enable_append_via: false,
-            enable_check_quorum: true,
-        }
+        bounded_model()
+            .voter_ids(voter_ids)
+            .max_inflight(2)
+            .enable_loss_dup(true)
+            .max_crashes(1)
+            .call()
     }
 
     /// Leader-completeness focus. Three voters and client appends, so a
@@ -98,32 +101,25 @@ impl ConsensusModel {
     /// in-flight messages are enough for a stale voter to be refused, and the
     /// space still exhausts.
     pub fn three_voters_append(voter_ids: &[NodeId], max_appends: u32) -> Self {
-        Self {
-            voter_ids: voter_ids.to_vec(),
-            max_appends,
-            max_inflight: 2,
-            max_epoch: 2,
-            enable_loss_dup: false,
-            max_crashes: 1,
-            enable_append_via: false,
-            enable_check_quorum: false,
-        }
+        bounded_model()
+            .voter_ids(voter_ids)
+            .max_appends(max_appends)
+            .max_inflight(2)
+            .max_crashes(1)
+            .enable_check_quorum(false)
+            .call()
     }
 
     /// Diskless append focus. Client appends are offered through every live
     /// node, which models stateless appenders, but the ordered controller log
     /// stays the linearization point.
     pub fn append_via(voter_ids: &[NodeId], max_appends: u32) -> Self {
-        Self {
-            voter_ids: voter_ids.to_vec(),
-            max_appends,
-            max_inflight: 3,
-            max_epoch: 2,
-            enable_loss_dup: false,
-            max_crashes: 0,
-            enable_append_via: true,
-            enable_check_quorum: false,
-        }
+        bounded_model()
+            .voter_ids(voter_ids)
+            .max_appends(max_appends)
+            .enable_append_via(true)
+            .enable_check_quorum(false)
+            .call()
     }
 
     /// The base election timeout configured for node `id`. It is staggered by

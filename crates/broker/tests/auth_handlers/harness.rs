@@ -11,11 +11,9 @@
 pub use crate::support::sasl::alice_password;
 use {
     crate::{
-        kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
+        kafka_wire,
         support::{
-            sasl::{
-                ScramCredentialSetup, provision_scram, sasl_plaintext_mechanisms, start_broker,
-            },
+            sasl::{provision_scram, sasl_plaintext_mechanisms, start_broker},
             sasl_plaintext_config,
             wire::{
                 CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
@@ -87,19 +85,16 @@ crate::socket_round_trip_fixture!(pub round_trip, "krabka-sasl-test");
 /// Post-auth Metadata proves the session survived and the data plane remains reachable.
 pub async fn metadata_probe(stream: &mut TcpStream, corr_id: i32) -> io::Result<()> {
     let response: krabka_protocol::owned::metadata_response::MetadataResponse =
-        kafka_wire::exchange(
-            stream,
-            &krabka_protocol::owned::metadata_request::MetadataRequest::default(),
-            WireExchangeSetup {
-                api_key: WireApiKey(3),
-                version: WireApiVersion(12),
-                correlation: WireCorrelationId(corr_id),
-                client_id: "krabka-sasl-test",
-                header: RequestHeaderEncoding::Flexible,
-                ..Default::default()
-            },
-        )
-        .await?;
+        kafka_wire::exchange()
+            .stream(stream)
+            .request(&krabka_protocol::owned::metadata_request::MetadataRequest::default())
+            .api_key(3)
+            .version(12)
+            .correlation(corr_id)
+            .client_id("krabka-sasl-test")
+            .header(RequestHeaderEncoding::Flexible)
+            .call()
+            .await?;
     if response.brokers.is_empty() {
         return Err(io::Error::other("Metadata response carried no brokers"));
     }
@@ -164,11 +159,11 @@ pub async fn start_scram_alice(
     let broker = krabka_broker::Broker::start(cfg)
         .await
         .expect("broker must start");
-    provision_scram(&broker, ScramCredentialSetup {
-        mechanism,
-        ..Default::default()
-    })
-    .await;
+    provision_scram()
+        .broker(&broker)
+        .mechanism(mechanism)
+        .call()
+        .await;
     broker
 }
 
@@ -243,12 +238,12 @@ pub async fn start_reauth_broker(
         .expect("broker must start");
     if mechanism == krabka_security::SaslMechanism::ScramSha512 {
         for user in ["alice", "bob"] {
-            provision_scram(&broker, ScramCredentialSetup {
-                user: (user).into(),
-                mechanism,
-                ..Default::default()
-            })
-            .await;
+            provision_scram()
+                .broker(&broker)
+                .user((user).into())
+                .mechanism(mechanism)
+                .call()
+                .await;
         }
     }
     broker

@@ -253,7 +253,12 @@ mod tests {
         fn truncate(&self) { truncate_to_current_epochs(&self.current, &self.future).unwrap(); }
     }
 
-    fn truncation_logs(setup: TruncationLogsSetup<'_>) -> TruncationLogsFixture {
+    #[bon::builder]
+    fn truncation_logs(
+        #[builder(default = & [])] future: &'_ [LeaderEpoch],
+        #[builder(default = & [LeaderEpoch (1) , LeaderEpoch (1)])] current: &'_ [LeaderEpoch],
+    ) -> TruncationLogsFixture {
+        let setup = TruncationLogsSetup { future, current };
         let directory = tempdir().unwrap();
         let future = log_with_epochs(directory.path(), "future", setup.future);
         let current = log_with_epochs(directory.path(), "current", setup.current);
@@ -273,20 +278,20 @@ mod tests {
         // Both logs hold offsets 0-1 in epoch 1. The future log went on with
         // offsets 2-3 in epoch 1, which the current log dropped and replaced
         // with offsets 2-3 in epoch 2.
-        let logs = truncation_logs(TruncationLogsSetup {
-            future: &[
+        let logs = truncation_logs()
+            .future(&[
                 LeaderEpoch(1),
                 LeaderEpoch(1),
                 LeaderEpoch(1),
                 LeaderEpoch(1),
-            ],
-            current: &[
+            ])
+            .current(&[
                 LeaderEpoch(1),
                 LeaderEpoch(1),
                 LeaderEpoch(2),
                 LeaderEpoch(2),
-            ],
-        });
+            ])
+            .call();
         assert!(leo(&logs.future) == leo(&logs.current));
 
         logs.truncate();
@@ -297,15 +302,15 @@ mod tests {
 
     #[test]
     fn a_future_log_that_is_a_prefix_of_the_current_log_is_left_alone() {
-        let logs = truncation_logs(TruncationLogsSetup {
-            future: &[LeaderEpoch(1), LeaderEpoch(1)],
-            current: &[
+        let logs = truncation_logs()
+            .future(&[LeaderEpoch(1), LeaderEpoch(1)])
+            .current(&[
                 LeaderEpoch(1),
                 LeaderEpoch(1),
                 LeaderEpoch(1),
                 LeaderEpoch(2),
-            ],
-        });
+            ])
+            .call();
 
         logs.truncate();
 
@@ -317,16 +322,15 @@ mod tests {
     /// two share.
     #[test]
     fn epochs_the_current_log_does_not_know_are_dropped_one_at_a_time() {
-        let logs = truncation_logs(TruncationLogsSetup {
-            future: &[
+        let logs = truncation_logs()
+            .future(&[
                 LeaderEpoch(1),
                 LeaderEpoch(1),
                 LeaderEpoch(2),
                 LeaderEpoch(3),
                 LeaderEpoch(3),
-            ],
-            ..Default::default()
-        });
+            ])
+            .call();
 
         logs.truncate();
 
@@ -339,10 +343,7 @@ mod tests {
             ("without epochs", &[LeaderEpoch(-1), LeaderEpoch(-1)][..]),
             ("already empty", &[][..]),
         ] {
-            let logs = truncation_logs(TruncationLogsSetup {
-                future: epochs,
-                ..Default::default()
-            });
+            let logs = truncation_logs().future(epochs).call();
             logs.truncate();
             assert!(leo(&logs.future) == Offset(0), "{label}");
         }

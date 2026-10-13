@@ -6,7 +6,7 @@ use {
     crate::{
         support::{
             self,
-            configs::{TopicConfigMutationSetup, alter_topic_config, topic_config},
+            configs::{alter_topic_config, topic_config},
         },
         wire::{
             MAX_MESSAGE_BYTES, accepted, create_topic, orders_fixture, produce_batch_of_wire_len,
@@ -128,11 +128,11 @@ async fn describe_max_message_bytes(client: &Client, topic: &str) -> DescribeCon
 
 /// Drive `kafka-configs --alter --add-config max.message.bytes=<value>`.
 async fn set_max_message_bytes(client: &Client, topic: &str, value: &str) -> (i16, Option<String>) {
-    alter_topic_config(client, TopicConfigMutationSetup {
-        topic,
-        name: MAX_MESSAGE_BYTES,
-        value: Some(value),
-        ..Default::default()
-    })
-    .await
+    alter_topic_config()
+        .client(client)
+        .topic(topic)
+        .name(MAX_MESSAGE_BYTES)
+        .maybe_value(Some(value))
+        .call()
+        .await
 }

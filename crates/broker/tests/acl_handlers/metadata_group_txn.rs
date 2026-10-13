@@ -24,8 +24,8 @@ use {
         },
         sasl_cluster::start_admin_alice,
         support::{
-            acl::{TopicAclSetup, seed_dummy_acl, topic_acl_record},
-            transactions::{InitProducerSetup, init_producer_request},
+            acl::{seed_dummy_acl, topic_acl_record},
+            transactions::init_producer_request,
         },
     },
     assert2::assert,
@@ -42,11 +42,12 @@ async fn alice_metadata_fixture() -> (
     create_topic_as_admin(addr, "t1", 1).await;
     create_topic_as_admin(addr, "t2", 1).await;
     handle
-        .submit_metadata_record_for_test(topic_acl_record(TopicAclSetup {
-            topic: "t1",
-            operation: krabka_metadata::AclOperation::Describe,
-            ..Default::default()
-        }))
+        .submit_metadata_record_for_test(
+            topic_acl_record()
+                .topic("t1")
+                .operation(krabka_metadata::AclOperation::Describe)
+                .call(),
+        )
         .await
         .expect("seed Describe-on-t1 ACL for alice");
     (handle, dir, addr)
@@ -184,10 +185,9 @@ async fn init_producer_id_denied_without_txn_acl() {
     // Seed a dummy ACL to disable the compat shim.
     seed_dummy_acl(&handle).await;
 
-    let req = init_producer_request(InitProducerSetup {
-        transactional_id: Some("tx-1".to_string()),
-        ..Default::default()
-    });
+    let req = init_producer_request()
+        .maybe_transactional_id(Some("tx-1".to_string()))
+        .call();
     let resp = drive_init_producer_id_as_plain(addr, req, &PlainAuthenticationSetup {
         client_id: CLIENT_ID,
         ..Default::default()

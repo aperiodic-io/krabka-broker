@@ -19,7 +19,7 @@
 use {
     crate::{
         harness::{alice_password, round_trip, sasl_authenticate_round_trip, start_broker_stream},
-        kafka_wire::{ExchangeSetup as WireExchangeSetup, exchange},
+        kafka_wire::exchange,
         oauthbearer::{
             drive_inband_reauth, drive_sasl_oauthbearer_session_open, now_unix_secs,
             oauthbearer_fixture, oauthbearer_zero_skew_validator, unsecured_jws,
@@ -375,16 +375,13 @@ async fn plain_listener_session_lifetime_ms_is_zero_and_no_timer() {
     // `session_lifetime_ms` field directly.
     let mut stream = broker_stream.stream;
 
-    let _: api_versions_response::ApiVersionsResponse = exchange(
-        &mut stream,
-        &api_versions_request::ApiVersionsRequest::default(),
-        WireExchangeSetup {
-            client_id: "krabka-sasl-test",
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("ApiVersions round-trip");
+    let _: api_versions_response::ApiVersionsResponse = exchange()
+        .stream(&mut stream)
+        .request(&api_versions_request::ApiVersionsRequest::default())
+        .client_id("krabka-sasl-test")
+        .call()
+        .await
+        .expect("ApiVersions round-trip");
 
     let sh_req = sasl_handshake_request::SaslHandshakeRequest {
         mechanism: "PLAIN".to_string(),

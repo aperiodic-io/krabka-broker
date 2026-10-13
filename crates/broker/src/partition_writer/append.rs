@@ -330,11 +330,7 @@ pub(crate) async fn run_produce_append_batch_at(
 mod tests {
     use {
         super::*,
-        crate::{
-            error::BrokerError,
-            partition_writer::test_support::sample_batch,
-            test_support::{EmptyPayloadBatchSetup, RecordCount},
-        },
+        crate::{error::BrokerError, partition_writer::test_support::sample_batch},
         assert2::{assert, check},
         krabka_log::{LogConfig, LogIo},
         tempfile::tempdir,
@@ -418,11 +414,9 @@ mod tests {
     }
 
     fn two_single_record_batches() -> Vec<ProduceData> {
-        std::iter::repeat_with(|| {
-            ProduceData::Owned(sample_batch(EmptyPayloadBatchSetup::default()))
-        })
-        .take(2)
-        .collect()
+        std::iter::repeat_with(|| ProduceData::Owned(sample_batch().call()))
+            .take(2)
+            .collect()
     }
 
     #[test]
@@ -439,8 +433,7 @@ mod tests {
             let dir = tempdir().unwrap();
             let mut log = Log::open(dir.path(), LogConfig::default()).unwrap();
             if seeded {
-                log.append(&mut sample_batch(EmptyPayloadBatchSetup::default()))
-                    .unwrap();
+                log.append(&mut sample_batch().call()).unwrap();
             }
             let disk = Arc::new(FailNthWrite {
                 next: std::sync::atomic::AtomicUsize::new(0),
@@ -458,7 +451,7 @@ mod tests {
                 ..LogConfig::default()
             });
             let mut bytes = bytes::BytesMut::new();
-            let mut sample = sample_batch(EmptyPayloadBatchSetup::default());
+            let mut sample = sample_batch().call();
             sample.records[0].value = Some(bytes::Bytes::from(vec![7; payload]));
             sample.encode(&mut bytes).unwrap();
             let bytes = bytes.freeze();
@@ -529,12 +522,7 @@ mod tests {
             &log,
             Offset(2),
             None,
-            (
-                vec![ProduceData::Owned(sample_batch(
-                    EmptyPayloadBatchSetup::default(),
-                ))],
-                Vec::new(),
-            ),
+            (vec![ProduceData::Owned(sample_batch().call())], Vec::new()),
         );
 
         assert!(results[0].as_ref().unwrap().base_offset == Offset(2));
@@ -546,9 +534,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let log = lz4_log(dir.path());
 
-        let original = sample_batch(EmptyPayloadBatchSetup {
-            count: RecordCount(2),
-        });
+        let original = sample_batch().count(2).call();
         assert!(original.attributes.compression() == CompressionType::None);
 
         let (results, leo, _) =
@@ -573,7 +559,7 @@ mod tests {
     /// and a 6-byte value (version 0, coordinator epoch 17), so the append
     /// path's control-record check accepts it.
     fn commit_marker_batch() -> krabka_protocol::records::RecordBatch {
-        let mut marker = sample_batch(EmptyPayloadBatchSetup::default());
+        let mut marker = sample_batch().call();
         marker.attributes = marker
             .attributes
             .with_transactional(true)
@@ -638,13 +624,13 @@ mod tests {
     #[test]
     fn a_marker_group_releases_transactions_below_the_high_watermark() {
         fn data(producer_id: i64) -> ProduceData {
-            let mut batch = sample_batch(EmptyPayloadBatchSetup::default());
+            let mut batch = sample_batch().call();
             batch.producer_id = producer_id;
             batch.attributes = batch.attributes.with_transactional(true);
             ProduceData::Owned(batch)
         }
         fn commit(producer_id: i64) -> ProduceData {
-            let mut batch = sample_batch(EmptyPayloadBatchSetup::default());
+            let mut batch = sample_batch().call();
             batch.producer_id = producer_id;
             batch.attributes = batch.attributes.with_transactional(true).with_control(true);
             batch.records[0].key = Some(bytes::Bytes::from_static(&[0, 0, 0, 1]));

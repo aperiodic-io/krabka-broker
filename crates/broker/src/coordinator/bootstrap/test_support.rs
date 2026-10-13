@@ -7,9 +7,7 @@ use {
         coordinator::{
             GroupCoordinator,
             persistence::{GroupMetadataValue, parse_key},
-            test_support::{
-                OffsetRecordSetup, coordinator_with_config, default_coordinator, offset_record,
-            },
+            test_support::{coordinator_with_config, default_coordinator, offset_record},
             unified::{
                 ImageMetadataProvider,
                 actor::test_support::empty_metadata,
@@ -243,12 +241,11 @@ pub(super) fn commit_record_for_group(
     partition: i32,
     offset: i64,
 ) -> krabka_protocol::records::Record {
-    offset_record(OffsetRecordSetup {
-        group,
-        partition: krabka_ids::PartitionIndex(partition),
-        offset: krabka_log::Offset(offset),
-        ..Default::default()
-    })
+    offset_record()
+        .group(group)
+        .partition(partition)
+        .offset(offset)
+        .call()
 }
 
 /// Write each `(key, value)` record (a `None` value is a tombstone) to a fresh

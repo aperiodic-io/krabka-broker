@@ -127,10 +127,7 @@ fn add_voter_follows_add_voter_handler_order() {
             "admitted",
             voters(VoterCount(3), KraftFeatureLevel(1)),
             target(Absent),
-            plan(ReconfigurationPlanSetup {
-                count: VoterCount(4),
-                ..Default::default()
-            }),
+            plan().count(4).call(),
         ),
     ];
     for (case, current, voter, expected) in cases {
@@ -190,10 +187,7 @@ fn remove_voter_answers_voter_not_found_unless_voter_set_removes() {
             "admitted",
             voters(VoterCount(3), KraftFeatureLevel(1)),
             PresentSameDirectory,
-            plan(ReconfigurationPlanSetup {
-                count: VoterCount(2),
-                ..Default::default()
-            }),
+            plan().count(2).call(),
         ),
     ];
     for (case, current, membership, expected) in cases {

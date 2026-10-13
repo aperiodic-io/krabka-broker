@@ -31,6 +31,13 @@ fn pending() -> BreakGlassProposalRecord {
     }
 }
 
+fn approved_by_bob() -> BreakGlassProposalRecord {
+    BreakGlassProposalRecord {
+        approvals: vec![approval("User:bob")],
+        ..pending()
+    }
+}
+
 #[test]
 fn a_second_principal_adds_an_approval_to_the_list() {
     let config = config();
@@ -61,10 +68,7 @@ fn a_second_principal_adds_an_approval_to_the_list() {
 fn an_approval_appends_to_the_list_it_found() {
     let config = config();
     let policy = BreakGlassPolicy::new(&config);
-    let stored = BreakGlassProposalRecord {
-        approvals: vec![approval("User:bob")],
-        ..pending()
-    };
+    let stored = approved_by_bob();
 
     let updated = decide(
         policy,

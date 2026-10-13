@@ -16,8 +16,7 @@
 
 use {
     crate::support::classic::{
-        ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId, classic_join_request,
-        classic_sync_request, sync_assignment,
+        ClassicTimeouts, classic_join_request, classic_sync_request, sync_assignment,
     },
     assert2::{assert, check},
     bytes::Bytes,
@@ -46,15 +45,14 @@ async fn start() -> support::InProcess {
 fn join_request(group_id: &str, member_id: &str, instance_id: Option<&str>) -> JoinGroupRequest {
     JoinGroupRequest {
         group_instance_id: instance_id.map(str::to_string),
-        ..classic_join_request(ClassicJoinSetup {
-            group_id: (group_id).into(),
-            member_id: (member_id).into(),
-            timeouts: ClassicTimeouts {
+        ..classic_join_request()
+            .group_id((group_id).into())
+            .member_id((member_id).into())
+            .timeouts(ClassicTimeouts {
                 rebalance: krabka_units::millis(1_500),
                 ..Default::default()
-            },
-            ..Default::default()
-        })
+            })
+            .call()
     }
 }
 
@@ -83,13 +81,12 @@ async fn bootstrap_static_member(
     let r3 = client
         .send(SyncGroupRequest {
             group_instance_id: Some(instance_id.into()),
-            ..classic_sync_request(ClassicSyncSetup {
-                group_id: (group_id).into(),
-                generation_id: GenerationId(generation),
-                member_id: mid.clone(),
-                assignments: vec![sync_assignment(mid.clone(), assignment.clone())],
-                ..Default::default()
-            })
+            ..classic_sync_request()
+                .group_id((group_id).into())
+                .generation_id(generation)
+                .member_id(mid.clone())
+                .assignments(vec![sync_assignment(mid.clone(), assignment.clone())])
+                .call()
         })
         .await
         .expect("SyncGroup");

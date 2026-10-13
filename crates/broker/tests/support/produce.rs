@@ -14,6 +14,17 @@ pub fn replicated_topic_produce_setup(
     }
 }
 
+/// The repeated one-topic form of the replicated Produce setup builder.
+pub fn replicated_topic_produce_for(
+    topic: &str,
+    topic_id: [u8; 16],
+) -> SinglePartitionProduceSetup {
+    replicated_topic_produce_setup()
+        .topic(topic.to_owned())
+        .topic_id(topic_id)
+        .call()
+}
+
 /// Verify the response cardinality before a scenario checks its partition row.
 ///
 /// # Panics
@@ -55,6 +66,39 @@ pub fn batch_request(
 ) -> krabka_protocol::owned::produce_request::ProduceRequest {
     setup.records = Some(batch.into());
     single_partition_produce(setup)
+}
+
+/// Build and encode one v2-batch produce request for a raw-wire test.
+#[bon::builder]
+pub fn encoded_batch_request(
+    batch: krabka_protocol::records::RecordBatch,
+    topic: String,
+    #[builder(into, default)] partition: krabka_ids::PartitionIndex,
+    version: i16,
+) -> bytes::BytesMut {
+    let request = batch_request(batch, SinglePartitionProduceSetup {
+        topic,
+        partition,
+        ..Default::default()
+    });
+    let mut body = bytes::BytesMut::new();
+    krabka_protocol::Encode::encode(&request, &mut body, version).expect("encode ProduceRequest");
+    body
+}
+
+/// Encode one partition's Produce body for callers that do not need to adjust builder defaults.
+pub fn encode_batch_request(
+    batch: krabka_protocol::records::RecordBatch,
+    topic: &str,
+    partition: i32,
+    version: i16,
+) -> bytes::BytesMut {
+    encoded_batch_request()
+        .batch(batch)
+        .topic(topic.to_owned())
+        .partition(partition)
+        .version(version)
+        .call()
 }
 
 /// Both client transports retain their normal Produce routing and error handling.

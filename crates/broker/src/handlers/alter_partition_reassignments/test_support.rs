@@ -49,7 +49,20 @@ pub(super) struct ReassignmentRequestSetup<'a> {
     pub target: ReassignmentTarget,
 }
 
-pub(super) fn request(setup: ReassignmentRequestSetup<'_>) -> AlterPartitionReassignmentsRequest {
+#[bon::builder]
+pub(super) fn request(
+    #[builder(default)] replication_factor_policy: ReplicationFactorPolicy,
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(into, default = krabka_ids :: PartitionIndex (7))]
+    partition_index: krabka_ids::PartitionIndex,
+    #[builder(default)] target: ReassignmentTarget,
+) -> AlterPartitionReassignmentsRequest {
+    let setup = ReassignmentRequestSetup {
+        replication_factor_policy,
+        topic,
+        partition_index,
+        target,
+    };
     let ReassignmentRequestSetup {
         replication_factor_policy,
         topic,
@@ -89,17 +102,24 @@ pub(super) struct ReassignmentImageSetup<'a> {
 
 /// The in-progress replacement of broker two by broker three.
 pub(super) fn pending_reassignment_image() -> MetadataImage {
-    img_with(ReassignmentImageSetup {
-        assignment: ReassignmentSetup {
+    img_with()
+        .assignment(ReassignmentSetup {
             adding: vec![krabka_ids::NodeId(3)],
             removing: vec![krabka_ids::NodeId(2)],
             ..Default::default()
-        },
-        ..Default::default()
-    })
+        })
+        .call()
 }
 
-pub(super) fn img_with(setup: ReassignmentImageSetup<'_>) -> MetadataImage {
+#[bon::builder]
+pub(super) fn img_with(
+    #[builder(default)] assignment: ReassignmentSetup<'_>,
+    #[builder(into, default)] partition_epoch: PartitionEpoch,
+) -> MetadataImage {
+    let setup = ReassignmentImageSetup {
+        assignment,
+        partition_epoch,
+    };
     let ReassignmentImageSetup {
         assignment,
         partition_epoch,
@@ -123,7 +143,7 @@ pub(super) fn img_with(setup: ReassignmentImageSetup<'_>) -> MetadataImage {
     }));
     img.apply(&MetadataRecord::V1Partition(PartitionRecord {
         partition_epoch: partition_epoch.0,
-        ..reassignment_partition(assignment)
+        ..crate::reassignment_fields!(reassignment_partition(), assignment).call()
     }));
     img
 }

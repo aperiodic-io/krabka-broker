@@ -109,10 +109,7 @@ impl AuditSink for KafkaTopicAuditSink {
 mod tests {
     use {
         super::*,
-        crate::{
-            partition::Partition,
-            test_support::{StandalonePartitionSetup, open_partition as fixture_partition},
-        },
+        crate::{partition::Partition, test_support::open_partition as fixture_partition},
         assert2::assert,
         krabka_log::Offset,
         krabka_units::mebibytes,
@@ -121,10 +118,7 @@ mod tests {
 
     fn audit_partition(path: &std::path::Path) -> (Arc<Partition>, Arc<PartitionRegistry>) {
         let partitions = Arc::new(PartitionRegistry::new());
-        let partition = fixture_partition(path, StandalonePartitionSetup {
-            topic: "__audit",
-            ..Default::default()
-        });
+        let partition = fixture_partition().log_dir(path).topic("__audit").call();
         partitions.insert("__audit".into(), PartitionIndex(0), Arc::clone(&partition));
         (partition, partitions)
     }

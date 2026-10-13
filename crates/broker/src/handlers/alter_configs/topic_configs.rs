@@ -122,13 +122,7 @@ mod tests {
         resource: &AlterConfigsResource,
         image: &krabka_metadata::MetadataImage,
     ) -> Result<MetadataRecord, (i16, String)> {
-        super::topic_config_record(
-            resource,
-            image,
-            &TopicPolicy::default(),
-            true,
-            UnstableApiVersions::Disabled,
-        )
+        topic_config_record_with_default_policy!(resource, image, super::topic_config_record,)
     }
 
     #[test]

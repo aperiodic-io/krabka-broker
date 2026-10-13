@@ -44,21 +44,23 @@ fn promote_with_second_voter(m: &mut QuorumStateMachine, log: &dyn LogView) {
     }
 }
 
-#[test]
-fn leader_advances_hwm_at_majority_fetch_offset() {
+#[yare::parameterized(
+    advances_after_promotion_at_offset_zero = { 0 },
+    holds_until_current_epoch_commits = { 10 },
+)]
+fn leader_hwm_respects_epoch_start_offset(epoch_start_offset: i64) {
     let mut m = three_voter_machine();
-    // The log end is 0 at promotion so the leader's `epoch_start_offset` is
-    // 0; the leader-completeness gate then permits advancing the HWM to any
-    // majority offset > 0. After promotion the log grows to end 10, which is
-    // what followers replicate against.
-    let log = CellLog::new(0, 1);
-    // drive to leader (epoch_start_offset captured as end_offset() == 0)
+    // At zero the log grows after promotion; at ten it already includes the
+    // prior-epoch entries the majority fetch does not cover.
+    let log = CellLog::new(epoch_start_offset, 1);
     promote_with_second_voter(&mut m, &log);
-    assert2::assert!(matches!(m.role(), Role::Leader {
-        epoch_start_offset: 0,
-        ..
-    }));
-    // Leader's log now ends at 10. follower 2 fetches at 8, follower 3 at 4.
+    assert2::assert!(matches!(
+        m.role(),
+        Role::Leader {
+            epoch_start_offset: actual,
+            ..
+        } if *actual == epoch_start_offset
+    ));
     log.end.set(10);
     let a2 = m.on_event(
         Event::ReceiveFetch {
@@ -69,23 +71,25 @@ fn leader_advances_hwm_at_majority_fetch_offset() {
         &log,
         SimInstant(2100),
     );
-    // majority of {self=10, 2=8} = 8, and 8 > epoch_start_offset 0 → advances
+    let advances = epoch_start_offset == 0;
     assert2::assert!(
         a2.iter()
-            .any(|a| matches!(a, Action::AdvanceHighWatermark(8)))
+            .any(|action| matches!(action, Action::AdvanceHighWatermark(8)))
+            == advances
     );
-    let _ = m.on_event(
-        Event::ReceiveFetch {
-            from: NodeId(3),
-            fetch_epoch: 1,
-            fetch_offset: 4,
-        },
-        &log,
-        SimInstant(2101),
-    );
-    // sorted match offsets {10,8,4}; majority (2nd highest) = 8 → no regress
+    if advances {
+        let _ = m.on_event(
+            Event::ReceiveFetch {
+                from: NodeId(3),
+                fetch_epoch: 1,
+                fetch_offset: 4,
+            },
+            &log,
+            SimInstant(2101),
+        );
+    }
     if let Role::Leader { high_watermark, .. } = m.role() {
-        assert2::assert!(*high_watermark == 8);
+        assert2::assert!(*high_watermark == if advances { 8 } else { 0 });
     } else {
         panic!()
     }
@@ -138,39 +142,6 @@ fn leader_hwm_does_not_regress_on_reordered_stale_fetch() {
         assert2::assert!(*high_watermark == 8);
     } else {
         panic!("expected leader")
-    }
-}
-
-#[test]
-fn leader_holds_hwm_for_prior_epoch_entries_until_current_epoch_committed() {
-    // Leader-completeness (Raft Fig.8): a leader promoted at log end 10
-    // (epoch_start_offset = 10) must NOT advance the HWM to a majority
-    // offset that only covers prior-epoch entries (8 < 10).
-    let mut m = three_voter_machine();
-    let log = FakeLog::new(10, 1);
-    promote_with_second_voter(&mut m, &log);
-    assert2::assert!(matches!(m.role(), Role::Leader {
-        epoch_start_offset: 10,
-        ..
-    }));
-    // follower 2 fetches at 8: majority of {10, 8} = 8, but 8 <= 10 → hold.
-    let a2 = m.on_event(
-        Event::ReceiveFetch {
-            from: NodeId(2),
-            fetch_epoch: 1,
-            fetch_offset: 8,
-        },
-        &log,
-        SimInstant(2100),
-    );
-    assert2::assert!(
-        !a2.iter()
-            .any(|a| matches!(a, Action::AdvanceHighWatermark(_)))
-    );
-    if let Role::Leader { high_watermark, .. } = m.role() {
-        assert2::assert!(*high_watermark == 0);
-    } else {
-        panic!()
     }
 }
 

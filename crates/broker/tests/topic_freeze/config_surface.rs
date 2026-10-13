@@ -11,9 +11,7 @@ use {
         control_plane::freeze_scope,
         support::{
             self,
-            configs::{
-                ConfigOperation, TopicConfigMutationSetup, alter_topic_config, topic_config,
-            },
+            configs::{ConfigOperation, alter_topic_config, topic_config},
         },
         wire::{CONTROL, accepted, controlled_fixture, create_topic, refused},
     },
@@ -102,13 +100,13 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
         "AlterConfigs set"
     );
     check!(
-        alter_topic_config(&p.client, TopicConfigMutationSetup {
-            topic: CONTROL,
-            name: WRITE_FREEZE,
-            value: Some("true"),
-            ..Default::default()
-        })
-        .await
+        alter_topic_config()
+            .client(&p.client)
+            .topic(CONTROL)
+            .name(WRITE_FREEZE)
+            .maybe_value(Some("true"))
+            .call()
+            .await
             == refusal,
         "IncrementalAlterConfigs set"
     );
@@ -118,12 +116,12 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
         "AlterConfigs clear"
     );
     check!(
-        alter_topic_config(&p.client, TopicConfigMutationSetup {
-            name: WRITE_FREEZE,
-            operation: ConfigOperation::Delete,
-            ..Default::default()
-        })
-        .await
+        alter_topic_config()
+            .client(&p.client)
+            .name(WRITE_FREEZE)
+            .operation(ConfigOperation::Delete)
+            .call()
+            .await
             == refusal,
         "IncrementalAlterConfigs delete"
     );

@@ -381,16 +381,12 @@ mod tests {
             coordinator::unified::{
                 ShareGroupSeed,
                 share::{
-                    actor::test_support::{
-                        ShareSubscriptionSetup, TopicMetadataSetup, subscribed_request,
-                        unavailable_persister_coordinator,
-                    },
+                    actor::test_support::{subscribed_request, unavailable_persister_coordinator},
                     persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
                     state::ShareMemberState,
                 },
                 test_support::{fixed_source, make_share_persister},
             },
-            test_support::PartitionCount,
         },
         assert2::assert,
     };
@@ -459,18 +455,12 @@ mod tests {
     /// wait with it. The partitions are initializing when it answers.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_heartbeat_does_not_wait_for_the_persister() {
-        let (coordinator, log, topic_id) = unavailable_persister_coordinator(TopicMetadataSetup {
-            partitions: PartitionCount(2),
-            ..Default::default()
-        });
+        let (coordinator, log, topic_id) = unavailable_persister_coordinator().partitions(2).call();
         let handle = coordinator.get_or_create_share("g");
 
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            heartbeat(
-                &handle,
-                subscribed_request(ShareSubscriptionSetup::default()),
-            ),
+            heartbeat(&handle, subscribed_request().call()),
         )
         .await
         .expect("the heartbeat answers before the persister does");
@@ -511,10 +501,7 @@ mod tests {
     /// with no outcome yet stays initializing.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_initialize_outcome_moves_each_partition() {
-        let (metadata, topic_id) = metadata_with_topic(TopicMetadataSetup {
-            partitions: PartitionCount(3),
-            ..Default::default()
-        });
+        let (metadata, topic_id) = metadata_with_topic().partitions(3).call();
         let (coordinator, _log) = make_coordinator(metadata);
         let handle = coordinator.get_or_create_share("g");
         handle
@@ -560,10 +547,7 @@ mod tests {
     /// group already initialized included.
     #[test]
     fn every_partition_initializes_at_the_uninitialized_start_offset() {
-        let (metadata, topic_id) = metadata_with_topic(TopicMetadataSetup {
-            partitions: PartitionCount(2),
-            ..Default::default()
-        });
+        let (metadata, topic_id) = metadata_with_topic().partitions(2).call();
         let (coordinator, _log) = make_coordinator(metadata);
         coordinator.set_share_persister(make_share_persister(fixed_source(
             krabka_metadata::MetadataImage::default(),

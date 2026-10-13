@@ -9,9 +9,7 @@ use {
     crate::support::{
         self,
         discovery::{api_versions, topic_metadata_request},
-        topics::{
-            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
-        },
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::{assert, check},
     krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest,
@@ -31,11 +29,7 @@ async fn api_versions_round_trip() {
 async fn metadata_returns_this_broker_and_listed_topics() {
     let p = support::start().await;
     // Create a topic first.
-    let create = create_topic_request(creatable_topic(ConfiguredTopicSetup {
-        name: ("beta").into(),
-        partitions: TopicPartitionCount(3),
-        ..Default::default()
-    }));
+    let create = create_topic_request(creatable_topic().name(("beta").into()).partitions(3).call());
     let _ = p.client.send(create).await.unwrap();
 
     let resp = p

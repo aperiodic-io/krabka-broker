@@ -20,11 +20,8 @@ mod support;
 
 use {
     crate::support::{
-        client::connect_client,
-        configs::feature_update,
-        discovery::api_versions_request_for,
-        transactions::{InitProducerSetup, TransactionTimeoutMillis, init_producer_request},
-        wire::At,
+        client::connect_client, configs::feature_update, discovery::api_versions_request_for,
+        transactions::init_producer_request, wire::At,
     },
     assert2::assert,
     krabka_broker::{Broker, BrokerConfig, BrokerHandle},
@@ -53,17 +50,22 @@ struct TwoPhaseInitSetup<'a> {
 }
 
 /// Pin the unstable v6 wire version and preserve both two-phase commit flags.
+#[bon::builder]
 fn two_phase_init(
-    setup: TwoPhaseInitSetup<'_>,
+    #[builder(default = "tid-2pc")] transactional_id: &'_ str,
+    #[builder(default)] recovery: PreparedTransactionRecovery,
 ) -> At<InitProducerIdRequest, { init_producer_id_request::MAX_VERSION }> {
+    let setup = TwoPhaseInitSetup {
+        transactional_id,
+        recovery,
+    };
     At(InitProducerIdRequest {
         enable2_pc: true,
         keep_prepared_txn: matches!(setup.recovery, PreparedTransactionRecovery::Keep),
-        ..init_producer_request(InitProducerSetup {
-            transactional_id: Some(setup.transactional_id.into()),
-            timeout: TransactionTimeoutMillis(30_000),
-            ..Default::default()
-        })
+        ..init_producer_request()
+            .maybe_transactional_id(Some(setup.transactional_id.into()))
+            .timeout(30_000)
+            .call()
     })
 }
 
@@ -74,11 +76,13 @@ struct InitializedProducerSetup<'a> {
 }
 
 /// Bootstrap the coordinator before initializing a transactional producer.
+#[bon::builder]
 async fn initialized_producer(
     broker: &BrokerHandle,
     bootstrap: &str,
-    setup: InitializedProducerSetup<'_>,
+    #[builder(default = "tid-keep")] transactional_id: &'_ str,
 ) -> Producer {
+    let setup = InitializedProducerSetup { transactional_id };
     broker.wait_until_transaction_coordinator_ready().await;
     let producer = Producer::builder()
         .bootstrap(bootstrap.to_owned())
@@ -128,9 +132,7 @@ async fn enable_2pc_rejected_when_cluster_disabled() {
     let client = client(&bootstrap).await;
 
     let resp = client
-        .send(two_phase_init(TwoPhaseInitSetup {
-            ..Default::default()
-        }))
+        .send(two_phase_init().call())
         .await
         .expect("InitProducerId");
 
@@ -148,15 +150,20 @@ async fn enable_2pc_rejected_when_cluster_disabled() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn keep_prepared_txn_without_ongoing_transaction_is_a_noop() {
     let (broker, bootstrap, _dir) = boot(TwoPhaseCommitSupport::Enabled).await;
-    let producer =
-        initialized_producer(&broker, &bootstrap, InitializedProducerSetup::default()).await;
+    let producer = initialized_producer()
+        .broker(&broker)
+        .bootstrap(&bootstrap)
+        .call()
+        .await;
     let client = client(&bootstrap).await;
 
     let resp = client
-        .send(two_phase_init(TwoPhaseInitSetup {
-            transactional_id: "tid-keep",
-            recovery: PreparedTransactionRecovery::Keep,
-        }))
+        .send(
+            two_phase_init()
+                .transactional_id("tid-keep")
+                .recovery(PreparedTransactionRecovery::Keep)
+                .call(),
+        )
         .await
         .expect("InitProducerId");
 
@@ -182,18 +189,17 @@ async fn keep_prepared_txn_without_ongoing_transaction_is_a_noop() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn enable_2pc_persists_no_timeout_sentinel() {
     let (broker, bootstrap, _dir) = boot(TwoPhaseCommitSupport::Enabled).await;
-    let producer = initialized_producer(&broker, &bootstrap, InitializedProducerSetup {
-        transactional_id: "tid-2pc-ok",
-    })
-    .await;
+    let producer = initialized_producer()
+        .broker(&broker)
+        .bootstrap(&bootstrap)
+        .transactional_id("tid-2pc-ok")
+        .call()
+        .await;
 
     // Re-init the SAME tid with enable2Pc → flips it to a no-timeout 2PC txn.
     let client = client(&bootstrap).await;
     let resp = client
-        .send(two_phase_init(TwoPhaseInitSetup {
-            transactional_id: "tid-2pc-ok",
-            ..Default::default()
-        }))
+        .send(two_phase_init().transactional_id("tid-2pc-ok").call())
         .await
         .expect("InitProducerId(enable2Pc)");
     assert!(

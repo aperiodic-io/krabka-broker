@@ -22,9 +22,9 @@ use {
     crate::support::{
         configs::{controller_registration, feature_update},
         discovery::api_versions_request_for,
-        sasl::{ScramAlgorithm, ScramIterations, ScramUpsertionSetup, scram_upsertion},
+        sasl::{ScramAlgorithm, scram_upsertion},
         start_with_bound_listeners,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::{assert, check},
     bytes::Bytes,
@@ -319,12 +319,11 @@ async fn controller_listener_serves_the_topic_lifecycle() {
     let connection = dial_controller(&broker).await;
 
     let created = connection
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("controller-lifecycle").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic()
+                .name(("controller-lifecycle").into())
+                .call(),
+        ))
         .await
         .expect("CreateTopics over the controller listener");
 
@@ -497,13 +496,14 @@ async fn controller_listener_serves_the_scram_write_path() {
 
     let altered = connection
         .send(AlterUserScramCredentialsRequest {
-            upsertions: vec![scram_upsertion(ScramUpsertionSetup {
-                mechanism: ScramAlgorithm::Sha256,
-                iterations: ScramIterations(8_192),
-                salt: Bytes::from_static(b"salt-bytes"),
-                salted_password: Bytes::from_static(b"salted-password-bytes"),
-                ..Default::default()
-            })],
+            upsertions: vec![
+                scram_upsertion()
+                    .mechanism(ScramAlgorithm::Sha256)
+                    .iterations(8_192)
+                    .salt(Bytes::from_static(b"salt-bytes"))
+                    .salted_password(Bytes::from_static(b"salted-password-bytes"))
+                    .call(),
+            ],
             ..Default::default()
         })
         .await
@@ -576,12 +576,9 @@ async fn controller_listener_serves_assign_replicas_to_dirs() {
         .broker_epoch;
 
     let created = connection
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("controller-dirs").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("controller-dirs").into()).call(),
+        ))
         .await
         .expect("CreateTopics over the controller listener");
     assert!(let [created_topic] = &created.topics[..]);
@@ -707,12 +704,11 @@ async fn controller_only_node_places_no_replica_on_itself() {
     let connection = dial_controller(&broker).await;
 
     let created = connection
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("controller-only-placement").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic()
+                .name(("controller-only-placement").into())
+                .call(),
+        ))
         .await
         .expect("CreateTopics over a controller-only listener");
     connection.close();

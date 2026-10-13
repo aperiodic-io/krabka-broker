@@ -17,6 +17,7 @@ categories = ["authentication", "network-programming"]
 workspace = true
 
 [dependencies]
+bon = { workspace = true }
 assert2 = { workspace = true }
 krabka-metadata = { version = "0.6.0" }
 krabka-security = { version = "0.6.0" }
@@ -26,3 +27,4 @@ tracing = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 uuid = { workspace = true }
+yare = { workspace = true }

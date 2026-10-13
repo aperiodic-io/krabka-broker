@@ -9,6 +9,7 @@ use {
     super::{RESOURCE_TYPE_BROKER, RESOURCE_TYPE_TOPIC, handle},
     crate::{
         authorizer::Authorizer,
+        handlers::test_support::metadata_topic_record,
         test_support::{
             broker_registration, start_broker_with_authorizer as start_broker, test_ctx,
         },
@@ -65,12 +66,12 @@ pub(super) fn topic_resource(
 
 pub(super) fn image_with_topic(name: &str) -> krabka_metadata::MetadataImage {
     let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-    image.apply(&MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
-        name: name.into(),
-        topic_id: uuid::Uuid::nil(),
-        partitions: 1,
-        replication_factor: 1,
-    }));
+    image.apply(&MetadataRecord::V1Topic(metadata_topic_record(
+        name,
+        uuid::Uuid::nil(),
+        1,
+        1,
+    )));
     image
 }
 

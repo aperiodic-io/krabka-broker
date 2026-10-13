@@ -5,13 +5,11 @@ mod support;
 
 use {
     crate::support::{
-        classic::{ClassicJoinSetup, ClassicTimeouts, classic_join_request},
+        classic::{ClassicTimeouts, classic_join_request},
         client::connect_client,
         consumer_groups::{consumer_heartbeat, reported_assignment},
         discovery::named_topic_metadata,
-        topics::{
-            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
-        },
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::{assert, check},
     krabka_broker::{Broker, BrokerConfig},
@@ -51,13 +49,12 @@ fn boot() -> std::pin::Pin<
 
 async fn create_topic(client: &Client, topic: &str, partitions: i32) {
     let resp = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: (topic).into(),
-                partitions: TopicPartitionCount(partitions),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic()
+                .name((topic).into())
+                .partitions(partitions)
+                .call(),
+        ))
         .await
         .expect("CreateTopics");
     assert!(
@@ -186,21 +183,21 @@ async fn classic_group_locked_against_next_gen() {
     // Kafka's `validateOnlineUpgrade` refuses to upgrade it; an empty classic
     // group would be replaced instead.
     let join = |member_id: String| {
-        classic_join_request(ClassicJoinSetup {
-            group_id: ("g3").into(),
-            member_id,
-            timeouts: ClassicTimeouts {
+        classic_join_request()
+            .group_id(("g3").into())
+            .member_id(member_id)
+            .timeouts(ClassicTimeouts {
                 rebalance: krabka_units::millis(60_000),
                 ..Default::default()
-            },
-            protocol_type: ("connect").into(),
-            protocols: vec![
+            })
+            .protocol_type(("connect").into())
+            .protocols(vec![
                 krabka_protocol::owned::join_group_request::JoinGroupRequestProtocol {
                     name: "default".into(),
                     ..Default::default()
                 },
-            ],
-        })
+            ])
+            .call()
     };
     let required = client.send(join(String::new())).await.unwrap();
     let joined = client.send(join(required.member_id)).await.unwrap();

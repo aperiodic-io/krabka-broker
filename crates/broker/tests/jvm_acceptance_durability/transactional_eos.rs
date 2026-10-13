@@ -14,8 +14,8 @@ use {
             docker_run_kafka_tool,
         },
         support::{
-            ContainerInput, JvmBrokerSetup, JvmDockerSetup, controller_voters, init_jvm_tracing,
-            jvm_broker_config, jvm_docker_command,
+            ContainerInput, controller_voters, init_jvm_tracing, jvm_broker_config,
+            jvm_docker_command,
         },
     },
     assert2::assert,
@@ -191,15 +191,18 @@ async fn transactional_console_producer_eos() {
                 },
             ],
             inter_broker_listener_name: "INTERNAL".to_string(),
-            ..jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
-                node: krabka_broker::NodeId(u64::try_from(i + 1).unwrap()),
-                listen: listen_addr,
-                controller: format!("0.0.0.0:{}", controller_ports[i])
-                    .parse()
-                    .expect("static addr"),
-                advertised: advertised_listener.clone(),
-                voters: controller_voters(&voters),
-            })
+            ..jvm_broker_config()
+                .log_dir(dir.path().to_path_buf())
+                .node(u64::try_from(i + 1).unwrap())
+                .listen(listen_addr)
+                .controller(
+                    format!("0.0.0.0:{}", controller_ports[i])
+                        .parse()
+                        .expect("static addr"),
+                )
+                .advertised(advertised_listener.clone())
+                .voters(controller_voters(&voters))
+                .call()
         };
         tempdirs.push(dir);
         spawns.push(tokio::spawn(async move {
@@ -235,7 +238,7 @@ async fn transactional_console_producer_eos() {
     // 2. Compile the small Java helper against the image's Kafka client jars.
     //    It writes one committed transaction, one aborted transaction, and a
     //    later record that seals the abort marker's transaction index.
-    let mut producer = jvm_docker_command(JvmDockerSetup { image: "--entrypoint", args: &["bash",
+    let mut producer = jvm_docker_command().image("--entrypoint").args(&["bash",
             KAFKA_IMAGE_TXN,
             "-c",
             r#"set -e; cat >/tmp/TransactionalProducer.java; \
@@ -245,7 +248,7 @@ async fn transactional_console_producer_eos() {
             "--",
             &bootstrap_1,
             TOPIC,
-        ], input: ContainerInput::Attached, ..Default::default() })
+        ]).input(ContainerInput::Attached).call()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -370,7 +373,7 @@ async fn transactional_console_producer_eos() {
         "--bootstrap-server",
         &bootstrap_1,
     ]);
-    let mut zombie = jvm_docker_command(JvmDockerSetup { image: "--entrypoint", args: &["bash",
+    let mut zombie = jvm_docker_command().image("--entrypoint").args(&["bash",
             KAFKA_IMAGE_TXN,
             "-c",
             r#"set -e; cat >/tmp/ZombieProducer.java; \
@@ -380,7 +383,7 @@ async fn transactional_console_producer_eos() {
             "--",
             &bootstrap_1,
             ZOMBIE_TOPIC,
-        ], input: ContainerInput::Attached, ..Default::default() })
+        ]).input(ContainerInput::Attached).call()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

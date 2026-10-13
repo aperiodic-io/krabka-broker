@@ -245,9 +245,7 @@ mod tests {
     use {
         super::*,
         crate::diskless::{
-            flusher::test_support::{
-                FlusherPartitionSetup, orders_partition, test_index_log, test_partition,
-            },
+            flusher::test_support::{orders_partition, test_index_log, test_partition},
             wal_object::WalObjectBuilder,
         },
         assert2::assert,
@@ -481,10 +479,7 @@ mod tests {
     async fn combined_object_stops_after_size_budget() {
         let dir = tempdir().unwrap();
         let first = orders_partition(dir.path());
-        let second = test_partition(dir.path(), FlusherPartitionSetup {
-            partition: krabka_ids::PartitionIndex(1),
-            ..Default::default()
-        });
+        let second = test_partition().root(dir.path()).partition(1).call();
         let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         let index = test_index_log().await;
         let cache = index.cache();

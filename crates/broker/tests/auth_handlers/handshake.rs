@@ -9,12 +9,12 @@
 use {
     crate::{
         harness::{alice_password, alice_plain_socket, round_trip},
-        kafka_wire::{ExchangeSetup as WireExchangeSetup, exchange},
+        kafka_wire::exchange,
         support::{
             sasl::sasl_plaintext_mechanisms,
             wire::{
                 CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-                SocketExchangeSetup, WireFrameSetup, request_frame, write_frame,
+                SocketExchangeSetup, request_frame, write_frame,
             },
         },
     },
@@ -47,16 +47,13 @@ async fn api_versions_reachable_pre_auth_on_sasl_listener() {
     let (_log_dir, handle, _addr, mut stream) =
         alice_plain_socket("alice-secret".to_string()).await;
 
-    let av_resp: ApiVersionsResponse = exchange(
-        &mut stream,
-        &ApiVersionsRequest::default(),
-        WireExchangeSetup {
-            client_id: "krabka-sasl-test",
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("ApiVersions round-trip");
+    let av_resp: ApiVersionsResponse = exchange()
+        .stream(&mut stream)
+        .request(&ApiVersionsRequest::default())
+        .client_id("krabka-sasl-test")
+        .call()
+        .await
+        .expect("ApiVersions round-trip");
 
     check!(
         av_resp.error_code == 0,
@@ -94,19 +91,18 @@ async fn metadata_rejected_pre_auth_on_sasl_listener() {
     md_req.encode(&mut md_body, 12).unwrap();
 
     // Build the frame manually: header + body, then length-prefix.
-    let frame = request_frame(WireFrameSetup {
-        api_key: krabka_ids::ApiKey(3),
-        version: krabka_ids::ApiVersion(12),
-        header: RequestHeaderEncoding::Flexible,
-        client_id: "krabka-t19-test",
-        body: &md_body,
-        capacity: Some(
+    let frame = request_frame()
+        .api_key(3)
+        .version(12)
+        .header(RequestHeaderEncoding::Flexible)
+        .client_id("krabka-t19-test")
+        .body(&md_body)
+        .maybe_capacity(Some(
             <krabka_units::ByteSize as krabka_units::convert::ByteSizeExt>::from_bytes(
                 u64::try_from(32 + md_body.len()).expect("frame capacity fits u64"),
             ),
-        ),
-        ..Default::default()
-    });
+        ))
+        .call();
 
     write_frame(&mut stream, &frame, None).await.unwrap();
 

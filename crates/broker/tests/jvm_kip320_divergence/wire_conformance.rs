@@ -13,7 +13,7 @@ use {
             KAFKA_IMAGE, KAFKA_IMAGE_MODERN, docker_rm, docker_run_kafka_tool_with_image,
             produce_lines_via_jvm,
         },
-        support::{self, JvmBrokerSetup, controller_voters, jvm_broker_config},
+        support::{self, controller_voters, jvm_broker_config},
     },
     krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle},
     krabka_metadata::MetadataRecord,
@@ -42,16 +42,16 @@ async fn start_host_broker_on(client_port: u16, controller_port: u16) -> (Broker
         // Keep it alive for the bounded in-container Java compile and probe.
         heartbeat_timeout: krabka_units::secs(120),
         bootstrap_mode: BootstrapMode::Bootstrap,
-        ..jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
-            listen: format!("0.0.0.0:{client_port}").parse().expect("addr"),
-            controller: format!("0.0.0.0:{controller_port}").parse().expect("addr"),
-            advertised: format!("host.docker.internal:{client_port}"),
-            voters: controller_voters(&[(
+        ..jvm_broker_config()
+            .log_dir(dir.path().to_path_buf())
+            .listen(format!("0.0.0.0:{client_port}").parse().expect("addr"))
+            .controller(format!("0.0.0.0:{controller_port}").parse().expect("addr"))
+            .advertised(format!("host.docker.internal:{client_port}"))
+            .voters(controller_voters(&[(
                 1,
                 format!("0.0.0.0:{controller_port}").parse().expect("addr"),
-            )]),
-            ..Default::default()
-        })
+            )]))
+            .call()
     };
     let handle = Broker::start(config).await.expect("start broker");
     (handle, dir)

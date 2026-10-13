@@ -201,15 +201,14 @@ mod tests {
             codes::{NOT_ENOUGH_REPLICAS, NOT_LEADER_OR_FOLLOWER},
             config_keys::{BROKER_WITNESS, MIN_INSYNC_REPLICAS, WITNESS_TRUE},
             handlers::{
-                produce::test_support::image_with_topic,
-                test_support::{ReplicatedPartitionSetup, replicated_partition},
+                produce::test_support::image_with_topic, test_support::replicated_partition,
             },
             log_dir::partition_dir,
             log_dir_status::LogDirRegistry,
             partition::ReplicationTarget,
             partition_registry::PartitionRegistry,
             replica_state::ReplicaState,
-            test_support::{StandalonePartitionSetup, StorageMode, spawn_standalone_partition},
+            test_support::{StorageMode, spawn_standalone_partition},
         },
         assert2::assert,
         krabka_metadata::{BrokerConfigRecord, MetadataImage, MetadataRecord, PartitionRecord},
@@ -365,10 +364,11 @@ mod tests {
             krabka_log::LogConfig::default(),
         )
         .unwrap();
-        let partition = spawn_standalone_partition(dir.path(), log, StandalonePartitionSetup {
-            storage: StorageMode::Diskless,
-            ..Default::default()
-        });
+        let partition = spawn_standalone_partition()
+            .log_dir(dir.path())
+            .log(log)
+            .storage(StorageMode::Diskless)
+            .call();
 
         assert!(!diskless_role_ready(&partition, record));
         partition
@@ -417,10 +417,11 @@ mod tests {
         partitions.insert(
             "orders".into(),
             krabka_ids::PartitionIndex(0),
-            spawn_standalone_partition(dir.path(), log, StandalonePartitionSetup {
-                storage: StorageMode::from_wire(diskless),
-                ..Default::default()
-            }),
+            spawn_standalone_partition()
+                .log_dir(dir.path())
+                .log(log)
+                .storage(StorageMode::from_wire(diskless))
+                .call(),
         );
         validate_partition_gate(
             "orders",
@@ -455,15 +456,14 @@ mod tests {
             krabka_metadata::PartitionRecord {
                 isr: vec![krabka_audit::NodeId(1)],
                 partition_epoch: 1,
-                ..replicated_partition(ReplicatedPartitionSetup {
-                    leader: krabka_audit::NodeId(1),
-                    replicas: &[
+                ..replicated_partition()
+                    .leader(1)
+                    .replicas(&[
                         krabka_audit::NodeId(1),
                         krabka_audit::NodeId(2),
                         krabka_audit::NodeId(3),
-                    ],
-                    ..Default::default()
-                })
+                    ])
+                    .call()
             },
         ));
         image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {

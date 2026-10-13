@@ -14,7 +14,6 @@ use {
         broker::BrokerHandle,
         codes,
         handlers::test_support::{
-            ClientTopicSetup, ProduceRecordsSetup, ShareWireSetup, TopicPartitionCount,
             acquired_share_records, create_topic as create_topic_from_test_support,
             initialize_earliest_share, produce_records, share_fetch_topics, share_fetch_wire,
             share_record_states,
@@ -55,22 +54,23 @@ async fn start(session_max: usize) -> (BrokerHandle, tempfile::TempDir) {
 
 /// Creates `topic` with `partitions` partitions and returns its id.
 async fn create_topic(broker: &BrokerHandle, topic: &str, partitions: i32) -> WireUuid {
-    create_topic_from_test_support(broker, ClientTopicSetup {
-        client_id: "share-session-test",
-        name: topic,
-        partitions: TopicPartitionCount(partitions),
-    })
-    .await
+    create_topic_from_test_support()
+        .broker(broker)
+        .client_id("share-session-test")
+        .name(topic)
+        .partitions(partitions)
+        .call()
+        .await
 }
 
 /// Appends three records to `partition` of `topic`.
 async fn produce(broker: &BrokerHandle, topic: &str, partition: i32) {
-    produce_records(broker, ProduceRecordsSetup {
-        topic,
-        partition_index: krabka_ids::PartitionIndex(partition),
-        ..Default::default()
-    })
-    .await;
+    produce_records()
+        .broker(broker)
+        .topic(topic)
+        .partition_index(partition)
+        .call()
+        .await;
 }
 
 /// Starts `group` at the earliest offset of each partition of `topic_id`.
@@ -135,11 +135,12 @@ async fn share_fetch(broker: &BrokerHandle, fetch: &Fetch<'_>) -> ShareFetchResp
         },
         ..Default::default()
     };
-    share_fetch_wire(broker, &request, ShareWireSetup {
-        version: krabka_ids::ApiVersion(VERSION),
-        ..Default::default()
-    })
-    .await
+    share_fetch_wire()
+        .broker(broker)
+        .request(&request)
+        .version(VERSION)
+        .call()
+        .await
 }
 
 async fn states(broker: &BrokerHandle, group: &str, topic_id: WireUuid) -> Vec<RecordState> {
@@ -396,11 +397,12 @@ async fn the_acquire_mode_and_batch_size_shape_the_acquired_rows() {
             }],
             ..Default::default()
         };
-        let response = share_fetch_wire(&broker, &request, ShareWireSetup {
-            version: krabka_ids::ApiVersion(version),
-            ..Default::default()
-        })
-        .await;
+        let response = share_fetch_wire()
+            .broker(&broker)
+            .request(&request)
+            .version(version)
+            .call()
+            .await;
         let acquired: Vec<(i64, i64)> = response
             .responses
             .iter()

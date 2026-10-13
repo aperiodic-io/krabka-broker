@@ -19,7 +19,7 @@
 use {
     crate::{
         freeze_signing::{FreezeBytes, freeze_signing_bytes},
-        support::{self, OperatorKeysSetup, OperatorSaslSetup},
+        support::{self, OperatorKeysSetup},
     },
     assert2::assert,
     krabka_broker::coordinator::AUDIT_TOPIC,
@@ -209,18 +209,18 @@ pub(super) async fn boot_workflow_cluster() -> Cluster {
     let alice_key = support::mint_operator_key(&keys, ALICE_KEY_ID, ALICE);
     let log_dir = dir.path().join("data");
 
-    let (broker, bootstrap, _config) =
-        support::start_with_operator_keys_sasl(&log_dir, OperatorSaslSetup {
-            trust: OperatorKeysSetup {
-                keys: &[&alice_key],
-                approvers: &[ALICE, BOB, CAROL],
-            },
-            users: &[
-                ("alice", "alice-pw"),
-                ("bob", "bob-pw"),
-                ("carol", "carol-pw"),
-            ],
+    let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl()
+        .dir(&log_dir)
+        .trust(OperatorKeysSetup {
+            keys: &[&alice_key],
+            approvers: &[ALICE, BOB, CAROL],
         })
+        .users(&[
+            ("alice", "alice-pw"),
+            ("bob", "bob-pw"),
+            ("carol", "carol-pw"),
+        ])
+        .call()
         .await;
     broker.wait_until_partition_present(AUDIT_TOPIC, 0).await;
     Cluster {

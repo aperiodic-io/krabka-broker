@@ -10,7 +10,10 @@ use {
     assert2::{assert, check},
     krabka_raft::scenarios::{NodeRole, ScenarioTrace, TraceAction, TraceStep, scenarios},
     std::collections::BTreeSet,
+    support::api_versions::supported_client_apis,
 };
+
+mod support;
 
 #[test]
 fn file_config_schema_has_the_shape_docgen_renders() {
@@ -50,11 +53,7 @@ fn file_config_schema_has_the_shape_docgen_renders() {
 
 #[test]
 fn supported_apis_is_non_empty_and_unique_by_key() {
-    let apis = krabka_broker::api_catalog::supported_apis(
-        krabka_broker::api_catalog::ListenerKind::Client,
-        krabka_broker::api_catalog::ClientMetricsReceiver::Absent,
-        krabka_broker::api_catalog::VersionGates::default(),
-    );
+    let apis = supported_client_apis();
     assert!(!apis.is_empty());
     let keys: BTreeSet<i16> = apis.iter().map(|api| api.api_key).collect();
     assert!(

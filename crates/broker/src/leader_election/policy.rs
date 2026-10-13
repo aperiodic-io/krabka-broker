@@ -482,11 +482,16 @@ pub(crate) fn unclean_restart_one(
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::leader_election::test_support::{ElectionSetup, seed_partition, witnesses},
-        assert2::assert,
-    };
+    use {super::*, assert2::assert};
+
+    fn clean_election(leader: u64, isr: &[u64]) -> super::FailoverDecision {
+        super::FailoverDecision::Elect {
+            leader: NodeId(leader),
+            isr: isr.iter().copied().map(NodeId).collect(),
+            unclean: false,
+        }
+    }
+    use crate::leader_election::test_support::{seed_partition, witnesses};
 
     /// The full failover decision for one partition, with `witnesses` and the
     /// published eligible-leader-replica set given directly. This keeps the
@@ -532,12 +537,11 @@ mod tests {
     }
 
     fn partition_record(leader: u64, replicas: &[u64], isr: &[u64]) -> PartitionRecord {
-        seed_partition(ElectionSetup {
-            leader: krabka_raft::NodeId(leader),
-            replicas: &replica_nodes(replicas),
-            isr: &replica_nodes(isr),
-            ..Default::default()
-        })
+        seed_partition()
+            .leader(leader)
+            .replicas(&replica_nodes(replicas))
+            .isr(&replica_nodes(isr))
+            .call()
     }
 
     fn expected_unclean_election(leader: NodeId) -> super::FailoverDecision {
@@ -948,11 +952,7 @@ mod tests {
                 dead: 1,
                 alive: &[2],
                 unclean_enabled: false,
-                expected: super::FailoverDecision::Elect {
-                    leader: NodeId(2),
-                    isr: vec![NodeId(2), NodeId(3)],
-                    unclean: false,
-                },
+                expected: clean_election(2, &[2, 3]),
             },
             KafkaCase {
                 label: "the clean pick walks the assignment, not the ISR",
@@ -1012,11 +1012,7 @@ mod tests {
                 alive: &[2, 3],
                 strategy: RecoveryStrategy::None,
                 unclean_enabled: false,
-                expected: super::FailoverDecision::Elect {
-                    leader: NodeId(2),
-                    isr: vec![NodeId(2), NodeId(3)],
-                    unclean: false,
-                },
+                expected: clean_election(2, &[2, 3]),
             },
             // Non-leader death shrinks the ISR and keeps the leader.
             FailoverCase {

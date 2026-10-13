@@ -328,9 +328,8 @@ mod tests {
         crate::{
             network::test_support::assert_authentication_event,
             raft_handshake::test_support::{
-                HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
-                RequestFrameSetup, api_versions_body, read_response_frame, request_frame,
-                sasl_authenticate_body, sasl_handshake_body, sasl_test_config,
+                HandshakeApiVersion, HandshakeHeader, api_versions_body, read_response_frame,
+                request_frame, sasl_authenticate_body, sasl_handshake_body, sasl_test_config,
             },
         },
         assert2::assert,
@@ -358,11 +357,12 @@ mod tests {
 
     async fn plain_handshake(client: &mut tokio::io::DuplexStream, correlation_id: i32) -> Vec<u8> {
         client
-            .write_all(&request_frame(RequestFrameSetup {
-                correlation: HandshakeCorrelationId(correlation_id),
-                body: &sasl_handshake_body(),
-                ..Default::default()
-            }))
+            .write_all(
+                &request_frame()
+                    .correlation(correlation_id)
+                    .body(&sasl_handshake_body())
+                    .call(),
+            )
             .await
             .expect("write handshake");
         let handshake = read_response_frame(client).await;
@@ -377,14 +377,15 @@ mod tests {
         body: &[u8],
     ) -> Vec<u8> {
         client
-            .write_all(&request_frame(RequestFrameSetup {
-                api_key: HandshakeApiKey(API_KEY_API_VERSIONS),
-                api_version: HandshakeApiVersion(version),
-                correlation: HandshakeCorrelationId(correlation_id),
-                header: HandshakeHeader::Flexible,
-                body,
-                ..Default::default()
-            }))
+            .write_all(
+                &request_frame()
+                    .api_key(API_KEY_API_VERSIONS)
+                    .api_version(version)
+                    .correlation(correlation_id)
+                    .header(HandshakeHeader::Flexible)
+                    .body(body)
+                    .call(),
+            )
             .await
             .expect("write api versions");
         read_response_frame(client).await
@@ -437,14 +438,15 @@ mod tests {
         let _handshake = plain_handshake(&mut client, 1).await;
 
         client
-            .write_all(&request_frame(RequestFrameSetup {
-                api_key: HandshakeApiKey(API_KEY_SASL_AUTHENTICATE),
-                api_version: HandshakeApiVersion(2),
-                correlation: HandshakeCorrelationId(2),
-                header: HandshakeHeader::Flexible,
-                body: &sasl_authenticate_body(user, password),
-                ..Default::default()
-            }))
+            .write_all(
+                &request_frame()
+                    .api_key(API_KEY_SASL_AUTHENTICATE)
+                    .api_version(2)
+                    .correlation(2)
+                    .header(HandshakeHeader::Flexible)
+                    .body(&sasl_authenticate_body(user, password))
+                    .call(),
+            )
             .await
             .expect("write authenticate");
         let frame = read_response_frame(&mut client).await;
@@ -522,14 +524,15 @@ mod tests {
         assert!(&handshake[0..4] == &2i32.to_be_bytes());
 
         client
-            .write_all(&request_frame(RequestFrameSetup {
-                api_key: HandshakeApiKey(API_KEY_SASL_AUTHENTICATE),
-                api_version: HandshakeApiVersion(2),
-                correlation: HandshakeCorrelationId(3),
-                header: HandshakeHeader::Flexible,
-                body: &sasl_authenticate_body("broker", "secret"),
-                ..Default::default()
-            }))
+            .write_all(
+                &request_frame()
+                    .api_key(API_KEY_SASL_AUTHENTICATE)
+                    .api_version(2)
+                    .correlation(3)
+                    .header(HandshakeHeader::Flexible)
+                    .body(&sasl_authenticate_body("broker", "secret"))
+                    .call(),
+            )
             .await
             .expect("write authenticate");
         let authenticate = read_response_frame(&mut client).await;
@@ -549,11 +552,7 @@ mod tests {
     async fn run_inbound_sasl_rejects_disallowed_request_before_authentication() {
         let (mut client, server) = sasl_server(128, sasl_test_config, FixedApiVersions);
         client
-            .write_all(&request_frame(RequestFrameSetup {
-                api_key: HandshakeApiKey(1),
-                api_version: HandshakeApiVersion(0),
-                ..Default::default()
-            }))
+            .write_all(&request_frame().api_key(1).api_version(0).call())
             .await
             .expect("write forbidden request");
 
@@ -603,14 +602,15 @@ mod tests {
             assert!(frame[4..6] == i16::to_be_bytes(error_code), "v{version}");
         }
         client
-            .write_all(&request_frame(RequestFrameSetup {
-                api_key: HandshakeApiKey(API_KEY_API_VERSIONS),
-                api_version: HandshakeApiVersion(3),
-                correlation: HandshakeCorrelationId(3),
-                header: HandshakeHeader::Flexible,
-                body: &api_versions_body(HandshakeApiVersion(3)),
-                ..Default::default()
-            }))
+            .write_all(
+                &request_frame()
+                    .api_key(API_KEY_API_VERSIONS)
+                    .api_version(3)
+                    .correlation(3)
+                    .header(HandshakeHeader::Flexible)
+                    .body(&api_versions_body(HandshakeApiVersion(3)))
+                    .call(),
+            )
             .await
             .expect("write the second api versions");
 

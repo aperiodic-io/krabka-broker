@@ -185,7 +185,7 @@ mod tests {
                 transactional_batch, verbatim_from,
             },
             name,
-            test_support::{AbortedTxnSetup, aborted_txn, open_log},
+            test_support::{aborted_txn, open_log},
         },
         bytes::Bytes,
         krabka_ids::LeaderEpoch,
@@ -254,19 +254,33 @@ mod tests {
         assert2::assert!(reopened.producer_state_snapshot().is_empty());
     }
 
-    #[test]
-    fn abort_marker_writes_txnindex_entry() {
+    #[yare::parameterized(
+        single_offset = { 0, 3, 4 },
+        two_offset_marker = { 1, 4, 5 },
+    )]
+    fn abort_marker_records_its_base_plus_delta(
+        last_offset_delta: i32,
+        expected_last_offset: i64,
+        expected_lso: i64,
+    ) {
         let (dir, mut log) = test_log();
         append_transaction(&mut log, (1000, 0), &["a", "b", "c"]);
 
         let mut a = abort_marker(1000, 0);
+        a.last_offset_delta = last_offset_delta;
         log.append(&mut a).unwrap();
 
         let entries = transaction_entries(dir.path(), "00000000000000000000.txnindex");
-        // Txn batch was the first append: start_offset = 0.
-        // last_offset = abort marker's base_offset + last_offset_delta = 3 + 0 = 3.
-        // (The 3-record txn batch occupies offsets 0-2; the marker lands at offset 3.)
-        assert2::assert!(entries == [aborted_txn(AbortedTxnSetup::default())]);
+        // The data batch occupies offsets 0-2; the marker starts at 3.
+        assert2::assert!(
+            entries
+                == [AbortedTxn {
+                    start_offset: Offset(0),
+                    last_offset: Offset(expected_last_offset),
+                    producer_id: ProducerId(1000),
+                    last_stable_offset: Offset(expected_lso),
+                }]
+        );
     }
 
     /// An earlier completed transaction, still held in `unreplicated`
@@ -298,11 +312,11 @@ mod tests {
         // producer 2000's own last_offset + 1.
         assert2::assert!(
             entries
-                == [aborted_txn(AbortedTxnSetup {
-                    producer: ProducerId(2000),
-                    bounds: Offset(3)..=Offset(4),
-                    stable: Offset(0)
-                })]
+                == [aborted_txn()
+                    .producer(2000)
+                    .bounds(Offset(3)..=Offset(4))
+                    .stable(0)
+                    .call()]
         );
     }
 
@@ -317,37 +331,7 @@ mod tests {
         log.append(&mut sample_batch(1)).unwrap();
         std::fs::remove_file(name::txnindex_path(dir.path(), marker_base.0)).unwrap();
 
-        assert2::assert!(
-            log.aborted_in_range(Offset(0), marker_base)
-                == [aborted_txn(AbortedTxnSetup::default())]
-        );
-    }
-
-    // The aborted-txn `last_offset` is `marker.base_offset +
-    // marker.last_offset_delta`. Using a marker that spans TWO offsets
-    // (`last_offset_delta = 1`) pins the `+`: the txn batch occupies offsets
-    // 0..=2, the abort marker lands at base_offset 3 with delta 1, so the
-    // recorded `last_offset` is `3 + 1 = 4`. Mutating `+`→`-` would record 2.
-    #[test]
-    fn abort_marker_last_offset_uses_base_plus_delta() {
-        let (dir, mut log) = test_log();
-        append_transaction(&mut log, (1000, 0), &["a", "b", "c"]); // offsets 0..=2
-
-        // Abort marker spanning two offsets (delta 1): base 3, last 4.
-        let mut a = abort_marker(1000, 0);
-        a.last_offset_delta = 1;
-        log.append(&mut a).unwrap();
-
-        let entries = transaction_entries(dir.path(), "00000000000000000000.txnindex");
-        assert2::assert!(
-            entries
-                == [AbortedTxn {
-                    start_offset: Offset(0),
-                    last_offset: Offset(4), // 3 + 1, not 3 - 1
-                    producer_id: ProducerId(1000),
-                    last_stable_offset: Offset(5),
-                }]
-        );
+        assert2::assert!(log.aborted_in_range(Offset(0), marker_base) == [aborted_txn().call()]);
     }
 
     // LSO tracking (owned path) keys on `is_transactional() && !pid.is_none()`.

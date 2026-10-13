@@ -10,10 +10,7 @@ use {
         support::{
             self,
             produce::{SinglePartitionProduceSetup, batch_request},
-            records::{
-                ProducerSequence, ProducerValuesSetup,
-                producer_values_batch as one_batch_with_producer,
-            },
+            records::producer_values_batch as one_batch_with_producer,
             transactions::claim_idempotent_producer,
         },
     },
@@ -31,11 +28,10 @@ async fn idempotent_produce_dedups_duplicate_batch() {
     let pid = init.producer_id;
 
     let req = batch_request(
-        one_batch_with_producer(ProducerValuesSetup {
-            pid: krabka_ids::ProducerId(pid),
-            values: &["a", "b", "c"],
-            ..Default::default()
-        }),
+        one_batch_with_producer()
+            .pid(pid)
+            .values(&["a", "b", "c"])
+            .call(),
         SinglePartitionProduceSetup {
             topic: ("idem").into(),
             topic_id: idem_id,
@@ -67,12 +63,11 @@ async fn out_of_order_returns_45() {
 
     let mk = |base_seq: i32| {
         batch_request(
-            one_batch_with_producer(ProducerValuesSetup {
-                pid: krabka_ids::ProducerId(pid),
-                base_seq: ProducerSequence(base_seq),
-                values: &["x", "y"],
-                ..Default::default()
-            }),
+            one_batch_with_producer()
+                .pid(pid)
+                .base_seq(base_seq)
+                .values(&["x", "y"])
+                .call(),
             SinglePartitionProduceSetup {
                 topic: ("ooo").into(),
                 topic_id: ooo_id,

@@ -9,7 +9,7 @@ use {
             nc_check_connectivity, start_host_broker, start_host_broker_in,
             wait_jvm_partition_leader, write_temp_file,
         },
-        support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_parse_offset},
+        support::{ContainerInput, jvm_docker_command, jvm_parse_offset},
     },
     assert2::assert,
     std::io::Write as _,
@@ -92,23 +92,22 @@ fn create_topic(topic: &str) { create_console_topic(KAFKA_IMAGE, &[], topic, 1, 
 /// Produce `count` records to `topic` through `kafka-console-producer`, one
 /// line per record on the tool's stdin.
 fn produce_lines(topic: &str, count: usize) {
-    let mut child = jvm_docker_command(JvmDockerSetup {
-        image: KAFKA_IMAGE,
-        args: &[
+    let mut child = jvm_docker_command()
+        .image(KAFKA_IMAGE)
+        .args(&[
             "kafka-console-producer",
             "--bootstrap-server",
             broker0_advertised(),
             "--topic",
             topic,
-        ],
-        input: ContainerInput::Attached,
-        ..Default::default()
-    })
-    .stdin(std::process::Stdio::piped())
-    .stdout(std::process::Stdio::piped())
-    .stderr(std::process::Stdio::piped())
-    .spawn()
-    .expect("spawn producer");
+        ])
+        .input(ContainerInput::Attached)
+        .call()
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn producer");
     {
         let stdin = child.stdin.as_mut().expect("stdin");
         for i in 0..count {

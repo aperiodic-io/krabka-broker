@@ -159,8 +159,7 @@ mod tests {
         super::*,
         crate::{
             replicator_supervisor::test_support::{
-                SupervisorPartitionSetup, broker_record, image_with, partition_record,
-                supervisor_fixture,
+                broker_record, image_with, partition_record, supervisor_fixture,
             },
             test_support::single_partition_topic,
             wal::quorum::{
@@ -204,12 +203,11 @@ mod tests {
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(2))),
             MetadataRecord::V1BrokerRegistration(broker_record(NodeId(3))),
             MetadataRecord::V1Topic(single_partition_topic("diskless", topic_id)),
-            partition_record(SupervisorPartitionSetup {
-                topic: "diskless",
-                replicas: vec![NodeId(1)],
-                epoch: krabka_metadata::LeaderEpoch(7),
-                ..Default::default()
-            }),
+            partition_record()
+                .topic("diskless")
+                .replicas(vec![NodeId(1)])
+                .epoch(7)
+                .call(),
             MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
                 topic: "diskless".into(),
                 overrides,
@@ -244,12 +242,11 @@ mod tests {
             overrides.insert("krabka.diskless".into(), "true".into());
             image_with(&[
                 MetadataRecord::V1Topic(single_partition_topic("diskless", topic_id)),
-                partition_record(SupervisorPartitionSetup {
-                    topic: "diskless",
-                    replicas: vec![NodeId(1)],
-                    epoch: krabka_metadata::LeaderEpoch(leader_epoch),
-                    ..Default::default()
-                }),
+                partition_record()
+                    .topic("diskless")
+                    .replicas(vec![NodeId(1)])
+                    .epoch(leader_epoch)
+                    .call(),
                 MetadataRecord::V1TopicConfig(krabka_metadata::TopicConfigRecord {
                     topic: "diskless".into(),
                     overrides,

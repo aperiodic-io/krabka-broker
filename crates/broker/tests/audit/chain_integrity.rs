@@ -9,10 +9,7 @@
 
 use crate::support::{
     self,
-    topics::{
-        ConfiguredTopicSetup, CreateTopicSetup, configured_topic_request, creatable_topic,
-        create_topic_request,
-    },
+    topics::{configured_topic_request, creatable_topic, create_topic_request},
 };
 
 /// Verifies the checkpoint path. The broker is configured with an audit
@@ -37,12 +34,9 @@ async fn signed_checkpoints_appear_on_audit_topic() {
     let audit_before = p.broker.metrics().audit_events.get();
     let _ = p
         .client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("cp-topic").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("cp-topic").into()).call(),
+        ))
         .await
         .unwrap();
 
@@ -76,20 +70,14 @@ async fn audit_chain_continues_across_restart() {
 
     // First boot: generate some audit events, then shut down cleanly.
     {
-        let (broker, _client) = boot_with_audited_topic(dir.path(), CreateTopicSetup {
-            topic: "r1",
-            ..Default::default()
-        })
-        .await;
+        let request = configured_topic_request().topic("r1").call();
+        let (broker, _client) = boot_with_audited_topic(dir.path(), request).await;
         broker.shutdown().await;
     }
 
     // Second boot on the SAME data dir: more events.
-    let (broker, client) = boot_with_audited_topic(dir.path(), CreateTopicSetup {
-        topic: "r2",
-        ..Default::default()
-    })
-    .await;
+    let request = configured_topic_request().topic("r2").call();
+    let (broker, client) = boot_with_audited_topic(dir.path(), request).await;
 
     // Consume the audit topic and assert seqs are a contiguous, duplicate-free
     // chain (recovery worked — no reset to 0 on the second boot).
@@ -107,11 +95,11 @@ async fn audit_chain_continues_across_restart() {
 /// Await the exact topic-creation audit event on each boot before shutdown or consumption.
 async fn boot_with_audited_topic(
     directory: &std::path::Path,
-    setup: CreateTopicSetup<'_>,
+    request: krabka_protocol::owned::create_topics_request::CreateTopicsRequest,
 ) -> (krabka_broker::BrokerHandle, krabka_client_core::Client) {
     let (broker, client) = support::start_with_dir(directory).await;
     let audit_before = broker.metrics().audit_events.get();
-    let _ = client.send(configured_topic_request(setup)).await.unwrap();
+    let _ = support::client::send_topic_creation(&client, request).await;
     broker
         .wait_for_metrics("audit event written", |metrics| {
             metrics.audit_events.get() > audit_before

@@ -20,7 +20,7 @@
 
 use {
     crate::support::{
-        AddressedNodeSetup, addressed_node_config,
+        addressed_node_config,
         client::{connect_owned, metadata_fetch},
         configs::describe_resource,
         records::metadata_batches,
@@ -112,6 +112,7 @@ async fn format(log_dir: &std::path::Path, id: NodeId, flags: &[String]) {
     assert!(code == 0, "krabka-format exited {code} for node {id}");
 }
 
+#[derive(derive_more::From, derive_more::Into)]
 /// The config the broker binary builds for `node` from its formatted
 /// directory: the ids of its `meta.properties`, `Bootstrap` mode for a fresh
 /// directory, and the static `min.insync.replicas` of the case.
@@ -135,11 +136,12 @@ fn config(node: &Node, setup: ActivationSetup<'_>) -> BrokerConfig {
         None,
     )
     .expect("krabka-format wrote meta.properties");
-    let mut config = addressed_node_config(&node.log_dir, AddressedNodeSetup {
-        node: node.id,
-        client: node.client_addr,
-        controller: node.controller_addr,
-    });
+    let mut config = addressed_node_config()
+        .log_dir(&node.log_dir)
+        .node(node.id)
+        .client(node.client_addr)
+        .controller(node.controller_addr)
+        .call();
     config.roles = node.roles.to_vec();
     config.bootstrap_mode = BootstrapMode::Bootstrap;
     config.cluster_id = Some(meta.cluster_id);
@@ -167,10 +169,19 @@ fn config(node: &Node, setup: ActivationSetup<'_>) -> BrokerConfig {
 
 /// Starts every node of `nodes` at the same time, and fails the test when one
 /// does not finish starting.
+#[bon::builder]
 async fn start_all(
     nodes: Vec<Node>,
-    setup: ActivationSetup<'_>,
+    #[builder(default = Quorum :: Dynamic)] quorum: Quorum,
+    #[builder(default)] controllers: &'_ [(NodeId, SocketAddr)],
+    #[builder(into, default = MinimumInsyncReplicas (1))]
+    min_insync_replicas: MinimumInsyncReplicas,
 ) -> Vec<(NodeId, BrokerHandle, TempDir)> {
+    let setup = ActivationSetup {
+        quorum,
+        controllers,
+        min_insync_replicas,
+    };
     join_all(nodes.into_iter().map(|node| async move {
         let config = config(&node, setup);
         let id = node.id;
@@ -471,22 +482,24 @@ async fn run_case(case: Case) {
     }
 
     let brokers = nodes.split_off(controller_specs.len());
-    let started_controllers = start_all(nodes, ActivationSetup {
-        quorum,
-        controllers: &controllers,
-        min_insync_replicas,
-    })
-    .await;
+    let started_controllers = start_all()
+        .nodes(nodes)
+        .quorum(quorum)
+        .controllers(&controllers)
+        .min_insync_replicas(min_insync_replicas)
+        .call()
+        .await;
     let leader_id = started_controllers[0]
         .1
         .wait_until_controller_leader()
         .await;
-    let started_brokers = start_all(brokers, ActivationSetup {
-        quorum,
-        controllers: &controllers,
-        min_insync_replicas,
-    })
-    .await;
+    let started_brokers = start_all()
+        .nodes(brokers)
+        .quorum(quorum)
+        .controllers(&controllers)
+        .min_insync_replicas(min_insync_replicas)
+        .call()
+        .await;
     let leader = started_controllers
         .iter()
         .find(|(id, ..)| *id == leader_id)

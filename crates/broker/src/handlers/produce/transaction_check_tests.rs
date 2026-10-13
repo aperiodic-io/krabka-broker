@@ -13,7 +13,7 @@ use {
         codes,
         handlers::{
             init_producer_id::handle as init_producer_id_handle,
-            test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
+            test_support::configured_topic_request,
         },
         test_support::{
             decode_response, dispatch_context, encode_request, peer, principal,
@@ -50,11 +50,10 @@ async fn a_produce_that_starts_a_transaction_on_many_partitions_makes_one_coordi
         principal("client"),
         client_id = "one-check"
     );
-    let create = configured_topic_request(CreateTopicSetup {
-        topic: TOPIC,
-        num_partitions: TopicPartitionCount(PARTITIONS),
-        ..Default::default()
-    });
+    let create = configured_topic_request()
+        .topic(TOPIC)
+        .num_partitions(PARTITIONS)
+        .call();
     dispatch_context(
         &broker,
         create_topics_request::API_KEY,

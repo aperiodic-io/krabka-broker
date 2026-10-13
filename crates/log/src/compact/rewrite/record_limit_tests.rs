@@ -49,7 +49,19 @@ struct KeyedBatchSetup {
 }
 
 /// One oversized keyed record, compressed with gzip and anonymous by default.
-fn keyed_batch(setup: KeyedBatchSetup) -> RecordBatch {
+#[bon::builder]
+fn keyed_batch(
+    #[builder(into, default)] offset: Offset,
+    #[builder(default = bytes (1_000))] value_size: ByteSize,
+    #[builder(default = CompressionType :: Gzip)] compression: CompressionType,
+    #[builder(default)] producer: BatchProducer,
+) -> RecordBatch {
+    let setup = KeyedBatchSetup {
+        offset,
+        value_size,
+        compression,
+        producer,
+    };
     let producer_id = match setup.producer {
         BatchProducer::Anonymous => -1,
         BatchProducer::Transactional(producer) => producer.0,
@@ -109,10 +121,7 @@ fn the_passes_refuse_a_compressed_record_above_the_limit() {
         ),
     ] {
         let dir = tempfile::tempdir().unwrap();
-        let seg = write_sealed_batches(dir.path(), &[keyed_batch(KeyedBatchSetup {
-            compression: codec,
-            ..Default::default()
-        })]);
+        let seg = write_sealed_batches(dir.path(), &[keyed_batch().compression(codec).call()]);
         let segments = [&seg];
 
         let map = build_offset_map(&segments, vec![], limit);
@@ -187,10 +196,9 @@ fn an_aborted_batch_is_read_only_when_the_pass_keeps_it_empty() {
         // An oversized compressed batch of an aborted transaction, then the
         // abort marker in the next segment (past the pass), which the
         // aborted-transaction list names all the same.
-        let seg = write_sealed_batches(dir.path(), &[keyed_batch(KeyedBatchSetup {
-            producer: BatchProducer::Transactional(producer),
-            ..Default::default()
-        })]);
+        let seg = write_sealed_batches(dir.path(), &[keyed_batch()
+            .producer(BatchProducer::Transactional(producer))
+            .call()]);
         let segments = [&seg];
         let aborted = AbortedTxn {
             start_offset: Offset(0),

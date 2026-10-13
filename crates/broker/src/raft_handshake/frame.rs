@@ -144,8 +144,8 @@ mod tests {
         crate::raft_handshake::{
             API_KEY_SASL_HANDSHAKE,
             test_support::{
-                HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
-                RequestFrameSetup, read_request_from_frame, read_response_frame, request_frame,
+                HandshakeApiKey, HandshakeApiVersion, HandshakeHeader, read_request_from_frame,
+                read_response_frame, request_frame,
             },
         },
         assert2::assert,
@@ -236,25 +236,23 @@ mod tests {
 
     #[tokio::test]
     async fn read_kafka_request_decodes_nonflex_and_flexible_headers() {
-        let nonflex = request_frame(RequestFrameSetup {
-            correlation: HandshakeCorrelationId(42),
-            client_id: None,
-            body: b"plain-body",
-            ..Default::default()
-        });
+        let nonflex = request_frame()
+            .correlation(42)
+            .maybe_client_id(None)
+            .body(b"plain-body")
+            .call();
         let decoded = read_request_from_frame(nonflex)
             .await
             .expect("nonflex request");
         assert!(decoded == (17, 1, 42, b"plain-body".to_vec()));
 
-        let flex = request_frame(RequestFrameSetup {
-            api_key: HandshakeApiKey(36),
-            api_version: HandshakeApiVersion(2),
-            correlation: HandshakeCorrelationId(43),
-            header: HandshakeHeader::Flexible,
-            body: b"auth-body",
-            ..Default::default()
-        });
+        let flex = request_frame()
+            .api_key(36)
+            .api_version(2)
+            .correlation(43)
+            .header(HandshakeHeader::Flexible)
+            .body(b"auth-body")
+            .call();
         let decoded = read_request_from_frame(flex).await.expect("flex request");
         assert!(decoded == (36, 2, 43, b"auth-body".to_vec()));
 
@@ -312,12 +310,11 @@ mod tests {
         truncated_client.extend_from_slice(&3i16.to_be_bytes());
         truncated_client.extend_from_slice(b"xy");
 
-        let missing_tag = request_frame(RequestFrameSetup {
-            api_key: HandshakeApiKey(36),
-            api_version: HandshakeApiVersion(2),
-            correlation: HandshakeCorrelationId(44),
-            ..Default::default()
-        });
+        let missing_tag = request_frame()
+            .api_key(36)
+            .api_version(2)
+            .correlation(44)
+            .call();
 
         for frame in [short, truncated_client, missing_tag] {
             let got = read_request_from_frame(frame).await;
@@ -359,11 +356,10 @@ mod tests {
 
     #[tokio::test]
     async fn read_kafka_request_accepts_exact_client_id_end_boundary() {
-        let frame = request_frame(RequestFrameSetup {
-            correlation: HandshakeCorrelationId(45),
-            client_id: Some(b"client"),
-            ..Default::default()
-        });
+        let frame = request_frame()
+            .correlation(45)
+            .maybe_client_id(Some(Some(&b"client"[..])))
+            .call();
         let decoded = read_request_from_frame(frame).await.expect("exact header");
         assert!(decoded == (17, 1, 45, Vec::new()));
     }
@@ -372,11 +368,7 @@ mod tests {
     async fn read_kafka_request_accepts_exact_header_prefix_frame() {
         // A null client id and empty body make the frame exactly 10 bytes,
         // the minimum legal v1 request header.
-        let frame = request_frame(RequestFrameSetup {
-            correlation: HandshakeCorrelationId(46),
-            client_id: None,
-            ..Default::default()
-        });
+        let frame = request_frame().correlation(46).maybe_client_id(None).call();
         let decoded = read_request_from_frame(frame).await.expect("exact prefix");
         assert!(decoded == (17, 1, 46, Vec::new()));
     }

@@ -292,16 +292,16 @@ async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
             // KIP-890 verifies the producer against an open transaction that
             // holds the group's offsets partition before it validates the
             // group.
-            seed_transaction(&broker, super::integration_tests::TransactionSeedSetup {
-                transactional_id: &transactional_id,
-                producer: super::test_support::TxnCommitProducer {
+            seed_transaction()
+                .broker(&broker)
+                .transactional_id(&transactional_id)
+                .producer(super::test_support::TxnCommitProducer {
                     id: krabka_ids::ProducerId(producer_id),
                     ..Default::default()
-                },
-                group_id: Some(&group_id),
-                ..Default::default()
-            })
-            .await;
+                })
+                .maybe_group_id(Some(&group_id))
+                .call()
+                .await;
         }
         let (member_id, generation_id) = match case.member {
             Member::Simple => (String::new(), -1),

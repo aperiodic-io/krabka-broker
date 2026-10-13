@@ -327,8 +327,8 @@ mod tests {
     use {
         super::*,
         crate::quota::test_support::{
-            QuotaEntitySpec, QuotaRecordSetup, QuotaValue, alice_app1_producer_quota,
-            app1_producer_quota, image_with_quotas, producer_quota_image, quota_record as rec,
+            QuotaEntitySpec, QuotaValue, alice_app1_producer_quota, app1_producer_quota,
+            image_with_quotas, producer_quota_image, quota_record as rec,
         },
         assert2::{assert, check},
         krabka_metadata::{ClientQuotaRecord, MetadataImage},
@@ -338,11 +338,7 @@ mod tests {
 
     /// Both identities must resolve the configured 1,024-byte producer quota.
     fn assert_alice_app1_entity(entity: QuotaEntitySpec<'_>) {
-        let img = img_with(vec![rec(QuotaRecordSetup {
-            entity,
-            value: QuotaValue(1024.0),
-            ..Default::default()
-        })]);
+        let img = img_with(vec![rec().entity(entity).value(1024.0).call()]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(1024.0));
     }
 
@@ -359,10 +355,7 @@ mod tests {
 
     #[test]
     fn single_user_match_when_no_pair_exists() {
-        let img = img_with(vec![rec(QuotaRecordSetup {
-            value: QuotaValue(2048.0),
-            ..Default::default()
-        })]);
+        let img = img_with(vec![rec().value(2048.0).call()]);
         assert!(
             lookup_quota(&img, "alice", Some("anyclient"), "producer_byte_rate") == Some(2048.0)
         );
@@ -370,41 +363,37 @@ mod tests {
 
     #[test]
     fn single_client_id_match_when_no_user_exists() {
-        let img = img_with(vec![rec(QuotaRecordSetup {
-            entity: vec![("client-id", Some("app1"))],
-            value: QuotaValue(512.0),
-            ..Default::default()
-        })]);
+        let img = img_with(vec![
+            rec()
+                .entity(vec![("client-id", Some("app1"))])
+                .value(512.0)
+                .call(),
+        ]);
         assert!(lookup_quota(&img, "anyuser", Some("app1"), "producer_byte_rate") == Some(512.0));
     }
 
     #[test]
     fn default_user_default_client_pair() {
-        let img = img_with(vec![rec(QuotaRecordSetup {
-            entity: vec![("user", None), ("client-id", None)],
-            value: QuotaValue(256.0),
-            ..Default::default()
-        })]);
+        let img = img_with(vec![
+            rec()
+                .entity(vec![("user", None), ("client-id", None)])
+                .value(256.0)
+                .call(),
+        ]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(256.0));
     }
 
     #[test]
     fn default_user_alone() {
-        let img = img_with(vec![rec(QuotaRecordSetup {
-            entity: vec![("user", None)],
-            value: QuotaValue(128.0),
-            ..Default::default()
-        })]);
+        let img = img_with(vec![rec().entity(vec![("user", None)]).value(128.0).call()]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(128.0));
     }
 
     #[test]
     fn default_client_alone() {
-        let img = img_with(vec![rec(QuotaRecordSetup {
-            entity: vec![("client-id", None)],
-            value: QuotaValue(64.0),
-            ..Default::default()
-        })]);
+        let img = img_with(vec![
+            rec().entity(vec![("client-id", None)]).value(64.0).call(),
+        ]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(64.0));
     }
 
@@ -417,15 +406,11 @@ mod tests {
     #[test]
     fn pair_specific_wins_over_user_only() {
         let img = img_with(vec![
-            rec(QuotaRecordSetup {
-                value: QuotaValue(8192.0),
-                ..Default::default()
-            }),
-            rec(QuotaRecordSetup {
-                entity: vec![("user", Some("alice")), ("client-id", Some("app1"))],
-                value: QuotaValue(512.0),
-                ..Default::default()
-            }),
+            rec().value(8192.0).call(),
+            rec()
+                .entity(vec![("user", Some("alice")), ("client-id", Some("app1"))])
+                .value(512.0)
+                .call(),
         ]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(512.0));
     }
@@ -649,24 +634,15 @@ mod tests {
     #[test]
     fn a_bucket_is_rated_by_its_own_key_levels() {
         let img = img_with(vec![
-            rec(QuotaRecordSetup::default()),
+            rec().call(),
             alice_app1_producer_quota(),
             app1_producer_quota(),
-            rec(QuotaRecordSetup {
-                entity: vec![("user", None)],
-                value: QuotaValue(700.0),
-                ..Default::default()
-            }),
-            rec(QuotaRecordSetup {
-                entity: vec![("client-id", None)],
-                value: QuotaValue(300.0),
-                ..Default::default()
-            }),
-            rec(QuotaRecordSetup {
-                entity: vec![("ip", Some("10.0.0.1"))],
-                value: QuotaValue(9.0),
-                ..Default::default()
-            }),
+            rec().entity(vec![("user", None)]).value(700.0).call(),
+            rec().entity(vec![("client-id", None)]).value(300.0).call(),
+            rec()
+                .entity(vec![("ip", Some("10.0.0.1"))])
+                .value(9.0)
+                .call(),
         ]);
         // (label, bucket key, expected rate)
         let cases: [(&str, EntityKey, Option<f64>); 9] = [
@@ -729,12 +705,18 @@ mod tests {
         value: QuotaValue,
     }
 
-    fn rec_ip(setup: IpQuotaSetup<'_>) -> ClientQuotaRecord {
-        rec(QuotaRecordSetup {
-            entity: vec![("ip", setup.ip)],
-            key: setup.key,
-            value: setup.value,
-        })
+    #[bon::builder]
+    fn rec_ip(
+        ip: Option<&'_ str>,
+        #[builder(default = "connection_creation_rate")] key: &'_ str,
+        #[builder(into, default = QuotaValue (1.0))] value: QuotaValue,
+    ) -> ClientQuotaRecord {
+        let setup = IpQuotaSetup { ip, key, value };
+        rec()
+            .entity(vec![("ip", setup.ip)])
+            .key(setup.key)
+            .value(setup.value)
+            .call()
     }
 
     fn img_with_ip(records: Vec<ClientQuotaRecord>) -> MetadataImage { image_with_quotas(records) }
@@ -743,31 +725,15 @@ mod tests {
     fn ip_quotas_prefer_an_exact_address_and_fall_back_to_the_default() {
         let cases = [
             (
-                vec![rec_ip(IpQuotaSetup {
-                    ip: Some("127.0.0.1"),
-                    ..Default::default()
-                })],
+                vec![rec_ip().maybe_ip(Some("127.0.0.1")).call()],
                 "127.0.0.1",
                 Some(1.0),
             ),
-            (
-                vec![rec_ip(IpQuotaSetup {
-                    value: QuotaValue(2.0),
-                    ..Default::default()
-                })],
-                "10.0.0.7",
-                Some(2.0),
-            ),
+            (vec![rec_ip().value(2.0).call()], "10.0.0.7", Some(2.0)),
             (
                 vec![
-                    rec_ip(IpQuotaSetup {
-                        value: QuotaValue(8.0),
-                        ..Default::default()
-                    }),
-                    rec_ip(IpQuotaSetup {
-                        ip: Some("127.0.0.1"),
-                        ..Default::default()
-                    }),
+                    rec_ip().value(8.0).call(),
+                    rec_ip().maybe_ip(Some("127.0.0.1")).call(),
                 ],
                 "127.0.0.1",
                 Some(1.0),
@@ -836,11 +802,7 @@ mod tests {
             ),
         ];
         for (label, entity, peer, matches) in cases {
-            let img = img_with_ip(vec![rec_ip(IpQuotaSetup {
-                ip: Some(entity),
-                value: QuotaValue(7.0),
-                ..Default::default()
-            })]);
+            let img = img_with_ip(vec![rec_ip().maybe_ip(Some(entity)).value(7.0).call()]);
             let names = IpNames::default();
             let _ = names.update(&img);
             let peer: std::net::IpAddr = peer.parse().unwrap();
@@ -862,15 +824,8 @@ mod tests {
     #[test]
     fn a_resolved_host_name_stands_for_its_address() {
         let img = img_with_ip(vec![
-            rec_ip(IpQuotaSetup {
-                ip: Some("db"),
-                value: QuotaValue(9.0),
-                ..Default::default()
-            }),
-            rec_ip(IpQuotaSetup {
-                value: QuotaValue(2.0),
-                ..Default::default()
-            }),
+            rec_ip().maybe_ip(Some("db")).value(9.0).call(),
+            rec_ip().value(2.0).call(),
         ]);
         let names = IpNames::default();
         let db: std::net::IpAddr = "10.0.0.9".parse().unwrap();
@@ -891,11 +846,7 @@ mod tests {
     fn ipv6_specific_match() {
         // KIP-612: the connection-creation-rate quota must resolve for an
         // IPv6 peer keyed by its canonical string form, not just IPv4.
-        let img = img_with_ip(vec![rec_ip(IpQuotaSetup {
-            ip: Some("::1"),
-            value: QuotaValue(3.0),
-            ..Default::default()
-        })]);
+        let img = img_with_ip(vec![rec_ip().maybe_ip(Some("::1")).value(3.0).call()]);
         let ip: std::net::IpAddr = "::1".parse().unwrap();
         assert!(
             lookup_ip_quota(&img, &IpNames::default(), ip, "connection_creation_rate") == Some(3.0)
@@ -906,10 +857,7 @@ mod tests {
     fn ipv6_default_fallback() {
         // An IPv6 peer with no specific entry falls back to the (ip=None)
         // default, proving IPv6 is no longer skipped by the quota path.
-        let img = img_with_ip(vec![rec_ip(IpQuotaSetup {
-            value: QuotaValue(5.0),
-            ..Default::default()
-        })]);
+        let img = img_with_ip(vec![rec_ip().value(5.0).call()]);
         let ip: std::net::IpAddr = "2001:db8::42".parse().unwrap();
         assert!(
             lookup_ip_quota(&img, &IpNames::default(), ip, "connection_creation_rate") == Some(5.0)
@@ -1004,13 +952,7 @@ mod tests {
             let img = img_with(
                 configured
                     .into_iter()
-                    .map(|(entity, value)| {
-                        rec(QuotaRecordSetup {
-                            entity,
-                            value: QuotaValue(value),
-                            ..Default::default()
-                        })
-                    })
+                    .map(|(entity, value)| rec().entity(entity).value(value).call())
                     .collect(),
             );
             let got = lookup_quota_with_key(&img, "alice", Some("app"), "producer_byte_rate");
@@ -1025,7 +967,7 @@ mod tests {
         1000.0, 1001.0, 1002.0, 1003.0, 1004.0, 1005.0, 1006.0, 1007.0,
     ];
 
-    #[derive(Clone, Copy, Default)]
+    #[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
     struct QuotaCandidateMask(u16);
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -1037,18 +979,28 @@ mod tests {
     }
 
     /// Select the same ordered candidates and their distinct sentinel values.
-    fn candidate_quota_records(setup: QuotaCandidatesSetup<'_>) -> Vec<ClientQuotaRecord> {
+    #[bon::builder]
+    fn candidate_quota_records(
+        #[builder(default)] entities: &'_ [QuotaEntitySpec<'_>],
+        #[builder(into, default)] mask: QuotaCandidateMask,
+        #[builder(default = "k")] key: &'_ str,
+    ) -> Vec<ClientQuotaRecord> {
+        let setup = QuotaCandidatesSetup {
+            entities,
+            mask,
+            key,
+        };
         setup
             .entities
             .iter()
             .enumerate()
             .filter(|(index, _)| setup.mask.0 & (1 << index) != 0)
             .map(|(index, entity)| {
-                rec(QuotaRecordSetup {
-                    entity: entity.clone(),
-                    key: setup.key,
-                    value: QuotaValue(CAND_VALS[index]),
-                })
+                rec()
+                    .entity(entity.clone())
+                    .key(setup.key)
+                    .value(CAND_VALS[index])
+                    .call()
             })
             .collect()
     }
@@ -1062,11 +1014,7 @@ mod tests {
     fn quota_precedence_exhaustive() {
         let cands = uc_candidates("u", "c");
         for mask in 0u16..256 {
-            let records = candidate_quota_records(QuotaCandidatesSetup {
-                entities: &cands,
-                mask: QuotaCandidateMask(mask),
-                ..Default::default()
-            });
+            let records = candidate_quota_records().entities(&cands).mask(mask).call();
             let img = img_with(records);
             let got = lookup_quota_with_key(&img, "u", Some("c"), "k");
             match (0..8usize).find(|i| mask & (1 << i) != 0) {
@@ -1096,11 +1044,11 @@ mod tests {
         let ip: std::net::IpAddr = "10.1.2.3".parse().unwrap();
         let cands = [vec![("ip", Some("10.1.2.3"))], vec![("ip", None)]];
         for mask in 0u8..4 {
-            let records = candidate_quota_records(QuotaCandidatesSetup {
-                entities: &cands,
-                mask: QuotaCandidateMask(u16::from(mask)),
-                key: "connection_creation_rate",
-            });
+            let records = candidate_quota_records()
+                .entities(&cands)
+                .mask(u16::from(mask))
+                .key("connection_creation_rate")
+                .call();
             let img = img_with(records);
             let got =
                 lookup_ip_quota_with_key(&img, &IpNames::default(), ip, "connection_creation_rate");
@@ -1131,13 +1079,31 @@ mod tests {
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| present[*i])
-                .map(|(i, c)| rec(QuotaRecordSetup { entity: c.clone(), key: qkey, value: QuotaValue(CAND_VALS[i]) }))
+                .map(|(i, c)| {
+                    rec()
+                        .entity(c.clone())
+                        .key(qkey)
+                        .value(CAND_VALS[i])
+                        .call()
+                })
                 .collect();
             if decoy {
                 // Non-matching entity (never a candidate for a [uv][12]/[cd][12]
                 // probe) — must never be returned.
-                records.push(rec(QuotaRecordSetup { entity: vec![("client-id", Some("ZZZ")), ("user", Some("ZZZ"))], key: qkey, value: QuotaValue(9999.0) }));
-                records.push(rec(QuotaRecordSetup { entity: vec![("user", Some("ZZZ"))], key: qkey, value: QuotaValue(9998.0) }));
+                records.push(
+                    rec()
+                        .entity(vec![("client-id", Some("ZZZ")), ("user", Some("ZZZ"))])
+                        .key(qkey)
+                        .value(9999.0)
+                        .call(),
+                );
+                records.push(
+                    rec()
+                        .entity(vec![("user", Some("ZZZ"))])
+                        .key(qkey)
+                        .value(9998.0)
+                        .call(),
+                );
             }
             let img = img_with(records);
             let got = lookup_quota_with_key(&img, &principal, Some(&client_id), qkey);
@@ -1157,13 +1123,31 @@ mod tests {
             let ip: std::net::IpAddr = "10.9.8.7".parse().unwrap();
             let mut records = vec![];
             if specific {
-                records.push(rec(QuotaRecordSetup { entity: vec![("ip", Some("10.9.8.7"))], key: "connection_creation_rate", value: QuotaValue(1.0) }));
+                records.push(
+                    rec()
+                        .entity(vec![("ip", Some("10.9.8.7"))])
+                        .key("connection_creation_rate")
+                        .value(1.0)
+                        .call(),
+                );
             }
             if default {
-                records.push(rec(QuotaRecordSetup { entity: vec![("ip", None)], key: "connection_creation_rate", value: QuotaValue(2.0) }));
+                records.push(
+                    rec()
+                        .entity(vec![("ip", None)])
+                        .key("connection_creation_rate")
+                        .value(2.0)
+                        .call(),
+                );
             }
             // A user/client entry must not leak into the IP path.
-            records.push(rec(QuotaRecordSetup { entity: vec![("user", Some("u"))], key: "connection_creation_rate", value: QuotaValue(50.0) }));
+            records.push(
+                rec()
+                    .entity(vec![("user", Some("u"))])
+                    .key("connection_creation_rate")
+                    .value(50.0)
+                    .call(),
+            );
             let img = img_with(records);
             let got = lookup_ip_quota_with_key(&img, &IpNames::default(), ip, "connection_creation_rate");
             if specific {

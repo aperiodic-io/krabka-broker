@@ -210,24 +210,20 @@ mod tests {
             .expect("combined default validates");
     }
 
-    #[test]
-    fn controller_only_does_not_register() {
+    #[yare::parameterized(
+        skips_registration = { "registration" },
+        hosts_no_partitions = { "partition recovery" },
+    )]
+    fn controller_only_node_is_not_treated_as_a_broker(gated_work: &str) {
         let c = BrokerConfig {
             roles: vec![NodeRole::Controller],
             ..BrokerConfig::default()
         };
-        // Registration is gated on is_broker(); a controller-only node skips it.
-        assert!(!c.is_broker());
-    }
-
-    #[test]
-    fn controller_only_hosts_no_partitions() {
-        let c = BrokerConfig {
-            roles: vec![NodeRole::Controller],
-            ..BrokerConfig::default()
-        };
-        // Partition scan/recovery is gated on is_broker().
-        assert!(!c.is_broker());
+        // {gated_work} is gated on is_broker(); a controller-only node skips it.
+        assert2::assert!(
+            !c.is_broker(),
+            "controller-only node must skip {gated_work}"
+        );
     }
 
     #[test]

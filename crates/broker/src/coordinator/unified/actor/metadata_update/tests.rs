@@ -18,8 +18,8 @@ use {
         share::config::ShareGroupConfig,
         streams::config::StreamsGroupConfig,
         test_support::{
-            ConsumerJoinSetup, SwitchableMetadata, assignment_interval_fixture,
-            consumer_join_request, make_coord_with_metadata, proto_uuid, snapshot_of,
+            SwitchableMetadata, assignment_interval_fixture, consumer_join_request,
+            make_coord_with_metadata, proto_uuid, snapshot_of,
         },
     },
     assert2::{assert, check},
@@ -45,12 +45,7 @@ async fn metadata_update(handle: &GroupActorHandle, topics: &[&str]) {
 }
 
 /// The first heartbeat of member `m1`, which subscribes to `orders`.
-fn join() -> ConsumerGroupHeartbeatRequest {
-    consumer_join_request(ConsumerJoinSetup {
-        topics: &["orders"],
-        ..Default::default()
-    })
-}
+fn join() -> ConsumerGroupHeartbeatRequest { consumer_join_request().topics(&["orders"]).call() }
 
 /// A later heartbeat of `m1`, which sends only what changed, as Kafka's
 /// consumer does: the partitions it owns when it acknowledges them, else

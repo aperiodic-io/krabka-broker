@@ -427,23 +427,37 @@ mod tests {
         assert!(range_max_bytes(&smaller) == 512 * 1024);
     }
 
-    /// A responder that answers with a range carrying no bytes leaves the
-    /// transfer exactly where it started. Re-asking would repeat the same
-    /// request against the same voter forever, so the transfer gives up and the
-    /// caller backs off instead — the loop must not spin on it.
-    #[tokio::test]
-    async fn a_range_that_carries_no_bytes_abandons_the_transfer() {
+    #[derive(Clone, Copy)]
+    enum SnapshotTransferFailure {
+        EmptyRange,
+        Refused,
+    }
+
+    /// An empty range or a refusal leaves the observer's image, store and
+    /// fetch offset untouched. The empty-range case also guards against
+    /// spinning on a response that carries no progress.
+    #[yare::parameterized(
+        empty_range = { SnapshotTransferFailure::EmptyRange },
+        refused = { SnapshotTransferFailure::Refused },
+    )]
+    #[test_macro(tokio::test)]
+    async fn failed_snapshot_transfer_is_not_applied(failure: SnapshotTransferFailure) {
         let cluster_id = Uuid::new_v4();
         let snapshot_id = (4_096_i64, 7_i32);
         let mock = snapshot_broker(snapshot_id, move |_body| {
-            // A non-zero total with an empty range: the shape a records
-            // field takes when it drops a batch it could not complete.
+            let (size, error_code) = match failure {
+                // Non-zero total with an empty range: a records field that
+                // dropped a batch it could not complete.
+                SnapshotTransferFailure::EmptyRange => (512, 0),
+                // Krabka-internal "snapshot not available".
+                SnapshotTransferFailure::Refused => (0, 98),
+            };
             Some(PeerResponse::FetchSnapshot {
                 snapshot_id,
-                size: 512,
+                size,
                 position: 0,
                 bytes: bytes::Bytes::new(),
-                error_code: 0,
+                error_code,
             })
         })
         .await;
@@ -454,7 +468,13 @@ mod tests {
             .await
             .expect("the transfer gives up rather than re-asking forever");
 
-        assert!(outcome.is_none());
+        assert2::assert!(outcome.is_none());
+        assert2::assert!(fixture.image.borrow().topics().next().is_none());
+        assert2::assert!(
+            ObserverStore::open(fixture.directory.path(), 0)
+                .resume(cluster_id)
+                .is_none()
+        );
         mock.stop();
     }
 
@@ -475,36 +495,6 @@ mod tests {
                 position: 0,
                 bytes: served.clone(),
                 error_code: 0,
-            })
-        })
-        .await;
-
-        assert_snapshot_fetch_was_not_applied()
-            .cluster_id(cluster_id)
-            .address(mock.addr)
-            .call()
-            .await;
-
-        mock.stop();
-    }
-
-    /// A controller that has pruned past the snapshot it named answers the
-    /// transfer with an error. The observer must not treat that as progress:
-    /// it reports the round trip as failed, so the loop backs off, rotates, and
-    /// asks again rather than jumping its fetch offset over records it never
-    /// applied.
-    #[tokio::test]
-    async fn a_refused_snapshot_transfer_leaves_the_fetch_offset_alone() {
-        let cluster_id = Uuid::new_v4();
-        let snapshot_id = (4_096_i64, 7_i32);
-        let mock = snapshot_broker(snapshot_id, move |_body| {
-            Some(PeerResponse::FetchSnapshot {
-                snapshot_id,
-                size: 0,
-                position: 0,
-                bytes: bytes::Bytes::new(),
-                // Krabka-internal "snapshot not available".
-                error_code: 98,
             })
         })
         .await;

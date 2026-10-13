@@ -31,8 +31,7 @@
 
 use {
     crate::support::{
-        client::connect_owned,
-        configs::{ClientMetricsSubscriptionSetup, client_metrics_subscription},
+        client::connect_owned, configs::client_metrics_subscription,
         discovery::api_versions_request_for,
     },
     assert2::{assert, check},
@@ -110,11 +109,10 @@ async fn configure_match_all_subscription(
     name: &str,
     interval_ms: &str,
 ) {
-    let alter_req = client_metrics_subscription(ClientMetricsSubscriptionSetup {
-        name,
-        interval: interval_ms,
-        ..Default::default()
-    });
+    let alter_req = client_metrics_subscription()
+        .name(name)
+        .interval(interval_ms)
+        .call();
 
     let alter_resp: IncrementalAlterConfigsResponse = client
         .send(alter_req)
@@ -176,7 +174,7 @@ async fn advertised_apis(client: &krabka_client_core::Client) -> std::collection
     resp.api_keys.iter().map(|k| k.api_key).collect()
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 struct SubscriptionId(i32);
 
 #[derive(Clone, Copy)]
@@ -198,7 +196,19 @@ struct TelemetryPushSetup {
     metrics: bytes::Bytes,
 }
 
-fn telemetry_push_request(setup: TelemetryPushSetup) -> PushTelemetryRequest {
+#[bon::builder]
+fn telemetry_push_request(
+    #[builder(default = WireUuid :: ZERO)] client_instance_id: WireUuid,
+    #[builder(into, default)] subscription_id: SubscriptionId,
+    #[builder(default)] compression: TelemetryCompression,
+    #[builder(default)] metrics: bytes::Bytes,
+) -> PushTelemetryRequest {
+    let setup = TelemetryPushSetup {
+        client_instance_id,
+        subscription_id,
+        compression,
+        metrics,
+    };
     let TelemetryPushSetup {
         client_instance_id,
         subscription_id,
@@ -347,11 +357,12 @@ async fn push_telemetry_unknown_instance_rejected() {
     ] {
         let resp: PushTelemetryResponse = p
             .client
-            .send(telemetry_push_request(TelemetryPushSetup {
-                client_instance_id: instance,
-                metrics: bytes::Bytes::from_static(b"\x00\x01\x02"),
-                ..Default::default()
-            }))
+            .send(
+                telemetry_push_request()
+                    .client_instance_id(instance)
+                    .metrics(bytes::Bytes::from_static(b"\x00\x01\x02"))
+                    .call(),
+            )
             .await
             .expect("PushTelemetry");
 
@@ -424,12 +435,13 @@ async fn push_telemetry_happy_path_after_subscription() {
     // compression_type = 0 is NONE (uncompressed); sample_otlp_metrics()
     // returns raw (uncompressed) proto bytes, so no codec mismatch.
     let push_resp: PushTelemetryResponse = client
-        .send(telemetry_push_request(TelemetryPushSetup {
-            client_instance_id: assigned_id,
-            subscription_id: SubscriptionId(subscription_id),
-            metrics: sample_otlp_metrics(),
-            ..Default::default()
-        }))
+        .send(
+            telemetry_push_request()
+                .client_instance_id(assigned_id)
+                .subscription_id(subscription_id)
+                .metrics(sample_otlp_metrics())
+                .call(),
+        )
         .await
         .expect("PushTelemetry");
 
@@ -453,12 +465,13 @@ async fn push_telemetry_stale_subscription_id_rejected() {
     let stale_sub_id = real_sub_id ^ 0x5555;
 
     let push_resp: PushTelemetryResponse = client
-        .send(telemetry_push_request(TelemetryPushSetup {
-            client_instance_id: assigned_id,
-            subscription_id: SubscriptionId(stale_sub_id),
-            metrics: sample_otlp_metrics(),
-            ..Default::default()
-        }))
+        .send(
+            telemetry_push_request()
+                .client_instance_id(assigned_id)
+                .subscription_id(stale_sub_id)
+                .metrics(sample_otlp_metrics())
+                .call(),
+        )
         .await
         .expect("PushTelemetry");
 
@@ -483,12 +496,14 @@ async fn push_telemetry_unsupported_compression_rejected() {
 
     // Kafka's `CompressionType.forId` knows the ids 0 to 4 only.
     let push_resp: PushTelemetryResponse = client
-        .send(telemetry_push_request(TelemetryPushSetup {
-            client_instance_id: assigned_id,
-            subscription_id: SubscriptionId(subscription_id),
-            compression: TelemetryCompression::Invalid(TelemetryCompressionCode(5)),
-            metrics: sample_otlp_metrics(),
-        }))
+        .send(
+            telemetry_push_request()
+                .client_instance_id(assigned_id)
+                .subscription_id(subscription_id)
+                .compression(TelemetryCompression::Invalid(TelemetryCompressionCode(5)))
+                .metrics(sample_otlp_metrics())
+                .call(),
+        )
         .await
         .expect("PushTelemetry");
 

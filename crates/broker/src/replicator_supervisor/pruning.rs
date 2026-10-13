@@ -128,8 +128,8 @@ mod tests {
         super::*,
         crate::{
             replicator_supervisor::test_support::{
-                SupervisorPartitionSetup, SupervisorTopicSetup, image_with, partition_record,
-                supervisor_fixture, topic_partition_records, topic_record,
+                SupervisorPartitionSetup, image_with, partition_record, supervisor_fixture,
+                topic_partition_records, topic_record,
             },
             wal::quorum::{registry::ShardId, shard_dir},
         },
@@ -165,39 +165,35 @@ mod tests {
     fn image_with_recreated_topic(
         mut records: Vec<krabka_metadata::MetadataRecord>,
     ) -> MetadataImage {
-        records.extend(topic_partition_records(
-            SupervisorPartitionSetup::single_replica("recreated", NodeId(2)),
-        ));
+        records.extend(
+            topic_partition_records()
+                .topic(SupervisorPartitionSetup::single_replica("recreated", NodeId(2)).topic)
+                .partition(
+                    SupervisorPartitionSetup::single_replica("recreated", NodeId(2)).partition,
+                )
+                .leader(SupervisorPartitionSetup::single_replica("recreated", NodeId(2)).leader)
+                .replicas(SupervisorPartitionSetup::single_replica("recreated", NodeId(2)).replicas)
+                .epoch(SupervisorPartitionSetup::single_replica("recreated", NodeId(2)).epoch)
+                .call(),
+        );
         image_with(&records)
     }
 
     #[tokio::test]
     async fn reconcile_prunes_deleted_topic_partitions_but_keeps_live_topics() {
-        let live_topic = topic_record(SupervisorTopicSetup {
-            topic: "live",
-            ..Default::default()
-        });
-        let live_partition = partition_record(SupervisorPartitionSetup {
-            topic: "live",
-            leader: NodeId(2),
-            replicas: vec![NodeId(2)],
-            ..Default::default()
-        });
+        let live_topic = topic_record().topic("live").call();
+        let live_partition = partition_record()
+            .topic("live")
+            .leader(2)
+            .replicas(vec![NodeId(2)])
+            .call();
         let active = image_with_recreated_topic(vec![
-            topic_record(
-                crate::replicator_supervisor::test_support::SupervisorTopicSetup {
-                    topic: "deleted",
-                    ..Default::default()
-                },
-            ),
-            partition_record(
-                crate::replicator_supervisor::test_support::SupervisorPartitionSetup {
-                    topic: "deleted",
-                    leader: NodeId(2),
-                    replicas: vec![NodeId(2)],
-                    ..Default::default()
-                },
-            ),
+            topic_record().topic("deleted").call(),
+            partition_record()
+                .topic("deleted")
+                .leader(2)
+                .replicas(vec![NodeId(2)])
+                .call(),
             live_topic.clone(),
             live_partition.clone(),
         ]);
@@ -296,27 +292,22 @@ mod tests {
 
     #[tokio::test]
     async fn reconcile_prunes_partition_after_local_replica_is_reassigned() {
-        let topic = topic_record(SupervisorTopicSetup {
-            topic: "moved",
-            ..Default::default()
-        });
+        let topic = topic_record().topic("moved").call();
         let assigned = image_with(&[
             topic.clone(),
-            partition_record(SupervisorPartitionSetup {
-                topic: "moved",
-                leader: NodeId(2),
-                replicas: vec![NodeId(2)],
-                ..Default::default()
-            }),
+            partition_record()
+                .topic("moved")
+                .leader(2)
+                .replicas(vec![NodeId(2)])
+                .call(),
         ]);
         let reassigned = image_with(&[
             topic,
-            partition_record(SupervisorPartitionSetup {
-                topic: "moved",
-                replicas: vec![NodeId(1)],
-                epoch: krabka_metadata::LeaderEpoch(1),
-                ..Default::default()
-            }),
+            partition_record()
+                .topic("moved")
+                .replicas(vec![NodeId(1)])
+                .epoch(1)
+                .call(),
         ]);
         let (supervisor, partitions, _reporter, dir) = supervisor_fixture(assigned.clone());
         supervisor.reconcile(&assigned).await;
@@ -349,10 +340,7 @@ mod tests {
 
     #[tokio::test]
     async fn reconcile_keeps_partition_until_its_metadata_record_arrives() {
-        let image = image_with(&[topic_record(SupervisorTopicSetup {
-            topic: "pending",
-            ..Default::default()
-        })]);
+        let image = image_with(&[topic_record().topic("pending").call()]);
         let (supervisor, partitions, _reporter, dir) = supervisor_fixture(image.clone());
         supervisor
             .materialize_local_partition(&image, "pending", 0)

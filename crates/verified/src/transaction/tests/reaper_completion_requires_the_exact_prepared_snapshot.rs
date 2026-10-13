@@ -6,32 +6,20 @@ fn reaper_completion_requires_the_exact_prepared_snapshot() {
         AlreadyComplete, Proceed, RejectChangedPreparedState, RejectMalformed, RejectStaleIdentity,
     };
 
-    let prepared = snapshot(TransactionSnapshotSetup::default());
-    let completion = snapshot(TransactionSnapshotSetup {
-        producer_epoch: ProducerEpoch(4),
-        state: TransactionStateCode(COMPLETE_ABORT),
-        ..Default::default()
-    });
+    let prepared = snapshot().call();
+    let completion = snapshot().producer_epoch(4).state(COMPLETE_ABORT).call();
     // (current, prepared, completion, exact snapshot, expected).
     let cases = [
         // The entry is exactly as the reaper prepared it.
         (prepared, prepared, completion, true, Proceed),
         (
-            snapshot(TransactionSnapshotSetup {
-                producer_id: ProducerId(0),
-                producer_epoch: ProducerEpoch(0),
-                ..Default::default()
-            }),
-            snapshot(TransactionSnapshotSetup {
-                producer_id: ProducerId(0),
-                producer_epoch: ProducerEpoch(0),
-                ..Default::default()
-            }),
-            snapshot(TransactionSnapshotSetup {
-                producer_id: ProducerId(0),
-                producer_epoch: ProducerEpoch(1),
-                state: TransactionStateCode(COMPLETE_ABORT),
-            }),
+            snapshot().producer_id(0).producer_epoch(0).call(),
+            snapshot().producer_id(0).producer_epoch(0).call(),
+            snapshot()
+                .producer_id(0)
+                .producer_epoch(1)
+                .state(COMPLETE_ABORT)
+                .call(),
             true,
             Proceed,
         ),
@@ -46,10 +34,7 @@ fn reaper_completion_requires_the_exact_prepared_snapshot() {
         ),
         // Same identity, different state: another caller moved it.
         (
-            snapshot(TransactionSnapshotSetup {
-                state: TransactionStateCode(ONGOING),
-                ..Default::default()
-            }),
+            snapshot().state(ONGOING).call(),
             prepared,
             completion,
             true,
@@ -57,20 +42,14 @@ fn reaper_completion_requires_the_exact_prepared_snapshot() {
         ),
         // An `InitProducerId` bumped the epoch or rotated the PID.
         (
-            snapshot(TransactionSnapshotSetup {
-                producer_epoch: ProducerEpoch(5),
-                ..Default::default()
-            }),
+            snapshot().producer_epoch(5).call(),
             prepared,
             completion,
             true,
             RejectStaleIdentity,
         ),
         (
-            snapshot(TransactionSnapshotSetup {
-                producer_id: ProducerId(9),
-                ..Default::default()
-            }),
+            snapshot().producer_id(9).call(),
             prepared,
             completion,
             false,
@@ -79,10 +58,7 @@ fn reaper_completion_requires_the_exact_prepared_snapshot() {
         // The completion identity at the prepare state is not the
         // completion.
         (
-            snapshot(TransactionSnapshotSetup {
-                producer_epoch: ProducerEpoch(4),
-                ..Default::default()
-            }),
+            snapshot().producer_epoch(4).call(),
             prepared,
             completion,
             true,
@@ -94,20 +70,14 @@ fn reaper_completion_requires_the_exact_prepared_snapshot() {
         (completion, prepared, completion, true, AlreadyComplete),
         // A negative PID or epoch in any snapshot.
         (
-            snapshot(TransactionSnapshotSetup {
-                producer_id: ProducerId(-1),
-                ..Default::default()
-            }),
+            snapshot().producer_id(-1).call(),
             prepared,
             completion,
             true,
             RejectMalformed,
         ),
         (
-            snapshot(TransactionSnapshotSetup {
-                producer_epoch: ProducerEpoch(-1),
-                ..Default::default()
-            }),
+            snapshot().producer_epoch(-1).call(),
             prepared,
             completion,
             true,
@@ -115,20 +85,14 @@ fn reaper_completion_requires_the_exact_prepared_snapshot() {
         ),
         (
             prepared,
-            snapshot(TransactionSnapshotSetup {
-                producer_id: ProducerId(-1),
-                ..Default::default()
-            }),
+            snapshot().producer_id(-1).call(),
             completion,
             true,
             RejectMalformed,
         ),
         (
             prepared,
-            snapshot(TransactionSnapshotSetup {
-                producer_epoch: ProducerEpoch(-1),
-                ..Default::default()
-            }),
+            snapshot().producer_epoch(-1).call(),
             completion,
             true,
             RejectMalformed,
@@ -136,22 +100,18 @@ fn reaper_completion_requires_the_exact_prepared_snapshot() {
         (
             prepared,
             prepared,
-            snapshot(TransactionSnapshotSetup {
-                producer_id: ProducerId(-1),
-                producer_epoch: ProducerEpoch(4),
-                state: TransactionStateCode(COMPLETE_ABORT),
-            }),
+            snapshot()
+                .producer_id(-1)
+                .producer_epoch(4)
+                .state(COMPLETE_ABORT)
+                .call(),
             true,
             RejectMalformed,
         ),
         (
             prepared,
             prepared,
-            snapshot(TransactionSnapshotSetup {
-                producer_epoch: ProducerEpoch(-1),
-                state: TransactionStateCode(COMPLETE_ABORT),
-                ..Default::default()
-            }),
+            snapshot().producer_epoch(-1).state(COMPLETE_ABORT).call(),
             true,
             RejectMalformed,
         ),

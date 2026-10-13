@@ -219,13 +219,11 @@ pub(crate) mod test_support {
                 entity: Vec<(&str, Option<&str>)>,
                 rate: f64,
             ) -> krabka_metadata::MetadataImage {
-                crate::quota::test_support::image_with_quota(
-                    crate::quota::test_support::QuotaRecordSetup {
-                        entity,
-                        key: $key,
-                        value: crate::quota::test_support::QuotaValue(rate),
-                    },
-                )
+                crate::quota::test_support::image_with_quota()
+                    .entity(entity)
+                    .key($key)
+                    .value(rate)
+                    .call()
             }
         };
     }
@@ -253,11 +251,7 @@ pub(crate) mod test_support {
         let mut actual = Vec::new();
         let mut expected = Vec::new();
         for (rate, bytes, delay) in fractional_bandwidth_cases() {
-            let image = image_with_quota(QuotaRecordSetup {
-                key,
-                value: QuotaValue(rate),
-                ..Default::default()
-            });
+            let image = image_with_quota().key(key).value(rate).call();
             let buckets = super::QuotaBuckets::with_window(secs(1));
             actual.push((rate.to_string(), bytes, consume(&image, &buckets, bytes)));
             expected.push((rate.to_string(), bytes, delay));
@@ -265,7 +259,7 @@ pub(crate) mod test_support {
         assert2::assert!(actual == expected);
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(derive_more::From, derive_more::Into, Clone, Copy)]
     pub(crate) struct QuotaValue(pub f64);
 
     #[derive(krabka_macros::FieldDefaults)]
@@ -278,91 +272,43 @@ pub(crate) mod test_support {
         pub value: QuotaValue,
     }
 
-    pub(crate) type QuotaEntitySpec<'a> = Vec<(&'a str, Option<&'a str>)>;
-
-    #[derive(krabka_macros::FieldDefaults)]
-    pub(crate) struct UniformQuotaImageSetup<'a> {
-        pub entities: Vec<QuotaEntitySpec<'a>>,
-        #[default("producer_byte_rate")]
-        pub key: &'a str,
-        #[default(QuotaValue(64.0))]
-        pub value: QuotaValue,
-    }
-
-    /// Configure every entity at one probe rate, retaining the input order.
-    pub(crate) fn uniform_quota_image(setup: UniformQuotaImageSetup<'_>) -> MetadataImage {
-        image_with_quotas(
-            setup
-                .entities
-                .into_iter()
-                .map(|entity| {
-                    quota_record(QuotaRecordSetup {
-                        entity,
-                        key: setup.key,
-                        value: setup.value,
-                    })
+    #[macro_export]
+    macro_rules! quota_record_builder {
+        ($visibility:vis $name:ident -> $output:ty = $constructor:path) => {
+            #[bon::builder]
+            $visibility fn $name(
+                #[builder(default = vec![ ("user", Some("alice")) ])]
+                entity: Vec<(&'_ str, Option<&'_ str>)>,
+                #[builder(default = "producer_byte_rate")] key: &'_ str,
+                #[builder(into, default = $crate::quota::test_support::QuotaValue(1_000.0))]
+                value: $crate::quota::test_support::QuotaValue,
+            ) -> $output {
+                $constructor($crate::quota::test_support::QuotaRecordSetup {
+                    entity,
+                    key,
+                    value,
                 })
-                .collect(),
-        )
+            }
+        };
     }
 
-    pub(crate) fn producer_quota_image(entities: Vec<QuotaEntitySpec<'_>>) -> MetadataImage {
-        uniform_quota_image(UniformQuotaImageSetup {
-            entities,
-            ..Default::default()
-        })
+    fn image_from_quota_setup(setup: QuotaRecordSetup<'_>) -> MetadataImage {
+        image_with_quotas(vec![
+            quota_record()
+                .entity(setup.entity)
+                .key(setup.key)
+                .value(setup.value)
+                .call(),
+        ])
     }
 
-    pub(crate) fn app1_producer_quota() -> ClientQuotaRecord {
-        quota_record(QuotaRecordSetup {
-            entity: vec![("client-id", Some("app1"))],
-            value: QuotaValue(200.0),
-            ..Default::default()
-        })
+    pub(crate) fn shared_image_from_quota_setup(
+        setup: QuotaRecordSetup<'_>,
+    ) -> std::sync::Arc<MetadataImage> {
+        std::sync::Arc::new(image_from_quota_setup(setup))
     }
 
-    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
-    pub(crate) struct UserBucketSetup<'a> {
-        #[default("producer_byte_rate")]
-        pub key: &'a str,
-        #[default(QuotaValue(0.0))]
-        pub rate: QuotaValue,
-    }
-
-    pub(crate) fn alice_bucket(
-        setup: UserBucketSetup<'_>,
-    ) -> (
-        std::sync::Arc<super::QuotaBuckets>,
-        std::sync::Arc<TokenBucket>,
-    ) {
-        let buckets = std::sync::Arc::new(super::QuotaBuckets::new());
-        let key: krabka_metadata::EntityKey = vec![("user".into(), Some("alice".into()))];
-        let bucket = buckets.get_or_create(setup.key, &key, setup.rate.0);
-        (buckets, bucket)
-    }
-
-    /// The 5,000-byte pair used to compare lookup precedence with bucket refresh.
-    pub(crate) fn alice_app1_producer_quota() -> ClientQuotaRecord {
-        quota_record(QuotaRecordSetup {
-            entity: vec![("user", Some("alice")), ("client-id", Some("app1"))],
-            value: QuotaValue(5_000.0),
-            ..Default::default()
-        })
-    }
-
-    pub(crate) fn image_with_quota(setup: QuotaRecordSetup<'_>) -> MetadataImage {
-        image_with_quotas(vec![quota_record(setup)])
-    }
-
-    pub(crate) fn image_with_quotas(records: Vec<ClientQuotaRecord>) -> MetadataImage {
-        let mut image = MetadataImage::new(uuid::Uuid::nil());
-        for record in records {
-            image.apply(&MetadataRecord::V1ClientQuota(record));
-        }
-        image
-    }
-
-    pub(crate) fn quota_record(setup: QuotaRecordSetup<'_>) -> ClientQuotaRecord {
+    fn record_from_quota_setup(setup: QuotaRecordSetup<'_>) -> ClientQuotaRecord {
         let QuotaRecordSetup { entity, key, value } = setup;
         ClientQuotaRecord {
             entity: entity
@@ -376,15 +322,103 @@ pub(crate) mod test_support {
             config_value: Some(value.0),
         }
     }
+
+    crate::quota_record_builder!(pub(crate) image_with_quota -> MetadataImage = image_from_quota_setup);
+    crate::quota_record_builder!(pub(crate) quota_record -> ClientQuotaRecord = record_from_quota_setup);
+
+    pub(crate) type QuotaEntitySpec<'a> = Vec<(&'a str, Option<&'a str>)>;
+
+    #[derive(krabka_macros::FieldDefaults)]
+    pub(crate) struct UniformQuotaImageSetup<'a> {
+        pub entities: Vec<QuotaEntitySpec<'a>>,
+        #[default("producer_byte_rate")]
+        pub key: &'a str,
+        #[default(QuotaValue(64.0))]
+        pub value: QuotaValue,
+    }
+
+    /// Configure every entity at one probe rate, retaining the input order.
+    #[bon::builder]
+    pub(crate) fn uniform_quota_image(
+        #[builder(default)] entities: Vec<QuotaEntitySpec<'_>>,
+        #[builder(default = "producer_byte_rate")] key: &'_ str,
+        #[builder(into, default = QuotaValue (64.0))] value: QuotaValue,
+    ) -> MetadataImage {
+        let setup = UniformQuotaImageSetup {
+            entities,
+            key,
+            value,
+        };
+        image_with_quotas(
+            setup
+                .entities
+                .into_iter()
+                .map(|entity| {
+                    quota_record()
+                        .entity(entity)
+                        .key(setup.key)
+                        .value(setup.value)
+                        .call()
+                })
+                .collect(),
+        )
+    }
+
+    pub(crate) fn producer_quota_image(entities: Vec<QuotaEntitySpec<'_>>) -> MetadataImage {
+        uniform_quota_image().entities(entities).call()
+    }
+
+    pub(crate) fn app1_producer_quota() -> ClientQuotaRecord {
+        quota_record()
+            .entity(vec![("client-id", Some("app1"))])
+            .value(200.0)
+            .call()
+    }
+
+    #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+    pub(crate) struct UserBucketSetup<'a> {
+        #[default("producer_byte_rate")]
+        pub key: &'a str,
+        #[default(QuotaValue(0.0))]
+        pub rate: QuotaValue,
+    }
+
+    #[bon::builder]
+    pub(crate) fn alice_bucket(
+        #[builder(default = "producer_byte_rate")] key: &'_ str,
+        #[builder(into, default = QuotaValue (0.0))] rate: QuotaValue,
+    ) -> (
+        std::sync::Arc<super::QuotaBuckets>,
+        std::sync::Arc<TokenBucket>,
+    ) {
+        let setup = UserBucketSetup { key, rate };
+        let buckets = std::sync::Arc::new(super::QuotaBuckets::new());
+        let key: krabka_metadata::EntityKey = vec![("user".into(), Some("alice".into()))];
+        let bucket = buckets.get_or_create(setup.key, &key, setup.rate.0);
+        (buckets, bucket)
+    }
+
+    /// The 5,000-byte pair used to compare lookup precedence with bucket refresh.
+    pub(crate) fn alice_app1_producer_quota() -> ClientQuotaRecord {
+        quota_record()
+            .entity(vec![("user", Some("alice")), ("client-id", Some("app1"))])
+            .value(5_000.0)
+            .call()
+    }
+
+    pub(crate) fn image_with_quotas(records: Vec<ClientQuotaRecord>) -> MetadataImage {
+        let mut image = MetadataImage::new(uuid::Uuid::nil());
+        for record in records {
+            image.apply(&MetadataRecord::V1ClientQuota(record));
+        }
+        image
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use {
-        super::{
-            test_support::{QuotaRecordSetup, QuotaValue, image_with_quota},
-            *,
-        },
+        super::{test_support::image_with_quota, *},
         crate::throttle::MICROS_PER_TOKEN,
         assert2::{assert, check},
         krabka_units::secs,
@@ -468,11 +502,10 @@ mod tests {
 
     #[test]
     fn consume_configured_quota_returns_zero_without_mutating_bucket_for_zero_amount() {
-        let image = image_with_quota(QuotaRecordSetup {
-            key: "request_percentage",
-            value: QuotaValue(100.0),
-            ..Default::default()
-        });
+        let image = image_with_quota()
+            .key("request_percentage")
+            .value(100.0)
+            .call();
         let buckets = QuotaBuckets::new();
         let initial_rate_called = Arc::new(AtomicBool::new(false));
         let delay_for_overage_called = Arc::new(AtomicBool::new(false));
@@ -512,10 +545,7 @@ mod tests {
     #[test]
     fn consume_configured_quota_ignores_non_positive_rates() {
         for rate in [-1.0, 0.0] {
-            let image = image_with_quota(QuotaRecordSetup {
-                value: QuotaValue(rate),
-                ..Default::default()
-            });
+            let image = image_with_quota().value(rate).call();
             let buckets = QuotaBuckets::new();
             let initial_rate_called = Arc::new(AtomicBool::new(false));
 
@@ -547,10 +577,7 @@ mod tests {
 
     #[test]
     fn consume_configured_quota_leaves_the_overage_delay_uncapped() {
-        let image = image_with_quota(QuotaRecordSetup {
-            value: QuotaValue(1.0),
-            ..Default::default()
-        });
+        let image = image_with_quota().value(1.0).call();
         // A one-second window: at 1 B/s the burst is one byte, so 10 bytes
         // leaves the 9-byte overage the closure below checks.
         let buckets = QuotaBuckets::with_window(secs(1));

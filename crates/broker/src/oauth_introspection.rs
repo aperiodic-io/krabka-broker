@@ -144,6 +144,7 @@ mod tests {
         userinfo_auths: Mutex<Vec<String>>,
     }
 
+    #[derive(derive_more::From, derive_more::Into)]
     /// Starts an HTTPS test server with these routes:
     ///   POST /introspect  -> `introspect_body` with `introspect_status`
     ///   GET  /userinfo    -> `userinfo_body` with 200, or 404 when it is None
@@ -163,14 +164,22 @@ mod tests {
         userinfo_body: Option<&'static str>,
     }
 
+    #[bon::builder]
     async fn serve_https(
-        setup: HttpsResponseSetup,
+        #[builder(default = "{}")] introspect_body: &'static str,
+        #[builder(into, default = HttpStatusCode (200))] introspect_status: HttpStatusCode,
+        userinfo_body: Option<&'static str>,
     ) -> (
         SocketAddr,
         CancellationToken,
         std::path::PathBuf,
         Arc<ObservedRequests>,
     ) {
+        let setup = HttpsResponseSetup {
+            introspect_body,
+            introspect_status,
+            userinfo_body,
+        };
         let HttpsResponseSetup {
             introspect_body,
             introspect_status,
@@ -256,11 +265,19 @@ mod tests {
         timeout: krabka_units::Time,
     }
 
+    #[bon::builder]
     fn https_client(
         addr: SocketAddr,
         ca: &std::path::Path,
-        setup: HttpsClientSetup<'_>,
+        #[builder(default = "id")] client_id: &'_ str,
+        #[builder(default = "s")] secret: &'_ str,
+        #[builder(default = secs (5))] timeout: krabka_units::Time,
     ) -> Arc<dyn IntrospectionClient> {
+        let setup = HttpsClientSetup {
+            client_id,
+            secret,
+            timeout,
+        };
         let HttpsClientSetup {
             client_id,
             secret,
@@ -278,33 +295,53 @@ mod tests {
     }
 
     /// A server and trusted client, retaining the request observations and shutdown handle.
+    #[bon::builder]
     async fn https_fixture(
-        response: HttpsResponseSetup,
+        #[builder(default = "{}")] introspect_body: &'static str,
+        #[builder(into, default = HttpStatusCode (200))] introspect_status: HttpStatusCode,
+        userinfo_body: Option<&'static str>,
         client: HttpsClientSetup<'_>,
     ) -> (
         Arc<dyn IntrospectionClient>,
         CancellationToken,
         Arc<ObservedRequests>,
     ) {
-        let (addr, shutdown, ca, observed) = serve_https(response).await;
-        (https_client(addr, &ca, client), shutdown, observed)
+        let response = HttpsResponseSetup {
+            introspect_body,
+            introspect_status,
+            userinfo_body,
+        };
+        let (addr, shutdown, ca, observed) = serve_https()
+            .introspect_body(response.introspect_body)
+            .introspect_status(response.introspect_status)
+            .maybe_userinfo_body(response.userinfo_body)
+            .call()
+            .await;
+        (
+            https_client()
+                .addr(addr)
+                .ca(&ca)
+                .client_id(client.client_id)
+                .secret(client.secret)
+                .timeout(client.timeout)
+                .call(),
+            shutdown,
+            observed,
+        )
     }
 
     #[tokio::test]
     async fn introspection_fetches_active_token_over_https_with_custom_trust() {
         let body = r#"{"active":true,"sub":"alice"}"#;
-        let (client, srv_shutdown, _observed) = https_fixture(
-            HttpsResponseSetup {
-                introspect_body: body,
-                ..Default::default()
-            },
-            HttpsClientSetup {
+        let (client, srv_shutdown, _observed) = https_fixture()
+            .introspect_body(body)
+            .client(HttpsClientSetup {
                 client_id: "kafka-broker",
                 secret: "secret",
                 ..Default::default()
-            },
-        )
-        .await;
+            })
+            .call()
+            .await;
         let resp = client.introspect("tok").await.unwrap();
         assert!(resp.get("active").and_then(serde_json::Value::as_bool) == Some(true));
         assert!(resp.get("sub").and_then(|v| v.as_str()) == Some("alice"));
@@ -313,14 +350,11 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_returns_inactive_when_idp_says_inactive() {
-        let (client, srv_shutdown, _) = https_fixture(
-            HttpsResponseSetup {
-                introspect_body: r#"{"active":false}"#,
-                ..Default::default()
-            },
-            HttpsClientSetup::default(),
-        )
-        .await;
+        let (client, srv_shutdown, _) = https_fixture()
+            .introspect_body(r#"{"active":false}"#)
+            .client(HttpsClientSetup::default())
+            .call()
+            .await;
         let resp = client.introspect("tok").await.unwrap();
         assert!(resp.get("active").and_then(serde_json::Value::as_bool) == Some(false));
         srv_shutdown.cancel();
@@ -328,15 +362,12 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_returns_transport_error_on_non_2xx() {
-        let (client, srv_shutdown, _) = https_fixture(
-            HttpsResponseSetup {
-                introspect_body: r#"{"error":"x"}"#,
-                introspect_status: HttpStatusCode(500),
-                ..Default::default()
-            },
-            HttpsClientSetup::default(),
-        )
-        .await;
+        let (client, srv_shutdown, _) = https_fixture()
+            .introspect_body(r#"{"error":"x"}"#)
+            .introspect_status(500)
+            .client(HttpsClientSetup::default())
+            .call()
+            .await;
         let err = client.introspect("tok").await.unwrap_err();
         assert!(
             matches!(err, IntrospectionError::Status(500)),
@@ -347,12 +378,11 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_userinfo_endpoint_is_called_after_active_introspection() {
-        let (addr, srv_shutdown, ca, observed) = serve_https(HttpsResponseSetup {
-            introspect_body: r#"{"active":true,"sub":"alice"}"#,
-            userinfo_body: Some(r#"{"preferred_username":"alice","email":"a@b.c"}"#),
-            ..Default::default()
-        })
-        .await;
+        let (addr, srv_shutdown, ca, observed) = serve_https()
+            .introspect_body(r#"{"active":true,"sub":"alice"}"#)
+            .maybe_userinfo_body(Some(r#"{"preferred_username":"alice","email":"a@b.c"}"#))
+            .call()
+            .await;
         let client = ReqwestIntrospectionClient::build(
             format!("https://127.0.0.1:{}/introspect", addr.port()),
             Some(format!("https://127.0.0.1:{}/userinfo", addr.port())),
@@ -371,14 +401,11 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_userinfo_endpoint_is_not_called_when_endpoint_unset() {
-        let (client, srv_shutdown, _) = https_fixture(
-            HttpsResponseSetup {
-                introspect_body: r#"{"active":true,"sub":"a"}"#,
-                ..Default::default()
-            },
-            HttpsClientSetup::default(),
-        )
-        .await;
+        let (client, srv_shutdown, _) = https_fixture()
+            .introspect_body(r#"{"active":true,"sub":"a"}"#)
+            .client(HttpsClientSetup::default())
+            .call()
+            .await;
         let ui = client.userinfo("tok").await.unwrap();
         assert!(ui.is_none());
         srv_shutdown.cancel();
@@ -387,14 +414,11 @@ mod tests {
     #[tokio::test]
     async fn introspection_handles_keycloak_response_shape() {
         let body = r#"{"active":true,"sub":"svc-account-kafka-client","client_id":"kafka-client","scope":"kafka.write profile","exp":9999999999}"#;
-        let (client, srv_shutdown, _) = https_fixture(
-            HttpsResponseSetup {
-                introspect_body: body,
-                ..Default::default()
-            },
-            HttpsClientSetup::default(),
-        )
-        .await;
+        let (client, srv_shutdown, _) = https_fixture()
+            .introspect_body(body)
+            .client(HttpsClientSetup::default())
+            .call()
+            .await;
         let resp = client.introspect("tok").await.unwrap();
         assert!(resp.get("client_id").and_then(|v| v.as_str()) == Some("kafka-client"));
         assert!(resp.get("scope").and_then(|v| v.as_str()) == Some("kafka.write profile"));
@@ -403,18 +427,15 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_basic_auth_sent_with_configured_client_id_and_secret() {
-        let (client, srv_shutdown, observed) = https_fixture(
-            HttpsResponseSetup {
-                introspect_body: r#"{"active":true,"sub":"a"}"#,
-                ..Default::default()
-            },
-            HttpsClientSetup {
+        let (client, srv_shutdown, observed) = https_fixture()
+            .introspect_body(r#"{"active":true,"sub":"a"}"#)
+            .client(HttpsClientSetup {
                 client_id: "kafka-broker",
                 secret: "shh",
                 ..Default::default()
-            },
-        )
-        .await;
+            })
+            .call()
+            .await;
         client.introspect("tok").await.unwrap();
         let auths = observed.introspect_auths.lock().unwrap();
         assert!(auths.len() == 1);
@@ -425,14 +446,11 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_form_body_token_field() {
-        let (client, srv_shutdown, observed) = https_fixture(
-            HttpsResponseSetup {
-                introspect_body: r#"{"active":true,"sub":"a"}"#,
-                ..Default::default()
-            },
-            HttpsClientSetup::default(),
-        )
-        .await;
+        let (client, srv_shutdown, observed) = https_fixture()
+            .introspect_body(r#"{"active":true,"sub":"a"}"#)
+            .client(HttpsClientSetup::default())
+            .call()
+            .await;
         client.introspect("opaque-abc").await.unwrap();
         let bodies = observed.introspect_bodies.lock().unwrap();
         assert!(bodies.len() == 1);
@@ -452,10 +470,11 @@ mod tests {
         let ca_path = dir.path().join("ca.pem");
         std::fs::write(&ca_path, cert.pem()).unwrap();
         drop(listener);
-        let client = https_client(addr, &ca_path, HttpsClientSetup {
-            timeout: millis(200),
-            ..Default::default()
-        });
+        let client = https_client()
+            .addr(addr)
+            .ca(&ca_path)
+            .timeout(millis(200))
+            .call();
         let err = client.introspect("tok").await.unwrap_err();
         assert!(
             matches!(err, IntrospectionError::Transport(_)),

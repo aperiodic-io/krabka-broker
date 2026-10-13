@@ -16,7 +16,7 @@ use {
         ERR_TOPIC_AUTHORIZATION_FAILED,
         client_api::{drive_fetch_as_plain, drive_produce_as_plain, single_record_produce_request},
         framing::CLIENT_ID,
-        kafka_wire::PlainAuthenticationSetup,
+        kafka_wire::{PlainAuthenticationSetup, plain_authentication_setup},
         polling::retry_produce_until_allowed,
         sasl_cluster::{start_alice_topic_grant, start_denied_foo},
         support::{
@@ -35,10 +35,7 @@ async fn produce_denied_without_topic_acl() {
     let resp = drive_produce_as_plain(
         addr,
         single_record_produce_request("foo", 0, b"hello"),
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            ..Default::default()
-        },
+        &plain_authentication_setup().client_id(CLIENT_ID).call(),
     )
     .await
     .expect("Produce must round-trip");

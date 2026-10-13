@@ -67,7 +67,7 @@
 use {
     crate::support::{
         load_test::*,
-        producer::{ProducerRecordSetup, no_retry_acks_all_producer, producer_record},
+        producer::{no_retry_acks_all_producer, producer_record},
         remove_container_with_volumes,
         storage::host_directory_user,
     },
@@ -409,12 +409,12 @@ async fn produce_settled(producer: &Producer, topic: &str, keys: &[String]) -> V
 }
 
 fn record(topic: &str, key: &str) -> ProducerRecord {
-    producer_record(ProducerRecordSetup {
-        topic: topic.to_owned(),
-        partition: Some(krabka_ids::PartitionIndex(0)),
-        key: Some(key.to_owned().into()),
-        value: Some(key.to_owned().into()),
-    })
+    producer_record()
+        .topic(topic.to_owned())
+        .maybe_partition(Some(0))
+        .maybe_key(Some(key.to_owned().into()))
+        .value(Some(bytes::Bytes::copy_from_slice(key.as_bytes())))
+        .call()
 }
 
 /// A producer that reports an ack only when the broker gave it one.

@@ -11,8 +11,7 @@ use {
     crate::support::{
         client::connect_client,
         fetch::{
-            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+            FetchByteLimit, FetchLimits, RequestWaitMillis, fetch_partition, single_partition_fetch,
         },
         produce::{SinglePartitionProduceSetup, single_partition_produce},
         records::value_record,
@@ -79,13 +78,12 @@ pub async fn create_topic_with_configs(
     let client = connect_client(bootstrap.to_string(), None).await;
     let resp = client
         .send(CreateTopicsRequest {
-            topics: vec![crate::support::topics::creatable_topic_with_configs(
-                crate::support::topics::ConfiguredTopicSetup {
-                    name: name.into(),
-                    configs,
-                    ..Default::default()
-                },
-            )],
+            topics: vec![
+                crate::support::topics::creatable_topic_with_configs()
+                    .name(name.into())
+                    .configs(configs)
+                    .call(),
+            ],
             timeout_ms: 5_000,
             ..Default::default()
         })
@@ -158,18 +156,15 @@ pub async fn fetch_first_batch(
     let resp = client
         .send(FetchRequest {
             replica_id: -1,
-            ..single_partition_fetch(SinglePartitionFetchSetup {
-                topic: topic.into(),
-                topic_id,
-                partition: fetch_partition(FetchPartitionSetup {
-                    maximum: FetchByteLimit(8 << 20),
-                    ..Default::default()
-                }),
-                limits: FetchLimits::wait_for_data_with_maximum(
+            ..single_partition_fetch()
+                .topic(topic.into())
+                .topic_id(topic_id)
+                .partition(fetch_partition().maximum(8 << 20).call())
+                .limits(FetchLimits::wait_for_data_with_maximum(
                     RequestWaitMillis(1_000),
                     FetchByteLimit(8 << 20),
-                ),
-            })
+                ))
+                .call()
         })
         .await
         .expect("Fetch");

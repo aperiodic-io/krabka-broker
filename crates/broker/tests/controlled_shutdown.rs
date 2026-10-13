@@ -20,7 +20,7 @@ use {
     },
     assert2::assert,
     krabka_broker::BrokerHandle,
-    krabka_metadata::NodeId as MetadataNodeId,
+    krabka_metadata::{MetadataRecord, NodeId as MetadataNodeId, PartitionRecord},
     std::{net::SocketAddr, time::Duration},
 };
 
@@ -56,9 +56,22 @@ struct ForcedLeadershipSetup<'a> {
 /// partition of `topic`. It uses `submit_metadata_record_for_test` to bypass
 /// the public wire path, so the test does not have to drive `ElectLeaders`.
 /// It returns after the image shows `leader=target` for every partition.
-async fn force_leadership_for_test(leader_handle: &BrokerHandle, setup: ForcedLeadershipSetup<'_>) {
-    use krabka_metadata::{MetadataRecord, PartitionRecord};
-
+#[bon::builder]
+async fn force_leadership_for_test(
+    leader_handle: &BrokerHandle,
+    #[builder(default = "drain-me")] topic: &'_ str,
+    #[builder(into, default = crate :: support :: topics :: TopicPartitionCount (4))]
+    partitions: TopicPartitionCount,
+    #[builder(into, default = krabka_metadata :: NodeId (1))] leader: krabka_metadata::NodeId,
+    #[builder(default = vec ! [krabka_metadata :: NodeId (1) , krabka_metadata :: NodeId (2) , krabka_metadata :: NodeId (3)])]
+    replicas: Vec<MetadataNodeId>,
+) {
+    let setup = ForcedLeadershipSetup {
+        topic,
+        partitions,
+        leader,
+        replicas,
+    };
     let topic = setup.topic;
     let partitions = setup.partitions.0;
     let target = setup.leader.0;
@@ -163,17 +176,20 @@ async fn controlled_shutdown_drains_leadership_and_returns_ok() {
     let mut replicas: Vec<u64> = (1..=3).collect();
     // Put target first so its `replicas[0]` is itself (preferred).
     replicas.sort_by_key(|n| i32::from(*n != target_node_id));
-    force_leadership_for_test(&cluster[raft_leader_idx].0, ForcedLeadershipSetup {
-        topic,
-        partitions: TopicPartitionCount(partitions),
-        leader: krabka_metadata::NodeId(target_node_id.0),
-        replicas: replicas
-            .iter()
-            .copied()
-            .map(krabka_metadata::NodeId)
-            .collect(),
-    })
-    .await;
+    force_leadership_for_test()
+        .leader_handle(&cluster[raft_leader_idx].0)
+        .topic(topic)
+        .partitions(partitions)
+        .leader(target_node_id.0)
+        .replicas(
+            replicas
+                .iter()
+                .copied()
+                .map(krabka_metadata::NodeId)
+                .collect(),
+        )
+        .call()
+        .await;
 
     // Sanity: target leads everything before we start. Use the raft
     // leader's image since the target is about to be drained.

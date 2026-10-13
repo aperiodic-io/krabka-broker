@@ -14,8 +14,7 @@ use {
             wait_partition_exists,
         },
         configs::drive_incremental_alter_configs,
-        kafka_wire::AutomaticTopicSetup,
-        support::topics::ConfiguredTopicSetup,
+        support::topics::configured_topic_setup,
     },
     assert2::assert,
 };
@@ -62,14 +61,12 @@ async fn topic_throttle_config_propagates() {
     let (handle, _dir, addr) =
         start_single_broker_sasl_plaintext_with_users("admin", &[("admin", "admin-secret")]).await;
 
-    create_topic_as_admin(addr, AutomaticTopicSetup {
-        client_id: CLIENT_ID,
-        topic: ConfiguredTopicSetup {
-            name: ("foo").into(),
-            ..Default::default()
-        },
-    })
-    .await;
+    create_topic_as_admin()
+        .addr(addr)
+        .client_id(CLIENT_ID)
+        .topic(configured_topic_setup().name("foo").call())
+        .call()
+        .await;
     wait_partition_exists(&handle, "foo", 0).await;
 
     let err = drive_incremental_alter_configs(addr, "admin", "admin-secret", vec![(

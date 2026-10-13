@@ -491,7 +491,7 @@ mod tests {
         super::*,
         crate::{
             config_keys::MIN_INSYNC_REPLICAS,
-            test_support::{TopicSetup, broker_registration, topic_image},
+            test_support::{broker_registration, topic_image},
         },
         assert2::{assert, check},
         krabka_metadata::{
@@ -509,8 +509,12 @@ mod tests {
     fn fresh_with_isr(nodes: &[u64], at: Instant) -> ReplicaState {
         let mut state = fresh();
         let nodes: Vec<_> = nodes.iter().copied().map(NodeId).collect();
-        state.install_isr(&nodes, &nodes, NodeId(1), at);
+        install_same_isr(&mut state, &nodes, at);
         state
+    }
+
+    fn install_same_isr(state: &mut ReplicaState, replicas: &[NodeId], at: Instant) {
+        state.install_isr(replicas, replicas, NodeId(1), at);
     }
 
     fn now() -> Instant { Instant::now() }
@@ -558,7 +562,7 @@ mod tests {
         assert!(s.leader_and_replicas() == (None, &empty));
 
         let replicas = [NodeId(1), NodeId(2), NodeId(3)];
-        s.install_isr(&replicas, &replicas, NodeId(1), now());
+        install_same_isr(&mut s, &replicas, now());
         let expected_replicas: HashSet<NodeId> = replicas.into_iter().collect();
         assert!(s.leader_and_replicas() == (Some(NodeId(1)), &expected_replicas));
 
@@ -570,12 +574,7 @@ mod tests {
     fn install_isr_seeds_non_leader_followers_at_zero() {
         let mut s = fresh();
         let t = now();
-        s.install_isr(
-            &[NodeId(1), NodeId(2), NodeId(3)],
-            &[NodeId(1), NodeId(2), NodeId(3)],
-            NodeId(1),
-            t,
-        );
+        install_same_isr(&mut s, &[NodeId(1), NodeId(2), NodeId(3)], t);
         let seeded = FollowerStats {
             leo: Offset(0),
             last_fetch: None,
@@ -606,12 +605,7 @@ mod tests {
         let mut s = fresh_with_isr(&[1, 2, 3], now());
         s.update_follower_leo(NodeId(2), o(50), o(100), now());
         s.update_follower_leo(NodeId(3), o(75), o(100), now());
-        s.install_isr(
-            &[NodeId(1), NodeId(2), NodeId(3)],
-            &[NodeId(1), NodeId(2), NodeId(3)],
-            NodeId(1),
-            now(),
-        );
+        install_same_isr(&mut s, &[NodeId(1), NodeId(2), NodeId(3)], now());
         assert!(s.per_follower.get(&NodeId(2)).map(|f| f.leo) == Some(o(50)));
         assert!(s.per_follower.get(&NodeId(3)).map(|f| f.leo) == Some(o(75)));
     }
@@ -1055,12 +1049,7 @@ mod tests {
         }
     }
 
-    fn policy_image() -> MetadataImage {
-        topic_image(TopicSetup {
-            topic: "t",
-            ..Default::default()
-        })
-    }
+    fn policy_image() -> MetadataImage { topic_image().topic("t").call() }
 
     /// The policy the ISR scan reads out of the metadata image: the topic's
     /// `min.insync.replicas` capped by the replica count, and each replica's

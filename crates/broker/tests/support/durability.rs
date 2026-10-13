@@ -3,7 +3,8 @@
 use {
     super::topic_id_for,
     crate::support::{
-        client::connect_client,
+        client::{BatchProduceSetup, connect_client},
+        produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
         records::value_record,
         registered_cluster,
         topics::{TopicReplicationFactor, create_topic_request},
@@ -12,9 +13,10 @@ use {
     bytes::Bytes,
     krabka_broker::BrokerHandle,
     krabka_protocol::records::RecordBatch,
+    std::time::{Duration, Instant},
 };
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct BrokerCount(pub u64);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -39,19 +41,30 @@ pub struct TopicReplicasSetup<'a> {
 ///
 /// # Panics
 /// Panics if the brokers or the replicated topic cannot be created.
+#[bon::builder]
 pub async fn replicated_topic_fixture(
-    setup: ReplicatedTopicSetup<'_>,
+    #[builder(into, default = BrokerCount (3))] brokers: BrokerCount,
+    #[builder(default = "t")] topic: &'_ str,
+    #[builder(default = crate :: support :: topics :: TopicReplicationFactor (3))]
+    replicas: TopicReplicationFactor,
 ) -> (
     Vec<(BrokerHandle, krabka_broker::BrokerConfig, tempfile::TempDir)>,
     String,
 ) {
+    let setup = ReplicatedTopicSetup {
+        brokers,
+        topic,
+        replicas,
+    };
     let cluster = registered_cluster(setup.brokers.0).await;
     let bootstrap = cluster[0].1.listen_addr.to_string();
-    create_topic_on_replicas(&cluster[0].0, &bootstrap, TopicReplicasSetup {
-        topic: setup.topic,
-        replicas: setup.replicas,
-    })
-    .await;
+    create_topic_on_replicas()
+        .broker(&cluster[0].0)
+        .bootstrap(&bootstrap)
+        .topic(setup.topic)
+        .replicas(setup.replicas)
+        .call()
+        .await;
     (cluster, bootstrap)
 }
 
@@ -70,11 +83,15 @@ pub fn record_batch_with_values(values: &[&str]) -> RecordBatch {
     batch
 }
 
+#[bon::builder]
 pub async fn create_topic_on_replicas(
     broker: &BrokerHandle,
     bootstrap: &str,
-    setup: TopicReplicasSetup<'_>,
+    #[builder(default = "t")] topic: &'_ str,
+    #[builder(default = crate :: support :: topics :: TopicReplicationFactor (1))]
+    replicas: TopicReplicationFactor,
 ) {
+    let setup = TopicReplicasSetup { topic, replicas };
     let client = connect_client(bootstrap.to_string(), None).await;
     let replicas: Vec<i32> = (1..=i32::from(setup.replicas.0)).collect();
     let resp = client
@@ -101,7 +118,15 @@ pub async fn produce_batch(
 ) -> Result<i64, i16> {
     let client = connect_client(bootstrap.to_string(), None).await;
     setup.topic_id = topic_id_for(&client, setup.topic).await;
-    let pr = super::client::produce_batch(&client, batch, setup).await;
+    let pr = super::client::produce_batch()
+        .client(&client)
+        .batch(batch)
+        .topic(setup.topic)
+        .topic_id(setup.topic_id)
+        .acknowledgements(setup.acknowledgements)
+        .timeout(setup.timeout)
+        .call()
+        .await;
     if pr.error_code == 0 {
         Ok(pr.base_offset)
     } else {
@@ -115,4 +140,24 @@ pub async fn produce_acks(
     setup: super::client::BatchProduceSetup<'_>,
 ) -> Result<i64, i16> {
     produce_batch(bootstrap, record_batch_with_values(values), setup).await
+}
+
+/// Time the acks-all request that waits for ISR shrink after a follower stops.
+#[bon::builder]
+pub async fn produce_acks_after_isr_shrink(
+    bootstrap: &str,
+    topic: &str,
+    values: &[&str],
+    #[builder(default = ProduceTimeoutMillis(10_000))] timeout: ProduceTimeoutMillis,
+) -> (i64, Duration) {
+    let start = Instant::now();
+    let offset = produce_acks(bootstrap, values, BatchProduceSetup {
+        topic,
+        acknowledgements: ProduceAcknowledgements::AllReplicas,
+        timeout,
+        ..Default::default()
+    })
+    .await
+    .expect("acks-all succeeds after ISR shrink");
+    (offset, start.elapsed())
 }

@@ -133,6 +133,14 @@ mod tests {
         }
     }
 
+    fn log_len(sim: &Sim, node_id: NodeId) -> usize {
+        sim.snapshot()
+            .nodes
+            .iter()
+            .find(|node| node.id == node_id.0)
+            .map_or(0, |node| node.log_len)
+    }
+
     #[test]
     fn interactive_bootstrap_elects_one_leader() {
         let mut sim = Sim::new(&[NodeId(1), NodeId(2), NodeId(3)]);
@@ -212,20 +220,10 @@ mod tests {
         step_until(&mut sim, 10_000, |s| !s.leaders().is_empty());
         sim.run_until_stable(10_000);
         let leader = sim.leaders()[0];
-        let before = sim
-            .snapshot()
-            .nodes
-            .iter()
-            .find(|n| n.id == leader.0)
-            .map_or(0, |n| n.log_len);
+        let before = log_len(&sim, leader);
 
         assert2::assert!(sim.append(2));
-        let after = sim
-            .snapshot()
-            .nodes
-            .iter()
-            .find(|n| n.id == leader.0)
-            .map_or(0, |n| n.log_len);
+        let after = log_len(&sim, leader);
         assert2::assert!(after == before + 2);
     }
 }

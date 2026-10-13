@@ -11,7 +11,7 @@ use {
         client::connect_client,
         discovery::{coordinator_lookup_request, topic_metadata_request},
         topics::TopicPartitionCount,
-        transaction_wire::{TransactionTopicSetup, create_topic as create_transaction_topic},
+        transaction_wire::create_topic as create_transaction_topic,
     },
     assert2::assert,
     krabka_client_core::Client,
@@ -29,13 +29,13 @@ pub async fn admin_client(bootstrap: &str) -> Client {
 }
 
 pub async fn create_topic(client: &Client, name: &str, partitions: TopicPartitionCount) {
-    create_transaction_topic(client, TransactionTopicSetup {
-        name,
-        partitions,
-        context: "create_topic",
-        ..Default::default()
-    })
-    .await;
+    create_transaction_topic()
+        .client(client)
+        .name(name)
+        .partitions(partitions)
+        .context("create_topic")
+        .call()
+        .await;
 }
 
 /// Downgrade the finalized `transaction.version` to `level` with a

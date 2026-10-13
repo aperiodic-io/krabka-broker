@@ -20,10 +20,10 @@ pub(super) const DENSE_INDEX: ByteSize = ByteSize::ZERO;
 /// budget never clips the result.
 pub(super) const NO_LIMIT: ByteSize = gibibytes(4);
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 pub(super) struct RecordCount(pub i32);
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 pub(super) struct RecordTimestamp(pub i64);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -119,7 +119,17 @@ pub(super) const INDEXED_READ_BATCHES: &[SampleBatchSetup] = &[
     },
 ];
 
-pub(super) fn sample_batch(setup: SampleBatchSetup) -> RecordBatch {
+#[bon::builder]
+pub(super) fn sample_batch(
+    #[builder(into, default)] offset: Offset,
+    #[builder(into, default = RecordCount (1))] records: RecordCount,
+    #[builder(into, default)] timestamp: RecordTimestamp,
+) -> RecordBatch {
+    let setup = SampleBatchSetup {
+        offset,
+        records,
+        timestamp,
+    };
     let SampleBatchSetup {
         offset,
         records,
@@ -158,19 +168,52 @@ pub(super) struct SeededSegmentSetup<'a> {
     pub index_interval: ByteSize,
 }
 
-pub(super) fn seeded_segment(dir: &std::path::Path, setup: SeededSegmentSetup<'_>) -> Segment {
+#[bon::builder]
+pub(super) fn seeded_segment(
+    dir: &std::path::Path,
+    #[builder(into, default)] offset: Offset,
+    #[builder(default)] batches: &'_ [SampleBatchSetup],
+    #[builder(default = DENSE_INDEX)] index_interval: ByteSize,
+) -> Segment {
+    let setup = SeededSegmentSetup {
+        offset,
+        batches,
+        index_interval,
+    };
     let mut segment = Segment::create(dir, setup.offset).unwrap();
     for &batch in setup.batches {
         segment
-            .append(&sample_batch(batch), setup.index_interval)
+            .append(
+                &sample_batch()
+                    .offset(batch.offset.0)
+                    .records(batch.records.0)
+                    .timestamp(batch.timestamp.0)
+                    .call(),
+                setup.index_interval,
+            )
             .unwrap();
     }
     segment
 }
 
-pub(super) fn seeded_fixture(setup: SeededSegmentSetup<'_>) -> (tempfile::TempDir, Segment) {
+#[bon::builder]
+pub(super) fn seeded_fixture(
+    #[builder(into, default)] offset: Offset,
+    #[builder(default)] batches: &'_ [SampleBatchSetup],
+    #[builder(default = DENSE_INDEX)] index_interval: ByteSize,
+) -> (tempfile::TempDir, Segment) {
+    let setup = SeededSegmentSetup {
+        offset,
+        batches,
+        index_interval,
+    };
     let dir = tempdir().unwrap();
-    let segment = seeded_segment(dir.path(), setup);
+    let segment = seeded_segment()
+        .dir(dir.path())
+        .offset(setup.offset)
+        .batches(setup.batches)
+        .index_interval(setup.index_interval)
+        .call();
     (dir, segment)
 }
 
@@ -184,24 +227,31 @@ pub(super) fn three_single_record_batches() -> Vec<RecordBatch> {
 
 /// An ordinary dense-index segment holding the first two records.
 pub(super) fn two_record_fixture() -> (tempfile::TempDir, Segment) {
-    seeded_fixture(SeededSegmentSetup {
-        batches: &[TWO_RECORD_BATCH],
-        ..Default::default()
-    })
+    seeded_fixture().batches(&[TWO_RECORD_BATCH]).call()
 }
 
 pub(super) fn indexed_segment() -> (tempfile::TempDir, Segment) {
     let dir = tempdir().unwrap();
-    let segment = seeded_segment(dir.path(), SeededSegmentSetup {
-        offset: Offset(100),
-        batches: INDEXED_READ_BATCHES,
-        ..Default::default()
-    });
+    let segment = seeded_segment()
+        .dir(dir.path())
+        .offset(100)
+        .batches(INDEXED_READ_BATCHES)
+        .call();
     (dir, segment)
 }
 
 pub(super) fn sample_batches(batches: &[SampleBatchSetup]) -> Vec<RecordBatch> {
-    batches.iter().copied().map(sample_batch).collect()
+    batches
+        .iter()
+        .copied()
+        .map(|batch| {
+            sample_batch()
+                .offset(batch.offset.0)
+                .records(batch.records.0)
+                .timestamp(batch.timestamp.0)
+                .call()
+        })
+        .collect()
 }
 
 /// `seg` with its I/O routed through a fresh

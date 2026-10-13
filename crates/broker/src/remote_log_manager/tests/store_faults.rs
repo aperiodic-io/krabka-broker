@@ -75,12 +75,13 @@ impl CopyExportContext {
 
     async fn copy(&self, request: CopyExportRequest) -> usize {
         copy_exports(
-            &fixtures::configured_tier(&self.rsm, &self.rlmm, fixtures::TierSetup {
-                metrics: &self.metrics,
-                index_cache: &self.index_cache,
-                copy_timeout: request.copy_timeout,
-                ..Default::default()
-            }),
+            &fixtures::configured_tier()
+                .rsm(&self.rsm)
+                .rlmm(&self.rlmm)
+                .metrics(&self.metrics)
+                .index_cache(&self.index_cache)
+                .copy_timeout(request.copy_timeout)
+                .call(),
             request.exports,
         )
         .await
@@ -201,11 +202,12 @@ async fn a_throttling_store_finishes_nothing_and_moves_the_error_and_lag_series(
         throttling_store
     );
     fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
-    let tier = fixtures::configured_tier(&rsm, &rlmm, fixtures::TierSetup {
-        metrics: &metrics,
-        index_cache: &index_cache,
-        ..Default::default()
-    });
+    let tier = fixtures::configured_tier()
+        .rsm(&rsm)
+        .rlmm(&rlmm)
+        .metrics(&metrics)
+        .index_cache(&index_cache)
+        .call();
 
     let copied = copy_exports(&tier, exports.clone()).await;
 
@@ -257,12 +259,13 @@ async fn a_stalled_copy_is_abandoned_at_its_deadline() {
 
     let started = std::time::Instant::now();
     let copied = copy_exports(
-        &fixtures::configured_tier(&rsm, &rlmm, fixtures::TierSetup {
-            metrics: &metrics,
-            index_cache: &index_cache,
-            copy_timeout: SHORT_COPY_DEADLINE,
-            ..Default::default()
-        }),
+        &fixtures::configured_tier()
+            .rsm(&rsm)
+            .rlmm(&rlmm)
+            .copy_timeout(SHORT_COPY_DEADLINE)
+            .metrics(&metrics)
+            .index_cache(&index_cache)
+            .call(),
         vec![exports[0].clone()],
     )
     .await;
@@ -310,12 +313,13 @@ async fn a_stalled_partition_does_not_stop_the_sweep_reaching_the_next() {
     tick_all(
         &partitions,
         &*controller,
-        &fixtures::configured_tier(&rsm, &rlmm, fixtures::TierSetup {
-            metrics: &metrics,
-            index_cache: &index_cache,
-            copy_timeout: SHORT_COPY_DEADLINE,
-            ..Default::default()
-        }),
+        &fixtures::configured_tier()
+            .rsm(&rsm)
+            .rlmm(&rlmm)
+            .copy_timeout(SHORT_COPY_DEADLINE)
+            .metrics(&metrics)
+            .index_cache(&index_cache)
+            .call(),
         NodeId(1),
         1,
         SweepConcurrency::default(),

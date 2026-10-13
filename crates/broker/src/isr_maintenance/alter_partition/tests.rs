@@ -8,11 +8,12 @@ use {
         BrokerHandle, codes,
         isr_maintenance::test_support::{fake_source, reg_at, topic},
         metadata_source::MetadataSource,
-        network::{client::InterBrokerClient, request::parse_request},
+        network::{
+            client::InterBrokerClient, request::parse_request, test_support::raw_request_frame,
+        },
         test_support::start_controller as start_test_support_controller,
     },
     assert2::assert,
-    bytes::{BufMut as _, BytesMut},
     krabka_client_core::{MockBroker, MockReply},
     krabka_metadata::{MetadataImage, MetadataRecord},
     krabka_protocol::{
@@ -193,11 +194,7 @@ impl ScriptedListener {
                 // `ApiVersions` always answers with a v0 response header.
                 return MockReply::Respond(encode_body(&api_versions, version, false));
             }
-            let mut frame = BytesMut::new();
-            frame.put_i16(api_key);
-            frame.put_i16(version);
-            frame.put_i32(correlation_id);
-            frame.put_slice(body);
+            let frame = raw_request_frame(api_key, version, correlation_id, body);
             let parsed = parse_request(&frame, |_, version| {
                 alter_partition_request::is_flexible(version)
             })

@@ -6,7 +6,7 @@ use {
     super::*,
     crate::{
         codes,
-        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+        handlers::test_support::replicated_partition,
         log_dir_status::LogDirRegistry,
         partition::Partition,
         partition_registry::PartitionRegistry,
@@ -522,12 +522,11 @@ fn state_partition_image(partition: i32, leader: u64, leader_epoch: i32) -> Meta
         krabka_metadata::MetadataRecord::V1Partition(krabka_metadata::PartitionRecord {
             leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
             partition_epoch: leader_epoch,
-            ..replicated_partition(ReplicatedPartitionSetup {
-                topic: bootstrap::TOPIC,
-                partition: krabka_ids::PartitionIndex(partition),
-                leader: node,
-                ..Default::default()
-            })
+            ..replicated_partition()
+                .topic(bootstrap::TOPIC)
+                .partition(partition)
+                .leader(node)
+                .call()
         }),
     ])
 }

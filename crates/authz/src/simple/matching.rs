@@ -120,8 +120,8 @@ mod tests {
         crate::{
             AuthorizationResult, Authorizer, SimpleAclAuthorizer,
             simple::test_support::{
-                AclSetup, AliceAuthorizer, QuerySetup, acl_image, alice, check_topic_access,
-                cidr_img, image_with_acls, img, no_super, req, topic_acl,
+                AliceAuthorizer, acl_image, alice, check_topic_access, cidr_img, image_with_acls,
+                img, no_super, req, topic_acl,
             },
         },
         krabka_metadata::{
@@ -203,19 +203,13 @@ mod tests {
 
     #[test]
     fn principal_wildcard_matches_any_user() {
-        let img = acl_image([topic_acl(AclSetup {
-            principal: "User:*",
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl().principal("User:*").call()]);
         check_topic_access(&img, "foo", AclOperation::Read, AuthorizationResult::Allow);
     }
 
     #[test]
     fn host_filter_matches_specific_ip() {
-        let img = acl_image([topic_acl(AclSetup {
-            host: "127.0.0.1",
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl().host("127.0.0.1").call()]);
         let a = alice();
         let h_match: SocketAddr = "127.0.0.1:5000".parse().unwrap();
         let h_nomatch: SocketAddr = "127.0.0.2:5000".parse().unwrap();
@@ -224,18 +218,13 @@ mod tests {
             ("host match", &h_match, AuthorizationResult::Allow),
             ("host mismatch", &h_nomatch, AuthorizationResult::Deny),
         ] {
-            assert2::assert!(
-                auth.authorize(&img, &req(&a, host, QuerySetup::default())) == expected
-            );
+            assert2::assert!(auth.authorize(&img, &req().p(&a).host(host).call()) == expected);
         }
     }
 
     #[test]
     fn operation_all_matches_any_op() {
-        let img = acl_image([topic_acl(AclSetup {
-            op: AclOperation::All,
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl().op(AclOperation::All).call()]);
         let caller = AliceAuthorizer::default();
         for op in [
             AclOperation::Read,
@@ -249,7 +238,7 @@ mod tests {
 
     #[test]
     fn operation_specific_does_not_match_others() {
-        let img = acl_image([topic_acl(AclSetup::default())]);
+        let img = acl_image([topic_acl().call()]);
         let caller = AliceAuthorizer::default();
         assert2::assert!(
             [AclOperation::Read, AclOperation::Write]
@@ -260,7 +249,7 @@ mod tests {
 
     #[test]
     fn read_implies_describe_on_topic() {
-        let img = acl_image([topic_acl(AclSetup::default())]);
+        let img = acl_image([topic_acl().call()]);
         check_topic_access(
             &img,
             "foo",
@@ -271,10 +260,7 @@ mod tests {
 
     #[test]
     fn write_implies_describe_on_topic() {
-        let img = acl_image([topic_acl(AclSetup {
-            op: AclOperation::Write,
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl().op(AclOperation::Write).call()]);
         check_topic_access(
             &img,
             "foo",
@@ -285,10 +271,7 @@ mod tests {
 
     #[test]
     fn delete_implies_describe() {
-        let img = acl_image([topic_acl(AclSetup {
-            op: AclOperation::Delete,
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl().op(AclOperation::Delete).call()]);
         check_topic_access(
             &img,
             "foo",
@@ -299,10 +282,7 @@ mod tests {
 
     #[test]
     fn alter_implies_describe() {
-        let img = acl_image([topic_acl(AclSetup {
-            op: AclOperation::Alter,
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl().op(AclOperation::Alter).call()]);
         check_topic_access(
             &img,
             "foo",
@@ -313,10 +293,7 @@ mod tests {
 
     #[test]
     fn alter_configs_implies_describe_configs() {
-        let img = acl_image([topic_acl(AclSetup {
-            op: AclOperation::AlterConfigs,
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl().op(AclOperation::AlterConfigs).call()]);
         check_topic_access(
             &img,
             "foo",
@@ -327,20 +304,13 @@ mod tests {
 
     #[test]
     fn describe_does_not_imply_read() {
-        let img = acl_image([topic_acl(AclSetup {
-            op: AclOperation::Describe,
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl().op(AclOperation::Describe).call()]);
         check_topic_access(&img, "foo", AclOperation::Read, AuthorizationResult::Deny);
     }
 
     #[test]
     fn implication_works_on_group_resource() {
-        let img = acl_image([topic_acl(AclSetup {
-            rt: ResourceType::Group,
-            name: "cg-1",
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl().rt(ResourceType::Group).name("cg-1").call()]);
         let caller = AliceAuthorizer::default();
         assert2::assert!(
             caller.authorize_on(&img, ResourceType::Group, "cg-1", AclOperation::Describe)
@@ -350,12 +320,11 @@ mod tests {
 
     #[test]
     fn implication_works_on_cluster_resource() {
-        let img = acl_image([topic_acl(AclSetup {
-            rt: ResourceType::Cluster,
-            op: AclOperation::Alter,
-            name: "kafka-cluster",
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl()
+            .rt(ResourceType::Cluster)
+            .op(AclOperation::Alter)
+            .name("kafka-cluster")
+            .call()]);
         let caller = AliceAuthorizer::default();
         assert2::assert!(
             caller.authorize_on(
@@ -369,12 +338,11 @@ mod tests {
 
     #[test]
     fn implication_works_on_transactional_id_resource() {
-        let img = acl_image([topic_acl(AclSetup {
-            rt: ResourceType::TransactionalId,
-            op: AclOperation::Write,
-            name: "tx-1",
-            ..Default::default()
-        })]);
+        let img = acl_image([topic_acl()
+            .rt(ResourceType::TransactionalId)
+            .op(AclOperation::Write)
+            .name("tx-1")
+            .call()]);
         let caller = AliceAuthorizer::default();
         assert2::assert!(
             caller.authorize_on(
@@ -388,19 +356,15 @@ mod tests {
 
     #[test]
     fn matches_resource_filters_by_type_name_and_pattern() {
-        let entry = topic_acl(AclSetup {
-            name: "orders",
-            ..Default::default()
-        });
+        let entry = topic_acl().name("orders").call();
         assert2::assert!(matches_resource(&entry, ResourceType::Topic, "orders"));
         assert2::assert!(!matches_resource(&entry, ResourceType::Topic, "payments"));
         assert2::assert!(!matches_resource(&entry, ResourceType::Group, "orders"));
 
-        let prefix_entry = topic_acl(AclSetup {
-            pattern: PatternType::Prefixed,
-            name: "prefix_",
-            ..Default::default()
-        });
+        let prefix_entry = topic_acl()
+            .pattern(PatternType::Prefixed)
+            .name("prefix_")
+            .call();
         assert2::assert!(matches_resource(
             &prefix_entry,
             ResourceType::Topic,
@@ -426,10 +390,7 @@ mod tests {
         let principal = alice();
         let auth = SimpleAclAuthorizer::new(no_super());
         for (peer, acl_host, expected) in cases {
-            let img = image_with_acls(image(), [topic_acl(AclSetup {
-                host: acl_host,
-                ..Default::default()
-            })]);
+            let img = image_with_acls(image(), [topic_acl().host(acl_host).call()]);
             check_peer(&auth, &principal, &img, peer, *expected, Some(acl_host));
         }
     }
@@ -443,7 +404,7 @@ mod tests {
         acl_host: Option<&str>,
     ) {
         let host: SocketAddr = peer.parse().unwrap();
-        let decision = auth.authorize(image, &req(principal, &host, QuerySetup::default()));
+        let decision = auth.authorize(image, &req().p(principal).host(&host).call());
         if let Some(acl_host) = acl_host {
             assert2::assert!(decision == expected, "peer {peer} vs acl host {acl_host}");
         } else {
@@ -527,14 +488,12 @@ mod tests {
         for (entries, expected) in cases {
             let mut img = img();
             for (permission, host) in &entries {
-                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl(AclSetup {
-                    permission: *permission,
-                    host,
-                    ..Default::default()
-                })));
+                img.apply(&MetadataRecord::V1AccessControlEntry(
+                    topic_acl().permission(*permission).host(host).call(),
+                ));
             }
             assert2::assert!(
-                auth.authorize(&img, &req(&a, &h, QuerySetup::default())) == expected,
+                auth.authorize(&img, &req().p(&a).host(&h).call()) == expected,
                 "{entries:?}"
             );
         }
@@ -546,12 +505,11 @@ mod tests {
     #[test]
     fn cidr_deny_overrides_wildcard_allow_inside_range() {
         let img = image_with_acls(cidr_img(), [
-            topic_acl(AclSetup::default()),
-            topic_acl(AclSetup {
-                permission: PermissionType::Deny,
-                host: "10.0.0.0/8",
-                ..Default::default()
-            }),
+            topic_acl().call(),
+            topic_acl()
+                .permission(PermissionType::Deny)
+                .host("10.0.0.0/8")
+                .call(),
         ]);
         let a = alice();
         let auth = SimpleAclAuthorizer::new(no_super());
@@ -570,18 +528,17 @@ mod tests {
     #[test]
     fn deny_acl_in_jdk_host_form_blocks_ipv4_mapped_peer() {
         let img = acl_image([
-            topic_acl(AclSetup::default()),
-            topic_acl(AclSetup {
-                permission: PermissionType::Deny,
-                host: "10.0.0.5",
-                ..Default::default()
-            }),
+            topic_acl().call(),
+            topic_acl()
+                .permission(PermissionType::Deny)
+                .host("10.0.0.5")
+                .call(),
         ]);
         let a = alice();
         let h: SocketAddr = "[::ffff:10.0.0.5]:5000".parse().unwrap();
         let auth = SimpleAclAuthorizer::new(no_super());
         assert2::assert!(
-            auth.authorize(&img, &req(&a, &h, QuerySetup::default())) == AuthorizationResult::Deny
+            auth.authorize(&img, &req().p(&a).host(&h).call()) == AuthorizationResult::Deny
         );
     }
 }

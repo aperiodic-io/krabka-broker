@@ -12,7 +12,7 @@ use {
             InitializedRestartFixture, NONE, acquired_topic, fetch_until_acquired,
             initialized_restart_fixture, leave,
         },
-        support::share::{ShareRecordSeedSetup, ShareSessionSetup, rejoin_group},
+        support::share::{ShareSessionSetup, rejoin_group},
     },
     assert2::{assert, check},
     krabka_protocol::owned::delete_share_group_offsets_request::{
@@ -94,7 +94,7 @@ async fn delete_rewrites_metadata_topic_absent_after_restart() {
         _dir,
         log_dir,
         topic: initial,
-    } = initialized_restart_fixture(ShareRecordSeedSetup::default()).await;
+    } = initialized_restart_fixture().call().await;
 
     let tid;
     {

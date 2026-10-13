@@ -18,3 +18,27 @@ pub(crate) use self::{
     point::{DataPoint, PointValue},
     render::SharedClientMetricsCollector,
 };
+
+#[cfg(test)]
+pub(super) mod test_support {
+    use super::{DataPoint, PointValue};
+
+    #[bon::builder]
+    pub(super) fn data_point(
+        metric: String,
+        value: PointValue,
+        #[builder(default = String::from("i"))] client_instance_id: String,
+        #[builder(default = String::from("c"))] client_id: String,
+        #[builder(default)] attributes: Vec<(String, String)>,
+        delta_start: Option<u64>,
+    ) -> DataPoint {
+        DataPoint {
+            metric,
+            client_instance_id,
+            client_id,
+            attributes,
+            value,
+            delta_start,
+        }
+    }
+}

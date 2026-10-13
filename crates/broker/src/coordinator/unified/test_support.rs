@@ -30,6 +30,17 @@ use {
 
 pub(crate) type AppendedRecords = Vec<(Option<Bytes>, Option<Bytes>)>;
 
+pub(crate) fn assert_group_epoch_exhaustion<State>(
+    mut state: State,
+    exhaust: impl FnOnce(&mut State),
+    bump_epoch: impl FnOnce(&mut State) -> bool,
+    epoch: impl FnOnce(&State) -> i32,
+) {
+    exhaust(&mut state);
+    ::assert2::assert!(!bump_epoch(&mut state));
+    ::assert2::assert!(epoch(&state) == i32::MAX);
+}
+
 pub(crate) async fn appended_offsets_records(log: &InMemoryOffsetsLog) -> AppendedRecords {
     log.batches()
         .await
@@ -39,7 +50,18 @@ pub(crate) async fn appended_offsets_records(log: &InMemoryOffsetsLog) -> Append
         .collect()
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    derive_more::From,
+    derive_more::Into,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
 pub(crate) struct MemberEpoch(pub i32);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -281,6 +303,17 @@ pub(crate) async fn assert_single_member_limit<H, Q, R: HeartbeatStatus>(
     assert2::check!(existing_epoch == epoch);
 }
 
+/// Build a one-member coordinator fixture and exercise its heartbeat limit.
+pub(crate) async fn assert_single_member_limit_with_log<H, Q, R: HeartbeatStatus>(
+    make_handle: impl FnOnce(Arc<InMemoryOffsetsLog>) -> Arc<H>,
+    request: impl Fn(&str, i32) -> Q,
+    heartbeat: impl AsyncFn(&H, Q) -> R,
+) {
+    let log = Arc::new(InMemoryOffsetsLog::default());
+    let handle = make_handle(log);
+    assert_single_member_limit(&handle, request, heartbeat).await;
+}
+
 /// Run the shared session-timeout contract after protocol-specific setup.
 pub(crate) async fn check_group_session_timeout<H, R: HeartbeatStatus>(
     create: impl Fn(&str) -> Arc<H>,
@@ -504,10 +537,13 @@ pub(crate) struct AssignmentDeletionSetup<'a> {
 }
 
 /// Kafka removes current and target assignments before member metadata.
+#[bon::builder]
 pub(crate) fn assignment_tombstones<R>(
     mut tombstone: impl FnMut(&str, &str) -> R,
-    setup: AssignmentDeletionSetup<'_>,
+    #[builder(default = "m")] member: &'_ str,
+    #[builder(default)] protocol: AssignmentDeletionProtocol,
 ) -> Vec<R> {
+    let setup = AssignmentDeletionSetup { member, protocol };
     let mut records: Vec<R> = [
         ("current", setup.member),
         ("target", setup.member),
@@ -526,16 +562,23 @@ pub(crate) fn assignment_tombstones<R>(
 }
 
 /// The replay oracle and ordered Kafka deletion records for one protocol.
+#[bon::builder]
 pub(crate) fn replay_fixtures<S, R>(
     seed: impl Fn() -> S,
     tombstone: impl Fn(&str, &str) -> R,
-    setup: AssignmentDeletionSetup<'_>,
+    #[builder(default = "m")] member: &'_ str,
+    #[builder(default)] protocol: AssignmentDeletionProtocol,
 ) -> (
     impl Fn(SeedUpdate<'_, S>) -> ReplayOutcome<S>,
     impl Fn() -> Vec<R>,
 ) {
+    let setup = AssignmentDeletionSetup { member, protocol };
     (expected_seed(seed), move || {
-        assignment_tombstones(&tombstone, setup)
+        assignment_tombstones()
+            .tombstone(&tombstone)
+            .member(setup.member)
+            .protocol(setup.protocol)
+            .call()
     })
 }
 
@@ -687,9 +730,17 @@ pub(crate) struct ConsumerJoinSetup<'a> {
     pub topics: &'a [&'a str],
 }
 
+#[bon::builder]
 pub(crate) fn consumer_join_request(
-    setup: ConsumerJoinSetup<'_>,
+    #[builder(default = "g")] group_id: &'_ str,
+    #[builder(default = "m1")] member_id: &'_ str,
+    #[builder(default = & ["t"])] topics: &'_ [&'_ str],
 ) -> krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest {
+    let setup = ConsumerJoinSetup {
+        group_id,
+        member_id,
+        topics,
+    };
     krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest {
         group_id: setup.group_id.into(),
         member_id: setup.member_id.into(),
@@ -730,9 +781,13 @@ pub(crate) struct AssignmentMetadataGoldenSetup {
     pub unknown_time_description: &'static str,
 }
 
+#[bon::builder]
 pub(crate) fn assignment_metadata_golden_cases(
-    setup: AssignmentMetadataGoldenSetup,
+    #[builder(default = "the time is unknown")] unknown_time_description: &'static str,
 ) -> [AssignmentMetadataGoldenCase; 2] {
+    let setup = AssignmentMetadataGoldenSetup {
+        unknown_time_description,
+    };
     [
         AssignmentMetadataGoldenCase {
             description: setup.unknown_time_description,

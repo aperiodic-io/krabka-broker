@@ -22,7 +22,7 @@ mod two_dir_topic;
 use {
     crate::{
         support::{
-            produce::{SinglePartitionProduceSetup, batch_request},
+            produce::encode_batch_request,
             records::{batch_from_records, value_record},
             topics::TopicPartitionCount,
             wire::ApiRequestSetup,
@@ -78,13 +78,7 @@ async fn produce_and_get_error(addr: SocketAddr, topic: &str, partition: i32) ->
         0,
         Some(bytes::Bytes::from_static(b"kip-112-test")),
     )]);
-    let req = batch_request(batch, SinglePartitionProduceSetup {
-        topic: topic.to_string(),
-        partition: krabka_ids::PartitionIndex(partition),
-        ..Default::default()
-    });
-    let mut body = BytesMut::new();
-    req.encode(&mut body, PRODUCE_VERSION).unwrap();
+    let body = encode_batch_request(batch, topic, partition, PRODUCE_VERSION);
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let resp_bytes = round_trip(
         &mut stream,
@@ -108,13 +102,12 @@ async fn produce_to_partition_on_offline_dir_returns_storage_error() {
     // both dirs under the least-loaded placement algorithm.
     const N: i32 = 6;
 
-    let (handle, primary, extra, addr) = start(Setup {
-        client_id: CLIENT_ID,
-        topic: TOPIC,
-        partitions: TopicPartitionCount(N),
-        ..Default::default()
-    })
-    .await;
+    let (handle, primary, extra, addr) = start()
+        .client_id(CLIENT_ID)
+        .topic(TOPIC)
+        .partitions(N)
+        .call()
+        .await;
 
     // Confirm spread: both dirs must hold at least one partition of the topic.
     let in_extra = partitions_in_dir(extra.path(), TOPIC);

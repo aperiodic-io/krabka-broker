@@ -151,43 +151,36 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn an_entry_carries_its_key_id_and_its_signature_back() {
-        let image = registry(&[("orders", PatternType::Literal)]);
-
-        let expected = DescribedTopicFreeze {
-            scope: "orders".to_owned(),
-            pattern_type: PATTERN_TYPE_LITERAL,
-            reason: "DR cutover".to_owned(),
-            set_by: "User:alice".to_owned(),
-            set_at_ms: 1_770_000_000_000,
-            proposal_id: ProtocolUuid(PROPOSAL.into_bytes()),
-            key_id: "alice-yubi".to_owned(),
-            signature: vec![0xAB; 64],
-            ..DescribedTopicFreeze::default()
-        };
-        check!(matching_freezes(&image, None, PATTERN_TYPE_ANY) == vec![expected]);
-    }
-
-    #[test]
-    fn an_unsigned_entry_comes_back_with_no_key_id_and_no_signature() {
+    #[yare::parameterized(
+        signed = { true },
+        unsigned = { false },
+    )]
+    fn an_entry_preserves_its_signature_fields(signed: bool) {
+        let mut record = entry("orders", PatternType::Literal);
+        if !signed {
+            record.proposal_id = Uuid::nil();
+            record.key_id.clear();
+            record.signature.clear();
+        }
         let mut image = MetadataImage::new(Uuid::from_u128(0x5150));
-        image.apply(&MetadataRecord::V1TopicFreeze(TopicFreezeRecord {
-            proposal_id: Uuid::nil(),
-            key_id: String::new(),
-            signature: Vec::new(),
-            ..entry("orders", PatternType::Literal)
-        }));
-
+        image.apply(&MetadataRecord::V1TopicFreeze(record));
         let expected = DescribedTopicFreeze {
             scope: "orders".to_owned(),
             pattern_type: PATTERN_TYPE_LITERAL,
             reason: "DR cutover".to_owned(),
             set_by: "User:alice".to_owned(),
             set_at_ms: 1_770_000_000_000,
-            proposal_id: ProtocolUuid::ZERO,
-            key_id: String::new(),
-            signature: Vec::new(),
+            proposal_id: if signed {
+                ProtocolUuid(PROPOSAL.into_bytes())
+            } else {
+                ProtocolUuid::ZERO
+            },
+            key_id: if signed {
+                "alice-yubi".to_owned()
+            } else {
+                String::new()
+            },
+            signature: if signed { vec![0xAB; 64] } else { Vec::new() },
             ..DescribedTopicFreeze::default()
         };
         check!(matching_freezes(&image, None, PATTERN_TYPE_ANY) == vec![expected]);

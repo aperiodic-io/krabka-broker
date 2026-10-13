@@ -37,6 +37,18 @@ fn value(object: &str, entry: WalIndexEntry) -> Vec<u8> {
     .to_vec()
 }
 
+fn capture(
+    projection: &WalCaptureProjection,
+    source_cutoffs: Vec<i64>,
+    captured_at_ms: u64,
+) -> Result<DisklessWalCapture, String> {
+    projection.capture(
+        &HashMap::from([(Uuid::from_u128(7), ("orders".to_owned(), 1))]),
+        source_cutoffs,
+        captured_at_ms,
+    )
+}
+
 #[test]
 fn retries_tombstones_and_delete_floors_capture_only_committed_live_state() {
     let mut projection = WalCaptureProjection::default();
@@ -75,13 +87,7 @@ fn retries_tombstones_and_delete_floors_capture_only_committed_live_state() {
         projection.apply(Some(&floor_key), Some(&bytes)).unwrap();
     }
 
-    let capture = projection
-        .capture(
-            &HashMap::from([(Uuid::from_u128(7), ("orders".to_owned(), 1))]),
-            vec![12],
-            1_700_000_000_000,
-        )
-        .unwrap();
+    let capture = capture(&projection, vec![12], 1_700_000_000_000).unwrap();
     check!(capture.partitions.len() == 1);
     check!(capture.partitions[0].delete_floor == 3);
     check!(capture.partitions[0].recovery_cutoff == 4);
@@ -173,13 +179,7 @@ fn adjacent_batches_from_one_footer_run_are_captured_as_one_range() {
             )
             .unwrap();
     }
-    let capture = projection
-        .capture(
-            &HashMap::from([(Uuid::from_u128(7), ("orders".to_owned(), 1))]),
-            vec![2],
-            0,
-        )
-        .unwrap();
+    let capture = capture(&projection, vec![2], 0).unwrap();
     check!(capture.partitions[0].ranges.len() == 1);
     check!(capture.partitions[0].ranges[0].entry.first_offset == 0);
     check!(capture.partitions[0].ranges[0].entry.last_offset == 1);

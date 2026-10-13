@@ -317,7 +317,7 @@ mod tests {
         super::*,
         crate::{
             broker::test_support::fake_source,
-            handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+            handlers::test_support::replicated_partition,
             metrics::BrokerMetrics,
             test_support::{broker_registration, single_partition_topic},
         },
@@ -458,12 +458,11 @@ mod tests {
         for partition in 0..=led {
             let leader = if partition < led { 1 } else { 2 };
             image.apply(&krabka_metadata::MetadataRecord::V1Partition(
-                replicated_partition(ReplicatedPartitionSetup {
-                    topic: "stretch-topic",
-                    partition: krabka_ids::PartitionIndex(partition),
-                    leader: krabka_metadata::NodeId(leader),
-                    ..Default::default()
-                }),
+                replicated_partition()
+                    .topic("stretch-topic")
+                    .partition(partition)
+                    .leader(leader)
+                    .call(),
             ));
         }
         image

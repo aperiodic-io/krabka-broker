@@ -72,7 +72,19 @@ struct TokenRefusalSetup {
     timestamp: UnixMillis,
 }
 
-fn refusal(setup: TokenRefusalSetup) -> CreateDelegationTokenResponse {
+#[bon::builder]
+fn refusal(
+    #[builder(into, default)] code: KafkaErrorCode,
+    #[builder(default = user ("alice"))] owner: KafkaPrincipal,
+    #[builder(default = user ("alice"))] requester: KafkaPrincipal,
+    #[builder(into, default = crate :: test_support :: UnixMillis (- 1))] timestamp: UnixMillis,
+) -> CreateDelegationTokenResponse {
+    let setup = TokenRefusalSetup {
+        code,
+        owner,
+        requester,
+        timestamp,
+    };
     CreateDelegationTokenResponse {
         error_code: setup.code.0,
         principal_type: setup.owner.principal_type,
@@ -115,12 +127,11 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
     let disabled = DELEGATION_TOKEN_AUTH_DISABLED;
 
     // (case, requester, tokens enabled, request, super users, response)
-    let unbuildable_owner_response = refusal(TokenRefusalSetup {
-        code: KafkaErrorCode(unbuildable_owner),
-        owner: user("ANONYMOUS"),
-        requester: user("ANONYMOUS"),
-        ..Default::default()
-    });
+    let unbuildable_owner_response = refusal()
+        .code(unbuildable_owner)
+        .owner(user("ANONYMOUS"))
+        .requester(user("ANONYMOUS"))
+        .call();
     let cases = [
         // `new KafkaPrincipal(null, "alice")` throws before
         // `allowTokenRequests` runs, so even a token-authenticated
@@ -147,10 +158,7 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
             SecretProvision::Configured,
             self_mint.clone(),
             empty_super_users(),
-            refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(not_allowed),
-                ..Default::default()
-            }),
+            refusal().code(not_allowed).call(),
         ),
         (
             "token-authenticated super user acting as another owner",
@@ -158,11 +166,7 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
             SecretProvision::Configured,
             act_as("User", "alice"),
             super_users_with(&["admin"]),
-            refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(not_allowed),
-                requester: user("admin"),
-                ..Default::default()
-            }),
+            refusal().code(not_allowed).requester(user("admin")).call(),
         ),
         (
             "anonymous requester",
@@ -170,12 +174,11 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
             SecretProvision::Configured,
             self_mint.clone(),
             empty_super_users(),
-            refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(not_allowed),
-                owner: user("ANONYMOUS"),
-                requester: user("ANONYMOUS"),
-                ..Default::default()
-            }),
+            refusal()
+                .code(not_allowed)
+                .owner(user("ANONYMOUS"))
+                .requester(user("ANONYMOUS"))
+                .call(),
         ),
         (
             "token-authenticated requester with tokens disabled",
@@ -183,10 +186,7 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
             SecretProvision::Absent,
             self_mint.clone(),
             empty_super_users(),
-            refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(not_allowed),
-                ..Default::default()
-            }),
+            refusal().code(not_allowed).call(),
         ),
         (
             "another owner without authorization",
@@ -194,11 +194,7 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
             SecretProvision::Configured,
             act_as("User", "alice"),
             super_users_with(&["admin"]),
-            refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(unauthorized),
-                requester: user("bob"),
-                ..Default::default()
-            }),
+            refusal().code(unauthorized).requester(user("bob")).call(),
         ),
         (
             "another owner of another type without authorization, tokens disabled",
@@ -206,12 +202,11 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
             SecretProvision::Absent,
             act_as("Group", "eng"),
             empty_super_users(),
-            refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(unauthorized),
-                owner: principal("Group", "eng"),
-                requester: user("bob"),
-                ..Default::default()
-            }),
+            refusal()
+                .code(unauthorized)
+                .owner(principal("Group", "eng"))
+                .requester(user("bob"))
+                .call(),
         ),
         (
             "renewer that is not a User",
@@ -219,10 +214,7 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
             SecretProvision::Configured,
             group_renewer.clone(),
             empty_super_users(),
-            refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(bad_renewer),
-                ..Default::default()
-            }),
+            refusal().code(bad_renewer).call(),
         ),
         (
             "renewer that is not a User, tokens disabled",
@@ -230,10 +222,7 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
             SecretProvision::Absent,
             group_renewer,
             empty_super_users(),
-            refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(bad_renewer),
-                ..Default::default()
-            }),
+            refusal().code(bad_renewer).call(),
         ),
         (
             "tokens disabled",
@@ -241,11 +230,7 @@ async fn refusals_follow_kafka_order_and_name_both_principals() {
             SecretProvision::Absent,
             act_as("User", "alice"),
             empty_super_users(),
-            refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(disabled),
-                timestamp: UnixMillis(0),
-                ..Default::default()
-            }),
+            refusal().code(disabled).timestamp(0).call(),
         ),
     ];
     for (case, auth, provision, req, super_users, expected) in cases {
@@ -434,12 +419,12 @@ async fn mints_for_the_resolved_owner_with_kafka_deadlines() {
             max_timestamp_ms: resp.issue_timestamp_ms + max_delta,
             token_id: resp.token_id.clone(),
             hmac: resp.hmac.clone(),
-            ..refusal(TokenRefusalSetup {
-                code: KafkaErrorCode(NONE),
-                owner: owner.clone(),
-                requester: user(requester),
-                timestamp: UnixMillis(0),
-            })
+            ..refusal()
+                .code(NONE)
+                .owner(owner.clone())
+                .requester(user(requester))
+                .timestamp(0)
+                .call()
         };
         assert!(resp == expected, "{case}");
 
@@ -471,12 +456,12 @@ async fn create_tokens_acl_admits_minting_for_that_owner_only() {
     let controller = test_controller(dir.path().into()).await;
     controller
         .submit_change(vec![krabka_metadata::MetadataRecord::V1AccessControlEntry(
-            crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
-                resource_type: krabka_metadata::ResourceType::User,
-                resource_name: "User:alice",
-                principal: "User:bob",
-                operation: krabka_metadata::AclOperation::CreateTokens,
-            }),
+            crate::test_support::allow_acl()
+                .resource_type(krabka_metadata::ResourceType::User)
+                .resource_name("User:alice")
+                .principal("User:bob")
+                .operation(krabka_metadata::AclOperation::CreateTokens)
+                .call(),
         )])
         .await
         .expect("seed acl");
@@ -509,14 +494,11 @@ async fn create_tokens_acl_admits_minting_for_that_owner_only() {
     );
     assert!(
         for_carol
-            == refusal(TokenRefusalSetup {
-                code: crate::test_support::KafkaErrorCode(
-                    crate::codes::DELEGATION_TOKEN_AUTHORIZATION_FAILED
-                ),
-                owner: user("carol"),
-                requester: user("bob"),
-                ..Default::default()
-            })
+            == refusal()
+                .code(crate::codes::DELEGATION_TOKEN_AUTHORIZATION_FAILED)
+                .owner(user("carol"))
+                .requester(user("bob"))
+                .call()
     );
     controller.cancel().await;
 }
@@ -573,11 +555,7 @@ async fn non_positive_configured_periods_mint_nothing() {
             token_acl(&empty_super_users()),
         )
         .await;
-        let expected = refusal(TokenRefusalSetup {
-            code: KafkaErrorCode(INVALID_REQUEST),
-            timestamp: UnixMillis(0),
-            ..Default::default()
-        });
+        let expected = refusal().code(INVALID_REQUEST).timestamp(0).call();
         assert!(resp == expected, "ceiling {ceiling_ms} renew {renew_ms}");
     }
     assert!(controller.current_image().all_delegation_tokens().count() == 0);

@@ -39,10 +39,10 @@ pub(super) const NAME_FETCH_VERSION: i16 = super::FIRST_TOPIC_ID_FETCH_VERSION -
 /// allocation a strictly greater last-use stamp than the previous one.
 pub(super) const TICK: std::time::Duration = std::time::Duration::from_nanos(1);
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 pub(super) struct RequestSessionId(pub FetchSessionId);
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 pub(super) struct RequestSessionEpoch(pub super::FetchSessionEpoch);
 
 #[derive(Default)]
@@ -64,7 +64,31 @@ impl SessionRequestSetup {
     }
 }
 
-pub(super) fn req(setup: SessionRequestSetup) -> FetchRequest {
+macro_rules! incremental_req {
+    ($id:expr, $epoch:expr $(, $field:ident($value:expr))*) => {{
+        let builder = $crate::fetch_session::test_support::req()
+            .session_id($crate::fetch_session::test_support::RequestSessionId($id))
+            .session_epoch($epoch);
+        $(let builder = builder.$field($value);)*
+        builder.call()
+    }};
+}
+
+pub(crate) use incremental_req;
+
+#[bon::builder]
+pub(super) fn req(
+    #[builder(into, default)] session_id: RequestSessionId,
+    #[builder(into, default)] session_epoch: RequestSessionEpoch,
+    #[builder(default)] topics: Vec<FetchTopic>,
+    #[builder(default)] forgotten: Vec<ForgottenTopic>,
+) -> FetchRequest {
+    let setup = SessionRequestSetup {
+        session_id,
+        session_epoch,
+        topics,
+        forgotten,
+    };
     let SessionRequestSetup {
         session_id,
         session_epoch,
@@ -89,7 +113,17 @@ pub(super) struct ForgottenTopicSetup {
     pub partitions: Vec<PartitionIndex>,
 }
 
-pub(super) fn forgotten_topic(setup: ForgottenTopicSetup) -> ForgottenTopic {
+#[bon::builder]
+pub(super) fn forgotten_topic(
+    #[builder(default = "t" . into ())] topic: String,
+    #[builder(default)] topic_id: WireUuid,
+    #[builder(default = vec ! [PartitionIndex (0)])] partitions: Vec<PartitionIndex>,
+) -> ForgottenTopic {
+    let setup = ForgottenTopicSetup {
+        topic,
+        topic_id,
+        partitions,
+    };
     let ForgottenTopicSetup {
         topic,
         topic_id,
@@ -124,8 +158,9 @@ pub(super) fn seed_resolved_partition(
     cache: &FetchSessionCache,
     topic_id: WireUuid,
 ) -> FetchSessionId {
-    allocate_session(cache, SessionAllocationSetup {
-        partitions: vec![(
+    allocate_session()
+        .cache(cache)
+        .partitions(vec![(
             FetchSessionKey {
                 topic_name: "t".into(),
                 topic_id,
@@ -136,9 +171,8 @@ pub(super) fn seed_resolved_partition(
                 max_bytes: 1024,
                 ..Default::default()
             },
-        )],
-        ..Default::default()
-    })
+        )])
+        .call()
 }
 
 pub(super) fn error_code(cache: &FetchSessionCache, request: &FetchRequest, version: i16) -> i16 {
@@ -171,10 +205,20 @@ pub(super) struct SessionAllocationSetup {
     pub partitions: Vec<(FetchSessionKey, CachedPartitionState)>,
 }
 
+#[bon::builder]
 pub(super) fn allocate_session(
     cache: &FetchSessionCache,
-    setup: SessionAllocationSetup,
+    #[builder(default)] privilege: SessionPrivilege,
+    #[builder(default)] addressing: TopicAddressing,
+    #[builder(default = "alice" . into ())] principal: String,
+    #[builder(default)] partitions: Vec<(FetchSessionKey, CachedPartitionState)>,
 ) -> FetchSessionId {
+    let setup = SessionAllocationSetup {
+        privilege,
+        addressing,
+        principal,
+        partitions,
+    };
     cache.try_allocate(
         matches!(setup.privilege, SessionPrivilege::Follower),
         matches!(setup.addressing, TopicAddressing::Id),
@@ -184,11 +228,27 @@ pub(super) fn allocate_session(
 }
 
 /// A ten-slot cache with the case's initial session already installed.
+#[bon::builder]
 pub(super) fn allocated_cache(
-    setup: SessionAllocationSetup,
+    #[builder(default)] privilege: SessionPrivilege,
+    #[builder(default)] addressing: TopicAddressing,
+    #[builder(default = "alice" . into ())] principal: String,
+    #[builder(default)] partitions: Vec<(FetchSessionKey, CachedPartitionState)>,
 ) -> (FetchSessionCache, FetchSessionId) {
+    let setup = SessionAllocationSetup {
+        privilege,
+        addressing,
+        principal,
+        partitions,
+    };
     let cache = FetchSessionCache::new(10);
-    let id = allocate_session(&cache, setup);
+    let id = allocate_session()
+        .cache(&cache)
+        .privilege(setup.privilege)
+        .addressing(setup.addressing)
+        .principal(setup.principal)
+        .partitions(setup.partitions)
+        .call();
     (cache, id)
 }
 
@@ -200,19 +260,20 @@ pub(super) struct SessionKeySetup {
     pub partition: PartitionIndex,
 }
 
-pub(super) fn session_key(setup: SessionKeySetup) -> FetchSessionKey {
+#[bon::builder]
+pub(super) fn session_key(
+    #[builder(default = "t" . into ())] topic: String,
+    #[builder(default)] topic_id: WireUuid,
+    #[builder(into, default)] partition: PartitionIndex,
+) -> FetchSessionKey {
+    let setup = SessionKeySetup {
+        topic,
+        topic_id,
+        partition,
+    };
     FetchSessionKey {
         topic_name: setup.topic,
         topic_id: setup.topic_id,
         partition: setup.partition.0,
-    }
-}
-
-impl SessionRequestSetup {
-    pub(super) fn forgetting(session_id: RequestSessionId, forgotten: Vec<ForgottenTopic>) -> Self {
-        Self {
-            forgotten,
-            ..Self::incremental(session_id)
-        }
     }
 }

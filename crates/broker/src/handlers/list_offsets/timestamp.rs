@@ -226,6 +226,17 @@ mod tests {
         },
     };
 
+    fn successful_remote_hit() -> ListOffsetsPartitionResponse {
+        ListOffsetsPartitionResponse {
+            partition_index: 0,
+            error_code: codes::NONE,
+            timestamp: 1_600,
+            offset: 2,
+            leader_epoch: 0,
+            ..Default::default()
+        }
+    }
+
     struct BrokerPartition {
         broker: std::sync::Arc<Broker>,
         partition: std::sync::Arc<Partition>,
@@ -368,11 +379,22 @@ mod tests {
         event: UnixMillis,
     }
 
+    #[bon::builder]
     fn copy_timestamp_segment(
         reader: &RemoteReader,
         data: &LogSegmentData,
-        setup: TimestampSegmentSetup,
+        #[builder(default = TopicIdPartition :: new (uuid :: Uuid :: from_u128 (1) , "orders" , 0))]
+        topic_partition: TopicIdPartition,
+        #[builder(default = Offset (0) ..= Offset (6))] bounds: RangeInclusive<Offset>,
+        #[builder(default = bytes (64))] size: ByteSize,
+        #[builder(into, default = UnixMillis (2_400))] event: UnixMillis,
     ) -> RemoteLogSegmentId {
+        let setup = TimestampSegmentSetup {
+            topic_partition,
+            bounds,
+            size,
+            event,
+        };
         let TimestampSegmentSetup {
             topic_partition,
             bounds,
@@ -461,12 +483,13 @@ mod tests {
             let data = export_segment_data(&export, ProducerSnapshotExport::Include, || {
                 bytes::Bytes::from_static(b"0\n1\n0 0\n")
             });
-            copy_timestamp_segment(reader, &data, TimestampSegmentSetup {
-                topic_partition: TopicIdPartition::new(id, TOPIC, 0),
-                bounds: export.base_offset..=export.last_offset,
-                size: export.size,
-                ..TimestampSegmentSetup::default()
-            });
+            copy_timestamp_segment()
+                .reader(reader)
+                .data(&data)
+                .topic_partition(TopicIdPartition::new(id, TOPIC, 0))
+                .bounds(export.base_offset..=export.last_offset)
+                .size(export.size)
+                .call();
         }
         log.delete_local_segments_through(Offset(4)).unwrap();
         drop(log);
@@ -475,17 +498,7 @@ mod tests {
         assert!(reopened.established_log_start().is_none());
         *partition.log.lock().unwrap() = reopened;
         partition.replica_state.lock().await.hw = Offset(6);
-        assert!(
-            list_one(client, TOPIC, 1_500).await
-                == ListOffsetsPartitionResponse {
-                    partition_index: 0,
-                    error_code: codes::NONE,
-                    timestamp: 1_600,
-                    offset: 2,
-                    leader_epoch: 0,
-                    ..ListOffsetsPartitionResponse::default()
-                }
-        );
+        assert!(list_one(client, TOPIC, 1_500).await == successful_remote_hit());
 
         // A real DeleteRecords floor is durable and still bounds remote hits.
         partition
@@ -595,40 +608,28 @@ mod tests {
             .topic_id;
         let topic_partition = TopicIdPartition::new(topic_id, TOPIC, 0);
         let reader = broker_arc.remote_reader.as_ref().expect("remote reader");
-        let segment_id = copy_timestamp_segment(
-            reader,
-            &LogSegmentData {
+        let segment_id = copy_timestamp_segment()
+            .reader(reader)
+            .data(&LogSegmentData {
                 log_segment: log_path.clone(),
                 offset_index: offset_index_path.clone(),
                 time_index: time_index_path.clone(),
                 transaction_index: None,
                 producer_snapshot_index: None,
                 leader_epoch_index: Bytes::from_static(b"0\n1\n0 0\n"),
-            },
-            TimestampSegmentSetup {
-                topic_partition: topic_partition.clone(),
-                size: ByteSize::from_bytes(u64::try_from(log_bytes.len()).expect("segment size")),
-                ..Default::default()
-            },
-        );
+            })
+            .topic_partition(topic_partition.clone())
+            .size(ByteSize::from_bytes(
+                u64::try_from(log_bytes.len()).expect("segment size"),
+            ))
+            .call();
 
         // Publish the exclusive committed end of the seven produced records.
         partition.replica_state.lock().await.hw = krabka_log::Offset(7);
 
-        assert!(
-            list_one(client, TOPIC, 1_500).await
-                == ListOffsetsPartitionResponse {
-                    partition_index: 0,
-                    error_code: codes::NONE,
-                    timestamp: 1_600,
-                    offset: 2,
-                    // The partition's leader recorded epoch 0 at promotion,
-                    // and the remote segment's epoch index agrees: epoch 0
-                    // covers offset 2.
-                    leader_epoch: 0,
-                    ..Default::default()
-                }
-        );
+        // The partition's leader recorded epoch 0 at promotion, and the
+        // remote segment's epoch index agrees: epoch 0 covers offset 2.
+        assert!(list_one(client, TOPIC, 1_500).await == successful_remote_hit());
 
         // A failed earlier copy can leave only a later segment finished.
         // Local records still cover the gap; the remote hit at 4 must not
@@ -655,23 +656,23 @@ mod tests {
             .concat(),
         )
         .expect("write suffix time index");
-        copy_timestamp_segment(
-            reader,
-            &LogSegmentData {
+        copy_timestamp_segment()
+            .reader(reader)
+            .data(&LogSegmentData {
                 log_segment: log_path,
                 offset_index: offset_index_path,
                 time_index: time_index_path,
                 transaction_index: None,
                 producer_snapshot_index: None,
                 leader_epoch_index: Bytes::from_static(b"0\n1\n0 4\n"),
-            },
-            TimestampSegmentSetup {
-                topic_partition,
-                bounds: Offset(4)..=Offset(6),
-                size: ByteSize::from_bytes(u64::try_from(suffix.len()).expect("segment size")),
-                event: UnixMillis(2_500),
-            },
-        );
+            })
+            .topic_partition(topic_partition)
+            .bounds(Offset(4)..=Offset(6))
+            .size(ByteSize::from_bytes(
+                u64::try_from(suffix.len()).expect("segment size"),
+            ))
+            .event(2_500)
+            .call();
         let response = list_one(client, TOPIC, 1_500).await;
         assert!(
             response.error_code == codes::NONE

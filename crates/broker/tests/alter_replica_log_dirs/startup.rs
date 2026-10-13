@@ -9,7 +9,10 @@
 use {
     crate::{
         harness::{count_topic_dirs, wait_for_move_complete},
-        support::{producer::enqueue_unkeyed_values, storage::two_dir_config},
+        support::{
+            producer::enqueue_unkeyed_values,
+            storage::{start_two_dir_broker, two_dir_config},
+        },
         two_dir_topic::{Setup, create_and_wait},
         wire::{CLIENT_ID, describe_log_dirs},
     },
@@ -28,14 +31,9 @@ use {
 /// partition in the target dir with `is_future_key=false`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn startup_resumes_move_for_existing_partition() {
-    let primary = tempfile::tempdir().unwrap();
-    let extra = tempfile::tempdir().unwrap();
-
     // First boot: create topic, produce a handful of records, then
     // shut down cleanly so the partition directory is left on disk.
-    let cfg = two_dir_config(primary.path(), extra.path());
-    let handle = Broker::start(cfg).await.expect("first boot");
-    let addr = handle.listen_addr();
+    let (handle, primary, extra, addr) = start_two_dir_broker().await;
     create_and_wait(&handle, addr, Setup {
         client_id: CLIENT_ID,
         ..Default::default()

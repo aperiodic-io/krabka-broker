@@ -5,10 +5,9 @@
 use {
     crate::{
         CLIENT_ID,
-        kafka_wire::{self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+        kafka_wire::{self, PlainAuthenticationSetup},
         support::wire::HeaderEncoding as RequestHeaderEncoding,
     },
-    krabka_ids::ApiKey as WireApiKey,
     std::net::SocketAddr,
 };
 
@@ -38,13 +37,13 @@ pub(crate) async fn drive_describe_user_scram_credentials_sasl(
     .await
     .expect("SASL authenticate for DescribeUserScramCredentials");
 
-    let resp: DescribeUserScramCredentialsResponse =
-        kafka_wire::exchange(&mut stream, &req, WireExchangeSetup {
-            api_key: WireApiKey(50),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        })
+    let resp: DescribeUserScramCredentialsResponse = kafka_wire::exchange()
+        .stream(&mut stream)
+        .request(&req)
+        .api_key(50)
+        .client_id(CLIENT_ID)
+        .header(RequestHeaderEncoding::Flexible)
+        .call()
         .await
         .expect("DescribeUserScramCredentials round-trip");
 

@@ -26,6 +26,7 @@ const UPGRADE: i8 = 1;
 const SAFE: i8 = 2;
 const UNSAFE: i8 = 3;
 
+#[derive(derive_more::From, derive_more::Into)]
 /// The advertised feature ranges are wire data, including unsupported levels.
 struct RegisteredFeatureRanges(std::collections::BTreeMap<String, (i16, i16)>);
 
@@ -40,10 +41,13 @@ struct RemoteFeatureSetup {
     ranges: RegisteredFeatureRanges,
 }
 
+#[bon::builder]
 fn remote_feature_image(
     mut image: krabka_metadata::MetadataImage,
-    setup: RemoteFeatureSetup,
+    #[builder(into, default = NodeId (2))] node_id: NodeId,
+    #[builder(into, default)] ranges: RegisteredFeatureRanges,
 ) -> krabka_metadata::MetadataImage {
+    let setup = RemoteFeatureSetup { node_id, ranges };
     image.apply(&MetadataRecord::V1BrokerRegistration(
         krabka_metadata::BrokerRegistrationRecord {
             host: String::new(),
@@ -467,10 +471,7 @@ fn a_feature_unaware_broker_blocks_only_enabling() {
         let image = elr_image(elr_level, false);
         let mut features = krabka_metadata::supported_feature_ranges();
         features.remove(elr);
-        remote_feature_image(image, RemoteFeatureSetup {
-            ranges: RegisteredFeatureRanges(features),
-            ..Default::default()
-        })
+        remote_feature_image().image(image).ranges(features).call()
     };
     let cases = [
         (
@@ -558,10 +559,7 @@ fn krabka_version_finalizes_as_kafka_finalizes_a_non_metadata_feature() {
             Some(range) => features.insert(kv.to_owned(), range),
             None => features.remove(kv),
         };
-        remote_feature_image(image, RemoteFeatureSetup {
-            ranges: RegisteredFeatureRanges(features),
-            ..Default::default()
-        })
+        remote_feature_image().image(image).ranges(features).call()
     };
     let cases = [
         (

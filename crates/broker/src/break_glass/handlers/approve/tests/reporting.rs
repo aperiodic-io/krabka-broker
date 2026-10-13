@@ -5,7 +5,7 @@
 //! the withdraw flag.
 
 use {
-    super::pending,
+    super::{approved_by_bob, pending},
     crate::{
         break_glass::{
             config::BreakGlassPolicy,
@@ -39,10 +39,7 @@ fn a_report_of_a_missing_proposal_names_no_action() {
 fn a_report_counts_the_approvals_the_request_leaves_behind() {
     let config = config();
     let policy = BreakGlassPolicy::new(&config);
-    let stored = BreakGlassProposalRecord {
-        approvals: vec![approval("User:bob")],
-        ..pending()
-    };
+    let stored = approved_by_bob();
     let settled = BreakGlassProposalRecord {
         approvals: vec![approval("User:bob"), approval("User:carol")],
         ..pending()

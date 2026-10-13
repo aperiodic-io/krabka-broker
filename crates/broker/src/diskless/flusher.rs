@@ -396,13 +396,10 @@ mod tests {
         },
         crate::{
             diskless::{
-                flusher::test_support::FlusherPartitionSetup,
-                index_log::test_support::{PacedReplayLog, ReplayPace, WalFlushSetup},
+                index_log::test_support::{PacedReplayLog, ReplayPace, three_record_flush},
                 wal_index::WalIndexCache,
             },
-            test_support::{
-                FreezeSetup, StorageMode, UnixMillis, single_partition_topic, topic_freeze_record,
-            },
+            test_support::{StorageMode, single_partition_topic, topic_freeze_record},
         },
         assert2::assert,
         krabka_metadata::{MetadataRecord, TopicRecord},
@@ -545,10 +542,7 @@ mod tests {
             partitions.insert(
                 "orders".into(),
                 krabka_ids::PartitionIndex(partition),
-                test_partition(root, FlusherPartitionSetup {
-                    partition: krabka_ids::PartitionIndex(partition),
-                    ..Default::default()
-                }),
+                test_partition().root(root).partition(partition).call(),
             );
         }
         let (topic_id, image) = orders_image(2);
@@ -661,11 +655,7 @@ mod tests {
         let cache = index.cache();
         for key in ["diskless-wal/9/old.ckwl", "diskless-wal/7/new.ckwl"] {
             index
-                .publish_flush(&flush_record(WalFlushSetup {
-                    topic_id,
-                    object_key: key,
-                    ..WalFlushSetup::three_records()
-                }))
+                .publish_flush(&three_record_flush(topic_id, key))
                 .await
                 .unwrap();
             wait_for_object(&cache, topic_id, key).await;
@@ -718,11 +708,7 @@ mod tests {
         let index = test_index_log().await;
         let cache = index.cache();
         index
-            .publish_flush(&flush_record(WalFlushSetup {
-                topic_id,
-                object_key,
-                ..WalFlushSetup::three_records()
-            }))
+            .publish_flush(&three_record_flush(topic_id, object_key))
             .await
             .unwrap();
         wait_for_object(&cache, topic_id, object_key).await;
@@ -772,14 +758,14 @@ mod tests {
                 .put(&Path::from(object_key), PutPayload::from_static(b"object"))
                 .await
                 .unwrap();
-            let record = flush_record(WalFlushSetup {
-                topic_id,
-                object_key,
-                first_offset: krabka_log::Offset(first_offset),
-                last_offset: krabka_log::Offset(last_offset),
-                max_timestamp: UnixMillis(max_timestamp_ms),
-                byte_len: krabka_units::bytes(6),
-            });
+            let record = flush_record()
+                .topic_id(topic_id)
+                .object_key(object_key)
+                .first_offset(first_offset)
+                .last_offset(last_offset)
+                .max_timestamp(max_timestamp_ms)
+                .byte_len(krabka_units::bytes(6))
+                .call();
             index.publish_flush(&record).await.unwrap();
             assert!(
                 index
@@ -867,13 +853,12 @@ mod tests {
     async fn a_write_freeze_holds_the_retention_pass() {
         retention_fixture!(dir, topic_id, context, store, handle; mut image);
         set_retention(&handle, krabka_units::millis(1));
-        image.apply(&MetadataRecord::V1TopicFreeze(topic_freeze_record(
-            FreezeSetup {
-                pattern_type: krabka_metadata::PatternType::Literal,
-                reason: "a cutover is in flight",
-                ..Default::default()
-            },
-        )));
+        image.apply(&MetadataRecord::V1TopicFreeze(
+            topic_freeze_record()
+                .pattern_type(krabka_metadata::PatternType::Literal)
+                .reason("a cutover is in flight")
+                .call(),
+        ));
         let partitions = [flush_partition(topic_id, &handle)];
 
         // The same clock and retention that expire the aged range in
@@ -1048,14 +1033,15 @@ mod tests {
         let seed = DisklessIndexLog::start(Arc::clone(&event_log))
             .await
             .unwrap();
-        seed.publish_flush(&flush_record(WalFlushSetup {
-            topic_id,
-            object_key: "diskless-wal/7/seed.ckwl",
-            first_offset: krabka_log::Offset(0),
-            last_offset: krabka_log::Offset(2),
-            max_timestamp: UnixMillis(0),
-            ..Default::default()
-        }))
+        seed.publish_flush(
+            &flush_record()
+                .topic_id(topic_id)
+                .object_key("diskless-wal/7/seed.ckwl")
+                .first_offset(0)
+                .last_offset(2)
+                .max_timestamp(0)
+                .call(),
+        )
         .await
         .unwrap();
 
@@ -1244,16 +1230,16 @@ mod tests {
     async fn worker_flushes_only_led_diskless_partitions_and_stops() {
         let dir = tempdir().unwrap();
         let led = orders_partition(dir.path());
-        let follower = test_partition(dir.path(), FlusherPartitionSetup {
-            partition: krabka_ids::PartitionIndex(1),
-            leader: NodeId(2),
-            ..Default::default()
-        });
-        let local = test_partition(dir.path(), FlusherPartitionSetup {
-            partition: krabka_ids::PartitionIndex(2),
-            storage: StorageMode::Local,
-            ..Default::default()
-        });
+        let follower = test_partition()
+            .root(dir.path())
+            .partition(1)
+            .leader(2)
+            .call();
+        let local = test_partition()
+            .root(dir.path())
+            .partition(2)
+            .storage(StorageMode::Local)
+            .call();
         let partitions = Arc::new(PartitionRegistry::new());
         partitions.insert("orders".into(), krabka_ids::PartitionIndex(0), led);
         partitions.insert("orders".into(), krabka_ids::PartitionIndex(1), follower);

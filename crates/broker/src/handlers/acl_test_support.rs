@@ -5,7 +5,7 @@ use {
         authorizer::{Authorizer, SimpleAclAuthorizer},
         broker::BrokerHandle,
         handlers::acl_wire::binding_filter::AclBindingFilter,
-        test_support::{AllowAclSetup, allow_acl},
+        test_support::allow_acl,
     },
     krabka_metadata::{AclEntry, MetadataRecord},
     std::sync::Arc,
@@ -30,7 +30,7 @@ pub(super) fn configured_authorizer() -> Arc<dyn Authorizer> {
 }
 
 /// The matching orders ACL shared by live ACL handler fixtures.
-pub(super) fn alice_orders_acl() -> AclEntry { allow_acl(AllowAclSetup::default()) }
+pub(super) fn alice_orders_acl() -> AclEntry { allow_acl().call() }
 
 /// Independent wire oracle for a successful deletion of the standard orders ACL.
 pub(super) fn expected_deleted_orders_acl()
@@ -68,12 +68,11 @@ macro_rules! security_disabled_acl_fixture {
 pub(super) fn orders_payments_acls() -> Vec<AclEntry> {
     vec![
         alice_orders_acl(),
-        crate::test_support::allow_acl(crate::test_support::AllowAclSetup {
-            resource_name: "payments",
-            principal: "User:bob",
-            operation: krabka_metadata::AclOperation::Write,
-            ..Default::default()
-        }),
+        crate::test_support::allow_acl()
+            .resource_name("payments")
+            .principal("User:bob")
+            .operation(krabka_metadata::AclOperation::Write)
+            .call(),
     ]
 }
 

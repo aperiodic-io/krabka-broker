@@ -32,11 +32,10 @@ fn one_batch_segments(
 }
 
 fn engine(metadata_log: MetadataLogConfig) -> (Engine, tempfile::TempDir) {
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        metadata_log,
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only()
+        .ids(&[NodeId(1)])
+        .metadata_log(metadata_log)
+        .call();
     elect_single_voter_engine(&mut engine);
     (engine, dir)
 }
@@ -229,14 +228,13 @@ fn the_no_op_timer_runs_only_on_a_leader_with_an_interval() {
         ("a leader with no interval", millis(0), true, false),
         ("a node that does not lead", millis(500), false, false),
     ] {
-        let (mut engine, _dir) = build_engine_only(EngineSetup {
-            ids: &[NodeId(1)],
-            metadata_log: MetadataLogConfig {
+        let (mut engine, _dir) = build_engine_only()
+            .ids(&[NodeId(1)])
+            .metadata_log(MetadataLogConfig {
                 max_idle_interval: interval,
                 ..MetadataLogConfig::default()
-            },
-            ..Default::default()
-        });
+            })
+            .call();
         if lead {
             elect_single_voter_engine(&mut engine);
         }

@@ -457,18 +457,12 @@ mod tests {
 
     #[test]
     fn consumer_build_retry_rejects_invalid_cli_values() {
-        let cases = [
-            ("--consumer-build-attempts", "0"),
-            ("--consumer-build-attempts", "4294967296"),
-            ("--consumer-build-initial-backoff", "0ms"),
-            ("--consumer-build-initial-backoff", "1"),
-            ("--consumer-build-max-backoff", "0ms"),
-            ("--consumer-build-max-backoff", "1"),
-        ];
-        for (option, invalid) in cases {
-            let mut args = required_args("krabka");
-            args.extend([option, invalid]);
-            check!(Cli::try_parse_from(args).is_err(), "{option}={invalid}");
+        check_invalid_cli_values("--consumer-build-attempts", &["0", "4294967296"]);
+        for option in [
+            "--consumer-build-initial-backoff",
+            "--consumer-build-max-backoff",
+        ] {
+            check_invalid_cli_values(option, &["0ms", "1"]);
         }
     }
 

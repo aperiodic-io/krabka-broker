@@ -23,18 +23,14 @@ mod kafka_wire;
 mod support;
 
 use {
-    crate::{
-        kafka_wire::ExchangeSetup as WireExchangeSetup,
-        support::{
-            tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config},
-            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
-            wire::HeaderEncoding as RequestHeaderEncoding,
-        },
+    crate::support::{
+        tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config},
+        topics::{creatable_topic, create_topic_request},
+        wire::HeaderEncoding as RequestHeaderEncoding,
     },
     assert2::assert,
     bytes::BytesMut,
     krabka_broker::{Broker, BrokerConfig, BrokerHandle},
-    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
     krabka_protocol::{Decode, Encode, owned::create_topics_response::CreateTopicsResponse},
     krabka_security::{ClientAuthMode, TlsConfig},
     std::sync::Arc,
@@ -114,19 +110,16 @@ async fn mtls_principal_is_cert_dn_and_super_user_bypass_works() {
     // ANONYMOUS, which is what a non-mTLS connection would see) would
     // get CLUSTER_AUTHORIZATION_FAILED.
     let body = create_topics_body("mtls-smoke");
-    let resp_bytes = kafka_wire::round_trip(
-        &mut tls,
-        WireExchangeSetup {
-            api_key: WireApiKey(19),
-            version: WireApiVersion(7),
-            client_id: CLIENT_ID,
-            header: RequestHeaderEncoding::Flexible,
-            ..Default::default()
-        },
-        &body,
-    )
-    .await
-    .unwrap();
+    let resp_bytes = kafka_wire::round_trip()
+        .stream(&mut tls)
+        .api_key(19)
+        .version(7)
+        .client_id(CLIENT_ID)
+        .header(RequestHeaderEncoding::Flexible)
+        .body(&body)
+        .call()
+        .await
+        .unwrap();
     check_create_topics_success(
         &resp_bytes,
         "CreateTopics must succeed for the cert-DN super-user",
@@ -238,17 +231,14 @@ async fn timed_create_topics<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + U
 ) -> std::io::Result<Vec<u8>> {
     tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        kafka_wire::round_trip(
-            stream,
-            WireExchangeSetup {
-                api_key: WireApiKey(19),
-                version: WireApiVersion(7),
-                client_id: CLIENT_ID,
-                header: RequestHeaderEncoding::Flexible,
-                ..Default::default()
-            },
-            body,
-        ),
+        kafka_wire::round_trip()
+            .stream(stream)
+            .api_key(19)
+            .version(7)
+            .client_id(CLIENT_ID)
+            .header(RequestHeaderEncoding::Flexible)
+            .body(body)
+            .call(),
     )
     .await
     .expect(timeout_context)
@@ -294,10 +284,7 @@ fn server_certificate() -> CertificateDer<'static> {
 }
 
 fn create_topics_body(topic: &str) -> BytesMut {
-    let request = create_topic_request(creatable_topic(ConfiguredTopicSetup {
-        name: (topic).into(),
-        ..Default::default()
-    }));
+    let request = create_topic_request(creatable_topic().name((topic).into()).call());
     let mut body = BytesMut::new();
     request.encode(&mut body, 7).expect("encode CreateTopics");
     body

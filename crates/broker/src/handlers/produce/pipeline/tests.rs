@@ -9,8 +9,9 @@ use {
                 framing::PartitionPayload,
                 test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
             },
-            test_support::{ReplicatedPartitionSetup, replicated_partition},
+            test_support::replicated_partition,
         },
+        partition::Partition,
         schema_validation::{SchemaGate, SchemaValidator, ValidationMode},
     },
     assert2::assert,
@@ -23,6 +24,15 @@ use {
     std::sync::Arc,
     wiremock::{Mock, MockServer, ResponseTemplate, matchers::method},
 };
+
+fn append_seed_batch(partition: &Partition) {
+    partition
+        .log
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .append(&mut seed_batch())
+        .expect("seed the partition");
+}
 
 #[tokio::test]
 async fn process_partition_non_leader_skips_schema_registry_and_preserves_hint() {
@@ -129,11 +139,10 @@ fn non_leader_image() -> Arc<krabka_metadata::MetadataImage> {
     img.apply(&MetadataRecord::V1Partition(PartitionRecord {
         leader_epoch: krabka_metadata::LeaderEpoch(17),
         partition_epoch: 1,
-        ..replicated_partition(ReplicatedPartitionSetup {
-            leader: krabka_audit::NodeId(2),
-            replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
-            ..Default::default()
-        })
+        ..replicated_partition()
+            .leader(2)
+            .replicas(&[krabka_audit::NodeId(2), krabka_audit::NodeId(3)])
+            .call()
     }));
     Arc::new(img)
 }

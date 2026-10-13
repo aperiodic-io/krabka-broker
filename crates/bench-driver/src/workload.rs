@@ -580,9 +580,6 @@ fn build_samples(
 /// Without this the JSON looks like an ordinary run and the reader has to
 /// guess whether the schedule ran at all.
 /// Spawn one producer task per `scenario.producers`.
-///
-/// The three shared handles travel as a tuple because they are one thing: the
-/// run-phase signal, the first-ack stamp, and the kill marker every task reads.
 fn spawn_producers(
     tasks: &mut JoinSet<ProducerOut>,
     scenario: &Scenario,

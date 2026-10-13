@@ -155,14 +155,13 @@ mod tests {
             handlers::{
                 RequestContext, encode_response,
                 group_heartbeat_test_support::{
-                    GroupAclSetup, GroupTopicSetup, check_group_read_denied, streams_request,
-                    topic_with_partitions,
+                    check_group_read_denied, streams_request, topic_with_partitions,
                 },
             },
             task_util::ask,
             test_support::{
-                ControllerPeerAllowed, GrantsInPrincipalName, PartitionCount, dispatch_wire, peer,
-                principal, request_context, start_group_broker_with,
+                ControllerPeerAllowed, GrantsInPrincipalName, dispatch_wire, peer, principal,
+                request_context, start_group_broker_with,
             },
         },
         assert2::assert,
@@ -196,12 +195,14 @@ mod tests {
     async fn create_source_topic(broker: &Broker, name: &str) {
         broker
             .controller
-            .submit_change(topic_with_partitions(GroupTopicSetup {
-                name,
-                topic_id: uuid::Uuid::new_v4(),
-                partitions: PartitionCount(1),
-                node: broker.config.node_id,
-            }))
+            .submit_change(
+                topic_with_partitions()
+                    .name(name)
+                    .topic_id(uuid::Uuid::new_v4())
+                    .partitions(1)
+                    .node(broker.config.node_id)
+                    .call(),
+            )
             .await
             .expect("create the source topic");
     }
@@ -936,10 +937,7 @@ mod tests {
     fn group_read_denied_yields_group_authorization_failed() {
         use krabka_protocol::owned::streams_group_heartbeat_response::StreamsGroupHeartbeatResponse;
 
-        check_group_read_denied(GroupAclSetup {
-            client_id: "streams-client",
-            ..Default::default()
-        });
+        check_group_read_denied().client_id("streams-client").call();
 
         let bytes = encode_response(
             &reply(codes::GROUP_AUTHORIZATION_FAILED, None),

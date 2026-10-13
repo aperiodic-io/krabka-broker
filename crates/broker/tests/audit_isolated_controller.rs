@@ -7,7 +7,7 @@
 //! then records the broker start in that partition.
 
 use {
-    crate::support::{ClusterNodeSetup, NodeIndex, controller_voters},
+    crate::support::controller_voters,
     assert2::assert,
     krabka_broker::{BootstrapMode, Broker, config::NodeRole, coordinator::AUDIT_TOPIC},
     krabka_raft::NodeId,
@@ -25,12 +25,12 @@ async fn only_a_broker_holds_the_audit_partition_under_an_isolated_controller() 
     let mut controller_listeners = controller_listeners.into_iter();
 
     let controller_dir = TempDir::new().unwrap();
-    let mut controller_config = support::broker_config(controller_dir.path(), ClusterNodeSetup {
-        client_addrs: &client_addrs,
-        controller_addrs: &controller_addrs,
-        voters: controller_voters(&voters),
-        ..Default::default()
-    });
+    let mut controller_config = support::broker_config()
+        .log_dir(controller_dir.path())
+        .client_addrs(&client_addrs)
+        .controller_addrs(&controller_addrs)
+        .voters(controller_voters(&voters))
+        .call();
     controller_config.roles = vec![NodeRole::Controller];
     let controller = Broker::start_with_listeners(
         controller_config,
@@ -46,13 +46,14 @@ async fn only_a_broker_holds_the_audit_partition_under_an_isolated_controller() 
         .is_some();
 
     let broker_dir = TempDir::new().unwrap();
-    let mut broker_config = support::broker_config(broker_dir.path(), ClusterNodeSetup {
-        index: NodeIndex(1),
-        client_addrs: &client_addrs,
-        controller_addrs: &controller_addrs,
-        voters: controller_voters(&voters),
-        mode: BootstrapMode::Join,
-    });
+    let mut broker_config = support::broker_config()
+        .log_dir(broker_dir.path())
+        .index(1)
+        .client_addrs(&client_addrs)
+        .controller_addrs(&controller_addrs)
+        .voters(controller_voters(&voters))
+        .mode(BootstrapMode::Join)
+        .call();
     broker_config.roles = vec![NodeRole::Broker];
     let broker = Broker::start_with_listeners(
         broker_config,

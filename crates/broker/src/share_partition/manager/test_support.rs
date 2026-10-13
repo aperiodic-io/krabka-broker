@@ -16,10 +16,7 @@ use {
             persister_client::SharePersister,
         },
         share_partition::dlq::{DlqSink, test_support::RecordingDlq},
-        test_support::{
-            FakeMetadataSource, StandalonePartitionSetup, UnixMillis, open_partition,
-            static_records_batch,
-        },
+        test_support::{FakeMetadataSource, UnixMillis, open_partition, static_records_batch},
     },
     krabka_ids::PartitionIndex,
     krabka_log::Offset,
@@ -95,37 +92,37 @@ pub(super) fn manager_over(
     controller: Arc<dyn MetadataSource>,
     reg: Arc<PartitionRegistry>,
 ) -> Arc<SharePartitionLeaderManager> {
-    build(controller, reg, ManagerSetup::default())
+    build().controller(controller).reg(reg).call()
 }
 
 pub(super) fn manager_with_unlimited_fallback(
     fallback: SessionCapacity,
 ) -> Arc<SharePartitionLeaderManager> {
-    let source = fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil())));
-    let reg = Arc::new(PartitionRegistry::new());
-    build(source, reg, ManagerSetup {
-        capacity: fallback,
-        ..Default::default()
-    })
+    build()
+        .controller(fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil()))))
+        .reg(Arc::new(PartitionRegistry::new()))
+        .capacity(fallback)
+        .call()
 }
 
 /// A manager whose dead-letter records go to `dlq`.
 pub(super) fn manager_with_dlq(dlq: Arc<dyn DlqSink>) -> Arc<SharePartitionLeaderManager> {
-    build(
-        fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil()))),
-        Arc::new(PartitionRegistry::new()),
-        ManagerSetup {
-            dlq,
-            ..Default::default()
-        },
-    )
+    build()
+        .controller(fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil()))))
+        .reg(Arc::new(PartitionRegistry::new()))
+        .dlq(dlq)
+        .call()
 }
 
+#[bon::builder]
 fn build(
     controller: Arc<dyn MetadataSource>,
     reg: Arc<PartitionRegistry>,
-    setup: ManagerSetup,
+    #[builder(into, default = SessionCapacity (crate :: config :: BrokerConfig :: default () . share_session_cache_max_when_unlimited))]
+    capacity: SessionCapacity,
+    #[builder(default = Arc :: new (RecordingDlq :: default ()))] dlq: Arc<dyn DlqSink>,
 ) -> Arc<SharePartitionLeaderManager> {
+    let setup = ManagerSetup { capacity, dlq };
     let ManagerSetup { capacity, dlq } = setup;
     let coord = Arc::new(ShareCoordinator::new(
         krabka_audit::NodeId(1),
@@ -171,22 +168,32 @@ pub(crate) struct DataPartitionSetup<'a> {
 }
 
 /// Append the selected batches, publish the high watermark, and register a real partition.
+#[bon::builder]
 pub(crate) async fn open_data_partition(
     reg: &PartitionRegistry,
     log_dir: &Path,
-    setup: DataPartitionSetup<'_>,
+    #[builder(default = "t")] topic: &'_ str,
+    #[builder(into, default)] partition: PartitionIndex,
+    #[builder(default)] batches: Vec<TimedValues<'_>>,
+    #[builder(into, default)] high_watermark: Offset,
 ) {
+    let setup = DataPartitionSetup {
+        topic,
+        partition,
+        batches,
+        high_watermark,
+    };
     let DataPartitionSetup {
         topic,
         partition,
         batches,
         high_watermark,
     } = setup;
-    let part = open_partition(log_dir, StandalonePartitionSetup {
-        topic,
-        partition,
-        ..Default::default()
-    });
+    let part = open_partition()
+        .log_dir(log_dir)
+        .topic(topic)
+        .partition(partition)
+        .call();
     for TimedValues { timestamp, values } in batches {
         let mut batch = RecordBatch {
             partition_leader_epoch: 0,

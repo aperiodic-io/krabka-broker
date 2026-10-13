@@ -148,19 +148,46 @@ mod tests {
         assert2::{assert, check},
     };
 
-    #[test]
-    fn pending_records_into_batch_emits_one_record_per_key() {
-        let mut pending = PendingStreamsRecords {
-            group_metadata: Some(StreamsGroupMetadataValue {
+    #[bon::builder]
+    fn pending_records(
+        group_metadata: Option<StreamsGroupMetadataValue>,
+        #[builder(default)] member_metadata: Vec<(String, Option<StreamsGroupMemberMetadataValue>)>,
+        topology: Option<StreamsGroupTopologyValue>,
+        #[builder(default)] target_per_member: Vec<(
+            String,
+            Option<StreamsGroupTargetAssignmentMemberValue>,
+        )>,
+        #[builder(default)] current_per_member: Vec<(
+            String,
+            Option<StreamsGroupCurrentMemberAssignmentValue>,
+        )>,
+    ) -> PendingStreamsRecords {
+        PendingStreamsRecords {
+            group_metadata,
+            member_metadata,
+            topology,
+            target_per_member,
+            current_per_member,
+            ..Default::default()
+        }
+    }
+
+    fn pending_with_group_metadata() -> PendingStreamsRecords {
+        pending_records()
+            .group_metadata(StreamsGroupMetadataValue {
                 epoch: 1,
                 metadata_hash: 0,
                 validated_topology_epoch: -1,
                 last_assignment_configs: None,
                 description: super::super::DescriptionEpochs::default(),
-            }),
-            topology: Some(StreamsGroupTopologyValue::default()),
-            ..Default::default()
-        };
+            })
+            .topology(StreamsGroupTopologyValue::default())
+            .call()
+    }
+
+    #[test]
+    fn pending_records_into_batch_emits_one_record_per_key() {
+        let mut pending = pending_with_group_metadata();
         pending.member_metadata.push(("m1".into(), None)); // tombstone
         let batch = pending.into_batch("g1", 123).unwrap();
         // group_metadata + topology + one member tombstone = 3 records.
@@ -176,19 +203,10 @@ mod tests {
     // with an `INT16` length. A string of 32767 bytes encodes, and one of
     // 32768 bytes makes the whole batch an error, not a panic in the actor.
     crate::coordinator::unified::persistence::key_string_boundaries!(PendingStreamsRecords, || {
-        PendingStreamsRecords {
-            group_metadata: Some(StreamsGroupMetadataValue {
-                epoch: 1,
-                metadata_hash: 0,
-                validated_topology_epoch: -1,
-                last_assignment_configs: None,
-                description: super::super::DescriptionEpochs::default(),
-            }),
-            member_metadata: vec![("m".into(), None)],
-            topology: Some(StreamsGroupTopologyValue::default()),
-            target_per_member: vec![("m".into(), None)],
-            current_per_member: vec![("m".into(), None)],
-            ..Default::default()
-        }
+        let mut pending = pending_with_group_metadata();
+        pending.member_metadata = vec![("m".into(), None)];
+        pending.target_per_member = vec![("m".into(), None)];
+        pending.current_per_member = vec![("m".into(), None)];
+        pending
     });
 }

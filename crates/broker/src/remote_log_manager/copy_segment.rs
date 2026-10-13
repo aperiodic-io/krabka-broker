@@ -477,7 +477,7 @@ mod tests {
             let rsm_impl = Arc::new(CapturingRsm::default());
             let rsm: Arc<dyn RemoteStorageManager> = rsm_impl.clone();
             let rlmm = fixtures::in_memory_metadata();
-            let export = synth_export(fixtures::SegmentExportSetup::default());
+            let export = synth_export().call();
 
             let outcome = copy_one(
                 &tier(chain.archive(), &rsm, &rlmm),
@@ -529,7 +529,7 @@ mod tests {
                 &tp(),
                 1,
                 LeaderEpoch(0),
-                &synth_export(fixtures::SegmentExportSetup::default()),
+                &synth_export().call(),
                 ChainPosition::At(requested),
             )
             .await;
@@ -598,19 +598,20 @@ mod tests {
         ];
         for (name, rsm, chain, sealed, failed) in cases {
             fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
-            let tier = fixtures::configured_tier(&rsm, &rlmm, fixtures::TierSetup {
-                metrics: &metrics,
-                index_cache: &index_cache,
-                archive: chain.archive(),
-                ..Default::default()
-            });
+            let tier = fixtures::configured_tier()
+                .rsm(&rsm)
+                .rlmm(&rlmm)
+                .archive(chain.archive())
+                .metrics(&metrics)
+                .index_cache(&index_cache)
+                .call();
 
             copy_one(
                 &tier,
                 &tp(),
                 1,
                 LeaderEpoch(0),
-                &synth_export(fixtures::SegmentExportSetup::default()),
+                &synth_export().call(),
                 chain,
             )
             .await;

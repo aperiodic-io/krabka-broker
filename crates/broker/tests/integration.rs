@@ -5,16 +5,11 @@ use {
     crate::support::{
         client::connect_client,
         discovery::{api_versions_request_for, topic_metadata_request},
-        fetch::{
-            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, check_record_count,
-            single_partition_fetch,
-        },
+        fetch::{FetchLimits, RequestWaitMillis, check_record_count, single_partition_fetch},
         offsets::{list_offset_partition, single_partition_list_offsets},
         produce::{ProduceAcknowledgements, SinglePartitionProduceSetup, batch_request},
         records::value_record,
-        topics::{
-            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
-        },
+        topics::{creatable_topic, create_topic_request},
         wire::write_frame,
     },
     assert2::{assert, check},
@@ -87,12 +82,9 @@ async fn list_offsets_by_timestamp_local() {
     let p = support::start().await;
 
     p.client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("by_ts").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("by_ts").into()).call(),
+        ))
         .await
         .unwrap();
     let topic_id = topic_id_for(&p.client, "by_ts").await;
@@ -154,12 +146,9 @@ async fn end_to_end_create_produce_fetch_delete() {
     // 2. CreateTopics.
     let cr = p
         .client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("e2e").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("e2e").into()).call(),
+        ))
         .await
         .unwrap();
     assert!(cr.topics[0].error_code == 0);
@@ -203,12 +192,13 @@ async fn end_to_end_create_produce_fetch_delete() {
     // 6. Fetch and confirm 3 records are returned.
     let fr = p
         .client
-        .send(single_partition_fetch(SinglePartitionFetchSetup {
-            topic: "e2e".into(),
-            topic_id,
-            limits: FetchLimits::one_mebibyte(RequestWaitMillis(100)),
-            ..Default::default()
-        }))
+        .send(
+            single_partition_fetch()
+                .topic("e2e".into())
+                .topic_id(topic_id)
+                .limits(FetchLimits::one_mebibyte(RequestWaitMillis(100)))
+                .call(),
+        )
         .await
         .unwrap();
     check_record_count(&fr.responses[0].partitions[0], 3);
@@ -221,12 +211,9 @@ async fn produce_acks_zero_sends_no_frame_and_keeps_connection_usable() {
     let p = support::start().await;
     let create = p
         .client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("one-way-produce").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("one-way-produce").into()).call(),
+        ))
         .await
         .expect("create topic");
     assert!(create.topics[0].error_code == 0);
@@ -308,13 +295,12 @@ async fn second_open_recovers_partitions_from_disk() {
         let bootstrap = handle.listen_addr().to_string();
         let client = connect_client(&bootstrap, Some("recovery-test")).await;
         let cr = client
-            .send(create_topic_request(creatable_topic(
-                ConfiguredTopicSetup {
-                    name: ("persisted").into(),
-                    partitions: TopicPartitionCount(2),
-                    ..Default::default()
-                },
-            )))
+            .send(create_topic_request(
+                creatable_topic()
+                    .name(("persisted").into())
+                    .partitions(2)
+                    .call(),
+            ))
             .await
             .unwrap();
         assert!(cr.topics[0].error_code == 0);

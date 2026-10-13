@@ -711,6 +711,23 @@ mod tests {
         topics.iter().map(|topic| (*topic).to_string()).collect()
     }
 
+    #[bon::builder]
+    fn configured_subtopology(
+        number_of_tasks: i32,
+        #[builder(default)] source_topics: BTreeSet<String>,
+        #[builder(default)] repartition_source_topics: BTreeMap<String, ConfiguredInternalTopic>,
+        #[builder(default)] repartition_sink_topics: BTreeSet<String>,
+        #[builder(default)] state_changelog_topics: BTreeMap<String, ConfiguredInternalTopic>,
+    ) -> ConfiguredSubtopology {
+        ConfiguredSubtopology {
+            number_of_tasks,
+            source_topics,
+            repartition_source_topics,
+            repartition_sink_topics,
+            state_changelog_topics,
+        }
+    }
+
     fn copartition(sources: Vec<i16>, repartition_sources: Vec<i16>) -> StoredCopartitionGroup {
         StoredCopartitionGroup {
             source_topics: sources,
@@ -750,20 +767,23 @@ mod tests {
         let expected = ConfiguredTopology {
             topology_epoch: 1,
             subtopologies: Some(BTreeMap::from([
-                ("0".to_string(), ConfiguredSubtopology {
-                    number_of_tasks: 6,
-                    source_topics: names(&["orders"]),
-                    repartition_source_topics: BTreeMap::new(),
-                    repartition_sink_topics: names(&["rp"]),
-                    state_changelog_topics: BTreeMap::new(),
-                }),
-                ("1".to_string(), ConfiguredSubtopology {
-                    number_of_tasks: 3,
-                    source_topics: names(&["customers"]),
-                    repartition_source_topics: BTreeMap::from([internal("rp", 3)]),
-                    repartition_sink_topics: BTreeSet::new(),
-                    state_changelog_topics: BTreeMap::from([internal("store-changelog", 3)]),
-                }),
+                (
+                    "0".to_string(),
+                    configured_subtopology()
+                        .number_of_tasks(6)
+                        .source_topics(names(&["orders"]))
+                        .repartition_sink_topics(names(&["rp"]))
+                        .call(),
+                ),
+                (
+                    "1".to_string(),
+                    configured_subtopology()
+                        .number_of_tasks(3)
+                        .source_topics(names(&["customers"]))
+                        .repartition_source_topics(BTreeMap::from([internal("rp", 3)]))
+                        .state_changelog_topics(BTreeMap::from([internal("store-changelog", 3)]))
+                        .call(),
+                ),
             ])),
             internal_topics_to_create: BTreeMap::from([
                 internal("rp", 3),
@@ -794,20 +814,22 @@ mod tests {
         let expected = ConfiguredTopology {
             topology_epoch: 1,
             subtopologies: Some(BTreeMap::from([
-                ("0".to_string(), ConfiguredSubtopology {
-                    number_of_tasks: 4,
-                    source_topics: names(&["in"]),
-                    repartition_source_topics: BTreeMap::new(),
-                    repartition_sink_topics: names(&["rp"]),
-                    state_changelog_topics: BTreeMap::new(),
-                }),
-                ("1".to_string(), ConfiguredSubtopology {
-                    number_of_tasks: 8,
-                    source_topics: names(&["other"]),
-                    repartition_source_topics: BTreeMap::from([internal("rp", 4)]),
-                    repartition_sink_topics: BTreeSet::new(),
-                    state_changelog_topics: BTreeMap::new(),
-                }),
+                (
+                    "0".to_string(),
+                    configured_subtopology()
+                        .number_of_tasks(4)
+                        .source_topics(names(&["in"]))
+                        .repartition_sink_topics(names(&["rp"]))
+                        .call(),
+                ),
+                (
+                    "1".to_string(),
+                    configured_subtopology()
+                        .number_of_tasks(8)
+                        .source_topics(names(&["other"]))
+                        .repartition_source_topics(BTreeMap::from([internal("rp", 4)]))
+                        .call(),
+                ),
             ])),
             internal_topics_to_create: BTreeMap::new(),
             status: None,

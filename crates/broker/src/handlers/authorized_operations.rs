@@ -211,11 +211,24 @@ mod tests {
 
     fn addr() -> SocketAddr { "127.0.0.1:0".parse().unwrap() }
 
-    use crate::test_support::{AllowAclSetup, allow_acl, request_context, sasl_principal};
+    use crate::test_support::{allow_acl, request_context, sasl_principal};
 
-    fn acl_image(setup: AllowAclSetup<'_>) -> MetadataImage {
+    #[bon::builder]
+    fn acl_image(
+        #[builder(default = ResourceType::Topic)] resource_type: ResourceType,
+        #[builder(default = "orders")] resource_name: &'_ str,
+        #[builder(default = "User:alice")] principal: &'_ str,
+        #[builder(default = AclOperation::Read)] operation: AclOperation,
+    ) -> MetadataImage {
         let mut image = MetadataImage::new(Uuid::nil());
-        image.apply(&MetadataRecord::V1AccessControlEntry(allow_acl(setup)));
+        image.apply(&MetadataRecord::V1AccessControlEntry(
+            allow_acl()
+                .resource_type(resource_type)
+                .resource_name(resource_name)
+                .principal(principal)
+                .operation(operation)
+                .call(),
+        ));
         image
     }
 
@@ -367,10 +380,7 @@ mod tests {
 
     #[test]
     fn read_allow_on_topic_sets_read_and_describe_bits_only() {
-        let img = acl_image(AllowAclSetup {
-            resource_name: "foo",
-            ..Default::default()
-        });
+        let img = acl_image().resource_name("foo").call();
         alice_acl_bits!((auth, p, h, bits), &img, ResourceType::Topic, "foo");
         // Read ACL grants Read directly and Describe via implication.
         // No other supported op should be set.
@@ -380,12 +390,10 @@ mod tests {
 
     #[test]
     fn write_allow_on_topic_sets_write_and_describe_only() {
-        let img = acl_image(AllowAclSetup {
-            resource_name: "foo",
-
-            operation: AclOperation::Write,
-            ..Default::default()
-        });
+        let img = acl_image()
+            .resource_name("foo")
+            .operation(AclOperation::Write)
+            .call();
         alice_acl_bits!((auth, p, h, bits), &img, ResourceType::Topic, "foo");
         let expected = bit(AclOperation::Write) | bit(AclOperation::Describe);
         assert!(bits == expected);
@@ -424,13 +432,11 @@ mod tests {
             ),
         ];
         for (granted, expected) in rows {
-            let img = acl_image(AllowAclSetup {
-                resource_type: ResourceType::Group,
-                resource_name: "cg",
-
-                operation: granted,
-                ..Default::default()
-            });
+            let img = acl_image()
+                .resource_type(ResourceType::Group)
+                .resource_name("cg")
+                .operation(granted)
+                .call();
             alice_acl_bits!((auth, p, h, bits), &img, ResourceType::Group, "cg");
             assert!(bits == expected, "{granted:?}");
         }
@@ -438,16 +444,10 @@ mod tests {
 
     #[test]
     fn deny_wins_the_exact_operation_but_not_its_implied_describe() {
-        let mut img = acl_image(AllowAclSetup {
-            resource_name: "foo",
-            ..Default::default()
-        });
+        let mut img = acl_image().resource_name("foo").call();
         img.apply(&MetadataRecord::V1AccessControlEntry(AclEntry {
             permission_type: PermissionType::Deny,
-            ..allow_acl(AllowAclSetup {
-                resource_name: "foo",
-                ..Default::default()
-            })
+            ..allow_acl().resource_name("foo").call()
         }));
         alice_acl_bits!((auth, p, h, bits), &img, ResourceType::Topic, "foo");
         // Read itself is denied: both ACL rows match the exact Read request,

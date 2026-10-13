@@ -12,9 +12,8 @@ pub use crate::support::share::{
 };
 use {
     crate::support::share::{
-        ConsumptionFixture, ConsumptionSetup, ShareRecordSeedSetup, ShareRecordsSetup,
-        ShareSessionSetup, ShareTopicSetup, consumption_fixture, join as join_share_group,
-        permitted_topic_fixture, start_topic,
+        ConsumptionFixture, ConsumptionSetup, ShareRecordCount, ShareSessionSetup,
+        consumption_fixture, join as join_share_group, permitted_topic_fixture, start_topic,
     },
     assert2::assert,
     krabka_client_core::Client,
@@ -93,28 +92,29 @@ crate::share_consumption_fixture!(
 );
 
 /// Initialize the persisted topic/group fixture before a restart scenario.
+#[bon::builder]
 pub async fn initialized_topic(
     log_dir: std::path::PathBuf,
-    setup: ShareRecordSeedSetup,
+    #[builder(into, default = ShareRecordCount(3))] count: ShareRecordCount,
 ) -> (
     krabka_broker::BrokerHandle,
     std::sync::Arc<Client>,
     uuid::Uuid,
     String,
 ) {
-    let (broker, client, tid) =
-        start_topic(broker_config(log_dir), ShareTopicSetup::default()).await;
+    let (broker, client, tid) = start_topic().cfg(broker_config(log_dir)).call().await;
     let (member, _) = initialize_consumption(&broker, &client, ConsumptionSetup {
         topic_id: tid,
-        count: setup.count,
+        count,
     })
     .await;
     (broker, client, tid, member)
 }
 
 /// Prepare g1's persister and data without joining a member to the group.
+#[bon::builder]
 pub async fn seeded_empty_group(
-    setup: ShareRecordSeedSetup,
+    #[builder(into, default = ShareRecordCount(3))] count: ShareRecordCount,
 ) -> (
     tokio::sync::OwnedSemaphorePermit,
     krabka_broker::BrokerHandle,
@@ -122,15 +122,14 @@ pub async fn seeded_empty_group(
     tempfile::TempDir,
     uuid::Uuid,
 ) {
-    let (permit, broker, client, dir, tid) =
-        permitted_topic_fixture(ShareTopicSetup::default(), |_| {}).await;
+    let (permit, broker, client, dir, tid) = Box::pin(permitted_topic_fixture().call()).await;
     bootstrap_share_state(&broker, &client, "g1").await;
-    produce_n(&client, ShareRecordsSetup {
-        topic_id: tid,
-        count: setup.count,
-        ..Default::default()
-    })
-    .await;
+    produce_n()
+        .client(&client)
+        .topic_id(tid)
+        .count(count.0)
+        .call()
+        .await;
     (permit, broker, client, dir, tid)
 }
 
@@ -163,7 +162,10 @@ pub async fn acquired_topic() -> (
         _dir: dir,
         tid,
         member,
-    } = consumption_fixture(ShareRecordSeedSetup::default(), initialize_consumption).await;
+    } = consumption_fixture()
+        .initialize(initialize_consumption)
+        .call()
+        .await;
     let row = fetch_until_acquired(&client, ShareSessionSetup::opening(&member, tid)).await;
     (permit, broker, client, dir, tid, member, row)
 }
@@ -181,9 +183,16 @@ pub struct InitializedRestartFixture {
     ),
 }
 
-pub async fn initialized_restart_fixture(setup: ShareRecordSeedSetup) -> InitializedRestartFixture {
+#[bon::builder]
+pub async fn initialized_restart_fixture(
+    #[builder(into, default = ShareRecordCount(3))] count: ShareRecordCount,
+) -> InitializedRestartFixture {
     let (permit, dir, log_dir) = restart_directory().await;
-    let topic = initialized_topic(log_dir.clone(), setup).await;
+    let topic = initialized_topic()
+        .log_dir(log_dir.clone())
+        .count(count.0)
+        .call()
+        .await;
     InitializedRestartFixture {
         _permit: permit,
         _dir: dir,

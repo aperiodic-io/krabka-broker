@@ -154,11 +154,12 @@ pub async fn start_jvm_single(
     init_jvm_tracing(default_filter);
     let listeners = jvm_listeners();
     let dir = tempfile::tempdir().expect("broker directory");
-    let mut config = jvm_single_broker_config(dir.path().to_path_buf(), JvmSingleBrokerSetup {
-        listen: &listeners.listen,
-        advertised: &listeners.advertised,
-        controller: &listeners.controller,
-    });
+    let mut config = jvm_single_broker_config()
+        .log_dir(dir.path().to_path_buf())
+        .listen(&listeners.listen)
+        .advertised(&listeners.advertised)
+        .controller(&listeners.controller)
+        .call();
     adjust(&mut config);
     let broker = krabka_broker::Broker::start(config)
         .await
@@ -190,10 +191,27 @@ pub struct JvmBrokerSetup {
 }
 
 /// Common configuration for host brokers addressed by Kafka containers.
+#[bon::builder]
 pub fn jvm_broker_config(
     log_dir: std::path::PathBuf,
-    setup: JvmBrokerSetup,
+    #[builder(into, default = NodeId (1))] node: NodeId,
+    #[builder(default = "127.0.0.1:0" . parse () . expect ("loopback listener"))]
+    listen: std::net::SocketAddr,
+    #[builder(default = "127.0.0.1:0" . parse () . expect ("loopback controller"))]
+    controller: std::net::SocketAddr,
+    #[builder(default = "127.0.0.1:0" . into ())] advertised: String,
+    #[builder(default = vec ! [(NodeId (1) , "127.0.0.1:0" . into ())])] voters: Vec<(
+        NodeId,
+        String,
+    )>,
 ) -> krabka_broker::BrokerConfig {
+    let setup = JvmBrokerSetup {
+        node,
+        listen,
+        controller,
+        advertised,
+        voters,
+    };
     let quorum_size = setup.voters.len();
     krabka_broker::BrokerConfig {
         broker_id: i32::try_from(setup.node.0).expect("broker id"),
@@ -225,18 +243,26 @@ pub struct JvmSingleBrokerSetup<'a> {
 }
 
 /// Common single-voter configuration, with listener strings supplied by a suite.
+#[bon::builder]
 pub fn jvm_single_broker_config(
     log_dir: std::path::PathBuf,
-    setup: JvmSingleBrokerSetup<'_>,
+    #[builder(default = "127.0.0.1:0")] listen: &'_ str,
+    #[builder(default = "127.0.0.1:0")] advertised: &'_ str,
+    #[builder(default = "127.0.0.1:0")] controller: &'_ str,
 ) -> krabka_broker::BrokerConfig {
-    let controller: std::net::SocketAddr = setup.controller.parse().expect("controller address");
-    jvm_broker_config(log_dir, JvmBrokerSetup {
-        listen: setup.listen.parse().expect("client address"),
+    let setup = JvmSingleBrokerSetup {
+        listen,
+        advertised,
         controller,
-        advertised: setup.advertised.into(),
-        voters: vec![(NodeId(1), controller.to_string())],
-        ..Default::default()
-    })
+    };
+    let controller: std::net::SocketAddr = setup.controller.parse().expect("controller address");
+    jvm_broker_config()
+        .log_dir(log_dir)
+        .listen(setup.listen.parse().expect("client address"))
+        .controller(controller)
+        .advertised(setup.advertised.into())
+        .voters(vec![(NodeId(1), controller.to_string())])
+        .call()
 }
 
 /// Prepare a tool container with Docker options kept in the caller's order.
@@ -270,7 +296,19 @@ pub struct JvmDockerSetup<'a> {
     pub input: ContainerInput,
 }
 
-pub fn jvm_docker_command(setup: JvmDockerSetup<'_>) -> std::process::Command {
+#[bon::builder]
+pub fn jvm_docker_command(
+    #[builder(default = "mirror.gcr.io/apache/kafka:4.3.1")] image: &'_ str,
+    #[builder(default)] mounts: &'_ [&'_ str],
+    #[builder(default)] args: &'_ [&'_ str],
+    #[builder(default)] input: ContainerInput,
+) -> std::process::Command {
+    let setup = JvmDockerSetup {
+        image,
+        mounts,
+        args,
+        input,
+    };
     let mut options = vec!["--add-host=host.docker.internal:host-gateway"];
     if matches!(setup.input, ContainerInput::Attached) {
         options.push("-i");
@@ -327,10 +365,13 @@ pub struct JvmStaticVoterSetup {
 }
 
 /// A test-default voter in a named static quorum shared with a JVM node.
+#[bon::builder]
 pub fn jvm_static_voter_config(
     log_dir: &std::path::Path,
-    setup: JvmStaticVoterSetup,
+    #[builder(default)] broker: JvmBrokerSetup,
+    #[builder(default)] cluster_id: uuid::Uuid,
 ) -> krabka_broker::BrokerConfig {
+    let setup = JvmStaticVoterSetup { broker, cluster_id };
     let mut config = krabka_broker::BrokerConfig::for_tests(log_dir.to_path_buf());
     config.broker_id = i32::try_from(setup.broker.node.0).expect("broker id");
     config.node_id = setup.broker.node;
@@ -372,13 +413,12 @@ pub async fn format_jvm_voter(
 
 /// Run a JVM tool while leaving success and output assertions to its caller.
 pub fn jvm_docker_run(image: &str, args: &[&str]) -> std::process::Output {
-    let out = jvm_docker_command(JvmDockerSetup {
-        image,
-        args,
-        ..Default::default()
-    })
-    .output()
-    .expect("docker run");
+    let out = jvm_docker_command()
+        .image(image)
+        .args(args)
+        .call()
+        .output()
+        .expect("docker run");
     eprintln!(
         "KRABKA[test] docker {image} {args:?} status={} stderr={}",
         out.status,
@@ -431,15 +471,18 @@ pub async fn start_jvm_cluster<const N: usize>(
         .enumerate()
         .map(|(index, port)| {
             let dir = tempfile::tempdir().expect("broker directory");
-            let mut config = jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
-                node: krabka_broker::NodeId(voters[index].0),
-                listen: format!("0.0.0.0:{port}").parse().expect("client address"),
-                controller: format!("0.0.0.0:{}", controller_ports[index])
-                    .parse()
-                    .expect("controller address"),
-                advertised: format!("host.docker.internal:{port}"),
-                voters: controller_voters(&voters),
-            });
+            let mut config = jvm_broker_config()
+                .log_dir(dir.path().to_path_buf())
+                .node(voters[index].0)
+                .listen(format!("0.0.0.0:{port}").parse().expect("client address"))
+                .controller(
+                    format!("0.0.0.0:{}", controller_ports[index])
+                        .parse()
+                        .expect("controller address"),
+                )
+                .advertised(format!("host.docker.internal:{port}"))
+                .voters(controller_voters(&voters))
+                .call();
             adjust(&mut config);
             (
                 tokio::spawn(async move {
@@ -553,7 +596,19 @@ pub struct JvmAdminSetup<'a> {
     pub bootstrap: &'a str,
 }
 
-pub fn jvm_admin_args(setup: JvmAdminSetup<'_>) -> Vec<String> {
+#[bon::builder]
+pub fn jvm_admin_args(
+    #[builder(default = "mirror.gcr.io/apache/kafka:4.3.1")] image: &'_ str,
+    #[builder(default = "/tmp/krabka-config:/krabka-config")] mount: &'_ str,
+    #[builder(default = "/opt/kafka/bin/kafka-configs.sh")] tool: &'_ str,
+    #[builder(default = "host.docker.internal:9092")] bootstrap: &'_ str,
+) -> Vec<String> {
+    let setup = JvmAdminSetup {
+        image,
+        mount,
+        tool,
+        bootstrap,
+    };
     let JvmAdminSetup {
         image,
         mount,
@@ -684,9 +739,9 @@ pub fn jvm_spawn_piped(command: &mut std::process::Command, context: &str) -> st
 /// The shared acks-all console-producer command; callers retain their write/exit assertions.
 pub fn jvm_acks_all_producer(image: &str, bootstrap: &str, topic: &str) -> std::process::Child {
     jvm_spawn_piped(
-        &mut jvm_docker_command(JvmDockerSetup {
-            image,
-            args: &[
+        &mut jvm_docker_command()
+            .image(image)
+            .args(&[
                 "kafka-console-producer",
                 "--bootstrap-server",
                 bootstrap,
@@ -694,23 +749,21 @@ pub fn jvm_acks_all_producer(image: &str, bootstrap: &str, topic: &str) -> std::
                 topic,
                 "--producer-property",
                 "acks=all",
-            ],
-            input: ContainerInput::Attached,
-            ..Default::default()
-        }),
+            ])
+            .input(ContainerInput::Attached)
+            .call(),
         "spawn JVM producer",
     )
 }
 
 /// Capture a plain JVM tool while retaining the suite-specific log prefix.
 pub fn jvm_tool_output(image: &str, args: &[&str], log_scope: &str) -> std::process::Output {
-    let out = jvm_docker_command(JvmDockerSetup {
-        image,
-        args,
-        ..Default::default()
-    })
-    .output()
-    .expect("spawn docker run");
+    let out = jvm_docker_command()
+        .image(image)
+        .args(args)
+        .call()
+        .output()
+        .expect("spawn docker run");
     eprintln!(
         "KRABKA[{log_scope}] docker_run image={image} {args:?} status={} stderr_len={}",
         out.status,

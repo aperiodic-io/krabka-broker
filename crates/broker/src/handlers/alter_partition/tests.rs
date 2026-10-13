@@ -34,11 +34,15 @@ struct EmptyAlterPartitionSetup {
     expected: KafkaErrorCode,
 }
 
+#[bon::builder]
 async fn check_empty_alter_partition(
     broker: &Broker,
     ctx: &RequestContext<'_>,
-    setup: EmptyAlterPartitionSetup,
+    #[builder(into, default = krabka_ids :: ApiVersion (alter_partition_response :: MAX_VERSION))]
+    version: krabka_ids::ApiVersion,
+    #[builder(into, default)] expected: KafkaErrorCode,
 ) {
+    let setup = EmptyAlterPartitionSetup { version, expected };
     let request = request_with_topics(broker, Vec::new());
     let response = super::handle(broker, request, setup.version.0, ctx)
         .await
@@ -57,11 +61,12 @@ async fn handle_denies_cluster_action_for_whole_request() {
         deny_all,
         context(ctx, "replica")
     );
-    check_empty_alter_partition(&broker, &ctx, EmptyAlterPartitionSetup {
-        expected: KafkaErrorCode(codes::CLUSTER_AUTHORIZATION_FAILED),
-        ..Default::default()
-    })
-    .await;
+    check_empty_alter_partition()
+        .broker(&broker)
+        .ctx(&ctx)
+        .expected(codes::CLUSTER_AUTHORIZATION_FAILED)
+        .call()
+        .await;
     broker_handle.shutdown().await;
 }
 
@@ -73,7 +78,11 @@ async fn leader_accepts_empty_alter_partition_request() {
         context(ctx, "replica"),
         controller_leader
     );
-    check_empty_alter_partition(&broker, &ctx, EmptyAlterPartitionSetup::default()).await;
+    check_empty_alter_partition()
+        .broker(&broker)
+        .ctx(&ctx)
+        .call()
+        .await;
     broker_handle.shutdown().await;
 }
 

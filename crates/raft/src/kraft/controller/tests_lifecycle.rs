@@ -22,10 +22,7 @@ use {
 
 #[test]
 fn initial_state_voters_preserves_configured_quorum_ids() {
-    let (engine, _dir) = build_engine_only(EngineSetup {
-        me: NodeId(2),
-        ..Default::default()
-    });
+    let (engine, _dir) = build_engine_only().me(2).call();
     assert2::assert!(initial_state_voters(&engine.core) == vec![NodeId(1), NodeId(2), NodeId(3)]);
     assert2::assert!(
         engine
@@ -41,13 +38,14 @@ fn initial_state_voters_preserves_configured_quorum_ids() {
 
 #[test]
 fn engine_uses_configured_miss_limit_and_fetch_max() {
-    let (engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        controller_fetch_miss_limit: ControllerFetchMissLimit::new(5).expect("positive miss limit"),
-        metadata_raft_fetch_max: MetadataRaftFetchMax::try_from(krabka_units::bytes(512))
-            .expect("positive fetch maximum"),
-        ..Default::default()
-    });
+    let (engine, _dir) = build_engine_only()
+        .ids(&[NodeId(1)])
+        .controller_fetch_miss_limit(ControllerFetchMissLimit::new(5).expect("positive miss limit"))
+        .metadata_raft_fetch_max(
+            MetadataRaftFetchMax::try_from(krabka_units::bytes(512))
+                .expect("positive fetch maximum"),
+        )
+        .call();
 
     check!(engine.controller_fetch_miss_limit.get() == 5);
     check!(engine.metadata_raft_fetch_max.bytes() == 512);
@@ -55,19 +53,19 @@ fn engine_uses_configured_miss_limit_and_fetch_max() {
 
 #[tokio::test]
 async fn spawned_controller_uses_configured_command_queue_capacity() {
-    let (controller, _dir) = build(ControllerSetup {
-        ids: &[NodeId(1)],
-        metadata_raft_command_queue_capacity: MetadataRaftCommandQueueCapacity::new(7)
-            .expect("positive queue capacity"),
-        ..Default::default()
-    });
+    let (controller, _dir) = build()
+        .ids(&[NodeId(1)])
+        .metadata_raft_command_queue_capacity(
+            MetadataRaftCommandQueueCapacity::new(7).expect("positive queue capacity"),
+        )
+        .call();
 
     check!(controller.cmd_tx.capacity() == 7);
 }
 
 #[tokio::test]
 async fn engine_following_leader_reflects_current_role() {
-    let (mut follower, _dir) = build_engine_only(EngineSetup::default());
+    let (mut follower, _dir) = build_engine_only().call();
     assert2::assert!(follower.following_leader().is_none());
 
     follower.on_event(Event::ReceiveBeginQuorumEpoch {
@@ -76,10 +74,7 @@ async fn engine_following_leader_reflects_current_role() {
     });
     assert2::assert!(follower.following_leader() == Some(NodeId(2)));
 
-    let (mut leader, _leader_dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut leader, _leader_dir) = build_engine_only().ids(&[NodeId(1)]).call();
     elect_single_voter_engine(&mut leader);
     assert2::assert!(leader.following_leader().is_none());
 }
@@ -109,10 +104,7 @@ async fn sleep_until_opt_waits_for_some_and_never_completes_for_none() {
 
 #[tokio::test]
 async fn single_voter_engine_starts_with_no_initial_leader() {
-    let (ctrl, _dir) = build(ControllerSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (ctrl, _dir) = build().ids(&[NodeId(1)]).call();
     let initial = *ctrl.watch_leader().borrow();
     assert2::assert!(initial.is_none());
     ctrl.shutdown().await;
@@ -120,11 +112,7 @@ async fn single_voter_engine_starts_with_no_initial_leader() {
 
 #[tokio::test]
 async fn node_id_reports_configured_node() {
-    let (ctrl, _dir) = build(ControllerSetup {
-        me: NodeId(7),
-        ids: &[NodeId(7)],
-        ..Default::default()
-    });
+    let (ctrl, _dir) = build().me(7).ids(&[NodeId(7)]).call();
     assert2::assert!(ctrl.node_id() == 7);
     ctrl.shutdown().await;
 }
@@ -137,20 +125,14 @@ async fn injected_election_makes_single_voter_leader() {
 
 #[tokio::test]
 async fn injected_vote_sequence_makes_multi_voter_leader_before_timer() {
-    let (ctrl, _dir) = build(ControllerSetup {
-        election_timeout: secs(60),
-        ..Default::default()
-    });
+    let (ctrl, _dir) = build().election_timeout(secs(60)).call();
     elect_leader_with_helper(&ctrl, NodeId(1), NodeId(2)).await;
     ctrl.shutdown().await;
 }
 
 #[tokio::test]
 async fn injected_election_timer_makes_single_voter_leader() {
-    let (ctrl, _dir) = build(ControllerSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (ctrl, _dir) = build().ids(&[NodeId(1)]).call();
     ctrl.cmd_tx
         .send(Command::Timer(TimerTick::Election))
         .await
@@ -163,11 +145,10 @@ async fn injected_election_timer_makes_single_voter_leader() {
 /// election timeout — no injected event.
 #[tokio::test]
 async fn single_voter_auto_elects_on_election_timeout() {
-    let (ctrl, _dir) = build(ControllerSetup {
-        ids: &[NodeId(1)],
-        election_timeout: millis(80),
-        ..Default::default()
-    });
+    let (ctrl, _dir) = build()
+        .ids(&[NodeId(1)])
+        .election_timeout(millis(80))
+        .call();
     // The election timer is armed at construction; wait for it to fire.
     tokio::time::timeout(
         StdDuration::from_secs(5),
@@ -185,10 +166,7 @@ async fn follower_with_live_leader_does_not_elect() {
     // Node 1 is a follower in a 3-voter cluster; the NullPeerSender means
     // its fetches fail, but a steady stream of BeginQuorumEpoch heartbeats
     // (which we inject) must keep it attached without electing.
-    let (ctrl, _dir) = build(ControllerSetup {
-        election_timeout: millis(120),
-        ..Default::default()
-    });
+    let (ctrl, _dir) = build().election_timeout(millis(120)).call();
     // Attach to leader 2.
     ctrl.inject_event(Event::ReceiveBeginQuorumEpoch {
         leader_id: NodeId(2),
@@ -218,10 +196,7 @@ async fn follower_with_live_leader_does_not_elect() {
 
 #[tokio::test]
 async fn controller_handle_reports_node_id_probe_and_shuts_down() {
-    let (ctrl, _dir) = build(ControllerSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (ctrl, _dir) = build().ids(&[NodeId(1)]).call();
     check!(ctrl.node_id() == NodeId(1));
     check!(matches!(
         ctrl.probe_kraft_version("127.0.0.1:9093", 1).await,

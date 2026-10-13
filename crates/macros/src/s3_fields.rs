@@ -1,8 +1,11 @@
 //! S3 endpoint and redacted credentials, preserving each configuration's docs.
 
-use crate::{
-    meta::{mode, named_body},
-    prelude::*,
+use {
+    crate::meta::{edit_named_body, mode},
+    moxy::{
+        ast::ParseError,
+        token::{Span, TokenStream, TokenTree},
+    },
 };
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
@@ -35,30 +38,27 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
         ),
         _ => unreachable!(),
     };
-    let (mut tokens, body) = named_body(item, "s3_fields")?;
-    let TokenTree::Group(group) = &mut tokens[body] else {
-        unreachable!()
-    };
-    let mut fields: Vec<_> = std::mem::take(&mut group.tokens).into_iter().collect();
-    let marker = fields
-        .iter()
-        .position(|token| token.as_ident().is_some_and(|id| id == "allow_http"))
-        .ok_or_else(|| {
-            ParseError::new(Span::call_site(), "s3_fields requires an allow_http field")
-        })?;
-    let insertion = fields[..marker]
-        .iter()
-        .rposition(TokenTree::is_punct_comma)
-        .map_or(0, |comma| comma + 1);
-    fields.splice(insertion..insertion, moxy::template! {
-        {{ endpoint_doc }} pub endpoint: Option<String>,
-        {{ access_doc }}
-        #[debug("{:?}", access_key_id.as_ref().map(|_| "***"))]
-        pub access_key_id: Option<String>,
-        {{ secret_doc }}
-        #[debug("{:?}", secret_access_key.as_ref().map(|_| "***"))]
-        pub secret_access_key: Option<String>,
-    });
-    group.tokens = fields.into();
-    Ok(tokens.into())
+    edit_named_body(item, "s3_fields", |body| {
+        let mut fields: Vec<_> = body.into_iter().collect();
+        let marker = fields
+            .iter()
+            .position(|token| token.as_ident().is_some_and(|id| id == "allow_http"))
+            .ok_or_else(|| {
+                ParseError::new(Span::call_site(), "s3_fields requires an allow_http field")
+            })?;
+        let insertion = fields[..marker]
+            .iter()
+            .rposition(TokenTree::is_punct_comma)
+            .map_or(0, |comma| comma + 1);
+        fields.splice(insertion..insertion, moxy::template! {
+            {{ endpoint_doc }} pub endpoint: Option<String>,
+            {{ access_doc }}
+            #[debug("{:?}", access_key_id.as_ref().map(|_| "***"))]
+            pub access_key_id: Option<String>,
+            {{ secret_doc }}
+            #[debug("{:?}", secret_access_key.as_ref().map(|_| "***"))]
+            pub secret_access_key: Option<String>,
+        });
+        Ok(fields.into())
+    })
 }

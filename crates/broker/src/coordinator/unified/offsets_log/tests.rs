@@ -9,9 +9,7 @@ use {
         coordinator::test_support::{offsets_partition_image, read_batch_epochs as read_epochs},
         error::BrokerError,
         metadata_source::MetadataSource,
-        partition::test_support::{
-            CommitPartitionSetup, commit_partition, test_partition_with_writer,
-        },
+        partition::test_support::{commit_partition, test_partition_with_writer},
         partition_registry::PartitionRegistry,
         test_support::FakeMetadataSource,
     },
@@ -104,11 +102,8 @@ async fn a_write_completes_only_when_committed_under_its_term() {
             .expected
             .kafka_error()
             .map_or(Ok(()), |code| Err((0, code.0)));
-        let (partition, _dir, hw_notify) = commit_partition(CommitPartitionSetup {
-            high_watermark: Offset(case.hw_now),
-            ..Default::default()
-        })
-        .await;
+        let (partition, _dir, hw_notify) =
+            commit_partition().high_watermark(case.hw_now).call().await;
         let metadata = Arc::new(
             FakeMetadataSource::builder()
                 .image(offsets_image(1, 0))

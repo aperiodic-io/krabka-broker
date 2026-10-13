@@ -13,7 +13,7 @@ mod jvm_acceptance;
 mod support;
 
 use {
-    crate::support::{JvmBrokerSetup, controller_voters, init_tracing_with},
+    crate::support::{controller_voters, init_tracing_with},
     assert2::{assert, check},
     jvm_acceptance::*,
     krabka_audit::signing::FileEd25519Signer,
@@ -225,13 +225,13 @@ async fn start_worm_broker(
         // for the whole test. A restart is what would start a new epoch, and
         // this suite never restarts.
         remote_log_metadata: krabka_broker::RlmmKind::InMemory,
-        ..support::jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
-            listen: listen_addr,
-            controller: controller_addr,
-            advertised: (broker0_advertised()).to_owned(),
-            voters: controller_voters(&[(1, controller_addr)]),
-            ..Default::default()
-        })
+        ..support::jvm_broker_config()
+            .log_dir(dir.path().to_path_buf())
+            .listen(listen_addr)
+            .controller(controller_addr)
+            .advertised((broker0_advertised()).to_owned())
+            .voters(controller_voters(&[(1, controller_addr)]))
+            .call()
     };
     let handle = krabka_broker::Broker::start(config)
         .await

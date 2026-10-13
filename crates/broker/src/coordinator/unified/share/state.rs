@@ -487,6 +487,7 @@ impl ShareGroupState {
 mod tests {
     use {
         super::*,
+        crate::coordinator::unified::test_support::assert_group_epoch_exhaustion,
         assert2::assert,
         std::time::{Duration, Instant},
     };
@@ -509,11 +510,12 @@ mod tests {
 
     #[test]
     fn bump_epoch_rejects_exhaustion() {
-        let mut group = ShareGroupState::new("g");
-        group.group_epoch = i32::MAX;
-
-        assert!(!group.bump_epoch());
-        assert!(group.group_epoch == i32::MAX);
+        assert_group_epoch_exhaustion(
+            ShareGroupState::new("g"),
+            |group| group.group_epoch = i32::MAX,
+            ShareGroupState::bump_epoch,
+            |group| group.group_epoch,
+        );
     }
 
     #[test]

@@ -130,7 +130,7 @@ pub(crate) fn effective_min_insync_replicas(
 mod tests {
     use {
         super::*,
-        crate::test_support::{TopicSetup, finalize_elr_version, topic_image},
+        crate::test_support::{finalize_elr_version, topic_image},
         assert2::check,
         krabka_metadata::{
             BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord,
@@ -139,10 +139,7 @@ mod tests {
     };
 
     fn image(topic_override: Option<&str>, cluster_default: Option<&str>) -> MetadataImage {
-        let mut image = topic_image(TopicSetup {
-            topic: "t",
-            ..Default::default()
-        });
+        let mut image = topic_image().topic("t").call();
         if let Some(value) = topic_override {
             image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
                 topic: "t".into(),

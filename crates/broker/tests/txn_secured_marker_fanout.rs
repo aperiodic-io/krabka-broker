@@ -31,19 +31,14 @@
 
 use {
     crate::support::{
-        acl::{AllowAclSetup, use_simple_acl_authorizer},
+        acl::use_simple_acl_authorizer,
         controller_voters,
         discovery::named_topic_metadata,
         produce::{SinglePartitionProduceSetup, batch_request},
         records::{batch_from_records, value_record},
         shutdown_cluster,
-        topics::{
-            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
-        },
-        transactions::{
-            EndTransactionSetup, InitProducerSetup, ProducerIdentity, end_transaction_request,
-            init_producer_request,
-        },
+        topics::{creatable_topic, create_topic_request},
+        transactions::{ProducerIdentity, end_transaction_request, init_producer_request},
     },
     assert2::assert,
     krabka_broker::{
@@ -345,13 +340,9 @@ async fn end_txn_marker_fanout_to_remote_leader_over_sasl() {
     // Topic with 2 partitions, RF=1. Round-robin places P0 on node 1 and P1 on
     // node 2.
     let cr = admin
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: (TOPIC).into(),
-                partitions: TopicPartitionCount(2),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name((TOPIC).into()).partitions(2).call(),
+        ))
         .await
         .expect("create topic");
     assert!(
@@ -381,10 +372,11 @@ async fn end_txn_marker_fanout_to_remote_leader_over_sasl() {
     let coord = sasl_client(&format!("{coord_host}:{coord_port}")).await;
 
     let init = coord
-        .send(init_producer_request(InitProducerSetup {
-            transactional_id: Some(TID.into()),
-            ..Default::default()
-        }))
+        .send(
+            init_producer_request()
+                .maybe_transactional_id(Some(TID.into()))
+                .call(),
+        )
         .await
         .expect("init producer id");
     assert!(init.error_code == 0, "InitProducerId failed: {init:?}");
@@ -426,10 +418,12 @@ async fn end_txn_marker_fanout_to_remote_leader_over_sasl() {
     // the path the fix repairs — the pre-fix one-shot client could not
     // authenticate and EndTxn would surface a retriable UNKNOWN_SERVER_ERROR.
     let end = coord
-        .send(end_transaction_request(TID, EndTransactionSetup {
-            producer: ProducerIdentity::from_wire((pid, epoch)),
-            ..Default::default()
-        }))
+        .send(
+            end_transaction_request()
+                .transactional_id(TID)
+                .producer(ProducerIdentity::from_wire((pid, epoch)))
+                .call(),
+        )
         .await
         .expect("end txn");
     assert!(
@@ -469,7 +463,7 @@ fn apply_acls(cfg: &mut BrokerConfig) {
 }
 
 // An Allow ACL on a literal resource.
-use crate::support::{acl::resource_allow_acl as allow, wire::At};
+use crate::support::{acl::literal_allow_acl as allow, wire::At};
 
 /// One transactional `Produce` whose partition leader is not the transaction
 /// coordinator.
@@ -515,26 +509,23 @@ async fn a_remote_coordinator_verifies_a_produce_for_a_broker_with_only_cluster_
     wait_both_registered(&cluster).await;
 
     let grants = [
-        allow(AllowAclSetup {
-            resource_type: ResourceType::Cluster,
-            resource_name: "kafka-cluster",
-            principal: &format!("User:{USER}"),
-            operation: AclOperation::ClusterAction,
-            ..Default::default()
-        }),
-        allow(AllowAclSetup {
-            resource_type: ResourceType::TransactionalId,
-            resource_name: "*",
-            principal: &format!("User:{CLIENT_USER}"),
-            operation: AclOperation::Write,
-            ..Default::default()
-        }),
-        allow(AllowAclSetup {
-            resource_name: "*",
-            principal: &format!("User:{CLIENT_USER}"),
-            operation: AclOperation::Write,
-            ..Default::default()
-        }),
+        allow()
+            .resource_type(ResourceType::Cluster)
+            .resource_name("kafka-cluster")
+            .principal(&format!("User:{USER}"))
+            .operation(AclOperation::ClusterAction)
+            .call(),
+        allow()
+            .resource_type(ResourceType::TransactionalId)
+            .resource_name("*")
+            .principal(&format!("User:{CLIENT_USER}"))
+            .operation(AclOperation::Write)
+            .call(),
+        allow()
+            .resource_name("*")
+            .principal(&format!("User:{CLIENT_USER}"))
+            .operation(AclOperation::Write)
+            .call(),
     ];
     for grant in grants {
         cluster[0]
@@ -583,13 +574,12 @@ async fn a_remote_coordinator_verifies_a_produce_for_a_broker_with_only_cluster_
     let mut expected = Vec::new();
     for case in cases {
         let created = admin
-            .send(create_topic_request(creatable_topic(
-                ConfiguredTopicSetup {
-                    name: (case.name).into(),
-                    partitions: TopicPartitionCount(2),
-                    ..Default::default()
-                },
-            )))
+            .send(create_topic_request(
+                creatable_topic()
+                    .name((case.name).into())
+                    .partitions(2)
+                    .call(),
+            ))
             .await
             .expect("create topic");
         assert!(
@@ -665,10 +655,15 @@ async fn a_remote_coordinator_verifies_a_produce_for_a_broker_with_only_cluster_
         .expect("produce");
 
         let ended = to_coordinator
-            .send(end_transaction_request(case.name, EndTransactionSetup {
-                producer: ProducerIdentity::from_wire((init.producer_id, init.producer_epoch)),
-                ..Default::default()
-            }))
+            .send(
+                end_transaction_request()
+                    .transactional_id(case.name)
+                    .producer(ProducerIdentity::from_wire((
+                        init.producer_id,
+                        init.producer_epoch,
+                    )))
+                    .call(),
+            )
             .await
             .expect("end txn");
 
@@ -705,10 +700,11 @@ async fn init_producer(client: &Client, transactional_id: &str) -> InitProducerI
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let init = client
-            .send(init_producer_request(InitProducerSetup {
-                transactional_id: Some(transactional_id.into()),
-                ..Default::default()
-            }))
+            .send(
+                init_producer_request()
+                    .maybe_transactional_id(Some(transactional_id.into()))
+                    .call(),
+            )
             .await
             .expect("init producer id");
         // COORDINATOR_NOT_AVAILABLE, NOT_COORDINATOR and

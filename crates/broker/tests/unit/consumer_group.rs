@@ -9,8 +9,8 @@ use {
         harness::{create_topic, topic_id_for},
         support::{
             classic::{
-                ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId,
-                classic_join_request, classic_sync_request, required_member_id, sync_assignment,
+                ClassicJoinSetup, ClassicTimeouts, classic_join_request, classic_sync_request,
+                required_member_id, sync_assignment,
             },
             offsets::{
                 offset_commit_partition, offset_commit_topic, offset_fetch_group,
@@ -41,13 +41,16 @@ fn join_setup() -> ClassicJoinSetup {
 #[tokio::test]
 async fn join_group_with_empty_member_returns_member_id_required() {
     let p = start().await;
-    let req = classic_join_request(ClassicJoinSetup {
-        timeouts: ClassicTimeouts {
+    let req = classic_join_request()
+        .group_id(join_setup().group_id)
+        .member_id(join_setup().member_id)
+        .timeouts(ClassicTimeouts {
             rebalance: krabka_units::millis(2_000),
             ..Default::default()
-        },
-        ..join_setup()
-    });
+        })
+        .protocol_type(join_setup().protocol_type)
+        .protocols(join_setup().protocols)
+        .call();
     let r = p.client.send(req).await.expect("JoinGroup");
     assert!(r.error_code == 79); // MEMBER_ID_REQUIRED
     assert!(!r.member_id.is_empty());
@@ -60,17 +63,22 @@ async fn join_group_single_member_completes_after_deadline() {
     // First call to obtain a server-assigned member_id.
     let r1 = p
         .client
-        .send(classic_join_request(join_setup()))
+        .send(crate::classic_join_request_from!(join_setup()))
         .await
         .expect("JoinGroup1");
     // Retry with the assigned member_id. The handler will block ~1.5s
     // waiting for the rebalance deadline.
     let r2 = p
         .client
-        .send(classic_join_request(ClassicJoinSetup {
-            member_id: r1.member_id.clone(),
-            ..join_setup()
-        }))
+        .send(
+            classic_join_request()
+                .group_id(join_setup().group_id)
+                .member_id(r1.member_id.clone())
+                .timeouts(join_setup().timeouts)
+                .protocol_type(join_setup().protocol_type)
+                .protocols(join_setup().protocols)
+                .call(),
+        )
         .await
         .expect("JoinGroup2");
     check!(r2.error_code == 0);
@@ -92,7 +100,7 @@ async fn full_group_flow_join_sync_heartbeat_commit_fetch_leave() {
     // Step 1: empty member_id → broker returns one.
     let r1 = p
         .client
-        .send(classic_join_request(join_setup()))
+        .send(crate::classic_join_request_from!(join_setup()))
         .await
         .unwrap();
     let mid = required_member_id(r1.error_code, r1.member_id.clone());
@@ -100,10 +108,15 @@ async fn full_group_flow_join_sync_heartbeat_commit_fetch_leave() {
     // Step 2: re-join with assigned member_id → wait for rebalance, become leader.
     let r2 = p
         .client
-        .send(classic_join_request(ClassicJoinSetup {
-            member_id: mid.clone(),
-            ..join_setup()
-        }))
+        .send(
+            classic_join_request()
+                .group_id(join_setup().group_id)
+                .member_id(mid.clone())
+                .timeouts(join_setup().timeouts)
+                .protocol_type(join_setup().protocol_type)
+                .protocols(join_setup().protocols)
+                .call(),
+        )
         .await
         .unwrap();
     assert!(r2.error_code == 0);
@@ -113,16 +126,17 @@ async fn full_group_flow_join_sync_heartbeat_commit_fetch_leave() {
     // Step 3: leader SyncGroup with a single-member assignment.
     let r3 = p
         .client
-        .send(classic_sync_request(ClassicSyncSetup {
-            group_id: ("g").into(),
-            generation_id: GenerationId(generation),
-            member_id: mid.clone(),
-            assignments: vec![sync_assignment(
-                mid.clone(),
-                bytes::Bytes::from_static(b"asgn"),
-            )],
-            ..Default::default()
-        }))
+        .send(
+            classic_sync_request()
+                .group_id(("g").into())
+                .generation_id(generation)
+                .member_id(mid.clone())
+                .assignments(vec![sync_assignment(
+                    mid.clone(),
+                    bytes::Bytes::from_static(b"asgn"),
+                )])
+                .call(),
+        )
         .await
         .unwrap();
     assert!(r3.error_code == 0);

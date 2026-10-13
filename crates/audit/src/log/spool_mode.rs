@@ -170,7 +170,12 @@ mod tests {
         frequency: CheckpointFrequency,
     }
 
-    fn failing_spool(setup: FailingSpoolSetup) -> FailingSpoolFixture {
+    #[bon::builder]
+    fn failing_spool(
+        #[builder(default = ROOMY_CAP)] cap: krabka_units::ByteSize,
+        #[builder(default)] frequency: CheckpointFrequency,
+    ) -> FailingSpoolFixture {
+        let setup = FailingSpoolSetup { cap, frequency };
         let FailingSpoolSetup { cap, frequency } = setup;
         let checkpoint_every_n = match frequency {
             CheckpointFrequency::Disabled => None,
@@ -260,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn records_spool_on_sink_failure_then_replay_to_sink() {
-        let fixture = failing_spool(FailingSpoolSetup::default());
+        let fixture = failing_spool().call();
 
         fixture.log.emit(life(NodeId(1)));
         fixture.log.emit(life(NodeId(2)));
@@ -378,10 +383,9 @@ mod tests {
     async fn checkpoint_is_spooled_in_spool_mode_and_replayed_in_order() {
         // Topic down: records and count-triggered checkpoints spool together.
         // Emit a checkpoint after every 2 records.
-        let fixture = failing_spool(FailingSpoolSetup {
-            frequency: CheckpointFrequency::Every(AuditEventCount(2)),
-            ..Default::default()
-        });
+        let fixture = failing_spool()
+            .frequency(CheckpointFrequency::Every(AuditEventCount(2)))
+            .call();
         fixture.log.emit(life(NodeId(0)));
         fixture.log.emit(life(NodeId(1))); // 2 records → triggers a checkpoint, all spooled
         // 2 chained records + 1 count-triggered checkpoint all land in the spool
@@ -512,7 +516,7 @@ mod tests {
 
     #[tokio::test]
     async fn partial_replay_keeps_remainder_then_drains() {
-        let fixture = failing_spool(FailingSpoolSetup::default());
+        let fixture = failing_spool().call();
         fixture.log.emit(life(NodeId(0)));
         fixture.log.emit(life(NodeId(1)));
         fixture.log.emit(life(NodeId(2)));

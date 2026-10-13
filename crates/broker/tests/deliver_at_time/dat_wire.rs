@@ -13,9 +13,7 @@ use {
         support::{
             self,
             client::create_configured_topic,
-            fetch::{
-                FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
-            },
+            fetch::{FetchLimits, RequestWaitMillis, single_partition_fetch},
             offsets::{list_offset_partition, single_partition_list_offsets},
             produce::{SinglePartitionProduceSetup, send_batch},
             topics::CreateTopicSetup,
@@ -100,12 +98,13 @@ pub async fn fetch_values(
     max_wait_ms: i32,
 ) -> Vec<String> {
     let response = client
-        .send(single_partition_fetch(SinglePartitionFetchSetup {
-            topic: topic.to_owned(),
-            topic_id,
-            limits: FetchLimits::one_mebibyte(RequestWaitMillis(max_wait_ms)),
-            ..Default::default()
-        }))
+        .send(
+            single_partition_fetch()
+                .topic(topic.to_owned())
+                .topic_id(topic_id)
+                .limits(FetchLimits::one_mebibyte(RequestWaitMillis(max_wait_ms)))
+                .call(),
+        )
         .await
         .expect("Fetch");
     let served = response

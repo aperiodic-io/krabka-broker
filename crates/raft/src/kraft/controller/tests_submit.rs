@@ -30,6 +30,12 @@ async fn acknowledge_tip(ctrl: &KraftController, follower: NodeId) {
     commit_pending(ctrl, follower).await;
 }
 
+async fn create_committed_topic(ctrl: &KraftController, name: &str) {
+    let create = super::test_support::spawn_submit(ctrl, topic_record(name));
+    acknowledge_tip(ctrl, NodeId(2)).await;
+    create.await.unwrap().unwrap();
+}
+
 fn waiter_offsets(engine: &super::Engine) -> Vec<Offset> {
     engine
         .commit_waiters
@@ -199,7 +205,7 @@ fn guarded_config_rejects_stale_maps_and_accepts_a_fresh_merge() {
 /// from its old authority must still be discarded before append.
 #[tokio::test]
 async fn guarded_change_rejects_old_authority_after_a_term_cycle_without_metadata_changes() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup::default());
+    let (mut engine, _dir) = build_engine_only().call();
     let elect = |engine: &mut Engine| {
         engine.on_event(Event::ElectionTimeout);
         for _ in 0..2 {
@@ -317,13 +323,8 @@ fn offset_advance_submit_rejects_counts_outside_verified_domain() {
 async fn pending_offset_reservations_are_contiguous_before_commit() {
     let (ctrl, _dir) = super::test_support::three_voter_leader().await;
 
-    let create = super::test_support::spawn_submit(&ctrl, topic_record("topic"));
-    acknowledge_tip(&ctrl, NodeId(2)).await;
-    create.await.unwrap().unwrap();
-
-    let create_other = super::test_support::spawn_submit(&ctrl, topic_record("other"));
-    acknowledge_tip(&ctrl, NodeId(2)).await;
-    create_other.await.unwrap().unwrap();
+    create_committed_topic(&ctrl, "topic").await;
+    create_committed_topic(&ctrl, "other").await;
 
     let first_ctrl = ctrl.clone();
     let first =
@@ -749,9 +750,7 @@ async fn offset_reservation_waits_for_current_epoch_commit_then_retries() {
     assert!(matches!(result, Err(RaftError::UncommittedTail)));
     assert!(ctrl.quorum_state().await.unwrap().log_end_offset == log_end);
 
-    let create = super::test_support::spawn_submit(&ctrl, topic_record("topic"));
-    acknowledge_tip(&ctrl, NodeId(2)).await;
-    create.await.unwrap().unwrap();
+    create_committed_topic(&ctrl, "topic").await;
 
     let retry_ctrl = ctrl.clone();
     let retry = tokio::spawn(async move {
@@ -774,10 +773,7 @@ async fn offset_reservation_waits_for_current_epoch_commit_then_retries() {
 
 #[test]
 fn try_resolve_waiters_resolves_at_exact_hwm_and_keeps_future_waiter() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, _dir) = build_engine_only().ids(&[NodeId(1)]).call();
     for offset in 0..5 {
         let mut batch = one_offset_batch(offset, 1, b"x");
         engine.log.append(&mut batch, 0).expect("append");
@@ -795,10 +791,7 @@ fn try_resolve_waiters_resolves_at_exact_hwm_and_keeps_future_waiter() {
 
 #[test]
 fn fail_waiters_reached_by_fails_only_waiters_at_or_below_target_hwm() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, _dir) = build_engine_only().ids(&[NodeId(1)]).call();
     let mut ready_rx = park_waiter(&mut engine, 4, 5);
     let mut future_rx = park_waiter(&mut engine, 5, 6);
 
@@ -884,7 +877,7 @@ async fn submit_waiter_fails_on_leadership_loss() {
 
 #[tokio::test]
 async fn submit_change_on_non_leader_rejects() {
-    let (ctrl, _dir) = build(ControllerSetup::default());
+    let (ctrl, _dir) = build().call();
     // Never elected; node 1 is Unattached → not leader.
     let r = ctrl.submit_change(topic_record("t")).await;
     assert2::assert!(matches!(r, Err(RaftError::NotLeader { .. })));
@@ -976,6 +969,18 @@ fn check_first_topic_only(engine: &Engine) {
     );
 }
 
+fn check_topic_already_exists(
+    receiver: &mut oneshot::Receiver<Result<SubmitChangeResult, RaftError>>,
+    expected: &str,
+) {
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(Err(RaftError::Metadata(
+            krabka_metadata::MetadataError::TopicExists(name)
+        ))) if name == expected
+    ));
+}
+
 fn elect_three_voter_engine(engine: &mut super::Engine, epoch: u32) {
     engine.on_event(Event::ElectionTimeout);
     for vote_epoch in [epoch, epoch + 1] {
@@ -989,7 +994,7 @@ fn elect_three_voter_engine(engine: &mut super::Engine, epoch: u32) {
 }
 
 fn elected_three_voter_engine() -> (Engine, tempfile::TempDir) {
-    let (mut engine, dir) = build_engine_only(EngineSetup::default());
+    let (mut engine, dir) = build_engine_only().call();
     elect_three_voter_engine(&mut engine, 0);
     (engine, dir)
 }
@@ -1012,12 +1017,7 @@ async fn second_create_of_uncommitted_topic_is_refused_before_append() {
 
     let mut second_rx =
         super::test_support::submit_on_engine(&mut engine, &topic_record_named("first", 2));
-    assert!(matches!(
-        second_rx.try_recv(),
-        Ok(Err(RaftError::Metadata(
-            krabka_metadata::MetadataError::TopicExists(name)
-        ))) if name == "first"
-    ));
+    check_topic_already_exists(&mut second_rx, "first");
     check!(engine.log.log_end_offset() == end_after_first);
     check!(
         engine
@@ -1070,12 +1070,7 @@ async fn create_of_a_name_left_uncommitted_by_an_earlier_epoch_is_refused() {
     let end_before_retry = engine.log.log_end_offset();
     let mut retry_rx =
         super::test_support::submit_on_engine(&mut engine, &topic_record_named("first", 2));
-    assert!(matches!(
-        retry_rx.try_recv(),
-        Ok(Err(RaftError::Metadata(
-            krabka_metadata::MetadataError::TopicExists(name)
-        ))) if name == "first"
-    ));
+    check_topic_already_exists(&mut retry_rx, "first");
     check!(engine.log.log_end_offset() == end_before_retry);
 
     // A create of another name is not held back by the pending tail.

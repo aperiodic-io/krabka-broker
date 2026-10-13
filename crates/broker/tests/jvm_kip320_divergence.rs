@@ -78,10 +78,7 @@ mod test_support {
         pub(crate) use crate::{
             docker::{produce_lines_via_jvm, set_container_paused},
             dump_log::{dump_log_in_container, max_offset_in_dump},
-            mixed_cluster::{
-                DivergenceDirection, PartitionEpochDelta, SingleLeaderSetup, prepare_divergence,
-                single_leader_record,
-            },
+            mixed_cluster::{DivergenceDirection, prepare_divergence, single_leader_record},
             topic_admin::{LEADER_WAIT, wait_for_described_leader},
         };
     }

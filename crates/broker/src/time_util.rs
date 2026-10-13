@@ -175,8 +175,38 @@ macro_rules! run_sweeps {
         }
     }};
 }
-use crate::metadata_source::MetadataSource;
 pub(crate) use run_sweeps;
+
+/// Run a metadata-backed sweep with one image snapshot per tick.
+macro_rules! run_metadata_sweeps {
+    (
+        $timer:expr,
+        $first:expr,
+        $interval:expr,
+        $shutdown:expr,
+        $task:expr,
+        $config:expr,
+        $image:ident,
+        $sweep:block,
+        $shutdown_message:expr $(,)?
+    ) => {
+        $crate::time_util::run_sweeps!(
+            $timer,
+            ($first, $interval),
+            $shutdown,
+            $task,
+            {
+                let $image = $config.current_image();
+                $sweep
+            },
+            {
+                tracing::debug!($shutdown_message);
+            },
+        )
+    };
+}
+use crate::metadata_source::MetadataSource;
+pub(crate) use run_metadata_sweeps;
 
 #[cfg(test)]
 mod tests {

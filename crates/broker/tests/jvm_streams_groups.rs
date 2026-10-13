@@ -100,10 +100,7 @@ async fn create_topic(broker: &BrokerHandle, client: &Client, topic: &str, parti
     .await;
 }
 
-use crate::support::{
-    streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
-    topics::{CreateTopicSetup, TopicPartitionCount},
-};
+use crate::support::topics::{CreateTopicSetup, TopicPartitionCount};
 /// Finalize `streams.version` to level 1 so the heartbeat/describe handlers
 /// stop returning `UNSUPPORTED_VERSION`. `upgrade_type: 1` is UPGRADE.
 use support::streams::{active_partition_count, finalize_streams_version, follow_up};
@@ -130,12 +127,14 @@ async fn keepalive(client: &Client, group: &str, member_id: &str, epoch: i32) {
         ..Default::default()
     }]);
     let _ = client
-        .send(follow_up(StreamsFollowUpSetup {
-            group,
-            member_id,
-            epoch: StreamsMemberEpoch(epoch),
-            active,
-        }))
+        .send(
+            follow_up()
+                .group(group)
+                .member_id(member_id)
+                .epoch(epoch)
+                .maybe_active(active)
+                .call(),
+        )
         .await;
 }
 

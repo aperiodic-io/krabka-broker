@@ -76,12 +76,8 @@ mod tests {
             None,
             (
                 vec![
-                    sample_owned(crate::test_support::EmptyPayloadBatchSetup {
-                        count: crate::test_support::RecordCount(2),
-                    }),
-                    sample_owned(crate::test_support::EmptyPayloadBatchSetup {
-                        count: crate::test_support::RecordCount(3),
-                    }),
+                    sample_owned().count(2).call(),
+                    sample_owned().count(3).call(),
                 ],
                 Vec::new(),
             ),
@@ -112,12 +108,7 @@ mod tests {
         let (_results, leo, _) = run_produce_append_batch(
             w.log.clone(),
             None,
-            (
-                vec![sample_owned(crate::test_support::EmptyPayloadBatchSetup {
-                    count: crate::test_support::RecordCount(3),
-                })],
-                Vec::new(),
-            ),
+            (vec![sample_owned().count(3).call()], Vec::new()),
         )
         .await
         .unwrap();
@@ -129,12 +120,15 @@ mod tests {
         assert!(w.log.lock().unwrap().log_start_offset() == start);
     }
 
-    fn sample_owned(setup: EmptyPayloadBatchSetup) -> ProduceData {
-        ProduceData::Owned(sample_batch(setup))
+    #[bon::builder]
+    fn sample_owned(
+        #[builder(into, default)] count: crate::test_support::RecordCount,
+    ) -> ProduceData {
+        ProduceData::Owned(sample_batch().count(count.0).call())
     }
 
     use crate::{
         partition_writer::run_produce_append_batch,
-        test_support::{EmptyPayloadBatchSetup, default_records_batch as sample_batch},
+        test_support::default_records_batch as sample_batch,
     };
 }

@@ -83,11 +83,21 @@ pub struct RefresherSetup {
     pub timer: Arc<dyn Timer>,
 }
 
+#[bon::builder]
 pub fn test_refresher(
     handle: JwksHandle,
     shutdown: CancellationToken,
-    setup: RefresherSetup,
+    #[builder(default = "http://127.0.0.1:1/jwks" . into ())] endpoint: String,
+    #[builder(default = millis (50))] interval: Time,
+    tls_trust: Option<PathBuf>,
+    #[builder(default = dormant_timer ())] timer: Arc<dyn Timer>,
 ) -> JwksRefresher {
+    let setup = RefresherSetup {
+        endpoint,
+        interval,
+        tls_trust,
+        timer,
+    };
     let RefresherSetup {
         endpoint,
         interval,

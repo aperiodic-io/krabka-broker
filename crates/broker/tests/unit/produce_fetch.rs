@@ -12,10 +12,7 @@ use {
         harness::{create_topic, topic_id_for},
         support::{
             self,
-            fetch::{
-                FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, check_record_count,
-                single_partition_fetch,
-            },
+            fetch::{FetchLimits, RequestWaitMillis, check_record_count, single_partition_fetch},
             offsets::{list_offset_partition, single_partition_list_offsets},
             produce::{SinglePartitionProduceSetup, batch_request},
         },
@@ -85,12 +82,11 @@ async fn produce_then_fetch_round_trip() {
     let presp = p.client.send(prod).await.expect("Produce");
     assert!(presp.responses[0].partition_responses[0].error_code == 0);
 
-    let fetch = single_partition_fetch(SinglePartitionFetchSetup {
-        topic: "round".into(),
-        topic_id,
-        limits: FetchLimits::wait_for_data(RequestWaitMillis(100)),
-        ..Default::default()
-    });
+    let fetch = single_partition_fetch()
+        .topic("round".into())
+        .topic_id(topic_id)
+        .limits(FetchLimits::wait_for_data(RequestWaitMillis(100)))
+        .call();
     let fresp = p.client.send(fetch).await.expect("Fetch");
     assert!(fresp.responses.len() == 1);
     check_record_count(&fresp.responses[0].partitions[0], 3);

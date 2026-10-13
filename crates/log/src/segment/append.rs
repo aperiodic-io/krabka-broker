@@ -364,10 +364,9 @@ mod tests {
     use {
         super::*,
         crate::segment::test_support::{
-            DENSE_INDEX, FIRST_LARGE_TIMESTAMP_BATCH, NO_LIMIT, ONE_RECORD_BATCH, RecordTimestamp,
-            SECOND_LARGE_TIMESTAMP_BATCH, SECOND_SINGLE_RECORD_BATCH, SampleBatchSetup,
-            SeededSegmentSetup, sample_batch, seeded_fixture, segment_at, test_batch_at,
-            test_segment,
+            DENSE_INDEX, FIRST_LARGE_TIMESTAMP_BATCH, NO_LIMIT, ONE_RECORD_BATCH,
+            SECOND_LARGE_TIMESTAMP_BATCH, SECOND_SINGLE_RECORD_BATCH, sample_batch, seeded_fixture,
+            segment_at, test_batch_at, test_segment,
         },
         krabka_units::prelude::kibibytes,
     };
@@ -375,8 +374,16 @@ mod tests {
     #[test]
     fn append_then_read_back() {
         let (_dir, mut seg) = test_segment();
-        let b1 = sample_batch(FIRST_LARGE_TIMESTAMP_BATCH);
-        let b2 = sample_batch(SECOND_LARGE_TIMESTAMP_BATCH);
+        let b1 = sample_batch()
+            .offset(FIRST_LARGE_TIMESTAMP_BATCH.offset.0)
+            .records(FIRST_LARGE_TIMESTAMP_BATCH.records.0)
+            .timestamp(FIRST_LARGE_TIMESTAMP_BATCH.timestamp.0)
+            .call();
+        let b2 = sample_batch()
+            .offset(SECOND_LARGE_TIMESTAMP_BATCH.offset.0)
+            .records(SECOND_LARGE_TIMESTAMP_BATCH.records.0)
+            .timestamp(SECOND_LARGE_TIMESTAMP_BATCH.timestamp.0)
+            .call();
         seg.append(&b1, kibibytes(4)).unwrap();
         seg.append(&b2, kibibytes(4)).unwrap();
         let read = seg.read(Offset(0), NO_LIMIT).unwrap();
@@ -387,11 +394,7 @@ mod tests {
     #[test]
     fn append_rejects_offset_successor_overflow_before_writing() {
         let (dir, mut seg) = segment_at(Offset(i64::MAX));
-        let batch = sample_batch(SampleBatchSetup {
-            offset: Offset(i64::MAX),
-            timestamp: RecordTimestamp(100),
-            ..Default::default()
-        });
+        let batch = sample_batch().offset(i64::MAX).timestamp(100).call();
 
         let error = seg.append(&batch, DENSE_INDEX).unwrap_err();
 
@@ -407,24 +410,21 @@ mod tests {
 
     #[test]
     fn append_after_truncate_writes_at_new_eof() {
-        let (_dir, mut seg) = seeded_fixture(SeededSegmentSetup {
-            batches: &[ONE_RECORD_BATCH],
-            ..Default::default()
-        });
+        let (_dir, mut seg) = seeded_fixture().batches(&[ONE_RECORD_BATCH]).call();
         let expected_position = seg.size().bytes_u64();
-        seg.append(&sample_batch(SECOND_SINGLE_RECORD_BATCH), DENSE_INDEX)
-            .unwrap();
+        seg.append(
+            &sample_batch()
+                .offset(SECOND_SINGLE_RECORD_BATCH.offset.0)
+                .records(SECOND_SINGLE_RECORD_BATCH.records.0)
+                .timestamp(SECOND_SINGLE_RECORD_BATCH.timestamp.0)
+                .call(),
+            DENSE_INDEX,
+        )
+        .unwrap();
 
         seg.truncate_to_relative(1).unwrap();
         let position = seg
-            .append(
-                &sample_batch(SampleBatchSetup {
-                    offset: Offset(1),
-                    timestamp: RecordTimestamp(300),
-                    ..Default::default()
-                }),
-                DENSE_INDEX,
-            )
+            .append(&sample_batch().offset(1).timestamp(300).call(), DENSE_INDEX)
             .unwrap();
 
         let read = seg.read(Offset(0), NO_LIMIT).unwrap();
@@ -432,12 +432,12 @@ mod tests {
         assert2::assert!(seg.last_offset() == Offset(1));
         assert2::assert!(
             read == vec![
-                sample_batch(crate::segment::test_support::ONE_RECORD_BATCH),
-                sample_batch(crate::segment::test_support::SampleBatchSetup {
-                    offset: Offset(1),
-                    timestamp: crate::segment::test_support::RecordTimestamp(300),
-                    ..Default::default()
-                })
+                sample_batch()
+                    .offset(crate::segment::test_support::ONE_RECORD_BATCH.offset.0)
+                    .records(crate::segment::test_support::ONE_RECORD_BATCH.records.0)
+                    .timestamp(crate::segment::test_support::ONE_RECORD_BATCH.timestamp.0)
+                    .call(),
+                sample_batch().offset(1).timestamp(300).call()
             ]
         );
     }
@@ -448,7 +448,7 @@ mod tests {
         seg.seal().unwrap();
         assert2::assert!(seg.is_sealed());
         let err = seg
-            .append(&sample_batch(SampleBatchSetup::default()), kibibytes(4))
+            .append(&sample_batch().call(), kibibytes(4))
             .unwrap_err();
         assert2::assert!(matches!(err, LogError::Io(_)));
     }

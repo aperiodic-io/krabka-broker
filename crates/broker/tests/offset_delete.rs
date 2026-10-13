@@ -8,10 +8,7 @@
 
 use {
     crate::support::{
-        classic::{
-            ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol,
-            required_member_id,
-        },
+        classic::{ClassicTimeouts, classic_join_request, join_protocol, required_member_id},
         client::create_topic as create_support_topic,
         offsets::{
             offset_commit_partition, offset_commit_topic, offset_delete_partition,
@@ -248,15 +245,16 @@ async fn delete_offsets_for_subscribed_topic_returns_group_subscribed() {
     // JoinGroup to create a live member with that subscription.
     let r1 = p
         .client
-        .send(classic_join_request(ClassicJoinSetup {
-            group_id: ("g5").into(),
-            timeouts: ClassicTimeouts {
-                rebalance: krabka_units::millis(1_500),
-                ..Default::default()
-            },
-            protocols: vec![join_protocol("range", sub_bytes.clone())],
-            ..Default::default()
-        }))
+        .send(
+            classic_join_request()
+                .group_id(("g5").into())
+                .timeouts(ClassicTimeouts {
+                    rebalance: krabka_units::millis(1_500),
+                    ..Default::default()
+                })
+                .protocols(vec![join_protocol("range", sub_bytes.clone())])
+                .call(),
+        )
         .await
         .expect("JoinGroup1");
     // First JoinGroup with empty member_id returns MEMBER_ID_REQUIRED (79).
@@ -265,16 +263,17 @@ async fn delete_offsets_for_subscribed_topic_returns_group_subscribed() {
     // Re-join with the assigned member_id → become an actual member.
     let r2 = p
         .client
-        .send(classic_join_request(ClassicJoinSetup {
-            group_id: ("g5").into(),
-            member_id: mid,
-            timeouts: ClassicTimeouts {
-                rebalance: krabka_units::millis(1_500),
-                ..Default::default()
-            },
-            protocols: vec![join_protocol("range", sub_bytes)],
-            ..Default::default()
-        }))
+        .send(
+            classic_join_request()
+                .group_id(("g5").into())
+                .member_id(mid)
+                .timeouts(ClassicTimeouts {
+                    rebalance: krabka_units::millis(1_500),
+                    ..Default::default()
+                })
+                .protocols(vec![join_protocol("range", sub_bytes)])
+                .call(),
+        )
         .await
         .expect("JoinGroup2");
     assert!(r2.error_code == 0);

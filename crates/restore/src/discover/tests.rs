@@ -6,15 +6,12 @@
 use {
     super::{
         test_support::{
-            FULL_SEGMENT_SUFFIXES, PartitionKey, args_from, expected_full_segment,
-            single_segment_archive, write_artifact, write_full_segment,
+            FULL_SEGMENT_SUFFIXES, PartitionKey, args_from, expected_full_segment, inventory_error,
+            single_segment_archive, write_artifact, write_full_segment, write_topic_segment,
         },
         *,
     },
-    crate::{
-        backend::open_archive,
-        discover::test_support::{ArtifactSetup, SegmentSetup},
-    },
+    crate::{backend::open_archive, discover::test_support::SegmentSetup},
     assert2::check,
     krabka_ids::{Offset, PartitionIndex},
     krabka_remote_storage::kafka_uuid,
@@ -35,15 +32,16 @@ fn torn_archive(prefix: Option<&str>) -> tempfile::TempDir {
     };
     let segment = Uuid::from_u128(10);
     for suffix in [".log", ".index"] {
-        write_artifact(archive.path(), ArtifactSetup {
-            prefix,
-            segment: SegmentSetup {
+        write_artifact()
+            .root(archive.path())
+            .maybe_prefix(prefix)
+            .segment(SegmentSetup {
                 partition: key,
                 segment_id: segment,
                 ..Default::default()
-            },
-            suffix,
-        });
+            })
+            .suffix(suffix)
+            .call();
     }
     archive
 }
@@ -60,50 +58,52 @@ async fn a_clean_archive_groups_and_sorts_by_topic_partition_and_base_offset() {
     let seg_e = Uuid::from_u128(30);
 
     // orders-0: three segments, written out of base-offset order.
-    write_full_segment(archive.path(), SegmentSetup {
-        partition: PartitionKey {
+    write_full_segment()
+        .root(archive.path())
+        .partition(PartitionKey {
             topic_id: orders_id,
             ..Default::default()
-        },
-        base_offset: Offset(100),
-        segment_id: seg_b,
-    });
-    write_full_segment(archive.path(), SegmentSetup {
-        partition: PartitionKey {
+        })
+        .base_offset(100)
+        .segment_id(seg_b)
+        .call();
+    write_full_segment()
+        .root(archive.path())
+        .partition(PartitionKey {
             topic_id: orders_id,
             ..Default::default()
-        },
-        segment_id: seg_a,
-        ..Default::default()
-    });
-    write_full_segment(archive.path(), SegmentSetup {
-        partition: PartitionKey {
+        })
+        .segment_id(seg_a)
+        .call();
+    write_full_segment()
+        .root(archive.path())
+        .partition(PartitionKey {
             topic_id: orders_id,
             ..Default::default()
-        },
-        base_offset: Offset(250),
-        segment_id: seg_c,
-    });
+        })
+        .base_offset(250)
+        .segment_id(seg_c)
+        .call();
     // orders-1: one segment.
-    write_full_segment(archive.path(), SegmentSetup {
-        partition: PartitionKey {
+    write_full_segment()
+        .root(archive.path())
+        .partition(PartitionKey {
             partition: PartitionIndex(1),
             topic_id: orders_id,
             ..Default::default()
-        },
-        segment_id: seg_d,
-        ..Default::default()
-    });
+        })
+        .segment_id(seg_d)
+        .call();
     // alerts-0: one segment. "alerts" sorts before "orders".
-    write_full_segment(archive.path(), SegmentSetup {
-        partition: PartitionKey {
+    write_full_segment()
+        .root(archive.path())
+        .partition(PartitionKey {
             topic: "alerts",
             topic_id: alerts_id,
             ..Default::default()
-        },
-        segment_id: seg_e,
-        ..Default::default()
-    });
+        })
+        .segment_id(seg_e)
+        .call();
 
     let args = args_from(archive.path(), &[]);
     let store = open_archive(&args).expect("store");
@@ -113,56 +113,62 @@ async fn a_clean_archive_groups_and_sorts_by_topic_partition_and_base_offset() {
         partitions: vec![
             PartitionInventory {
                 partition: TopicIdPartition::new(alerts_id, "alerts", 0),
-                segments: vec![expected_full_segment(&store, SegmentSetup {
-                    partition: PartitionKey {
-                        topic: "alerts",
-                        topic_id: alerts_id,
-                        ..Default::default()
-                    },
-                    segment_id: seg_e,
-                    ..Default::default()
-                })],
+                segments: vec![
+                    expected_full_segment()
+                        .store(&store)
+                        .partition(PartitionKey {
+                            topic: "alerts",
+                            topic_id: alerts_id,
+                            ..Default::default()
+                        })
+                        .segment_id(seg_e)
+                        .call(),
+                ],
             },
             PartitionInventory {
                 partition: TopicIdPartition::new(orders_id, "orders", 0),
                 segments: vec![
-                    expected_full_segment(&store, SegmentSetup {
-                        partition: PartitionKey {
+                    expected_full_segment()
+                        .store(&store)
+                        .partition(PartitionKey {
                             topic_id: orders_id,
                             ..Default::default()
-                        },
-                        segment_id: seg_a,
-                        ..Default::default()
-                    }),
-                    expected_full_segment(&store, SegmentSetup {
-                        partition: PartitionKey {
+                        })
+                        .segment_id(seg_a)
+                        .call(),
+                    expected_full_segment()
+                        .store(&store)
+                        .partition(PartitionKey {
                             topic_id: orders_id,
                             ..Default::default()
-                        },
-                        base_offset: Offset(100),
-                        segment_id: seg_b,
-                    }),
-                    expected_full_segment(&store, SegmentSetup {
-                        partition: PartitionKey {
+                        })
+                        .base_offset(100)
+                        .segment_id(seg_b)
+                        .call(),
+                    expected_full_segment()
+                        .store(&store)
+                        .partition(PartitionKey {
                             topic_id: orders_id,
                             ..Default::default()
-                        },
-                        base_offset: Offset(250),
-                        segment_id: seg_c,
-                    }),
+                        })
+                        .base_offset(250)
+                        .segment_id(seg_c)
+                        .call(),
                 ],
             },
             PartitionInventory {
                 partition: TopicIdPartition::new(orders_id, "orders", 1),
-                segments: vec![expected_full_segment(&store, SegmentSetup {
-                    partition: PartitionKey {
-                        partition: PartitionIndex(1),
-                        topic_id: orders_id,
-                        ..Default::default()
-                    },
-                    segment_id: seg_d,
-                    ..Default::default()
-                })],
+                segments: vec![
+                    expected_full_segment()
+                        .store(&store)
+                        .partition(PartitionKey {
+                            partition: PartitionIndex(1),
+                            topic_id: orders_id,
+                            ..Default::default()
+                        })
+                        .segment_id(seg_d)
+                        .call(),
+                ],
             },
         ],
         unrecognized: UnrecognizedKeys::default(),
@@ -187,23 +193,18 @@ async fn a_topic_filter_narrows_the_selection_and_the_rest_lands_in_unrecognized
     let payments_id = Uuid::from_u128(2);
     let orders_seg = Uuid::from_u128(10);
     let payments_seg = Uuid::from_u128(20);
-    write_full_segment(archive.path(), SegmentSetup {
-        partition: PartitionKey {
-            topic_id: orders_id,
-            ..Default::default()
-        },
-        segment_id: orders_seg,
-        ..Default::default()
-    });
-    write_full_segment(archive.path(), SegmentSetup {
-        partition: PartitionKey {
-            topic: "payments",
-            topic_id: payments_id,
-            ..Default::default()
-        },
-        segment_id: payments_seg,
-        ..Default::default()
-    });
+    write_topic_segment()
+        .root(archive.path())
+        .topic("orders")
+        .topic_id(orders_id)
+        .segment_id(orders_seg)
+        .call();
+    write_topic_segment()
+        .root(archive.path())
+        .topic("payments")
+        .topic_id(payments_id)
+        .segment_id(payments_seg)
+        .call();
 
     let args = args_from(archive.path(), &["--topic", "orders"]);
     let store = open_archive(&args).expect("store");
@@ -359,8 +360,7 @@ async fn a_scan_past_the_sample_limit_keeps_the_sample_and_the_exact_total() {
 async fn an_archive_with_nothing_in_it_is_an_empty_archive_error() {
     let archive = tempfile::tempdir().expect("temp dir");
     let args = args_from(archive.path(), &[]);
-    let store = open_archive(&args).expect("store");
-    let err = inventory(&store, &args).await.unwrap_err();
+    let err = inventory_error(&args).await;
     check!(matches!(err, RestoreError::EmptyArchive { prefix } if prefix.is_empty()));
 }
 
@@ -369,7 +369,6 @@ async fn a_topic_filter_that_selects_nothing_is_also_an_empty_archive_error() {
     let (archive, _topic_id, _) = single_segment_archive(Offset(0));
 
     let args = args_from(archive.path(), &["--topic", "bogus"]);
-    let store = open_archive(&args).expect("store");
-    let err = inventory(&store, &args).await.unwrap_err();
+    let err = inventory_error(&args).await;
     check!(matches!(err, RestoreError::EmptyArchive { .. }));
 }

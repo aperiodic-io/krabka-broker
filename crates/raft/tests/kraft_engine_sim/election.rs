@@ -5,10 +5,7 @@
 //! livelock, which the staggered topologies cannot reach.
 
 use {
-    crate::harness::{
-        SimClusterSetup, SimEngineSetup, await_single_leader, build_engine, start_engines,
-        three_voter_network,
-    },
+    crate::harness::{await_single_leader, build_engine, start_engines, three_voter_network},
     krabka_raft::kraft::NodeId,
     krabka_units::prelude::millis,
     std::time::Duration,
@@ -21,11 +18,7 @@ async fn three_engines_elect_one_leader() {
     let cid = uuid::Uuid::from_u128(100);
 
     // Staggered election timeouts so one node reliably wins the first round.
-    let _dirs = start_engines(&net, SimClusterSetup {
-        ids: &ids,
-        cluster_id: cid,
-        ..Default::default()
-    });
+    let _dirs = start_engines().net(&net).ids(&ids).cluster_id(cid).call();
 
     let (leader, epoch) = await_single_leader(&net, &ids, Duration::from_secs(10)).await;
     assert2::assert!(epoch >= 1);
@@ -65,13 +58,13 @@ async fn bare_majority_two_of_three_elects_with_uniform_timeouts() {
     // majority of the 3-voter set.
     let mut dirs = Vec::new();
     for &id in &[NodeId(1), NodeId(2)] {
-        let (ctrl, dir) = build_engine(&net, SimEngineSetup {
-            me: id,
-            ids: &ids,
-            cluster_id: cid,
-            election_timeout: millis(200),
-            ..Default::default()
-        });
+        let (ctrl, dir) = build_engine()
+            .net(&net)
+            .me(id)
+            .ids(&ids)
+            .cluster_id(cid)
+            .election_timeout(millis(200))
+            .call();
         net.register(id, ctrl);
         dirs.push(dir);
     }

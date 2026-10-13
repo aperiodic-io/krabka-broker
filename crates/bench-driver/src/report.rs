@@ -1310,18 +1310,25 @@ mod tests {
     }
 
     fn check_failover_violation(dir: &Path, krabka: &RunOutput, expected: &str) {
-        write_failover_runs(
+        check_failover_runs(
             dir,
             krabka,
             &fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000)),
+            &[expected],
         );
+    }
+
+    fn check_failover_runs(dir: &Path, krabka: &RunOutput, kafka: &RunOutput, expected: &[&str]) {
+        write_failover_runs(dir, krabka, kafka);
         let violations = failover_gate_violations(dir, true).unwrap();
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|violation| violation.contains(expected)),
-            "{expected}"
-        );
+        for expected in expected {
+            assert2::assert!(
+                violations
+                    .iter()
+                    .any(|violation| violation.contains(expected)),
+                "{expected}"
+            );
+        }
     }
 
     fn write_run(path: impl AsRef<Path>, run: &RunOutput) {
@@ -1459,23 +1466,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut kafka = fake_failover_run(Stack::Kafka, secs(2), per_sec(6_000));
         kafka.samples.clear();
-        write_failover_runs(
+        check_failover_runs(
             dir.path(),
             &fake_failover_run(Stack::Krabka, secs(4), per_sec(8_000)),
             &kafka,
-        );
-
-        let violations = failover_gate_violations(dir.path(), true).unwrap();
-
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("Krabka recovery 4s is slower than kafka 2s"))
-        );
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("kafka failover run is missing message-rate samples"))
+            &[
+                "Krabka recovery 4s is slower than kafka 2s",
+                "kafka failover run is missing message-rate samples",
+            ],
         );
     }
 

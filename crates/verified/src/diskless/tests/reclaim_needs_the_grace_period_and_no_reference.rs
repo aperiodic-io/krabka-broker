@@ -155,12 +155,12 @@ fn retention_prefix_applies_each_kafka_predicate_and_keeps_the_newest_range() {
             &max_timestamps,
             &BYTE_LENS,
             &LAST_OFFSETS,
-            policy(DisklessRetentionSetup {
-                retention: retention_ms.map(RetentionMillis),
-                bytes: retention_bytes.map(RetentionBytes),
-                start: LogicalOffset(floor),
-                now: UnixMillis(NOW_MS),
-            }),
+            policy()
+                .maybe_retention(retention_ms.map(RetentionMillis))
+                .maybe_bytes(retention_bytes.map(RetentionBytes))
+                .start(floor)
+                .now(NOW_MS)
+                .call(),
         );
         check!(prefix == expired, "{what}");
     }
@@ -171,12 +171,6 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
     const THREE_TIMESTAMPS: &[i64] = &[10, 20, 30];
     const THREE_BYTE_LENS: &[u64] = &[100, 100, 100];
     const THREE_LAST_OFFSETS: &[i64] = &[4, 9, 14];
-    let empty_index_policy = policy(DisklessRetentionSetup {
-        retention: Some(RetentionMillis(1)),
-        bytes: Some(RetentionBytes(0)),
-        start: LogicalOffset(99),
-        ..Default::default()
-    });
     // `(what, max timestamps, byte lens, last offsets, policy, expired)`.
     for (what, max_timestamps, byte_lens, last_offsets, policy, expired) in [
         (
@@ -184,10 +178,7 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[100, 200][..],
             &[10, 10][..],
             &[10, 20][..],
-            policy(DisklessRetentionSetup {
-                start: LogicalOffset(10),
-                ..Default::default()
-            }),
+            policy().start(10).call(),
             0,
         ),
         (
@@ -195,10 +186,7 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[500, 900][..],
             &[10, 10][..],
             &[10, 20][..],
-            policy(DisklessRetentionSetup {
-                retention: Some(RetentionMillis(500)),
-                ..Default::default()
-            }),
+            policy().maybe_retention(Some(500)).call(),
             0,
         ),
         // `diff` is 0 and `0 - 0 >= 0`.
@@ -207,10 +195,7 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[100, 200][..],
             &[0, 10][..],
             &[10, 20][..],
-            policy(DisklessRetentionSetup {
-                bytes: Some(RetentionBytes(10)),
-                ..Default::default()
-            }),
+            policy().maybe_bytes(Some(10)).call(),
             1,
         ),
         (
@@ -218,11 +203,7 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             THREE_TIMESTAMPS,
             THREE_BYTE_LENS,
             THREE_LAST_OFFSETS,
-            policy(DisklessRetentionSetup {
-                retention: Some(RetentionMillis(1)),
-                now: UnixMillis(i64::MIN),
-                ..Default::default()
-            }),
+            policy().maybe_retention(Some(1)).now(i64::MIN).call(),
             0,
         ),
         (
@@ -230,11 +211,7 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             THREE_TIMESTAMPS,
             THREE_BYTE_LENS,
             THREE_LAST_OFFSETS,
-            policy(DisklessRetentionSetup {
-                retention: Some(RetentionMillis(-1)),
-                now: UnixMillis(i64::MAX),
-                ..Default::default()
-            }),
+            policy().maybe_retention(Some(-1)).now(i64::MAX).call(),
             0,
         ),
         (
@@ -242,10 +219,7 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             THREE_TIMESTAMPS,
             &[u64::MAX, u64::MAX, u64::MAX][..],
             THREE_LAST_OFFSETS,
-            policy(DisklessRetentionSetup {
-                bytes: Some(RetentionBytes(u64::MAX)),
-                ..Default::default()
-            }),
+            policy().maybe_bytes(Some(u64::MAX)).call(),
             2,
         ),
         (
@@ -253,12 +227,11 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[10][..],
             &[100][..],
             &[4][..],
-            policy(DisklessRetentionSetup {
-                retention: Some(RetentionMillis(1)),
-                bytes: Some(RetentionBytes(0)),
-                start: LogicalOffset(99),
-                ..Default::default()
-            }),
+            policy()
+                .maybe_retention(Some(1))
+                .maybe_bytes(Some(0))
+                .start(99)
+                .call(),
             0,
         ),
         (
@@ -266,7 +239,11 @@ fn retention_prefix_boundaries_follow_kafkas_strict_and_inclusive_comparisons() 
             &[][..],
             &[][..],
             &[][..],
-            empty_index_policy,
+            policy()
+                .maybe_retention(Some(1))
+                .maybe_bytes(Some(0))
+                .start(99)
+                .call(),
             0,
         ),
     ] {

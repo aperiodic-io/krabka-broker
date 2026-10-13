@@ -241,11 +241,11 @@ mod tests {
 
     #[test]
     fn plaintext_passthrough_short_circuits() {
-        let cfg = test_support::handshake_config(test_support::HandshakeSetup {
-            protocol: ListenerProtocol::Plaintext,
-            mechanisms: vec![],
-            credentials: HashMap::new(),
-        });
+        let cfg = test_support::handshake_config()
+            .protocol(ListenerProtocol::Plaintext)
+            .mechanisms(vec![])
+            .credentials(HashMap::new())
+            .call();
         // `upgrade(TcpStream)` requires a real TCP socket, so we
         // exercise the short-circuit predicates directly here. The full
         // upgrade-path is exercised end-to-end in integration tests.

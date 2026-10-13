@@ -6,11 +6,12 @@
 use {
     crate::{
         heartbeat::controller_state::ControllerLivenessState,
-        test_support::{ReassignmentSetup, broker_registration, reassignment_partition},
+        test_support::{broker_registration, reassignment_partition},
     },
     krabka_metadata::{
         BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord,
     },
+    krabka_raft::NodeId,
     std::sync::Arc,
     uuid::Uuid,
 };
@@ -33,7 +34,17 @@ pub(super) fn first_partition(rec: &MetadataRecord) -> &PartitionRecord {
 /// Builds an image with explicit directories. It tests that
 /// `compute_reassignment_progress` keeps the directories aligned after a
 /// completion removes a replica from the set.
-pub(super) fn img(setup: ReassignmentSetup<'_>) -> Arc<MetadataImage> {
+#[bon::builder]
+pub(super) fn img(
+    #[builder(default = vec![krabka_raft::NodeId(1), krabka_raft::NodeId(2), krabka_raft::NodeId(3)])]
+    replicas: Vec<NodeId>,
+    #[builder(default = vec![krabka_raft::NodeId(1), krabka_raft::NodeId(2), krabka_raft::NodeId(3)])]
+    isr: Vec<NodeId>,
+    #[builder(default)] adding: Vec<NodeId>,
+    #[builder(default)] removing: Vec<NodeId>,
+    #[builder(into, default = NodeId(1))] leader: NodeId,
+    #[builder(default = &[])] directories: &'_ [Uuid],
+) -> Arc<MetadataImage> {
     let mut image = MetadataImage::new(Uuid::nil());
     for n in 1..=6u64 {
         image.apply(&MetadataRecord::V1BrokerRegistration(
@@ -48,9 +59,17 @@ pub(super) fn img(setup: ReassignmentSetup<'_>) -> Arc<MetadataImage> {
         name: "foo".into(),
         topic_id: Uuid::nil(),
         partitions: 1,
-        replication_factor: i16::try_from(setup.replicas.len())
-            .expect("replication factor fits i16"),
+        replication_factor: i16::try_from(replicas.len()).expect("replication factor fits i16"),
     }));
-    image.apply(&MetadataRecord::V1Partition(reassignment_partition(setup)));
+    image.apply(&MetadataRecord::V1Partition(
+        reassignment_partition()
+            .replicas(replicas)
+            .isr(isr)
+            .adding(adding)
+            .removing(removing)
+            .leader(leader)
+            .directories(directories)
+            .call(),
+    ));
     Arc::new(image)
 }

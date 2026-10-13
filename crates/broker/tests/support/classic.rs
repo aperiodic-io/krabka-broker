@@ -23,13 +23,15 @@ const ERR_NONE: i16 = 0;
 pub fn join_request(group_id: &str, member_id: &str) -> JoinGroupRequest {
     JoinGroupRequest {
         group_instance_id: None,
-        ..classic_join_request(ClassicJoinSetup {
-            group_id: group_id.to_string(),
-            member_id: member_id.to_string(),
-            protocol_type: "consumer".to_string(),
-            protocols: vec![join_protocol("range".to_string(), Bytes::from_static(b""))],
-            ..Default::default()
-        })
+        ..classic_join_request()
+            .group_id(group_id.to_string())
+            .member_id(member_id.to_string())
+            .protocol_type("consumer".to_string())
+            .protocols(vec![join_protocol(
+                "range".to_string(),
+                Bytes::from_static(b""),
+            )])
+            .call()
     }
 }
 
@@ -137,7 +139,23 @@ pub struct ClassicJoinSetup {
     pub protocols: Vec<JoinGroupRequestProtocol>,
 }
 
-pub fn classic_join_request(setup: ClassicJoinSetup) -> JoinGroupRequest {
+#[bon::builder]
+pub fn classic_join_request(
+    #[builder(default = "group" . into ())] group_id: String,
+    #[builder(default)] member_id: String,
+    #[builder(default)] timeouts: ClassicTimeouts,
+    #[builder(default = "consumer" . into ())] protocol_type: String,
+    #[builder(default = vec ! [join_protocol ("range" , Bytes :: new ())])] protocols: Vec<
+        JoinGroupRequestProtocol,
+    >,
+) -> JoinGroupRequest {
+    let setup = ClassicJoinSetup {
+        group_id,
+        member_id,
+        timeouts,
+        protocol_type,
+        protocols,
+    };
     let ClassicJoinSetup {
         group_id,
         member_id,
@@ -154,6 +172,20 @@ pub fn classic_join_request(setup: ClassicJoinSetup) -> JoinGroupRequest {
         protocols,
         ..Default::default()
     }
+}
+
+#[macro_export]
+macro_rules! classic_join_request_from {
+    ($setup:expr) => {{
+        let setup = $setup;
+        $crate::support::classic::classic_join_request()
+            .group_id(setup.group_id)
+            .member_id(setup.member_id)
+            .timeouts(setup.timeouts)
+            .protocol_type(setup.protocol_type)
+            .protocols(setup.protocols)
+            .call()
+    }};
 }
 
 pub fn sync_assignment(
@@ -180,7 +212,23 @@ pub struct ClassicSyncSetup {
     pub assignments: Vec<SyncGroupRequestAssignment>,
 }
 
-pub fn classic_sync_request(setup: ClassicSyncSetup) -> SyncGroupRequest {
+#[bon::builder]
+pub fn classic_sync_request(
+    #[builder(default = "group" . into ())] group_id: String,
+    #[builder(into, default)] generation_id: GenerationId,
+    #[builder(default)] member_id: String,
+    #[builder(required, default = Some ("consumer" . into ()))] protocol_type: Option<String>,
+    #[builder(required, default = Some ("range" . into ()))] protocol_name: Option<String>,
+    #[builder(default)] assignments: Vec<SyncGroupRequestAssignment>,
+) -> SyncGroupRequest {
+    let setup = ClassicSyncSetup {
+        group_id,
+        generation_id,
+        member_id,
+        protocol_type,
+        protocol_name,
+        assignments,
+    };
     let ClassicSyncSetup {
         group_id,
         generation_id,
@@ -206,10 +254,9 @@ pub fn empty_range_join(
     member: impl Into<String>,
     timeouts: ClassicTimeouts,
 ) -> JoinGroupRequest {
-    classic_join_request(ClassicJoinSetup {
-        group_id: (group).into(),
-        member_id: (member).into(),
-        timeouts,
-        ..Default::default()
-    })
+    classic_join_request()
+        .group_id((group).into())
+        .member_id((member).into())
+        .timeouts(timeouts)
+        .call()
 }

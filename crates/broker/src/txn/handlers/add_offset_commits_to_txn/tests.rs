@@ -1,14 +1,11 @@
 use {
     super::*,
     crate::{
-        partition::Partition,
-        partition_registry::PartitionRegistry,
-        producer_id_manager::ProducerIdManager,
-        test_support::{StandalonePartitionSetup, open_partition},
-        txn::bootstrap,
+        partition::Partition, partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager, test_support::open_partition, txn::bootstrap,
     },
     assert2::{assert, check},
-    std::sync::Arc,
+    std::{path::Path, sync::Arc},
 };
 
 const TID: &str = "tid-offsets";
@@ -173,15 +170,25 @@ fn coordinator_with_log(directory: &std::path::Path) -> (Arc<TxnCoordinator>, Ar
         1,
         krabka_units::mebibytes(1),
     ));
-    let partition = open_partition(directory, StandalonePartitionSetup {
-        topic: bootstrap::TOPIC,
-        ..Default::default()
-    });
+    let partition = open_partition()
+        .log_dir(directory)
+        .topic(bootstrap::TOPIC)
+        .call();
     coordinator.partitions.insert(
         bootstrap::TOPIC.into(),
         PartitionIndex(0),
         Arc::clone(&partition),
     );
+    (coordinator, partition)
+}
+
+async fn coordinator_with_led_state_partition(
+    directory: &Path,
+) -> (Arc<TxnCoordinator>, Arc<Partition>) {
+    let (coordinator, partition) = coordinator_with_log(directory);
+    coordinator
+        .lead_state_partition_for_test(PartitionIndex(0))
+        .await;
     (coordinator, partition)
 }
 
@@ -303,10 +310,7 @@ async fn add_offsets_answers_kafka_codes_and_appends_only_a_change() {
 #[tokio::test]
 async fn a_caller_already_holding_the_handle_sees_the_durable_state() {
     let directory = tempfile::tempdir().expect("tempdir");
-    let (coordinator, _partition) = coordinator_with_log(directory.path());
-    coordinator
-        .lead_state_partition_for_test(PartitionIndex(0))
-        .await;
+    let (coordinator, _partition) = coordinator_with_led_state_partition(directory.path()).await;
     coordinator
         .put(entry(TxnState::Ongoing, &[]), TxnVersion::Verified)
         .await
@@ -346,10 +350,7 @@ enum Outcome {
 #[tokio::test]
 async fn the_reaper_does_not_abort_a_transaction_that_add_offsets_just_opened() {
     let directory = tempfile::tempdir().expect("tempdir");
-    let (coordinator, _partition) = coordinator_with_log(directory.path());
-    coordinator
-        .lead_state_partition_for_test(PartitionIndex(0))
-        .await;
+    let (coordinator, _partition) = coordinator_with_led_state_partition(directory.path()).await;
     // The previous transaction started and completed long ago.
     let mut completed = entry(TxnState::CompleteCommit, &[]);
     completed.start_ms = 0;

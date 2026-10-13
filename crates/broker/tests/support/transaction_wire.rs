@@ -5,11 +5,11 @@ use {
         produce::{SinglePartitionProduceSetup, batch_request},
         records::{batch_from_records, value_record},
         topics::{
-            AssignedTopicSetup, ConfiguredTopicSetup, TopicPartitionCount, assigned_topic,
-            creatable_topic, create_topic_request,
+            AssignedTopicSetup, TopicPartitionCount, assigned_topic, creatable_topic,
+            create_topic_request,
         },
         transactions::{
-            InitProducerSetup, PartitionRegistration, ProducerIdentity,
+            PartitionRegistration, ProducerIdentity,
             init_producer_request as producer_initialization,
         },
     },
@@ -33,10 +33,9 @@ use {
 };
 
 pub(crate) fn init_producer_request(transactional_id: &str) -> InitProducerIdRequest {
-    producer_initialization(InitProducerSetup {
-        transactional_id: Some(transactional_id.into()),
-        ..Default::default()
-    })
+    producer_initialization()
+        .maybe_transactional_id(Some(transactional_id.into()))
+        .call()
 }
 
 /// Supply both layouts so the client can negotiate either protocol version.
@@ -45,12 +44,11 @@ pub(crate) fn add_partition_request(
     topic: &str,
     (producer_id, epoch): (i64, i16),
 ) -> AddPartitionsToTxnRequest {
-    partitions_request(TransactionPartitionsSetup {
-        transactional_id,
-        producer: ProducerIdentity::from_wire((producer_id, epoch)),
-        topics: vec![transaction_topic(topic, vec![0])],
-        ..Default::default()
-    })
+    partitions_request()
+        .transactional_id(transactional_id)
+        .producer(ProducerIdentity::from_wire((producer_id, epoch)))
+        .topics(vec![transaction_topic(topic, vec![0])])
+        .call()
 }
 
 pub(crate) fn transaction_topic(name: &str, partitions: Vec<i32>) -> AddPartitionsToTxnTopic {
@@ -72,9 +70,21 @@ pub(crate) struct TransactionPartitionsSetup<'a> {
     pub topics: Vec<AddPartitionsToTxnTopic>,
 }
 
+#[bon::builder]
 pub(crate) fn partitions_request(
-    setup: TransactionPartitionsSetup<'_>,
+    #[builder(default = "transaction")] transactional_id: &'_ str,
+    #[builder(default)] producer: ProducerIdentity,
+    #[builder(default)] registration: PartitionRegistration,
+    #[builder(default = vec ! [transaction_topic ("orders" , vec ! [0])])] topics: Vec<
+        AddPartitionsToTxnTopic,
+    >,
 ) -> AddPartitionsToTxnRequest {
+    let setup = TransactionPartitionsSetup {
+        transactional_id,
+        producer,
+        registration,
+        topics,
+    };
     let TransactionPartitionsSetup {
         transactional_id,
         producer,
@@ -115,7 +125,7 @@ pub(crate) struct TransactionProduceSetup<'a> {
     pub values: &'a [&'static str],
 }
 
-pub(crate) fn produce_request(setup: TransactionProduceSetup<'_>) -> ProduceRequest {
+fn build_produce_request(setup: TransactionProduceSetup<'_>) -> ProduceRequest {
     let TransactionProduceSetup {
         transactional_id,
         topic,
@@ -188,7 +198,21 @@ pub struct TransactionTopicSetup<'a> {
     pub context: &'a str,
 }
 
-pub async fn create_topic(client: &krabka_client_core::Client, setup: TransactionTopicSetup<'_>) {
+#[bon::builder]
+pub async fn create_topic(
+    client: &krabka_client_core::Client,
+    #[builder(default = "orders")] name: &'_ str,
+    #[builder(default = crate :: support :: topics :: TopicPartitionCount (1))]
+    partitions: TopicPartitionCount,
+    #[builder(default)] configs: Vec<CreatableTopicConfig>,
+    #[builder(default = "CreateTopics")] context: &'_ str,
+) {
+    let setup = TransactionTopicSetup {
+        name,
+        partitions,
+        configs,
+        context,
+    };
     let TransactionTopicSetup {
         name,
         partitions,
@@ -199,11 +223,10 @@ pub async fn create_topic(client: &krabka_client_core::Client, setup: Transactio
         .send(create_topic_request(
             krabka_protocol::owned::create_topics_request::CreatableTopic {
                 configs,
-                ..creatable_topic(ConfiguredTopicSetup {
-                    name: (name).into(),
-                    partitions: TopicPartitionCount(partitions.0),
-                    ..Default::default()
-                })
+                ..creatable_topic()
+                    .name((name).into())
+                    .partitions(partitions.0)
+                    .call()
             },
         ))
         .await
@@ -285,15 +308,27 @@ pub(crate) async fn produce_succeeds<E: std::fmt::Debug>(
 }
 
 /// Send the fixture through either a client or a direct connection, keeping the success oracle.
+#[bon::builder]
 pub(crate) async fn produce_fixture<E: std::fmt::Debug, F>(
-    setup: TransactionProduceSetup<'_>,
+    #[builder(default = "transaction")] transactional_id: &'_ str,
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(default)] topic_id: Uuid,
+    producer: Option<ProducerIdentity>,
+    #[builder(default = & ["v"])] values: &'_ [&'static str],
     send: impl FnOnce(ProduceRequest) -> F,
 ) where
     F: std::future::Future<
             Output = Result<krabka_protocol::owned::produce_response::ProduceResponse, E>,
         >,
 {
-    produce_succeeds(send(produce_request(setup))).await;
+    let setup = TransactionProduceSetup {
+        transactional_id,
+        topic,
+        topic_id,
+        producer,
+        values,
+    };
+    produce_succeeds(send(build_produce_request(setup))).await;
 }
 
 pub(crate) async fn partition_added<E: std::fmt::Debug>(
@@ -342,12 +377,20 @@ pub(crate) struct AssignedTransactionTopicSetup<'a> {
     pub context: Option<&'a str>,
 }
 
+#[bon::builder]
 pub(crate) async fn create_assigned_topic(
     client: &krabka_client_core::Client,
-    setup: AssignedTransactionTopicSetup<'_>,
+    #[builder(default)] topic: AssignedTopicSetup,
+    context: Option<&'_ str>,
 ) -> Uuid {
+    let setup = AssignedTransactionTopicSetup { topic, context };
     let created = client
-        .send(create_topic_request(assigned_topic(setup.topic)))
+        .send(create_topic_request(
+            assigned_topic()
+                .name(setup.topic.name)
+                .replicas(setup.topic.replicas)
+                .call(),
+        ))
         .await
         .expect("CreateTopics");
     match setup.context {
@@ -423,10 +466,20 @@ pub(crate) struct TransactionConsumerSetup<'a> {
     pub security: Option<ClientSecurity>,
 }
 
+#[bon::builder]
 pub(crate) async fn consumer(
     bootstrap: impl Into<String>,
-    setup: TransactionConsumerSetup<'_>,
+    #[builder(default = "transaction-reader" . into ())] group: String,
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(default = IsolationLevel :: ReadCommitted)] isolation: IsolationLevel,
+    security: Option<ClientSecurity>,
 ) -> Result<Consumer, krabka_client_consumer::ConsumerError> {
+    let setup = TransactionConsumerSetup {
+        group,
+        topic,
+        isolation,
+        security,
+    };
     let TransactionConsumerSetup {
         group,
         topic,
@@ -477,14 +530,15 @@ pub(crate) async fn observed_values(
     done: impl Fn(&[String]) -> bool,
     context: Option<&str>,
 ) -> (Consumer, Vec<String>) {
-    let mut consumer = consumer(bootstrap, TransactionConsumerSetup {
-        group: group.into(),
-        topic,
-        isolation,
-        security,
-    })
-    .await
-    .unwrap();
+    let mut consumer = consumer()
+        .bootstrap(bootstrap)
+        .group(group.into())
+        .topic(topic)
+        .isolation(isolation)
+        .maybe_security(security)
+        .call()
+        .await
+        .unwrap();
     let seen = poll_values(&mut consumer, timeout, done, context).await;
     (consumer, seen)
 }

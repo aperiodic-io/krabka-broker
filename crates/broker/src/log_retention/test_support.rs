@@ -53,7 +53,15 @@ pub(super) async fn expired_partition(
         let mut batch = epoch_batch(idx, format!("value-{idx}").as_bytes());
         log.append(&mut batch).expect("append expired batch");
     }
-    committed_partition(root.path(), log, setup).await
+    committed_partition()
+        .root(root.path())
+        .log(log)
+        .topic(setup.topic)
+        .partition(setup.partition)
+        .leader(setup.leader)
+        .registry(setup.registry)
+        .call()
+        .await
 }
 
 /// The base offsets of the segment files currently on disk for `topic`.

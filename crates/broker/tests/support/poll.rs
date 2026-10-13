@@ -18,8 +18,10 @@ pub struct RetrySetup {
 ///
 /// # Errors
 /// Returns the request error without retrying it.
+#[bon::builder]
 pub async fn retry_response<R, E, F, Fut>(
-    setup: RetrySetup,
+    #[builder(default = Duration :: from_secs (10))] timeout: Duration,
+    #[builder(default = Duration :: from_millis (50))] backoff: Duration,
     mut request: F,
     ready: impl Fn(&R) -> bool,
 ) -> Result<R, E>
@@ -27,6 +29,7 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<R, E>>,
 {
+    let setup = RetrySetup { timeout, backoff };
     let deadline = Instant::now() + setup.timeout;
     loop {
         let response = request().await?;

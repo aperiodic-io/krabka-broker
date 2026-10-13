@@ -163,11 +163,7 @@ pub(crate) struct ControllerDialer {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::test_support::{VoterImageSetup, voter_image},
-        assert2::assert,
-    };
+    use {super::*, crate::test_support::voter_image, assert2::assert};
 
     fn endpoints(named: &[(&str, &str, u16)]) -> Vec<krabka_metadata::VoterEndpoint> {
         named
@@ -213,10 +209,10 @@ mod tests {
     }
 
     fn image_with_voter(node: u64, host: &str, port: u16) -> krabka_metadata::MetadataImage {
-        voter_image(VoterImageSetup {
-            node: krabka_ids::NodeId(node),
-            endpoints: endpoints(&[("CONTROLLER", host, port)]),
-        })
+        voter_image()
+            .node(node)
+            .endpoints(endpoints(&[("CONTROLLER", host, port)]))
+            .call()
     }
 
     /// The voter set answers first, and the configured quorum answers for a

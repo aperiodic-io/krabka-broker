@@ -7,10 +7,7 @@
 //! before it parses the batch.
 
 use {
-    super::{
-        super::{PartitionInput, process_partition},
-        seed_batch,
-    },
+    super::{PartitionInput, append_seed_batch, process_partition, seed_batch},
     crate::{
         codes::{INVALID_TOPIC_EXCEPTION, NONE},
         config::BrokerConfig,
@@ -120,11 +117,7 @@ async fn a_denied_internal_topic_is_refused_and_its_log_end_offset_does_not_move
     let part = fixture
         .partition(dir.path(), "__consumer_offsets", &image)
         .await;
-    part.log
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .append(&mut seed_batch())
-        .expect("seed the partition");
+    append_seed_batch(&part);
     fixture.partitions.insert(
         "__consumer_offsets".into(),
         krabka_ids::PartitionIndex(0),

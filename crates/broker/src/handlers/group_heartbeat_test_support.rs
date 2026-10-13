@@ -1,6 +1,7 @@
 //! Shared group-handler fixtures and subscription authorization cases.
 
 use {
+    crate::test_support::principal as make_principal,
     assert2::assert,
     krabka_metadata::{
         AclOperation, FeatureLevelRecord, MetadataImage, MetadataRecord, ResourceType,
@@ -21,10 +22,20 @@ pub(super) struct GroupAclSetup<'a> {
 }
 
 /// An anonymous group-read probe is denied against an empty authorizer and image.
-pub(super) fn check_group_read_denied(setup: GroupAclSetup<'_>) {
+#[bon::builder]
+pub(super) fn check_group_read_denied(
+    #[builder(default = "consumer-client")] client_id: &'_ str,
+    #[builder(default = "ANONYMOUS")] principal: &'_ str,
+    #[builder(default = "g")] group: &'_ str,
+) {
+    let setup = GroupAclSetup {
+        client_id,
+        principal,
+        group,
+    };
     let authorizer = acl_authorizer();
     let image = MetadataImage::new(uuid::Uuid::nil());
-    let principal = principal(setup.principal);
+    let principal = make_principal(setup.principal);
     let peer = peer();
     let ctx = request_context(&principal, &peer, setup.client_id);
     assert!(super::group_read_denied(
@@ -41,12 +52,13 @@ pub(super) fn acl(
     name: &str,
     operation: AclOperation,
 ) -> MetadataRecord {
-    MetadataRecord::V1AccessControlEntry(allow_acl(AllowAclSetup {
-        resource_type,
-        resource_name: name,
-        operation,
-        ..Default::default()
-    }))
+    MetadataRecord::V1AccessControlEntry(
+        allow_acl()
+            .resource_type(resource_type)
+            .resource_name(name)
+            .operation(operation)
+            .call(),
+    )
 }
 
 /// `Describe` on `Topic(name)`, allowed to `User:alice` from any host.
@@ -121,8 +133,8 @@ use {
         broker::Broker,
         handlers::test_support::single_replica_partition,
         test_support::{
-            AllowAclSetup, PartitionCount, StreamsJoinSetup, allow_acl, peer, principal,
-            request_context, sasl_principal, start_group_broker, streams_join_request,
+            PartitionCount, allow_acl, peer, request_context, sasl_principal, start_group_broker,
+            streams_join_request,
         },
     },
     krabka_raft::NodeId,
@@ -145,7 +157,19 @@ pub(super) struct GroupTopicSetup<'a> {
 /// real count comes from the `V1Partition` records that follow it -- so a
 /// topic meant to be assignable needs both, unlike [`topic_record`] alone
 /// (used only where a test never reaches the assignor).
-pub(super) fn topic_with_partitions(setup: GroupTopicSetup<'_>) -> Vec<MetadataRecord> {
+#[bon::builder]
+pub(super) fn topic_with_partitions(
+    #[builder(default = "orders")] name: &'_ str,
+    #[builder(default)] topic_id: uuid::Uuid,
+    #[builder(into, default = PartitionCount (2))] partitions: PartitionCount,
+    #[builder(into, default = NodeId (1))] node: NodeId,
+) -> Vec<MetadataRecord> {
+    let setup = GroupTopicSetup {
+        name,
+        topic_id,
+        partitions,
+        node,
+    };
     let GroupTopicSetup {
         name,
         topic_id,
@@ -228,11 +252,10 @@ pub(super) fn streams_request(
     group_id: &str,
     member_id: &str,
 ) -> krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest {
-    streams_request_with_topology(StreamsTopologySetup {
-        group_id,
-        member_id,
-        ..Default::default()
-    })
+    streams_request_with_topology()
+        .group_id(group_id)
+        .member_id(member_id)
+        .call()
 }
 
 use krabka_protocol::owned::common::streams_group_heartbeat_request::topic_info::TopicInfo;
@@ -248,18 +271,29 @@ pub(super) struct StreamsTopologySetup<'a> {
     pub state_changelog_topics: Vec<TopicInfo>,
 }
 
+#[bon::builder]
 pub(super) fn streams_request_with_topology(
-    setup: StreamsTopologySetup<'_>,
+    #[builder(default = "g")] group_id: &'_ str,
+    #[builder(default = "m1")] member_id: &'_ str,
+    #[builder(default = "in")] source_topic: &'_ str,
+    #[builder(default)] state_changelog_topics: Vec<TopicInfo>,
 ) -> krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest {
     use krabka_protocol::owned::streams_group_heartbeat_request::{Subtopology, Topology};
+
+    let setup = StreamsTopologySetup {
+        group_id,
+        member_id,
+        source_topic,
+        state_changelog_topics,
+    };
     let StreamsTopologySetup {
         group_id,
         member_id,
         source_topic,
         state_changelog_topics,
     } = setup;
-    streams_join_request(
-        Topology {
+    streams_join_request()
+        .topology(Topology {
             epoch: 1,
             subtopologies: vec![Subtopology {
                 subtopology_id: "0".into(),
@@ -268,10 +302,8 @@ pub(super) fn streams_request_with_topology(
                 ..Default::default()
             }],
             ..Default::default()
-        },
-        StreamsJoinSetup {
-            group_id,
-            member_id,
-        },
-    )
+        })
+        .group_id(group_id)
+        .member_id(member_id)
+        .call()
 }

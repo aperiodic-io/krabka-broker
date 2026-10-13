@@ -8,11 +8,10 @@
 
 pub(super) use crate::break_glass::gate::consumed_proposal_id;
 use {
-    crate::{
-        break_glass::gate::{self, BreakGlassDenial},
-        config::BreakGlassConfig,
+    crate::break_glass::gate::{
+        self, BreakGlassAction, BreakGlassConfig, BreakGlassDenial, MetadataImage, MetadataRecord,
     },
-    krabka_metadata::{BreakGlassAction, DeleteTopicRecord, MetadataImage, MetadataRecord},
+    krabka_metadata::DeleteTopicRecord,
 };
 
 /// The records one topic deletion appends.
@@ -38,11 +37,14 @@ pub(super) fn delete_topic_records(
     let record = MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
         name: name.to_owned(),
     });
-    if !gate::is_gated(config) {
-        return Ok(vec![record]);
-    }
-    let consumed = gate::authorize(image, config, BreakGlassAction::DeleteTopic, name, now_ms)?;
-    Ok(vec![consumed, record])
+    gate::records_with_consume(
+        image,
+        config,
+        BreakGlassAction::DeleteTopic,
+        name,
+        now_ms,
+        record,
+    )
 }
 
 #[cfg(test)]

@@ -10,9 +10,7 @@ use {
         support::{
             client::connect_client,
             discovery::topic_metadata_request,
-            fetch::{
-                FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
-            },
+            fetch::{FetchLimits, RequestWaitMillis, single_partition_fetch},
             producer::{default_producer, enqueue_string_values, transactional_producer},
             topics::metadata_topic,
             transaction_wire::{committed_values, observed_values, read_committed_at_least},
@@ -100,12 +98,11 @@ async fn abort_then_read_committed_skips_records() {
         .send(FetchRequest {
             replica_id: -1,
             isolation_level: 1,
-            ..single_partition_fetch(SinglePartitionFetchSetup {
-                topic: "ta".into(),
-                topic_id,
-                limits: FetchLimits::one_mebibyte(RequestWaitMillis(1_000)),
-                ..Default::default()
-            })
+            ..single_partition_fetch()
+                .topic("ta".into())
+                .topic_id(topic_id)
+                .limits(FetchLimits::one_mebibyte(RequestWaitMillis(1_000)))
+                .call()
         })
         .await
         .unwrap();

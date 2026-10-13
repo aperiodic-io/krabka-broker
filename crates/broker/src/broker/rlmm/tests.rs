@@ -3,7 +3,7 @@ use {
     crate::{
         config::{KafkaRlmmConfig, RemoteStorageBackend},
         diskless::index_log::DISKLESS_WAL_INDEX_TOPIC,
-        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+        handlers::test_support::replicated_partition,
         metrics::BrokerMetrics,
         test_support::replica_nodes,
     },
@@ -11,6 +11,24 @@ use {
     krabka_units::{mebibytes, millis, minutes, secs},
     tempfile::tempdir,
 };
+
+#[bon::builder]
+fn topic_image(
+    topic_id: uuid::Uuid,
+    #[builder(default = 3)] partitions: i32,
+    replication_factor: i16,
+) -> krabka_metadata::MetadataImage {
+    use krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord};
+
+    let mut image = MetadataImage::new(uuid::Uuid::from_u128(1));
+    image.apply(&MetadataRecord::V1Topic(TopicRecord {
+        name: "orders".into(),
+        topic_id,
+        partitions,
+        replication_factor,
+    }));
+    image
+}
 
 #[test]
 fn loopback_bootstrap_maps_wildcard_to_loopback() {
@@ -109,34 +127,28 @@ async fn rlmm_reconciler_applies_initial_and_changed_assignments() {
 #[test]
 fn needed_metadata_partitions_covers_led_and_followed() {
     use {
-        krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord},
-        krabka_remote_storage::TopicIdPartition,
-        krabka_remote_storage_topic::metadata_partition_for,
-        uuid::Uuid,
+        krabka_metadata::MetadataRecord, krabka_remote_storage::TopicIdPartition,
+        krabka_remote_storage_topic::metadata_partition_for, uuid::Uuid,
     };
 
     let topic_id = Uuid::from_u128(0xABCD);
-    let mut image = MetadataImage::new(Uuid::from_u128(1));
-    image.apply(&MetadataRecord::V1Topic(TopicRecord {
-        name: "orders".into(),
-        topic_id,
-        partitions: 3,
-        replication_factor: 2,
-    }));
+    let mut image = topic_image()
+        .topic_id(topic_id)
+        .replication_factor(2)
+        .call();
     // node 7 leads p0, follows p1 (replica), is absent from p2.
     for (partition, leader, replicas) in [
         (0_i32, 7_u64, vec![7_u64, 8]),
         (1, 8, vec![8, 7]),
         (2, 8, vec![8, 9]),
     ] {
-        image.apply(&MetadataRecord::V1Partition(replicated_partition(
-            ReplicatedPartitionSetup {
-                partition: krabka_ids::PartitionIndex(partition),
-                leader: krabka_audit::NodeId(leader),
-                replicas: &replica_nodes(&replicas),
-                ..Default::default()
-            },
-        )));
+        image.apply(&MetadataRecord::V1Partition(
+            replicated_partition()
+                .partition(partition)
+                .leader(leader)
+                .replicas(&replica_nodes(&replicas))
+                .call(),
+        ));
     }
 
     let got = needed_metadata_partitions(&image, krabka_audit::NodeId(7), 50);
@@ -156,7 +168,7 @@ fn needed_metadata_partitions_covers_led_and_followed() {
 #[tokio::test]
 async fn topic_assignment_uses_discovered_count_after_config_changes() {
     use {
-        krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord},
+        krabka_metadata::MetadataRecord,
         krabka_remote_storage_topic::{
             InProcessMetadataEventLog, TopicBasedRemoteLogMetadataManager,
         },
@@ -166,21 +178,17 @@ async fn topic_assignment_uses_discovered_count_after_config_changes() {
     let topic_id = Uuid::from_u128(0xABCD);
     let node = krabka_audit::NodeId(7);
     let image_for = |partition| {
-        let mut image = MetadataImage::new(Uuid::from_u128(1));
-        image.apply(&MetadataRecord::V1Topic(TopicRecord {
-            name: "orders".into(),
-            topic_id,
-            partitions: 3,
-            replication_factor: 1,
-        }));
-        image.apply(&MetadataRecord::V1Partition(replicated_partition(
-            ReplicatedPartitionSetup {
-                partition: krabka_ids::PartitionIndex(partition),
-                leader: node,
-                replicas: &[node],
-                ..Default::default()
-            },
-        )));
+        let mut image = topic_image()
+            .topic_id(topic_id)
+            .replication_factor(1)
+            .call();
+        image.apply(&MetadataRecord::V1Partition(
+            replicated_partition()
+                .partition(partition)
+                .leader(node.0)
+                .replicas(&[node])
+                .call(),
+        ));
         image
     };
     // The topic already exists with three partitions; the restarted broker's

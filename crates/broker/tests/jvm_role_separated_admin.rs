@@ -186,12 +186,11 @@ fn command_config() -> &'static std::path::Path { support::jvm_admin_config() }
 /// with forwarding.
 async fn kafka_tool(tool: &str, bootstrap: &str, args: &[&str]) -> std::process::Output {
     let mount = format!("{}:/krabka-config", command_config().display());
-    let mut full = support::jvm_admin_args(support::JvmAdminSetup {
-        mount: &mount,
-        tool,
-        bootstrap,
-        ..Default::default()
-    });
+    let mut full = support::jvm_admin_args()
+        .mount(&mount)
+        .tool(tool)
+        .bootstrap(bootstrap)
+        .call();
     full.extend(args.iter().map(|arg| (*arg).to_owned()));
     let tool = tool.to_owned();
     let out = support::docker_run_blocking(full, "spawn docker run").await;

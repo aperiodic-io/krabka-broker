@@ -32,7 +32,7 @@ impl BrokerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, assert2::assert};
+    use super::*;
 
     #[test]
     fn replication_helpers_accumulate_per_partition() {
@@ -61,15 +61,6 @@ mod tests {
             ("replication_out", &m.replication_bytes_out, &lbl3, 4_000),
             ("replication_out", &m.replication_bytes_out, &lbl4, 0),
         ];
-        for (family_name, family, label, want) in cases {
-            // One `get_or_create` guard per statement (first
-            // materialization takes the family write lock).
-            let got = family.get_or_create(label).get();
-            assert!(
-                got == want,
-                "{family_name} for partition {}",
-                label.partition
-            );
-        }
+        crate::metrics::assert_metric_counter_cases!(cases);
     }
 }

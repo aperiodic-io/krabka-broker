@@ -28,7 +28,11 @@ pub async fn drive_elect_leaders_sasl_plain(
         .await
         .expect("SASL authenticate for ElectLeaders");
     let topic = election.topic.clone();
-    let req = election_request(election);
+    let req = election_request()
+        .topic(election.topic)
+        .partitions(election.partitions)
+        .kind(election.kind)
+        .call();
     let resp =
         kafka_wire::elect_leaders_response(&mut stream, &req, authentication.client_id).await;
 

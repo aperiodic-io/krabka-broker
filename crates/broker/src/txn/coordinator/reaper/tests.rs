@@ -5,9 +5,7 @@
 use {
     super::*,
     crate::txn::{
-        coordinator::test_support::{
-            DATA_TOPIC, TxnEntrySetup, entry, live_coordinator, test_coordinator,
-        },
+        coordinator::test_support::{DATA_TOPIC, entry, live_coordinator, test_coordinator},
         state::TopicPartition,
     },
     assert2::{assert, check},
@@ -19,8 +17,7 @@ use {
 #[tokio::test]
 async fn reaper_retries_an_existing_prepare_abort() {
     let coordinator = test_coordinator();
-    let mut prepared = TxnEntry::new_empty("tid-retry".to_string(), ProducerId(1000), 2, 60_000, 0);
-    prepared.state = TxnState::PrepareAbort;
+    let prepared = prepared_entry("tid-retry", 1000, 2);
     coordinator.state.insert(
         prepared.transactional_id.clone(),
         Arc::new(Mutex::new(prepared.clone())),
@@ -44,9 +41,7 @@ async fn reaper_retries_an_existing_prepare_abort() {
 #[tokio::test]
 async fn reaper_never_retries_a_prepared_two_phase_transaction() {
     let coordinator = test_coordinator();
-    let mut prepared =
-        TxnEntry::new_empty("tid-2pc".to_string(), ProducerId(1000), 2, NO_TIMEOUT_MS, 0);
-    prepared.state = TxnState::PrepareAbort;
+    let prepared = prepared_entry_with_timeout("tid-2pc", 1000, 2, NO_TIMEOUT_MS);
     coordinator.state.insert(
         prepared.transactional_id.clone(),
         Arc::new(Mutex::new(prepared.clone())),
@@ -76,7 +71,7 @@ async fn reaper_never_retries_a_prepared_two_phase_transaction() {
 
 #[test]
 fn apply_prepare_abort_flips_state_and_stamps_time() {
-    let mut e = entry(TxnEntrySetup::default());
+    let mut e = entry().call();
     e.state = TxnState::Ongoing;
     e.last_update_ms = 1;
     apply_prepare_abort(&mut e, 999);
@@ -87,7 +82,7 @@ fn apply_prepare_abort_flips_state_and_stamps_time() {
 #[test]
 fn apply_complete_abort_records_prev_only_on_a_pid_roll() {
     // No roll: same pid, epoch bumped → prev untouched.
-    let mut e = entry(TxnEntrySetup::default());
+    let mut e = entry().call();
     e.state = TxnState::PrepareAbort;
     e.producer_epoch = 4;
     e.partitions.insert(TopicPartition {
@@ -103,7 +98,7 @@ fn apply_complete_abort_records_prev_only_on_a_pid_roll() {
     check!(e.last_update_ms == 42);
 
     // Roll: fresh pid at epoch 0 → prior pid recorded as prev.
-    let mut rolled = entry(TxnEntrySetup::default());
+    let mut rolled = entry().call();
     rolled.state = TxnState::PrepareAbort;
     apply_complete_abort(&mut rolled, ProducerId(2000), 0, 43);
     check!(rolled.producer_id == 2000);
@@ -114,74 +109,81 @@ fn apply_complete_abort_records_prev_only_on_a_pid_roll() {
     );
 }
 
-#[test]
-fn complete_abort_decision_rejects_any_prepared_snapshot_drift() {
-    let mut prepared = entry(TxnEntrySetup::default());
+#[derive(Clone, Copy)]
+enum PreparedSnapshotCase {
+    Exact,
+    ProducerIdChanged,
+    ProducerEpochChanged,
+    StateChanged,
+    LatePartitionRegistered,
+    StagedIdentityChanged,
+    AlreadyComplete,
+    MalformedEpoch,
+}
+
+#[yare::parameterized(
+    exact = { PreparedSnapshotCase::Exact },
+    producer_id_changed = { PreparedSnapshotCase::ProducerIdChanged },
+    producer_epoch_changed = { PreparedSnapshotCase::ProducerEpochChanged },
+    state_changed = { PreparedSnapshotCase::StateChanged },
+    late_partition_registered = { PreparedSnapshotCase::LatePartitionRegistered },
+    staged_identity_changed = { PreparedSnapshotCase::StagedIdentityChanged },
+    already_complete = { PreparedSnapshotCase::AlreadyComplete },
+    malformed_epoch = { PreparedSnapshotCase::MalformedEpoch },
+)]
+fn complete_abort_decision_checks_the_prepared_snapshot(case: PreparedSnapshotCase) {
+    let mut prepared = entry().call();
     prepared.producer_epoch = 7;
     prepared.state = TxnState::PrepareAbort;
 
-    // Exact match → ok.
     let mut current = prepared.clone();
-    assert!(complete_abort_decision(&current, &prepared) == CompletionDecision::Proceed);
+    let expected = match case {
+        PreparedSnapshotCase::Exact => CompletionDecision::Proceed,
+        PreparedSnapshotCase::ProducerIdChanged => {
+            current.producer_id = ProducerId(9999);
+            CompletionDecision::RejectStaleIdentity
+        }
+        PreparedSnapshotCase::ProducerEpochChanged => {
+            current.producer_epoch = 8;
+            CompletionDecision::RejectStaleIdentity
+        }
+        PreparedSnapshotCase::StateChanged => {
+            current.state = TxnState::Ongoing;
+            CompletionDecision::RejectChangedPreparedState
+        }
+        // A partition registered after preparation must not be cleared by
+        // completion, even when identity and state are unchanged.
+        PreparedSnapshotCase::LatePartitionRegistered => {
+            current.partitions.insert(TopicPartition {
+                topic: "late-registration".into(),
+                partition: PartitionIndex(4),
+            });
+            CompletionDecision::RejectChangedPreparedState
+        }
+        // A staged recovery identity changed while markers were in flight.
+        PreparedSnapshotCase::StagedIdentityChanged => {
+            current.next_producer_id = ProducerId(2000);
+            current.next_producer_epoch = 0;
+            CompletionDecision::RejectChangedPreparedState
+        }
+        // Completed is an idempotent success, not a second completion write.
+        PreparedSnapshotCase::AlreadyComplete => {
+            current.state = TxnState::CompleteAbort;
+            CompletionDecision::AlreadyComplete
+        }
+        PreparedSnapshotCase::MalformedEpoch => {
+            current.producer_epoch = -1;
+            CompletionDecision::RejectMalformed
+        }
+    };
 
-    // pid changed → reject.
-    current = prepared.clone();
-    current.producer_id = ProducerId(9999);
-    assert!(
-        complete_abort_decision(&current, &prepared) == CompletionDecision::RejectStaleIdentity
-    );
-
-    // epoch changed → reject.
-    current = prepared.clone();
-    current.producer_epoch = 8;
-    assert!(
-        complete_abort_decision(&current, &prepared) == CompletionDecision::RejectStaleIdentity
-    );
-
-    // state advanced past PrepareAbort → reject.
-    current = prepared.clone();
-    current.state = TxnState::Ongoing;
-    assert!(
-        complete_abort_decision(&current, &prepared)
-            == CompletionDecision::RejectChangedPreparedState
-    );
-
-    // A partition registration with the same identity and state is still a
-    // different prepared snapshot and must not be cleared by completion.
-    current = prepared.clone();
-    current.partitions.insert(TopicPartition {
-        topic: "late-registration".into(),
-        partition: PartitionIndex(4),
-    });
-    assert!(
-        complete_abort_decision(&current, &prepared)
-            == CompletionDecision::RejectChangedPreparedState
-    );
-
-    // A staged recovery identity changed while markers were in flight.
-    current = prepared.clone();
-    current.next_producer_id = ProducerId(2000);
-    current.next_producer_epoch = 0;
-    assert!(
-        complete_abort_decision(&current, &prepared)
-            == CompletionDecision::RejectChangedPreparedState
-    );
-
-    // The exact completed identity is an idempotent success, not a second
-    // completion write.
-    current = prepared.clone();
-    current.state = TxnState::CompleteAbort;
-    assert!(complete_abort_decision(&current, &prepared) == CompletionDecision::AlreadyComplete);
-
-    current = prepared.clone();
-    current.producer_epoch = -1;
-    assert!(complete_abort_decision(&current, &prepared) == CompletionDecision::RejectMalformed);
+    assert2::assert!(complete_abort_decision(&current, &prepared) == expected);
 }
 
 #[tokio::test]
 async fn failed_prepare_persistence_leaves_the_live_entry_ongoing() {
     let coordinator = test_coordinator();
-    let mut ongoing = entry(TxnEntrySetup::default());
+    let mut ongoing = entry().call();
     ongoing.state = TxnState::Ongoing;
     ongoing.txn_timeout_ms = 1;
     ongoing.start_ms = 0;
@@ -201,7 +203,7 @@ async fn failed_prepare_persistence_leaves_the_live_entry_ongoing() {
 #[tokio::test]
 async fn failed_completion_persistence_leaves_the_live_entry_prepared() {
     let coordinator = test_coordinator();
-    let mut prepared = entry(TxnEntrySetup::default());
+    let mut prepared = entry().call();
     prepared.state = TxnState::PrepareAbort;
     let tid = prepared.transactional_id.clone();
     coordinator
@@ -219,7 +221,7 @@ async fn failed_completion_persistence_leaves_the_live_entry_prepared() {
 #[tokio::test]
 async fn completed_retry_is_at_most_once_without_persistence() {
     let coordinator = test_coordinator();
-    let mut prepared = entry(TxnEntrySetup::default());
+    let mut prepared = entry().call();
     prepared.state = TxnState::PrepareAbort;
     let mut completed = prepared.clone();
     completed.state = TxnState::CompleteAbort;
@@ -238,7 +240,7 @@ async fn completed_retry_is_at_most_once_without_persistence() {
 #[tokio::test]
 async fn replaced_entry_handle_is_rejected_as_stale() {
     let coordinator = test_coordinator();
-    let current = entry(TxnEntrySetup::default());
+    let current = entry().call();
     let tid = current.transactional_id.clone();
     let stale = Arc::new(Mutex::new(current.clone()));
     coordinator.state.insert(tid.clone(), stale.clone());
@@ -253,7 +255,11 @@ async fn replaced_entry_handle_is_rejected_as_stale() {
 // ── Orchestration loop, driven against a mock backend ─────────────────
 
 fn prepared_entry(tid: &str, pid: i64, epoch: i16) -> TxnEntry {
-    let mut e = TxnEntry::new_empty(tid.to_owned(), ProducerId(pid), epoch, 60_000, 0);
+    prepared_entry_with_timeout(tid, pid, epoch, 60_000)
+}
+
+fn prepared_entry_with_timeout(tid: &str, pid: i64, epoch: i16, timeout_ms: i32) -> TxnEntry {
+    let mut e = TxnEntry::new_empty(tid.to_owned(), ProducerId(pid), epoch, timeout_ms, 0);
     e.state = TxnState::PrepareAbort;
     e
 }

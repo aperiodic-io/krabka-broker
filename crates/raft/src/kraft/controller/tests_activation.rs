@@ -245,10 +245,7 @@ async fn a_new_leader_writes_the_bootstrap_records_only_to_a_log_without_a_metad
         ),
     ];
     for (what, voters, bootstrap, before, elected, log, committed) in cases {
-        let (mut engine, _dir) = build_engine_only(EngineSetup {
-            ids: voters,
-            ..Default::default()
-        });
+        let (mut engine, _dir) = build_engine_only().ids(voters).call();
         engine.activation = Activation {
             bootstrap_records: bootstrap,
             default_min_insync_replicas: 2,
@@ -332,16 +329,16 @@ async fn the_records_of_the_bootstrap_checkpoint_reach_the_image_through_the_log
     write_checkpoint(dir.path(), 0, 0, &bytes).expect("write the bootstrap checkpoint");
 
     // The election timeout is long, so only the injected timeout elects.
-    let ctrl = open_test_controller_with(dir.path().to_path_buf(), ControllerOpenSetup {
-        voters: voters.clone(),
-        election_timeout: secs(60),
-        activation: Activation {
+    let ctrl = open_test_controller_with()
+        .data_dir(dir.path().to_path_buf())
+        .voters(voters.clone())
+        .election_timeout(secs(60))
+        .activation(Activation {
             bootstrap_records: vec![feature(METADATA_VERSION_FEATURE, EARLIER_METADATA_VERSION)],
             ..Activation::default()
-        },
-        ..Default::default()
-    })
-    .expect("open");
+        })
+        .call()
+        .expect("open");
     let opened = ctrl.current_image();
     let before = (opened.finalized_features().clone(), opened.voters().clone());
 
@@ -423,10 +420,7 @@ fn the_activation_sets_the_cluster_min_insync_replicas_when_the_bootstrap_enable
 /// not create is one the leader refuses.
 #[test]
 fn a_refused_activation_is_a_fatal_fault() {
-    let (mut engine, _dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, _dir) = build_engine_only().ids(&[NodeId(1)]).call();
     engine.activation = Activation {
         bootstrap_records: vec![
             feature(METADATA_VERSION_FEATURE, LATEST_PRODUCTION_METADATA_VERSION),

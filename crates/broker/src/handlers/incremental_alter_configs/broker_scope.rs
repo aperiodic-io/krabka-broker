@@ -296,7 +296,15 @@ mod tests {
     fn check_broker_record_cases(cases: Vec<Case<'_>>, setup: BrokerConfigMutationSetup<'_>) {
         for (name, image, configs, want) in cases {
             let resource = make_resource(name, configs.clone());
-            let got = broker_records(&resource, broker_config_context(&image, setup));
+            let got = broker_records(
+                &resource,
+                broker_config_context()
+                    .image(&image)
+                    .serving(setup.serving)
+                    .log_dirs(setup.log_dirs)
+                    .unstable(setup.unstable)
+                    .call(),
+            );
             let want = want.map_err(|(code, message)| (code, message.to_owned()));
             check!(got == want, "{name:?} {configs:?}");
         }
@@ -516,10 +524,9 @@ mod tests {
 
         let records = broker_records(
             &resource,
-            broker_config_context(
-                &image_with(&[], false),
-                BrokerConfigMutationSetup::default(),
-            ),
+            broker_config_context()
+                .image(&image_with(&[], false))
+                .call(),
         );
 
         check!(
@@ -539,10 +546,9 @@ mod tests {
                 check!(
                     broker_records(
                         &resource,
-                        broker_config_context(
-                            &image_with(&[], false),
-                            BrokerConfigMutationSetup::default()
-                        )
+                        broker_config_context()
+                            .image(&image_with(&[], false))
+                            .call()
                     ) == Err((
                         codes::INVALID_CONFIG,
                         format!("broker config {key} is controller-managed and read-only"),

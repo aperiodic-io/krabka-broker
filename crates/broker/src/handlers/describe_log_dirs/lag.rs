@@ -75,10 +75,7 @@ mod tests {
         crate::{
             future_log::FutureLogState,
             partition::Partition,
-            test_support::{
-                RecordCount, RepeatedRecordsSetup, StandalonePartitionSetup, UnixMillis,
-                open_partition, repeated_records_batch,
-            },
+            test_support::{RecordCount, open_partition, repeated_records_batch},
         },
         assert2::assert,
     };
@@ -97,20 +94,28 @@ mod tests {
         count: RecordCount,
     }
 
+    #[bon::builder]
     fn partition_with_leo(
         log_dir: &std::path::Path,
-        setup: PartitionLogSetup<'_>,
+        #[builder(default = "orders")] topic: &'_ str,
+        #[builder(into, default)] partition: krabka_ids::PartitionIndex,
+        #[builder(into, default = RecordCount (0))] count: RecordCount,
     ) -> std::sync::Arc<Partition> {
+        let setup = PartitionLogSetup {
+            topic,
+            partition,
+            count,
+        };
         let PartitionLogSetup {
             topic,
             partition,
             count,
         } = setup;
-        let part = open_partition(log_dir, StandalonePartitionSetup {
-            topic,
-            partition: krabka_ids::PartitionIndex(partition.get()),
-            ..Default::default()
-        });
+        let part = open_partition()
+            .log_dir(log_dir)
+            .topic(topic)
+            .partition(partition.get())
+            .call();
         if count.0 > 0 {
             append_n(&part.log, count);
         }
@@ -121,10 +126,10 @@ mod tests {
     ///
     /// The LEO of the log advances by `count`.
     fn append_n(log: &std::sync::Mutex<krabka_log::Log>, count: RecordCount) {
-        let mut batch = repeated_records_batch(RepeatedRecordsSetup {
-            count,
-            timestamp: UnixMillis(1_700_000_000),
-        });
+        let mut batch = repeated_records_batch()
+            .count(count)
+            .timestamp(1_700_000_000)
+            .call();
         log.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .append(&mut batch)
@@ -138,11 +143,11 @@ mod tests {
     async fn offset_lag_matches_kafka() {
         let dir = tempfile::tempdir().unwrap();
         let reg = PartitionRegistry::new();
-        let part = partition_with_leo(dir.path(), PartitionLogSetup {
-            topic: "t",
-            count: RecordCount(5),
-            ..Default::default()
-        });
+        let part = partition_with_leo()
+            .log_dir(dir.path())
+            .topic("t")
+            .count(5)
+            .call();
         assert!(part.log_end_offset() == krabka_log::Offset(5));
         reg.insert("t".into(), krabka_ids::PartitionIndex(0), part);
         for (topic, expected) in [("ghost", INVALID_OFFSET_LAG), ("t", 0)] {
@@ -178,11 +183,12 @@ mod tests {
     async fn future_offset_lag_matches_kafka() {
         let cur_dir = tempfile::tempdir().unwrap();
         let reg = PartitionRegistry::new();
-        let part = partition_with_leo(cur_dir.path(), PartitionLogSetup {
-            topic: "t",
-            partition: krabka_ids::PartitionIndex(3),
-            count: RecordCount(5),
-        });
+        let part = partition_with_leo()
+            .log_dir(cur_dir.path())
+            .topic("t")
+            .partition(3)
+            .count(5)
+            .call();
         assert!(part.log_end_offset() == krabka_log::Offset(5));
         reg.insert("t".into(), krabka_ids::PartitionIndex(3), part);
 

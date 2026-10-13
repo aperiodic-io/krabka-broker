@@ -155,7 +155,7 @@ impl TxnCoordinator {
 mod tests {
     use {
         super::*,
-        crate::txn::coordinator::test_support::{ProducerEpoch, TxnEntrySetup, entry},
+        crate::txn::coordinator::test_support::entry,
         assert2::{assert, check},
     };
 
@@ -165,13 +165,7 @@ mod tests {
         Misplaced,
     }
 
-    fn rolled_entry() -> TxnEntry {
-        entry(TxnEntrySetup {
-            producer: krabka_log::ProducerId(2000),
-            previous: krabka_log::ProducerId(1000),
-            ..Default::default()
-        })
-    }
+    fn rolled_entry() -> TxnEntry { entry().producer(2000).previous(1000).call() }
 
     #[test]
     fn evict_rolled_pid_drops_only_the_prior_id_on_a_roll() {
@@ -195,16 +189,10 @@ mod tests {
         let map: DashMap<ProducerId, String> = DashMap::new();
         map.insert(ProducerId(1000), "tid-a".into());
         // Never rolled: prev == -1 → nothing evicted.
-        TxnCoordinator::evict_superseded_pids(&map, &entry(TxnEntrySetup::default()));
+        TxnCoordinator::evict_superseded_pids(&map, &entry().call());
         assert!(map.get(&ProducerId(1000)).is_some());
         // prev == current (defensive): nothing evicted.
-        TxnCoordinator::evict_superseded_pids(
-            &map,
-            &entry(TxnEntrySetup {
-                previous: krabka_log::ProducerId(1000),
-                ..Default::default()
-            }),
-        );
+        TxnCoordinator::evict_superseded_pids(&map, &entry().previous(1000).call());
         assert!(map.get(&ProducerId(1000)).is_some());
     }
 
@@ -225,7 +213,7 @@ mod tests {
         map.insert(ProducerId(1000), "tid-a".into());
         map.insert(ProducerId(2000), "tid-a".into());
 
-        let mut current = entry(TxnEntrySetup::default());
+        let mut current = entry().call();
         current.next_producer_id = ProducerId(3000);
         current.next_producer_epoch = 0;
         TxnCoordinator::evict_superseded_pids(&map, &current);
@@ -237,19 +225,9 @@ mod tests {
     #[test]
     fn recovery_replay_evicts_superseded_ids_and_tombstone_dominates() {
         let mut recovered = RecoveredTransactions::default();
+        recovered.apply_value(entry().call(), true).unwrap();
         recovered
-            .apply_value(entry(TxnEntrySetup::default()), true)
-            .unwrap();
-        recovered
-            .apply_value(
-                entry(TxnEntrySetup {
-                    producer: krabka_log::ProducerId(2000),
-                    next: krabka_log::ProducerId(3000),
-                    next_epoch: ProducerEpoch(0),
-                    ..Default::default()
-                }),
-                true,
-            )
+            .apply_value(entry().producer(2000).next(3000).next_epoch(0).call(), true)
             .unwrap();
 
         assert!(!recovered.pid_to_tid.contains_key(&ProducerId(1000)));
@@ -277,18 +255,12 @@ mod tests {
     #[test]
     fn recovery_retry_is_idempotent_and_pid_collision_is_atomic() {
         let mut recovered = RecoveredTransactions::default();
-        let first = entry(TxnEntrySetup::default());
+        let first = entry().call();
         recovered.apply_value(first.clone(), true).unwrap();
         recovered.apply_value(first, true).unwrap();
 
         let error = recovered
-            .apply_value(
-                entry(TxnEntrySetup {
-                    transactional_id: "tid-b",
-                    ..Default::default()
-                }),
-                true,
-            )
+            .apply_value(entry().transactional_id("tid-b").call(), true)
             .unwrap_err();
 
         assert!(error.to_string().contains("owned by another transaction"));
@@ -308,14 +280,7 @@ mod tests {
         let mut recovered = RecoveredTransactions::default();
 
         recovered
-            .apply_value(
-                entry(TxnEntrySetup {
-                    next: krabka_log::ProducerId(1000),
-                    next_epoch: ProducerEpoch(1),
-                    ..Default::default()
-                }),
-                true,
-            )
+            .apply_value(entry().next(1000).next_epoch(1).call(), true)
             .unwrap();
 
         assert!(recovered.state.contains_key("tid-a"));
@@ -333,36 +298,22 @@ mod tests {
     fn recovery_rejects_malformed_or_misplaced_identities_without_mutation() {
         for (entry, partition_matches, message) in [
             (
-                entry(TxnEntrySetup {
-                    producer: krabka_log::ProducerId(-1),
-                    ..Default::default()
-                }),
+                entry().producer(-1).call(),
                 StatePartition::Matching,
                 "invalid current producer identity",
             ),
             (
-                entry(TxnEntrySetup {
-                    producer: krabka_log::ProducerId(1),
-                    next: krabka_log::ProducerId(2),
-                    ..Default::default()
-                }),
+                entry().producer(1).next(2).call(),
                 StatePartition::Matching,
                 "invalid staged producer identity",
             ),
             (
-                entry(TxnEntrySetup {
-                    producer: krabka_log::ProducerId(1),
-                    next_epoch: ProducerEpoch(0),
-                    ..Default::default()
-                }),
+                entry().producer(1).next_epoch(0).call(),
                 StatePartition::Matching,
                 "invalid staged producer identity",
             ),
             (
-                entry(TxnEntrySetup {
-                    producer: krabka_log::ProducerId(1),
-                    ..Default::default()
-                }),
+                entry().producer(1).call(),
                 StatePartition::Misplaced,
                 "wrong state partition",
             ),

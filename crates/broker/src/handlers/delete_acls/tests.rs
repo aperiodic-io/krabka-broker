@@ -21,9 +21,7 @@ use {
                 configured_authorizer, filter, named_filters, request, test_context,
             },
         },
-        test_support::{
-            AllowAclSetup, DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
-        },
+        test_support::{DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx},
     },
     assert2::{assert, check},
     krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType},
@@ -90,12 +88,13 @@ async fn handle_returns_matching_acl_fields_and_deletes_only_matches() {
     let remaining = all_acls(&broker_handle);
     assert!(
         remaining
-            == vec![acl(crate::test_support::AllowAclSetup {
-                resource_name: "payments",
-                principal: "User:bob",
-                operation: AclOperation::Write,
-                ..Default::default()
-            })]
+            == vec![
+                acl()
+                    .resource_name("payments")
+                    .principal("User:bob")
+                    .operation(AclOperation::Write)
+                    .call()
+            ]
     );
     broker_handle.shutdown().await;
 }
@@ -140,7 +139,19 @@ struct TopicAclSetup<'a> {
     permission_type: PermissionType,
 }
 
-fn topic_acl(setup: TopicAclSetup<'_>) -> AclEntry {
+#[bon::builder]
+fn topic_acl(
+    #[builder(default = "orders")] name: &'_ str,
+    #[builder(default = PatternType :: Literal)] pattern_type: PatternType,
+    #[builder(default = "User:alice")] principal: &'_ str,
+    #[builder(default = PermissionType :: Allow)] permission_type: PermissionType,
+) -> AclEntry {
+    let setup = TopicAclSetup {
+        name,
+        pattern_type,
+        principal,
+        permission_type,
+    };
     let TopicAclSetup {
         name,
         pattern_type,
@@ -150,11 +161,7 @@ fn topic_acl(setup: TopicAclSetup<'_>) -> AclEntry {
     AclEntry {
         pattern_type,
         permission_type,
-        ..acl(AllowAclSetup {
-            resource_name: name,
-            principal,
-            ..Default::default()
-        })
+        ..acl().resource_name(name).principal(principal).call()
     }
 }
 
@@ -195,32 +202,23 @@ async fn handle_deletes_exactly_what_kafka_matches() {
     );
     test_ctx!(ctx, "admin");
 
-    let literal_foo = topic_acl(TopicAclSetup {
-        name: "foo",
-        ..Default::default()
-    });
-    let wildcard_deny = topic_acl(TopicAclSetup {
-        name: "*",
-        principal: "User:bob",
-        permission_type: PermissionType::Deny,
-        ..Default::default()
-    });
-    let prefixed_fo = topic_acl(TopicAclSetup {
-        name: "fo",
-        pattern_type: PatternType::Prefixed,
-        permission_type: PermissionType::Deny,
-        ..Default::default()
-    });
-    let prefixed_bar = topic_acl(TopicAclSetup {
-        name: "bar",
-        pattern_type: PatternType::Prefixed,
-        principal: "User:bob",
-        ..Default::default()
-    });
-    let literal_food = topic_acl(TopicAclSetup {
-        name: "food",
-        ..Default::default()
-    });
+    let literal_foo = topic_acl().name("foo").call();
+    let wildcard_deny = topic_acl()
+        .name("*")
+        .principal("User:bob")
+        .permission_type(PermissionType::Deny)
+        .call();
+    let prefixed_fo = topic_acl()
+        .name("fo")
+        .pattern_type(PatternType::Prefixed)
+        .permission_type(PermissionType::Deny)
+        .call();
+    let prefixed_bar = topic_acl()
+        .name("bar")
+        .pattern_type(PatternType::Prefixed)
+        .principal("User:bob")
+        .call();
+    let literal_food = topic_acl().name("food").call();
     let seeded = vec![
         literal_foo.clone(),
         wildcard_deny.clone(),
@@ -325,12 +323,8 @@ async fn handle_deletes_exactly_what_kafka_matches() {
 #[tokio::test]
 async fn handle_lists_an_acl_under_every_filter_that_matches_it() {
     let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
-    let shared = acl(AllowAclSetup::default());
-    let other = acl(AllowAclSetup {
-        resource_name: "payments",
-        principal: "User:bob",
-        ..Default::default()
-    });
+    let shared = acl().call();
+    let other = acl().resource_name("payments").principal("User:bob").call();
     seed_acls(&broker_handle, vec![shared.clone(), other.clone()]).await;
     let broker = broker_handle.broker_arc_for_test();
     test_ctx!(ctx, "admin");
@@ -363,7 +357,7 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
     type Edit = fn(&mut DeleteAclsFilter);
 
     let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
-    let doomed = acl(AllowAclSetup::default());
+    let doomed = acl().call();
     seed_acls(&broker_handle, vec![doomed.clone()]).await;
     let broker = broker_handle.broker_arc_for_test();
     test_ctx!(ctx, "admin");
@@ -456,12 +450,7 @@ async fn seed_many_acls(handle: &BrokerHandle, count: usize) {
     seed_acls(
         handle,
         (0..count)
-            .map(|n| {
-                acl(AllowAclSetup {
-                    resource_name: &format!("topic-{n}"),
-                    ..Default::default()
-                })
-            })
+            .map(|n| acl().resource_name(&format!("topic-{n}")).call())
             .collect(),
     )
     .await;
@@ -519,12 +508,7 @@ async fn handle_bounds_a_request_to_ten_thousand_removals() {
 #[test]
 fn match_filter_bounds_the_removals_of_a_request() {
     let image_acls: Vec<AclEntry> = (0..5)
-        .map(|n| {
-            acl(AllowAclSetup {
-                resource_name: &format!("topic-{n}"),
-                ..Default::default()
-            })
-        })
+        .map(|n| acl().resource_name(&format!("topic-{n}")).call())
         .collect();
     let build = |name: Option<&str>| build_filter(&filter(name, None)).expect("filter");
     let every_acl = build(None);

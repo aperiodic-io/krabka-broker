@@ -381,10 +381,16 @@ mod tests {
         }
     }
 
+    #[bon::builder]
     fn memory_writer(
         directory: &std::path::Path,
-        setup: MemoryWriterSetup,
+        #[builder(into, default = MemoryWriterSetup::default().capacity)] capacity: QueueCapacity,
+        #[builder(default = MemoryWriterSetup::default().checkpoints)] checkpoints: CheckpointSetup,
     ) -> (Arc<AuditLog>, Arc<MemorySink>, tokio::task::JoinHandle<()>) {
+        let setup = MemoryWriterSetup {
+            capacity,
+            checkpoints,
+        };
         let MemoryWriterSetup {
             capacity,
             checkpoints,
@@ -392,7 +398,16 @@ mod tests {
         let spool = Spool::open(directory, ROOMY_CAP).unwrap();
         let (log, receiver) = AuditLog::new(capacity.0);
         let sink = Arc::new(MemorySink::default());
-        let handle = spawn_writer(receiver, quiet_params(sink.clone(), spool, checkpoints));
+        let handle = spawn_writer(
+            receiver,
+            quiet_params()
+                .sink(sink.clone())
+                .spool(spool)
+                .stats(checkpoints.stats)
+                .maybe_signer(checkpoints.signer)
+                .frequency(checkpoints.frequency)
+                .call(),
+        );
         (log, sink, handle)
     }
 
@@ -412,17 +427,27 @@ mod tests {
         frequency: CheckpointFrequency,
     }
 
-    fn signed_writer(setup: SignedWriterSetup) -> SignedWriterFixture {
+    #[bon::builder]
+    fn signed_writer(
+        #[builder(into, default = QueueCapacity (16))] capacity: QueueCapacity,
+        #[builder(default = crate :: log :: test_support :: CheckpointFrequency :: Every (crate :: log :: test_support :: AuditEventCount (1_000_000)))]
+        frequency: CheckpointFrequency,
+    ) -> SignedWriterFixture {
+        let setup = SignedWriterSetup {
+            capacity,
+            frequency,
+        };
         let (signer, public_key) = test_signer();
         let directory = tempfile::tempdir().unwrap();
-        let writer = memory_writer(directory.path(), MemoryWriterSetup {
-            capacity: setup.capacity,
-            checkpoints: CheckpointSetup {
+        let writer = memory_writer()
+            .directory(directory.path())
+            .capacity(setup.capacity)
+            .checkpoints(CheckpointSetup {
                 signer: Some(signer),
                 frequency: setup.frequency,
                 ..Default::default()
-            },
-        });
+            })
+            .call();
         (public_key, directory, writer)
     }
 
@@ -460,7 +485,7 @@ mod tests {
     #[tokio::test]
     async fn emitted_events_reach_the_sink_in_order() {
         let dir = tempfile::tempdir().unwrap();
-        let (log, sink, handle) = memory_writer(dir.path(), MemoryWriterSetup::default());
+        let (log, sink, handle) = memory_writer().directory(dir.path()).call();
 
         finish_lifecycle_writer(log, handle, &[NodeId(1), NodeId(2), NodeId(3)]).await;
 
@@ -475,7 +500,7 @@ mod tests {
     async fn chained_records_carry_seq_and_prev_hash() {
         let dir = tempfile::tempdir().unwrap();
         // no signer, huge interval => no checkpoints, just chaining
-        let (log, sink, h) = memory_writer(dir.path(), MemoryWriterSetup::default());
+        let (log, sink, h) = memory_writer().directory(dir.path()).call();
         finish_lifecycle_writer(log, h, &[NodeId(1), NodeId(2)]).await;
 
         let recs = sink.records();
@@ -499,10 +524,10 @@ mod tests {
     #[tokio::test]
     async fn checkpoints_emitted_by_count_and_verify_against_recomputed_head() {
         // checkpoint every 2 records; long interval so only count triggers
-        let (pubkey, _dir, (log, sink, h)) = signed_writer(SignedWriterSetup {
-            capacity: QueueCapacity(64),
-            frequency: CheckpointFrequency::Every(AuditEventCount(2)),
-        });
+        let (pubkey, _dir, (log, sink, h)) = signed_writer()
+            .capacity(64)
+            .frequency(CheckpointFrequency::Every(AuditEventCount(2)))
+            .call();
         for i in 0..4 {
             log.emit(life(NodeId(i)));
         }
@@ -536,7 +561,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_emits_final_checkpoint_for_pending_tail() {
         // every_n large so only the shutdown path emits
-        let (pubkey, _dir, (log, sink, h)) = signed_writer(SignedWriterSetup::default());
+        let (pubkey, _dir, (log, sink, h)) = signed_writer().call();
         finish_lifecycle_writer(log, h, &[NodeId(1), NodeId(2), NodeId(3)]).await;
 
         let recs = sink.records();

@@ -31,10 +31,7 @@ use {
             storage::{local_log_segment_metadata, topic_remote_log_files},
             topics::AssignedTopicSetup,
         },
-        topic_fixture::{
-            AssignedTieredTopicSetup, TieredRecordCount, TieredRecordsSetup, create_assigned_topic,
-            produce_records as produce_tiered_records,
-        },
+        topic_fixture::{create_assigned_topic, produce_records as produce_tiered_records},
     },
     assert2::{assert, check},
     krabka_broker::{BrokerHandle, metrics::PartitionLabel},
@@ -82,31 +79,30 @@ fn local_log_bytes(partition_dir: &Path) -> u64 {
 
 /// Produces `count` single-record batches through `client`, one request each.
 async fn produce_records(client: &Client, topic_id: WireUuid, count: usize) {
-    produce_tiered_records(
-        client,
-        |index| {
+    produce_tiered_records()
+        .client(client)
+        .value(|index| {
             let mut value = format!("record-{index}-").into_bytes();
             value.resize(PAYLOAD, b'x');
             bytes::Bytes::from(value)
-        },
-        TieredRecordsSetup {
-            topic: TOPIC,
-            topic_id,
-            count: TieredRecordCount(count),
-        },
-    )
-    .await;
+        })
+        .topic(TOPIC)
+        .topic_id(topic_id)
+        .count(count)
+        .call()
+        .await;
 }
 
 /// Creates the tiered topic on broker 1 alone, with local retention set so
 /// tight that every sealed segment is evicted as soon as it is archived.
 async fn create_single_replica_tiered_topic(admin: &Client, leader: &BrokerHandle) {
     let assignment = AssignedTopicSetup::on_replicas(TOPIC, vec![krabka_metadata::NodeId(1)]);
-    create_assigned_topic(admin, AssignedTieredTopicSetup {
-        topic: assignment,
-        segment_bytes: None,
-    })
-    .await;
+    create_assigned_topic()
+        .client(admin)
+        .topic(assignment)
+        .maybe_segment_bytes(None)
+        .call()
+        .await;
     leader
         .wait_for_image(|img| img.partition(TOPIC, 0).is_some())
         .await;

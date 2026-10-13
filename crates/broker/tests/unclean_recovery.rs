@@ -89,7 +89,6 @@ use crate::kafka_wire::create_assigned_topic_plaintext as create_topic_plaintext
 /// the top-level `error_code == 0`, and returns the per-partition
 /// `(partition_id, error_code)` rows for `topic`.
 use crate::kafka_wire::elect_leaders_plaintext as drive_elect_leaders;
-use crate::kafka_wire::{AssignedTopicExchangeSetup, ElectionExchangeSetup};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Polling helpers
@@ -170,11 +169,12 @@ async fn offline_partition_with_diverged_logs(
     let [h1, h2, h3] = handles;
     // ── Create the RF=3 topic. Partition 0's replica assignment is
     //    [1, 2, 3]; broker 1 is the preferred/first. ──
-    create_topic_plaintext(addr, AssignedTopicExchangeSetup {
-        client_id: CLIENT_ID,
-        topic: AssignedTopicSetup::three_replicas(topic),
-    })
-    .await;
+    create_topic_plaintext()
+        .addr(addr)
+        .client_id(CLIENT_ID)
+        .topic(AssignedTopicSetup::three_replicas(topic))
+        .call()
+        .await;
     wait_partition_hosted(h1, topic, 0).await;
     wait_partition_hosted(h2, topic, 0).await;
     wait_partition_hosted(h3, topic, 0).await;
@@ -357,15 +357,16 @@ async fn run_unclean_recovery(elr: Option<&str>, witness: Option<u64>, expected_
     eprintln!("sending ElectLeaders UNCLEAN to raft leader at {elect_addr}");
 
     // ── Trigger offset-aware recovery (election_type = 1 = UNCLEAN). ──
-    let result = drive_elect_leaders(elect_addr, ElectionExchangeSetup {
-        client_id: CLIENT_ID,
-        election: ElectionSetup {
+    let result = drive_elect_leaders()
+        .addr(elect_addr)
+        .client_id(CLIENT_ID)
+        .election(ElectionSetup {
             topic: (topic).to_string(),
             kind: ElectionKind::Unclean,
             ..Default::default()
-        },
-    })
-    .await;
+        })
+        .call()
+        .await;
     assert!(
         result == vec![(0, 0)],
         "expected error_code=0 for UNCLEAN election; got {result:?}"

@@ -9,16 +9,16 @@ use {
         NONE,
         harness::initialize_consumption,
         share_rpc::{
-            ShareRenewSetup, acquired_count, fetch_empty, fetch_redelivered, fetch_until_acquired,
-            share_fetch, share_renew,
+            acquired_count, fetch_empty, fetch_redelivered, fetch_until_acquired, share_fetch,
+            share_renew,
         },
         support::share::{
-            ConsumptionSetup, ShareFetchSetup, ShareRecordCount, ShareSessionEpoch,
-            ShareSessionSetup, ShareTopicSetup, permitted_topic_fixture,
+            ConsumptionSetup, ShareBrokerFixture, ShareFetchSetup, ShareRecordCount,
+            ShareSessionEpoch, ShareSessionSetup, permitted_topic_fixture,
         },
     },
     assert2::assert,
-    std::time::Duration,
+    std::time::{Duration, Instant},
 };
 
 /// The background sweep reverts an acquired-but-unacknowledged lock that
@@ -26,7 +26,7 @@ use {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lock_timeout_redelivers() {
     let (_permit, broker, client, _dir, tid, member) =
-        lock_fixture(Duration::from_millis(200), None).await;
+        Box::pin(lock_fixture(Duration::from_millis(200), None)).await;
     let session = ShareSessionSetup::joined(&member, tid);
 
     // Fetch but DO NOT acknowledge.
@@ -47,7 +47,7 @@ async fn lock_timeout_redelivers() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delivery_limit_archives() {
     let (_permit, broker, client, _dir, tid, member) =
-        lock_fixture(Duration::from_millis(150), Some(2)).await;
+        Box::pin(lock_fixture(Duration::from_millis(150), Some(2))).await;
     let session = ShareSessionSetup::joined(&member, tid);
 
     // Delivery 1 (no ack).
@@ -94,22 +94,19 @@ async fn delivery_limit_archives() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn renew_extends_lock_not_redelivered() {
     let (_permit, _broker, client, _dir, tid, member) =
-        lock_fixture(Duration::from_millis(500), None).await;
-    let session = ShareSessionSetup::joined(&member, tid);
-
+        Box::pin(lock_fixture(Duration::from_millis(500), None)).await;
     // Acquire offset 0 (lock 500ms, delivery_count 1). Epoch is now 1.
-    let acquire_at = std::time::Instant::now();
-    acquire_initial_record(&client, &member, tid).await;
+    let (session, acquire_at) = acquire_initial_session(&client, &member, tid).await;
 
     // Intentional calibrated timing: renew ~200ms in (before the 500ms lock
     // expires) to reset the deadline to renew-time + 500ms ≈ T0+700ms. Epoch
     // is now 2. This sleep proves renew timing; it is NOT a flaky state-guess.
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let renew = share_renew(&client, ShareRenewSetup {
-        session: ShareSessionSetup::joined(&member, tid),
-        ..Default::default()
-    })
-    .await;
+    let renew = share_renew()
+        .client(&client)
+        .session(ShareSessionSetup::joined(&member, tid))
+        .call()
+        .await;
     assert!(
         renew.error_code == NONE,
         "renew must succeed for an acquired offset, got {}",
@@ -135,10 +132,8 @@ async fn renew_extends_lock_not_redelivered() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn no_renew_redelivers_after_lock_expiry() {
     let (_permit, _broker, client, _dir, tid, member) =
-        lock_fixture(Duration::from_millis(500), None).await;
-    let session = ShareSessionSetup::joined(&member, tid);
-
-    acquire_initial_record(&client, &member, tid).await;
+        Box::pin(lock_fixture(Duration::from_millis(500), None)).await;
+    let (session, _) = acquire_initial_session(&client, &member, tid).await;
 
     // Intentional calibrated timing: no renew — wait 800ms (well past the 500ms
     // lock + a sweeper tick) so the record is reverted to Available and
@@ -152,22 +147,18 @@ async fn no_renew_redelivers_after_lock_expiry() {
 async fn lock_fixture(
     lock_duration: Duration,
     max_delivery_attempts: Option<i16>,
-) -> (
-    tokio::sync::OwnedSemaphorePermit,
-    krabka_broker::BrokerHandle,
-    std::sync::Arc<krabka_client_core::Client>,
-    tempfile::TempDir,
-    uuid::Uuid,
-    String,
-) {
-    let (permit, broker, client, dir, tid) =
-        permitted_topic_fixture(ShareTopicSetup::default(), |config| {
-            config.share_group.record_lock_duration = lock_duration;
-            if let Some(attempts) = max_delivery_attempts {
-                config.share_group.max_delivery_attempts = attempts;
-            }
-        })
-        .await;
+) -> ShareBrokerFixture {
+    let (permit, broker, client, dir, tid) = Box::pin(
+        permitted_topic_fixture()
+            .customize(Box::new(move |config| {
+                config.share_group.record_lock_duration = lock_duration;
+                if let Some(attempts) = max_delivery_attempts {
+                    config.share_group.max_delivery_attempts = attempts;
+                }
+            }))
+            .call(),
+    )
+    .await;
     let (member, _) = initialize_consumption(&broker, &client, ConsumptionSetup {
         topic_id: tid,
         count: ShareRecordCount(1),
@@ -185,4 +176,15 @@ async fn acquire_initial_record(
     let row = fetch_until_acquired(client, ShareSessionSetup::opening(member, tid)).await;
     assert!(acquired_count(&row) == 1, "acquire the single offset");
     assert!(row.acquired_records[0].delivery_count == 1);
+}
+
+async fn acquire_initial_session<'a>(
+    client: &krabka_client_core::Client,
+    member: &'a str,
+    tid: uuid::Uuid,
+) -> (ShareSessionSetup<'a>, Instant) {
+    let session = ShareSessionSetup::joined(member, tid);
+    let acquire_at = Instant::now();
+    acquire_initial_record(client, member, tid).await;
+    (session, acquire_at)
 }

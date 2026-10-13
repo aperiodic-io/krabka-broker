@@ -344,7 +344,19 @@ mod tests {
     }
 
     /// The responder and quorum watermarks differ while a follower catches up.
-    fn metadata_fetch_response_body(setup: MetadataFetchResponseSetup) -> Vec<u8> {
+    #[bon::builder]
+    fn metadata_fetch_response_body(
+        #[builder(into, default = krabka_ids :: NodeId (1))] leader: krabka_ids::NodeId,
+        #[builder(default)] records: Bytes,
+        #[builder(into, default)] high_watermark: krabka_ids::Offset,
+        #[builder(into, default)] quorum_high_watermark: krabka_ids::Offset,
+    ) -> Vec<u8> {
+        let setup = MetadataFetchResponseSetup {
+            leader,
+            records,
+            high_watermark,
+            quorum_high_watermark,
+        };
         let MetadataFetchResponseSetup {
             leader,
             records,
@@ -535,7 +547,7 @@ mod tests {
             krabka_raft::API_KEY_METADATA_FETCH,
             move || {
                 fetches_for_mock.fetch_add(1, Ordering::SeqCst);
-                metadata_fetch_response_body(MetadataFetchResponseSetup::default())
+                metadata_fetch_response_body().call()
             },
             api_versions_response_v0,
         )
@@ -669,45 +681,32 @@ mod tests {
         assert!(timer.registrations() == 1);
     }
 
-    #[tokio::test]
-    async fn the_loop_stops_when_a_voterless_park_cannot_be_armed() {
-        // No voters: the loop's only move is to park, and the park cannot be
-        // armed, so it stops instead of spinning through a poll that no longer
-        // waits.
-        let dir = tempfile::tempdir().unwrap();
-        let timer = BrokenTimer::dead(TimerFailure::Registration);
-        let observer = run_until_it_stops(config_on(vec![], timer.injectable(), dir.path())).await;
-
-        check_unanswered_shutdown(&observer, &timer);
-    }
-
-    #[tokio::test]
-    async fn the_loop_stops_when_a_voterless_park_is_armed_but_never_completes() {
-        // The other half of the park: the deadline registers and then fails,
-        // which ends the loop the same way a refused registration does.
-        let dir = tempfile::tempdir().unwrap();
-        let timer = BrokenTimer::dead(TimerFailure::Completion);
-        let observer = run_until_it_stops(config_on(vec![], timer.injectable(), dir.path())).await;
-
-        assert!(observer.current_metadata_offset() == -1);
-        assert!(timer.registrations() == 1);
-    }
-
-    #[tokio::test]
-    async fn the_loop_stops_when_the_back_off_after_an_unreachable_voter_cannot_be_armed() {
-        // The fetch fails, so the loop rotates to the next voter and backs off
-        // — and the back-off is the park that cannot be armed. It leaves no
-        // leader hint, because no voter answered.
-        let dir = tempfile::tempdir().unwrap();
-        let timer = BrokenTimer::dead(TimerFailure::Registration);
-        let observer = run_until_it_stops(config_on(
+    #[yare::parameterized(
+        voterless_registration_fails = { vec![], TimerFailure::Registration },
+        voterless_completion_fails = { vec![], TimerFailure::Completion },
+        unreachable_voter_registration_fails = {
             vec![(NodeId(1), UNREACHABLE.to_string())],
-            timer.injectable(),
-            dir.path(),
-        ))
-        .await;
+            TimerFailure::Registration
+        },
+    )]
+    fn the_loop_stops_when_it_cannot_wait_for_a_voter(
+        targets: Vec<(NodeId, String)>,
+        failure: TimerFailure,
+    ) {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                // With no voters the loop parks; after an unreachable voter it backs
+                // off before trying the next one. In all cases a failed park stops it.
+                let dir = tempfile::tempdir().unwrap();
+                let timer = BrokenTimer::dead(failure);
+                let observer =
+                    run_until_it_stops(config_on(targets, timer.injectable(), dir.path())).await;
 
-        check_unanswered_shutdown(&observer, &timer);
+                check_unanswered_shutdown(&observer, &timer);
+            });
     }
 
     #[tokio::test]
@@ -718,7 +717,7 @@ mod tests {
         // which is what separates this exit from the unreachable-voter one.
         let mock = mock_request_broker(
             krabka_raft::API_KEY_METADATA_FETCH,
-            move || metadata_fetch_response_body(MetadataFetchResponseSetup::default()),
+            move || metadata_fetch_response_body().call(),
             api_versions_response_v0,
         )
         .await;
@@ -741,12 +740,13 @@ mod tests {
             }
             if api_key == krabka_raft::API_KEY_METADATA_FETCH {
                 let fetch = fetches.fetch_add(1, Ordering::SeqCst);
-                return Some(metadata_fetch_response_body(MetadataFetchResponseSetup {
-                    records: body(fetch),
-                    high_watermark: krabka_ids::Offset(high_watermark),
-                    quorum_high_watermark: krabka_ids::Offset(high_watermark),
-                    ..Default::default()
-                }));
+                return Some(
+                    metadata_fetch_response_body()
+                        .records(body(fetch))
+                        .high_watermark(high_watermark)
+                        .quorum_high_watermark(high_watermark)
+                        .call(),
+                );
             }
             None
         })
@@ -896,12 +896,13 @@ mod tests {
                         .unwrap()
                         .push((request.replica_id, request.replica_directory_id));
                     // Both controllers name node 2 as the leader.
-                    return Some(metadata_fetch_response_body(MetadataFetchResponseSetup {
-                        leader: krabka_ids::NodeId(2),
-                        high_watermark: krabka_ids::Offset(5),
-                        quorum_high_watermark: krabka_ids::Offset(5),
-                        ..Default::default()
-                    }));
+                    return Some(
+                        metadata_fetch_response_body()
+                            .leader(2)
+                            .high_watermark(5)
+                            .quorum_high_watermark(5)
+                            .call(),
+                    );
                 }
                 None
             }
@@ -962,11 +963,10 @@ mod tests {
             krabka_raft::API_KEY_METADATA_FETCH,
             move || {
                 // A follower holding 5 of the quorum's 10 000 records.
-                metadata_fetch_response_body(MetadataFetchResponseSetup {
-                    high_watermark: krabka_ids::Offset(5),
-                    quorum_high_watermark: krabka_ids::Offset(10_000),
-                    ..Default::default()
-                })
+                metadata_fetch_response_body()
+                    .high_watermark(5)
+                    .quorum_high_watermark(10_000)
+                    .call()
             },
             api_versions_response_v0,
         )

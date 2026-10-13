@@ -29,10 +29,7 @@ const INCONSISTENT_CLUSTER_ID: i16 = 104;
 
 /// Node 1 elected leader of voters 0 and 1, and the epoch it leads.
 fn leader_of_0_and_1() -> (Engine, tempfile::TempDir, i32) {
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(0), NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only().ids(&[NodeId(0), NodeId(1)]).call();
     engine.on_event(Event::ElectionTimeout);
     for epoch in [0, 1] {
         engine.on_event(Event::ReceiveVoteResponse {

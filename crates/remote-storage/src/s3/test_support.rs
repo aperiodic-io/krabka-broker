@@ -79,11 +79,18 @@ pub(super) fn memory_worm_archive() -> (TempDir, S3RemoteStorage) {
 /// Copy one [`sample_data`] segment into `store` as `md` on the blocking
 /// pool, where the store's synchronous API may block, and then run `then`
 /// there with both.
+#[bon::builder]
 pub(super) async fn seeded_blocking(
     store: S3RemoteStorage,
-    setup: SeededCopySetup,
+    #[builder(default = sample_metadata (Uuid :: from_u128 (10)))]
+    metadata: RemoteLogSegmentMetadata,
+    #[builder(default)] transaction_index: TransactionIndex,
     then: impl FnOnce(S3RemoteStorage, RemoteLogSegmentMetadata) + Send + 'static,
 ) {
+    let setup = SeededCopySetup {
+        metadata,
+        transaction_index,
+    };
     let SeededCopySetup {
         metadata: md,
         transaction_index,
@@ -128,7 +135,17 @@ pub(super) fn worm_rsm(
 
 /// [`sample_metadata`] plus the chain stamp the broker leaves on a segment
 /// before it asks for the copy.
-pub(super) fn stamped_metadata(setup: StampedMetadataSetup) -> RemoteLogSegmentMetadata {
+#[bon::builder]
+pub(super) fn stamped_metadata(
+    #[builder(default = Uuid :: from_u128 (52))] segment_id: Uuid,
+    #[builder(into, default = ManifestSeq (0))] sequence: ManifestSeq,
+    #[builder(into, default = ChainHead :: GENESIS)] previous_head: ChainHead,
+) -> RemoteLogSegmentMetadata {
+    let setup = StampedMetadataSetup {
+        segment_id,
+        sequence,
+        previous_head,
+    };
     let StampedMetadataSetup {
         segment_id,
         sequence,

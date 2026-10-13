@@ -125,11 +125,10 @@ fn ordinary_snapshot_does_not_reload_the_live_image() {
 
 /// Elect the single-voter fixture before snapshot submissions.
 async fn single_leader_snapshot_fixture() -> (KraftController, tempfile::TempDir) {
-    let (ctrl, dir) = build(ControllerSetup {
-        ids: &[NodeId(1)],
-        snapshot_interval_records: SnapshotRecordCount(3),
-        ..Default::default()
-    });
+    let (ctrl, dir) = build()
+        .ids(&[NodeId(1)])
+        .snapshot_interval_records(3)
+        .call();
     super::test_support::elect_single_voter_controller(&ctrl).await;
     (ctrl, dir)
 }
@@ -168,11 +167,10 @@ async fn leader_snapshots_and_prunes_at_threshold() {
 /// later, identical read of the same unchanged range).
 #[tokio::test]
 async fn leader_snapshots_and_prunes_at_byte_threshold_across_many_small_commits() {
-    let (ctrl, dir) = build(ControllerSetup {
-        ids: &[NodeId(1)],
-        max_bytes_between_snapshots: krabka_units::prelude::bytes(200),
-        ..Default::default()
-    });
+    let (ctrl, dir) = build()
+        .ids(&[NodeId(1)])
+        .max_bytes_between_snapshots(krabka_units::prelude::bytes(200))
+        .call();
     ctrl.inject_event(Event::ElectionTimeout).await.unwrap();
     await_leader(&ctrl, Some(NodeId(1))).await;
 
@@ -278,10 +276,7 @@ fn retain_latest_checkpoint_keeps_only_the_single_newest_id() {
 /// tracking in-flight readers.
 #[test]
 fn a_snapshot_roll_keeps_the_checkpoint_it_replaces_until_the_next_one() {
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only().ids(&[NodeId(1)]).call();
     elect_single_voter_engine(&mut engine);
     let cp_dir = dir.path().to_path_buf();
 
@@ -318,10 +313,7 @@ fn a_snapshot_roll_keeps_the_checkpoint_it_replaces_until_the_next_one() {
 /// literal `0` and every checkpoint claimed 1970.
 #[test]
 fn the_checkpoint_header_carries_the_last_contained_batch_create_time() {
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only().ids(&[NodeId(1)]).call();
     elect_single_voter_engine(&mut engine);
 
     // Append below the engine's own submit path so the create-times are
@@ -353,10 +345,7 @@ fn the_checkpoint_header_carries_the_last_contained_batch_create_time() {
 /// both land here.
 #[test]
 fn a_snapshot_at_an_already_pruned_boundary_keeps_the_header_timestamp() {
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only().ids(&[NodeId(1)]).call();
     elect_single_voter_engine(&mut engine);
     let stamp = 1_700_000_222_333;
     let mut batch = one_offset_batch(0, 1, b"only");
@@ -382,11 +371,10 @@ fn a_snapshot_at_an_already_pruned_boundary_keeps_the_header_timestamp() {
 /// own header — the one place the record's stamp still exists on this node.
 #[test]
 fn an_installed_snapshot_hands_its_header_timestamp_to_the_next_checkpoint() {
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        me: NodeId(2),
-        ids: &[NodeId(1), NodeId(2)],
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only()
+        .me(2)
+        .ids(&[NodeId(1), NodeId(2)])
+        .call();
     let stamp = 1_700_000_444_555;
     let mut image = engine.image.clone();
     image.apply(&MetadataRecord::V1Voters(VotersRecord {
@@ -412,10 +400,7 @@ async fn a_restart_recovers_the_header_timestamp_from_the_checkpoint() {
     let stamp = 1_700_000_666_777;
     // Snapshot and prune without an election, so the reopened controller's
     // bootstrap epoch matches and its checkpoint lands on the same id.
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only().ids(&[NodeId(1)]).call();
     let mut batch = one_offset_batch(0, 0, b"restart");
     engine.log.append(&mut batch, stamp).expect("append");
     engine.log.advance_hwm(engine.log.log_end_offset());
@@ -426,12 +411,12 @@ async fn a_restart_recovers_the_header_timestamp_from_the_checkpoint() {
     assert2::assert!(latest_header_timestamp(&cp_dir) == stamp);
     drop(engine);
 
-    let reopened = open_test_controller_with(dir.path().to_path_buf(), ControllerOpenSetup {
-        cluster_id: uuid::Uuid::nil(),
-        voters: voter_set(&[NodeId(1)]),
-        ..Default::default()
-    })
-    .expect("reopen over the same data dir");
+    let reopened = open_test_controller_with()
+        .data_dir(dir.path().to_path_buf())
+        .cluster_id(uuid::Uuid::nil())
+        .voters(voter_set(&[NodeId(1)]))
+        .call()
+        .expect("reopen over the same data dir");
     reopened.trigger_snapshot().await.expect("trigger snapshot");
 
     assert2::assert!(latest_header_timestamp(&cp_dir) == stamp);

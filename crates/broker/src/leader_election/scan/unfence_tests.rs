@@ -13,15 +13,14 @@ use {super::*, assert2::assert};
 /// The image of a partition `t-0` with replicas `[1, 2, 3]`, led by broker 1
 /// alone in its record, and with `published` as its ELR state.
 fn leaderless_image(published: &str) -> MetadataImage {
-    img_with_partition(ElectionSetup {
-        isr: &[krabka_raft::NodeId(1)],
-        elr: ElrFinalization::Enabled,
-        configs: &[
+    img_with_partition()
+        .isr(&[krabka_raft::NodeId(1)])
+        .configs(&[
             (MIN_INSYNC_REPLICAS, "2"),
             (ELIGIBLE_LEADER_REPLICAS, published),
-        ],
-        ..Default::default()
-    })
+        ])
+        .elr(ElrFinalization::Enabled)
+        .call()
 }
 
 async fn setup_liveness(alive: &[u64]) -> ControllerLivenessState {
@@ -58,17 +57,23 @@ struct ElectedSetup<'a> {
     recovery: ElectionRecovery,
 }
 
-fn elected(setup: ElectedSetup<'_>) -> Vec<MetadataRecord> {
+#[bon::builder]
+fn elected(
+    #[builder(into, default = NodeId (1))] leader: NodeId,
+    #[builder(default)] eligible: &'_ [NodeId],
+    #[builder(default)] recovery: ElectionRecovery,
+) -> Vec<MetadataRecord> {
+    let setup = ElectedSetup {
+        leader,
+        eligible,
+        recovery,
+    };
     let ElectedSetup {
         leader,
         eligible,
         recovery,
     } = setup;
-    let partition = expected_partition(ExpectedPartitionSetup {
-        leader,
-        isr: &[leader],
-        ..Default::default()
-    });
+    let partition = expected_partition().leader(leader).isr(&[leader]).call();
     let eligible = eligible.to_vec();
     let recovery =
         (recovery == ElectionRecovery::Recovering).then_some(LeaderRecoveryState::Recovering);
@@ -126,10 +131,7 @@ async fn an_unfence_elects_for_a_partition_with_no_leader() {
             published: "0::1",
             unfenced: 1,
             alive: &[2, 3],
-            expected: elected(ElectedSetup {
-                recovery: ElectionRecovery::Recovering,
-                ..Default::default()
-            }),
+            expected: elected().recovery(ElectionRecovery::Recovering).call(),
             unclean_elections: 1,
         },
         Case {
@@ -137,10 +139,9 @@ async fn an_unfence_elects_for_a_partition_with_no_leader() {
             published: "0:1,2,3:1",
             unfenced: 1,
             alive: &[2, 3],
-            expected: elected(ElectedSetup {
-                eligible: &[krabka_raft::NodeId(2), krabka_raft::NodeId(3)],
-                ..Default::default()
-            }),
+            expected: elected()
+                .eligible(&[krabka_raft::NodeId(2), krabka_raft::NodeId(3)])
+                .call(),
             unclean_elections: 0,
         },
         Case {
@@ -148,11 +149,10 @@ async fn an_unfence_elects_for_a_partition_with_no_leader() {
             published: "0:1,2,3:1",
             unfenced: 2,
             alive: &[3],
-            expected: elected(ElectedSetup {
-                leader: NodeId(2),
-                eligible: &[krabka_raft::NodeId(1), krabka_raft::NodeId(3)],
-                ..Default::default()
-            }),
+            expected: elected()
+                .leader(2)
+                .eligible(&[krabka_raft::NodeId(1), krabka_raft::NodeId(3)])
+                .call(),
             unclean_elections: 0,
         },
     ];

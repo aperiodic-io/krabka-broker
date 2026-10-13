@@ -7,7 +7,35 @@ use {
     },
 };
 
-#[derive(Clone, Copy)]
+type KnownControlCase = (VoterChangeKind, u64, TargetMembership, u16, usize);
+
+fn known_control_cases(node: u64) -> [KnownControlCase; 3] {
+    [
+        (
+            VoterChangeKind::Update,
+            node,
+            TargetMembership::PresentSameDirectory,
+            1,
+            1,
+        ),
+        (
+            VoterChangeKind::Update,
+            node,
+            TargetMembership::PresentUnknownDirectory,
+            0,
+            0,
+        ),
+        (
+            VoterChangeKind::FinalizeKraftVersion,
+            node,
+            TargetMembership::Absent,
+            0,
+            2,
+        ),
+    ]
+}
+
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct RequestFlags(u16);
 
 #[derive(Clone, Copy)]
@@ -21,6 +49,11 @@ enum RequestProperty {
     CompatibleTargetVersion = 1 << 5,
     TargetCaughtUp = 1 << 6,
 }
+
+use RequestProperty::{
+    CompatibleTargetVersion, ControlsCommitted, EpochCommitted, Leader, NoPendingChange,
+    TargetCaughtUp, VotersSupportVersion,
+};
 
 impl RequestFlags {
     fn contains(self, property: RequestProperty) -> bool { self.0 & property as u16 != 0 }
@@ -90,30 +123,41 @@ fn request_cases() -> impl Strategy<Value = RequestCase> {
                     2 => TargetMembership::PresentSameDirectory,
                     _ => TargetMembership::PresentOtherDirectory,
                 };
-                let facts = generated_request(GeneratedRequestSetup {
-                    count: VoterCount(old.len()),
-                    flags: RequestFlags(bits),
-                    kind,
-                    membership,
-                    version: KraftFeatureLevel(version),
-                    requested: KraftFeatureLevel(requested),
-                });
+                let facts = generated_request()
+                    .count(old.len())
+                    .flags(bits)
+                    .kind(kind)
+                    .membership(membership)
+                    .version(version)
+                    .requested(requested)
+                    .call();
                 (old, node, facts)
             },
         )
 }
 
+#[bon::builder]
 fn generated_request(
-    setup: GeneratedRequestSetup,
+    #[builder(into, default = GeneratedRequestSetup::default().count)] count: VoterCount,
+    #[builder(into, default = GeneratedRequestSetup::default().flags)] flags: RequestFlags,
+    #[builder(default = GeneratedRequestSetup::default().kind)] kind: VoterChangeKind,
+    #[builder(default = GeneratedRequestSetup::default().membership)] membership: TargetMembership,
+    #[builder(into, default = GeneratedRequestSetup::default().version)] version: KraftFeatureLevel,
+    #[builder(into, default = GeneratedRequestSetup::default().requested)]
+    requested: KraftFeatureLevel,
 ) -> (
     ReconfigurationLeadership,
     CurrentVoterSet,
     VoterChangeRequest,
     TargetVoter,
 ) {
-    use RequestProperty::{
-        CompatibleTargetVersion, ControlsCommitted, EpochCommitted, Leader, NoPendingChange,
-        TargetCaughtUp, VotersSupportVersion,
+    let setup = GeneratedRequestSetup {
+        count,
+        flags,
+        kind,
+        membership,
+        version,
+        requested,
     };
     (
         ReconfigurationLeadership {

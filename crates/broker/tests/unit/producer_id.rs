@@ -9,7 +9,7 @@
 use {
     crate::support::{
         self,
-        transactions::{InitProducerSetup, claim_idempotent_producer, new_producer_request},
+        transactions::{claim_idempotent_producer, init_producer_request},
     },
     assert2::{assert, check},
     krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest,
@@ -39,10 +39,11 @@ async fn init_producer_id_without_coordinator_bootstrap_returns_not_coordinator(
     let p = support::start().await;
     let r = p
         .client
-        .send(new_producer_request(InitProducerSetup {
-            transactional_id: Some("tx-1".into()),
-            ..Default::default()
-        }))
+        .send(
+            init_producer_request()
+                .maybe_transactional_id(Some("tx-1".into()))
+                .call(),
+        )
         .await
         .expect("InitProducerId");
     assert!(r.error_code == 16); // NOT_COORDINATOR
@@ -86,10 +87,11 @@ async fn init_producer_id_with_transactional_id_returns_real_pid() {
 
     let r = p
         .client
-        .send(new_producer_request(InitProducerSetup {
-            transactional_id: Some("my-tid".into()),
-            ..Default::default()
-        }))
+        .send(
+            init_producer_request()
+                .maybe_transactional_id(Some("my-tid".into()))
+                .call(),
+        )
         .await
         .expect("InitProducerId");
     check!(r.error_code == 0, "error_code should be NONE");
@@ -110,20 +112,22 @@ async fn init_producer_id_with_same_tid_bumps_epoch() {
 
     let r1 = p
         .client
-        .send(new_producer_request(InitProducerSetup {
-            transactional_id: Some("stable-tid".into()),
-            ..Default::default()
-        }))
+        .send(
+            init_producer_request()
+                .maybe_transactional_id(Some("stable-tid".into()))
+                .call(),
+        )
         .await
         .expect("InitProducerId 1");
     assert!(r1.error_code == 0, "r1 error_code");
 
     let r2 = p
         .client
-        .send(new_producer_request(InitProducerSetup {
-            transactional_id: Some("stable-tid".into()),
-            ..Default::default()
-        }))
+        .send(
+            init_producer_request()
+                .maybe_transactional_id(Some("stable-tid".into()))
+                .call(),
+        )
         .await
         .expect("InitProducerId 2");
     check!(r2.error_code == 0, "r2 error_code");

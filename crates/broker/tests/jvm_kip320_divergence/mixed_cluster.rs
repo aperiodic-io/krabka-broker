@@ -87,7 +87,11 @@ impl MixedCluster {
 /// `jvm_static_quorum_spike.rs::krabka_controller_config` plus a bound data
 /// listener.
 fn krabka_mixed_config(log_dir: &std::path::Path, setup: JvmStaticVoterSetup) -> BrokerConfig {
-    let mut cfg = support::jvm_static_voter_config(log_dir, setup);
+    let mut cfg = support::jvm_static_voter_config()
+        .log_dir(log_dir)
+        .broker(setup.broker)
+        .cluster_id(setup.cluster_id)
+        .call();
     cfg.heartbeat_interval = krabka_units::millis(1_000);
     // Kafka's `broker.session.timeout.ms` default. The controller starts a
     // broker's session when its registration lands, and the JVM broker
@@ -271,6 +275,7 @@ pub async fn start_mixed_cluster(container: &str, jvm_is_controller: bool) -> Mi
     }
 }
 
+#[derive(derive_more::From, derive_more::Into)]
 /// Advance one partition epoch while retaining its replicas and directory identities.
 #[derive(Clone, Copy)]
 pub struct PartitionEpochDelta(pub i32);
@@ -287,10 +292,21 @@ pub struct SingleLeaderSetup<'a> {
     pub partition_epoch_delta: PartitionEpochDelta,
 }
 
+#[bon::builder]
 pub fn single_leader_record(
     previous: &krabka_metadata::PartitionRecord,
-    setup: SingleLeaderSetup<'_>,
+    #[builder(default = "t")] topic: &'_ str,
+    #[builder(into, default = krabka_broker :: NodeId (1))] leader: krabka_broker::NodeId,
+    #[builder(into, default = krabka_metadata :: LeaderEpoch (0))]
+    epoch: krabka_metadata::LeaderEpoch,
+    #[builder(into, default = PartitionEpochDelta (1))] partition_epoch_delta: PartitionEpochDelta,
 ) -> krabka_metadata::PartitionRecord {
+    let setup = SingleLeaderSetup {
+        topic,
+        leader,
+        epoch,
+        partition_epoch_delta,
+    };
     krabka_metadata::PartitionRecord {
         topic: setup.topic.to_string(),
         partition: 0,

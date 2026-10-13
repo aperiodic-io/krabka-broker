@@ -408,9 +408,7 @@ mod tests {
             elr::state::test_records,
             handlers::{
                 RequestContext,
-                test_support::{
-                    ReplicatedPartitionSetup, replicated_partition, single_replica_partition,
-                },
+                test_support::{replicated_partition, single_replica_partition},
             },
             test_support::{PartitionCount, TopicSetup},
         },
@@ -462,13 +460,10 @@ mod tests {
                     leader_epoch,
                     directories: vec![uuid::Uuid::nil()],
                     partition_epoch: 3,
-                    ..crate::handlers::test_support::replicated_partition(
-                        crate::handlers::test_support::ReplicatedPartitionSetup {
-                            leader: NodeId(1),
-                            replicas: &[NodeId(1)],
-                            ..Default::default()
-                        },
-                    )
+                    ..crate::handlers::test_support::replicated_partition()
+                        .leader(1)
+                        .replicas(&[NodeId(1)])
+                        .call()
                 }),
             ])
             .await
@@ -521,7 +516,7 @@ mod tests {
         }
     });
 
-    #[derive(Clone, Copy)]
+    #[derive(derive_more::From, derive_more::Into, Clone, Copy)]
     struct ResponsePartitionLimit(i32);
 
     #[derive(krabka_macros::FieldDefaults)]
@@ -544,7 +539,27 @@ mod tests {
         }
     }
 
-    fn request(setup: DescribeTopicsSetup) -> DescribeTopicPartitionsRequest {
+    fn one_partition_request(topics: &[&str]) -> DescribeTopicPartitionsRequest {
+        let setup = DescribeTopicsSetup::one_partition(topics);
+        request()
+            .topics(setup.topics)
+            .response_partition_limit(setup.response_partition_limit)
+            .maybe_cursor(setup.cursor)
+            .call()
+    }
+
+    #[bon::builder]
+    fn request(
+        #[builder(default = vec ! ["a" . to_owned ()])] topics: Vec<String>,
+        #[builder(into, default = ResponsePartitionLimit (2000))]
+        response_partition_limit: ResponsePartitionLimit,
+        cursor: Option<RequestCursor>,
+    ) -> DescribeTopicPartitionsRequest {
+        let setup = DescribeTopicsSetup {
+            topics,
+            response_partition_limit,
+            cursor,
+        };
         let DescribeTopicsSetup {
             topics,
             response_partition_limit,
@@ -637,7 +652,7 @@ mod tests {
         // Budget of 1: "a" fills it, "b" is truncated with no row (the
         // partition-budget-at-topic-boundary rule), "c" is denied. Without
         // the fix, "c" would vanish instead of appearing after "b".
-        let req = request(DescribeTopicsSetup::one_partition(&["a", "b", "c"]));
+        let req = one_partition_request(&["a", "b", "c"]);
 
         let resp = describe(&broker, req, &ctx).await;
 
@@ -698,11 +713,10 @@ mod tests {
             partition_index: 2,
             ..Default::default()
         });
-        let req = request(DescribeTopicsSetup {
-            topics: vec!["a", "b"].into_iter().map(str::to_owned).collect(),
-            cursor,
-            ..Default::default()
-        });
+        let req = request()
+            .topics(vec!["a", "b"].into_iter().map(str::to_owned).collect())
+            .maybe_cursor(cursor)
+            .call();
 
         let resp = describe(&broker, req, &ctx).await;
 
@@ -746,13 +760,14 @@ mod tests {
             Arc::new(crate::authorizer::AllowAllAuthorizer),
             ordered_a_b_topics()
         );
-        let req = request(DescribeTopicsSetup {
-            topics: vec!["b", "a", "b", "a"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
-            ..Default::default()
-        });
+        let req = request()
+            .topics(
+                vec!["b", "a", "b", "a"]
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            )
+            .call();
 
         let resp = describe(&broker, req, &ctx).await;
 
@@ -766,55 +781,46 @@ mod tests {
     /// list, and its partition index must not be negative. Either failure
     /// answers `INVALID_REQUEST` for the whole request: one row per
     /// requested topic, in request order, none of them paginated.
-    #[tokio::test]
-    async fn invalid_cursor_fails_the_whole_request() {
-        let cases: [(&str, Option<RequestCursor>); 2] = [
-            (
-                "cursor topic absent from a non-empty topic list",
-                Some(RequestCursor {
-                    topic_name: "missing".into(),
-                    partition_index: 0,
-                    ..Default::default()
-                }),
-            ),
-            (
-                "negative cursor partition index",
-                Some(RequestCursor {
-                    topic_name: "a".into(),
-                    partition_index: -1,
-                    ..Default::default()
-                }),
-            ),
-        ];
-
-        for (name, cursor) in cases {
-            seeded_topics_fixture!(
-                (broker_handle, _dir, broker, ctx),
-                Arc::new(crate::authorizer::AllowAllAuthorizer),
-                [TopicSetup {
-                    topic: "a",
-                    ..TopicSetup::single_replica()
-                }]
-            );
-            let req = request(DescribeTopicsSetup {
-                cursor,
+    #[yare::parameterized(
+        cursor_topic_is_not_requested = {
+            Some(RequestCursor {
+                topic_name: "missing".into(),
+                partition_index: 0,
                 ..Default::default()
-            });
+            })
+        },
+        cursor_partition_is_negative = {
+            Some(RequestCursor {
+                topic_name: "a".into(),
+                partition_index: -1,
+                ..Default::default()
+            })
+        },
+    )]
+    #[test_macro(tokio::test)]
+    async fn invalid_cursor_fails_the_whole_request(cursor: Option<RequestCursor>) {
+        seeded_topics_fixture!(
+            (broker_handle, _dir, broker, ctx),
+            Arc::new(crate::authorizer::AllowAllAuthorizer),
+            [TopicSetup {
+                topic: "a",
+                ..TopicSetup::single_replica()
+            }]
+        );
+        let req = request().maybe_cursor(cursor).call();
 
-            let resp = describe(&broker, req, &ctx).await;
+        let resp = describe(&broker, req, &ctx).await;
 
-            assert!(
-                resp == DescribeTopicPartitionsResponse {
-                    throttle_time_ms: 0,
-                    topics: vec![error_topic("a", codes::INVALID_REQUEST)],
-                    next_cursor: None,
-                    ..Default::default()
-                },
-                "case: {name}"
-            );
+        assert2::assert!(
+            resp == DescribeTopicPartitionsResponse {
+                throttle_time_ms: 0,
+                topics: vec![error_topic("a", codes::INVALID_REQUEST)],
+                next_cursor: None,
+                ..Default::default()
+            }
+        );
 
-            broker_handle.shutdown().await;
-        }
+        broker_handle.shutdown().await;
     }
 
     /// `response_partition_limit = 0` floors to 1 partition, not 0 --
@@ -831,10 +837,7 @@ mod tests {
                 ..TopicSetup::single_replica()
             }]
         );
-        let req = request(DescribeTopicsSetup {
-            response_partition_limit: ResponsePartitionLimit(0),
-            ..Default::default()
-        });
+        let req = request().response_partition_limit(0).call();
 
         let resp = describe(&broker, req, &ctx).await;
 
@@ -863,46 +866,50 @@ mod tests {
     /// would, so a cursor can legitimately name a topic the image doesn't
     /// hold without krabka resolving it to an `UNKNOWN_TOPIC_OR_PARTITION`
     /// row.
-    #[tokio::test]
-    async fn budget_exhausted_at_topic_boundary_emits_no_row_for_the_next_topic() {
-        for next_topic_exists in [true, false] {
-            let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+    #[yare::parameterized(
+        next_topic_exists = { true },
+        next_topic_is_missing = { false },
+    )]
+    #[test_macro(tokio::test)]
+    async fn budget_exhausted_at_topic_boundary_emits_no_row_for_the_next_topic(
+        next_topic_exists: bool,
+    ) {
+        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        seed_topic(&broker_handle, TopicSetup {
+            topic: "a",
+            ..TopicSetup::single_replica()
+        })
+        .await;
+        if next_topic_exists {
             seed_topic(&broker_handle, TopicSetup {
-                topic: "a",
+                topic: "b",
+                topic_id: uuid::Uuid::from_u128(2),
                 ..TopicSetup::single_replica()
             })
             .await;
-            if next_topic_exists {
-                seed_topic(&broker_handle, TopicSetup {
-                    topic: "b",
-                    topic_id: uuid::Uuid::from_u128(2),
-                    ..TopicSetup::single_replica()
-                })
-                .await;
-            }
-            let broker = broker_handle.broker_arc_for_test();
-            test_ctx!(ctx, "admin");
-            let req = request(DescribeTopicsSetup::one_partition(&["a", "b"]));
-
-            let resp = describe(&broker, req, &ctx).await;
-
-            let names = response_topic_names(&resp);
-            assert!(
-                names == vec!["a"],
-                "next_topic_exists = {next_topic_exists}"
-            );
-            assert!(
-                resp.next_cursor
-                    == Some(ResponseCursor {
-                        topic_name: "b".into(),
-                        partition_index: 0,
-                        ..Default::default()
-                    }),
-                "next_topic_exists = {next_topic_exists}"
-            );
-
-            broker_handle.shutdown().await;
         }
+        let broker = broker_handle.broker_arc_for_test();
+        test_ctx!(ctx, "admin");
+        let req = one_partition_request(&["a", "b"]);
+
+        let resp = describe(&broker, req, &ctx).await;
+
+        let names = response_topic_names(&resp);
+        assert2::assert!(
+            names == vec!["a"],
+            "next_topic_exists = {next_topic_exists}"
+        );
+        assert2::assert!(
+            resp.next_cursor
+                == Some(ResponseCursor {
+                    topic_name: "b".into(),
+                    partition_index: 0,
+                    ..Default::default()
+                }),
+            "next_topic_exists = {next_topic_exists}"
+        );
+
+        broker_handle.shutdown().await;
     }
 
     /// A missing named topic's row answers `is_internal` (by name, since the
@@ -934,10 +941,9 @@ mod tests {
         );
 
         for (name, error_code, is_internal) in cases {
-            let req = request(DescribeTopicsSetup {
-                topics: vec![name].into_iter().map(str::to_owned).collect(),
-                ..Default::default()
-            });
+            let req = request()
+                .topics(vec![name].into_iter().map(str::to_owned).collect())
+                .call();
             let resp = describe(&broker, req, &ctx).await;
 
             let expected_ops = authorized_operations_bits(
@@ -983,12 +989,11 @@ mod tests {
                 leader_epoch: krabka_metadata::LeaderEpoch(7),
                 directories: vec![uuid::Uuid::nil(); 3],
                 partition_epoch: 4,
-                ..replicated_partition(ReplicatedPartitionSetup {
-                    partition: krabka_ids::PartitionIndex(index),
-                    leader: NodeId(1),
-                    replicas: &[NodeId(1), NodeId(2), NodeId(3)],
-                    ..Default::default()
-                })
+                ..replicated_partition()
+                    .partition(index)
+                    .leader(1)
+                    .replicas(&[NodeId(1), NodeId(2), NodeId(3)])
+                    .call()
             })
         };
         let mut records = vec![

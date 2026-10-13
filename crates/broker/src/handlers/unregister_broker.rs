@@ -60,11 +60,14 @@
 
 use {
     self::{
-        gate::{broker_target, consumed_proposal_id, unregister_records, with_leaves},
+        gate::{broker_target, unregister_records, with_leaves},
         wire::not_controller_refusal,
     },
     crate::{
-        break_glass::handlers::audit::{GatedTransition, audit_transition, require_transition},
+        break_glass::{
+            gate::consumed_proposal_id,
+            handlers::audit::{GatedTransition, audit_transition, require_transition},
+        },
         codes,
         controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
         handlers::{

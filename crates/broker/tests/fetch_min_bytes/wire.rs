@@ -9,16 +9,10 @@ use {
     crate::support::{
         client::connect_owned,
         discovery::named_topic_metadata,
-        fetch::{
-            FetchByteLimit, FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup,
-            single_partition_fetch,
-        },
+        fetch::{FetchByteLimit, FetchLimits, RequestWaitMillis, single_partition_fetch},
         produce::{ProduceTimeoutMillis, SinglePartitionProduceSetup, send_batch},
         records::batch_from_records,
-        topics::{
-            ConfiguredTopicSetup, CreateTopicRequestSetup, CreateTopicsTimeoutMillis,
-            creatable_topic, create_topic_request_with_setup,
-        },
+        topics::{creatable_topic, create_topic_request_with_setup},
     },
     assert2::assert,
     krabka_client_core::Client,
@@ -102,15 +96,12 @@ async fn produce_one(client: &Client, topic: &str, topic_id: WireUuid, value: &'
 /// behind.
 async fn create_topic(client: &Client, topic: &str) {
     let response = client
-        .send(create_topic_request_with_setup(
-            creatable_topic(ConfiguredTopicSetup {
-                name: (topic).into(),
-                ..Default::default()
-            }),
-            CreateTopicRequestSetup {
-                timeout: CreateTopicsTimeoutMillis(10_000),
-            },
-        ))
+        .send(
+            create_topic_request_with_setup()
+                .topic(creatable_topic().name(topic.to_owned()).call())
+                .timeout(10_000)
+                .call(),
+        )
         .await
         .expect("CreateTopics");
     let code = response.topics[0].error_code;
@@ -154,17 +145,7 @@ fn base_offsets(records: Option<&RecordsPayload>) -> Vec<i64> {
                 other => panic!("fetched records are not v2 batches: {other:?}"),
             }
         }
-        RecordsPayload::Legacy(_) => panic!("unexpected legacy records payload"),
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "tvos",
-            target_os = "watchos",
-            target_os = "freebsd",
-            target_os = "dragonfly"
-        ))]
-        RecordsPayload::FileRegions(_) => panic!("unexpected file-region records payload"),
+        other => panic!("unexpected records payload: {other:?}"),
     };
     batches.iter().map(|batch| batch.base_offset).collect()
 }
@@ -196,16 +177,17 @@ pub(crate) async fn min_bytes_exchange(bootstrap: &str, topic: &str) -> (Duratio
 
     let started = Instant::now();
     let fetched = client
-        .send(single_partition_fetch(SinglePartitionFetchSetup {
-            topic: topic.into(),
-            topic_id,
-            limits: FetchLimits {
-                wait: RequestWaitMillis(MAX_WAIT_MS),
-                minimum: FetchByteLimit(MIN_BYTES),
-                ..Default::default()
-            },
-            ..Default::default()
-        }))
+        .send(
+            single_partition_fetch()
+                .topic(topic.into())
+                .topic_id(topic_id)
+                .limits(FetchLimits {
+                    wait: RequestWaitMillis(MAX_WAIT_MS),
+                    minimum: FetchByteLimit(MIN_BYTES),
+                    ..Default::default()
+                })
+                .call(),
+        )
         .await
         .expect("Fetch");
     let held = started.elapsed();

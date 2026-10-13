@@ -44,7 +44,17 @@ pub(super) struct ThreeBrokerEpochsSetup {
     pub third: BrokerEpoch,
 }
 
-pub(super) fn three_broker_states(setup: ThreeBrokerEpochsSetup) -> Vec<BrokerState> {
+#[bon::builder]
+pub(super) fn three_broker_states(
+    #[builder(into, default = BrokerEpoch (10))] first: BrokerEpoch,
+    #[builder(into, default = BrokerEpoch (20))] second: BrokerEpoch,
+    #[builder(into, default = BrokerEpoch (30))] third: BrokerEpoch,
+) -> Vec<BrokerState> {
+    let setup = ThreeBrokerEpochsSetup {
+        first,
+        second,
+        third,
+    };
     vec![
         bs(WireBrokerId(1), setup.first),
         bs(WireBrokerId(2), setup.second),
@@ -135,13 +145,10 @@ pub(super) async fn seed_partition(broker: &Broker) {
             }),
             MetadataRecord::V1Partition(PartitionRecord {
                 leader_epoch: krabka_metadata::LeaderEpoch(5),
-                ..crate::handlers::test_support::replicated_partition(
-                    crate::handlers::test_support::ReplicatedPartitionSetup {
-                        topic: "t",
-                        replicas: &[krabka_metadata::NodeId(1)],
-                        ..Default::default()
-                    },
-                )
+                ..crate::handlers::test_support::replicated_partition()
+                    .topic("t")
+                    .replicas(&[krabka_metadata::NodeId(1)])
+                    .call()
             }),
         ])
         .await

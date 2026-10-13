@@ -2,7 +2,7 @@ use {
     super::*,
     crate::{
         codes::{COORDINATOR_LOAD_IN_PROGRESS, NOT_COORDINATOR},
-        txn::coordinator::test_support::{StateImageSetup, state_image},
+        txn::coordinator::test_support::state_image,
     },
     assert2::assert,
     uuid::Uuid,
@@ -17,12 +17,12 @@ const P0: PartitionIndex = PartitionIndex(0);
 fn image_without_topic() -> MetadataImage { MetadataImage::new(Uuid::nil()) }
 
 fn image(topic_id: Uuid, leader: NodeId, leader_epoch: LeaderEpoch) -> MetadataImage {
-    state_image(StateImageSetup {
-        topic_id,
-        leader,
-        leader_epoch,
-        replicas: &[leader],
-    })
+    state_image()
+        .topic_id(topic_id)
+        .leader(leader)
+        .leader_epoch(leader_epoch)
+        .replicas(&[leader])
+        .call()
 }
 
 #[derive(Clone, Copy)]

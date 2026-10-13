@@ -13,11 +13,7 @@ use {
     super::request_frame,
     crate::{
         BrokerHandle,
-        network::{
-            codec::KafkaCodec,
-            dispatch::test_support::plaintext_loop,
-            test_support::{FrameCorrelationId, RequestFrameSetup},
-        },
+        network::{codec::KafkaCodec, dispatch::test_support::plaintext_loop},
         test_support::start_broker_with,
     },
     assert2::check,
@@ -134,13 +130,7 @@ async fn connect_to_serve_loop(
 }
 
 async fn create_topic(framed: &mut Framed<TcpStream, KafkaCodec>, topic: &str) {
-    let body = encoded(
-        &configured_topic_request(CreateTopicSetup {
-            topic,
-            ..Default::default()
-        }),
-        7,
-    );
+    let body = encoded(&configured_topic_request().topic(topic).call(), 7);
     send_request(framed, 19, 7, 1, &body).await;
     let response = response_frame(
         framed,
@@ -154,12 +144,11 @@ async fn create_topic(framed: &mut Framed<TcpStream, KafkaCodec>, topic: &str) {
 /// Writes a v0 `ApiVersions` request, the cheapest frame that still reaches a
 /// real handler through the whole serve loop.
 async fn send_api_versions(framed: &mut Framed<TcpStream, KafkaCodec>, correlation_id: i32) {
-    let frame = request_frame(RequestFrameSetup {
-        api_key: krabka_ids::ApiKey(super::API_VERSIONS_KEY),
-        correlation_id: FrameCorrelationId(correlation_id),
-        ..Default::default()
-    })
-    .freeze();
+    let frame = request_frame()
+        .api_key(super::API_VERSIONS_KEY)
+        .correlation_id(correlation_id)
+        .call()
+        .freeze();
     framed.send(frame).await.expect("send ApiVersions");
 }
 
@@ -172,15 +161,14 @@ async fn send_request(
     correlation_id: i32,
     body: &BytesMut,
 ) {
-    let frame = request_frame(RequestFrameSetup {
-        api_key: krabka_ids::ApiKey(api_key),
-        api_version: krabka_ids::ApiVersion(version),
-        correlation_id: FrameCorrelationId(correlation_id),
-        tagged: Some(&[0]),
-        body,
-        ..Default::default()
-    })
-    .freeze();
+    let frame = request_frame()
+        .api_key(api_key)
+        .api_version(version)
+        .correlation_id(correlation_id)
+        .maybe_tagged(Some(&[0]))
+        .body(body)
+        .call()
+        .freeze();
     framed.send(frame).await.expect("send request");
 }
 
@@ -447,14 +435,13 @@ async fn produce_charges_the_whole_request_frame_once() {
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
     let body = produce_body("frame-charge", 1, 256, 8);
-    let frame_len = request_frame(RequestFrameSetup {
-        api_key: krabka_ids::ApiKey(PRODUCE_KEY),
-        api_version: krabka_ids::ApiVersion(PRODUCE_VERSION),
-        tagged: Some(&[0]),
-        body: &body,
-        ..Default::default()
-    })
-    .len();
+    let frame_len = request_frame()
+        .api_key(PRODUCE_KEY)
+        .api_version(PRODUCE_VERSION)
+        .maybe_tagged(Some(&[0]))
+        .body(&body)
+        .call()
+        .len();
     send_request(&mut framed, PRODUCE_KEY, PRODUCE_VERSION, 1, &body).await;
     let response = response_frame(
         &mut framed,
@@ -625,14 +612,14 @@ async fn every_charged_api_reports_its_delay_and_mutes() {
 
     for case in cases {
         let (server, mut framed) = connect_to_serve_loop(&handle).await;
-        let frame = super::request_frame(RequestFrameSetup {
-            api_key: krabka_ids::ApiKey(case.api_key),
-            api_version: krabka_ids::ApiVersion(case.version),
-            tagged: case.flexible.then_some(&[0][..]),
-            body: &case.body,
-            ..Default::default()
-        })
-        .freeze();
+        let frame = super::request_frame()
+            .api_key(case.api_key)
+            .api_version(case.version)
+            .correlation_id(1)
+            .maybe_tagged(case.flexible.then_some(&[0][..]))
+            .body(&case.body)
+            .call()
+            .freeze();
         framed.send(frame).await.expect("send request");
         let response = response_frame(
             &mut framed,
@@ -733,10 +720,7 @@ async fn a_controller_mutation_and_the_request_quota_resolve_in_one_observation(
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
     let body = encoded(
-        &configured_topic_request(CreateTopicSetup {
-            topic: "one-observation",
-            ..Default::default()
-        }),
+        &configured_topic_request().topic("one-observation").call(),
         VERSION,
     );
     send_request(&mut framed, 19, VERSION, 1, &body).await;

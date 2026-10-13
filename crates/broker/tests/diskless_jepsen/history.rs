@@ -22,10 +22,7 @@
 //! before relation, and a counter states it exactly.
 
 use {
-    crate::{
-        APPENDERS, RECORDS_PER_APPENDER, TOPIC,
-        support::producer::{ProducerRecordSetup, producer_record},
-    },
+    crate::{APPENDERS, RECORDS_PER_APPENDER, TOPIC, support::producer::producer_record},
     assert2::assert,
     bytes::Bytes,
     krabka_client_producer::{Acks, Producer},
@@ -127,12 +124,13 @@ async fn produce_appender(
         let value = format!("appender-{appender}-record-{sequence}").into_bytes();
         let invoke_order = clock.fetch_add(1, Ordering::SeqCst);
         let metadata = producer
-            .send(producer_record(ProducerRecordSetup {
-                topic: (TOPIC).into(),
-                partition: Some(krabka_ids::PartitionIndex(0)),
-                value: Some(Bytes::copy_from_slice(&value)),
-                ..Default::default()
-            }))
+            .send(
+                producer_record()
+                    .topic((TOPIC).into())
+                    .maybe_partition(Some(0))
+                    .maybe_value(Some(Some(Bytes::copy_from_slice(&value))))
+                    .call(),
+            )
             .await
             .expect("acks=all record");
         let return_order = clock.fetch_add(1, Ordering::SeqCst);

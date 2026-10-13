@@ -186,13 +186,44 @@ mod tests {
         directories: &'a [uuid::Uuid],
     }
 
-    fn image_with(setup: ReplicaImageSetup<'_>) -> MetadataImage {
+    #[bon::builder]
+    fn image_with(
+        #[builder(default = "t")] name: &'_ str,
+        #[builder(default = uuid :: Uuid :: from_u128 (7))] topic_id: uuid::Uuid,
+        #[builder(default = & [NodeId (1) , NodeId (2)])] replicas: &'_ [NodeId],
+        #[builder(default = & UNASSIGNED_DIRECTORIES)] directories: &'_ [uuid::Uuid],
+    ) -> MetadataImage {
+        let setup = ReplicaImageSetup {
+            name,
+            topic_id,
+            replicas,
+            directories,
+        };
         let mut image = MetadataImage::new(uuid::Uuid::nil());
-        apply_topic(&mut image, setup);
+        apply_topic()
+            .image(&mut image)
+            .name(setup.name)
+            .topic_id(setup.topic_id)
+            .replicas(setup.replicas)
+            .directories(setup.directories)
+            .call();
         image
     }
 
-    fn apply_topic(image: &mut MetadataImage, setup: ReplicaImageSetup<'_>) {
+    #[bon::builder]
+    fn apply_topic(
+        image: &mut MetadataImage,
+        #[builder(default = "t")] name: &'_ str,
+        #[builder(default = uuid :: Uuid :: from_u128 (7))] topic_id: uuid::Uuid,
+        #[builder(default = & [NodeId (1) , NodeId (2)])] replicas: &'_ [NodeId],
+        #[builder(default = & UNASSIGNED_DIRECTORIES)] directories: &'_ [uuid::Uuid],
+    ) {
+        let setup = ReplicaImageSetup {
+            name,
+            topic_id,
+            replicas,
+            directories,
+        };
         let ReplicaImageSetup {
             name,
             topic_id,
@@ -236,41 +267,31 @@ mod tests {
         let cases = [
             (
                 "broker 2 sets its own slot",
-                image_with(ReplicaImageSetup {
-                    topic_id,
-                    ..Default::default()
-                }),
+                image_with().topic_id(topic_id).call(),
                 NodeId(2),
                 PartitionIndex(0),
                 Ok(Some(assigned("t", NodeId(2)))),
             ),
             (
                 "a slot that holds the directory is a no-op",
-                image_with(ReplicaImageSetup {
-                    topic_id,
-                    directories: &[nil, DIR],
-                    ..Default::default()
-                }),
+                image_with()
+                    .topic_id(topic_id)
+                    .directories(&[nil, DIR])
+                    .call(),
                 NodeId(2),
                 PartitionIndex(0),
                 Ok(None),
             ),
             (
                 "a broker that is not a replica",
-                image_with(ReplicaImageSetup {
-                    topic_id,
-                    ..Default::default()
-                }),
+                image_with().topic_id(topic_id).call(),
                 NodeId(99),
                 PartitionIndex(0),
                 Err(KafkaErrorCode(codes::NOT_LEADER_OR_FOLLOWER)),
             ),
             (
                 "a partition that the topic does not have",
-                image_with(ReplicaImageSetup {
-                    topic_id,
-                    ..Default::default()
-                }),
+                image_with().topic_id(topic_id).call(),
                 NodeId(2),
                 PartitionIndex(99),
                 Err(KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION)),
@@ -292,10 +313,7 @@ mod tests {
     fn delta_preserves_replica_order_and_only_changes_the_reporting_slot() {
         let topic_id = uuid::Uuid::from_u128(0x42);
         let nil = uuid::Uuid::nil();
-        let mut image = image_with(ReplicaImageSetup {
-            topic_id,
-            ..Default::default()
-        });
+        let mut image = image_with().topic_id(topic_id).call();
         let change = assignment_change(&image, 2, "t", 0, DIR)
             .expect("broker 2 is a replica")
             .expect("the slot changes");
@@ -317,16 +335,14 @@ mod tests {
         let elsewhere = uuid::Uuid::from_u128(0x43);
         let unknown = uuid::Uuid::from_u128(0x44);
         let nil = uuid::Uuid::nil();
-        let mut image = image_with(ReplicaImageSetup {
-            topic_id: known,
-            ..Default::default()
-        });
-        apply_topic(&mut image, ReplicaImageSetup {
-            name: "other",
-            topic_id: elsewhere,
-            replicas: &[NodeId(1)],
-            directories: &[nil],
-        });
+        let mut image = image_with().topic_id(known).call();
+        apply_topic()
+            .image(&mut image)
+            .name("other")
+            .topic_id(elsewhere)
+            .replicas(&[NodeId(1)])
+            .directories(&[nil])
+            .call();
 
         let topic = |topic_id: uuid::Uuid, partitions: &[i32]| ReqTopicData {
             topic_id: ProtocolUuid(topic_id.into_bytes()),

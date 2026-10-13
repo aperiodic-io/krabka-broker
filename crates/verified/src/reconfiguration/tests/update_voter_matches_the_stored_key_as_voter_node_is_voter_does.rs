@@ -34,13 +34,13 @@ fn update_voter_matches_the_stored_key_as_voter_node_is_voter_does() {
             "legacy directory",
             voters(VoterCount(3), KraftFeatureLevel(1)),
             target(PresentUnknownDirectory),
-            plan(ReconfigurationPlanSetup::default()),
+            plan().call(),
         ),
         (
             "same directory",
             voters(VoterCount(3), KraftFeatureLevel(1)),
             target(PresentSameDirectory),
-            plan(ReconfigurationPlanSetup::default()),
+            plan().call(),
         ),
         (
             "preflight unknown id",
@@ -60,21 +60,13 @@ fn update_voter_matches_the_stored_key_as_voter_node_is_voter_does() {
             "preflight same",
             voters(VoterCount(3), KraftFeatureLevel(0)),
             target(PresentSameDirectory),
-            plan(ReconfigurationPlanSetup {
-                level: KraftFeatureLevel(0),
-                voters: ControlRecordWrite::Skip,
-                ..Default::default()
-            }),
+            plan().level(0).voters(ControlRecordWrite::Skip).call(),
         ),
         (
             "preflight legacy",
             voters(VoterCount(3), KraftFeatureLevel(0)),
             target(PresentUnknownDirectory),
-            plan(ReconfigurationPlanSetup {
-                level: KraftFeatureLevel(0),
-                voters: ControlRecordWrite::Skip,
-                ..Default::default()
-            }),
+            plan().level(0).voters(ControlRecordWrite::Skip).call(),
         ),
     ];
     for (case, current, voter, expected) in cases {
@@ -124,10 +116,7 @@ fn kraft_version_finalization_is_only_the_zero_to_one_upgrade() {
             "admitted",
             voters(VoterCount(3), KraftFeatureLevel(0)),
             finalize(1),
-            plan(ReconfigurationPlanSetup {
-                kraft: ControlRecordWrite::Emit,
-                ..Default::default()
-            }),
+            plan().kraft(ControlRecordWrite::Emit).call(),
         ),
     ];
     for (case, current, change, expected) in cases {

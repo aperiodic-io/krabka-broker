@@ -24,6 +24,29 @@
 pub(crate) mod paused_audit;
 
 use {
+    crate::config::BreakGlassConfig,
+    std::{
+        collections::BTreeSet,
+        io,
+        net::SocketAddr,
+        sync::{
+            Arc, Mutex,
+            atomic::{self, AtomicUsize, Ordering},
+        },
+        time::Duration,
+    },
+};
+
+/// A break-glass test config that requires approval from the two named users.
+#[cfg(test)]
+pub(crate) fn gated_break_glass_config() -> BreakGlassConfig {
+    BreakGlassConfig {
+        approvers: ["User:alice", "User:bob"].map(str::to_owned).to_vec(),
+        ..BreakGlassConfig::default()
+    }
+}
+
+use {
     crate::{
         api_catalog::UnstableApiVersions,
         authorizer::{
@@ -87,16 +110,6 @@ use {
         TimerUnavailableError,
     },
     rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
-    std::{
-        collections::BTreeSet,
-        io,
-        net::SocketAddr,
-        sync::{
-            Arc, Mutex,
-            atomic::{self, AtomicUsize, Ordering},
-        },
-        time::Duration,
-    },
     tokio::sync::watch,
     tokio_rustls::TlsAcceptor,
     tracing_subscriber::{
@@ -154,11 +167,15 @@ pub(crate) struct OperatorKeyFileSetup<'a> {
 }
 
 /// Stage an operator public key while returning the private signing pair to its owner.
+#[bon::builder]
 pub(crate) fn ed25519_public_key_file(
     dir: &std::path::Path,
-    setup: OperatorKeyFileSetup<'_>,
+    #[builder(default = "alice.pub")] name: &'_ str,
+    #[builder(default = "write public key")] context: &'_ str,
 ) -> (ring::signature::Ed25519KeyPair, std::path::PathBuf) {
     use ring::signature::KeyPair as _;
+
+    let setup = OperatorKeyFileSetup { name, context };
     let pair = fresh_ed25519_key();
     let path = dir.join(setup.name);
     std::fs::write(&path, pair.public_key().as_ref()).expect(setup.context);
@@ -223,24 +240,63 @@ where
     (addr, shutdown, cert_path)
 }
 
-/// Own the temporary directory alongside its replica until the caller drops both.
-pub(crate) fn temporary_partition(
-    setup: StandalonePartitionSetup<'_>,
+fn temporary_partition_impl(
+    topic: &str,
+    partition: krabka_ids::PartitionIndex,
+    storage: StorageMode,
 ) -> (tempfile::TempDir, Arc<Partition>) {
     let directory = tempfile::tempdir().expect("tempdir");
-    let partition = open_partition(directory.path(), setup);
+    let partition = open_partition()
+        .log_dir(directory.path())
+        .topic(topic)
+        .partition(partition)
+        .storage(storage)
+        .call();
     (directory, partition)
 }
 
-/// Opens a local replica with a running writer in the supplied log directory.
-pub(crate) fn open_partition(
+fn open_partition_impl(
     log_dir: &std::path::Path,
-    setup: StandalonePartitionSetup<'_>,
+    topic: &str,
+    partition: krabka_ids::PartitionIndex,
+    storage: StorageMode,
 ) -> Arc<Partition> {
-    let path = partition_dir(log_dir, setup.topic, setup.partition.0);
+    let path = partition_dir(log_dir, topic, partition.0);
     std::fs::create_dir_all(&path).expect("create partition directory");
     let log = krabka_log::Log::open(&path, krabka_log::LogConfig::default()).expect("open log");
-    spawn_standalone_partition(log_dir, log, setup)
+    spawn_standalone_partition()
+        .log_dir(log_dir)
+        .log(log)
+        .topic(topic)
+        .partition(partition)
+        .storage(storage)
+        .call()
+}
+
+macro_rules! standalone_partition_builder {
+    ($(#[$doc:meta])* $name:ident, [$($extra_params:tt)*], [$($extra_args:tt)*], $helper:ident -> $result:ty) => {
+        $(#[$doc])*
+        #[bon::builder]
+        pub(crate) fn $name(
+            $($extra_params)*
+            #[builder(default = StandalonePartitionSetup::default().topic)] topic: &'_ str,
+            #[builder(into, default = StandalonePartitionSetup::default().partition)]
+            partition: krabka_ids::PartitionIndex,
+            #[builder(default = StandalonePartitionSetup::default().storage)] storage: StorageMode,
+        ) -> $result {
+            $helper($($extra_args)* topic, partition, storage)
+        }
+    };
+}
+
+standalone_partition_builder! {
+    /// Own the temporary directory alongside its replica until the caller drops both.
+    temporary_partition, [], [], temporary_partition_impl -> (tempfile::TempDir, Arc<Partition>)
+}
+
+standalone_partition_builder! {
+    /// Opens a local replica with a running writer in the supplied log directory.
+    open_partition, [log_dir: &std::path::Path,], [log_dir,], open_partition_impl -> Arc<Partition>
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -330,11 +386,20 @@ impl Default for StandalonePartitionSetup<'_> {
     }
 }
 
+#[bon::builder]
 pub(crate) fn spawn_standalone_partition(
     log_dir: &std::path::Path,
     log: krabka_log::Log,
-    setup: StandalonePartitionSetup<'_>,
+    #[builder(default = StandalonePartitionSetup::default().topic)] topic: &'_ str,
+    #[builder(into, default = StandalonePartitionSetup::default().partition)]
+    partition: krabka_ids::PartitionIndex,
+    #[builder(default = StandalonePartitionSetup::default().storage)] storage: StorageMode,
 ) -> Arc<Partition> {
+    let setup = StandalonePartitionSetup {
+        topic,
+        partition,
+        storage,
+    };
     let StandalonePartitionSetup {
         topic,
         partition,
@@ -417,7 +482,7 @@ pub(crate) fn static_records_batch(
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(derive_more::From, derive_more::Into, Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RecordCount(pub i32);
 
 impl Default for RecordCount {
@@ -441,15 +506,25 @@ pub(crate) struct PartitionRecordsSetup {
     pub timestamp: UnixMillis,
 }
 
-pub(crate) fn partition_records_batch(setup: PartitionRecordsSetup) -> RecordBatch {
-    repeated_records_batch(RepeatedRecordsSetup {
-        count: setup.count,
-        timestamp: setup.timestamp,
-    })
+#[bon::builder]
+pub(crate) fn partition_records_batch(
+    #[builder(into, default)] count: RecordCount,
+    #[builder(into, default = UnixMillis (1_700_000_000))] timestamp: UnixMillis,
+) -> RecordBatch {
+    let setup = PartitionRecordsSetup { count, timestamp };
+    repeated_records_batch()
+        .count(setup.count)
+        .timestamp(setup.timestamp)
+        .call()
 }
 
 /// Builds a batch of identical values, preserving the explicit count header.
-pub(crate) fn repeated_records_batch(setup: RepeatedRecordsSetup) -> RecordBatch {
+#[bon::builder]
+pub(crate) fn repeated_records_batch(
+    #[builder(into, default)] count: RecordCount,
+    #[builder(into, default)] timestamp: UnixMillis,
+) -> RecordBatch {
+    let setup = RepeatedRecordsSetup { count, timestamp };
     let RepeatedRecordsSetup {
         count,
         timestamp: timestamp_ms,
@@ -533,7 +608,20 @@ impl Default for FreezeSetup<'_> {
     }
 }
 
-pub(crate) fn topic_freeze_record(setup: FreezeSetup<'_>) -> krabka_metadata::TopicFreezeRecord {
+#[bon::builder]
+pub(crate) fn topic_freeze_record(
+    #[builder(default = FreezeSetup::default().scope)] scope: &'_ str,
+    #[builder(default = FreezeSetup::default().pattern_type)]
+    pattern_type: krabka_metadata::PatternType,
+    #[builder(default = FreezeSetup::default().state)] state: FreezeState,
+    #[builder(default = FreezeSetup::default().reason)] reason: &'_ str,
+) -> krabka_metadata::TopicFreezeRecord {
+    let setup = FreezeSetup {
+        scope,
+        pattern_type,
+        state,
+        reason,
+    };
     let FreezeSetup {
         scope,
         pattern_type,
@@ -560,18 +648,19 @@ pub(crate) struct FrozenTopicsImageSetup {
 }
 
 /// One live DR-cutover freeze per scope, in the requested cluster image.
+#[bon::builder]
 pub(crate) fn frozen_topics_image(
     scopes: &[(&str, krabka_metadata::PatternType)],
-    setup: FrozenTopicsImageSetup,
+    #[builder(default = uuid :: Uuid :: from_u128 (0x5150))] cluster: uuid::Uuid,
 ) -> MetadataImage {
+    let setup = FrozenTopicsImageSetup { cluster };
     let mut image = MetadataImage::new(setup.cluster);
     for &(scope, pattern_type) in scopes {
         image.apply(&krabka_metadata::MetadataRecord::V1TopicFreeze(
-            topic_freeze_record(FreezeSetup {
-                scope,
-                pattern_type,
-                ..Default::default()
-            }),
+            topic_freeze_record()
+                .scope(scope)
+                .pattern_type(pattern_type)
+                .call(),
         ));
     }
     image
@@ -585,12 +674,12 @@ pub(crate) fn topic_thaw_record(
         set_by: "User:bob".to_owned(),
         set_at_ms: 1_770_000_100_000,
         proposal_id: uuid::Uuid::from_u128(7),
-        ..topic_freeze_record(FreezeSetup {
-            scope,
-            pattern_type,
-            state: FreezeState::Thawed,
-            reason: "",
-        })
+        ..topic_freeze_record()
+            .scope(scope)
+            .pattern_type(pattern_type)
+            .state(FreezeState::Thawed)
+            .reason("")
+            .call()
     }
 }
 
@@ -624,7 +713,20 @@ impl TopicSetup<'_> {
     }
 }
 
-pub(crate) fn topic_image(setup: TopicSetup<'_>) -> MetadataImage {
+#[bon::builder]
+pub(crate) fn topic_image(
+    #[builder(default = TopicSetup::default().topic)] topic: &'_ str,
+    #[builder(default = TopicSetup::default().topic_id)] topic_id: uuid::Uuid,
+    #[builder(into, default = TopicSetup::default().partitions)] partitions: PartitionCount,
+    #[builder(into, default = TopicSetup::default().replication_factor)]
+    replication_factor: ReplicationFactor,
+) -> MetadataImage {
+    let setup = TopicSetup {
+        topic,
+        topic_id,
+        partitions,
+        replication_factor,
+    };
     let TopicSetup {
         topic,
         topic_id,
@@ -684,26 +786,42 @@ impl Default for ReassignmentSetup<'_> {
     }
 }
 
-impl ReassignmentSetup<'_> {
-    /// An in-flight replacement with the new replica already in the ISR.
-    pub(crate) fn replacing_replica(removed: NodeId, added: NodeId) -> Self {
-        let mut replicas = Self::default().replicas;
-        replicas.push(added);
-        Self {
-            isr: replicas.clone(),
-            replicas,
-            adding: vec![added],
-            removing: vec![removed],
-            ..Default::default()
-        }
-    }
+/// Apply the common assignment fields to any reassignment fixture builder.
+#[macro_export]
+macro_rules! reassignment_fields {
+    ($builder:expr, $assignment:expr) => {{
+        let assignment = $assignment;
+        $builder
+            .replicas(assignment.replicas)
+            .isr(assignment.isr)
+            .adding(assignment.adding)
+            .removing(assignment.removing)
+            .leader(assignment.leader.0)
+            .directories(assignment.directories)
+    }};
 }
 
 pub(crate) fn replica_nodes(ids: &[u64]) -> Vec<NodeId> {
     ids.iter().copied().map(NodeId).collect()
 }
 
-pub(crate) fn reassignment_partition(setup: ReassignmentSetup<'_>) -> PartitionRecord {
+#[bon::builder]
+pub(crate) fn reassignment_partition(
+    #[builder(default = ReassignmentSetup::default().replicas)] replicas: Vec<NodeId>,
+    #[builder(default = ReassignmentSetup::default().isr)] isr: Vec<NodeId>,
+    #[builder(default = ReassignmentSetup::default().adding)] adding: Vec<NodeId>,
+    #[builder(default = ReassignmentSetup::default().removing)] removing: Vec<NodeId>,
+    #[builder(into, default = ReassignmentSetup::default().leader)] leader: NodeId,
+    #[builder(default = ReassignmentSetup::default().directories)] directories: &'_ [uuid::Uuid],
+) -> PartitionRecord {
+    let setup = ReassignmentSetup {
+        replicas,
+        isr,
+        adding,
+        removing,
+        leader,
+        directories,
+    };
     let ReassignmentSetup {
         replicas,
         isr,
@@ -769,7 +887,7 @@ pub(crate) mod elr_model_prelude {
 #[derive(Clone, Copy, Default)]
 pub(crate) struct WireBrokerId(pub i32);
 
-#[derive(Clone, Copy, Default)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy, Default)]
 pub(crate) struct BrokerEpoch(pub i64);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -804,7 +922,19 @@ impl Default for IsrProposalSetup<'_> {
     }
 }
 
-pub(crate) fn alter_partition_request(setup: IsrProposalSetup<'_>) -> AlterPartitionRequest {
+#[bon::builder]
+pub(crate) fn alter_partition_request(
+    #[builder(default = IsrProposalSetup::default().topic_id)] topic_id: WireUuid,
+    #[builder(default = IsrProposalSetup::default().broker)] broker: IsrBrokerIdentity,
+    #[builder(default = IsrProposalSetup::default().partition)] partition: IsrPartitionEpochs,
+    #[builder(default = IsrProposalSetup::default().new_isr)] new_isr: &'_ [WireBrokerId],
+) -> AlterPartitionRequest {
+    let setup = IsrProposalSetup {
+        topic_id,
+        broker,
+        partition,
+        new_isr,
+    };
     let IsrProposalSetup {
         topic_id,
         broker,
@@ -845,11 +975,33 @@ pub(crate) struct LiveIsrSetup<'a> {
     pub new_isr: &'a [WireBrokerId],
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum IsrResponseCheck {
+    #[default]
+    None,
+    EnvelopeAndPartition,
+    PartitionOnly,
+}
+
 /// Send a real ISR proposal using the caller's wire identity and separate epoch snapshots.
+#[bon::builder]
 pub(crate) async fn propose_isr(
     broker: &Arc<Broker>,
-    setup: LiveIsrSetup<'_>,
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(default = WireUuid ([9 ; 16]))] topic_id: WireUuid,
+    #[builder(into, default = krabka_metadata :: LeaderEpoch (7))]
+    leader_epoch: krabka_metadata::LeaderEpoch,
+    #[builder(into, default = krabka_ids :: ApiVersion (2))] version: krabka_ids::ApiVersion,
+    #[builder(default = & [WireBrokerId (1)])] new_isr: &'_ [WireBrokerId],
+    #[builder(default)] response_check: IsrResponseCheck,
 ) -> AlterPartitionResponse {
+    let setup = LiveIsrSetup {
+        topic,
+        topic_id,
+        leader_epoch,
+        version,
+        new_isr,
+    };
     let LiveIsrSetup {
         topic,
         topic_id,
@@ -863,13 +1015,13 @@ pub(crate) async fn propose_isr(
     // The controller checks the sender's broker epoch and the row's partition
     // epoch. Keep the two image snapshots in the original request-read order.
     let image = broker.controller.current_image();
-    let request = alter_partition_request(IsrProposalSetup {
-        topic_id,
-        broker: IsrBrokerIdentity {
+    let request = alter_partition_request()
+        .topic_id(topic_id)
+        .broker(IsrBrokerIdentity {
             epoch: BrokerEpoch(image.broker_epoch(NodeId(1)).unwrap_or(-1)),
             ..Default::default()
-        },
-        partition: IsrPartitionEpochs {
+        })
+        .partition(IsrPartitionEpochs {
             leader: leader_epoch,
             partition: PartitionEpoch(
                 broker
@@ -879,34 +1031,22 @@ pub(crate) async fn propose_isr(
                     .expect("partition")
                     .partition_epoch,
             ),
-        },
-        new_isr,
-    });
-    handle(broker, request, version.0, &ctx)
+        })
+        .new_isr(new_isr)
+        .call();
+    let response = handle(broker, request, version.0, &ctx)
         .await
-        .expect("AlterPartition")
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IsrResponseCheck {
-    EnvelopeAndPartition,
-    PartitionOnly,
-}
-
-/// Propose an ISR change and verify its partition result, optionally checking the envelope first.
-pub(crate) async fn accepted_isr_proposal(
-    broker: &Arc<Broker>,
-    setup: LiveIsrSetup<'_>,
-    response_check: IsrResponseCheck,
-) {
-    let response = propose_isr(broker, setup).await;
+        .expect("AlterPartition");
     if response_check == IsrResponseCheck::EnvelopeAndPartition {
         assert2::assert!(response.error_code == NONE);
     }
-    assert2::assert!(
-        response.topics[0].partitions[0].error_code == NONE,
-        "AlterPartition refused the proposal: {response:?}"
-    );
+    if response_check != IsrResponseCheck::None {
+        assert2::assert!(
+            response.topics[0].partitions[0].error_code == NONE,
+            "AlterPartition refused the proposal: {response:?}"
+        );
+    }
+    response
 }
 
 /// Authorizer that denies every request. It drives the authorization-failure
@@ -1441,7 +1581,21 @@ impl Default for AllowAclSetup<'_> {
     }
 }
 
-pub(crate) fn allow_acl(setup: AllowAclSetup<'_>) -> krabka_metadata::AclEntry {
+#[bon::builder]
+pub(crate) fn allow_acl(
+    #[builder(default = AllowAclSetup::default().resource_type)]
+    resource_type: krabka_metadata::ResourceType,
+    #[builder(default = AllowAclSetup::default().resource_name)] resource_name: &'_ str,
+    #[builder(default = AllowAclSetup::default().principal)] principal: &'_ str,
+    #[builder(default = AllowAclSetup::default().operation)]
+    operation: krabka_metadata::AclOperation,
+) -> krabka_metadata::AclEntry {
+    let setup = AllowAclSetup {
+        resource_type,
+        resource_name,
+        principal,
+        operation,
+    };
     let AllowAclSetup {
         resource_type,
         resource_name,
@@ -1492,14 +1646,14 @@ pub(crate) async fn grant_cluster_operation(
     handle
         .broker_arc_for_test()
         .controller
-        .submit_change(vec![MetadataRecord::V1AccessControlEntry(allow_acl(
-            AllowAclSetup {
-                resource_type: krabka_metadata::ResourceType::Cluster,
-                resource_name: CLUSTER_RESOURCE_NAME,
-                principal: &format!("User:{user}"),
-                operation,
-            },
-        ))])
+        .submit_change(vec![MetadataRecord::V1AccessControlEntry(
+            allow_acl()
+                .resource_type(krabka_metadata::ResourceType::Cluster)
+                .resource_name(CLUSTER_RESOURCE_NAME)
+                .principal(&format!("User:{user}"))
+                .operation(operation)
+                .call(),
+        )])
         .await
         .expect("commit cluster acl");
 }
@@ -1520,14 +1674,13 @@ pub(crate) async fn grant_topic_operation(
     handle
         .broker_arc_for_test()
         .controller
-        .submit_change(vec![MetadataRecord::V1AccessControlEntry(allow_acl(
-            AllowAclSetup {
-                resource_name: topic,
-                principal: &format!("User:{user}"),
-                operation,
-                ..Default::default()
-            },
-        ))])
+        .submit_change(vec![MetadataRecord::V1AccessControlEntry(
+            allow_acl()
+                .resource_name(topic)
+                .principal(&format!("User:{user}"))
+                .operation(operation)
+                .call(),
+        )])
         .await
         .expect("commit topic acl");
 }
@@ -1729,10 +1882,12 @@ pub(crate) struct ShareBrokerSetup {
 /// Like [`start_group_broker`], but it also waits until the share coordinator
 /// serves `__share_group_state`. Disabled support then finalizes
 /// `share.version` at 0, which turns the share-group APIs off.
+#[bon::builder]
 pub(crate) async fn start_share_broker(
     authorizer: std::sync::Arc<dyn Authorizer>,
-    setup: ShareBrokerSetup,
+    #[builder(default)] support: ShareApiSupport,
 ) -> (BrokerHandle, tempfile::TempDir) {
+    let setup = ShareBrokerSetup { support };
     let (handle, dir) = start_group_broker(authorizer).await;
     handle.wait_until_share_coordinator_ready().await;
     if matches!(setup.support, ShareApiSupport::Disabled) {
@@ -2694,7 +2849,9 @@ pub(crate) struct EmptyPayloadBatchSetup {
 }
 
 /// An empty-payload fixture batch with the protocol's original default headers.
-pub(crate) fn default_records_batch(setup: EmptyPayloadBatchSetup) -> RecordBatch {
+#[bon::builder]
+pub(crate) fn default_records_batch(#[builder(into, default)] count: RecordCount) -> RecordBatch {
+    let setup = EmptyPayloadBatchSetup { count };
     let n = setup.count.0;
     let mut batch = RecordBatch {
         last_offset_delta: n - 1,
@@ -2742,11 +2899,23 @@ impl Default for CommittedPartitionSetup<'_> {
     }
 }
 
+#[bon::builder]
 pub(crate) async fn committed_partition(
     root: &std::path::Path,
     log: krabka_log::Log,
-    setup: CommittedPartitionSetup<'_>,
+    #[builder(default = CommittedPartitionSetup::default().topic)] topic: &'_ str,
+    #[builder(into, default = CommittedPartitionSetup::default().partition)]
+    partition: krabka_ids::PartitionIndex,
+    #[builder(into, default = CommittedPartitionSetup::default().leader)]
+    leader: krabka_metadata::NodeId,
+    #[builder(default = CommittedPartitionSetup::default().registry)] registry: LogDirRegistry,
 ) -> Arc<Partition> {
+    let setup = CommittedPartitionSetup {
+        topic,
+        partition,
+        leader,
+        registry,
+    };
     let CommittedPartitionSetup {
         topic,
         partition,
@@ -2768,6 +2937,34 @@ pub(crate) async fn committed_partition(
 }
 
 /// Finalize ELR and seed a topic, its partition and minimum ISR together.
+#[bon::builder]
+pub(crate) fn metadata_partition_record(
+    topic: String,
+    replica_ids: Vec<u64>,
+    isr_ids: Vec<u64>,
+    #[builder(default = 0)] partition: i32,
+    #[builder(default = 1)] leader_id: u64,
+    #[builder(default = 1)] leader_epoch: i32,
+    #[builder(default = 4)] partition_epoch: i32,
+) -> PartitionRecord {
+    let directories = vec![uuid::Uuid::nil(); replica_ids.len()];
+    PartitionRecord {
+        topic,
+        partition,
+        leader: krabka_metadata::NodeId(leader_id),
+        replicas: replica_ids
+            .into_iter()
+            .map(krabka_metadata::NodeId)
+            .collect(),
+        isr: isr_ids.into_iter().map(krabka_metadata::NodeId).collect(),
+        leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
+        adding_replicas: vec![],
+        removing_replicas: vec![],
+        directories,
+        partition_epoch,
+    }
+}
+
 pub(crate) fn elr_topic_records(
     partition: PartitionRecord,
     topic_id: uuid::Uuid,
@@ -2832,10 +3029,18 @@ pub(crate) struct DescribedCreationSetup<'a> {
     pub overrides: &'a TopicConfigOverrides,
 }
 
+#[bon::builder]
 pub(crate) fn described_creation_configs(
     image: &krabka_metadata::MetadataImage,
-    setup: DescribedCreationSetup<'_>,
+    #[builder(into, default = krabka_metadata :: NodeId (1))] node: krabka_metadata::NodeId,
+    #[builder(default = "t")] topic: &'_ str,
+    #[builder(default = & NO_TOPIC_OVERRIDES)] overrides: &'_ TopicConfigOverrides,
 ) -> Vec<krabka_protocol::owned::create_topics_response::CreatableTopicConfigs> {
+    let setup = DescribedCreationSetup {
+        node,
+        topic,
+        overrides,
+    };
     effective_topic_configs(
         image,
         setup.node,
@@ -2984,7 +3189,14 @@ impl Default for VoterImageSetup {
     }
 }
 
-pub(crate) fn voter_image(setup: VoterImageSetup) -> krabka_metadata::MetadataImage {
+#[bon::builder]
+pub(crate) fn voter_image(
+    #[builder(into, default = VoterImageSetup::default().node)] node: krabka_ids::NodeId,
+    #[builder(default = VoterImageSetup::default().endpoints)] endpoints: Vec<
+        krabka_metadata::VoterEndpoint,
+    >,
+) -> krabka_metadata::MetadataImage {
+    let setup = VoterImageSetup { node, endpoints };
     let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
     image.apply(&krabka_metadata::MetadataRecord::V1Voters(
         krabka_metadata::VotersRecord {
@@ -3077,7 +3289,24 @@ pub(crate) struct InSyncPartitionSetup<'a> {
 }
 
 /// A fully in-sync assignment whose first replica leads, retaining exact directory slots.
-pub(crate) fn in_sync_partition(setup: InSyncPartitionSetup<'_>) -> PartitionRecord {
+#[bon::builder]
+pub(crate) fn in_sync_partition(
+    #[builder(default = "t")] topic: &'_ str,
+    #[builder(into, default)] partition: krabka_ids::PartitionIndex,
+    #[builder(into, default = krabka_metadata :: LeaderEpoch (0))]
+    leader_epoch: krabka_metadata::LeaderEpoch,
+    #[builder(default = vec ! [InSyncReplicaId (1) , InSyncReplicaId (2)])] replicas: Vec<
+        InSyncReplicaId,
+    >,
+    #[builder(default)] directories: Vec<ReplicaDirectory>,
+) -> PartitionRecord {
+    let setup = InSyncPartitionSetup {
+        topic,
+        partition,
+        leader_epoch,
+        replicas,
+        directories,
+    };
     PartitionRecord {
         topic: setup.topic.to_string(),
         partition: setup.partition.0,
@@ -3101,10 +3330,16 @@ pub(crate) struct StreamsJoinSetup<'a> {
 }
 
 /// A streams join reporting empty owned task sets and its complete topology.
+#[bon::builder]
 pub(crate) fn streams_join_request(
     topology: krabka_protocol::owned::streams_group_heartbeat_request::Topology,
-    setup: StreamsJoinSetup<'_>,
+    #[builder(default = "g")] group_id: &'_ str,
+    #[builder(default = "m1")] member_id: &'_ str,
 ) -> krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest {
+    let setup = StreamsJoinSetup {
+        group_id,
+        member_id,
+    };
     krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest {
         group_id: setup.group_id.into(),
         member_id: setup.member_id.into(),

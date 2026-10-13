@@ -4,13 +4,11 @@
 //! are each built by more than one of the test modules under this module, so
 //! the builders live in one file instead of once per module.
 
+pub(super) use crate::barrier::test_support::at;
 use {
-    crate::barrier::{
-        persistence::{
-            CutStatus, CutValue, GroupValue, InjectionStartValue, PartitionOffset, TopicOffsets,
-            TopicTarget,
-        },
-        state::TargetPartition,
+    crate::barrier::persistence::{
+        CutStatus, CutValue, GroupValue, InjectionStartValue, PartitionOffset, TopicOffsets,
+        TopicTarget,
     },
     krabka_ids::PartitionIndex,
     krabka_log::Offset,
@@ -21,13 +19,6 @@ pub(super) fn target(topic: &str, count: i32) -> TopicTarget {
     TopicTarget {
         topic: topic.to_owned(),
         partition_count: count,
-    }
-}
-
-pub(super) fn at(topic: &str, partition: i32) -> TargetPartition {
-    TargetPartition {
-        topic: topic.to_owned(),
-        partition: PartitionIndex(partition),
     }
 }
 

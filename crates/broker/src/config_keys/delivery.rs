@@ -157,60 +157,54 @@ mod tests {
         );
     }
 
-    #[test]
-    fn delivery_settings_resolve_topic_overrides_over_defaults() {
+    #[yare::parameterized(
+        no_override = { None, Some(604_800_000), false },
+        valid_override = { Some("90000"), Some(90_000), false },
+        disabled_override = { Some("-1"), None, false },
+        malformed_word = { Some("soon"), Some(604_800_000), true },
+        negative_override = { Some("-5"), Some(604_800_000), true },
+        empty_override = { Some(""), Some(604_800_000), true },
+    )]
+    fn delivery_max_delay_resolves_overrides_and_falls_back_for_invalid_values(
+        value: Option<&str>,
+        expected_millis: Option<u32>,
+        check_schedule_default: bool,
+    ) {
         use {
             krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
             uuid::Uuid,
         };
 
+        let mut overrides = maplit::btreemap! {};
+        if let Some(value) = value {
+            overrides.insert(DELIVERY_MAX_DELAY_MS.to_owned(), value.to_owned());
+            if check_schedule_default {
+                overrides.insert(DELIVERY_SCHEDULE_MONOTONIC.to_owned(), value.to_owned());
+            }
+        }
         let mut image = MetadataImage::new(Uuid::nil());
-        assert!(resolve_delivery_max_delay(&image, "t") == Some(millis(604_800_000)));
-
-        image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
-            topic: "t".into(),
-            overrides: maplit::btreemap! {
-            DELIVERY_MAX_DELAY_MS.into() => "90000".into()},
-        }));
-        assert!(resolve_delivery_max_delay(&image, "t") == Some(millis(90_000)));
-
-        image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
-            topic: "t".into(),
-            overrides: maplit::btreemap! {DELIVERY_MAX_DELAY_MS.into() => "-1".into()},
-        }));
-        assert!(resolve_delivery_max_delay(&image, "t") == None);
-    }
-
-    #[test]
-    fn corrupt_delivery_settings_resolve_to_their_defaults() {
-        use {
-            krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
-            uuid::Uuid,
-        };
-
-        let cases = ["soon", "-5", ""];
-        for value in cases {
-            let mut image = MetadataImage::new(Uuid::nil());
+        if !overrides.is_empty() {
             image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
                 topic: "t".into(),
-                overrides: maplit::btreemap! {
-                DELIVERY_MAX_DELAY_MS.into() => value.into(),
-                DELIVERY_SCHEDULE_MONOTONIC.into() => value.into()},
+                overrides: overrides.clone(),
             }));
-            assert!(
-                resolve_delivery_max_delay(&image, "t") == Some(millis(604_800_000)),
-                "delivery.max.delay.ms={value}"
-            );
+        }
+
+        assert2::assert!(
+            resolve_delivery_max_delay(&image, "t") == expected_millis.map(millis),
+            "delivery.max.delay.ms={value:?}"
+        );
+        if let (true, Some(value)) = (check_schedule_default, value) {
             // A corrupt `delivery.schedule.monotonic` is not "true", so the
             // applier leaves the log's default in place.
-            assert!(
+            assert2::assert!(
                 apply_to_log_config(
                     &maplit::btreemap! {
                         DELIVERY_SCHEDULE_MONOTONIC.to_owned() => value.to_owned()
                     },
                     &LogConfig::default()
                 ) == LogConfig::default(),
-                "delivery.schedule.monotonic={value}"
+                "delivery.schedule.monotonic={value:?}"
             );
         }
     }

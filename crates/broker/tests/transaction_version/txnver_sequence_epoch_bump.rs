@@ -12,18 +12,14 @@ use {
     crate::{
         support::{
             produce::{SinglePartitionProduceSetup, batch_request},
-            records::{
-                BatchTransaction, ProbeRecordCount, ProducerSequence, TransactionProbeBatchSetup,
-                transaction_probe_batch,
-            },
+            records::{BatchTransaction, ProducerSequence, transaction_probe_batch},
             topics::TopicPartitionCount,
             transaction_wire::{
                 add_partition_request, coordinator_loading, initialize_transactional,
                 partition_error, retry_coordinator, settled_produce,
             },
             transactions::{
-                EndTransactionSetup, ProducerEpoch, ProducerEpochOffset, ProducerIdentity,
-                end_transaction_request,
+                ProducerEpoch, ProducerEpochOffset, ProducerIdentity, end_transaction_request,
             },
         },
         txnver_harness::{
@@ -160,19 +156,19 @@ async fn produce_setup(client: &Client, case: &Case, producer: &Identity) {
         case.topic,
         (
             producer.transactional_id,
-            transaction_probe_batch(TransactionProbeBatchSetup {
-                producer: ProducerIdentity {
+            transaction_probe_batch()
+                .producer(ProducerIdentity {
                     id: producer.producer_id,
                     epoch: producer.epoch,
-                },
-                sequence: ProducerSequence(0),
-                records: ProbeRecordCount(3),
-                transaction: if producer.transactional_id.is_some() {
+                })
+                .sequence(0)
+                .records(3)
+                .transaction(if producer.transactional_id.is_some() {
                     BatchTransaction::Transactional
                 } else {
                     BatchTransaction::Ordinary
-                },
-            }),
+                })
+                .call(),
         ),
     )
     .await;
@@ -218,16 +214,15 @@ async fn set_up(client: &Client, case: &Case) -> Identity {
             assert!(added == 0, "{}: AddPartitionsToTxn", case.name);
             produce_setup(client, case, &producer).await;
             let end = client
-                .send(end_transaction_request(
-                    transactional_id,
-                    EndTransactionSetup {
-                        producer: ProducerIdentity::from_wire((
+                .send(
+                    end_transaction_request()
+                        .transactional_id(transactional_id)
+                        .producer(ProducerIdentity::from_wire((
                             producer.producer_id.0,
                             producer.epoch.0,
-                        )),
-                        ..Default::default()
-                    },
-                ))
+                        )))
+                        .call(),
+                )
                 .await
                 .expect("EndTxn");
             assert!(end.error_code == 0, "{}: EndTxn {end:?}", case.name);
@@ -263,19 +258,18 @@ async fn probe(
         case.topic,
         (
             producer.transactional_id,
-            transaction_probe_batch(TransactionProbeBatchSetup {
-                producer: ProducerIdentity {
+            transaction_probe_batch()
+                .producer(ProducerIdentity {
                     id: producer.producer_id,
                     epoch,
-                },
-                sequence,
-                transaction: if producer.transactional_id.is_some() {
+                })
+                .sequence(sequence)
+                .transaction(if producer.transactional_id.is_some() {
                     BatchTransaction::Transactional
                 } else {
                     BatchTransaction::Ordinary
-                },
-                ..Default::default()
-            }),
+                })
+                .call(),
         ),
     )
     .await

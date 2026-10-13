@@ -80,13 +80,18 @@ impl LinkedCluster {
             support::listener_pairs(client_listeners, controller_listeners)
         {
             let dir = TempDir::new().unwrap();
-            let mut cfg = support::broker_config(
-                dir.path(),
-                topology.node_setup(ClusterBootstrapSetup {
-                    index: NodeIndex(index),
-                    ..Default::default()
-                }),
-            );
+            let node = topology.node_setup(ClusterBootstrapSetup {
+                index: NodeIndex(index),
+                ..Default::default()
+            });
+            let mut cfg = support::broker_config()
+                .log_dir(dir.path())
+                .index(node.index.0)
+                .client_addrs(node.client_addrs)
+                .controller_addrs(node.controller_addrs)
+                .voters(node.voters)
+                .mode(node.mode)
+                .call();
             // Peers and clients learn this site through its relay; the broker
             // itself binds the real port behind it.
             cfg.advertised_listener = links[index].client_addr().to_string();

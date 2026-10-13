@@ -12,7 +12,6 @@ use {
             admin::describe_producers_request,
             produce::{SinglePartitionProduceSetup, batch_request},
             records::{ProducerSequence, ProducerValuesSetup},
-            topics::CreateTopicSetup,
             transactions::ProducerEpoch,
         },
     },
@@ -25,11 +24,7 @@ use {
 #[tokio::test]
 async fn transactional_fields_follow_open_and_completed_transactions() {
     let p = support::start().await;
-    create_topic(&p.client, CreateTopicSetup {
-        topic: "transactions",
-        ..Default::default()
-    })
-    .await;
+    create_topic(&p.client, "transactions").await;
     let topic_id = topic_id_for(&p.client, "transactions").await;
     let (pid, epoch) = init_transactional_producer(&p, "describe-producers-tid").await;
 
@@ -55,20 +50,19 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
     let marker = p
         .client
         .send(WriteTxnMarkersRequest {
-            markers: vec![crate::support::transactions::transaction_marker(
-                crate::support::transactions::TransactionMarkerSetup {
-                    producer: crate::support::transactions::ProducerIdentity::from_wire((
+            markers: vec![
+                crate::support::transactions::transaction_marker()
+                    .producer(crate::support::transactions::ProducerIdentity::from_wire((
                         pid, epoch,
-                    )),
-                    coordinator_epoch: crate::support::transactions::CoordinatorEpoch(17),
-                    transaction_version: crate::support::transactions::TransactionVersion(1),
-                    topics: vec![crate::support::transactions::marker_topic(
+                    )))
+                    .coordinator_epoch(17)
+                    .transaction_version(1)
+                    .topics(vec![crate::support::transactions::marker_topic(
                         "transactions".into(),
                         vec![0],
-                    )],
-                    ..Default::default()
-                },
-            )],
+                    )])
+                    .call(),
+            ],
             ..Default::default()
         })
         .await
@@ -119,10 +113,18 @@ fn transaction_values_request(
 ) -> ProduceRequest {
     ProduceRequest {
         transactional_id: Some("describe-producers-tid".into()),
-        ..batch_request(transactional_batch(values), SinglePartitionProduceSetup {
-            topic: ("transactions").into(),
-            topic_id,
-            ..SinglePartitionProduceSetup::replicated()
-        })
+        ..batch_request(
+            transactional_batch()
+                .pid(values.pid.0)
+                .epoch(values.epoch.0)
+                .base_seq(values.base_seq.0)
+                .values(values.values)
+                .call(),
+            SinglePartitionProduceSetup {
+                topic: ("transactions").into(),
+                topic_id,
+                ..SinglePartitionProduceSetup::replicated()
+            },
+        )
     }
 }

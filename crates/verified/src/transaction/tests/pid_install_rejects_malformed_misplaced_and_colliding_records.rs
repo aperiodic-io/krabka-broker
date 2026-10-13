@@ -42,57 +42,38 @@ fn malformed_marker_cases() -> Vec<(
     std::vec![
         // A negative producer ID names no producer.
         (
-            marker(MarkerSetup {
-                producer_id: ProducerId(-1),
-                ..Default::default()
-            }),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(-1),
-                coordinator_epoch: CoordinatorEpoch(-1),
-                ..Default::default()
-            }),
+            marker().producer_id(-1).call(),
+            partition().producer_epoch(-1).coordinator_epoch(-1).call(),
             RejectMalformed,
         ),
         // A negative marker epoch.
         (
-            marker(MarkerSetup {
-                producer_epoch: ProducerEpoch(-1),
-                ..Default::default()
-            }),
-            partition(MarkerPartitionSetup::default()),
+            marker().producer_epoch(-1).call(),
+            partition().call(),
             RejectMalformed,
         ),
         // A coordinator epoch below the `-1` sentinel.
         (
-            marker(MarkerSetup {
-                outcome: TransactionOutcome::Abort,
-                target: MarkerTarget::Data,
-                coordinator_epoch: CoordinatorEpoch(-2),
-                ..Default::default()
-            }),
-            partition(MarkerPartitionSetup {
-                coordinator_epoch: CoordinatorEpoch(-1),
-                ..Default::default()
-            }),
+            marker()
+                .coordinator_epoch(-2)
+                .outcome(TransactionOutcome::Abort)
+                .target(MarkerTarget::Data)
+                .call(),
+            partition().coordinator_epoch(-1).call(),
             RejectMalformed,
         ),
         // Partition state below the sentinels.
         (
-            marker(MarkerSetup::default()),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(-2),
-                coordinator_epoch: CoordinatorEpoch(-1),
-                ..Default::default()
-            }),
+            marker().call(),
+            partition().producer_epoch(-2).coordinator_epoch(-1).call(),
             RejectMalformed,
         ),
         (
-            marker(MarkerSetup::default()),
-            partition(MarkerPartitionSetup {
-                coordinator_epoch: CoordinatorEpoch(-2),
-                pending: PendingTransaction::Absent,
-                ..Default::default()
-            }),
+            marker().call(),
+            partition()
+                .coordinator_epoch(-2)
+                .pending(PendingTransaction::Absent)
+                .call(),
             RejectMalformed,
         ),
     ]
@@ -110,134 +91,89 @@ fn marker_fencing_and_publication_cases() -> Vec<(
     std::vec![
         // A pending transaction without a producer epoch.
         (
-            marker(MarkerSetup::default()),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(-1),
-                ..Default::default()
-            }),
+            marker().call(),
+            partition().producer_epoch(-1).call(),
             RejectMalformed,
         ),
         // `ProducerFencedException`: the marker's epoch is older.
         (
-            marker(MarkerSetup {
-                producer_epoch: ProducerEpoch(2),
-                coordinator_epoch: CoordinatorEpoch(9),
-                ..Default::default()
-            }),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(3),
-                coordinator_epoch: CoordinatorEpoch(8),
-                ..Default::default()
-            }),
+            marker().producer_epoch(2).coordinator_epoch(9).call(),
+            partition().producer_epoch(3).coordinator_epoch(8).call(),
             RejectProducerEpoch,
         ),
         // `TransactionCoordinatorFencedException`: an older coordinator.
         (
-            marker(MarkerSetup {
-                producer_epoch: ProducerEpoch(3),
-                coordinator_epoch: CoordinatorEpoch(7),
-                ..Default::default()
-            }),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(3),
-                coordinator_epoch: CoordinatorEpoch(8),
-                ..Default::default()
-            }),
+            marker().producer_epoch(3).coordinator_epoch(7).call(),
+            partition().producer_epoch(3).coordinator_epoch(8).call(),
             RejectCoordinatorEpoch,
         ),
         // The same generation already closed the transaction: append
         // nothing.
         (
             committed_marker(),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(3),
-                coordinator_epoch: CoordinatorEpoch(8),
-                pending: PendingTransaction::Absent,
-            }),
+            partition()
+                .producer_epoch(3)
+                .coordinator_epoch(8)
+                .pending(PendingTransaction::Absent)
+                .call(),
             Retry,
         ),
         (
-            marker(MarkerSetup::default()),
-            partition(MarkerPartitionSetup {
-                pending: PendingTransaction::Absent,
-                ..Default::default()
-            }),
+            marker().call(),
+            partition().pending(PendingTransaction::Absent).call(),
             Retry,
         ),
         // A pending COMMIT on `__consumer_offsets` publishes its offsets.
         (
             committed_marker(),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(3),
-                coordinator_epoch: CoordinatorEpoch(7),
-                ..Default::default()
-            }),
+            partition().producer_epoch(3).coordinator_epoch(7).call(),
             AppendAndPublishOffsets,
         ),
         // An ABORT, a data partition, or no pending transaction appends
         // without publishing.
         (
-            marker(MarkerSetup {
-                outcome: TransactionOutcome::Abort,
-                coordinator_epoch: CoordinatorEpoch(8),
-                producer_epoch: ProducerEpoch(3),
-                ..Default::default()
-            }),
-            partition(MarkerPartitionSetup {
-                coordinator_epoch: CoordinatorEpoch(7),
-                producer_epoch: ProducerEpoch(3),
-                ..Default::default()
-            }),
+            marker()
+                .producer_epoch(3)
+                .coordinator_epoch(8)
+                .outcome(TransactionOutcome::Abort)
+                .call(),
+            partition().producer_epoch(3).coordinator_epoch(7).call(),
             AppendWithoutOffsetPublication,
         ),
         (
-            marker(MarkerSetup {
-                target: MarkerTarget::Data,
-                coordinator_epoch: CoordinatorEpoch(8),
-                producer_epoch: ProducerEpoch(3),
-                ..Default::default()
-            }),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(3),
-                coordinator_epoch: CoordinatorEpoch(7),
-                ..Default::default()
-            }),
+            marker()
+                .producer_epoch(3)
+                .coordinator_epoch(8)
+                .target(MarkerTarget::Data)
+                .call(),
+            partition().producer_epoch(3).coordinator_epoch(7).call(),
             AppendWithoutOffsetPublication,
         ),
         (
-            marker(MarkerSetup {
-                target: MarkerTarget::Data,
-                coordinator_epoch: CoordinatorEpoch(-1),
-                outcome: TransactionOutcome::Abort,
-                ..Default::default()
-            }),
-            partition(MarkerPartitionSetup {
-                coordinator_epoch: CoordinatorEpoch(-1),
-                ..Default::default()
-            }),
+            marker()
+                .coordinator_epoch(-1)
+                .outcome(TransactionOutcome::Abort)
+                .target(MarkerTarget::Data)
+                .call(),
+            partition().coordinator_epoch(-1).call(),
             AppendWithoutOffsetPublication,
         ),
         // A newer generation than the closed one is not a retry.
         (
-            marker(MarkerSetup {
-                producer_epoch: ProducerEpoch(4),
-                coordinator_epoch: CoordinatorEpoch(9),
-                ..Default::default()
-            }),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(3),
-                coordinator_epoch: CoordinatorEpoch(8),
-                pending: PendingTransaction::Absent,
-            }),
+            marker().producer_epoch(4).coordinator_epoch(9).call(),
+            partition()
+                .producer_epoch(3)
+                .coordinator_epoch(8)
+                .pending(PendingTransaction::Absent)
+                .call(),
             AppendWithoutOffsetPublication,
         ),
         (
-            marker(MarkerSetup::default()),
-            partition(MarkerPartitionSetup {
-                producer_epoch: ProducerEpoch(-1),
-                pending: PendingTransaction::Absent,
-                ..Default::default()
-            }),
+            marker().call(),
+            partition()
+                .producer_epoch(-1)
+                .pending(PendingTransaction::Absent)
+                .call(),
             AppendWithoutOffsetPublication,
         ),
     ]

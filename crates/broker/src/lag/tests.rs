@@ -17,11 +17,11 @@ use {
                 streams::config::StreamsGroupConfig,
             },
         },
+        handlers::test_support::replicated_partition,
         metrics::PartitionLabel,
         partition::Partition,
         test_support::{
-            FakeMetadataSource, RecordCount, RepeatedRecordsSetup, StandalonePartitionSetup,
-            UnixMillis, open_partition, repeated_records_batch, single_partition_topic,
+            FakeMetadataSource, open_partition, repeated_records_batch, single_partition_topic,
             started_controller_broker,
         },
     },
@@ -53,6 +53,16 @@ fn lag_metadata(image: MetadataImage) -> Arc<dyn MetadataSource> {
     )
 }
 
+fn local_partition_record(topic: &str) -> PartitionRecord {
+    let mut record = replicated_partition()
+        .topic(topic)
+        .leader(LEADER)
+        .replicas(&[LEADER])
+        .call();
+    record.leader_epoch = LeaderEpoch(1);
+    record
+}
+
 fn image_with_remote_leader(topic: &str) -> MetadataImage {
     let mut image = coordinator_image();
     image.apply(&MetadataRecord::V1Partition(PartitionRecord {
@@ -70,11 +80,11 @@ fn image_with_remote_leader(topic: &str) -> MetadataImage {
 /// A partition backed by a real log under `dir`, registered as led by
 /// `LEADER` with `FOLLOWER` as its one in-sync follower.
 fn led_partition(dir: &Path, topic: &str, partition: i32) -> Arc<Partition> {
-    let part = open_partition(dir, StandalonePartitionSetup {
-        topic,
-        partition: krabka_ids::PartitionIndex(partition),
-        ..Default::default()
-    });
+    let part = open_partition()
+        .log_dir(dir)
+        .topic(topic)
+        .partition(partition)
+        .call();
     part.current_leader.store(LEADER.0, Ordering::Release);
     part
 }
@@ -95,10 +105,10 @@ async fn install_isr(partition: &Partition) {
 fn append_records(partition: &Partition, count: i32) {
     let mut batch = RecordBatch {
         partition_leader_epoch: -1,
-        ..repeated_records_batch(RepeatedRecordsSetup {
-            count: RecordCount(count),
-            timestamp: UnixMillis(1_700_000_000),
-        })
+        ..repeated_records_batch()
+            .count(count)
+            .timestamp(1_700_000_000)
+            .call()
     };
     partition
         .log
@@ -343,15 +353,7 @@ fn coordinator_image() -> MetadataImage {
             name,
             uuid::Uuid::from_u128(topic_id),
         )));
-        image.apply(&MetadataRecord::V1Partition(PartitionRecord {
-            topic: name.into(),
-            partition: 0,
-            leader: LEADER,
-            replicas: vec![LEADER],
-            isr: vec![LEADER],
-            leader_epoch: LeaderEpoch(1),
-            ..Default::default()
-        }));
+        image.apply(&MetadataRecord::V1Partition(local_partition_record(name)));
     }
     image
 }
@@ -722,15 +724,7 @@ async fn remote_watermark_probe_resolves_a_valid_fetch_boundary() {
         .controller
         .submit_change(vec![
             MetadataRecord::V1Topic(single_partition_topic(TOPIC, uuid::Uuid::from_u128(1))),
-            MetadataRecord::V1Partition(PartitionRecord {
-                topic: TOPIC.into(),
-                partition: 0,
-                leader: LEADER,
-                replicas: vec![LEADER],
-                isr: vec![LEADER],
-                leader_epoch: LeaderEpoch(1),
-                ..Default::default()
-            }),
+            MetadataRecord::V1Partition(local_partition_record(TOPIC)),
         ])
         .await
         .expect("publish probed partition");

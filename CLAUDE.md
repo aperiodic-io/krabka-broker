@@ -191,6 +191,21 @@ Do not make style-only sweeps across untouched files. Bring a file into line
 with the guides only when you already edit it. Keep the tidy-up proportionate to
 the change.
 
+### Builders
+
+Use `bon` builders for factory and test-fixture functions that take a setup
+struct, especially when callers override a few values on top of defaults. Do
+this for production helpers and test helpers alike; do not make callers build a
+`Setup { field: value, ..Default::default() }` just to pass it to a factory.
+Give defaultable builder fields explicit defaults and call the builder with
+named setters followed by `.call()` (or `.build()` for a derived struct
+builder).
+
+For builder fields that use scalar newtypes, make the setter accept the raw
+scalar with bon's `#[builder(into)]`. Derive the needed `From` conversions on
+the newtype with `derive_more` instead of writing repetitive conversion
+implementations by hand.
+
 ### Assertions and Clippy
 
 - Never add `#[allow(clippy::...)]` or any equivalent Clippy suppression. Fix

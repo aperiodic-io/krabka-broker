@@ -229,11 +229,19 @@ pub struct CheckpointSetup {
     pub frequency: CheckpointFrequency,
 }
 
+#[bon::builder]
 pub fn quiet_params(
     sink: Arc<dyn AuditSink>,
     spool: Spool,
-    setup: CheckpointSetup,
+    #[builder(default = Arc :: new (AuditStats :: new ()))] stats: Arc<AuditStats>,
+    signer: Option<Arc<FileEd25519Signer>>,
+    #[builder(default)] frequency: CheckpointFrequency,
 ) -> AuditWriterParams {
+    let setup = CheckpointSetup {
+        stats,
+        signer,
+        frequency,
+    };
     let CheckpointSetup {
         stats,
         signer,

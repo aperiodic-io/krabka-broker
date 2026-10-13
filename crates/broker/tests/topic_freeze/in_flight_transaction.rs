@@ -10,10 +10,7 @@
 use {
     crate::{
         control_plane::freeze_scope,
-        support::{
-            self,
-            producer::{ProducerRecordSetup, producer_record},
-        },
+        support::{self, producer::producer_record},
         wire::{CONTROL, accepted, create_topic, refused},
     },
     assert2::{assert, check},
@@ -123,10 +120,11 @@ async fn a_transaction_that_enlisted_before_the_freeze_still_commits() {
         .await
         .expect("begin_transaction");
     producer
-        .send(producer_record(ProducerRecordSetup {
-            value: Some(Bytes::from_static(b"in-flight")),
-            ..Default::default()
-        }))
+        .send(
+            producer_record()
+                .value(Some(Bytes::from_static(b"in-flight")))
+                .call(),
+        )
         .await
         .expect("the in-flight record is acknowledged");
     p.broker

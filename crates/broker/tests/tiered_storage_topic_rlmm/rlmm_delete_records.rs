@@ -21,10 +21,7 @@ use {
         rlmm_round_trip::remote_log_files,
         run_broker_test,
         support::{
-            fetch::{
-                FetchLimits, FetchPartitionSetup, RequestWaitMillis, SinglePartitionFetchSetup,
-                fetch_partition, single_partition_fetch,
-            },
+            fetch::{FetchLimits, RequestWaitMillis, fetch_partition, single_partition_fetch},
             topic_id_for,
             topics::topic_configs,
         },
@@ -190,15 +187,14 @@ async fn fetch_once(
     fetch_offset: i64,
 ) -> krabka_protocol::owned::fetch_response::PartitionData {
     let resp = client
-        .send(single_partition_fetch(SinglePartitionFetchSetup {
-            topic: TOPIC.into(),
-            topic_id,
-            partition: fetch_partition(FetchPartitionSetup {
-                offset: krabka_ids::Offset(fetch_offset),
-                ..Default::default()
-            }),
-            limits: FetchLimits::wait_for_data(RequestWaitMillis(500)),
-        }))
+        .send(
+            single_partition_fetch()
+                .topic(TOPIC.into())
+                .topic_id(topic_id)
+                .partition(fetch_partition().offset(fetch_offset).call())
+                .limits(FetchLimits::wait_for_data(RequestWaitMillis(500)))
+                .call(),
+        )
         .await
         .expect("Fetch");
     resp.responses

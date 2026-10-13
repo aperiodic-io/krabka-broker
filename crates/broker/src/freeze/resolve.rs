@@ -193,7 +193,14 @@ mod tests {
     use crate::test_support::topic_freeze_record as freeze;
 
     fn frozen(image: &mut MetadataImage, setup: FreezeSetup<'_>) {
-        image.apply(&MetadataRecord::V1TopicFreeze(freeze(setup)));
+        image.apply(&MetadataRecord::V1TopicFreeze(
+            freeze()
+                .scope(setup.scope)
+                .pattern_type(setup.pattern_type)
+                .state(setup.state)
+                .reason(setup.reason)
+                .call(),
+        ));
     }
 
     #[test]
@@ -213,9 +220,7 @@ mod tests {
     #[test]
     fn mutation_resolution_hides_freeze_detail_until_authorized() {
         let mut image = image();
-        image.apply(&MetadataRecord::V1TopicFreeze(freeze(
-            FreezeSetup::default(),
-        )));
+        image.apply(&MetadataRecord::V1TopicFreeze(freeze().call()));
 
         check!(
             resolve_freeze_mutation(&image, "orders", false, FreezeMutationKind::Produce)

@@ -11,9 +11,9 @@ mod support;
 use {
     crate::support::{
         client::{connect_client, standalone_topic},
-        producer::{ProducerRecordSetup, default_producer, producer_record},
+        producer::{default_producer, producer_record},
         standalone_broker,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        topics::{creatable_topic, create_topic_request},
     },
     krabka_client_consumer::{AutoOffsetReset, Consumer},
 };
@@ -22,12 +22,14 @@ async fn produce_n(bootstrap: &str, topic: &str, n: u32) {
     let producer = default_producer(bootstrap).await;
     for i in 0..n {
         producer
-            .send(producer_record(ProducerRecordSetup {
-                topic: (topic).into(),
-                partition: Some(krabka_ids::PartitionIndex(0)),
-                key: Some(format!("k{i}").into()),
-                value: Some(format!("v{i}").into()),
-            }))
+            .send(
+                producer_record()
+                    .topic((topic).into())
+                    .maybe_partition(Some(0))
+                    .maybe_key(Some(format!("k{i}").into()))
+                    .value(Some(bytes::Bytes::from(format!("v{i}"))))
+                    .call(),
+            )
             .await
             .unwrap();
     }
@@ -79,12 +81,9 @@ async fn seek_rejects_negative_offset() {
 
     let admin = connect_client(&bootstrap, None).await;
     admin
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: ("n").into(),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic().name(("n").into()).call(),
+        ))
         .await
         .unwrap();
 

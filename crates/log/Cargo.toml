@@ -27,6 +27,8 @@ default = []
 test-helpers = []
 
 [dependencies]
+derive_more = { workspace = true }
+bon = { workspace = true }
 maplit = { workspace = true }
 assert2 = { workspace = true }
 krabka-ids = { version = "0.6.0" }
@@ -53,6 +55,7 @@ rustix = { workspace = true }
 
 [dev-dependencies]
 bon = { workspace = true }
+yare = { workspace = true }
 # The lookup and compaction tests of `max.decompressed.message.bytes` write
 # compressed batches, and the library itself carries no codec.
 krabka-compression = { version = "0.6.0", default-features = false, features = ["gzip"] }

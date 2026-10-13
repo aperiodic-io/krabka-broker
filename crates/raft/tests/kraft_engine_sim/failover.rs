@@ -17,7 +17,12 @@ async fn elected_cluster(
     setup: SimClusterSetup<'_>,
 ) -> (Vec<tempfile::TempDir>, fixture::NodeId, u32) {
     let ids = setup.ids;
-    let dirs = start_engines(net, setup);
+    let dirs = start_engines()
+        .net(net)
+        .ids(setup.ids)
+        .cluster_id(setup.cluster_id)
+        .timeouts(setup.timeouts)
+        .call();
     let (leader, epoch) = await_single_leader(net, ids, fixture::Duration::from_secs(10)).await;
     (dirs, leader, epoch)
 }

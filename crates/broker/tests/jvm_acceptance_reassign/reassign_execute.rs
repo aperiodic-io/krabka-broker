@@ -12,7 +12,7 @@ use {
         },
         jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised, verify_console_reassignment},
         oracle::{AssignedTopicCommandSetup, CliRun, OracleComparison},
-        support::{ContainerInput, JvmDockerSetup, jvm_docker_command},
+        support::{ContainerInput, jvm_docker_command},
     },
     assert2::assert,
     std::{io::Write as _, process::Stdio, time::Duration},
@@ -26,10 +26,10 @@ async fn jvm_kafka_reassign_partitions_end_to_end() {
 
     let (cluster, _admin_props, admin_mount) = Box::pin(reassignment_cluster(TOPIC)).await;
 
-    let mut producer = jvm_docker_command(JvmDockerSetup {
-        image: KAFKA_IMAGE_TXN,
-        mounts: &[&admin_mount],
-        args: &[
+    let mut producer = jvm_docker_command()
+        .image(KAFKA_IMAGE_TXN)
+        .mounts(&[&admin_mount])
+        .args(&[
             "kafka-console-producer",
             "--topic",
             TOPIC,
@@ -37,12 +37,12 @@ async fn jvm_kafka_reassign_partitions_end_to_end() {
             broker0_advertised(),
             "--producer.config",
             "/client.properties",
-        ],
-        input: ContainerInput::Attached,
-    })
-    .stdin(Stdio::piped())
-    .spawn()
-    .expect("spawn kafka-console-producer");
+        ])
+        .input(ContainerInput::Attached)
+        .call()
+        .stdin(Stdio::piped())
+        .spawn()
+        .expect("spawn kafka-console-producer");
     producer
         .stdin
         .as_mut()

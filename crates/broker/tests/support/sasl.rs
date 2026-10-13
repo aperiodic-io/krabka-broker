@@ -28,7 +28,7 @@ impl ScramAlgorithm {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct ScramIterations(pub i32);
 
 impl Default for ScramIterations {
@@ -47,9 +47,21 @@ pub struct ScramUpsertionSetup {
     pub salted_password: bytes::Bytes,
 }
 
+#[bon::builder]
 pub fn scram_upsertion(
-    setup: ScramUpsertionSetup,
+    #[builder(default = "alice" . into ())] name: String,
+    #[builder(default)] mechanism: ScramAlgorithm,
+    #[builder(into, default)] iterations: ScramIterations,
+    #[builder(default = bytes :: Bytes :: from (vec ! [0u8 ; 16]))] salt: bytes::Bytes,
+    #[builder(default = bytes :: Bytes :: from (vec ! [0u8 ; 64]))] salted_password: bytes::Bytes,
 ) -> krabka_protocol::owned::alter_user_scram_credentials_request::ScramCredentialUpsertion {
+    let setup = ScramUpsertionSetup {
+        name,
+        mechanism,
+        iterations,
+        salt,
+        salted_password,
+    };
     krabka_protocol::owned::alter_user_scram_credentials_request::ScramCredentialUpsertion {
         name: setup.name,
         mechanism: setup.mechanism.wire_code(),
@@ -147,6 +159,7 @@ pub fn start_sasl_plaintext_with_acl_users(
     })
 }
 
+#[derive(derive_more::From, derive_more::Into)]
 /// Hash and persist a SCRAM fixture through the controller, outside the wire admin API.
 #[derive(Clone, Copy)]
 pub struct HashIterations(pub u32);
@@ -170,7 +183,20 @@ pub struct ScramCredentialSetup {
 ///
 /// # Panics
 /// Panics if hashing rejects the mechanism or metadata submission fails.
-pub async fn provision_scram(broker: &BrokerHandle, setup: ScramCredentialSetup) {
+#[bon::builder]
+pub async fn provision_scram(
+    broker: &BrokerHandle,
+    #[builder(default = "alice" . into ())] user: String,
+    #[builder(default = alice_password () . into_bytes ())] password: Vec<u8>,
+    #[builder(default = SaslMechanism :: ScramSha512)] mechanism: SaslMechanism,
+    #[builder(into, default)] iterations: HashIterations,
+) {
+    let setup = ScramCredentialSetup {
+        user,
+        password,
+        mechanism,
+        iterations,
+    };
     let credential =
         krabka_security::hash_scram_password(&setup.password, setup.mechanism, setup.iterations.0);
     broker

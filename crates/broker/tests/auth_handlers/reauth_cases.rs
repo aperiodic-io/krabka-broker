@@ -4,10 +4,7 @@ use {
     crate::{
         harness,
         harness::common_imports::*,
-        kafka_wire::{
-            ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup, ScramAuthenticationSetup,
-            exchange,
-        },
+        kafka_wire::{PlainAuthenticationSetup, ScramAuthenticationSetup, exchange},
         plain, scram,
         support::wire::{
             CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
@@ -78,19 +75,16 @@ impl Session {
         &mut self,
     ) -> std::io::Result<krabka_protocol::owned::metadata_response::MetadataResponse> {
         self.correlation.0 += 1;
-        exchange(
-            &mut self.stream,
-            &krabka_protocol::owned::metadata_request::MetadataRequest::default(),
-            WireExchangeSetup {
-                api_key: WireApiKey(3),
-                version: WireApiVersion(12),
-                correlation: self.correlation,
-                client_id: "krabka-sasl-test",
-                header: RequestHeaderEncoding::Flexible,
-                ..Default::default()
-            },
-        )
-        .await
+        exchange()
+            .stream(&mut self.stream)
+            .request(&krabka_protocol::owned::metadata_request::MetadataRequest::default())
+            .api_key(3)
+            .version(12)
+            .correlation(self.correlation.0)
+            .client_id("krabka-sasl-test")
+            .header(RequestHeaderEncoding::Flexible)
+            .call()
+            .await
     }
 }
 

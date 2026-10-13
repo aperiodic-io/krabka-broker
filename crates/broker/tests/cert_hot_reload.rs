@@ -15,19 +15,13 @@
 mod support;
 
 use {
-    crate::support::tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config},
+    crate::support::tls::{
+        CertificateDer, ClientAuthMode, ClientConfig, PemObject as _, PinnedCertVerifier,
+        ServerName, TcpStream, TlsConfig, TlsConnector, fixture_signature_schemes, ssl_config,
+    },
     assert2::assert,
     krabka_broker::Broker,
-    krabka_security::{ClientAuthMode, TlsConfig},
     std::{io, path::PathBuf, sync::Arc},
-    tokio::net::TcpStream,
-    tokio_rustls::{
-        TlsConnector,
-        rustls::{
-            ClientConfig,
-            pki_types::{CertificateDer, ServerName, pem::PemObject as _},
-        },
-    },
 };
 
 const DEV_CERT_A: &str = include_str!("fixtures/security/dev_cert.pem");

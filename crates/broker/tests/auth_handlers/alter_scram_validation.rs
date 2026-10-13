@@ -15,10 +15,7 @@ use {
         },
         harness::{alice_password, scram_admin_fixture, start_scram_admin},
         support::{
-            sasl::{
-                ScramAlgorithm, ScramIterations, ScramMechanismCode, ScramUpsertionSetup,
-                scram_upsertion,
-            },
+            sasl::{ScramAlgorithm, ScramMechanismCode, scram_upsertion},
             sasl_plaintext_config,
         },
     },
@@ -40,10 +37,7 @@ async fn alter_scram_creds_low_iterations_rejected() {
 
     // 64-byte salted_password length is valid; only `iterations` violates.
     let req = AlterUserScramCredentialsRequest {
-        upsertions: vec![scram_upsertion(ScramUpsertionSetup {
-            iterations: ScramIterations(1),
-            ..Default::default()
-        })],
+        upsertions: vec![scram_upsertion().iterations(1).call()],
         ..Default::default()
     };
     let resp = provision_as_admin(addr, req, "PLAIN auth + AUSCR (rejected)").await;
@@ -61,18 +55,16 @@ async fn alter_scram_creds_high_iterations_rejected_but_max_allowed() {
     let (_log_dir, handle, addr) = scram_admin_fixture(vec![SaslMechanism::Plain]).await;
     let req = AlterUserScramCredentialsRequest {
         upsertions: vec![
-            scram_upsertion(ScramUpsertionSetup {
-                name: "too-high".into(),
-                iterations: ScramIterations(KAFKA_MAX_SCRAM_ITERATIONS + 1),
-                ..Default::default()
-            }),
-            scram_upsertion(ScramUpsertionSetup {
-                name: "max".into(),
-                iterations: ScramIterations(KAFKA_MAX_SCRAM_ITERATIONS),
-                salt: bytes::Bytes::from(vec![1u8; 16]),
-                salted_password: bytes::Bytes::from(vec![1u8; 64]),
-                ..Default::default()
-            }),
+            scram_upsertion()
+                .name("too-high".into())
+                .iterations(KAFKA_MAX_SCRAM_ITERATIONS + 1)
+                .call(),
+            scram_upsertion()
+                .name("max".into())
+                .iterations(KAFKA_MAX_SCRAM_ITERATIONS)
+                .salt(bytes::Bytes::from(vec![1u8; 16]))
+                .salted_password(bytes::Bytes::from(vec![1u8; 64]))
+                .call(),
         ],
         ..Default::default()
     };
@@ -122,10 +114,11 @@ async fn alter_scram_creds_unknown_mechanism_returns_unsupported_sasl_mechanism(
     let handle = Broker::start(cfg).await.expect("broker must start");
     let addr = handle.listen_addr();
     let req = AlterUserScramCredentialsRequest {
-        upsertions: vec![scram_upsertion(ScramUpsertionSetup {
-            mechanism: ScramAlgorithm::Unrecognized(ScramMechanismCode(99)),
-            ..Default::default()
-        })],
+        upsertions: vec![
+            scram_upsertion()
+                .mechanism(ScramAlgorithm::Unrecognized(ScramMechanismCode(99)))
+                .call(),
+        ],
         ..Default::default()
     };
 
@@ -151,11 +144,10 @@ async fn alter_scram_creds_duplicate_resource_rejected() {
     let (_log_dir, handle, addr) = scram_admin_fixture(vec![SaslMechanism::Plain]).await;
 
     let (salt, salted) = pbkdf2_salt_and_salted(alice_password().as_bytes(), 4096);
-    let upsert = scram_upsertion(ScramUpsertionSetup {
-        salt: bytes::Bytes::from(salt),
-        salted_password: bytes::Bytes::from(salted.to_vec()),
-        ..Default::default()
-    });
+    let upsert = scram_upsertion()
+        .salt(bytes::Bytes::from(salt))
+        .salted_password(bytes::Bytes::from(salted.to_vec()))
+        .call();
     let mut upsert_sha256 = upsert.clone();
     upsert_sha256.mechanism = WIRE_MECH_SCRAM_SHA_256;
     upsert_sha256.salted_password = bytes::Bytes::from(vec![7; 32]);
@@ -202,12 +194,13 @@ async fn alter_scram_creds_duplicate_deletion_and_upsertion_rejected_per_user() 
             mechanism: WIRE_MECH_SCRAM_SHA_512,
             ..Default::default()
         }],
-        upsertions: vec![scram_upsertion(ScramUpsertionSetup {
-            mechanism: ScramAlgorithm::Sha256,
-            salt: bytes::Bytes::from(vec![4u8; 16]),
-            salted_password: bytes::Bytes::from(vec![5u8; 32]),
-            ..Default::default()
-        })],
+        upsertions: vec![
+            scram_upsertion()
+                .mechanism(ScramAlgorithm::Sha256)
+                .salt(bytes::Bytes::from(vec![4u8; 16]))
+                .salted_password(bytes::Bytes::from(vec![5u8; 32]))
+                .call(),
+        ],
         ..Default::default()
     };
 

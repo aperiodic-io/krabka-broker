@@ -113,7 +113,7 @@ mod tests {
         krabka_ids::{Offset, ProducerId},
     };
 
-    #[derive(Clone, Copy)]
+    #[derive(derive_more::From, derive_more::Into, Clone, Copy)]
     struct TxnIndexVersion(i16);
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -130,7 +130,21 @@ mod tests {
         lso: Offset,
     }
 
-    fn entry_bytes(setup: TxnIndexEntrySetup) -> Vec<u8> {
+    #[bon::builder]
+    fn entry_bytes(
+        #[builder(into, default = TxnIndexVersion (0))] version: TxnIndexVersion,
+        #[builder(into, default = ProducerId (1000))] producer_id: ProducerId,
+        #[builder(into, default = Offset (0))] start: Offset,
+        #[builder(into, default = Offset (4))] last: Offset,
+        #[builder(into, default = Offset (5))] lso: Offset,
+    ) -> Vec<u8> {
+        let setup = TxnIndexEntrySetup {
+            version,
+            producer_id,
+            start,
+            last,
+            lso,
+        };
         let TxnIndexEntrySetup {
             version,
             producer_id,
@@ -153,13 +167,14 @@ mod tests {
         // start_offset, 8B last_offset, 8B last_stable_offset, all BE.
         let mut buf = Vec::new();
         for (start, last, pid) in [(0_i64, 4_i64, 1000_i64), (10, 14, 2000)] {
-            buf.extend(entry_bytes(TxnIndexEntrySetup {
-                producer_id: ProducerId(pid),
-                start: Offset(start),
-                last: Offset(last),
-                lso: Offset(last + 1),
-                ..Default::default()
-            }));
+            buf.extend(
+                entry_bytes()
+                    .producer_id(pid)
+                    .start(start)
+                    .last(last)
+                    .lso(last + 1)
+                    .call(),
+            );
         }
         let entries = parse_txn_index(&buf).expect("valid txn index");
         let decoded: Vec<(i64, i64, i64, i64)> = entries
@@ -178,7 +193,7 @@ mod tests {
 
     #[test]
     fn parse_txn_index_rejects_trailing_partial_bytes() {
-        let mut buf = entry_bytes(TxnIndexEntrySetup::default());
+        let mut buf = entry_bytes().call();
         // 5 trailing bytes that don't complete a 34-byte entry.
         buf.extend_from_slice(&[0xAA; 5]);
         assert!(parse_txn_index(&buf).is_err(), "partial entry is corrupt");
@@ -191,10 +206,7 @@ mod tests {
 
     #[test]
     fn parse_txn_index_rejects_an_unsupported_version() {
-        let buf = entry_bytes(TxnIndexEntrySetup {
-            version: TxnIndexVersion(1),
-            ..Default::default()
-        });
+        let buf = entry_bytes().version(1).call();
         assert!(
             parse_txn_index(&buf).is_err(),
             "an unsupported version prefix is corrupt"
@@ -244,13 +256,12 @@ mod tests {
         assert!(!txn_overlaps(&valid, 14, 10));
         assert!(!txn_overlaps(&inverted, 0, 100));
 
-        let bytes = entry_bytes(TxnIndexEntrySetup {
-            producer_id: ProducerId(1),
-            start: Offset(14),
-            last: Offset(10),
-            lso: Offset(11),
-            ..Default::default()
-        });
+        let bytes = entry_bytes()
+            .producer_id(1)
+            .start(14)
+            .last(10)
+            .lso(11)
+            .call();
         assert!(parse_txn_index(&bytes).is_err());
     }
 }

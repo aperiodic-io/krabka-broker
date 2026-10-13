@@ -12,8 +12,7 @@ use {
         handlers::RequestContext,
         operator_keys::{OperatorKeyEntry, OperatorKeys},
         test_support::{
-            FrozenTopicsImageSetup, OperatorKeyFileSetup, ed25519_public_key_file,
-            frozen_topics_image, principal, start_broker_no_audit_with,
+            ed25519_public_key_file, frozen_topics_image, principal, start_broker_no_audit_with,
         },
     },
     krabka_metadata::{MetadataImage, PatternType, TopicFreezeRecord},
@@ -58,7 +57,10 @@ const ALICE_NAME: &str = "alice";
 const ALICE_KEY: &str = "alice-yubi";
 
 fn image(entries: &[(&str, PatternType)]) -> MetadataImage {
-    frozen_topics_image(entries, FrozenTopicsImageSetup { cluster: CLUSTER })
+    frozen_topics_image()
+        .scopes(entries)
+        .cluster(CLUSTER)
+        .call()
 }
 
 fn peer() -> SocketAddr { "10.0.0.1:51120".parse().expect("peer address") }
@@ -93,7 +95,7 @@ fn with_freeze_env(
 
 // A broker configuration with alice's operator key loaded.
 fn config_with_alice(dir: &TempDir) -> (BrokerConfig, Ed25519KeyPair) {
-    let (pair, path) = ed25519_public_key_file(dir.path(), OperatorKeyFileSetup::default());
+    let (pair, path) = ed25519_public_key_file().dir(dir.path()).call();
     let keys = OperatorKeys::load(&[OperatorKeyEntry {
         key_id: ALICE_KEY.to_owned(),
         principal: ALICE.to_owned(),

@@ -380,10 +380,7 @@ mod tests {
         super::*,
         crate::{
             ids::TimeOffsetMs,
-            scenario::{
-                Sample,
-                fixture::{RunSetup, empty_run as run},
-            },
+            scenario::{Sample, fixture::empty_run as run},
         },
     };
 
@@ -401,31 +398,27 @@ mod tests {
     #[test]
     fn render_html_embeds_library_bars_and_timeseries() {
         let runs = vec![
-            run(RunSetup {
-                samples: vec![sample(0, per_sec(1000)), sample(2000, per_sec(1100))],
-                p99: millis(5),
-                ..Default::default()
-            }),
-            run(RunSetup {
-                stack: Stack::Kafka,
-                producer_rate: per_sec(800),
-                samples: vec![sample(0, per_sec(800)), sample(2000, per_sec(820))],
-                p99: millis(7),
-                ..Default::default()
-            }),
-            run(RunSetup {
-                scenario: "fan-out",
-                producer_rate: per_sec(500),
-                p99: millis(9),
-                ..Default::default()
-            }),
-            run(RunSetup {
-                scenario: "fan-out",
-                stack: Stack::Kafka,
-                producer_rate: per_sec(400),
-                p99: millis(11),
-                ..Default::default()
-            }),
+            run()
+                .samples(vec![sample(0, per_sec(1000)), sample(2000, per_sec(1100))])
+                .p99(millis(5))
+                .call(),
+            run()
+                .stack(Stack::Kafka)
+                .producer_rate(per_sec(800))
+                .samples(vec![sample(0, per_sec(800)), sample(2000, per_sec(820))])
+                .p99(millis(7))
+                .call(),
+            run()
+                .scenario("fan-out")
+                .producer_rate(per_sec(500))
+                .p99(millis(9))
+                .call(),
+            run()
+                .scenario("fan-out")
+                .stack(Stack::Kafka)
+                .producer_rate(per_sec(400))
+                .p99(millis(11))
+                .call(),
         ];
         let html = render_html(&runs, "Krabka vs Strimzi");
 
@@ -463,13 +456,12 @@ mod tests {
     fn web_fragment_has_per_run_and_mean_for_cpu_mem_throughput() {
         use crate::scenario::BrokerSample;
         let mk = |stack, prod: Frequency, cpu: f64, mem: ByteSize| {
-            let mut r = run(RunSetup {
-                stack,
-                producer_rate: prod,
-                samples: vec![sample(0, prod), sample(2000, prod * 1.1)],
-                p99: millis(5),
-                ..Default::default()
-            });
+            let mut r = run()
+                .stack(stack)
+                .producer_rate(prod)
+                .samples(vec![sample(0, prod), sample(2000, prod * 1.1)])
+                .p99(millis(5))
+                .call();
             r.broker_samples = vec![
                 BrokerSample {
                     t_offset_ms: TimeOffsetMs(0),

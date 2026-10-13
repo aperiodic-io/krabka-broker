@@ -290,7 +290,7 @@ mod tests {
         crate::{
             coordinator::unified::test_support::wire_bytes,
             share_coordinator::coordinator::test_support::{
-                DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+                DeliveryAttemptCount, FixtureDeliveryState, state_batch,
             },
         },
         assert2::{assert, check},
@@ -389,15 +389,12 @@ mod tests {
                     create_timestamp: 1000,
                     write_timestamp: 2000,
                     state_batches: vec![
-                        state_batch(StateBatchSetup {
-                            bounds: Offset(10)..=Offset(19),
-                            ..Default::default()
-                        }),
-                        state_batch(StateBatchSetup {
-                            bounds: Offset(20)..=Offset(29),
-                            delivery: FixtureDeliveryState::Acknowledged,
-                            attempts: DeliveryAttemptCount(3),
-                        }),
+                        state_batch().bounds(Offset(10)..=Offset(19)).call(),
+                        state_batch()
+                            .bounds(Offset(20)..=Offset(29))
+                            .delivery(FixtureDeliveryState::Acknowledged)
+                            .attempts(DeliveryAttemptCount(3))
+                            .call(),
                     ],
                 },
                 "0000 00000003 00000002 00000004 000000000000000a \
@@ -423,10 +420,7 @@ mod tests {
                     leader_epoch: 4,
                     start_offset: Offset(12),
                     delivery_complete_count: -1,
-                    state_batches: vec![state_batch(StateBatchSetup {
-                        bounds: Offset(12)..=Offset(15),
-                        ..Default::default()
-                    })],
+                    state_batches: vec![state_batch().bounds(Offset(12)..=Offset(15)).call()],
                 },
                 "0000 00000003 00000004 000000000000000c 02 \
                  000000000000000c 000000000000000f 00 0001 00 00",

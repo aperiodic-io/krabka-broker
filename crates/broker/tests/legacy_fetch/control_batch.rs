@@ -9,10 +9,7 @@
 use {
     crate::{
         harness::{create_topic, fetch_legacy_raw_at},
-        support::{
-            self,
-            producer::{ProducerRecordSetup, producer_record},
-        },
+        support::{self, producer::producer_record},
     },
     assert2::assert,
     bytes::Bytes,
@@ -48,11 +45,12 @@ async fn fetch_v3_drops_control_batch() {
     producer.init_transactions().await.unwrap();
     let transaction = producer.begin_transaction().await.unwrap();
     producer
-        .send(producer_record(ProducerRecordSetup {
-            topic: ("legacy_fetch_ctrl").into(),
-            value: Some(Bytes::from_static(b"data-before-marker")),
-            ..Default::default()
-        }))
+        .send(
+            producer_record()
+                .topic(("legacy_fetch_ctrl").into())
+                .maybe_value(Some(Some(Bytes::from_static(b"data-before-marker"))))
+                .call(),
+        )
         .await
         .expect("transactional produce");
     transaction.commit().await.expect("commit transaction");

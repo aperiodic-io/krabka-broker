@@ -24,7 +24,7 @@ use {
         codes,
         handlers::{
             acl_wire::CLUSTER_RESOURCE_NAME,
-            test_support::{ReplicatedTopicSetup, default_records_batch, seed_partition_replicas},
+            test_support::{default_records_batch, seed_partition_replicas},
         },
         partition::Partition,
         test_support::{append_partition_batch, start_broker_no_audit_with},
@@ -112,7 +112,7 @@ enum Sender {
 
 use crate::test_support::KafkaErrorCode;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Debug, Clone, Copy)]
 struct FetchApiVersion(i16);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -176,12 +176,12 @@ async fn replicated_partition(
     topic: &str,
     topic_id: uuid::Uuid,
 ) -> (Arc<Partition>, RecordBatch) {
-    seed_partition_replicas(broker, ReplicatedTopicSetup {
-        topic,
-        topic_id,
-        ..Default::default()
-    })
-    .await;
+    seed_partition_replicas()
+        .broker(broker)
+        .topic(topic)
+        .topic_id(topic_id)
+        .call()
+        .await;
 
     let shared = broker.broker_arc_for_test();
     let follower = krabka_raft::NodeId(2);
@@ -199,7 +199,19 @@ async fn replicated_partition(
 }
 
 /// A sessionless one-row fetch of partition 0 of `topic`, from `fetch_offset`.
-fn request(setup: FetchRequestSetup<'_>) -> FetchRequest {
+#[bon::builder]
+fn request(
+    #[builder(into, default = FetchApiVersion (12))] version: FetchApiVersion,
+    #[builder(default = Sender :: Follower)] sender: Sender,
+    #[builder(default = ("replicated" , WireUuid :: ZERO))] topic: (&'_ str, WireUuid),
+    #[builder(into, default)] offset: Offset,
+) -> FetchRequest {
+    let setup = FetchRequestSetup {
+        version,
+        sender,
+        topic,
+        offset,
+    };
     let FetchRequestSetup {
         version,
         sender,
@@ -230,10 +242,10 @@ fn request(setup: FetchRequestSetup<'_>) -> FetchRequest {
             partitions: vec![super::test_support::request_partition(Offset(offset.0))],
             ..Default::default()
         }],
-        ..super::test_support::sessionless_request(super::test_support::SessionlessFetchSetup {
-            version: krabka_ids::ApiVersion(version.0),
-            replica: super::test_support::FetchReplicaId(replica_id),
-        })
+        ..super::test_support::sessionless_request()
+            .version(version.0)
+            .replica(replica_id)
+            .call()
     }
 }
 
@@ -244,12 +256,14 @@ async fn fetch(
     caller: Caller,
     request: &FetchRequest,
 ) -> FetchResponse {
-    super::test_support::fetch_wire(broker, request, super::test_support::FetchWireSetup {
-        version: krabka_ids::ApiVersion(version.0),
-        user: caller.name(),
-        client_id: "fetch-client",
-    })
-    .await
+    super::test_support::fetch_wire()
+        .broker(broker)
+        .request(request)
+        .version(version.0)
+        .user(caller.name())
+        .client_id("fetch-client")
+        .call()
+        .await
 }
 
 /// The one-row response of `case` for partition 0 of `topic`.
@@ -282,26 +296,26 @@ fn expected(case: Case, label: String, topic: (&str, WireUuid), batch: RecordBat
         // records that position, so the second answer still carries 0, and
         // only the partition's high watermark moves to the log end.
         Expect::FollowerRead => (
-            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
-                watermark: Offset(0),
-                records: RecordsPayload::V2(vec![batch]),
-            }),
-            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
-                watermark: Offset(0),
-                records: no_records(),
-            }),
+            super::test_support::expected_read()
+                .watermark(0)
+                .records(RecordsPayload::V2(vec![batch]))
+                .call(),
+            super::test_support::expected_read()
+                .watermark(0)
+                .records(no_records())
+                .call(),
             Offset(LOG_END),
         ),
         Expect::Refused(error_code) => (refused(error_code), refused(error_code), Offset(0)),
         Expect::ConsumerRead => (
-            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
-                watermark: Offset(0),
-                records: no_records(),
-            }),
-            super::test_support::expected_read(super::test_support::ExpectedReadSetup {
-                watermark: Offset(0),
-                records: no_records(),
-            }),
+            super::test_support::expected_read()
+                .watermark(0)
+                .records(no_records())
+                .call(),
+            super::test_support::expected_read()
+                .watermark(0)
+                .records(no_records())
+                .call(),
             Offset(0),
         ),
     };
@@ -370,15 +384,28 @@ async fn follower_fetch_needs_cluster_action() {
                 ..Default::default()
             };
 
-            let from_start = fetch(&broker, case.version, case.caller, &request(fetch_setup)).await;
+            let from_start = fetch(
+                &broker,
+                case.version,
+                case.caller,
+                &request()
+                    .version(fetch_setup.version)
+                    .sender(fetch_setup.sender)
+                    .topic(fetch_setup.topic)
+                    .offset(fetch_setup.offset)
+                    .call(),
+            )
+            .await;
             let from_log_end = fetch(
                 &broker,
                 case.version,
                 case.caller,
-                &request(FetchRequestSetup {
-                    offset: Offset(LOG_END),
-                    ..fetch_setup
-                }),
+                &request()
+                    .version(fetch_setup.version)
+                    .sender(fetch_setup.sender)
+                    .topic(fetch_setup.topic)
+                    .offset(LOG_END)
+                    .call(),
             )
             .await;
             actual.push(Outcome {

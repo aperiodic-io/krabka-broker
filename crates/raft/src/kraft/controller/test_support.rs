@@ -88,7 +88,34 @@ impl Default for ControllerSetup<'_> {
     }
 }
 
-pub fn build(setup: ControllerSetup<'_>) -> (KraftController, tempfile::TempDir) {
+#[bon::builder]
+pub fn build(
+    #[builder(into, default = ControllerSetup::default().me)] me: NodeId,
+    #[builder(default = ControllerSetup::default().ids)] ids: &'_ [NodeId],
+    #[builder(default = ControllerSetup::default().election_timeout)] election_timeout: Time,
+    #[builder(into, default = ControllerSetup::default().snapshot_interval_records)]
+    snapshot_interval_records: SnapshotRecordCount,
+    heartbeat_interval: Option<Time>,
+    #[builder(into, default = ControllerSetup::default().controller_fetch_miss_limit)]
+    controller_fetch_miss_limit: ControllerFetchMissLimit,
+    #[builder(into, default = ControllerSetup::default().metadata_raft_command_queue_capacity)]
+    metadata_raft_command_queue_capacity: MetadataRaftCommandQueueCapacity,
+    #[builder(into, default = ControllerSetup::default().metadata_raft_fetch_max)]
+    metadata_raft_fetch_max: MetadataRaftFetchMax,
+    #[builder(default = ControllerSetup::default().max_bytes_between_snapshots)]
+    max_bytes_between_snapshots: krabka_units::ByteSize,
+) -> (KraftController, tempfile::TempDir) {
+    let setup = ControllerSetup {
+        me,
+        ids,
+        election_timeout,
+        snapshot_interval_records,
+        heartbeat_interval,
+        controller_fetch_miss_limit,
+        metadata_raft_command_queue_capacity,
+        metadata_raft_fetch_max,
+        max_bytes_between_snapshots,
+    };
     spawn_test_controller(setup.me, setup.ids, |config| {
         config.election_timeout = setup.election_timeout;
         config.snapshot_interval_records = setup.snapshot_interval_records.0;
@@ -126,11 +153,11 @@ pub fn open_test_controller(
     cluster_id: uuid::Uuid,
     voters: VoterSet,
 ) -> Result<KraftController, RaftError> {
-    open_test_controller_with(data_dir, ControllerOpenSetup {
-        cluster_id,
-        voters,
-        ..Default::default()
-    })
+    open_test_controller_with()
+        .data_dir(data_dir)
+        .cluster_id(cluster_id)
+        .voters(voters)
+        .call()
 }
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -143,10 +170,20 @@ pub struct ControllerOpenSetup {
     pub activation: Activation,
 }
 
+#[bon::builder]
 pub fn open_test_controller_with(
     data_dir: std::path::PathBuf,
-    setup: ControllerOpenSetup,
+    #[builder(default)] cluster_id: uuid::Uuid,
+    #[builder(default = voter_set (& [NodeId (1)]))] voters: VoterSet,
+    #[builder(default = TEST_ELECTION_TIMEOUT)] election_timeout: krabka_units::Time,
+    #[builder(default)] activation: Activation,
 ) -> Result<KraftController, RaftError> {
+    let setup = ControllerOpenSetup {
+        cluster_id,
+        voters,
+        election_timeout,
+        activation,
+    };
     let ControllerOpenSetup {
         cluster_id,
         voters,
@@ -209,7 +246,23 @@ impl Default for EngineSetup<'_> {
     }
 }
 
-pub fn build_engine_only(setup: EngineSetup<'_>) -> (Engine, tempfile::TempDir) {
+#[bon::builder]
+pub fn build_engine_only(
+    #[builder(into, default = EngineSetup::default().me)] me: NodeId,
+    #[builder(default = EngineSetup::default().ids)] ids: &'_ [NodeId],
+    #[builder(into, default = EngineSetup::default().controller_fetch_miss_limit)]
+    controller_fetch_miss_limit: ControllerFetchMissLimit,
+    #[builder(into, default = EngineSetup::default().metadata_raft_fetch_max)]
+    metadata_raft_fetch_max: MetadataRaftFetchMax,
+    #[builder(default = EngineSetup::default().metadata_log)] metadata_log: MetadataLogConfig,
+) -> (Engine, tempfile::TempDir) {
+    let setup = EngineSetup {
+        me,
+        ids,
+        controller_fetch_miss_limit,
+        metadata_raft_fetch_max,
+        metadata_log,
+    };
     let EngineSetup {
         me,
         ids,
@@ -380,6 +433,18 @@ pub fn elect_single_voter_engine(engine: &mut Engine) {
     assert2::assert!(engine.core.role().is_leader());
 }
 
+pub fn elect_test_engine_with_helper(engine: &mut Engine, helper: NodeId) {
+    engine.on_event(Event::ElectionTimeout);
+    for epoch in [0, 1] {
+        engine.on_event(Event::ReceiveVoteResponse {
+            from: helper,
+            epoch,
+            vote_granted: true,
+        });
+    }
+    assert2::assert!(engine.core.role().is_leader());
+}
+
 /// A realistic single-partition create batch: a `V1Topic` plus its one
 /// `V1Partition`. KIP-631 framing derives the topic's partition count from
 /// the partition records (the `TopicRecord` wire shape carries no count), so
@@ -470,10 +535,7 @@ pub async fn commit_pending(ctrl: &KraftController, follower: NodeId) -> QuorumS
 }
 
 pub fn single_voter_leader_engine() -> (Engine, tempfile::TempDir) {
-    let (mut engine, dir) = build_engine_only(EngineSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (mut engine, dir) = build_engine_only().ids(&[NodeId(1)]).call();
     elect_single_voter_engine(&mut engine);
     (engine, dir)
 }
@@ -484,16 +546,13 @@ pub async fn elect_single_voter_controller(ctrl: &KraftController) {
 }
 
 pub async fn single_voter_leader() -> (KraftController, tempfile::TempDir) {
-    let (ctrl, dir) = build(ControllerSetup {
-        ids: &[NodeId(1)],
-        ..Default::default()
-    });
+    let (ctrl, dir) = build().ids(&[NodeId(1)]).call();
     elect_single_voter_controller(&ctrl).await;
     (ctrl, dir)
 }
 
 pub async fn three_voter_leader() -> (KraftController, tempfile::TempDir) {
-    let (ctrl, dir) = build(ControllerSetup::default());
+    let (ctrl, dir) = build().call();
     elect_leader_with_helper(&ctrl, NodeId(1), NodeId(2)).await;
     (ctrl, dir)
 }

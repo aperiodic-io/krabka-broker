@@ -1,12 +1,11 @@
 //! Ordered tiered-topic configuration shared by the tiered-storage suites.
 use {
     crate::support::{
-        client::{BatchProduceSetup, produce_batch},
+        client::produce_batch,
         produce::ProduceTimeoutMillis,
         records::batch_from_records,
         topics::{
-            AssignedTopicSetup, ConfiguredTopicSetup, CreateTopicRequestSetup,
-            CreateTopicsTimeoutMillis, assigned_topic, creatable_topic, create_topic_request,
+            AssignedTopicSetup, assigned_topic, creatable_topic, create_topic_request,
             create_topic_request_with_setup, topic_configs,
         },
     },
@@ -35,10 +34,7 @@ pub async fn create_configured_topic(
         .send(create_topic_request(
             krabka_protocol::owned::create_topics_request::CreatableTopic {
                 configs,
-                ..creatable_topic(ConfiguredTopicSetup {
-                    name: (topic).into(),
-                    ..Default::default()
-                })
+                ..creatable_topic().name((topic).into()).call()
             },
         ))
         .await
@@ -57,20 +53,31 @@ pub struct AssignedTieredTopicSetup<'a> {
 }
 
 /// Pin one tiered partition to the caller's ordered replica list.
+#[bon::builder]
 pub async fn create_assigned_topic(
     client: &krabka_client_core::Client,
-    setup: AssignedTieredTopicSetup<'_>,
+    #[builder(default)] topic: AssignedTopicSetup,
+    segment_bytes: Option<&'_ str>,
 ) {
+    let setup = AssignedTieredTopicSetup {
+        topic,
+        segment_bytes,
+    };
     let response = client
-        .send(create_topic_request_with_setup(
-            krabka_protocol::owned::create_topics_request::CreatableTopic {
-                configs: tiered_configs(setup.segment_bytes),
-                ..assigned_topic(setup.topic)
-            },
-            CreateTopicRequestSetup {
-                timeout: CreateTopicsTimeoutMillis(10_000),
-            },
-        ))
+        .send(
+            create_topic_request_with_setup()
+                .topic(
+                    krabka_protocol::owned::create_topics_request::CreatableTopic {
+                        configs: tiered_configs(setup.segment_bytes),
+                        ..assigned_topic()
+                            .name(setup.topic.name)
+                            .replicas(setup.topic.replicas)
+                            .call()
+                    },
+                )
+                .timeout(10_000)
+                .call(),
+        )
         .await
         .expect("CreateTopics");
     assert2::assert!(
@@ -105,7 +112,7 @@ pub async fn await_tiered_replicas(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 pub struct TieredRecordCount(pub usize);
 
 #[derive(Clone, Copy, derive_more::Display)]
@@ -121,23 +128,32 @@ pub struct TieredRecordsSetup<'a> {
 }
 
 /// Produce one acknowledged single-record request for every caller-generated value.
+#[bon::builder]
 pub async fn produce_records(
     client: &krabka_client_core::Client,
     value: impl Fn(TieredRecordIndex) -> bytes::Bytes,
-    setup: TieredRecordsSetup<'_>,
+    #[builder(default = "orders")] topic: &'_ str,
+    #[builder(default)] topic_id: krabka_protocol::primitives::uuid::Uuid,
+    #[builder(into, default = TieredRecordCount (1))] count: TieredRecordCount,
 ) {
+    let setup = TieredRecordsSetup {
+        topic,
+        topic_id,
+        count,
+    };
     for index in 0..setup.count.0 {
         let batch = batch_from_records(vec![krabka_protocol::records::Record {
             value: Some(value(TieredRecordIndex(index))),
             ..Default::default()
         }]);
-        let response = produce_batch(client, batch, BatchProduceSetup {
-            topic: setup.topic,
-            topic_id: setup.topic_id,
-            timeout: ProduceTimeoutMillis(10_000),
-            ..Default::default()
-        })
-        .await;
+        let response = produce_batch()
+            .client(client)
+            .batch(batch)
+            .topic(setup.topic)
+            .topic_id(setup.topic_id)
+            .timeout(ProduceTimeoutMillis(10_000))
+            .call()
+            .await;
         assert2::assert!(response.error_code == 0, "Produce failed: {response:?}");
     }
 }

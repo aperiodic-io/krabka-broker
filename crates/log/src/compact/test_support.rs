@@ -120,7 +120,17 @@ pub(super) struct TransactionalRecordSetup<'a> {
 }
 
 /// One transactional keyed record, retaining the protocol's epoch/sequence defaults.
-pub(super) fn transactional_record(setup: TransactionalRecordSetup<'_>) -> RecordBatch {
+#[bon::builder]
+pub(super) fn transactional_record(
+    #[builder(into, default)] offset: Offset,
+    #[builder(into, default = ProducerId (1000))] producer: ProducerId,
+    #[builder(default = (b"k" , b"v"))] payload: (&'_ [u8], &'_ [u8]),
+) -> RecordBatch {
+    let setup = TransactionalRecordSetup {
+        offset,
+        producer,
+        payload,
+    };
     let TransactionalRecordSetup {
         offset,
         producer,

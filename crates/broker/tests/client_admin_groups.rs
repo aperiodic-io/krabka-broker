@@ -21,11 +21,12 @@ async fn lists_groups_and_committed_offsets() {
 
     let producer = default_producer(&bootstrap).await;
     producer
-        .send(producer_record(ProducerRecordSetup {
-            topic: ("t1").into(),
-            value: Some("v".into()),
-            ..Default::default()
-        }))
+        .send(
+            producer_record()
+                .topic(("t1").into())
+                .value(Some(bytes::Bytes::from_static(b"v")))
+                .call(),
+        )
         .await
         .unwrap();
     producer.flush().await.unwrap();

@@ -3,24 +3,14 @@
 //! them, and the KFC-9 break-glass configuration the gate tests and the
 //! end-to-end refusal tests both build a broker from.
 
-use {
-    crate::config::BreakGlassConfig,
-    krabka_protocol::{
-        owned::delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
-        primitives::uuid::Uuid as WireUuid,
-    },
+pub(super) use crate::test_support::gated_break_glass_config as gated_config;
+use krabka_protocol::{
+    owned::delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
+    primitives::uuid::Uuid as WireUuid,
 };
 
 /// The topic every KFC-9 test asks the broker to delete.
 pub(super) const DOOMED: &str = "doomed";
-
-/// A broker configuration that names an approver set, so the gate is active.
-pub(super) fn gated_config() -> BreakGlassConfig {
-    BreakGlassConfig {
-        approvers: ["User:alice", "User:bob"].map(str::to_owned).to_vec(),
-        ..BreakGlassConfig::default()
-    }
-}
 
 /// A `DeleteTopicState` that names its topic and leaves the id zeroed.
 pub(super) fn named_state(name: &str) -> DeleteTopicState {

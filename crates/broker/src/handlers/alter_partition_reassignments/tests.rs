@@ -13,13 +13,12 @@ use {
         elr::state::test_records,
         handlers::{
             alter_partition_reassignments::test_support::{
-                ReassignmentRequestSetup, ReassignmentTarget, ReplicationFactorPolicy, request,
-                test_context,
+                ReassignmentTarget, ReplicationFactorPolicy, request, test_context,
             },
-            test_support::{ReplicatedPartitionSetup, replicated_partition},
+            test_support::replicated_partition,
         },
         test_support::{
-            DenyAll, FreezeSetup, broker_registration, finalize_elr_version_on,
+            DenyAll, broker_registration, finalize_elr_version_on,
             start_broker_with_authorizer as start_broker, test_ctx,
         },
     },
@@ -42,15 +41,24 @@ struct ReassignableSeedSetup<'a> {
     adding: &'a [NodeId],
 }
 
-fn reassignable_seed_record(setup: ReassignableSeedSetup<'_>) -> PartitionRecord {
+#[bon::builder]
+fn reassignable_seed_record(
+    #[builder(default = & [NodeId (1)])] replicas: &'_ [NodeId],
+    isr: Option<&'_ [NodeId]>,
+    #[builder(default = & [])] adding: &'_ [NodeId],
+) -> PartitionRecord {
+    let setup = ReassignableSeedSetup {
+        replicas,
+        isr,
+        adding,
+    };
     let mut record = PartitionRecord {
         leader_epoch: LeaderEpoch(3),
         partition_epoch: 11,
-        ..replicated_partition(ReplicatedPartitionSetup {
-            partition: krabka_ids::PartitionIndex(7),
-            replicas: setup.replicas,
-            ..Default::default()
-        })
+        ..replicated_partition()
+            .partition(7)
+            .replicas(setup.replicas)
+            .call()
     };
     if let Some(isr) = setup.isr {
         record.isr = isr.to_vec();
@@ -80,7 +88,7 @@ async fn seed_reassignable_partition(broker: &Broker) {
                 partitions: 1,
                 replication_factor: 1,
             }),
-            MetadataRecord::V1Partition(reassignable_seed_record(ReassignableSeedSetup::default())),
+            MetadataRecord::V1Partition(reassignable_seed_record().call()),
         ])
         .await
         .expect("seed reassignment metadata");
@@ -107,13 +115,13 @@ async fn seed_cancellable_partition(broker: &Broker) {
         partitions: 1,
         replication_factor: 2,
     }));
-    records.push(MetadataRecord::V1Partition(reassignable_seed_record(
-        ReassignableSeedSetup {
-            replicas: &[NodeId(1), NodeId(2), NodeId(3)],
-            isr: Some(&[NodeId(1)]),
-            adding: &[NodeId(3)],
-        },
-    )));
+    records.push(MetadataRecord::V1Partition(
+        reassignable_seed_record()
+            .replicas(&[NodeId(1), NodeId(2), NodeId(3)])
+            .maybe_isr(Some(&[NodeId(1)]))
+            .adding(&[NodeId(3)])
+            .call(),
+    ));
     records.push(MetadataRecord::V1TopicConfig(
         krabka_metadata::TopicConfigRecord {
             topic: "orders".into(),
@@ -146,11 +154,10 @@ async fn a_cancel_publishes_the_eligible_leader_state_the_revert_implies() {
 
     let resp = handle(
         &broker,
-        request(ReassignmentRequestSetup {
-            replication_factor_policy: ReplicationFactorPolicy::PermitChange,
-            target: ReassignmentTarget::Cancel,
-            ..Default::default()
-        }),
+        request()
+            .replication_factor_policy(ReplicationFactorPolicy::PermitChange)
+            .target(ReassignmentTarget::Cancel)
+            .call(),
         version,
         &ctx,
     )
@@ -181,12 +188,14 @@ async fn handle_preserves_unknown_partition_response_shape() {
         context(ctx, "admin")
     );
 
-    let req = request(ReassignmentRequestSetup {
-        topic: "payments",
-        partition_index: krabka_ids::PartitionIndex(8),
-        ..Default::default()
-    });
-    let resp = handle(&broker, req, version, &ctx).await.expect("handle");
+    let resp = handle(
+        &broker,
+        request().topic("payments").partition_index(8).call(),
+        version,
+        &ctx,
+    )
+    .await
+    .expect("handle");
 
     let expected = unthrottled_wire!(AlterPartitionReassignmentsResponse {
         allow_replication_factor_change: false,
@@ -227,12 +236,11 @@ async fn handle_denies_cluster_alter_with_top_level_cluster_authorization_failed
 
             let resp = handle(
                 &broker,
-                request(ReassignmentRequestSetup {
-                    replication_factor_policy: allow_rf_change,
-                    topic: "payments",
-                    partition_index: krabka_ids::PartitionIndex(8),
-                    ..Default::default()
-                }),
+                request()
+                    .replication_factor_policy(allow_rf_change)
+                    .topic("payments")
+                    .partition_index(8)
+                    .call(),
                 version,
                 &ctx,
             )
@@ -270,10 +278,9 @@ async fn handle_submits_successful_reassignment_records() {
 
     let resp = handle(
         &broker,
-        request(ReassignmentRequestSetup {
-            replication_factor_policy: ReplicationFactorPolicy::PermitChange,
-            ..Default::default()
-        }),
+        request()
+            .replication_factor_policy(ReplicationFactorPolicy::PermitChange)
+            .call(),
         version,
         &ctx,
     )
@@ -311,7 +318,7 @@ async fn handle_refuses_a_frozen_reassignment_without_mutating_the_partition() {
         .controller
         .submit_change(vec![MetadataRecord::V1TopicFreeze(TopicFreezeRecord {
             set_at_ms: 10,
-            ..crate::test_support::topic_freeze_record(FreezeSetup::default())
+            ..crate::test_support::topic_freeze_record().call()
         })])
         .await
         .expect("seed topic freeze");
@@ -325,10 +332,9 @@ async fn handle_refuses_a_frozen_reassignment_without_mutating_the_partition() {
 
     let response = handle(
         &broker,
-        request(ReassignmentRequestSetup {
-            replication_factor_policy: ReplicationFactorPolicy::PermitChange,
-            ..Default::default()
-        }),
+        request()
+            .replication_factor_policy(ReplicationFactorPolicy::PermitChange)
+            .call(),
         version,
         &ctx,
     )

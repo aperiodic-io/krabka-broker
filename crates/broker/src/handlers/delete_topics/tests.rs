@@ -15,12 +15,14 @@ use {
             RequestContext,
             acl_wire::CLUSTER_RESOURCE_NAME,
             create_topics::handle as create_topics_handle,
-            test_support::{AclSetup, CreateTopicSetup, configured_topic_request},
+            test_support::{
+                AclSetup, CreateTopicSetup, acl, cluster_acl, configured_topic_request_from,
+            },
         },
         metrics::AuthorizationDeniedLabel,
         test_support::{
-            AllowAclSetup, DenyAll, allow_acl, dispatch_wire, peer, principal,
-            start_broker_no_audit_with, start_broker_with_authorizer_no_audit as start_broker,
+            DenyAll, allow_acl, dispatch_wire, peer, principal, start_broker_no_audit_with,
+            start_broker_with_authorizer_no_audit as start_broker,
         },
     },
     assert2::{assert, check},
@@ -124,14 +126,11 @@ async fn delete_doomed(break_glass: BreakGlassConfig) -> (DeletableTopicResult, 
     .await;
     let broker = broker_handle.broker_arc_for_test();
     request_identity!((principal, peer), principal("admin"));
-    seed_topic(
-        &broker,
-        &test_context(&principal, &peer),
-        CreateTopicSetup {
-            topic: DOOMED,
-            ..Default::default()
-        },
-    )
+    let ctx = test_context(&principal, &peer);
+    seed_topic(&broker, &ctx, CreateTopicSetup {
+        topic: DOOMED,
+        ..Default::default()
+    })
     .await;
     let topic_id = WireUuid(
         broker
@@ -307,7 +306,7 @@ async fn invalid_topic_rows_answer_invalid_request_and_delete_nothing() {
 /// exist before it authorizes their deletion.
 async fn seed_topic(broker: &Broker, ctx: &RequestContext<'_>, setup: CreateTopicSetup<'_>) {
     let name = setup.topic;
-    let req = configured_topic_request(setup);
+    let req = configured_topic_request_from(setup);
     let resp = create_topics_handle(broker, req, CREATE_VERSION, ctx)
         .await
         .expect("handle CreateTopics");
@@ -351,21 +350,22 @@ async fn handle_authorizes_delete_per_topic_when_cluster_delete_is_denied() {
         deleted: &'static [&'static str],
     }
 
-    use crate::handlers::test_support::acl;
-
-    let cluster_create = acl(AclSetup::cluster(AclOperation::Create));
-    let cluster_delete = acl(AclSetup::cluster(AclOperation::Delete));
-    let literal_a_delete = acl(AclSetup {
-        resource_name: "a",
-        operation: AclOperation::Delete,
-        ..Default::default()
-    });
-    let prefixed_app_delete = acl(AclSetup {
-        resource_name: "app-",
-        pattern_type: PatternType::Prefixed,
-        operation: AclOperation::Delete,
-        ..Default::default()
-    });
+    let cluster_create = cluster_acl(AclOperation::Create);
+    let cluster_delete = acl()
+        .resource_type(AclSetup::cluster(AclOperation::Delete).resource_type)
+        .resource_name(AclSetup::cluster(AclOperation::Delete).resource_name)
+        .pattern_type(AclSetup::cluster(AclOperation::Delete).pattern_type)
+        .operation(AclSetup::cluster(AclOperation::Delete).operation)
+        .call();
+    let literal_a_delete = acl()
+        .resource_name("a")
+        .operation(AclOperation::Delete)
+        .call();
+    let prefixed_app_delete = acl()
+        .resource_name("app-")
+        .pattern_type(PatternType::Prefixed)
+        .operation(AclOperation::Delete)
+        .call();
 
     let cases = [
         ("cluster Delete authorizes every survivor", Case {
@@ -400,12 +400,13 @@ async fn handle_authorizes_delete_per_topic_when_cluster_delete_is_denied() {
             )])
             .await
             .expect("seed create acl");
-        seed_topic(&broker, &test_context(&p, &peer), CreateTopicSetup {
+        let ctx = test_context(&p, &peer);
+        seed_topic(&broker, &ctx, CreateTopicSetup {
             topic: "a",
             ..Default::default()
         })
         .await;
-        seed_topic(&broker, &test_context(&p, &peer), CreateTopicSetup {
+        seed_topic(&broker, &ctx, CreateTopicSetup {
             topic: "app-x",
             ..Default::default()
         })
@@ -488,12 +489,11 @@ async fn handle_authorizes_delete_per_topic_when_cluster_delete_is_denied() {
 
 /// One `alice` Allow ACL on a literal resource.
 fn alice_acl(resource_type: ResourceType, name: &str, operation: AclOperation) -> AclEntry {
-    allow_acl(AllowAclSetup {
-        resource_type,
-        resource_name: name,
-        operation,
-        ..Default::default()
-    })
+    allow_acl()
+        .resource_type(resource_type)
+        .resource_name(name)
+        .operation(operation)
+        .call()
 }
 
 /// Kafka's `ControllerApis.deleteTopics` checks `Describe` and `Delete`
@@ -588,7 +588,8 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             .submit_change(vec![MetadataRecord::V1AccessControlEntry(cluster_create)])
             .await
             .expect("seed create acl");
-        let topic_id = seeded_topic_id(&broker, &test_context(&p, &peer), CreateTopicSetup {
+        let ctx = test_context(&p, &peer);
+        let topic_id = seeded_topic_id(&broker, &ctx, CreateTopicSetup {
             topic: TOPIC,
             ..Default::default()
         })
@@ -649,7 +650,8 @@ async fn delete_topic_enable_false_refuses_every_row() {
         .await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((p, peer), principal("admin"));
-        let topic_id = seeded_topic_id(&broker, &test_context(&p, &peer), CreateTopicSetup {
+        let ctx = test_context(&p, &peer);
+        let topic_id = seeded_topic_id(&broker, &ctx, CreateTopicSetup {
             topic: TOPIC,
             ..Default::default()
         })

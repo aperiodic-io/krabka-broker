@@ -16,11 +16,10 @@ use {
     crate::{
         broker::{Broker, BrokerHandle},
         codes,
-        handlers::test_support::{CreateTopicSetup, configured_topic_request},
+        handlers::test_support::configured_topic_request,
         test_support::{
-            KafkaErrorCode, RepeatedRecordsSetup, decode_response, dispatch_context,
-            encode_request, peer, principal, repeated_records_batch,
-            start_transaction_grant_broker,
+            KafkaErrorCode, decode_response, dispatch_context, encode_request, peer, principal,
+            repeated_records_batch, start_transaction_grant_broker,
         },
     },
     assert2::assert,
@@ -32,17 +31,15 @@ use {
     },
 };
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct ProduceApiVersion(i16);
 
-#[derive(Clone, Copy)]
+#[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct ProducerEpoch(i16);
 
-#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
+#[derive(Clone, Copy)]
 struct TransactionalBatchSetup {
-    #[default(ProducerId(7))]
     producer_id: ProducerId,
-    #[default(ProducerEpoch(0))]
     producer_epoch: ProducerEpoch,
 }
 
@@ -88,10 +85,7 @@ async fn create_topic(broker: &Broker, name: &str) {
         principal(ADMIN_GRANTS),
         client_id = "produce-txn-authz-admin"
     );
-    let request = configured_topic_request(CreateTopicSetup {
-        topic: name,
-        ..Default::default()
-    });
+    let request = configured_topic_request().topic(name).call();
     dispatch_context(
         broker,
         create_topics_request::API_KEY,
@@ -137,16 +131,26 @@ async fn open_transaction(broker: &Broker) -> TransactionalBatchSetup {
 }
 
 /// One v2 batch with one record, non-transactional.
-fn plain_batch() -> RecordsPayload {
-    RecordsPayload::V2(vec![
-        repeated_records_batch(RepeatedRecordsSetup::default()),
-    ])
-}
+fn plain_batch() -> RecordsPayload { RecordsPayload::V2(vec![repeated_records_batch().call()]) }
 
+/// One v2 batch with one record, marked transactional (KIP-98) under
+/// `producer_id`/`producer_epoch`.
 /// One request naming `TOPIC` by name (`version < FIRST_TOPIC_ID_VERSION`) or
 /// by id (`version >= FIRST_TOPIC_ID_VERSION`), carrying `records` and
 /// `transactional_id`.
-fn produce_request(setup: ProduceRequestSetup<'_>) -> ProduceRequest {
+#[bon::builder]
+fn produce_request(
+    #[builder(default = WireUuid :: ZERO)] topic_id: WireUuid,
+    #[builder(into, default = ProduceApiVersion (12))] version: ProduceApiVersion,
+    transactional_id: Option<&'_ str>,
+    #[builder(default = plain_batch ())] records: RecordsPayload,
+) -> ProduceRequest {
+    let setup = ProduceRequestSetup {
+        topic_id,
+        version,
+        transactional_id,
+        records,
+    };
     let ProduceRequestSetup {
         topic_id,
         version,
@@ -190,9 +194,28 @@ fn refused_row(index: PartitionIndex, error_code: KafkaErrorCode) -> PartitionPr
     }
 }
 
-async fn drive(broker: &Broker, grants: &str, setup: ProduceRequestSetup<'_>) -> ProduceResponse {
+#[bon::builder]
+async fn drive(
+    broker: &Broker,
+    grants: &str,
+    #[builder(default = WireUuid :: ZERO)] topic_id: WireUuid,
+    #[builder(into, default = ProduceApiVersion (12))] version: ProduceApiVersion,
+    transactional_id: Option<&'_ str>,
+    #[builder(default = plain_batch ())] records: RecordsPayload,
+) -> ProduceResponse {
+    let setup = ProduceRequestSetup {
+        topic_id,
+        version,
+        transactional_id,
+        records,
+    };
     let version = setup.version.0;
-    let request = produce_request(setup);
+    let request = produce_request()
+        .topic_id(setup.topic_id)
+        .version(setup.version)
+        .maybe_transactional_id(setup.transactional_id)
+        .records(setup.records)
+        .call();
     request_identity!(
         (user, address, ctx),
         principal(grants),
@@ -301,13 +324,15 @@ async fn transactional_id_write_gates_exactly_on_the_batch_not_the_request_field
         } else {
             plain_batch()
         };
-        let actual = drive(&broker, case.grants, ProduceRequestSetup {
-            version: case.version,
-            topic_id,
-            transactional_id: case.transactional_id,
-            records,
-        })
-        .await;
+        let actual = drive()
+            .broker(&broker)
+            .grants(case.grants)
+            .topic_id(topic_id)
+            .version(case.version)
+            .maybe_transactional_id(case.transactional_id)
+            .records(records)
+            .call()
+            .await;
         let expected_row = if case.expected.0 == codes::NONE {
             let row = PartitionProduceResponse {
                 index: 0,
@@ -347,16 +372,20 @@ async fn transactional_denial_precedes_topic_resolution_at_v13() {
 
     let unknown_id = WireUuid([0x0b; 16]);
     let version = ProduceApiVersion(13);
-    let actual = drive(&broker, "Topic:Write", ProduceRequestSetup {
-        version,
-        topic_id: unknown_id,
-        transactional_id: Some(TXN_ID),
-        records: one_transactional_batch()
-            .producer_id(ProducerId(999).0)
-            .producer_epoch(0)
-            .call(),
-    })
-    .await;
+    let actual = drive()
+        .broker(&broker)
+        .grants("Topic:Write")
+        .topic_id(unknown_id)
+        .version(version)
+        .maybe_transactional_id(Some(TXN_ID))
+        .records(
+            one_transactional_batch()
+                .producer_id(999)
+                .producer_epoch(0)
+                .call(),
+        )
+        .call()
+        .await;
     let expected = ProduceResponse {
         responses: vec![TopicProduceResponse {
             name: String::new(),

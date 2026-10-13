@@ -16,12 +16,11 @@ use {
             shutdown_cluster,
             topics::{AssignedTopicSetup, metadata_topic},
             transaction_wire::{
-                AssignedTransactionTopicSetup, TransactionProduceSetup, add_partition_request,
-                coordinator_loading, create_assigned_topic, init_producer_request,
-                initialized_identity, partition_added, partition_leader, produce_fixture,
-                read_committed_through, retry_coordinator,
+                add_partition_request, coordinator_loading, create_assigned_topic,
+                init_producer_request, initialized_identity, partition_added, partition_leader,
+                produce_fixture, read_committed_through, retry_coordinator,
             },
-            transactions::{EndTransactionSetup, ProducerIdentity, end_transaction_request},
+            transactions::{ProducerIdentity, end_transaction_request},
         },
         txn_harness::registered_transaction_cluster,
     },
@@ -128,27 +127,27 @@ async fn produce(client: &Client, producer: Option<(i64, i16)>, values: &[&'stat
         .find(|row| row.name.as_deref() == Some(TOPIC))
         .map(|row| row.topic_id)
         .expect("topic in metadata");
-    produce_fixture(
-        TransactionProduceSetup {
-            transactional_id: TID,
-            topic: TOPIC,
-            topic_id,
-            producer: producer.map(ProducerIdentity::from_wire),
-            values,
-        },
-        |request| client.send(request),
-    )
-    .await;
+    produce_fixture()
+        .transactional_id(TID)
+        .topic(TOPIC)
+        .topic_id(topic_id)
+        .maybe_producer(producer.map(ProducerIdentity::from_wire))
+        .values(values)
+        .send(|request| client.send(request))
+        .call()
+        .await;
 }
 
 async fn end_txn(client: &Client, (producer_id, epoch): (i64, i16)) -> EndTxnResponse {
     retry_coordinator(
         || async {
             client
-                .send(end_transaction_request(TID, EndTransactionSetup {
-                    producer: ProducerIdentity::from_wire((producer_id, epoch)),
-                    ..Default::default()
-                }))
+                .send(
+                    end_transaction_request()
+                        .transactional_id(TID)
+                        .producer(ProducerIdentity::from_wire((producer_id, epoch)))
+                        .call(),
+                )
                 .await
                 .expect("EndTxn")
         },
@@ -173,11 +172,15 @@ async fn a_transaction_commits_through_the_next_coordinator() {
     let admin = client(&cluster[0].0.listen_addr().to_string()).await;
     find_coordinator(&admin).await;
     let coordinator = leader_of(&cluster[0].0, STATE_TOPIC).await;
-    create_assigned_topic(&admin, AssignedTransactionTopicSetup {
-        topic: AssignedTopicSetup::leader_first(TOPIC, krabka_metadata::NodeId(coordinator)),
-        context: Some("CreateTopics"),
-    })
-    .await;
+    create_assigned_topic()
+        .client(&admin)
+        .topic(AssignedTopicSetup::leader_first(
+            TOPIC,
+            krabka_metadata::NodeId(coordinator),
+        ))
+        .maybe_context(Some("CreateTopics"))
+        .call()
+        .await;
     cluster[0].0.wait_until_isr_len(STATE_TOPIC, 0, 3).await;
     cluster[0].0.wait_until_isr_len(TOPIC, 0, 3).await;
 

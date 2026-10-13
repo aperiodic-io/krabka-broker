@@ -12,12 +12,12 @@ use {
         },
         log_dir_status::LogDirRegistry,
         metrics::{CleanerFailureLabel, CleanerFailureReason},
-        partition::Partition,
-        test_support::{FrozenTopicsImageSetup, append_partition_batch, topic_thaw_record},
+        partition::{Partition, test_support::update_log_config},
+        test_support::{append_partition_batch, topic_thaw_record},
     },
     assert2::{assert, check},
     krabka_ids::PartitionIndex,
-    krabka_metadata::{MetadataRecord, NodeId, PatternType},
+    krabka_metadata::{MetadataRecord, PatternType},
     std::sync::atomic::Ordering,
     tempfile::TempDir,
 };
@@ -33,11 +33,11 @@ async fn hosted_compact_partition() -> HostedCompactPartition {
     let dir = tempfile::tempdir().expect("log root");
     let status = LogDirRegistry::probe(&[dir.path().to_path_buf()]);
     let registry = PartitionRegistry::new();
-    let partition = compactable_partition(&dir, CompactionSetup {
-        log_dir_status: status.clone(),
-        ..Default::default()
-    })
-    .await;
+    let partition = compactable_partition()
+        .root(&dir)
+        .log_dir_status(status.clone())
+        .call()
+        .await;
     registry.insert("orders".into(), PartitionIndex(0), Arc::clone(&partition));
     HostedCompactPartition {
         dir,
@@ -102,16 +102,16 @@ async fn tick_all_compacts_every_hosted_compact_topic_whoever_leads_it() {
     ];
     let mut cases = Vec::new();
     for (topic, leader, policy, expect_compacted) in specs {
-        let partition = compactable_partition(&dir, CompactionSetup {
-            topic,
-            leader: NodeId(leader),
-            cfg: krabka_log::LogConfig {
+        let partition = compactable_partition()
+            .root(&dir)
+            .topic(topic)
+            .leader(leader)
+            .cfg(krabka_log::LogConfig {
                 cleanup_policy: policy,
                 ..CompactionSetup::default().cfg
-            },
-            ..Default::default()
-        })
-        .await;
+            })
+            .call()
+            .await;
         let before = record_count(&partition);
         registry.insert(topic.into(), PartitionIndex(0), Arc::clone(&partition));
         cases.push((topic, partition, before, expect_compacted));
@@ -159,12 +159,12 @@ async fn tick_all_skips_a_partition_below_its_dirty_ratio_until_the_max_lag() {
         min_cleanable_dirty_ratio: krabka_units::fraction(1.0),
         ..Default::default()
     };
-    let partition = compactable_partition(&dir, CompactionSetup {
-        topic: "too-clean",
-        cfg: base.clone(),
-        ..Default::default()
-    })
-    .await;
+    let partition = compactable_partition()
+        .root(&dir)
+        .topic("too-clean")
+        .cfg(base.clone())
+        .call()
+        .await;
     let before = record_count(&partition);
     registry.insert(
         "too-clean".into(),
@@ -249,13 +249,12 @@ async fn tick_all_skips_a_frozen_partition_and_compacts_an_unfrozen_control() {
     // One image, one sweep. The control partition is compactable in
     // exactly the same way as the two frozen ones, so a sweep that
     // compacted nothing at all could not pass this test.
-    let image = image_with_freezes(
-        &[
+    let image = image_with_freezes()
+        .scopes(&[
             ("frozen-literal", PatternType::Literal),
             ("tenant-a.", PatternType::Prefixed),
-        ],
-        FrozenTopicsImageSetup::default(),
-    );
+        ])
+        .call();
 
     tick_all(
         &registry,
@@ -286,10 +285,9 @@ async fn tick_all_compacts_again_once_the_thaw_leaves_the_image() {
     let registry = PartitionRegistry::new();
     let cases = compactable_topics(&dir, &registry, &["orders"]).await;
     let (_, partition, before) = &cases[0];
-    let mut image = image_with_freezes(
-        &[("orders", PatternType::Literal)],
-        FrozenTopicsImageSetup::default(),
-    );
+    let mut image = image_with_freezes()
+        .scopes(&[("orders", PatternType::Literal)])
+        .call();
     let metrics = BrokerMetrics::new();
 
     tick_all(
@@ -321,13 +319,12 @@ async fn tick_all_compacts_again_once_the_thaw_leaves_the_image() {
 
 #[test]
 fn freeze_stops_compaction_reads_the_registry_the_produce_path_reads() {
-    let image = image_with_freezes(
-        &[
+    let image = image_with_freezes()
+        .scopes(&[
             ("orders", PatternType::Literal),
             ("tenant-a.", PatternType::Prefixed),
-        ],
-        FrozenTopicsImageSetup::default(),
-    );
+        ])
+        .call();
 
     for (label, topic, want) in [
         (
@@ -442,15 +439,9 @@ async fn tick_all_leaves_a_partition_uncleanable_for_a_record_above_the_decompre
 
     // A gzip record with a 1000-byte value under a key the log already holds,
     // then a plain one that seals its segment.
-    let with_limit = |limit| {
-        let log = partition.log.lock().expect("partition log lock");
-        let config = krabka_log::LogConfig {
-            max_decompressed_record: limit,
-            ..log.config_snapshot()
-        };
-        log.set_config(config);
-    };
-    with_limit(Some(krabka_units::bytes(100)));
+    update_log_config(&partition, |config| {
+        config.max_decompressed_record = Some(krabka_units::bytes(100));
+    });
     // Pseudo-random bytes, so the gzip batch stays wider than a segment and the
     // append after it seals its segment.
     let mut state = 12_345_u32;
@@ -511,7 +502,9 @@ async fn tick_all_leaves_a_partition_uncleanable_for_a_record_above_the_decompre
 
     // A different limit that still refuses the record is a different verdict,
     // so the partition runs again and is refused again.
-    with_limit(Some(krabka_units::bytes(50)));
+    update_log_config(&partition, |config| {
+        config.max_decompressed_record = Some(krabka_units::bytes(50));
+    });
     tick_all(&registry, None, &metrics, &mut uncleanable).await;
     check!(failures(&metrics, "orders", CleanerFailureReason::Other) == 2);
     tick_all(&registry, None, &metrics, &mut uncleanable).await;
@@ -523,7 +516,9 @@ async fn tick_all_leaves_a_partition_uncleanable_for_a_record_above_the_decompre
 
     // The operator raises the limit: the next sweep compacts the partition and
     // clears the mark.
-    with_limit(None);
+    update_log_config(&partition, |config| {
+        config.max_decompressed_record = None;
+    });
     tick_all(&registry, None, &metrics, &mut uncleanable).await;
 
     check!(record_count(&partition) < before, "the retry compacted");

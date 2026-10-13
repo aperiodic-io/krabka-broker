@@ -11,10 +11,7 @@ use {
         client::http_get,
         produce::{SinglePartitionProduceSetup, batch_request},
         records::{batch_from_records, value_record},
-        topics::{
-            ConfiguredTopicSetup, TopicPartitionCount, TopicReplicationFactor, creatable_topic,
-            create_topic_request,
-        },
+        topics::{creatable_topic, create_topic_request},
     },
     assert2::assert,
     krabka_client_core::Client,
@@ -38,14 +35,13 @@ pub async fn scrape(addr: SocketAddr) -> String {
 
 pub async fn create_topic(client: &Client, partitions: i32, replication_factor: i16) {
     let response = client
-        .send(create_topic_request(creatable_topic(
-            ConfiguredTopicSetup {
-                name: (TOPIC).into(),
-                partitions: TopicPartitionCount(partitions),
-                replicas: TopicReplicationFactor(replication_factor),
-                ..Default::default()
-            },
-        )))
+        .send(create_topic_request(
+            creatable_topic()
+                .name((TOPIC).into())
+                .partitions(partitions)
+                .replicas(replication_factor)
+                .call(),
+        ))
         .await
         .unwrap();
     assert!(response.topics[0].error_code == 0, "{response:?}");

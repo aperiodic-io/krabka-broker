@@ -417,33 +417,37 @@ mod tests {
         assert!(c.lookup_fetch_range(t, 0, 0, 20) == Some(("o".into(), 0, 20)));
     }
 
-    #[test]
-    fn fetch_range_falls_forward_across_an_offset_gap() {
-        let mut c = WalIndexCache::default();
-        let mut first = entry(0, 0, 0);
-        first.byte_len = 10;
-        let mut next = entry(0, 2, 2);
-        next.byte_start = 10;
-        next.byte_len = 10;
-        c.apply(&WalFlushRecord {
-            object_key: "o".into(),
-            format_version: WalFlushRecord::FORMAT_VERSION,
-            entries: vec![first, next],
-        });
-
-        assert!(c.lookup_fetch_range(Uuid::from_u128(1), 0, 1, 10) == Some(("o".into(), 10, 10)));
+    #[derive(Clone, Copy)]
+    enum FetchRangeBoundary {
+        OffsetGap,
+        BelowObjectFloor,
     }
 
-    #[test]
-    fn fetch_range_keeps_offsets_below_the_object_floor_out_of_range() {
+    #[yare::parameterized(
+        offset_gap = { FetchRangeBoundary::OffsetGap },
+        below_object_floor = { FetchRangeBoundary::BelowObjectFloor },
+    )]
+    fn fetch_range_obeys_offset_boundaries(boundary: FetchRangeBoundary) {
+        let (entries, offset, expected): (Vec<_>, i64, Option<(String, u64, u64)>) = match boundary
+        {
+            FetchRangeBoundary::OffsetGap => {
+                let mut first = entry(0, 0, 0);
+                first.byte_len = 10;
+                let mut next = entry(0, 2, 2);
+                next.byte_start = 10;
+                next.byte_len = 10;
+                (vec![first, next], 1, Some(("o".into(), 10, 10)))
+            }
+            FetchRangeBoundary::BelowObjectFloor => (vec![entry(0, 5, 5)], 4, None),
+        };
         let mut c = WalIndexCache::default();
         c.apply(&WalFlushRecord {
             object_key: "o".into(),
             format_version: WalFlushRecord::FORMAT_VERSION,
-            entries: vec![entry(0, 5, 5)],
+            entries,
         });
 
-        assert!(c.lookup_fetch_range(Uuid::from_u128(1), 0, 4, 10).is_none());
+        assert2::assert!(c.lookup_fetch_range(Uuid::from_u128(1), 0, offset, 10) == expected);
     }
 
     #[test]

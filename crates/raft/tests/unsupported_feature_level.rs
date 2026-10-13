@@ -40,7 +40,18 @@ struct FeatureControllerSetup {
     unstable: UnstableFeatureVersions,
 }
 
-fn config(dir: &TempDir, setup: FeatureControllerSetup) -> ControllerConfig {
+#[bon::builder]
+fn config(
+    dir: &TempDir,
+    #[builder(default)] cluster_id: Uuid,
+    #[builder(default = BootstrapMode :: Bootstrap)] mode: BootstrapMode,
+    #[builder(default = UnstableFeatureVersions :: Disabled)] unstable: UnstableFeatureVersions,
+) -> ControllerConfig {
+    let setup = FeatureControllerSetup {
+        cluster_id,
+        mode,
+        unstable,
+    };
     let FeatureControllerSetup {
         cluster_id,
         mode,
@@ -75,11 +86,13 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
     let cluster_id = Uuid::new_v4();
 
     // The first boot has the flag on and finalizes the unstable level.
-    let controller = Controller::start(config(&dir, FeatureControllerSetup {
-        cluster_id,
-        unstable: UnstableFeatureVersions::Enabled,
-        ..Default::default()
-    }))
+    let controller = Controller::start(
+        config()
+            .dir(&dir)
+            .cluster_id(cluster_id)
+            .unstable(UnstableFeatureVersions::Enabled)
+            .call(),
+    )
     .await
     .expect("first boot");
     wait_for_leader(&controller).await;
@@ -90,11 +103,13 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
     controller.shutdown().await;
 
     // With the flag off the node refuses the log, with Kafka's message.
-    let Err(refused) = Controller::start(config(&dir, FeatureControllerSetup {
-        cluster_id,
-        mode: BootstrapMode::Rejoin,
-        ..Default::default()
-    }))
+    let Err(refused) = Controller::start(
+        config()
+            .dir(&dir)
+            .cluster_id(cluster_id)
+            .mode(BootstrapMode::Rejoin)
+            .call(),
+    )
     .await
     else {
         panic!("a controller without the flag started over an unstable log");
@@ -103,11 +118,14 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
     check!(refused.to_string() == format!("Encountered fatal fault: {REFUSAL}"));
 
     // The refusal changed nothing on disk: the same log starts with the flag on.
-    let controller = Controller::start(config(&dir, FeatureControllerSetup {
-        cluster_id,
-        mode: BootstrapMode::Rejoin,
-        unstable: UnstableFeatureVersions::Enabled,
-    }))
+    let controller = Controller::start(
+        config()
+            .dir(&dir)
+            .cluster_id(cluster_id)
+            .mode(BootstrapMode::Rejoin)
+            .unstable(UnstableFeatureVersions::Enabled)
+            .call(),
+    )
     .await
     .expect("restart with the flag on");
     wait_for_leader(&controller).await;
@@ -118,12 +136,9 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_controller_stops_when_it_replays_a_level_it_does_not_support() {
     let dir = TempDir::new().unwrap();
-    let controller = Controller::start(config(&dir, FeatureControllerSetup {
-        cluster_id: Uuid::new_v4(),
-        ..Default::default()
-    }))
-    .await
-    .expect("boot");
+    let controller = Controller::start(config().dir(&dir).cluster_id(Uuid::new_v4()).call())
+        .await
+        .expect("boot");
     wait_for_leader(&controller).await;
     let fatal = controller.watch_fatal();
     check!(
@@ -164,11 +179,13 @@ async fn a_controller_stops_when_it_replays_a_level_it_does_not_support() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_controller_that_stops_for_any_other_reason_reports_no_fault() {
     let dir = TempDir::new().unwrap();
-    let controller = Controller::start(config(&dir, FeatureControllerSetup {
-        cluster_id: Uuid::new_v4(),
-        unstable: UnstableFeatureVersions::Enabled,
-        ..Default::default()
-    }))
+    let controller = Controller::start(
+        config()
+            .dir(&dir)
+            .cluster_id(Uuid::new_v4())
+            .unstable(UnstableFeatureVersions::Enabled)
+            .call(),
+    )
     .await
     .expect("boot");
     wait_for_leader(&controller).await;

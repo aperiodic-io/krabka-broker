@@ -6,8 +6,8 @@
 use {
     crate::{
         harness::{
-            STAGGERED_TIMEOUTS, SimEngineSetup, SnapshotRecordCount, await_single_leader,
-            await_until, build_engine, shutdown_nodes, three_voter_network, topic_record,
+            STAGGERED_TIMEOUTS, await_single_leader, await_until, build_engine, shutdown_nodes,
+            three_voter_network, topic_record,
         },
         sim_net::SimNet,
     },
@@ -34,13 +34,14 @@ fn start_snapshot_pair(
         .into_iter()
         .map(|id| {
             let idx = usize::try_from(id.0 - 1).unwrap();
-            let (ctrl, dir) = build_engine(net, SimEngineSetup {
-                me: id,
-                ids: voters,
-                cluster_id: cid,
-                election_timeout: STAGGERED_TIMEOUTS[idx],
-                snapshot_interval_records: SnapshotRecordCount(interval),
-            });
+            let (ctrl, dir) = build_engine()
+                .net(net)
+                .me(id)
+                .ids(voters)
+                .cluster_id(cid)
+                .election_timeout(STAGGERED_TIMEOUTS[idx])
+                .snapshot_interval_records(interval)
+                .call();
             net.register(id, ctrl);
             (id, dir)
         })
@@ -57,6 +58,31 @@ async fn elected_snapshot_pair(
     let (leader, epoch) =
         await_single_leader(net, &[NodeId(1), NodeId(2)], Duration::from_secs(10)).await;
     (dirs, leader, epoch)
+}
+
+async fn snapshot_test_pair(
+    net: &SimNet,
+    ids: &[NodeId],
+    cluster_id: u128,
+) -> (
+    HashMap<NodeId, tempfile::TempDir>,
+    NodeId,
+    u32,
+    [NodeId; 2],
+    u64,
+    uuid::Uuid,
+) {
+    const INTERVAL: u64 = 5;
+    let cluster_id = uuid::Uuid::from_u128(cluster_id);
+    let (dirs, leader, epoch) = elected_snapshot_pair(net, ids, cluster_id, INTERVAL).await;
+    (
+        dirs,
+        leader,
+        epoch,
+        [NodeId(1), NodeId(2)],
+        INTERVAL,
+        cluster_id,
+    )
 }
 
 fn fetch_from_zero(epoch: u32) -> bytes::Bytes {
@@ -165,13 +191,14 @@ async fn lagging_follower_catches_up_via_snapshot() {
     // Now bring the lagging node 3 up on a FRESH empty tempdir: its LEO is 0,
     // far below the leader's pruned log_start, so it can ONLY catch up by
     // fetching the snapshot.
-    let (lag_ctrl, lag_dir) = build_engine(&net, SimEngineSetup {
-        me: NodeId(3),
-        ids: &ids,
-        cluster_id: cid,
-        election_timeout: STAGGERED_TIMEOUTS[2],
-        snapshot_interval_records: SnapshotRecordCount(interval),
-    });
+    let (lag_ctrl, lag_dir) = build_engine()
+        .net(&net)
+        .me(3)
+        .ids(&ids)
+        .cluster_id(cid)
+        .election_timeout(STAGGERED_TIMEOUTS[2])
+        .snapshot_interval_records(interval)
+        .call();
     net.register(NodeId(3), lag_ctrl);
     dirs.insert(NodeId(3), lag_dir);
 
@@ -205,11 +232,7 @@ async fn lagging_follower_catches_up_via_snapshot() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn follower_that_pruned_independently_redirects_a_lagging_fetch_to_the_leader() {
     let (net, ids) = three_voter_network();
-    let cid = uuid::Uuid::from_u128(501);
-    let interval = 5u64;
-
-    let (dirs, leader, epoch) = elected_snapshot_pair(&net, &ids, cid, interval).await;
-    let live = [NodeId(1), NodeId(2)];
+    let (dirs, leader, epoch, live, interval, cid) = snapshot_test_pair(&net, &ids, 501).await;
     assert2::assert!(leader == NodeId(1));
     let follower = NodeId(2);
 
@@ -323,11 +346,7 @@ async fn follower_that_pruned_independently_redirects_a_lagging_fetch_to_the_lea
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_snapshot_fetch_in_flight_survives_the_leader_rolling_to_a_new_checkpoint() {
     let (net, ids) = three_voter_network();
-    let cid = uuid::Uuid::from_u128(502);
-    let interval = 5u64;
-
-    let (dirs, leader, epoch) = elected_snapshot_pair(&net, &ids, cid, interval).await;
-    let live = [NodeId(1), NodeId(2)];
+    let (dirs, leader, epoch, live, interval, cid) = snapshot_test_pair(&net, &ids, 502).await;
     let leader_dir = dirs[&leader].path().to_path_buf();
 
     let submit = async |name: String, id: u128| {

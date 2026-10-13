@@ -59,22 +59,19 @@ pub(super) async fn handle_session_tick(
 mod tests {
     use {
         super::*,
-        crate::{
-            coordinator::unified::{
-                config::NextGenConfig,
-                share::{
-                    actor::{
-                        records::PendingShareRecords,
-                        test_support::{
-                            TopicMetadataSetup, make_coordinator_with_config, metadata_with_topic,
-                        },
+        crate::coordinator::unified::{
+            config::NextGenConfig,
+            share::{
+                actor::{
+                    records::PendingShareRecords,
+                    test_support::{
+                        TopicMetadataSetup, make_coordinator_with_config, metadata_with_topic,
                     },
-                    persistence::ShareGroupMetadataValue,
-                    state::ShareMemberState,
                 },
-                test_support::{check_two_members_expired, expired_session_last_seen},
+                persistence::ShareGroupMetadataValue,
+                state::ShareMemberState,
             },
-            test_support::PartitionCount,
+            test_support::{check_two_members_expired, expired_session_last_seen},
         },
         assert2::check,
         std::time::Duration,
@@ -86,7 +83,10 @@ mod tests {
     /// and an epoch bump, and no target is computed.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn each_expired_member_is_fenced_in_a_batch_of_its_own() {
-        let (metadata, _id) = metadata_with_topic(TopicMetadataSetup::four_partitions());
+        let (metadata, _id) = metadata_with_topic()
+            .name(TopicMetadataSetup::four_partitions().name)
+            .partitions(TopicMetadataSetup::four_partitions().partitions)
+            .call();
         let config = ShareGroupConfig {
             session_timeout: Duration::from_millis(1),
             ..ShareGroupConfig::default()
@@ -147,10 +147,7 @@ mod tests {
             ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
         };
 
-        let (metadata, topic_id) = metadata_with_topic(TopicMetadataSetup {
-            partitions: PartitionCount(2),
-            ..Default::default()
-        });
+        let (metadata, topic_id) = metadata_with_topic().partitions(2).call();
         let config = ShareGroupConfig::default();
         let (coord, log) = make_coordinator_with_config(
             metadata.clone(),

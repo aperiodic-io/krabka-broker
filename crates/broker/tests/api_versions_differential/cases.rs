@@ -5,7 +5,7 @@ use {
         divergence::DivergenceReport,
         oracle::{ORACLE_IMAGE, OracleBroker, krabka_api_versions, start_krabka},
         parse::{advertised, parse_single_broker},
-        support::{JvmListeners, manifest_dir},
+        support::{JvmListeners, api_versions::supported_client_apis, manifest_dir},
     },
     assert2::assert,
     krabka_protocol::owned::api_versions_response::ApiVersion,
@@ -39,15 +39,7 @@ fn regenerating() -> bool {
 /// listener with: the KIP-714 keys are withheld the way a stock Kafka broker
 /// withholds them, and so is every key in
 /// `api_catalog::INTER_BROKER_ONLY_APIS`.
-fn catalog_sorted_by_key() -> Vec<ApiVersion> {
-    let mut apis = krabka_broker::api_catalog::supported_apis(
-        krabka_broker::api_catalog::ListenerKind::Client,
-        krabka_broker::api_catalog::ClientMetricsReceiver::Absent,
-        krabka_broker::api_catalog::VersionGates::default(),
-    );
-    apis.sort_by_key(|api| api.api_key);
-    apis
-}
+fn catalog_sorted_by_key() -> Vec<ApiVersion> { supported_client_apis() }
 
 /// Decode the stock broker's table, retaining its container until the case ends.
 fn kafka_advertised_table() -> (OracleBroker, Vec<ApiVersion>) {
