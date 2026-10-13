@@ -14,12 +14,15 @@ use {
     anyhow::{Context, Result},
     clap::Parser,
     krabka_bench_driver::{
+        hist,
         local_cluster::{LocalCluster, LocalClusterSpec},
+        raw_load::{self, RawOutcome},
         scenario::{RunOutput, Scenario, Stack},
         workload::{self, ConsumerBuildRetryPolicy, DriverConfig},
     },
     krabka_client_core::{ClientFrameMax, ConnectionDispatchQueueCapacity},
     krabka_units::{fmt::Human as _, prelude::*},
+    num_traits::ToPrimitive as _,
     std::path::PathBuf,
     tracing_subscriber::EnvFilter,
 };
@@ -54,13 +57,69 @@ struct Cli {
     /// Extra argument for every broker. Repeat it for several.
     #[arg(long = "broker-arg", allow_hyphen_values = true)]
     broker_args: Vec<String>,
+    /// Extra environment variable for every broker, as `KEY=VALUE`, such as
+    /// `TOKIO_WORKER_THREADS=2`. Repeat it for several.
+    #[arg(long = "broker-env")]
+    broker_env: Vec<String>,
     /// `RUST_LOG` for the brokers.
     #[arg(long, default_value = "warn")]
     broker_log: String,
-    /// Where to write the `RunOutput` JSON.
+    /// Where to write the `RunOutput` JSON of a `client` run.
     #[arg(long)]
     out: Option<PathBuf>,
+    /// The load generator: `raw` produces pre-encoded batches over the
+    /// protocol and measures the cluster; `client` runs the producer and
+    /// consumer libraries, whose own CPU cost is then part of the result.
+    #[arg(long, value_enum, default_value_t = Generator::Raw)]
+    generator: Generator,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum Generator {
+    Raw,
+    Client,
+}
+
+fn print_raw_summary(name: &str, out: &RawOutcome) {
+    let window = out.window.secs_f64();
+    let produced = to_rate(out.produced, window);
+    let p = hist::percentiles(&out.ack);
+    let e = hist::percentiles(&out.end_to_end);
+    println!("scenario            {name}");
+    println!("produce             {produced:.0} msg/s");
+    println!(
+        "consume             {:.0} msg/s",
+        to_rate(out.consumed, window)
+    );
+    println!(
+        "committed           {:.0} msg/s",
+        to_rate(out.committed, window)
+    );
+    println!(
+        "produce ack latency p50 {}  p99 {}  p999 {}  max {}",
+        p.p50.human(),
+        p.p99.human(),
+        p.p999.human(),
+        p.max.human()
+    );
+    println!(
+        "end-to-end latency  p50 {}  p99 {}  p999 {}  max {}",
+        e.p50.human(),
+        e.p99.human(),
+        e.p999.human(),
+        e.max.human()
+    );
+    if out.errors > 0 {
+        println!(
+            "errors              {} (first: {})",
+            out.errors,
+            out.first_error.as_deref().unwrap_or("")
+        );
+    }
+}
+
+/// `count` per second over `window` seconds.
+fn to_rate(count: u64, window: f64) -> f64 { count.to_f64().unwrap_or(0.0) / window }
 
 fn print_summary(out: &RunOutput) {
     let produced = out.throughput.producer_rate.per_sec_f64();
@@ -119,12 +178,24 @@ async fn main() -> Result<()> {
         .base_port(cli.base_port)
         .broker_args(cli.broker_args)
         .broker_log(cli.broker_log)
+        .broker_env(cli.broker_env)
         .build();
     let mut cluster = LocalCluster::start(&spec).await?;
     let topic = "bench-topic";
     cluster
         .create_topic(topic, scenario.partitions, scenario.replication_factor)
         .await?;
+
+    if cli.generator == Generator::Raw {
+        let name = scenario.name.clone();
+        let out = raw_load::run(&scenario, cluster.bootstrap(), topic).await?;
+        if let Err(error) = cluster.save_metrics(&spec).await {
+            tracing::warn!(%error, "could not save the broker metrics");
+        }
+        drop(cluster);
+        print_raw_summary(&name, &out);
+        return Ok(());
+    }
 
     let cfg = DriverConfig {
         bootstrap: cluster.bootstrap().to_owned(),
@@ -147,6 +218,9 @@ async fn main() -> Result<()> {
         tls: None,
     };
     let out = workload::run(scenario, cfg).await?;
+    if let Err(error) = cluster.save_metrics(&spec).await {
+        tracing::warn!(%error, "could not save the broker metrics");
+    }
     drop(cluster);
 
     if let Some(path) = &cli.out {

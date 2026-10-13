@@ -11,7 +11,7 @@ use {
     bon::Builder,
     krabka_client_core::Client,
     krabka_protocol::owned::{
-        create_topics_request::{CreatableTopic, CreateTopicsRequest},
+        create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
         metadata_request::{MetadataRequest, MetadataRequestTopic},
     },
     std::{
@@ -34,6 +34,14 @@ const TOPIC_ALREADY_EXISTS: i16 = 36;
 /// starts from empty directories, so it never meets another cluster's data.
 const CLUSTER_ID: &str = "DX4vWpscTB6KPyttHkyfEA";
 
+/// The most bytes the benchmark topic keeps per partition replica.
+const RETENTION_BYTES: u64 = 256 * 1024 * 1024;
+/// The segment size of the benchmark topic, small enough that retention can
+/// delete in steps well below [`RETENTION_BYTES`].
+const SEGMENT_BYTES: u64 = 64 * 1024 * 1024;
+/// How often the brokers apply retention, as a duration flag value.
+const RETENTION_CHECK_INTERVAL: &str = "2s";
+
 /// How long the harness waits for the cluster, or a topic, to come up.
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -44,6 +52,8 @@ pub struct NodePorts {
     pub client: u16,
     /// The controller (raft) listener.
     pub controller: u16,
+    /// The Prometheus `/metrics` endpoint.
+    pub metrics: u16,
 }
 
 impl NodePorts {
@@ -55,6 +65,7 @@ impl NodePorts {
         Self {
             client: block,
             controller: block + 1,
+            metrics: block + 2,
         }
     }
 }
@@ -78,6 +89,9 @@ pub struct LocalClusterSpec {
     /// `RUST_LOG` for the brokers.
     #[builder(default = "warn".to_owned())]
     pub broker_log: String,
+    /// Extra environment variables for every broker, as `KEY=VALUE`.
+    #[builder(default)]
+    pub broker_env: Vec<String>,
 }
 
 /// A running local cluster. Dropping it kills every node.
@@ -85,6 +99,9 @@ pub struct LocalCluster {
     children: Vec<Child>,
     bootstrap: String,
     nodes: u16,
+    /// The node data directories, deleted when the cluster drops. A
+    /// saturating run writes gigabytes; the logs and metrics beside them stay.
+    data_dirs: Vec<PathBuf>,
 }
 
 impl LocalCluster {
@@ -127,6 +144,9 @@ impl LocalCluster {
                 .collect::<Vec<_>>()
                 .join(","),
             nodes: spec.nodes,
+            data_dirs: (0..spec.nodes)
+                .map(|index| spec.work_dir.join(format!("node-{}", index + 1)))
+                .collect(),
         };
         for index in 0..spec.nodes {
             let child = start_node(spec, &broker_bin, &format_bin, index, &voters)?;
@@ -139,6 +159,30 @@ impl LocalCluster {
     /// The comma-separated bootstrap list of every node's client listener.
     #[must_use]
     pub fn bootstrap(&self) -> &str { &self.bootstrap }
+
+    /// Saves every node's `/metrics` page as `node-N.metrics` in the work
+    /// directory, for reading after the run.
+    ///
+    /// # Errors
+    ///
+    /// When a page cannot be fetched or written.
+    pub async fn save_metrics(&self, spec: &LocalClusterSpec) -> Result<()> {
+        let http = reqwest::Client::new();
+        for index in 0..self.nodes {
+            let port = NodePorts::of(spec.base_port, index).metrics;
+            let page = http
+                .get(format!("http://127.0.0.1:{port}/metrics"))
+                .send()
+                .await?
+                .text()
+                .await?;
+            fs::write(
+                spec.work_dir.join(format!("node-{}.metrics", index + 1)),
+                page,
+            )?;
+        }
+        Ok(())
+    }
 
     async fn admin(&self) -> Result<Client> {
         Client::builder()
@@ -191,6 +235,10 @@ impl LocalCluster {
     /// Creates `topic` and waits until every partition has a leader and a
     /// full in-sync replica set.
     ///
+    /// The topic keeps at most [`RETENTION_BYTES`] per partition, in
+    /// [`SEGMENT_BYTES`] segments, so a saturating run does not fill the disk
+    /// it shares with the build.
+    ///
     /// # Errors
     ///
     /// When the broker refuses the topic or it is not ready within a minute.
@@ -207,6 +255,18 @@ impl LocalCluster {
                     name: topic.to_owned(),
                     num_partitions: partitions,
                     replication_factor,
+                    configs: vec![
+                        CreatableTopicConfig {
+                            name: "retention.bytes".to_owned(),
+                            value: Some(RETENTION_BYTES.to_string()),
+                            ..Default::default()
+                        },
+                        CreatableTopicConfig {
+                            name: "segment.bytes".to_owned(),
+                            value: Some(SEGMENT_BYTES.to_string()),
+                            ..Default::default()
+                        },
+                    ],
                     ..Default::default()
                 }],
                 timeout_ms: 30_000,
@@ -259,6 +319,9 @@ impl Drop for LocalCluster {
         for child in &mut self.children {
             let _ = child.wait();
         }
+        for dir in &self.data_dirs {
+            let _ = fs::remove_dir_all(dir);
+        }
     }
 }
 
@@ -302,12 +365,19 @@ fn start_node(
             "--controller-quorum-voters",
             voters,
             "--metrics-listen-addr",
-            "none",
+            &format!("127.0.0.1:{}", ports.metrics),
             "--health-listen-addr",
             "none",
+            "--log-retention-check-interval",
+            RETENTION_CHECK_INTERVAL,
         ])
         .args(&spec.broker_args)
         .env("RUST_LOG", &spec.broker_log)
+        .envs(
+            spec.broker_env
+                .iter()
+                .filter_map(|pair| pair.split_once('=')),
+        )
         .stdout(log.try_clone()?)
         .stderr(log)
         .spawn()
@@ -324,14 +394,16 @@ mod tests {
             NodePorts::of(19_100, 0)
                 == NodePorts {
                     client: 19_100,
-                    controller: 19_101
+                    controller: 19_101,
+                    metrics: 19_102,
                 }
         );
         check!(
             NodePorts::of(19_100, 2)
                 == NodePorts {
                     client: 19_120,
-                    controller: 19_121
+                    controller: 19_121,
+                    metrics: 19_122,
                 }
         );
     }

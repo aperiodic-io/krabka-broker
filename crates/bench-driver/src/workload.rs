@@ -967,6 +967,23 @@ struct ProducerOut {
     interval_hist: Vec<Histogram<u64>>,
 }
 
+impl ProducerOut {
+    /// The output of a producer that never sent: no tallies, only the error.
+    fn failed(error: String) -> Self {
+        Self {
+            latency: hist::new(),
+            msgs: 0,
+            bytes: 0,
+            dropped: 0,
+            recovery_unix_ms: 0,
+            latency_spike_max: Time::ZERO,
+            error,
+            interval_msgs: Vec::new(),
+            interval_hist: Vec::new(),
+        }
+    }
+}
+
 struct ConsumerOut {
     latency: Histogram<u64>,
     msgs: u64,
@@ -1106,17 +1123,7 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
     {
         Ok(p) => p,
         Err(e) => {
-            return ProducerOut {
-                latency: hist::new(),
-                msgs: 0,
-                bytes: 0,
-                dropped: 0,
-                recovery_unix_ms: 0,
-                latency_spike_max: Time::ZERO,
-                error: format!("producer-{idx}-build: {e:#}"),
-                interval_msgs: Vec::new(),
-                interval_hist: Vec::new(),
-            };
+            return ProducerOut::failed(format!("producer-{idx}-build: {e:#}"));
         }
     };
 

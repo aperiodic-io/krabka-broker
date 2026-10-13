@@ -1,18 +1,18 @@
-# Throughput ceiling of a replicated cluster: RF=3, acks=all, records sent as
+# Throughput ceiling of a replicated cluster: RF=3, acks=1, records sent as
 # fast as the cluster acknowledges them. Sized for `krabka-bench-local` on a
 # developer machine.
 name: local-rf3-saturate
 mode_tag: cluster
-msg_size: 1KiB
+msg_size: 100B
 partitions: 6
 replication_factor: 3
 producers: 2
 consumers: 1
 mode:
   kind: saturate
-acks: all
+acks: leader
 compression: none
 linger: 5ms
-batch_size: 64KiB
+batch_size: 16KiB
 warmup: 5s
 duration: 20s

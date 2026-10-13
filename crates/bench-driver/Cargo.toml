@@ -41,6 +41,8 @@ anyhow = { workspace = true }
 bytes = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { workspace = true, features = ["env"] }
+# The raw load generator restamps pre-encoded batches and recomputes their CRC.
+crc32c = { workspace = true }
 krabka-client-admin = { version = "0.6.0" }
 krabka-client-consumer = { version = "0.6.0" }
 krabka-client-core = { version = "0.6.0" }

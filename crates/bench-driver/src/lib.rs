@@ -62,6 +62,7 @@ mod numeric;
 pub mod payload;
 pub mod prom;
 pub mod rate;
+pub mod raw_load;
 pub mod report;
 pub mod scenario;
 pub mod workload;
