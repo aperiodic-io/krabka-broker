@@ -42,7 +42,7 @@ krabka-client-producer = { version = "0.6.0" }
 krabka-protocol = { version = "0.6.0", default-features = false }
 krabka-security = { workspace = true }
 krabka-units = { workspace = true }
-krabka-macros = { version = "1.0.4", path = "../macros" }
+krabka-macros = { version = "1.0.5", path = "../macros" }
 derive_more = { workspace = true }
 exponential-backoff = "2.1.1"
 futures = "0.3"

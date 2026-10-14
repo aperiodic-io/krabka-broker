@@ -27,13 +27,13 @@ scenarios = ["krabka-kraft-core/sim"]
 bon = { workspace = true }
 maplit = { workspace = true }
 assert2 = { workspace = true }
-krabka-kraft-core = { version = "1.0.4", path = "../kraft-core" }
+krabka-kraft-core = { version = "1.0.5", path = "../kraft-core" }
 krabka-ids = { version = "0.6.0" }
 krabka-metadata = { version = "0.6.0" }
-krabka-log = { version = "1.0.4", path = "../log" }
+krabka-log = { version = "1.0.5", path = "../log" }
 krabka-protocol = { version = "0.6.0", default-features = false }
-krabka-verified = { version = "1.0.4", path = "../verified" }
-krabka-macros = { version = "1.0.4", path = "../macros" }
+krabka-verified = { version = "1.0.5", path = "../verified" }
+krabka-macros = { version = "1.0.5", path = "../macros" }
 krabka-client-core = { version = "0.6.0" }
 krabka-units = { workspace = true }
 refined_type = { workspace = true }

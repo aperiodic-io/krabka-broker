@@ -23,6 +23,12 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-10-14
+
+1.0.5 changes no on-disk format and adds no setting, so it upgrades from any
+1.x release in place and rolls back to 1.0.4 the same way. Its change is to
+the fetch path only.
+
 ### Fixed
 
 - A consumer catching up on a backlog that is no longer in the page cache
@@ -1545,7 +1551,8 @@ robot-head/crabka.
 - An audit stamp carries the value that its freeze signature covers.
 - The release publishes the image digest that cosign signed.
 
-[Unreleased]: https://github.com/krabka-io/krabka-broker/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/krabka-io/krabka-broker/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.5
 [1.0.4]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.4
 [1.0.3]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.3
 [1.0.2]: https://github.com/krabka-io/krabka-broker/releases/tag/v1.0.2

@@ -7,7 +7,7 @@ so there is no second dependency set to keep in sync.
 
 module(
     name = "krabka_broker",
-    version = "1.0.4",
+    version = "1.0.5",
 )
 
 # `tools/creusot` constrains its container layers with `@platforms//os:linux`.

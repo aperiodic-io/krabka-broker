@@ -35,7 +35,7 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 derive_more = { workspace = true }
-krabka-macros = { version = "1.0.4", path = "../macros" }
+krabka-macros = { version = "1.0.5", path = "../macros" }
 futures-util = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

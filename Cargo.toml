@@ -5,7 +5,7 @@ members = ["crates/*"]
 exclude = ["tools/mutants"]
 
 [workspace.package]
-version = "1.0.4"
+version = "1.0.5"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["The Krabka Authors"]
@@ -181,7 +181,7 @@ wincode = "=0.6"
 zerocopy = { version = "0.8", features = ["derive"] }
 
 # First-party crates inherited by more than one member.
-krabka-audit = { path = "crates/audit", version = "1.0.4" }
+krabka-audit = { path = "crates/audit", version = "1.0.5" }
 krabka-security = "0.6.0"
 krabka-units = "0.6.0"
 

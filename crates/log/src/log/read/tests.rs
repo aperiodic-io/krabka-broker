@@ -615,23 +615,32 @@ fn an_uncached_run_falls_back_to_one_large_read() {
     assert2::assert!(copied.bytes == raw.bytes);
 }
 
+/// A log of six batches, one segment each, whose segment based at `cold`
+/// reads as not in the page cache.
+#[krabka_macros::sendfile_cfg]
+fn six_segments_one_cold(cold: impl Fn(&Log) -> i64) -> (tempfile::TempDir, Log) {
+    let dir = tempdir().unwrap();
+    let mut log = segmented_log(dir.path(), bytes(100));
+    for off in 0..6 {
+        log.append(&mut test_batch_at(off)).unwrap();
+    }
+    let base = cold(&log);
+    log.test_set_io(std::sync::Arc::new(ColdFile {
+        cold: segment_inode(dir.path(), base),
+    }));
+    (dir, log)
+}
+
 #[krabka_macros::sendfile_cfg]
 /// The walk stops at the first segment whose run is not cached: it sends the
 /// cached segments before it, and never passes over it to a later segment,
 /// which would skip its offsets.
 #[test]
 fn the_descriptor_walk_stops_at_an_uncached_segment() {
-    let dir = tempdir().unwrap();
-    let mut log = segmented_log(dir.path(), bytes(100));
-    for off in 0..6 {
-        log.append(&mut test_batch_at(off)).unwrap();
-    }
+    let (_dir, log) = six_segments_one_cold(|log| log.segments[1].base_offset().0);
     assert2::assert!(log.segments.len() >= 2);
     let end = log.log_end_offset();
     let second = log.segments[1].base_offset();
-    log.test_set_io(std::sync::Arc::new(ColdFile {
-        cold: segment_inode(dir.path(), second.0),
-    }));
 
     let desc = log.read_raw_desc(Offset(0), end, mebibytes(10)).unwrap();
     assert2::assert!(desc.start_offset == Offset(0));
@@ -645,14 +654,7 @@ fn the_descriptor_walk_stops_at_an_uncached_segment() {
 /// it, so the segment never blocks the fetch, cached or not.
 #[test]
 fn a_fetch_past_a_segment_never_blocks_on_it() {
-    let dir = tempdir().unwrap();
-    let mut log = segmented_log(dir.path(), bytes(100));
-    for off in 0..6 {
-        log.append(&mut test_batch_at(off)).unwrap();
-    }
-    log.test_set_io(std::sync::Arc::new(ColdFile {
-        cold: segment_inode(dir.path(), 0),
-    }));
+    let (_dir, log) = six_segments_one_cold(|_| 0);
     let end = log.log_end_offset();
     let first = &log.segments[0];
     assert2::assert!(

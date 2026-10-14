@@ -20,15 +20,15 @@ workspace = true
 bon = { workspace = true }
 assert2 = { workspace = true }
 maplit = { workspace = true }
-krabka-remote-storage = { version = "1.0.4", path = "../remote-storage" }
+krabka-remote-storage = { version = "1.0.5", path = "../remote-storage" }
 krabka-client-admin = { version = "0.6.0" }
 krabka-client-core = { version = "0.6.0" }
 krabka-client-producer = { version = "0.6.0" }
 krabka-protocol = { version = "0.6.0" }
 krabka-ids = { version = "0.6.0" }
 krabka-units = { workspace = true }
-krabka-verified = { version = "1.0.4", path = "../verified" }
-krabka-macros = { version = "1.0.4", path = "../macros" }
+krabka-verified = { version = "1.0.5", path = "../verified" }
+krabka-macros = { version = "1.0.5", path = "../macros" }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures-util = { workspace = true }

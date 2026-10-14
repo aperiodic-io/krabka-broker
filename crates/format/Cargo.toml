@@ -28,7 +28,7 @@ krabka-metadata = { version = "0.6.0" }
 krabka-security = { workspace = true }
 # The singleton VotersRecord this writes is the one the consensus engine reads
 # back on the node's first boot.
-krabka-raft = { version = "1.0.4", path = "../raft" }
+krabka-raft = { version = "1.0.5", path = "../raft" }
 base64 = { workspace = true }
 clap = { workspace = true, features = ["env"] }
 derive_more = { workspace = true }
@@ -39,7 +39,7 @@ serde-wincode = { workspace = true }
 wincode = { workspace = true }
 uuid = { workspace = true }
 # `cli_main!` writes the binary's `main`.
-krabka-macros = { version = "1.0.4", path = "../macros" }
+krabka-macros = { version = "1.0.5", path = "../macros" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs"] }
 thiserror = { workspace = true }
 # `Date.toString` for the `meta.properties` date comment.
@@ -50,5 +50,5 @@ assert2 = { workspace = true }
 
 [dev-dependencies]
 krabka-ids = { version = "0.6.0" }
-krabka-broker = { version = "1.0.4", path = "../broker" }
+krabka-broker = { version = "1.0.5", path = "../broker" }
 tempfile = { workspace = true }

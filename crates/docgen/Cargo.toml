@@ -31,10 +31,10 @@ path = "src/main.rs"
 assert2 = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-krabka-broker = { version = "1.0.4", path = "../broker" }
+krabka-broker = { version = "1.0.5", path = "../broker" }
 # The simulator the failure-scenario page renders. No production build turns
 # this feature on; the page is its one consumer.
-krabka-raft = { version = "1.0.4", path = "../raft", features = ["scenarios"] }
+krabka-raft = { version = "1.0.5", path = "../raft", features = ["scenarios"] }
 krabka-protocol = { version = "0.6.0", default-features = false }
 serde_json = { workspace = true }
 
