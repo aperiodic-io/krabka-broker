@@ -267,6 +267,7 @@ pub(super) async fn queue_batch(
             data: ProduceData::Owned(batch),
             ack,
             producer_check: None,
+            dedup: None,
         }))
         .await
         .expect("send produce");

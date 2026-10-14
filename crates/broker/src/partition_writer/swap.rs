@@ -4,8 +4,8 @@
 //! two logs under one lock, so its filesystem recovery path is isolated here.
 
 use {
-    super::storage::lock_log,
-    crate::{error::BrokerError, partition::SwapOutcome},
+    super::{mutations::lock_dedup, storage::lock_log},
+    crate::{dedup::PartitionDedup, error::BrokerError, partition::SwapOutcome},
     arc_swap::ArcSwap,
     krabka_log::Log,
     std::{
@@ -13,6 +13,38 @@ use {
         sync::{Arc, Mutex},
     },
 };
+
+/// The writer's answer to a KIP-113 swap request.
+///
+/// Equal log ends do not make the two logs equal once the current log was
+/// cut (`cut`): it may have grown back with records the future log lacks, so
+/// the swap waits for the move task to cut the future log too. A swapped-in
+/// log is a different log, so the dedup index rebuilds from it before the
+/// next append.
+pub(super) fn handle_swap(
+    (log, log_dir, dedup): (
+        &Arc<Mutex<Log>>,
+        &Arc<ArcSwap<PathBuf>>,
+        &Mutex<PartitionDedup>,
+    ),
+    cut: bool,
+    target_log_dir: PathBuf,
+    future_log: &Arc<Mutex<Log>>,
+    (future_path, target_partition_path): (&std::path::Path, &std::path::Path),
+) -> Result<SwapOutcome, BrokerError> {
+    if cut {
+        return Ok(SwapOutcome::NotCaughtUp);
+    }
+    lock_dedup(dedup).invalidate();
+    swap_future_log(
+        log,
+        log_dir,
+        target_log_dir,
+        future_log,
+        future_path,
+        target_partition_path,
+    )
+}
 
 /// KIP-113 intra-broker log-dir swap.
 ///

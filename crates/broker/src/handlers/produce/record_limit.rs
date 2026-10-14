@@ -119,6 +119,7 @@ mod tests {
             max_timestamp: 0,
             keyless_records: Vec::new(),
             invalid_timestamp_records: Vec::new(),
+            dedup: None,
         }
     }
 

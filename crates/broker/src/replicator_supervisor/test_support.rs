@@ -11,6 +11,7 @@ use {
     crate::{
         api_catalog::UnstableApiVersions,
         config::ReplicationRuntimeConfig,
+        dedup::DedupRuntime,
         diskless::hot_tail::HotTailCache,
         log_dir_id::LogDirIds,
         log_dir_status::LogDirRegistry,
@@ -373,6 +374,7 @@ pub(super) fn supervisor_fixture(image: MetadataImage) -> SupervisorFixture {
         partition_writer_queue_depth: 64,
         diskless_wal_local_replica_count: 3,
         metrics: BrokerMetrics::default(),
+        dedup: Arc::new(DedupRuntime::for_tests()),
         log_dir_ids: LogDirIds::resolve(&[dir.path().to_path_buf()]),
         hot_tail: Arc::new(HotTailCache::default()),
         wal_shards: Arc::new(WalShardRegistry::new(krabka_raft::NodeId(2))),

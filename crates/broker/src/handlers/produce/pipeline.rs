@@ -25,6 +25,7 @@ use {
     crate::{
         api_catalog::UnstableApiVersions,
         codes,
+        dedup::DedupConfig,
         error::BrokerError,
         freeze::resolve::{FreezeMutationResolution, FreezeVerdict},
         log_dir_status::LogDirRegistry,
@@ -93,6 +94,9 @@ pub(super) struct PartitionInput<'a> {
     /// The request fields of the KIP-890 transaction check.
     pub(super) transaction: TransactionRequest<'a>,
     pub(super) acks: i16,
+    /// The topic's KFC-10 dedup config, resolved once per topic. `None` is
+    /// `dedup.window.ms=-1`, and reads no record identity.
+    pub(super) dedup: Option<&'a DedupConfig>,
 }
 
 #[derive(Clone, Copy)]
@@ -170,6 +174,9 @@ pub(super) struct AdmittedBatch {
     /// The pre-append row, with the `UNKNOWN_LOG_APPEND_INFO` sentinel.
     out: PartitionProduceResponse,
     verification: Verification,
+    /// The topic's KFC-10 dedup config, which travels with the batch's
+    /// identities to the writer.
+    dedup: Option<DedupConfig>,
 }
 
 impl AdmittedBatch {
@@ -370,6 +377,7 @@ pub(super) async fn admit_partition(
         internal_topic_denied,
         transaction,
         acks,
+        dedup,
     } = input;
     // `shared_topic` is the owned handle the metric labels clone;
     // `topic_name` stays the borrowed view every gate and image lookup below
@@ -495,6 +503,7 @@ pub(super) async fn admit_partition(
             topic_name: &shared_topic,
             metrics,
             policy: record_decompression_policy,
+            dedup: dedup.map(|config| &config.settings),
         },
         transaction.version,
     ) {
@@ -613,7 +622,7 @@ pub(super) async fn admit_partition(
     }
 
     // ── compacted topic: Kafka's `LogValidator.validateKey` ──────────
-    if let Some(refusal) = record_validation_refusal(&out, &prepared, &part, topic_name) {
+    if let Some(refusal) = record_validation_refusal(&out, &prepared, &part, topic_name, dedup) {
         return Ok(Admission::Done(refusal));
     }
 
@@ -656,6 +665,7 @@ pub(super) async fn admit_partition(
         version: transaction.version,
         out,
         verification,
+        dedup: dedup.cloned(),
     })))
 }
 
@@ -693,6 +703,7 @@ pub(super) async fn complete_partition(
         version,
         mut out,
         verification,
+        dedup,
     } = batch;
     let PartitionServices {
         producer_state,
@@ -819,6 +830,7 @@ pub(super) async fn complete_partition(
             leader_epoch,
             phases,
             producer_check,
+            dedup: dedup.as_ref(),
         },
         &shared_topic,
     )
@@ -865,11 +877,35 @@ fn record_validation_refusal(
     prepared: &PreparedBatch,
     part: &Partition,
     topic_name: &str,
+    dedup: Option<&DedupConfig>,
 ) -> Option<PartitionProduceResponse> {
-    if prepared.keyless_records.is_empty() && prepared.invalid_timestamp_records.is_empty() {
+    let missing_header = prepared
+        .dedup
+        .as_ref()
+        .map_or(&[][..], |identities| &identities.missing_header[..]);
+    if prepared.keyless_records.is_empty()
+        && prepared.invalid_timestamp_records.is_empty()
+        && missing_header.is_empty()
+    {
         return None;
     }
     let partition_label = format!("{topic_name}-{}", out.index);
+    let header_name = dedup
+        .and_then(|config| config.settings.key_header.as_deref())
+        .unwrap_or_default();
+    // KFC-10: with `dedup.key.header` set, a record without a value for that
+    // header has no identity. The batch is refused rather than appended
+    // without deduplication, so a producer that forgot the header learns it.
+    let missing_header = missing_header
+        .iter()
+        .map(|&batch_index| BatchIndexAndErrorMessage {
+            batch_index,
+            batch_index_error_message: Some(format!(
+                "Record has no value for the header '{header_name}' that dedup.key.header names \
+                 in topic partition {partition_label}"
+            )),
+            ..Default::default()
+        });
     let mut out = out.clone();
     let keyless = prepared
         .keyless_records
@@ -884,8 +920,12 @@ fn record_validation_refusal(
         });
     let mut record_errors: Vec<BatchIndexAndErrorMessage> = keyless
         .chain(prepared.invalid_timestamp_records.iter().cloned())
+        .chain(missing_header)
         .collect();
     record_errors.sort_by_key(|error| error.batch_index);
+    // A record that both a Kafka check and the dedup header check refuse is
+    // reported once, with the Kafka check's message: the sort is stable.
+    record_errors.dedup_by_key(|error| error.batch_index);
     if prepared.invalid_timestamp_records.is_empty() {
         out.error_code = codes::INVALID_RECORD;
         out.error_message = Some(record_errors_message(&record_errors));

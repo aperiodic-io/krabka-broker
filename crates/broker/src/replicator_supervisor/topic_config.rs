@@ -5,13 +5,14 @@ use {
     super::TopicPartition,
     crate::{
         api_catalog::UnstableApiVersions,
-        config_keys::{dynamic_log_base, log_max_decompressed_record},
+        config_keys::{dedup_topic_config, dynamic_log_base, log_max_decompressed_record},
+        dedup::{DedupConfig, DedupRuntime},
         partition_registry::PartitionRegistry,
     },
     krabka_ids::PartitionIndex,
     krabka_log::LogConfig,
     krabka_metadata::MetadataImage,
-    std::collections::HashSet,
+    std::{collections::HashSet, sync::Arc},
     tracing::warn,
 };
 
@@ -33,6 +34,12 @@ use {
 /// the cluster default, and only when `unstable` says the broker serves trunk's
 /// topic keys: under Kafka 4.3.1 a stored value of it is an unknown key that
 /// nothing reads, so the log runs with no limit.
+///
+/// The topic's KFC-10 dedup config goes to the same partitions, so a follower
+/// indexes what it replicates with the rule its leader classifies with. A
+/// diskless partition gets none: `dedup.window.ms` is refused on a diskless
+/// topic, and its offsets come from a shared sequencer rather than from its
+/// writer.
 pub(crate) async fn push_topic_configs(
     desired: &HashSet<TopicPartition>,
     partitions: &PartitionRegistry,
@@ -40,6 +47,7 @@ pub(crate) async fn push_topic_configs(
     base: &LogConfig,
     node: krabka_metadata::NodeId,
     unstable: UnstableApiVersions,
+    dedup: &Arc<DedupRuntime>,
 ) {
     let base = &dynamic_log_base(image, node, base);
     let empty: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
@@ -61,6 +69,17 @@ pub(crate) async fn push_topic_configs(
             warn!(
                 topic = %topic, partition = partition, error = %e,
                 "supervisor: apply_log_config_overrides failed"
+            );
+        }
+        let config = if part.diskless {
+            None
+        } else {
+            DedupConfig::resolve(dedup_topic_config(overrides), dedup)
+        };
+        if let Err(e) = part.apply_dedup_config(config).await {
+            warn!(
+                topic = %topic, partition = partition, error = %e,
+                "supervisor: apply_dedup_config failed"
             );
         }
     }
@@ -122,7 +141,16 @@ mod tests {
         } = setup;
         let (_dir, partitions) = materialized_partition_with_config(base);
         let desired = HashSet::from([("t".to_owned(), 0)]);
-        push_topic_configs(&desired, &partitions, image, base, NodeId(1), unstable).await;
+        push_topic_configs(
+            &desired,
+            &partitions,
+            image,
+            base,
+            NodeId(1),
+            unstable,
+            &Arc::new(DedupRuntime::for_tests()),
+        )
+        .await;
         let part = partitions.get("t", PartitionIndex(0)).expect("partition");
         await_until(what, || {
             ready(&part.log.lock().expect("log lock").config_snapshot())

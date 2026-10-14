@@ -189,6 +189,17 @@ macro_rules! tuning_fields {
             pub max_produce_group: usize,
             /// Capacity of each partition-writer request queue.
             pub partition_writer_queue_depth: usize,
+            /// KFC-10: maximum distinct dedup identities that the index of one
+            /// partition replica holds (default 1000000, within
+            /// 1..=10000000). At the limit the index trims its oldest
+            /// identities. If it can free none, it admits new identities
+            /// without indexing them.
+            pub dedup_max_entries_per_partition: usize,
+            /// KFC-10: maximum dedup identities that all partition replicas on
+            /// this broker hold together (default 16000000, about 1 GiB at
+            /// about 64 bytes each). A partition that inserts while the broker
+            /// is near the limit trims its own index.
+            pub dedup_max_entries: usize,
             /// Default minimum in-sync replica count.
             pub default_min_insync_replicas: i32,
             /// `log.message.timestamp.before.max.ms` broker default: how far

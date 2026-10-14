@@ -57,6 +57,7 @@ use {
         broker::registered_listener_endpoint,
         config::ReplicationRuntimeConfig,
         controller_endpoint::ControllerDialer,
+        dedup::DedupRuntime,
         diskless::hot_tail::HotTailCache,
         log_dir_id::LogDirIds,
         log_dir_status::LogDirRegistry,
@@ -178,6 +179,10 @@ pub(crate) struct ReplicatorSupervisor {
     /// clones this so it can increment `replication_bytes_in` after a
     /// successful follower-side append.
     metrics: BrokerMetrics,
+    /// KFC-10: the broker resources every partition's dedup index shares. The
+    /// reconcile loop sends each local partition its topic's dedup config
+    /// with it.
+    dedup: Arc<DedupRuntime>,
     /// KIP-858: stable UUID per configured log.dir. The reconcile loop uses
     /// these to build `AssignReplicasToDirs` reports.
     log_dir_ids: LogDirIds,
@@ -231,6 +236,7 @@ pub(crate) struct ReplicatorSupervisorConfig {
     pub partition_writer_queue_depth: usize,
     pub diskless_wal_local_replica_count: usize,
     pub metrics: BrokerMetrics,
+    pub dedup: Arc<DedupRuntime>,
     pub log_dir_ids: LogDirIds,
     pub hot_tail: Arc<HotTailCache>,
     pub wal_shards: Arc<WalShardRegistry>,
@@ -272,6 +278,7 @@ impl ReplicatorSupervisor {
             partition_writer_queue_depth,
             diskless_wal_local_replica_count,
             metrics,
+            dedup,
             log_dir_ids,
             hot_tail,
             wal_shards,
@@ -320,6 +327,7 @@ impl ReplicatorSupervisor {
             partition_writer_queue_depth,
             diskless_wal_local_replica_count,
             metrics,
+            dedup,
             log_dir_ids,
             hot_tail,
             wal_shards,

@@ -1814,6 +1814,24 @@
             "null"
           ]
         },
+        "dedup_max_entries": {
+          "description": "Maximum number of KFC-10 dedup index entries that all partition\nreplicas on this broker hold together. An entry takes about 64 B, so\nthe default of 16000000 takes about 1 GiB of memory. The partitions\nshare this budget, and a partition that inserts while the broker is\nnear the limit trims its own index. The broker reads it at startup. The\nvalue must be at least 1.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "dedup_max_entries_per_partition": {
+          "description": "Maximum number of KFC-10 dedup index entries, one for each distinct\nidentity, that one partition replica holds. At the limit the index\ntrims its oldest entries. If it can free none, it admits new identities\nwithout indexing them. The broker reads it at startup. The default is\n1000000, and the value must be within 1..=10000000.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "default_min_insync_replicas": {
           "description": "Broker default for a topic's `min.insync.replicas`, Kafka's\n`min.insync.replicas`. A topic override wins over it.",
           "format": "int32",

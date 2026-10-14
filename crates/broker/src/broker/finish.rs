@@ -126,6 +126,7 @@ pub(super) async fn finish_broker_startup(
         inter_broker_client: transport.inter_broker_client,
         unclean_recovery: runtime.liveness_services.unclean_recovery,
         metrics: runtime.metrics,
+        dedup: runtime.dedup,
         metrics_bound_addr: runtime.metrics_bound_addr,
         throttle_state: runtime.throttle_state,
         quota_buckets: runtime.quota_buckets,

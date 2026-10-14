@@ -150,6 +150,13 @@ impl BrokerMetrics {
             &self.replication_bytes_out,
             &self.partition_cpu_micros,
             &self.log_compactions_total,
+            &self.dedup_records_dropped,
+            &self.dedup_records_unindexed,
+            &self.dedup_records_expired_on_arrival,
+            &self.dedup_records_skew_clamped,
+            &self.dedup_capacity_evicted_entries,
+            &self.dedup_batches_rebuilt,
+            &self.dedup_index_rebuilds,
         ] {
             family.remove(label);
         }
@@ -157,6 +164,8 @@ impl BrokerMetrics {
             &self.partition_disk_bytes,
             &self.delivery_watermark,
             &self.delivery_pending_records,
+            &self.dedup_index_entries,
+            &self.dedup_index_heap_bytes,
         ] {
             family.remove(label);
         }
@@ -359,7 +368,7 @@ mod tests {
         super::*,
         crate::{
             metadata_source::MetadataSource as _,
-            metrics::{ConsumerGroupLabel, ReplicaLagLabel},
+            metrics::{ConsumerGroupLabel, DedupCounterDelta, ReplicaLagLabel},
             test_support::FakeMetadataSource,
         },
         assert2::{assert, check},
@@ -419,9 +428,23 @@ mod tests {
     }
 
     /// Touch every family that carries a [`PartitionLabel`], the way the
-    /// produce, fetch, replication, compaction, disk-scan and delivery paths
-    /// each do.
+    /// produce, fetch, replication, compaction, disk-scan, delivery and dedup
+    /// paths each do.
     fn create_partition_series(metrics: &BrokerMetrics, topic: &Arc<str>, partition: i32) {
+        metrics.record_dedup_partition(
+            topic,
+            partition,
+            DedupCounterDelta {
+                records_dropped: 1,
+                records_unindexed: 1,
+                records_expired_on_arrival: 1,
+                records_skew_clamped: 1,
+                capacity_evicted_entries: 1,
+                batches_rebuilt: 1,
+                index_rebuilds: 1,
+            },
+            16,
+        );
         metrics.record_partition_produce(topic, partition, 512);
         metrics.record_partition_fetch(topic, partition, 256);
         metrics.record_replication_in(topic, partition, 128);

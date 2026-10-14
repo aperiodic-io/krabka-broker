@@ -26,6 +26,7 @@ use {
 
 mod auth;
 mod break_glass;
+mod dedup;
 mod delivery;
 mod diskless;
 mod eviction;
@@ -48,6 +49,7 @@ pub(crate) mod test_support;
 mod traffic;
 
 pub use self::{
+    dedup::DedupCounterDelta,
     eviction::MetricSeriesIndex,
     labels::{
         ApiKeyLabel, AuthorizationDeniedLabel, BarrierGroupLabel, BreakGlassAction,
@@ -1153,6 +1155,110 @@ pub struct BrokerMetrics {
         refuse. Any non-zero rate needs an operator to read the audit \
         log for the partition it names.")]
     pub break_glass_bypassed: Family<BreakGlassActionLabel, Counter>,
+    /// KFC-10 cumulative count of records the produce path dropped as
+    /// duplicates of a record already in the partition's dedup window.
+    ///
+    /// A producer that retries without idempotence, or an upstream that
+    /// replays, shows up here. A dropped record never reaches the log, so
+    /// this series is the only trace it leaves.
+    #[metric(
+        help = "KFC-10 cumulative count of records dropped at produce time as \
+        duplicates of a record already in the partition's dedup window. \
+        A dropped record never reaches the log; a rising rate is a \
+        producer or upstream that retries or replays."
+    )]
+    pub dedup_records_dropped: Family<PartitionLabel, Counter>,
+    /// KFC-10 cumulative count of records admitted without being indexed,
+    /// because the partition's index or the broker-wide index budget was
+    /// full.
+    ///
+    /// A later duplicate of such a record is not detected, so any non-zero
+    /// rate means the window is leaking. The fix is a larger
+    /// `dedup_max_entries_per_partition` or `dedup_max_entries`.
+    #[metric(help = "KFC-10 cumulative count of records admitted without being \
+        indexed because the partition index or the broker-wide index \
+        budget was full. Duplicates of these records are not detected; \
+        a non-zero rate calls for a larger dedup_max_entries_per_partition \
+        or dedup_max_entries.")]
+    pub dedup_records_unindexed: Family<PartitionLabel, Counter>,
+    /// KFC-10 cumulative count of records whose timestamp was already more
+    /// than `dedup.window.ms` behind the broker clock when they arrived, so
+    /// they were appended without being indexed. A backfill of old data
+    /// shows up here: its duplicates are not detected.
+    #[metric(
+        help = "KFC-10 cumulative count of records whose timestamp was already \
+        outside the dedup window by the broker clock on arrival. They are \
+        appended without being indexed, so their duplicates are not detected."
+    )]
+    pub dedup_records_expired_on_arrival: Family<PartitionLabel, Counter>,
+    /// KFC-10 cumulative count of records whose timestamp was ahead of the
+    /// broker clock and was clamped before it reached the index.
+    ///
+    /// The clamp keeps a future-dated record from pinning an identity in
+    /// the window long after it should have expired. A non-zero rate is a
+    /// producer whose clock runs ahead of the broker's.
+    #[metric(help = "KFC-10 cumulative count of records whose timestamp was ahead \
+        of the broker clock and was clamped before reaching the dedup \
+        index. A non-zero rate means producer clock skew.")]
+    pub dedup_records_skew_clamped: Family<PartitionLabel, Counter>,
+    /// KFC-10 cumulative count of identities still inside their window that
+    /// the index dropped to make room at an entry limit.
+    ///
+    /// A duplicate of an evicted identity is admitted, so a non-zero rate
+    /// means the effective window is narrower than the configured one.
+    #[metric(help = "KFC-10 cumulative count of still-live identities the dedup \
+        index dropped to make room at its entry limits. A non-zero rate \
+        means the effective dedup window is narrower than configured.")]
+    pub dedup_capacity_evicted_entries: Family<PartitionLabel, Counter>,
+    /// KFC-10 cumulative count of produce batches the broker re-encoded and
+    /// recompressed because some, but not all, of their records were
+    /// duplicates.
+    ///
+    /// A batch with no duplicate, or only duplicates, is appended or dropped
+    /// as it arrived. A rebuild is the expensive case, so this rate is what
+    /// drives dedup's cost on the produce path.
+    #[metric(help = "KFC-10 cumulative count of produce batches rebuilt \
+        (re-encoded and recompressed) because some but not all of their \
+        records were duplicates. This rate drives dedup's produce-path \
+        cost.")]
+    pub dedup_batches_rebuilt: Family<PartitionLabel, Counter>,
+    /// KFC-10 cumulative count of times the partition's dedup index was
+    /// rebuilt from the log: after a restart, a truncation, or a dedup
+    /// config change.
+    ///
+    /// A rebuild reads the window back from the log, so a rate that keeps
+    /// rising outside restarts points at repeated truncation or config churn.
+    #[metric(help = "KFC-10 cumulative count of times the partition's dedup index \
+        was rebuilt from the log, after a restart, a truncation, or a \
+        dedup config change. A steady rate outside restarts points at \
+        repeated truncation or config churn.")]
+    pub dedup_index_rebuilds: Family<PartitionLabel, Counter>,
+    /// KFC-10 identities this partition replica's dedup index holds (gauge).
+    #[metric(help = "KFC-10 identities held in this partition replica's dedup \
+        index (gauge).")]
+    pub dedup_index_entries: Family<PartitionLabel, Gauge>,
+    /// KFC-10 heap that this partition replica's dedup index holds, an
+    /// estimate from its table capacities (gauge). It bounds the index's
+    /// memory the way `dedup_index_entries` bounds its identities: growth
+    /// doubles one of 64 segments at a time, and a segment shrinks again
+    /// once it is a quarter full.
+    #[metric(help = "KFC-10 estimated heap bytes held by this partition replica's \
+        dedup index (gauge).")]
+    pub dedup_index_heap_bytes: Family<PartitionLabel, Gauge>,
+    /// KFC-10 identities held across every dedup index on this broker
+    /// (gauge). Read against `dedup_broker_index_max_entries` to see how
+    /// close the broker is to the budget that, once reached, admits records
+    /// unindexed.
+    #[metric(help = "KFC-10 identities held across every dedup index on this \
+        broker (gauge). Read against dedup_broker_index_max_entries: at \
+        the limit, records are admitted unindexed.")]
+    pub dedup_broker_index_entries: Gauge,
+    /// KFC-10 the broker-wide limit on dedup index identities, the
+    /// configured `dedup_max_entries` (gauge). Exported so a rule compares
+    /// usage against the limit the broker runs with rather than a copy.
+    #[metric(help = "KFC-10 the broker-wide limit on dedup index identities, \
+        dedup_max_entries (gauge).")]
+    pub dedup_broker_index_max_entries: Gauge,
     /// Quorum-durable offset for each diskless WAL shard led by this broker.
     #[metric(help = "Quorum-durable offset for each diskless WAL shard led by this broker.")]
     pub diskless_wal_durable_watermark: Family<WalShardLabel, Gauge>,

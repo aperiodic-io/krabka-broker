@@ -311,6 +311,24 @@ fn additional_scalar_cases_a() -> Vec<RuntimeInvalidator> {
                 c.partition_writer_queue_depth = 0;
             },
         },
+        RuntimeInvalidator {
+            expected: "dedup_max_entries_per_partition must be within 1..=10000000",
+            invalidate: |c| {
+                c.dedup_max_entries_per_partition = 0;
+            },
+        },
+        RuntimeInvalidator {
+            expected: "dedup_max_entries_per_partition must be within 1..=10000000",
+            invalidate: |c| {
+                c.dedup_max_entries_per_partition = 10_000_001;
+            },
+        },
+        RuntimeInvalidator {
+            expected: "dedup_max_entries must be positive",
+            invalidate: |c| {
+                c.dedup_max_entries = 0;
+            },
+        },
     ]
 }
 
@@ -585,4 +603,21 @@ fn a_negative_classic_group_initial_rebalance_delay_is_rejected() {
         &config,
         "classic_group_initial_rebalance_delay must be finite and nonnegative",
     );
+}
+
+/// The KFC-10 dedup bounds accept both ends of the per-partition range and a
+/// broker-wide budget of one.
+#[test]
+fn dedup_bounds_accept_the_ends_of_their_ranges() {
+    for (per_partition, total) in [(1, 1), (10_000_000, 1), (1_000_000, 16_000_000)] {
+        let config = BrokerConfig {
+            dedup_max_entries_per_partition: per_partition,
+            dedup_max_entries: total,
+            ..base()
+        };
+        assert!(
+            config.validate().is_ok(),
+            "per_partition={per_partition} total={total}"
+        );
+    }
 }

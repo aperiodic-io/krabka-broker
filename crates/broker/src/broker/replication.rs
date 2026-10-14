@@ -7,6 +7,7 @@ use {
     crate::{
         broker::DisklessRuntime,
         config::BrokerConfig,
+        dedup::DedupRuntime,
         log_dir_id::LogDirIds,
         log_dir_status::LogDirRegistry,
         metadata_source::MetadataSource,
@@ -47,6 +48,7 @@ pub(super) struct ReplicatorRuntime<'a> {
     pub(super) shutdown: &'a CancellationToken,
     pub(super) throttle_state: &'a Arc<ThrottleState>,
     pub(super) metrics: &'a BrokerMetrics,
+    pub(super) dedup: &'a Arc<DedupRuntime>,
 }
 
 pub(super) fn spawn_replicator_supervisor(
@@ -89,6 +91,7 @@ pub(super) fn spawn_replicator_supervisor(
         partition_writer_queue_depth: config.partition_writer_queue_depth,
         diskless_wal_local_replica_count: config.diskless_wal_local_replica_count,
         metrics: runtime.metrics.clone(),
+        dedup: Arc::clone(runtime.dedup),
         log_dir_ids: storage.log_dir_ids.clone(),
         hot_tail: Arc::clone(&storage.diskless.hot_tail),
         wal_shards: Arc::clone(&storage.diskless.wal_shards),

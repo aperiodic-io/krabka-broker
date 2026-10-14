@@ -160,6 +160,7 @@ pub(super) fn pipeline_input(
             verification_enabled: true,
         },
         acks: 1,
+        dedup: None,
     }
 }
 

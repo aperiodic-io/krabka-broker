@@ -10,10 +10,11 @@
 use crate::config::BrokerConfig;
 use {
     crate::{
+        dedup::PartitionDedup,
         delivery::DeliveryHandles,
         error::BrokerError,
         log_dir_status::LogDirRegistry,
-        partition::{SwapOutcome, WriterMessage},
+        partition::WriterMessage,
         producer_state::ProducerState,
         replica_state::ReplicaState,
         wal::{OffsetSequencer, SharedWal},
@@ -52,14 +53,17 @@ mod tests;
 // the re-export is test-gated: in a normal build it would be dead.
 #[cfg(test)]
 pub(crate) use self::append::run_produce_append_batch;
-pub(crate) use self::storage::{flag_storage_failure, storage_failure_error};
+pub(crate) use self::storage::{flag_storage_failure, lock_log, storage_failure_error};
 use self::{
     compaction::handle_compact,
-    mutations::{ReplicationState, ResetMutation, handle_log_reset, handle_replicate, handle_trim},
+    mutations::{
+        ReplicationState, ResetMutation, handle_log_reset, handle_replicate, handle_trim,
+        lock_dedup,
+    },
     produce::{DisklessParts, ProduceGroup, ProduceSignals, ProduceStorage, handle_produce},
     retention::handle_retention,
-    storage::{StorageStatus, lock_log},
-    swap::swap_future_log,
+    storage::StorageStatus,
+    swap::handle_swap,
 };
 
 /// The topic name and partition index a writer message belongs to.
@@ -124,6 +128,8 @@ pub async fn run_with_sequencer(
         topic: &topic,
         partition,
     };
+    // KFC-10: only this task changes the index, always with the log.
+    let dedup = PartitionDedup::shared(&topic, partition.0);
     // `pending` holds a non-Produce message that was pulled off the channel
     // while group-draining Produce jobs (see the Produce arm). It is handled on
     // the next iteration so control messages are never reordered ahead of the
@@ -182,6 +188,7 @@ pub async fn run_with_sequencer(
                         log: &log,
                         status: storage_status,
                         producer_state: &producer_state,
+                        dedup: &dedup,
                     },
                     ProduceSignals {
                         append_notify: &append_notify,
@@ -215,6 +222,7 @@ pub async fn run_with_sequencer(
                     ReplicationState {
                         producer_state: &producer_state,
                         replica_state: &replica_state,
+                        dedup: &dedup,
                     },
                     batch,
                     ack,
@@ -228,9 +236,8 @@ pub async fn run_with_sequencer(
                 ack,
             } => {
                 mutations::handle_replicate_verbatim(
-                    &log,
-                    &log_dir,
-                    &log_dir_status,
+                    (&log, &log_dir, &log_dir_status),
+                    &dedup,
                     batch,
                     base_offset,
                     ack,
@@ -240,7 +247,7 @@ pub async fn run_with_sequencer(
             }
             WriterMessage::Truncate { offset, ack } => {
                 if handle_log_reset(
-                    &log,
+                    (&log, &dedup),
                     storage_status,
                     &replica_state,
                     wal.as_ref(),
@@ -254,7 +261,7 @@ pub async fn run_with_sequencer(
             }
             WriterMessage::ResetTo { new_base, ack } => {
                 if handle_log_reset(
-                    &log,
+                    (&log, &dedup),
                     storage_status,
                     &replica_state,
                     wal.as_ref(),
@@ -274,6 +281,12 @@ pub async fn run_with_sequencer(
             }
             WriterMessage::SetLogConfig { config, ack } => {
                 lock_log(&log).set_config(config);
+                let _ = ack.send(());
+            }
+            WriterMessage::SetDedupConfig { config, ack } => {
+                if let Some(runtime) = lock_dedup(&dedup).apply_pushed(config) {
+                    runtime.track(&dedup);
+                }
                 let _ = ack.send(());
             }
             WriterMessage::Retain { ack } => {
@@ -298,21 +311,13 @@ pub async fn run_with_sequencer(
                 target_partition_path,
                 ack,
             } => {
-                // Equal log ends do not make the two logs equal once the
-                // current log was cut: it may have grown back with records
-                // the future log lacks.
-                let result = if unreported_cut.is_some() {
-                    Ok(SwapOutcome::NotCaughtUp)
-                } else {
-                    swap_future_log(
-                        &log,
-                        &log_dir,
-                        target_log_dir,
-                        &future_log,
-                        &future_path,
-                        &target_partition_path,
-                    )
-                };
+                let result = handle_swap(
+                    (&log, &log_dir, &dedup),
+                    unreported_cut.is_some(),
+                    target_log_dir,
+                    &future_log,
+                    (&future_path, &target_partition_path),
+                );
                 let _ = ack.send(result);
                 // No `append_notify` — swap doesn't deliver new data,
                 // and consumers re-read from the swapped `log` against

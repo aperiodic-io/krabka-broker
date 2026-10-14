@@ -2,7 +2,9 @@
 
 use {
     super::*,
-    crate::{handlers::produce::test_support::encode_batch, metrics::BrokerMetrics},
+    crate::{
+        dedup::DedupSettings, handlers::produce::test_support::encode_batch, metrics::BrokerMetrics,
+    },
     assert2::assert,
     krabka_compression::CompressionType,
     krabka_protocol::records::Record,
@@ -40,6 +42,7 @@ fn record_decompression_policy_limits_owned_and_verbatim_produce() {
                 topic_name: &topic(),
                 metrics: &metrics,
                 policy: pol,
+                dedup: None,
             },
             13,
         )
@@ -90,3 +93,36 @@ mod timestamp_window;
 // Kafka's `LogValidator.validateKey` runs before the timestamp check of the
 // same record, on both append shapes.
 mod keyless_records;
+
+/// A dedup topic reads every record's identity during validation, and the
+/// collector reserves room before any record is parsed. The record count it
+/// would size that reservation from is the producer's claim: a 61-byte batch
+/// with a valid CRC can declare `i32::MAX` records. The batch is refused for
+/// the records it lacks, and nothing is reserved for the ones it claimed.
+#[test]
+fn a_dedup_topic_reserves_nothing_for_a_record_count_the_batch_does_not_hold() {
+    let mut wire = encode_batch(&RecordBatch::default()).to_vec();
+    wire[57..61].copy_from_slice(&i32::MAX.to_be_bytes());
+    let crc = crc32c::crc32c(&wire[21..]);
+    wire[17..21].copy_from_slice(&crc.to_be_bytes());
+    let settings = DedupSettings {
+        window_ms: 60_000,
+        key_header: None,
+    };
+
+    let refused = prepare_batch(
+        PartitionPayload::Slice(Bytes::from(wire)),
+        None,
+        TimestampPolicy::default(),
+        false,
+        DecodeEnv {
+            topic_name: &topic(),
+            metrics: &BrokerMetrics::new(),
+            policy: RecordDecompressionPolicy::default(),
+            dedup: Some(&settings),
+        },
+        13,
+    );
+
+    assert!(refused.unwrap_err() == crate::codes::INVALID_RECORD);
+}

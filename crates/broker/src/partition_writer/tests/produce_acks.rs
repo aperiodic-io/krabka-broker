@@ -178,6 +178,7 @@ async fn writer_appends_verbatim_byte_exact() {
         }),
         ack,
         producer_check: None,
+        dedup: None,
     }))
     .await
     .expect("send verbatim job");

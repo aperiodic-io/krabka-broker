@@ -17,6 +17,9 @@ use {
 #[cfg(test)]
 mod tests;
 
+/// The largest `dedup_max_entries_per_partition` the broker accepts.
+const DEDUP_MAX_ENTRIES_PER_PARTITION_CEILING: usize = 10_000_000;
+
 impl BrokerConfig {
     /// The broker-wide time knobs. They sit in their own pass, apart from the
     /// replication timings and the size and count limits, because one function
@@ -280,6 +283,26 @@ impl BrokerConfig {
         )
     }
 
+    /// The two KFC-10 dedup index bounds. Both must be positive. The
+    /// per-partition bound also has a ceiling, because each partition replica
+    /// sizes its index from it.
+    fn validate_dedup_scalars(&self) -> Result<(), BrokerError> {
+        if !(1..=DEDUP_MAX_ENTRIES_PER_PARTITION_CEILING)
+            .contains(&self.dedup_max_entries_per_partition)
+        {
+            return Err(BrokerError::InvalidRuntimeConfig(format!(
+                "dedup_max_entries_per_partition must be within \
+                 1..={DEDUP_MAX_ENTRIES_PER_PARTITION_CEILING}"
+            )));
+        }
+        if self.dedup_max_entries == 0 {
+            return Err(BrokerError::InvalidRuntimeConfig(
+                "dedup_max_entries must be positive".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_additional_runtime_scalars(&self) -> Result<(), BrokerError> {
         // The timeout is carried verbatim in `AddRaftVoter.timeout_ms`, an
         // `int32` millisecond wire field, so it has to survive that narrowing.
@@ -419,6 +442,7 @@ impl BrokerConfig {
                 "audit_tail_window_offsets must be positive".into(),
             ));
         }
+        self.validate_dedup_scalars()?;
         self.validate_internal_topic_scalars()
     }
 

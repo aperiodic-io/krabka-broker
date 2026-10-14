@@ -40,6 +40,7 @@ use {
             REMOTE_LIST_OFFSETS_REQUEST_TIMEOUT_MS, STRETCH_PREFERRED_LEADER_SITE,
             TRANSACTION_REMOVE_EXPIRED_CLEANUP_INTERVAL_MS, TRANSACTIONAL_ID_EXPIRATION_MS,
         },
+        dedup::{DEDUP_KEY_HEADER, DEDUP_WINDOW_MS},
         delivery::{
             DELIVERY_MAX_DELAY_MS, DELIVERY_MAX_DELAY_UNLIMITED, DELIVERY_MODE,
             DELIVERY_MODE_IMMEDIATE, DELIVERY_MODE_SCHEDULED, DELIVERY_SCHEDULE_MONOTONIC,
@@ -572,7 +573,7 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
             ConfigScope::Topic,
             ConfigType::Boolean,
             Some("false"),
-            "Route this topic through the diskless WAL data path instead of the local log. Fixed when the topic is created, and exclusive with both remote.storage.enable and delivery.mode=scheduled.",
+            "Route this topic through the diskless WAL data path instead of the local log. Fixed when the topic is created, and exclusive with remote.storage.enable, delivery.mode=scheduled, and a dedup.window.ms other than -1.",
             ValueCheck::Bool,
         )
     },
@@ -641,6 +642,29 @@ pub(crate) const CONFIG_KEYS: &[ConfigKey] = &[
             Some(SCHEMA_VALIDATION_MODE_ID),
             "`id` checks the Confluent header alone; `full` also decodes the record body against the schema the header names.",
             ValueCheck::OneOf(SCHEMA_VALIDATION_MODE_VALUES),
+        )
+    },
+    ConfigKey {
+        type_note: Some("ms, -1 or >=1"),
+        kip: Some("KFC-10"),
+        ..key(
+            DEDUP_WINDOW_MS,
+            ConfigScope::Topic,
+            ConfigType::Long,
+            Some("-1"),
+            "Produce-time deduplication window. The leader drops a record whose dedup identity it already admitted within this many milliseconds, and the first record wins. The identity is the record key; a record with a null key is never deduplicated. When dedup.key.header is set, the identity is the value of that header instead. The window compares record timestamps: CreateTime clamped to the broker clock, or the append time on a LogAppendTime topic. A dropped record leaves an offset gap, as on a compacted topic. Transactional produce bypasses the check. Deduplication is best-effort near the window edge and is bounded by the broker's dedup_max_entries_per_partition and dedup_max_entries limits. -1, the default, turns it off. Not supported with krabka.diskless=true.",
+            ValueCheck::Parsed,
+        )
+    },
+    ConfigKey {
+        kip: Some("KFC-10"),
+        ..key(
+            DEDUP_KEY_HEADER,
+            ConfigScope::Topic,
+            ConfigType::String,
+            None,
+            "Name of the record header whose value is the dedup identity under dedup.window.ms. Unset, the default, uses the record key. The first header with this name counts. A record without the header, or with a null header value, fails the produce request with INVALID_RECORD (87). The name is trimmed and must not be empty. It has no effect while dedup.window.ms is -1.",
+            ValueCheck::Parsed,
         )
     },
     ConfigKey {

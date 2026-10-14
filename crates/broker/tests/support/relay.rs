@@ -149,8 +149,15 @@ impl Relay {
         // A cancelled token stays cancelled, so healing means a new generation.
         // Connections killed by the previous one stay dead, which is right: a
         // healed network does not resurrect a reset TCP connection either.
-        let fresh = self.state.shutdown.child_token();
-        *self.state.link.lock().expect("relay link lock") = fresh;
+        //
+        // A link that is not cut keeps its generation. Replacing it would
+        // orphan the connections already selecting on it, and a later `cut`
+        // would then leave them forwarding: an isolated broker that still
+        // replicates.
+        let mut link = self.state.link.lock().expect("relay link lock");
+        if link.is_cancelled() {
+            *link = self.state.shutdown.child_token();
+        }
     }
 
     /// Stop the relay and await its tasks.

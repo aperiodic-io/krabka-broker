@@ -31,6 +31,7 @@ macro_rules! prepare_for_topic {
                 topic_name: &topic(),
                 metrics: $metrics,
                 policy: RecordDecompressionPolicy::default(),
+                dedup: None,
             },
             $version,
         )

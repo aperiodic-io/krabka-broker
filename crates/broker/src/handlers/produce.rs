@@ -41,7 +41,11 @@ use {
     crate::{
         broker::Broker,
         codes,
-        config_keys::{BrokerLogDefaults, resolve_max_message_bytes, resolve_schema_validation},
+        config_keys::{
+            BrokerLogDefaults, resolve_dedup_topic_config, resolve_max_message_bytes,
+            resolve_schema_validation,
+        },
+        dedup::DedupConfig,
         error::BrokerError,
         freeze::resolve::resolve_freeze_mutation,
         handlers::{ApiKeyCode, RequestContext},
@@ -433,6 +437,14 @@ pub(crate) async fn handle(
         // such a topic then skips the check without reading a record body.
         let schema = resolve_schema_validation(&image, &topic_name);
 
+        // KFC-10, resolved once per topic too: produce-time deduplication is a
+        // property of the topic. `None` is `dedup.window.ms=-1`, the default,
+        // and every partition of such a topic then reads no record identity.
+        let dedup = DedupConfig::resolve(
+            resolve_dedup_topic_config(&image, &topic_name),
+            &broker.dedup,
+        );
+
         // KFC-9, resolved here for the same reason once more: a write freeze
         // is a property of the topic. `None` is a topic that accepts writes, and
         // the image answers an empty registry in two emptiness tests, so every
@@ -484,6 +496,7 @@ pub(crate) async fn handle(
                     internal_topic_denied,
                     transaction,
                     acks: req.acks,
+                    dedup: dedup.as_ref(),
                 },
                 services,
             )

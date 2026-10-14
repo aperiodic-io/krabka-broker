@@ -1,10 +1,11 @@
 //! Krabka's `krabka.diskless` topic key: the per-topic opt-in to the diskless
-//! WAL data path, its value check, the two exclusivity rules it carries, and
-//! the immutability rule both alter paths enforce.
+//! WAL data path, its value check, the three exclusivity rules it carries,
+//! and the immutability rule both alter paths enforce.
 
 use {
     super::{
         REMOTE_STORAGE_ENABLE,
+        dedup::{DEDUP_WINDOW_DISABLED, DEDUP_WINDOW_MS, dedup_topic_config},
         delivery::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED},
     },
     std::collections::BTreeMap,
@@ -64,7 +65,7 @@ pub(crate) fn validate_diskless_unchanged(
     ))
 }
 
-/// The two exclusivity rules the diskless data path carries, checked over a
+/// The three exclusivity rules the diskless data path carries, checked over a
 /// topic's whole override map.
 ///
 /// The first is KIP-405 tiered storage. A diskless partition already keeps its
@@ -85,6 +86,11 @@ pub(crate) fn validate_diskless_unchanged(
 /// delivered before its own time. Until the cold path carries a delivery gate,
 /// the pair is refused rather than silently breaking the one guarantee
 /// scheduled delivery exists to give.
+///
+/// The third is KFC-10 produce-time deduplication. Only the local-log produce
+/// path runs the dedup check, so a diskless topic would accept the window and
+/// then ignore it. The rule reads the window as the produce path reads it, so
+/// it refuses exactly the windows that would turn deduplication on.
 pub(super) fn validate_diskless_combination(
     overrides: &BTreeMap<String, String>,
 ) -> Result<(), String> {
@@ -109,6 +115,13 @@ pub(super) fn validate_diskless_combination(
              delivery watermark, so a batch that is not yet due reaches an object-store run and is \
              trimmed locally, and the cold-read path serves that run back with no delivery gate, \
              which would deliver a scheduled record before its own time"
+        ));
+    }
+    if dedup_topic_config(overrides).is_some() {
+        return Err(format!(
+            "{DEDUP_WINDOW_MS} is not supported on diskless topics: {DISKLESS}=true cannot be \
+             combined with a {DEDUP_WINDOW_MS} other than {DEDUP_WINDOW_DISABLED}, because \
+             produce-time deduplication runs only on the local-log produce path"
         ));
     }
     Ok(())
@@ -194,6 +207,7 @@ mod tests {
     enum DisklessConflict {
         TieredStorage,
         ScheduledDelivery,
+        DedupWindow,
     }
 
     type DisklessValidCases = Vec<(&'static str, BTreeMap<String, String>)>;
@@ -201,6 +215,7 @@ mod tests {
     #[yare::parameterized(
         tiered_storage = { DisklessConflict::TieredStorage },
         scheduled_delivery = { DisklessConflict::ScheduledDelivery },
+        dedup_window = { DisklessConflict::DedupWindow },
     )]
     fn diskless_excludes_conflicting_topic_features(conflict: DisklessConflict) {
         let (key, conflicting_value, valid_cases): (&str, &str, DisklessValidCases) = match conflict
@@ -271,6 +286,34 @@ mod tests {
                         ConfigPair {
                             key: DELIVERY_MODE,
                             value: DELIVERY_MODE_SCHEDULED,
+                        },
+                    ]),
+                ),
+            ]),
+            DisklessConflict::DedupWindow => (DEDUP_WINDOW_MS, "60000", vec![
+                (
+                    "a diskless topic with the window off",
+                    map(&[
+                        ConfigPair {
+                            key: DISKLESS,
+                            value: "true",
+                        },
+                        ConfigPair {
+                            key: DEDUP_WINDOW_MS,
+                            value: "-1",
+                        },
+                    ]),
+                ),
+                (
+                    "a local-log topic with a window",
+                    map(&[
+                        ConfigPair {
+                            key: DISKLESS,
+                            value: "false",
+                        },
+                        ConfigPair {
+                            key: DEDUP_WINDOW_MS,
+                            value: "60000",
                         },
                     ]),
                 ),

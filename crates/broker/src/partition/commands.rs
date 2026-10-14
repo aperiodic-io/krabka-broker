@@ -6,6 +6,7 @@ use {
     crate::{
         blocking::run_blocking,
         config_keys::apply_to_log_config,
+        dedup::DedupConfig,
         error::BrokerError,
         partition::{Partition, ProduceData, ProduceJob, ProducerAppendCheck, WriterMessage},
         task_util::{AskError, ask},
@@ -114,6 +115,25 @@ impl Partition {
             ack,
         })
         .await?;
+        Ok(())
+    }
+
+    /// Send the partition's writer its topic's KFC-10 dedup config, or `None`
+    /// to turn dedup off. `ReplicatorSupervisor::reconcile` calls this every
+    /// time the metadata image changes, so the call must be cheap when the
+    /// config is unchanged, and it is: the writer compares the settings and
+    /// keeps its index.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BrokerError::Replication` if the writer is dead or the
+    /// ack is dropped.
+    pub(crate) async fn apply_dedup_config(
+        &self,
+        config: Option<DedupConfig>,
+    ) -> Result<(), BrokerError> {
+        self.ask_writer(|ack| WriterMessage::SetDedupConfig { config, ack })
+            .await?;
         Ok(())
     }
 
@@ -253,6 +273,7 @@ impl Partition {
                 data: ProduceData::Owned(batch),
                 ack,
                 producer_check,
+                dedup: None,
             })
         };
         ask(&self.writer_tx, job)
@@ -316,6 +337,7 @@ impl Partition {
                 },
                 ack,
                 producer_check: None,
+                dedup: None,
             })
         };
         Ok(self
@@ -349,6 +371,7 @@ impl Partition {
                         data: ProduceData::OwnedControl(batch),
                         ack,
                         producer_check: None,
+                        dedup: None,
                     })
                 },
                 BrokerError::Txn,

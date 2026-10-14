@@ -138,6 +138,9 @@ impl Default for BrokerConfig {
             producer_id_expiration_scan_interval: minutes(10),
             max_produce_group: 1_024,
             partition_writer_queue_depth: 64,
+            dedup_max_entries_per_partition: 1_000_000,
+            // About 64 bytes an identity, so about 1 GiB of index memory.
+            dedup_max_entries: 16_000_000,
             default_min_insync_replicas: 1,
             default_message_timestamp_before_max_ms: None,
             default_message_timestamp_after_max_ms: Some(3_600_000),

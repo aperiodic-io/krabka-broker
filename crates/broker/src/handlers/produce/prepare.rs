@@ -9,7 +9,12 @@ use {
         owned_decode::decode_owned_batch,
         topic_settings::{TimestampPolicy, TimestampWindow},
     },
-    crate::{codes, metrics::BrokerMetrics, time_util::now_ms},
+    crate::{
+        codes,
+        dedup::{CollectedIdentities, DedupSettings, IdentityCollector},
+        metrics::BrokerMetrics,
+        time_util::now_ms,
+    },
     bytes::Bytes,
     krabka_compression::RecordDecompressionPolicy,
     krabka_protocol::{
@@ -34,6 +39,27 @@ pub(super) struct DecodeEnv<'a> {
     pub(super) topic_name: &'a Arc<str>,
     pub(super) metrics: &'a BrokerMetrics,
     pub(super) policy: RecordDecompressionPolicy,
+    /// The topic's KFC-10 dedup settings, when it has any. The walk that
+    /// validates the records then also reads each record's identity.
+    pub(super) dedup: Option<&'a DedupSettings>,
+}
+
+impl DecodeEnv<'_> {
+    /// A collector for a batch with these attributes, or `None` when the
+    /// topic does not deduplicate or the batch is transactional, which
+    /// bypasses deduplication.
+    fn dedup_collector(
+        &self,
+        attributes: Attributes,
+        base_timestamp: i64,
+        records: usize,
+    ) -> Option<IdentityCollector> {
+        self.dedup
+            .filter(|_| !attributes.is_transactional())
+            .map(|settings| {
+                IdentityCollector::new(settings.key_header.clone(), base_timestamp, records)
+            })
+    }
 }
 
 /// All the per-batch HEADER fields that the broker's produce gates need.
@@ -67,6 +93,12 @@ pub(super) struct PreparedBatch {
     /// answers the batch with these once the leadership gate has passed, the
     /// same as [`Self::keyless_records`].
     pub(super) invalid_timestamp_records: Vec<BatchIndexAndErrorMessage>,
+    /// The record identities of a batch on a KFC-10 dedup topic, read during
+    /// the same walk. `None` when the topic does not deduplicate, or the
+    /// batch is transactional. A record that lacks the header
+    /// `dedup.key.header` names is listed in `missing_header`, and the
+    /// pipeline refuses the batch with it.
+    pub(super) dedup: Option<CollectedIdentities>,
     /// The append source. It is either the producer's verbatim bytes on the
     /// passthrough path, or the decoded owned batch on the fallback path. On
     /// the verbatim path the writer stamps the leader epoch at append time. On
@@ -89,12 +121,13 @@ impl PreparedBatch {
     fn from_header(
         header: ValidatedHeader,
         bytes: Bytes,
-        keyless_records: Vec<i32>,
-        invalid_timestamp_records: Vec<BatchIndexAndErrorMessage>,
+        (keyless_records, invalid_timestamp_records): (Vec<i32>, Vec<BatchIndexAndErrorMessage>),
+        dedup: Option<CollectedIdentities>,
     ) -> Self {
         Self {
             keyless_records,
             invalid_timestamp_records,
+            dedup,
             attributes: header.attributes,
             last_offset_delta: header.last_offset_delta,
             max_timestamp: header.max_timestamp,
@@ -110,11 +143,21 @@ impl PreparedBatch {
     /// way Kafka's `LogValidator.validateRecord` does: the key first, on a
     /// compacted topic, and the timestamp window only for a record whose key
     /// passed that check (or every record, off a compacted topic).
-    fn from_owned(batch: RecordBatch, compacted_topic: bool, timestamps: TimestampPolicy) -> Self {
+    fn from_owned(
+        batch: RecordBatch,
+        compacted_topic: bool,
+        timestamps: TimestampPolicy,
+        env: &DecodeEnv<'_>,
+    ) -> Self {
         let now_ms = timestamps.bounds_records().then(now_ms);
         let mut keyless_records = Vec::new();
         let mut invalid_timestamp_records = Vec::new();
+        let mut dedup =
+            env.dedup_collector(batch.attributes, batch.base_timestamp, batch.records.len());
         for (index, record) in batch.records.iter().enumerate() {
+            if let Some(dedup) = &mut dedup {
+                dedup.visit_owned(record);
+            }
             let index = i32::try_from(index).unwrap_or(i32::MAX);
             if compacted_topic && record.key.is_none() {
                 keyless_records.push(index);
@@ -137,6 +180,7 @@ impl PreparedBatch {
         Self {
             keyless_records,
             invalid_timestamp_records,
+            dedup: dedup.map(IdentityCollector::finish),
             attributes: batch.attributes,
             last_offset_delta: batch.last_offset_delta,
             max_timestamp: batch.max_timestamp,
@@ -251,6 +295,7 @@ pub(super) fn prepare_batch(
         topic_name,
         metrics,
         policy,
+        ..
     } = env;
     let bytes = match payload {
         // Legacy / pre-decoded payload: always owned.
@@ -261,6 +306,7 @@ pub(super) fn prepare_batch(
                 batch,
                 compacted_topic,
                 timestamps,
+                &env,
             ));
         }
         PartitionPayload::Null => return Err(codes::INVALID_REQUEST),
@@ -273,17 +319,7 @@ pub(super) fn prepare_batch(
     let validated = match validate_one_v2_batch(&bytes) {
         Ok(batch) if batch.total_len == bytes.len() => batch,
         _ => {
-            return owned_fallback(
-                &bytes,
-                timestamps,
-                compacted_topic,
-                DecodeEnv {
-                    topic_name,
-                    metrics,
-                    policy,
-                },
-                version,
-            );
+            return owned_fallback(&bytes, timestamps, compacted_topic, env, version);
         }
     };
     let header = ValidatedHeader::from(&validated);
@@ -294,25 +330,23 @@ pub(super) fn prepare_batch(
     if let Some(target) = topic_compression
         && target != attributes.compression()
     {
-        return owned_fallback(
-            &bytes,
-            timestamps,
-            compacted_topic,
-            DecodeEnv {
-                topic_name,
-                metrics,
-                policy,
-            },
-            version,
-        );
+        return owned_fallback(&bytes, timestamps, compacted_topic, env, version);
     }
     let mut keyless_records = Vec::new();
     let mut invalid_timestamp_records = Vec::new();
-    if timestamps.bounds_records() || compacted_topic {
+    let mut dedup = env.dedup_collector(
+        attributes,
+        header.base_timestamp,
+        usize::try_from(header.records_count).unwrap_or(0),
+    );
+    if timestamps.bounds_records() || compacted_topic || dedup.is_some() {
         let now_ms = now_ms();
         let mut index = 0_i32;
         validated
             .validate_records_with(policy, |record| {
+                if let Some(dedup) = &mut dedup {
+                    dedup.visit_borrowed(record);
+                }
                 // Kafka's `LogValidator.validateRecord` checks the key first
                 // and checks the timestamp only of a record whose key passed.
                 if compacted_topic && record.key.is_none() {
@@ -342,8 +376,8 @@ pub(super) fn prepare_batch(
     Ok(PreparedBatch::from_header(
         header,
         bytes,
-        keyless_records,
-        invalid_timestamp_records,
+        (keyless_records, invalid_timestamp_records),
+        dedup.map(IdentityCollector::finish),
     ))
 }
 
@@ -392,6 +426,7 @@ pub(super) fn owned_fallback(
         topic_name,
         metrics,
         policy,
+        ..
     } = env;
     // Kafka frames a field before it decodes any of it, and a size or a magic
     // that no batch can have is `CorruptRecordException` however the field
@@ -406,6 +441,7 @@ pub(super) fn owned_fallback(
                 batch,
                 compacted_topic,
                 timestamps,
+                &env,
             ))
         }),
         Err(error) => Err(decode_failure_code(&error, bytes)),

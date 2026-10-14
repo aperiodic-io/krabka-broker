@@ -3,7 +3,10 @@
 //! a request handler builds one without holding that handle.
 
 use {
-    crate::error::BrokerError,
+    crate::{
+        dedup::{DedupConfig, DedupJob},
+        error::BrokerError,
+    },
     krabka_compression::CompressionType,
     krabka_log::{Log, Offset, VerbatimBatch},
     krabka_protocol::records::RecordBatch,
@@ -55,6 +58,12 @@ impl ProduceData {
         let Self::Owned(batch) = self else {
             return;
         };
+        // An empty batch, which KFC-10 dedup appends for a request whose
+        // records were all duplicates, has no body to compress. Kafka's log
+        // cleaner writes its empty batches uncompressed too.
+        if batch.records.is_empty() {
+            return;
+        }
         if let Some(target) = target
             && batch.attributes.compression() != target
         {
@@ -124,6 +133,10 @@ pub struct ProduceJob {
     /// client batch. `None` for a batch the broker built itself, such as a
     /// marker, an offset commit or a tombstone.
     pub producer_check: Option<ProducerAppendCheck>,
+    /// The record identities a KFC-10 dedup topic classifies the batch by.
+    /// `None` for a topic without dedup, a transactional batch, and a batch
+    /// the broker built itself.
+    pub dedup: Option<DedupJob>,
 }
 
 /// A client batch as the log's transaction check sees it, and the KIP-890
@@ -190,6 +203,13 @@ pub enum WriterMessage {
     /// record changes the topic's overrides.
     SetLogConfig {
         config: krabka_log::LogConfig,
+        ack: tokio::sync::oneshot::Sender<()>,
+    },
+    /// Apply the topic's KFC-10 dedup config to the partition's index, or
+    /// turn dedup off with `None`. `ReplicatorSupervisor::reconcile` sends it
+    /// beside every `SetLogConfig`.
+    SetDedupConfig {
+        config: Option<DedupConfig>,
         ack: tokio::sync::oneshot::Sender<()>,
     },
     /// Run one compaction pass. The writer actor serializes this with

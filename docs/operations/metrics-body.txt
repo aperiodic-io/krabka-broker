@@ -386,6 +386,39 @@ krabka_broker_break_glass_refusals_total{action="unclean_recovery"} 0
 # HELP krabka_broker_break_glass_bypassed KFC-9 cumulative count of privileged transitions that ran WITHOUT an approved break-glass proposal, per action. This is the series to alert on: it counts data-losing unclean recoveries that no second person approved, which the background policy audit-only permits because that path has no caller to refuse. Any non-zero rate needs an operator to read the audit log for the partition it names..
 # TYPE krabka_broker_break_glass_bypassed counter
 krabka_broker_break_glass_bypassed_total{action="unclean_recovery"} 0
+# HELP krabka_broker_dedup_records_dropped KFC-10 cumulative count of records dropped at produce time as duplicates of a record already in the partition's dedup window. A dropped record never reaches the log; a rising rate is a producer or upstream that retries or replays..
+# TYPE krabka_broker_dedup_records_dropped counter
+krabka_broker_dedup_records_dropped_total{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_records_unindexed KFC-10 cumulative count of records admitted without being indexed because the partition index or the broker-wide index budget was full. Duplicates of these records are not detected; a non-zero rate calls for a larger dedup_max_entries_per_partition or dedup_max_entries..
+# TYPE krabka_broker_dedup_records_unindexed counter
+krabka_broker_dedup_records_unindexed_total{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_records_expired_on_arrival KFC-10 cumulative count of records whose timestamp was already outside the dedup window by the broker clock on arrival. They are appended without being indexed, so their duplicates are not detected..
+# TYPE krabka_broker_dedup_records_expired_on_arrival counter
+krabka_broker_dedup_records_expired_on_arrival_total{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_records_skew_clamped KFC-10 cumulative count of records whose timestamp was ahead of the broker clock and was clamped before reaching the dedup index. A non-zero rate means producer clock skew..
+# TYPE krabka_broker_dedup_records_skew_clamped counter
+krabka_broker_dedup_records_skew_clamped_total{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_capacity_evicted_entries KFC-10 cumulative count of still-live identities the dedup index dropped to make room at its entry limits. A non-zero rate means the effective dedup window is narrower than configured..
+# TYPE krabka_broker_dedup_capacity_evicted_entries counter
+krabka_broker_dedup_capacity_evicted_entries_total{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_batches_rebuilt KFC-10 cumulative count of produce batches rebuilt (re-encoded and recompressed) because some but not all of their records were duplicates. This rate drives dedup's produce-path cost..
+# TYPE krabka_broker_dedup_batches_rebuilt counter
+krabka_broker_dedup_batches_rebuilt_total{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_index_rebuilds KFC-10 cumulative count of times the partition's dedup index was rebuilt from the log, after a restart, a truncation, or a dedup config change. A steady rate outside restarts points at repeated truncation or config churn..
+# TYPE krabka_broker_dedup_index_rebuilds counter
+krabka_broker_dedup_index_rebuilds_total{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_index_entries KFC-10 identities held in this partition replica's dedup index (gauge)..
+# TYPE krabka_broker_dedup_index_entries gauge
+krabka_broker_dedup_index_entries{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_index_heap_bytes KFC-10 estimated heap bytes held by this partition replica's dedup index (gauge)..
+# TYPE krabka_broker_dedup_index_heap_bytes gauge
+krabka_broker_dedup_index_heap_bytes{topic="orders",partition="0"} 0
+# HELP krabka_broker_dedup_broker_index_entries KFC-10 identities held across every dedup index on this broker (gauge). Read against dedup_broker_index_max_entries: at the limit, records are admitted unindexed..
+# TYPE krabka_broker_dedup_broker_index_entries gauge
+krabka_broker_dedup_broker_index_entries 0
+# HELP krabka_broker_dedup_broker_index_max_entries KFC-10 the broker-wide limit on dedup index identities, dedup_max_entries (gauge)..
+# TYPE krabka_broker_dedup_broker_index_max_entries gauge
+krabka_broker_dedup_broker_index_max_entries 0
 # HELP krabka_broker_diskless_wal_durable_watermark Quorum-durable offset for each diskless WAL shard led by this broker..
 # TYPE krabka_broker_diskless_wal_durable_watermark gauge
 krabka_broker_diskless_wal_durable_watermark{topic_id="00000000-0000-0000-0000-000000000001",partition="0"} 0
