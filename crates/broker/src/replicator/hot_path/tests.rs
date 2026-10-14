@@ -117,6 +117,7 @@ async fn shape(partition: &Partition) -> PartitionShape {
         log_dir,
         log: _,
         writer_tx,
+        writer_gate: _,
         marker_materialization,
         append_notify: _,
         replica_state,

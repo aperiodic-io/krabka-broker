@@ -12,7 +12,7 @@
 use {
     super::{
         Config, FetcherConfig, FollowedKey, FollowedSnapshot,
-        connection::{connect_with_backoff, sleep_or_cancel},
+        connection::{FollowerLink, connect_with_backoff, sleep_or_cancel},
         ensure_local_partition,
         follower_throttle::{FetchThrottleDecision, follower_partition_fetch_cap},
         raw_fetch::RawFetchRequest,
@@ -20,7 +20,7 @@ use {
         response::{FollowedIndex, KeyedAction, RoundEntry, RowAction, apply_response_indexed},
         session::{FollowerFetchSession, SessionKey, SessionOutcome, WantedRows},
     },
-    krabka_client_core::{ClientError, Connection},
+    krabka_client_core::ClientError,
     krabka_protocol::owned::{
         fetch_request::{FetchPartition, FetchRequest, ReplicaState},
         fetch_response::FetchResponse,
@@ -84,7 +84,7 @@ pub(super) async fn run_fetcher_loop(fetcher: &FetcherConfig) -> Result<(), Stri
     // election and a consumer's metadata are all keyed off the partition
     // existing. One task per partition used to guarantee that by construction,
     // since each dialled only after opening its own log.
-    let mut client: Option<Connection> = None;
+    let mut client: Option<FollowerLink> = None;
 
     loop {
         if fetcher.shutdown.is_cancelled() {

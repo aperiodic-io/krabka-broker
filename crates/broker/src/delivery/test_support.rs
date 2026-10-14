@@ -10,7 +10,8 @@ use {
         delivery::{DeliveryHandles, PartitionDelivery, metrics::DeliveryMetrics},
         log_dir::partition_dir,
         partition::{
-            Partition, WriterMessage, empty_marker_materialization, initial_replication_target,
+            Partition, WriterGate, WriterMessage, empty_marker_materialization,
+            initial_replication_target,
         },
         partition_registry::PartitionRegistry,
         replica_state::ReplicaState,
@@ -210,6 +211,7 @@ pub(crate) fn partition_with_batches(
         log_dir: Arc::new(ArcSwap::from_pointee(dir.path().to_path_buf())),
         log,
         writer_tx: tx,
+        writer_gate: WriterGate::shared(false),
         marker_materialization: empty_marker_materialization(),
         append_notify: Arc::new(Notify::new()),
         replica_state: Arc::new(tokio::sync::Mutex::new(replica_state)),

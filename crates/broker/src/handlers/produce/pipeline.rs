@@ -696,6 +696,7 @@ pub(super) async fn complete_partition(
     } = batch;
     let PartitionServices {
         producer_state,
+        log_dir_status,
         image,
         phases,
         unstable_api_versions,
@@ -814,6 +815,7 @@ pub(super) async fn complete_partition(
         AppendContext {
             partition: &part,
             producer_state,
+            log_dir_status,
             partition_index: idx,
             acks,
             leader_epoch,

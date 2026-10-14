@@ -145,6 +145,7 @@ fn krabka_private_codes_sit_above_the_whole_kafka_table() {
         BrokerError::PartitionWriterDied { topic: "t".into(), partition: 0 },
         NOT_LEADER_OR_FOLLOWER,
     },
+    fenced_log = { BrokerError::Log(krabka_log::LogError::Fenced), NOT_LEADER_OR_FOLLOWER },
     invalid_group_state = {
         BrokerError::GroupInvalidState {
             group_id: "g".into(),

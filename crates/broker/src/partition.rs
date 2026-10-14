@@ -49,12 +49,16 @@ mod commit_wait;
 mod leadership;
 mod messages;
 mod watermark;
+mod writer_gate;
+
+pub(crate) use self::writer_gate::WriterGate;
 
 #[cfg(test)]
 pub(crate) mod test_support;
 
 pub use self::messages::{
-    AppendedBatch, ProduceData, ProduceJob, ProducerAppendCheck, SwapOutcome, WriterMessage,
+    AppendedBatch, ProduceData, ProduceJob, ProducerAppendCheck, ReplicatedBatch, SwapOutcome,
+    WriterMessage,
 };
 // Only watermark's own tests name crate::partition::HwTimeout.
 #[cfg(test)]
@@ -150,6 +154,9 @@ pub struct Partition {
     pub log_dir: Arc<ArcSwap<PathBuf>>,
     pub log: Arc<Mutex<Log>>,
     pub writer_tx: mpsc::Sender<WriterMessage>,
+    /// Lets a produce append on its own task while the writer is idle; see
+    /// [`WriterGate`].
+    pub(crate) writer_gate: Arc<WriterGate>,
     /// Serializes transaction-marker admission, append, and any offset
     /// resolution for this partition. Holds, per producer, the resolution a
     /// durable `__consumer_offsets` marker still owes the group actors: the
@@ -238,6 +245,7 @@ impl Partition {
             log_dir,
             log,
             writer_tx,
+            writer_gate: WriterGate::shared(false),
             marker_materialization: empty_marker_materialization(),
             append_notify,
             replica_state,
@@ -328,6 +336,22 @@ impl Partition {
             Ok(g) => g.stamp_for_offset(offset),
             Err(_) => None,
         }
+    }
+
+    /// Fence the log and then remove and return the writer task handle, for a
+    /// caller that is about to delete the partition's directory.
+    ///
+    /// An append can run on a request's own task while the writer is idle
+    /// (see [`WriterGate`]), so aborting the writer does not stop every
+    /// writer of the log. The fence does: it is taken under the log's mutex,
+    /// so an append either finished before it or finds the log fenced and is
+    /// answered `NOT_LEADER_OR_FOLLOWER`, as a produce to a gone writer was.
+    pub(crate) fn retire(&self) -> Option<JoinHandle<()>> {
+        self.log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .fence();
+        self.take_writer_handle()
     }
 
     /// Remove and return the writer task handle exactly once. Broker shutdown

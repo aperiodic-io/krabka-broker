@@ -23,7 +23,31 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+### Added
+
+- `krabka-log` gains `Log::fence`, `Log::append_may_block` and
+  `Log::written_since_open_from`, and `LogError` gains a `Fenced` variant. A
+  fenced log refuses every append with `LogError::Fenced`, which the broker
+  answers with `NOT_LEADER_OR_FOLLOWER`. The broker fences a partition's log
+  when it retires the partition, so an append that raced the retirement cannot
+  land after it. `LogError` is not `#[non_exhaustive]`, so an exhaustive
+  `match` on it outside this repository needs a new arm.
+
 ### Changed
+
+- A produce append runs on the request's own task when it only writes to the
+  page cache. The partition writer task used to take every produce, so each
+  one paid two cross-thread wakes before its write. The request task now takes
+  the writer's gate, appends under the log lock and finishes the group, and
+  falls back to the writer task when the writer is busy, the lock is
+  contended, a flush policy is set, or the append would roll a segment. The
+  same rule places a follower's replica append and a fetch that reads only
+  data this broker wrote since it opened the log: work that stays in the page
+  cache runs inline, and work that may wait on the disk goes to the blocking
+  pool.
+- A follower fetches from its leader over a dedicated link that hands the
+  response's record bytes to the replica append without copying them, instead
+  of through the general client connection.
 
 - A small fetch from the page cache looks its run up once. A fetch on a
   `sendfile`-capable connection first describes its run of batches; when the

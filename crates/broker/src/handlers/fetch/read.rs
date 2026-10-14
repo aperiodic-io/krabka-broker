@@ -5,8 +5,8 @@
 use {
     super::{FetchWatermarks, VisibilityWindow, compute_visibility_window, plan::refused_read},
     crate::{
-        blocking::run_blocking_catching, codes, diskless::hot_tail::HotTailCache,
-        error::BrokerError, log_dir_status::LogDirRegistry, partition::Partition,
+        blocking::run_page_cache_io, codes, diskless::hot_tail::HotTailCache, error::BrokerError,
+        log_dir_status::LogDirRegistry, partition::Partition,
     },
     krabka_log::{Log, LogError, Offset},
     krabka_protocol::{
@@ -320,11 +320,18 @@ async fn run_blocking_read(
     log: &Arc<Mutex<Log>>,
     read: &BlockingRead,
 ) -> Result<ServedRecords, BrokerError> {
-    let log = Arc::clone(log);
     let read = BlockingRead { ..*read };
-    let served = run_blocking_catching(move || read_records(&log, &read))
-        .await
-        .map_err(|error| read_task_panicked(&error))?;
+    let fetch_offset = read.fetch_offset;
+    // A read of what this process wrote into the active segment finds it in
+    // the page cache. An older one may go to the disk, so it does not run on
+    // a runtime worker.
+    let served = run_page_cache_io(
+        log,
+        |log| fetch_offset >= log.written_since_open_from(),
+        move |log| read_records(log, &read),
+    )
+    .await
+    .map_err(|error| read_task_panicked(&error))?;
     let RawServed { records, aborted } = served?;
     let records = (records.payload_len() > 0).then_some(records);
     Ok(ServedRecords { records, aborted })
@@ -336,9 +343,9 @@ fn read_task_panicked(cause: &impl std::fmt::Display) -> BrokerError {
     )))
 }
 
-/// The blocking body of one partition's read: take the log mutex, seek, and
+/// The blocking body of one partition's read, under the log mutex: seek, and
 /// either describe or copy the records run out of it.
-fn read_records(log: &Mutex<Log>, read: &BlockingRead) -> Result<RawServed, BrokerError> {
+fn read_records(log: &Log, read: &BlockingRead) -> Result<RawServed, BrokerError> {
     let &BlockingRead {
         fetch_offset,
         limit_offset,
@@ -348,7 +355,6 @@ fn read_records(log: &Mutex<Log>, read: &BlockingRead) -> Result<RawServed, Brok
         sendfile_capable,
         sendfile_min_bytes,
     } = read;
-    let log = log.lock().expect("log mutex poisoned");
 
     // Zero-copy (Increments D + E): on a plaintext connection
     // (SENDFILE alias: Linux + Apple + FreeBSD/DragonFly), describe
@@ -872,7 +878,7 @@ mod tests {
         let RawLog { log, raw, limit } = locked_raw_log(log);
 
         let described = super::read_records(
-            &log,
+            &log.lock().expect("log mutex"),
             &super::BlockingRead {
                 sendfile_capable: true,
                 ..whole_log_read(limit)
@@ -880,7 +886,7 @@ mod tests {
         )
         .expect("the blocking read succeeds");
         let copied = super::read_records(
-            &log,
+            &log.lock().expect("log mutex"),
             &super::BlockingRead {
                 sendfile_capable: true,
                 sendfile_min_bytes: raw.len() + 1,
@@ -914,7 +920,7 @@ mod tests {
             .expect("append a batch to the second segment");
         let RawLog { log, raw, limit } = locked_raw_log(log);
 
-        let copied = super::read_records(&log, &super::BlockingRead {
+        let copied = super::read_records(&log.lock().expect("log mutex"), &super::BlockingRead {
             sendfile_capable: true,
             sendfile_min_bytes: raw.len() + 1,
             ..whole_log_read(limit)
@@ -940,13 +946,15 @@ mod tests {
         let LogInDir { dir: _dir, log } = aborted_transaction_log();
         let RawLog { log, raw, limit } = locked_raw_log(log);
 
-        let read_committed = super::read_records(&log, &super::BlockingRead {
-            read_committed_aborts: true,
-            ..whole_log_read(limit)
-        })
-        .expect("the blocking read succeeds");
+        let read_committed =
+            super::read_records(&log.lock().expect("log mutex"), &super::BlockingRead {
+                read_committed_aborts: true,
+                ..whole_log_read(limit)
+            })
+            .expect("the blocking read succeeds");
         let read_uncommitted =
-            super::read_records(&log, &whole_log_read(limit)).expect("the blocking read succeeds");
+            super::read_records(&log.lock().expect("log mutex"), &whole_log_read(limit))
+                .expect("the blocking read succeeds");
 
         assert!(
             read_committed
@@ -992,20 +1000,21 @@ mod tests {
             .expect("read the first transaction alone");
 
         let log = Mutex::new(log);
-        let RawServed { records, aborted } = super::read_records(&log, &super::BlockingRead {
-            fetch_offset: Offset(0),
-            limit_offset: full_end,
-            // Spans both transactions; only the byte budget below clips
-            // the read to the first one.
-            effective_lso: full_end,
-            read_max: krabka_units::ByteSize::from_bytes(
-                u64::try_from(clip.total).unwrap_or(u64::MAX),
-            ),
-            read_committed_aborts: true,
-            sendfile_capable: false,
-            sendfile_min_bytes: 0,
-        })
-        .expect("the blocking read succeeds");
+        let RawServed { records, aborted } =
+            super::read_records(&log.lock().expect("log mutex"), &super::BlockingRead {
+                fetch_offset: Offset(0),
+                limit_offset: full_end,
+                // Spans both transactions; only the byte budget below clips
+                // the read to the first one.
+                effective_lso: full_end,
+                read_max: krabka_units::ByteSize::from_bytes(
+                    u64::try_from(clip.total).unwrap_or(u64::MAX),
+                ),
+                read_committed_aborts: true,
+                sendfile_capable: false,
+                sendfile_min_bytes: 0,
+            })
+            .expect("the blocking read succeeds");
 
         assert!(records == RecordsPayload::Raw(clip.bytes));
         assert!(
@@ -1467,8 +1476,11 @@ mod tests {
         } = retained_partition();
         let log_dirs = LogDirRegistry::probe(&[dir.path().to_path_buf()]);
 
-        let error = super::read_records(&partition.log, &whole_log_read(limit))
-            .expect_err("the fetch offset is below the log start");
+        let error = super::read_records(
+            &partition.log.lock().expect("log mutex"),
+            &whole_log_read(limit),
+        )
+        .expect_err("the fetch offset is below the log start");
         let row = super::settle_failed_read(&partition, 0, &error, &log_dirs);
 
         assert!(row == super::refused_read(0, crate::codes::OFFSET_OUT_OF_RANGE));

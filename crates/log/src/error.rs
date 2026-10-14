@@ -175,6 +175,11 @@ pub enum LogError {
         /// The refused batch's delivery time, which is its `max_timestamp`.
         delivery_ms: i64,
     },
+
+    /// The log was fenced with [`Log::fence`](crate::Log::fence) because its
+    /// partition is being removed, and takes no more appends.
+    #[error("the log is fenced: its partition is being removed")]
+    Fenced,
 }
 
 #[cfg(test)]

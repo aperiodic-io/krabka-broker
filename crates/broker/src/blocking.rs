@@ -13,18 +13,24 @@
 //! on that target the work runs inline on the runtime thread, and every other
 //! task waits for the length of one call.
 //!
-//! [`run_blocking`], [`run_blocking_catching`] and [`spawn_blocking`] are the
-//! three shapes the broker uses; nothing else in the crate calls
+//! [`run_blocking`] and [`spawn_blocking`] are the two shapes the broker uses
+//! for work that may block; nothing else in the crate calls
 //! `block_in_place` or `spawn_blocking` on a runtime path. A test makes a
 //! native thread run its blocking work inline too, with
 //! [`inline_blocking_on_this_thread`], and so drives the WASI path on every
 //! target.
+//!
+//! [`run_page_cache_io`] is the exception: file work that only touches the
+//! page cache runs on the calling task, because handing it off costs more
+//! than the work. Work that may wait on a lock or the disk still goes
+//! through [`run_blocking`].
 
 use {
     std::{
         future::Future,
         panic::{AssertUnwindSafe, catch_unwind},
         pin::Pin,
+        sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError},
         task::{Context, Poll},
     },
     tokio::{
@@ -36,9 +42,6 @@ use {
 /// Blocking work that did not return its value.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum BlockingError {
-    /// The work panicked in place, on a multi-thread runtime.
-    #[error("block_in_place panic")]
-    PanickedInPlace,
     /// The work panicked inline, on the runtime thread.
     #[error("inline blocking panic")]
     PanickedInline,
@@ -57,12 +60,6 @@ enum Placement {
     Pool,
     /// On the calling thread, which stalls its runtime for the duration.
     Inline,
-}
-
-#[derive(Clone, Copy)]
-enum InPlacePanicHandling {
-    Propagate,
-    ReturnError,
 }
 
 impl Placement {
@@ -94,46 +91,92 @@ pub(crate) async fn run_blocking<R>(
 where
     R: Send + 'static,
 {
-    run_blocking_placed(work, InPlacePanicHandling::Propagate).await
-}
-
-/// [`run_blocking`], with a panic in place returned as an error rather than
-/// unwound into the caller.
-///
-/// # Errors
-///
-/// Returns [`BlockingError::PanickedInPlace`] or
-/// [`BlockingError::PanickedInline`] when the work panics on the calling
-/// thread, and [`BlockingError::Join`] when the blocking pool does not return
-/// the value.
-pub(crate) async fn run_blocking_catching<R>(
-    work: impl FnOnce() -> R + Send + 'static,
-) -> Result<R, BlockingError>
-where
-    R: Send + 'static,
-{
-    run_blocking_placed(work, InPlacePanicHandling::ReturnError).await
-}
-
-async fn run_blocking_placed<R>(
-    work: impl FnOnce() -> R + Send + 'static,
-    in_place_panic: InPlacePanicHandling,
-) -> Result<R, BlockingError>
-where
-    R: Send + 'static,
-{
     match Placement::for_current_runtime() {
-        Placement::InPlace => match in_place_panic {
-            InPlacePanicHandling::Propagate => Ok(tokio::task::block_in_place(work)),
-            InPlacePanicHandling::ReturnError => {
-                catch_unwind(AssertUnwindSafe(|| tokio::task::block_in_place(work)))
-                    .map_err(|_| BlockingError::PanickedInPlace)
-            }
-        },
+        Placement::InPlace => Ok(tokio::task::block_in_place(work)),
         Placement::Pool => tokio::task::spawn_blocking(work)
             .await
             .map_err(BlockingError::Join),
         Placement::Inline => run_inline(work),
+    }
+}
+
+/// Run `work` on the value behind `lock`, on the calling task when that only
+/// touches the page cache, and through [`run_blocking`] otherwise. A panic is
+/// returned as an error rather than unwound into the caller.
+///
+/// This is for the log's hot paths: a produce append, a fetch read, and a
+/// follower's replicated append. Most of those are a copy into or out of the
+/// page cache that takes microseconds, and handing it to another thread, as
+/// [`run_blocking`] does, costs a thread handoff and a futex wake, which is
+/// more than the work. But one of them can also wait: on the lock, which other
+/// paths hold across an fsync, or on the disk, for an append that is due a
+/// flush or a segment roll, or a read the page cache does not hold. A wait on
+/// a runtime worker stalls every task that worker would have run, so `work`
+/// runs here only when the lock is free and `stays_in_cache` says, under that
+/// lock, that it will not wait. The guard is held from that answer through
+/// `work`, so no other thread can take the lock in between.
+///
+/// # Errors
+///
+/// Returns [`BlockingError::PanickedInline`] when the work panics, and
+/// [`BlockingError::Join`] when the blocking pool does not return it.
+pub(crate) async fn run_page_cache_io<T, R>(
+    lock: &Arc<Mutex<T>>,
+    stays_in_cache: impl FnOnce(&mut T) -> bool,
+    work: impl FnOnce(&mut T) -> R + Send + 'static,
+) -> Result<R, BlockingError>
+where
+    T: Send + 'static,
+    R: Send + 'static,
+{
+    let work = match run_if_cached(lock, stays_in_cache, work) {
+        Ok(ran) => return ran,
+        Err(work) => work,
+    };
+    let lock = Arc::clone(lock);
+    run_blocking(move || {
+        let mut guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        run_inline(|| work(&mut guard))
+    })
+    .await?
+}
+
+/// How long [`run_if_cached`] keeps trying a held lock before it gives up on
+/// running inline. The hot paths hold the log lock for a page-cache copy, a
+/// few microseconds; a holder still there after this is likely fsyncing or
+/// reading the disk.
+const LOCK_SPIN: std::time::Duration = std::time::Duration::from_micros(20);
+
+/// Runs `work` here under `lock` when the lock comes free within
+/// [`LOCK_SPIN`] and `stays_in_cache` agrees, and hands `work` back
+/// otherwise. The guard never outlives this call, which keeps it out of the
+/// caller's future.
+fn run_if_cached<T, R, W: FnOnce(&mut T) -> R>(
+    lock: &Mutex<T>,
+    stays_in_cache: impl FnOnce(&mut T) -> bool,
+    work: W,
+) -> Result<Result<R, BlockingError>, W> {
+    let Some(mut guard) = lock_within(lock, LOCK_SPIN) else {
+        return Err(work);
+    };
+    if stays_in_cache(&mut guard) {
+        Ok(run_inline(|| work(&mut guard)))
+    } else {
+        Err(work)
+    }
+}
+
+/// `lock`'s guard, if it comes free within `spin`. A poisoned lock is
+/// recovered, as the log's own lock helper does.
+fn lock_within<T>(lock: &Mutex<T>, spin: std::time::Duration) -> Option<MutexGuard<'_, T>> {
+    let started = std::time::Instant::now();
+    loop {
+        match lock.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => return Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) if started.elapsed() < spin => std::hint::spin_loop(),
+            Err(TryLockError::WouldBlock) => return None,
+        }
     }
 }
 
@@ -345,9 +388,9 @@ mod tests {
         let guard = inline_blocking_on_this_thread();
         let values = runtime.block_on(async {
             let ran = run_blocking(|| 1).await.expect("run_blocking");
-            let caught = run_blocking_catching(|| 2)
+            let caught = run_page_cache_io(&Arc::new(Mutex::new(2)), |_| true, |value| *value)
                 .await
-                .expect("run_blocking_catching");
+                .expect("run_page_cache_io");
             let spawned = spawn_blocking(|| 3).await.expect("spawn_blocking");
             [ran, caught, spawned]
         });
@@ -370,7 +413,7 @@ mod tests {
         let outcomes = runtime.block_on(async {
             [
                 run_blocking(panics).await,
-                run_blocking_catching(panics).await,
+                run_page_cache_io(&Arc::new(Mutex::new(())), |()| true, |()| panics()).await,
                 spawn_blocking(panics).await,
             ]
         });
@@ -380,8 +423,8 @@ mod tests {
     }
 
     /// Natively a panic keeps the shape each placement always gave it: an
-    /// error from the pool, and from `run_blocking_catching` in place an error
-    /// with the message the callers already log.
+    /// error from the pool, and from `run_page_cache_io` on the calling task
+    /// an error with the message the callers log.
     #[test]
     fn a_native_panic_keeps_its_shape() {
         let CountingRuntime {
@@ -395,9 +438,55 @@ mod tests {
             runtime: multi_thread,
             ..
         } = counting_runtime(true);
-        let in_place = multi_thread.block_on(run_blocking_catching(panics));
+        let in_place = multi_thread.block_on(run_page_cache_io(
+            &Arc::new(Mutex::new(())),
+            |()| true,
+            |()| panics(),
+        ));
         let error = in_place.expect_err("the panic is caught");
-        check!(error.to_string() == "block_in_place panic");
+        check!(error.to_string() == "inline blocking panic");
+    }
+
+    /// Page-cache work runs on the calling task only when its lock is free
+    /// and it says it will not wait. Otherwise it takes the blocking path,
+    /// which on a current-thread runtime is a pool thread.
+    #[test]
+    fn page_cache_io_runs_inline_only_on_a_free_lock_and_work_that_will_not_wait() {
+        let CountingRuntime { runtime, .. } = counting_runtime(false);
+        let caller = std::thread::current().id();
+        let lock = Arc::new(Mutex::new(()));
+        let ran_on = |stays_in_cache: bool| {
+            runtime
+                .block_on(run_page_cache_io(
+                    &lock,
+                    move |()| stays_in_cache,
+                    |()| std::thread::current().id(),
+                ))
+                .expect("the work returns")
+        };
+        check!(ran_on(true) == caller, "a free lock and page-cache work");
+        check!(ran_on(false) != caller, "work that may wait");
+
+        let (holding, held) = std::sync::mpsc::channel::<()>();
+        let (taken, released) = std::sync::mpsc::channel::<()>();
+        let holder_lock = Arc::clone(&lock);
+        let contended = std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let _held = holder_lock.lock().expect("lock");
+                holding.send(()).expect("the test waits");
+                let _ = released.recv();
+            });
+            held.recv().expect("the holder takes the lock");
+            let outcome = runtime.block_on(async {
+                let work = run_page_cache_io(&lock, |()| true, |()| std::thread::current().id());
+                // `join!` polls the work first: it finds the lock held and
+                // goes to the pool before the holder lets go.
+                let (worker, ()) = tokio::join!(work, async { drop(taken) });
+                worker
+            });
+            outcome.expect("the work returns")
+        });
+        check!(contended != caller, "a held lock");
     }
 
     /// The guard sets the flag for its own thread only, and restores what was

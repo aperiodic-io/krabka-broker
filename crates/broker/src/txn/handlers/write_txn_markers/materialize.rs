@@ -649,7 +649,7 @@ mod tests {
     /// acknowledgements never arrive: each append lands, and its caller sees
     /// the acknowledgement dropped.
     fn dropping_acks(part: &Partition) -> Partition {
-        use crate::partition::{ProduceJob, WriterMessage};
+        use crate::partition::{ProduceJob, WriterGate, WriterMessage};
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<WriterMessage>(8);
         let writer = part.writer_tx.clone();
@@ -679,6 +679,8 @@ mod tests {
         });
         Partition {
             writer_tx: tx,
+            // The intercepting writer above must see every append.
+            writer_gate: WriterGate::shared(false),
             ..part.clone()
         }
     }
