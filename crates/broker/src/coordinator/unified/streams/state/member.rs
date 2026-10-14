@@ -182,15 +182,17 @@ impl StreamsMemberState {
 mod tests {
     use {super::*, assert2::assert};
 
+    #[yare::parameterized(
+        stable = { StreamsMemberAssignmentState::Stable },
+        unrevoked_tasks = { StreamsMemberAssignmentState::UnrevokedTasks },
+        unreleased_tasks = { StreamsMemberAssignmentState::UnreleasedTasks },
+    )]
+    fn assignment_state_i8_roundtrips(s: StreamsMemberAssignmentState) {
+        assert2::assert!(StreamsMemberAssignmentState::from_i8(s.as_i8()) == Some(s));
+    }
+
     #[test]
-    fn assignment_state_i8_roundtrips() {
-        for s in [
-            StreamsMemberAssignmentState::Stable,
-            StreamsMemberAssignmentState::UnrevokedTasks,
-            StreamsMemberAssignmentState::UnreleasedTasks,
-        ] {
-            assert!(StreamsMemberAssignmentState::from_i8(s.as_i8()) == Some(s));
-        }
+    fn assignment_state_i8_rejects_unknown_and_defaults_to_stable() {
         assert!(StreamsMemberAssignmentState::from_i8(99).is_none());
         assert!(StreamsMemberAssignmentState::default() == StreamsMemberAssignmentState::Stable);
     }

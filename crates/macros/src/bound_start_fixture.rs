@@ -256,40 +256,36 @@ pub(crate) fn vector_request(input: TokenStream) -> Result<TokenStream, ParseErr
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::{expand, metric_registry},
-        assert2::assert,
-    };
+    use super::{expand, metric_registry};
 
-    #[test]
-    fn startup_emits_direct_calls_with_the_selected_panic_policy() {
-        for policy in ["expect", "unwrap"] {
-            let input = format!("start, start_bound, broker, {policy}, bound_config")
-                .parse()
-                .unwrap();
-            let output = expand(input).unwrap();
-            let parser = moxy::ast::Parser::from_tokens(&output);
-            let _: moxy::ast::ItemStruct = moxy::ast::Parse::parse(&parser).unwrap();
-            let _: moxy::ast::ItemFn = moxy::ast::Parse::parse(&parser).unwrap();
-            assert!(parser.is_empty());
-            let rendered = output.to_string();
-            assert!(!rendered.contains("macro_rules"));
-            assert!(!rendered.contains("fixture_result"));
-            assert!(rendered.matches(policy).count() == 6);
-            assert!(rendered.contains("broker start") == (policy == "expect"));
-            assert!(rendered.contains("bind controller listener") == (policy == "expect"));
-        }
+    #[yare::parameterized(
+        expect = { "expect" },
+        unwrap = { "unwrap" },
+    )]
+    fn startup_emits_direct_calls_with_the_selected_panic_policy(policy: &str) {
+        let input = format!("start, start_bound, broker, {policy}, bound_config")
+            .parse()
+            .unwrap();
+        let output = expand(input).unwrap();
+        let parser = moxy::ast::Parser::from_tokens(&output);
+        let _: moxy::ast::ItemStruct = moxy::ast::Parse::parse(&parser).unwrap();
+        let _: moxy::ast::ItemFn = moxy::ast::Parse::parse(&parser).unwrap();
+        assert2::assert!(parser.is_empty());
+        let rendered = output.to_string();
+        assert2::assert!(!rendered.contains("macro_rules"));
+        assert2::assert!(!rendered.contains("fixture_result"));
+        assert2::assert!(rendered.matches(policy).count() == 6);
+        assert2::assert!(rendered.contains("broker start") == (policy == "expect"));
+        assert2::assert!(rendered.contains("bind controller listener") == (policy == "expect"));
     }
 
-    #[test]
-    fn registry_requires_binding_names_and_a_parenthesized_finish() {
-        for input in [
-            "metrics, body + suffix, guard; unwrap()",
-            "metrics, body, guard; unwrap{}",
-            "metrics, body, guard; unwrap() extra",
-            "render_registry",
-        ] {
-            assert!(metric_registry(input.parse().unwrap()).is_err());
-        }
+    #[yare::parameterized(
+        computed_body = { "metrics, body + suffix, guard; unwrap()" },
+        braced_finish = { "metrics, body, guard; unwrap{}" },
+        trailing_tokens = { "metrics, body, guard; unwrap() extra" },
+        missing_finish = { "render_registry" },
+    )]
+    fn registry_requires_binding_names_and_a_parenthesized_finish(input: &str) {
+        assert2::assert!(metric_registry(input.parse().unwrap()).is_err());
     }
 }

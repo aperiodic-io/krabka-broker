@@ -8,20 +8,18 @@
 //! leader that no live broker registration backs keeps its id in the hint and
 //! adds no endpoint.
 
-#[cfg(test)]
-use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
-        authorizer::AllowAllAuthorizer,
         broker::BrokerHandle,
         codes,
         handlers::test_support::{
             StartedBroker, configured_topic_request, replicated_partition, share_fetch_wire,
+            start_allow_all_no_audit,
         },
-        share_partition::session::FetchPartitions,
+        share_partition::session::{FetchPartitions, ShareFetchSessionRequest},
         test_support::{
             decode_response, encode_request, initialize_share_state, peer, principal,
-            request_context, start_broker_no_audit_with, try_dispatch_context,
+            request_context, try_dispatch_context,
         },
     },
     assert2::assert,
@@ -47,7 +45,6 @@ use {
         primitives::uuid::Uuid as WireUuid,
         records::RecordsPayload,
     },
-    std::sync::Arc,
 };
 
 const GROUP: &str = "endpoints-group";
@@ -60,11 +57,7 @@ const UNREGISTERED_NODE: i32 = 7;
 const REMOTE: WireUuid = WireUuid([0x22; 16]);
 const ORPHAN: WireUuid = WireUuid([0x77; 16]);
 
-async fn start() -> StartedBroker {
-    let HandlerStartedBroker { broker, dir } =
-        start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
-    StartedBroker { broker, dir }
-}
+async fn start() -> StartedBroker { start_allow_all_no_audit().await }
 
 async fn create_local_topic(broker: &BrokerHandle) -> WireUuid {
     let client = krabka_client_core::Client::builder()
@@ -280,14 +273,15 @@ async fn share_acknowledge_on_a_remote_leader_answers_unknown_partition_without_
     shared
         .share_partition_leaders
         .update_fetch_session(
-            (GROUP, "member"),
-            ctx.connection_id,
-            0,
-            FetchPartitions {
-                requested: &[],
-                forgotten: &std::collections::HashSet::new(),
-            },
-            false,
+            ShareFetchSessionRequest::builder()
+                .identity((GROUP, "member"))
+                .connection_id(ctx.connection_id)
+                .epoch(0)
+                .partitions(FetchPartitions {
+                    requested: &[],
+                    forgotten: &std::collections::HashSet::new(),
+                })
+                .build(),
         )
         .expect("open the share session");
     let request = ShareAcknowledgeRequest {

@@ -16,7 +16,7 @@ use crate::config::ReplicationRuntimeConfig;
 use {
     super::{
         Config, connection::connection_options, replication_target_changed, response::RowAction,
-        task_replication_target,
+        task_replication_target, truncate_producer_state,
     },
     crate::{codes, network::client::InterBrokerError, partition::Partition},
     krabka_client_core::Connection,
@@ -147,6 +147,27 @@ fn reset_for_leader_start(replica_end: i64, leader_start: i64) -> Option<i64> {
     (leader_start > replica_end).then_some(leader_start)
 }
 
+fn warn_if_target_stale(cfg: &Config, message: &'static str) -> bool {
+    if !replication_target_changed(cfg) {
+        return false;
+    }
+    warn!(
+        topic = %cfg.topic,
+        partition = cfg.partition.get(),
+        "{}",
+        message
+    );
+    true
+}
+
+macro_rules! return_if_target_stale {
+    ($cfg:ident, $message:literal, $result:expr) => {
+        if warn_if_target_stale($cfg, $message) {
+            return $result;
+        }
+    };
+}
+
 /// Recovers from `OFFSET_OUT_OF_RANGE` the way Kafka's
 /// `AbstractFetcherThread.fetchOffsetAndTruncate` does: ask the leader for
 /// its log end offset with `ListOffsets(LATEST)`, truncate to it when it lies
@@ -179,11 +200,11 @@ where
     F: FnMut(i64) -> Fut,
     Fut: std::future::Future<Output = Result<i64, String>>,
 {
-    if replication_target_changed(cfg) {
-        warn!(topic = %cfg.topic, partition = cfg.partition.get(),
-            "replicator: skipping out_of_range recovery from stale target");
-        return RowAction::Drop;
-    }
+    return_if_target_stale!(
+        cfg,
+        "replicator: skipping out_of_range recovery from stale target",
+        RowAction::Drop
+    );
     let Some(partition) = cfg.partitions.get(&cfg.topic, cfg.partition) else {
         return RowAction::Continue;
     };
@@ -254,9 +275,7 @@ where
     };
     match result {
         Ok(()) => {
-            cfg.producer_state
-                .truncate(&cfg.topic, cfg.partition, target)
-                .await;
+            truncate_producer_state(cfg, target).await;
         }
         Err(error) => {
             warn!(topic = %cfg.topic, partition = cfg.partition.get(), %error,
@@ -299,11 +318,11 @@ const EARLIEST_LOCAL_TIMESTAMP: i64 = -4;
 // unit-tested below.
 #[cfg_attr(test, mutants::skip)]
 pub(super) async fn handle_offset_moved_to_tiered_storage(cfg: &Config) -> RowAction {
-    if replication_target_changed(cfg) {
-        warn!(topic = %cfg.topic, partition = cfg.partition.get(),
-            "replicator: skipping tiered-storage restart from stale target");
-        return RowAction::Drop;
-    }
+    return_if_target_stale!(
+        cfg,
+        "replicator: skipping tiered-storage restart from stale target",
+        RowAction::Drop
+    );
     let Some(partition) = cfg.partitions.get(&cfg.topic, cfg.partition) else {
         return RowAction::Continue;
     };
@@ -342,9 +361,7 @@ pub(super) async fn handle_offset_moved_to_tiered_storage(cfg: &Config) -> RowAc
     );
     match partition.reset_to(Offset(local_log_start)).await {
         Ok(()) => {
-            cfg.producer_state
-                .truncate(&cfg.topic, cfg.partition, local_log_start)
-                .await;
+            truncate_producer_state(cfg, local_log_start).await;
             info!(
                 topic = %cfg.topic,
                 partition = cfg.partition.get(),
@@ -515,11 +532,11 @@ pub(super) async fn handle_epoch_fence(cfg: &Config) -> Result<(), String> {
     // Stale-response guard: never truncate/reset from an OffsetForLeaderEpoch
     // response if metadata has since selected another target (see
     // `replication_target_changed`).
-    if replication_target_changed(cfg) {
-        warn!(topic = %cfg.topic, partition = cfg.partition.get(),
-            "replicator: skipping epoch-fence truncation from stale target");
-        return Ok(());
-    }
+    return_if_target_stale!(
+        cfg,
+        "replicator: skipping epoch-fence truncation from stale target",
+        Ok(())
+    );
 
     let _target_guard = part
         .lock_replication_target(task_replication_target(cfg))
@@ -537,9 +554,7 @@ pub(super) async fn handle_epoch_fence(cfg: &Config) -> Result<(), String> {
                 "handle_epoch_fence: truncate_to failed"
             );
         } else {
-            cfg.producer_state
-                .truncate(&cfg.topic, cfg.partition, end_offset)
-                .await;
+            truncate_producer_state(cfg, end_offset).await;
             info!(
                 topic = %cfg.topic,
                 partition = cfg.partition.get(),
@@ -558,9 +573,7 @@ pub(super) async fn handle_epoch_fence(cfg: &Config) -> Result<(), String> {
                 "handle_epoch_fence: reset_to(0) failed"
             );
         } else {
-            cfg.producer_state
-                .truncate(&cfg.topic, cfg.partition, 0)
-                .await;
+            truncate_producer_state(cfg, 0).await;
             info!(
                 topic = %cfg.topic,
                 partition = cfg.partition.get(),

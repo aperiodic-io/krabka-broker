@@ -161,3 +161,18 @@ pub async fn produce_acks_after_isr_shrink(
     .expect("acks-all succeeds after ISR shrink");
     (offset, start.elapsed())
 }
+
+pub async fn time_acks_after_isr_shrink(
+    bootstrap: &str,
+    topic: &str,
+    values: &[&str],
+    timeout: ProduceTimeoutMillis,
+) -> (i64, Duration) {
+    produce_acks_after_isr_shrink()
+        .bootstrap(bootstrap)
+        .topic(topic)
+        .values(values)
+        .timeout(timeout)
+        .call()
+        .await
+}

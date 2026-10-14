@@ -405,12 +405,10 @@ mod tests {
 
     /// A matched series keeps its value, whatever that value is. A real zero
     /// is a measurement and passes through.
-    #[test]
-    fn require_series_passes_a_matched_value_through() {
-        for value in [12.5_f64, 0.0_f64] {
-            let kept = require_series(Some(value), "broker CPU", "q").expect("a matched series");
-            assert!((kept - value).abs() < f64::EPSILON);
-        }
+    #[yare::parameterized(nonzero_measurement = { 12.5_f64 }, real_zero_measurement = { 0.0_f64 })]
+    fn require_series_passes_a_matched_value_through(value: f64) {
+        let kept = require_series(Some(value), "broker CPU", "q").expect("a matched series");
+        assert2::assert!((kept - value).abs() < f64::EPSILON);
     }
 
     /// An empty vector is not a zero. The error names the query, because the

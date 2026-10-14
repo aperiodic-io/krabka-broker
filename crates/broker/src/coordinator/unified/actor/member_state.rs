@@ -647,85 +647,89 @@ mod tests {
     /// Kafka's `throwIfRegularExpressionIsInvalid` fails the heartbeat that
     /// carries a bad pattern, before any member record is written, so the
     /// joining member is never admitted.
-    #[test]
-    fn invalid_regex_on_join_rejects_the_heartbeat() {
+    #[yare::parameterized(
+        unmatched_paren = { "(" },
+        unterminated_class = { "[a-" },
+        reversed_repeat = { "a{2,1}" },
+    )]
+    fn invalid_regex_on_join_rejects_the_heartbeat(pattern: &str) {
         let config = NextGenConfig::assigning_at_once();
         let metadata = orders_metadata();
-        for pattern in ["(", "[a-", "a{2,1}"] {
-            let mut state = GroupState::new("g");
-            let step = step_heartbeat(
-                &mut state,
-                &config,
-                &metadata,
-                &regex_join_request().pattern(pattern).call(),
-                ClientIdentity {
-                    id: "client",
-                    host: "host",
-                },
-                Instant::now(),
-                &RegexResolution::none(),
-            );
+        let mut state = GroupState::new("g");
+        let step = step_heartbeat(
+            &mut state,
+            &config,
+            &metadata,
+            &regex_join_request().pattern(pattern).call(),
+            ClientIdentity {
+                id: "client",
+                host: "host",
+            },
+            Instant::now(),
+            &RegexResolution::none(),
+        );
 
-            check!(
-                step.response.error_code == crate::codes::INVALID_REGULAR_EXPRESSION,
-                "{pattern}"
-            );
-            check!(
-                step.response
-                    .error_message
-                    .as_deref()
-                    .is_some_and(|m| m.starts_with(&format!(
-                        "SubscribedTopicRegex `{pattern}` is not a valid regular expression: "
-                    ))),
-                "{pattern}: {:?}",
-                step.response.error_message,
-            );
-            check!(step.pending.is_empty(), "{pattern}");
-            assert!(state.members.is_empty(), "{pattern}");
-        }
+        check!(
+            step.response.error_code == crate::codes::INVALID_REGULAR_EXPRESSION,
+            "{pattern}"
+        );
+        check!(
+            step.response
+                .error_message
+                .as_deref()
+                .is_some_and(|m| m.starts_with(&format!(
+                    "SubscribedTopicRegex `{pattern}` is not a valid regular expression: "
+                ))),
+            "{pattern}: {:?}",
+            step.response.error_message,
+        );
+        check!(step.pending.is_empty(), "{pattern}");
+        assert2::assert!(state.members.is_empty(), "{pattern}");
     }
 
     /// A pattern change to something that does not compile leaves the existing
     /// member exactly as it was: same pattern, same epoch, same group epoch.
-    #[test]
-    fn invalid_regex_on_pattern_change_leaves_member_untouched() {
+    #[yare::parameterized(
+        unmatched_paren = { "(" },
+        unterminated_class = { "[a-" },
+        reversed_repeat = { "a{2,1}" },
+    )]
+    fn invalid_regex_on_pattern_change_leaves_member_untouched(pattern: &str) {
         let config = NextGenConfig::assigning_at_once();
         let metadata = orders_metadata();
-        for pattern in ["(", "[a-", "a{2,1}"] {
-            let mut state = group_with_regex_member(&metadata, "^orders-.*");
-            let member_epoch = state.members["m1"].member_epoch;
-            let group_epoch = state.group_epoch;
+        let mut state = group_with_regex_member(&metadata, "^orders-.*");
+        let member_epoch = state.members["m1"].member_epoch;
+        let group_epoch = state.group_epoch;
 
-            let result = update_member_state(
-                &mut state,
-                &config,
-                &metadata,
-                &ConsumerGroupHeartbeatRequest {
-                    group_id: "g".into(),
-                    member_id: "m1".into(),
-                    member_epoch,
-                    subscribed_topic_regex: Some(pattern.into()),
-                    rebalance_timeout_ms: 60_000,
-                    ..Default::default()
-                },
-                ClientIdentity {
-                    id: "other-client",
-                    host: "other-host",
-                },
-                Instant::now(),
-                &RegexResolution::none(),
-            );
+        let result = update_member_state(
+            &mut state,
+            &config,
+            &metadata,
+            &ConsumerGroupHeartbeatRequest {
+                group_id: "g".into(),
+                member_id: "m1".into(),
+                member_epoch,
+                subscribed_topic_regex: Some(pattern.into()),
+                rebalance_timeout_ms: 60_000,
+                ..Default::default()
+            },
+            ClientIdentity {
+                id: "other-client",
+                host: "other-host",
+            },
+            Instant::now(),
+            &RegexResolution::none(),
+        );
 
-            check!(result.is_err(), "{pattern}");
-            let member = &state.members["m1"];
-            check!(
-                member.subscribed_topic_regex.as_deref() == Some("^orders-.*"),
-                "{pattern}"
-            );
-            check!(member.client_id == "client", "{pattern}");
-            check!(member.member_epoch == member_epoch, "{pattern}");
-            assert!(state.group_epoch == group_epoch, "{pattern}");
-        }
+        check!(result.is_err(), "{pattern}");
+        let member = &state.members["m1"];
+        check!(
+            member.subscribed_topic_regex.as_deref() == Some("^orders-.*"),
+            "{pattern}"
+        );
+        check!(member.client_id == "client", "{pattern}");
+        check!(member.member_epoch == member_epoch, "{pattern}");
+        assert2::assert!(state.group_epoch == group_epoch, "{pattern}");
     }
 
     /// The rejection is specific to the bad pattern: a valid one still admits
@@ -860,50 +864,37 @@ mod tests {
     /// `regex` runs in Unicode mode here on purpose: it accepts everything
     /// RE2J does in these cases, where `RegexBuilder::unicode(false)` would
     /// reject the Unicode classes RE2J supports.
-    #[test]
-    fn regex_acceptance_matches_re2j() {
-        for (pattern, accepted) in [
-            // ASCII in RE2J, Unicode-aware in Rust — both compile.
-            (r"\d+", true),
-            (r"\w+", true),
-            (r"x", true),
-            // Unicode classes: RE2J supports them, and `unicode(false)` would
-            // not.
-            (r"\pN", true),
-            (r"\p{Greek}", true),
-            // Named groups: RE2's `(?P<name>)` spelling and the modern
-            // `(?<name>)` spelling.
-            (r"(?P<name>a)", true),
-            (r"(?<name>a)", true),
-            // Rejected by both engines.
-            ("(", false),
-            ("[a-", false),
-            // Inline flags. RE2J's `parsePerlFlags` takes only `i`, `m`, `s`
-            // and `U`, with `-` to negate; `regex` also takes `x`, `u` and
-            // `R`, so those must be rejected here to stay with Kafka.
-            ("(?i)abc", true),
-            ("(?im)abc", true),
-            ("(?i-s)abc", true),
-            ("(?U)a+", true),
-            ("(?i:abc)", true),
-            ("(?:abc)", true),
-            ("(?x) a b c", false),
-            ("(?x:abc)", false),
-            ("(?iu)abc", false),
-            ("(?-u)abc", false),
-            ("(?R)abc", false),
-            // A `(?` that is not a flag group at all: the literal `(` an
-            // escape produces, and one inside a character class.
-            (r"\(?abc", true),
-            ("[(?x]abc", true),
-            (r"a\[(?x)", false),
-        ] {
-            check!(
-                check_subscribed_topic_regex(pattern).is_ok() == accepted,
-                "{pattern}: {:?}",
-                check_subscribed_topic_regex(pattern),
-            );
-        }
+    #[yare::parameterized(
+        digits = { r"\d+", true },
+        word = { r"\w+", true },
+        word_boundary_control = { r"\x08x\x08", true },
+        unicode_number = { r"\pN", true },
+        greek = { r"\p{Greek}", true },
+        named_group_re = { r"(?P<name>a)", true },
+        named_group_angle = { r"(?<name>a)", true },
+        unmatched_parenthesis = { "(", false },
+        unfinished_class = { "[a-", false },
+        flag_i = { "(?i)abc", true },
+        flags_im = { "(?im)abc", true },
+        negative_flag = { "(?i-s)abc", true },
+        flag_upper_u = { "(?U)a+", true },
+        scoped_flags = { "(?i:abc)", true },
+        noncapturing_group = { "(?:abc)", true },
+        unsupported_flag_x = { "(?x) a b c", false },
+        unsupported_scoped_flag_x = { "(?x:abc)", false },
+        unsupported_unicode_flag = { "(?iu)abc", false },
+        unsupported_disable_unicode = { "(?-u)abc", false },
+        unsupported_recursive_flag = { "(?R)abc", false },
+        escaped_parenthesis = { r"\(?abc", true },
+        parenthesis_in_class = { "[(?x]abc", true },
+        flag_after_escaped_bracket = { r"a\[(?x)", false },
+    )]
+    fn regex_acceptance_matches_re2j(pattern: &str, accepted: bool) {
+        check!(
+            check_subscribed_topic_regex(pattern).is_ok() == accepted,
+            "{pattern}: {:?}",
+            check_subscribed_topic_regex(pattern),
+        );
     }
 
     /// A flag RE2J does not have is answered with the message Kafka builds

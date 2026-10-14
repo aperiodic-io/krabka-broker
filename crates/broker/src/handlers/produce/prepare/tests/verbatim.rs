@@ -200,28 +200,38 @@ fn rejects_client_control_batch() {
 /// topic's own `compression.type` asks for, because the refusal is about
 /// whether the REQUESTING client's version can decode zstd, not about what
 /// the broker stores it as.
-#[test]
-fn rejects_zstd_below_v7_and_admits_it_from_v7_on_both_paths() {
+#[yare::parameterized(
+    v0_slice = { 0, false, false },
+    v6_slice = { 6, false, false },
+    v7_slice = { 7, false, true },
+    v13_slice = { 13, false, true },
+    v0_owned = { 0, true, false },
+    v6_owned = { 6, true, false },
+    v7_owned = { 7, true, true },
+    v13_owned = { 13, true, true },
+)]
+fn rejects_zstd_below_v7_and_admits_it_from_v7_on_both_paths(
+    version: i16,
+    owned_payload: bool,
+    admitted: bool,
+) {
     let mut b = plain_batch();
     b.attributes = b.attributes.with_compression(CompressionType::Zstd);
     let wire = encode(&b);
 
-    for (version, admitted) in [(0, false), (6, false), (7, true), (13, true)] {
-        let payloads = [
-            PartitionPayload::Slice(wire.clone()),
-            PartitionPayload::Owned(RecordsPayload::V2(vec![b.clone()])),
-        ];
-        for payload in payloads {
-            let result = prepare_for_topic(payload, None, &BrokerMetrics::new(), version);
-            if admitted {
-                assert!(result.is_ok(), "version {version}: {result:?}");
-            } else {
-                assert!(
-                    result.as_ref().err() == Some(&crate::codes::UNSUPPORTED_COMPRESSION_TYPE),
-                    "version {version}: {result:?}"
-                );
-            }
-        }
+    let payload = if owned_payload {
+        PartitionPayload::Owned(RecordsPayload::V2(vec![b]))
+    } else {
+        PartitionPayload::Slice(wire)
+    };
+    let result = prepare_for_topic(payload, None, &BrokerMetrics::new(), version);
+    if admitted {
+        assert2::assert!(result.is_ok(), "version {version}: {result:?}");
+    } else {
+        assert2::assert!(
+            result.as_ref().err() == Some(&crate::codes::UNSUPPORTED_COMPRESSION_TYPE),
+            "version {version}: {result:?}"
+        );
     }
 }
 

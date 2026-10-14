@@ -174,21 +174,23 @@ fn epoch_transitions_change_dirty_only_after_a_successful_streams_bump() {
     share.group_epoch = i32::MAX;
     assert!(!consumer.bump_epoch() && consumer.group_epoch == i32::MAX);
     assert!(!share.bump_epoch() && share.group_epoch == i32::MAX);
-    for dirty in [false, true] {
-        let mut streams = Streams {
-            dirty,
-            ..Default::default()
-        };
-        assert!(streams.bump_epoch() && streams.group_epoch == 1 && streams.dirty);
-        streams.group_epoch = i32::MAX;
-        streams.dirty = dirty;
-        assert!(!streams.bump_epoch());
-        assert!(streams.group_epoch == i32::MAX && streams.dirty == dirty);
-    }
+}
+
+#[yare::parameterized(clean = { false }, already_dirty = { true })]
+fn streams_preserve_dirty_state_when_epoch_cannot_advance(dirty: bool) {
+    let mut streams = Streams {
+        dirty,
+        ..Default::default()
+    };
+    assert2::assert!(streams.bump_epoch() && streams.group_epoch == 1 && streams.dirty);
+    streams.group_epoch = i32::MAX;
+    streams.dirty = dirty;
+    assert2::assert!(!streams.bump_epoch());
+    assert2::assert!(streams.group_epoch == i32::MAX && streams.dirty == dirty);
 }
 
 #[test]
-fn consumer_and_share_preserve_assignment_delay_boundaries() {
+fn consumer_and_share_preserve_zero_interval_boundaries() {
     let mut consumer = Consumer::<u8>::default();
     let mut share = Share::default();
     let interval = Duration::from_millis(10);
@@ -196,25 +198,23 @@ fn consumer_and_share_preserve_assignment_delay_boundaries() {
     assert!(!share.assignment_delayed(interval, 1));
     consumer.assignment_timestamp_ms = 100;
     share.assignment_timestamp_ms = 100;
-    for DelayCase { now, delayed } in [
-        DelayCase {
-            now: 109,
-            delayed: true,
-        },
-        DelayCase {
-            now: 110,
-            delayed: false,
-        },
-        DelayCase {
-            now: 111,
-            delayed: false,
-        },
-    ] {
-        assert!(consumer.assignment_delayed(interval, now) == delayed);
-        assert!(share.assignment_delayed(interval, now) == delayed);
-    }
     assert!(!consumer.assignment_delayed(Duration::ZERO, 100));
     assert!(!share.assignment_delayed(Duration::ZERO, 100));
+}
+
+#[yare::parameterized(
+    before = { 109, true },
+    at_boundary = { 110, false },
+    after = { 111, false },
+)]
+fn consumer_and_share_preserve_assignment_delay_boundaries(now: i64, delayed: bool) {
+    let mut consumer = Consumer::<u8>::default();
+    let mut share = Share::default();
+    let interval = Duration::from_millis(10);
+    consumer.assignment_timestamp_ms = 100;
+    share.assignment_timestamp_ms = 100;
+    assert2::assert!(consumer.assignment_delayed(interval, now) == delayed);
+    assert2::assert!(share.assignment_delayed(interval, now) == delayed);
 }
 
 #[test]
@@ -236,11 +236,6 @@ fn rebalance_fences_preserve_due_order_and_use_protocol_removal() {
     assert!(streams.dirty && !streams.members.contains_key("boundary"));
     assert!(consumer.fence_rebalance_timeouts(now).is_empty());
     assert!(streams.fence_rebalance_timeouts(now).is_empty());
-}
-
-struct DelayCase {
-    now: i64,
-    delayed: bool,
 }
 
 struct SessionAge {

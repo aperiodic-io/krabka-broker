@@ -51,8 +51,7 @@ pub(crate) async fn get_topic_id(addr: SocketAddr, topic: &str) -> Uuid {
     resp.topics
         .iter()
         .find(|t| t.name.as_deref() == Some(topic))
-        .map(|t| t.topic_id)
-        .unwrap_or_default()
+        .map_or_default(|t| t.topic_id)
 }
 
 /// One keyed record for the compacted single-partition topic.

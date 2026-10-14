@@ -533,26 +533,23 @@ mod tests {
         assert2::assert!(c.cleanup_policy == CleanupPolicy::Delete);
     }
 
-    #[test]
-    fn a_policy_reports_the_halves_of_kafkas_cleanup_policy_list_it_contains() {
+    #[yare::parameterized(
+        delete = { CleanupPolicy::Delete, false, true, "delete" },
+        compact = { CleanupPolicy::Compact, true, false, "compact" },
+        compact_and_delete = { CleanupPolicy::CompactAndDelete, true, true, "compact,delete" },
+        no_cleanup = { CleanupPolicy::NoCleanup, false, false, "" },
+    )]
+    fn a_policy_reports_the_halves_of_kafkas_cleanup_policy_list_it_contains(
+        policy: CleanupPolicy,
+        compact: bool,
+        delete: bool,
+        rendered: &'static str,
+    ) {
         // `LogConfig` in Kafka derives `compact` and `delete` from the list by
         // membership, so `compact,delete` is both, and each name alone is one.
-        let cases = [
-            (CleanupPolicy::Delete, false, true, "delete"),
-            (CleanupPolicy::Compact, true, false, "compact"),
-            (
-                CleanupPolicy::CompactAndDelete,
-                true,
-                true,
-                "compact,delete",
-            ),
-            (CleanupPolicy::NoCleanup, false, false, ""),
-        ];
-        for (policy, compact, delete, rendered) in cases {
-            assert2::check!(policy.contains_compact() == compact, "{policy:?}");
-            assert2::check!(policy.contains_delete() == delete, "{policy:?}");
-            assert2::check!(policy.as_str() == rendered, "{policy:?}");
-        }
+        assert2::check!(policy.contains_compact() == compact, "{policy:?}");
+        assert2::check!(policy.contains_delete() == delete, "{policy:?}");
+        assert2::check!(policy.as_str() == rendered, "{policy:?}");
     }
 
     #[test]

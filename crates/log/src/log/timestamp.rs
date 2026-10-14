@@ -304,8 +304,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn log_offset_for_timestamp_across_segments() {
+    #[yare::parameterized(
+        before_first = { "before first", 50, Some((Offset(0), 100)) },
+        exact_sealed = { "exact sealed", 300, Some((Offset(2), 300)) },
+        between_records = { "between records", 350, Some((Offset(3), 400)) },
+        active_record = { "active record", 500, Some((Offset(4), 500)) },
+        after_last = { "after last", 600, None },
+    )]
+    fn log_offset_for_timestamp_across_segments(
+        name: &str,
+        target: i64,
+        want: Option<(Offset, i64)>,
+    ) {
         let dir = tempdir().unwrap();
         let config = tiny_segments();
         let mut log = Log::open(dir.path(), config).unwrap();
@@ -320,20 +330,10 @@ mod tests {
             let mut b = ts_batch(ts);
             assert2::assert!(log.append(&mut b).unwrap().0 == Offset(i));
         }
-        for (name, ts, want) in [
-            // before-first → offset 0.
-            ("before first", 50, Some((Offset(0), 100))),
-            // exact match on a sealed segment.
-            ("exact sealed", 300, Some((Offset(2), 300))),
-            // between records → next record up.
-            ("between records", 350, Some((Offset(3), 400))),
-            // landing on the active segment's record.
-            ("active record", 500, Some((Offset(4), 500))),
-            // after-last → None.
-            ("after last", 600, None),
-        ] {
-            check!(log.offset_for_timestamp(ts) == want, "case {name}: ts={ts}");
-        }
+        check!(
+            log.offset_for_timestamp(target) == want,
+            "case {name}: ts={target}"
+        );
         log.close();
         drop(dir);
     }

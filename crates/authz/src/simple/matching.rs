@@ -177,28 +177,75 @@ mod tests {
     /// #649: the operation-implication table (e.g. Read implies Describe)
     /// must apply only to ALLOW ACLs. A DENY Read ACL must not also deny
     /// Describe.
-    #[test]
-    fn implication_table_applies_only_to_allow_acls() {
-        use AclOperation::{Alter, AlterConfigs, Delete, Describe, DescribeConfigs, Read, Write};
-
-        let cases = [
-            (PermissionType::Allow, Read, Describe, true),
-            (PermissionType::Allow, Write, Describe, true),
-            (PermissionType::Allow, Delete, Describe, true),
-            (PermissionType::Allow, Alter, Describe, true),
-            (PermissionType::Allow, AlterConfigs, DescribeConfigs, true),
-            (PermissionType::Deny, Read, Describe, false),
-            (PermissionType::Deny, Write, Describe, false),
-            (PermissionType::Deny, Delete, Describe, false),
-            (PermissionType::Deny, Alter, Describe, false),
-            (PermissionType::Deny, AlterConfigs, DescribeConfigs, false),
-        ];
-        for (permission, stored, requested, expected) in cases {
-            assert2::assert!(
-                matches_operation(stored, requested, permission) == expected,
-                "permission={permission:?} stored={stored:?} requested={requested:?}"
-            );
-        }
+    #[yare::parameterized(
+        allow_read_describe = {
+            PermissionType::Allow,
+            AclOperation::Read,
+            AclOperation::Describe,
+            true,
+        },
+        allow_write_describe = {
+            PermissionType::Allow,
+            AclOperation::Write,
+            AclOperation::Describe,
+            true,
+        },
+        allow_delete_describe = {
+            PermissionType::Allow,
+            AclOperation::Delete,
+            AclOperation::Describe,
+            true,
+        },
+        allow_alter_describe = {
+            PermissionType::Allow,
+            AclOperation::Alter,
+            AclOperation::Describe,
+            true,
+        },
+        allow_alter_configs_describe_configs = {
+            PermissionType::Allow,
+            AclOperation::AlterConfigs,
+            AclOperation::DescribeConfigs,
+            true,
+        },
+        deny_read_describe = {
+            PermissionType::Deny,
+            AclOperation::Read,
+            AclOperation::Describe,
+            false,
+        },
+        deny_write_describe = {
+            PermissionType::Deny,
+            AclOperation::Write,
+            AclOperation::Describe,
+            false,
+        },
+        deny_delete_describe = {
+            PermissionType::Deny,
+            AclOperation::Delete,
+            AclOperation::Describe,
+            false,
+        },
+        deny_alter_describe = {
+            PermissionType::Deny,
+            AclOperation::Alter,
+            AclOperation::Describe,
+            false,
+        },
+        deny_alter_configs_describe_configs = {
+            PermissionType::Deny,
+            AclOperation::AlterConfigs,
+            AclOperation::DescribeConfigs,
+            false,
+        },
+    )]
+    fn implication_table_applies_only_to_allow_acls(
+        permission: PermissionType,
+        stored: AclOperation,
+        requested: AclOperation,
+        expected: bool,
+    ) {
+        assert2::assert!(matches_operation(stored, requested, permission) == expected);
     }
 
     #[test]
@@ -207,33 +254,28 @@ mod tests {
         check_topic_access(&img, "foo", AclOperation::Read, AuthorizationResult::Allow);
     }
 
-    #[test]
-    fn host_filter_matches_specific_ip() {
+    #[yare::parameterized(
+        matching_address = { "127.0.0.1:5000", AuthorizationResult::Allow },
+        different_address = { "127.0.0.2:5000", AuthorizationResult::Deny },
+    )]
+    fn host_filter_matches_specific_ip(host: &str, expected: AuthorizationResult) {
         let img = acl_image([topic_acl().host("127.0.0.1").call()]);
         let a = alice();
-        let h_match: SocketAddr = "127.0.0.1:5000".parse().unwrap();
-        let h_nomatch: SocketAddr = "127.0.0.2:5000".parse().unwrap();
+        let host = host.parse::<SocketAddr>().unwrap();
         let auth = SimpleAclAuthorizer::new(no_super());
-        for (_name, host, expected) in [
-            ("host match", &h_match, AuthorizationResult::Allow),
-            ("host mismatch", &h_nomatch, AuthorizationResult::Deny),
-        ] {
-            assert2::assert!(auth.authorize(&img, &req().p(&a).host(host).call()) == expected);
-        }
+        assert2::assert!(auth.authorize(&img, &req().p(&a).host(&host).call()) == expected);
     }
 
-    #[test]
-    fn operation_all_matches_any_op() {
+    #[yare::parameterized(
+        read = { AclOperation::Read },
+        write = { AclOperation::Write },
+        describe = { AclOperation::Describe },
+        delete = { AclOperation::Delete },
+    )]
+    fn operation_all_matches_any_op(operation: AclOperation) {
         let img = acl_image([topic_acl().op(AclOperation::All).call()]);
         let caller = AliceAuthorizer::default();
-        for op in [
-            AclOperation::Read,
-            AclOperation::Write,
-            AclOperation::Describe,
-            AclOperation::Delete,
-        ] {
-            assert2::assert!(caller.authorize(&img, "foo", op) == AuthorizationResult::Allow);
-        }
+        assert2::assert!(caller.authorize(&img, "foo", operation) == AuthorizationResult::Allow);
     }
 
     #[test]
@@ -247,59 +289,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn read_implies_describe_on_topic() {
-        let img = acl_image([topic_acl().call()]);
-        check_topic_access(
-            &img,
-            "foo",
-            AclOperation::Describe,
-            AuthorizationResult::Allow,
-        );
-    }
-
-    #[test]
-    fn write_implies_describe_on_topic() {
-        let img = acl_image([topic_acl().op(AclOperation::Write).call()]);
-        check_topic_access(
-            &img,
-            "foo",
-            AclOperation::Describe,
-            AuthorizationResult::Allow,
-        );
-    }
-
-    #[test]
-    fn delete_implies_describe() {
-        let img = acl_image([topic_acl().op(AclOperation::Delete).call()]);
-        check_topic_access(
-            &img,
-            "foo",
-            AclOperation::Describe,
-            AuthorizationResult::Allow,
-        );
-    }
-
-    #[test]
-    fn alter_implies_describe() {
-        let img = acl_image([topic_acl().op(AclOperation::Alter).call()]);
-        check_topic_access(
-            &img,
-            "foo",
-            AclOperation::Describe,
-            AuthorizationResult::Allow,
-        );
-    }
-
-    #[test]
-    fn alter_configs_implies_describe_configs() {
-        let img = acl_image([topic_acl().op(AclOperation::AlterConfigs).call()]);
-        check_topic_access(
-            &img,
-            "foo",
-            AclOperation::DescribeConfigs,
-            AuthorizationResult::Allow,
-        );
+    #[yare::parameterized(
+        read = { AclOperation::Read, AclOperation::Describe },
+        write = { AclOperation::Write, AclOperation::Describe },
+        delete = { AclOperation::Delete, AclOperation::Describe },
+        alter = { AclOperation::Alter, AclOperation::Describe },
+        alter_configs = { AclOperation::AlterConfigs, AclOperation::DescribeConfigs },
+    )]
+    fn operation_implies_describe_on_topic(
+        granted_operation: AclOperation,
+        described_operation: AclOperation,
+    ) {
+        let img = acl_image([topic_acl().op(granted_operation).call()]);
+        check_topic_access(&img, "foo", described_operation, AuthorizationResult::Allow);
     }
 
     #[test]
@@ -382,40 +384,6 @@ mod tests {
         ));
     }
 
-    /// A peer address, the host an ACL stores, and the decision for the pair.
-    struct HostCase {
-        peer: &'static str,
-        acl_host: &'static str,
-        expected: AuthorizationResult,
-    }
-
-    fn host_case(
-        peer: &'static str,
-        acl_host: &'static str,
-        expected: AuthorizationResult,
-    ) -> HostCase {
-        HostCase {
-            peer,
-            acl_host,
-            expected,
-        }
-    }
-
-    /// Check the same literal host ACL across peer addresses, with a caller-selected metadata version.
-    fn check_host_cases(image: impl Fn() -> krabka_metadata::MetadataImage, cases: &[HostCase]) {
-        let principal = alice();
-        let auth = SimpleAclAuthorizer::new(no_super());
-        for HostCase {
-            peer,
-            acl_host,
-            expected,
-        } in cases
-        {
-            let img = image_with_acls(image(), [topic_acl().host(acl_host).call()]);
-            check_peer(&auth, &principal, &img, peer, *expected, Some(acl_host));
-        }
-    }
-
     fn check_peer(
         auth: &SimpleAclAuthorizer,
         principal: &krabka_security::Principal,
@@ -433,98 +401,100 @@ mod tests {
         }
     }
 
+    fn check_host_acl(
+        base: krabka_metadata::MetadataImage,
+        peer: &str,
+        acl_host: &str,
+        expected: AuthorizationResult,
+    ) {
+        let principal = alice();
+        let auth = SimpleAclAuthorizer::new(no_super());
+        let image = image_with_acls(base, [topic_acl().host(acl_host).call()]);
+        check_peer(&auth, &principal, &image, peer, expected, Some(acl_host));
+    }
+
     /// The ACL host comparison must use the JDK's `getHostAddress()` text,
     /// not Rust's `Display` text, because that is what Kafka tooling writes
     /// into ACL host strings. See the module doc on
     /// [`crate::jdk_host_address`].
-    #[test]
-    fn host_matching_uses_jdk_address_text() {
-        let cases = [
-            host_case("127.0.0.1:5000", "127.0.0.1", AuthorizationResult::Allow),
-            host_case(
-                "[::ffff:10.0.0.5]:5000",
-                "10.0.0.5",
-                AuthorizationResult::Allow,
-            ),
-            host_case(
-                "[::ffff:10.0.0.5]:5000",
-                "::ffff:10.0.0.5",
-                AuthorizationResult::Deny,
-            ),
-            host_case("[::1]:5000", "0:0:0:0:0:0:0:1", AuthorizationResult::Allow),
-            host_case("[::1]:5000", "::1", AuthorizationResult::Deny),
-            host_case(
-                "[2001:db8::5]:5000",
-                "2001:db8:0:0:0:0:0:5",
-                AuthorizationResult::Allow,
-            ),
-        ];
-        check_host_cases(img, &cases);
+    #[yare::parameterized(
+        ipv4_text = { "127.0.0.1:5000", "127.0.0.1", AuthorizationResult::Allow },
+        mapped_peer_ipv4_acl = { "[::ffff:10.0.0.5]:5000", "10.0.0.5", AuthorizationResult::Allow },
+        mapped_peer_ipv6_acl = {
+            "[::ffff:10.0.0.5]:5000",
+            "::ffff:10.0.0.5",
+            AuthorizationResult::Deny,
+        },
+        expanded_ipv6_acl = { "[::1]:5000", "0:0:0:0:0:0:0:1", AuthorizationResult::Allow },
+        compressed_ipv6_acl = { "[::1]:5000", "::1", AuthorizationResult::Deny },
+        expanded_global_ipv6_acl = {
+            "[2001:db8::5]:5000",
+            "2001:db8:0:0:0:0:0:5",
+            AuthorizationResult::Allow,
+        },
+    )]
+    fn host_matching_uses_jdk_address_text(
+        peer: &'static str,
+        acl_host: &'static str,
+        expected: AuthorizationResult,
+    ) {
+        check_host_acl(img(), peer, acl_host, expected);
     }
 
     /// KIP-1276: a CIDR ACL host matches by numeric range, not by comparing
     /// the peer's JDK host-address text against the CIDR literal.
-    #[test]
-    fn cidr_host_matches_peer_address_by_range() {
-        let cases = [
-            host_case("10.1.2.3:5000", "10.0.0.0/8", AuthorizationResult::Allow),
-            host_case("11.0.0.1:5000", "10.0.0.0/8", AuthorizationResult::Deny),
-            host_case(
-                "[2001:db8::5]:5000",
-                "2001:db8::/32",
-                AuthorizationResult::Allow,
-            ),
-            host_case(
-                "[2001:db9::5]:5000",
-                "2001:db8::/32",
-                AuthorizationResult::Deny,
-            ),
-        ];
-        check_host_cases(cidr_img, &cases);
+    #[yare::parameterized(
+        ipv4_inside = { "10.1.2.3:5000", "10.0.0.0/8", AuthorizationResult::Allow },
+        ipv4_outside = { "11.0.0.1:5000", "10.0.0.0/8", AuthorizationResult::Deny },
+        ipv6_inside = { "[2001:db8::5]:5000", "2001:db8::/32", AuthorizationResult::Allow },
+        ipv6_outside = { "[2001:db9::5]:5000", "2001:db8::/32", AuthorizationResult::Deny },
+    )]
+    fn cidr_host_matches_peer_address_by_range(
+        peer: &'static str,
+        acl_host: &'static str,
+        expected: AuthorizationResult,
+    ) {
+        check_host_acl(cidr_img(), peer, acl_host, expected);
     }
 
     /// Kafka 4.3.1 compares every ACL host as text, and trunk reads a range
     /// only from `metadata.version` 4.4-IV1. Below it a host containing `/`
     /// applies to no peer, so a range ALLOW grants nothing and a range DENY
     /// denies nothing.
-    #[test]
-    fn a_host_with_a_slash_is_plain_text_below_the_cidr_metadata_version() {
+    #[yare::parameterized(
+        range_allow_is_text = {
+            vec![(PermissionType::Allow, "10.0.0.0/8")],
+            AuthorizationResult::Deny,
+        },
+        wildcard_allow_wins = {
+            vec![(PermissionType::Allow, "*"), (PermissionType::Deny, "10.0.0.0/8")],
+            AuthorizationResult::Allow,
+        },
+    )]
+    fn a_host_with_a_slash_is_plain_text_below_the_cidr_metadata_version(
+        entries: Vec<(PermissionType, &'static str)>,
+        expected: AuthorizationResult,
+    ) {
         let a = alice();
         let auth = SimpleAclAuthorizer::new(no_super());
         let h: SocketAddr = "10.1.2.3:5000".parse().unwrap();
-        // (stored entries, expected)
-        let cases = [
-            (
-                vec![(PermissionType::Allow, "10.0.0.0/8")],
-                AuthorizationResult::Deny,
-            ),
-            (
-                vec![
-                    (PermissionType::Allow, "*"),
-                    (PermissionType::Deny, "10.0.0.0/8"),
-                ],
-                AuthorizationResult::Allow,
-            ),
-        ];
-        for (entries, expected) in cases {
-            let mut img = img();
-            for (permission, host) in &entries {
-                img.apply(&MetadataRecord::V1AccessControlEntry(
-                    topic_acl().permission(*permission).host(host).call(),
-                ));
-            }
-            assert2::assert!(
-                auth.authorize(&img, &req().p(&a).host(&h).call()) == expected,
-                "{entries:?}"
-            );
+        let mut img = img();
+        for (permission, host) in &entries {
+            img.apply(&MetadataRecord::V1AccessControlEntry(
+                topic_acl().permission(*permission).host(host).call(),
+            ));
         }
+        assert2::assert!(auth.authorize(&img, &req().p(&a).host(&h).call()) == expected);
     }
 
     /// A CIDR DENY still wins over a wildcard ALLOW for a peer inside the
     /// range, and the wildcard ALLOW still covers a peer outside it -- the
     /// same deny-wins-over-allow rule as a literal host ACL.
-    #[test]
-    fn cidr_deny_overrides_wildcard_allow_inside_range() {
+    #[yare::parameterized(
+        peer_inside_range = { "10.1.2.3:5000", AuthorizationResult::Deny },
+        peer_outside_range = { "192.168.0.1:5000", AuthorizationResult::Allow },
+    )]
+    fn cidr_deny_overrides_wildcard_allow_inside_range(peer: &str, expected: AuthorizationResult) {
         let img = image_with_acls(cidr_img(), [
             topic_acl().call(),
             topic_acl()
@@ -534,13 +504,7 @@ mod tests {
         ]);
         let a = alice();
         let auth = SimpleAclAuthorizer::new(no_super());
-        let cases = [
-            ("10.1.2.3:5000", AuthorizationResult::Deny),
-            ("192.168.0.1:5000", AuthorizationResult::Allow),
-        ];
-        for (peer, expected) in cases {
-            check_peer(&auth, &a, &img, peer, expected, None);
-        }
+        check_peer(&auth, &a, &img, peer, expected, None);
     }
 
     /// A DENY ACL written in Kafka's JDK host-address form must still deny an

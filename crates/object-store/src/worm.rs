@@ -219,6 +219,38 @@ mod tests {
         "disable_oauth":true
     }"#;
 
+    #[derive(Clone, Copy)]
+    enum S3PolicyCase {
+        SuspendedVersioning,
+        MissingObjectLock,
+        MissingRule,
+        GovernanceRetention,
+        ZeroRetention,
+    }
+
+    fn versioning(status: Option<&str>) -> VersioningConfiguration {
+        VersioningConfiguration {
+            status: status.map(str::to_owned),
+        }
+    }
+
+    fn lock(
+        enabled: Option<&str>,
+        mode: Option<&str>,
+        days: Option<u64>,
+    ) -> ObjectLockConfiguration {
+        ObjectLockConfiguration {
+            object_lock_enabled: enabled.map(str::to_owned),
+            rule: Some(ObjectLockRule {
+                default_retention: Some(DefaultRetention {
+                    mode: mode.map(str::to_owned),
+                    days,
+                    years: None,
+                }),
+            }),
+        }
+    }
+
     #[tokio::test]
     async fn requires_versioning_and_positive_compliance_retention() {
         let pages = [
@@ -238,38 +270,30 @@ mod tests {
         server.await.unwrap();
     }
 
-    #[test]
-    fn s3_policy_rejects_each_missing_protection() {
+    #[yare::parameterized(
+        suspended_versioning = { S3PolicyCase::SuspendedVersioning },
+        missing_object_lock = { S3PolicyCase::MissingObjectLock },
+        missing_rule = { S3PolicyCase::MissingRule },
+        governance_retention = { S3PolicyCase::GovernanceRetention },
+        zero_retention = { S3PolicyCase::ZeroRetention },
+    )]
+    fn s3_policy_rejects_each_missing_protection(case: S3PolicyCase) {
         let cfg = S3Config {
             bucket: "bucket".into(),
             ..Default::default()
         };
-        let versioning = |status: Option<&str>| VersioningConfiguration {
-            status: status.map(str::to_string),
-        };
-        let lock = |enabled: Option<&str>, mode: Option<&str>, days| ObjectLockConfiguration {
-            object_lock_enabled: enabled.map(str::to_string),
-            rule: Some(ObjectLockRule {
-                default_retention: Some(DefaultRetention {
-                    mode: mode.map(str::to_string),
-                    days,
-                    years: None,
-                }),
-            }),
-        };
-
-        for (versioning, lock, reason) in [
-            (
+        let (versioning, lock, reason) = match case {
+            S3PolicyCase::SuspendedVersioning => (
                 versioning(Some("Suspended")),
                 lock(Some("Enabled"), Some("COMPLIANCE"), Some(1)),
                 "versioning Enabled",
             ),
-            (
+            S3PolicyCase::MissingObjectLock => (
                 versioning(Some("Enabled")),
                 lock(None, Some("COMPLIANCE"), Some(1)),
                 "Object Lock Enabled",
             ),
-            (
+            S3PolicyCase::MissingRule => (
                 versioning(Some("Enabled")),
                 ObjectLockConfiguration {
                     object_lock_enabled: Some("Enabled".into()),
@@ -277,50 +301,44 @@ mod tests {
                 },
                 "no Object Lock default retention",
             ),
-            (
+            S3PolicyCase::GovernanceRetention => (
                 versioning(Some("Enabled")),
                 lock(Some("Enabled"), Some("GOVERNANCE"), Some(1)),
                 "COMPLIANCE",
             ),
-            (
+            S3PolicyCase::ZeroRetention => (
                 versioning(Some("Enabled")),
                 lock(Some("Enabled"), Some("COMPLIANCE"), Some(0)),
                 "no positive Days or Years",
             ),
-        ] {
-            let error = validate_s3_policy(&cfg, &versioning, lock).unwrap_err();
-            check!(error.to_string().contains(reason), "{reason}: {error}");
-        }
+        };
+        let error = validate_s3_policy(&cfg, &versioning, lock).unwrap_err();
+        check!(error.to_string().contains(reason), "{reason}: {error}");
     }
 
-    #[test]
-    fn gcs_policy_rejects_each_missing_protection() {
+    #[yare::parameterized(
+        versioning_disabled = {
+            r#"{"versioning":{"enabled":false},"retentionPolicy":{"retentionPeriod":"1","isLocked":true}}"#,
+            "versioning enabled",
+        },
+        missing_retention = { r#"{"versioning":{"enabled":true}}"#, "no GCS retention policy" },
+        unlocked_retention = {
+            r#"{"versioning":{"enabled":true},"retentionPolicy":{"retentionPeriod":"1","isLocked":false}}"#,
+            "locked GCS retention policy",
+        },
+        zero_retention = {
+            r#"{"versioning":{"enabled":true},"retentionPolicy":{"retentionPeriod":"0","isLocked":true}}"#,
+            "no positive retention period",
+        },
+    )]
+    fn gcs_policy_rejects_each_missing_protection(json: &str, reason: &str) {
         let cfg = GcsConfig {
             bucket: "bucket".into(),
             ..Default::default()
         };
-        for (json, reason) in [
-            (
-                r#"{"versioning":{"enabled":false},"retentionPolicy":{"retentionPeriod":"1","isLocked":true}}"#,
-                "versioning enabled",
-            ),
-            (
-                r#"{"versioning":{"enabled":true}}"#,
-                "no GCS retention policy",
-            ),
-            (
-                r#"{"versioning":{"enabled":true},"retentionPolicy":{"retentionPeriod":"1","isLocked":false}}"#,
-                "locked GCS retention policy",
-            ),
-            (
-                r#"{"versioning":{"enabled":true},"retentionPolicy":{"retentionPeriod":"0","isLocked":true}}"#,
-                "no positive retention period",
-            ),
-        ] {
-            let policy = serde_json::from_str(json).unwrap();
-            let error = validate_gcs_policy(&cfg, policy).unwrap_err();
-            check!(error.to_string().contains(reason), "{reason}: {error}");
-        }
+        let policy = serde_json::from_str(json).unwrap();
+        let error = validate_gcs_policy(&cfg, policy).unwrap_err();
+        check!(error.to_string().contains(reason), "{reason}: {error}");
     }
 
     /// Serves one canned `Buckets.get` body to one client, checking on the
@@ -364,74 +382,74 @@ mod tests {
     /// covers the decision; this covers the whole `Buckets.get` round trip, so
     /// a policy a real bucket reports as non-compliant fails archive startup
     /// rather than being lost between the request and the check.
-    #[tokio::test]
-    async fn refuses_a_gcs_bucket_whose_policy_is_not_worm() {
-        for (body, reason) in [
-            (
-                r#"{"versioning":{"enabled":false},"retentionPolicy":{"retentionPeriod":"86400","isLocked":true}}"#,
-                "versioning enabled",
-            ),
-            (
-                r#"{"versioning":{"enabled":true}}"#,
-                "no GCS retention policy",
-            ),
-            (
-                r#"{"versioning":{"enabled":true},"retentionPolicy":{"retentionPeriod":"86400","isLocked":false}}"#,
-                "locked GCS retention policy",
-            ),
-        ] {
-            let HttpServer { endpoint, server } = serve_bucket_policy(body).await;
+    #[yare::parameterized(
+        versioning_disabled = {
+            r#"{"versioning":{"enabled":false},"retentionPolicy":{"retentionPeriod":"86400","isLocked":true}}"#,
+            "versioning enabled",
+        },
+        missing_retention = { r#"{"versioning":{"enabled":true}}"#, "no GCS retention policy" },
+        unlocked_retention = {
+            r#"{"versioning":{"enabled":true},"retentionPolicy":{"retentionPeriod":"86400","isLocked":false}}"#,
+            "locked GCS retention policy",
+        },
+    )]
+    #[test_macro(tokio::test)]
+    async fn refuses_a_gcs_bucket_whose_policy_is_not_worm(body: &str, reason: &str) {
+        let HttpServer { endpoint, server } = serve_bucket_policy(body).await;
 
-            let error = verify_gcs_worm_bucket(&gcs_cfg(endpoint))
-                .await
-                .unwrap_err();
-            check!(error.to_string().contains(reason), "{reason}: {error}");
-            server.await.unwrap();
-        }
+        let error = verify_gcs_worm_bucket(&gcs_cfg(endpoint))
+            .await
+            .unwrap_err();
+        check!(error.to_string().contains(reason), "{reason}: {error}");
+        server.await.unwrap();
     }
 
-    #[tokio::test]
-    async fn bucket_checks_obey_request_and_retry_deadlines() {
-        for (gcs, retry_deadline) in [(false, false), (true, false), (false, true), (true, true)] {
-            let HttpListener { listener, endpoint } = http_listener().await;
-            let server = tokio::spawn(async move {
-                let _socket = accept_http_request(listener).await;
-                std::future::pending::<()>().await;
-            });
-            let request_timeout = if retry_deadline {
-                Duration::from_secs(2)
+    #[yare::parameterized(
+        s3_request_deadline = { false, false },
+        gcs_request_deadline = { true, false },
+        s3_retry_deadline = { false, true },
+        gcs_retry_deadline = { true, true },
+    )]
+    #[test_macro(tokio::test)]
+    async fn bucket_checks_obey_request_and_retry_deadlines(gcs: bool, retry_deadline: bool) {
+        let HttpListener { listener, endpoint } = http_listener().await;
+        let server = tokio::spawn(async move {
+            let _socket = accept_http_request(listener).await;
+            std::future::pending::<()>().await;
+        });
+        let request_timeout = if retry_deadline {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_millis(25)
+        };
+        let retry_timeout = if retry_deadline {
+            Duration::from_millis(25)
+        } else {
+            Duration::from_secs(2)
+        };
+        let result = tokio::time::timeout(Duration::from_secs(1), async {
+            if gcs {
+                let mut cfg = gcs_cfg(endpoint);
+                cfg.request_timeout = request_timeout;
+                cfg.retry_timeout = retry_timeout;
+                cfg.max_retries = 0;
+                verify_gcs_worm_bucket(&cfg).await
             } else {
-                Duration::from_millis(25)
-            };
-            let retry_timeout = if retry_deadline {
-                Duration::from_millis(25)
-            } else {
-                Duration::from_secs(2)
-            };
-            let result = tokio::time::timeout(Duration::from_secs(1), async {
-                if gcs {
-                    let mut cfg = gcs_cfg(endpoint);
-                    cfg.request_timeout = request_timeout;
-                    cfg.retry_timeout = retry_timeout;
-                    cfg.max_retries = 0;
-                    verify_gcs_worm_bucket(&cfg).await
-                } else {
-                    let mut cfg = s3_config("bucket", endpoint);
-                    cfg.request_timeout = request_timeout;
-                    cfg.retry_timeout = retry_timeout;
-                    cfg.max_retries = 0;
-                    verify_s3_worm_bucket(&cfg).await
-                }
-            })
-            .await;
-            server.abort();
-            let error = result
-                .expect("configured deadline must expire before the test guard")
-                .unwrap_err();
-            check!(matches!(error, ObjectStoreError::Backend(_)));
-            if retry_deadline {
-                check!(error.to_string().contains("retry deadline exceeded"));
+                let mut cfg = s3_config("bucket", endpoint);
+                cfg.request_timeout = request_timeout;
+                cfg.retry_timeout = retry_timeout;
+                cfg.max_retries = 0;
+                verify_s3_worm_bucket(&cfg).await
             }
+        })
+        .await;
+        server.abort();
+        let error = result
+            .expect("configured deadline must expire before the test guard")
+            .unwrap_err();
+        check!(matches!(error, ObjectStoreError::Backend(_)));
+        if retry_deadline {
+            check!(error.to_string().contains("retry deadline exceeded"));
         }
     }
 }

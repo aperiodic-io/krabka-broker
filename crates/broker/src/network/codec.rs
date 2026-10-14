@@ -229,20 +229,26 @@ mod tests {
         assert!(codec.decode(&mut frame_of_five).is_err());
     }
 
-    #[test]
-    fn response_frame_length_is_bounded_by_the_int32_size_prefix() {
-        let int32_max = usize::try_from(i32::MAX).expect("i32::MAX fits usize");
-        for (len, accepted) in [
-            (0, Some(0_u32)),
-            (100 * 1024 * 1024 + 1, Some(104_857_601)),
-            (int32_max, Some(i32::MAX.cast_unsigned())),
-            (int32_max + 1, None),
-        ] {
-            check!(
-                response_frame_length(len).ok() == accepted,
-                "a {len}-byte response frame"
-            );
-        }
+    #[yare::parameterized(
+        empty = { 0, Some(0_u32) },
+        hundred_mebibytes_plus_one = { 100 * 1024 * 1024 + 1, Some(104_857_601) },
+        i32_max = {
+            usize::try_from(i32::MAX).expect("i32::MAX fits usize"),
+            Some(i32::MAX.cast_unsigned()),
+        },
+        above_i32_max = {
+            usize::try_from(i32::MAX).expect("i32::MAX fits usize") + 1,
+            None,
+        },
+    )]
+    fn response_frame_length_is_bounded_by_the_int32_size_prefix(
+        len: usize,
+        accepted: Option<u32>,
+    ) {
+        check!(
+            response_frame_length(len).ok() == accepted,
+            "a {len}-byte response frame"
+        );
     }
 
     #[test]

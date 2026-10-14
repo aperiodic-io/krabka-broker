@@ -247,11 +247,28 @@ mod tests {
         .await
     }
 
+    fn assert_precreation_preference(partitions: &PartitionRegistry, expected: &Path) {
+        assert!(
+            partitions
+                .preferred_log_dir(uuid::Uuid::from_u128(1), PartitionIndex(0))
+                .as_deref()
+                == Some(expected)
+        );
+    }
+
     /// The log dirs, the partitions and the future logs of a move.
     struct MoveRegistries {
         log_dirs: Vec<PathBuf>,
         partitions: Arc<PartitionRegistry>,
         future_logs: Arc<DashMap<(String, PartitionIndex), Arc<FutureLogState>>>,
+    }
+
+    fn empty_move_registries(log_dirs: Vec<PathBuf>) -> MoveRegistries {
+        MoveRegistries {
+            log_dirs,
+            partitions: Arc::new(PartitionRegistry::new()),
+            future_logs: Arc::new(DashMap::new()),
+        }
     }
 
     fn registered_move(primary: &Path, target: &Path) -> MoveRegistries {
@@ -306,10 +323,7 @@ mod tests {
         .await
         .expect_err("expected ReplicaNotAvailable");
         assert!(matches!(err, MoveError::ReplicaNotAvailable));
-        assert!(
-            partitions.preferred_log_dir(uuid::Uuid::from_u128(1), PartitionIndex(0))
-                == Some(dir.path().to_path_buf())
-        );
+        assert_precreation_preference(&partitions, dir.path());
     }
 
     #[tokio::test]
@@ -336,19 +350,21 @@ mod tests {
         .expect_err("invalid target");
 
         assert!(matches!(err, MoveError::LogDirNotFound));
-        assert!(
-            partitions.preferred_log_dir(uuid::Uuid::from_u128(1), PartitionIndex(0))
-                == Some(valid.path().to_path_buf())
-        );
+        assert_precreation_preference(&partitions, valid.path());
     }
 
     #[tokio::test]
     async fn a_later_valid_precreation_request_replaces_the_preference() {
-        let partitions = Arc::new(PartitionRegistry::new());
-        let future_logs = Arc::new(DashMap::new());
         let first = tempdir().unwrap();
         let second = tempdir().unwrap();
-        let log_dirs = [first.path().to_path_buf(), second.path().to_path_buf()];
+        let MoveRegistries {
+            log_dirs,
+            partitions,
+            future_logs,
+        } = empty_move_registries(vec![
+            first.path().to_path_buf(),
+            second.path().to_path_buf(),
+        ]);
 
         for target in [&log_dirs[0], &log_dirs[1]] {
             let error = move_with_defaults(
@@ -364,18 +380,21 @@ mod tests {
             assert!(matches!(error, MoveError::ReplicaNotAvailable));
         }
 
-        assert!(
-            partitions.preferred_log_dir(uuid::Uuid::from_u128(1), PartitionIndex(0))
-                == Some(log_dirs[1].clone())
-        );
+        assert_precreation_preference(&partitions, &log_dirs[1]);
     }
 
     #[tokio::test]
     async fn an_offline_target_does_not_replace_the_preference() {
-        let partitions = Arc::new(PartitionRegistry::new());
-        let future_logs = Arc::new(DashMap::new());
         let first = tempdir().unwrap();
         let offline = tempdir().unwrap();
+        let MoveRegistries {
+            log_dirs,
+            partitions,
+            future_logs,
+        } = empty_move_registries(vec![
+            first.path().to_path_buf(),
+            offline.path().to_path_buf(),
+        ]);
         let status = LogDirRegistry::default();
         status.mark_offline(offline.path(), "test failure");
         partitions.set_preferred_log_dir(
@@ -387,7 +406,7 @@ mod tests {
         let error = move_with_defaults(
             &partitions,
             &future_logs,
-            &[first.path().to_path_buf(), offline.path().to_path_buf()],
+            &log_dirs,
             &status,
             Some(uuid::Uuid::from_u128(1)),
             offline.path(),
@@ -396,10 +415,7 @@ mod tests {
         .expect_err("offline target");
 
         assert!(matches!(error, MoveError::Storage(_)));
-        assert!(
-            partitions.preferred_log_dir(uuid::Uuid::from_u128(1), PartitionIndex(0))
-                == Some(first.path().to_path_buf())
-        );
+        assert_precreation_preference(&partitions, first.path());
     }
 
     #[tokio::test]

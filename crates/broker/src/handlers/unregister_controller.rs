@@ -33,13 +33,12 @@ use {
     crate::{
         broker::Broker,
         codes,
-        controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
         error::BrokerError,
         features::CONTROLLER_UNREGISTRATION_MIN_LEVEL,
         handlers::{
             ApiVersion, DispatchResult, RequestContext, audit_admin_success, cluster_alter_denied,
             encode_response,
-            forward_to_controller::{to_active_controller, wrong_controller_message},
+            forward_to_controller::{forward_if_not_controller, wrong_controller_message},
         },
     },
     bytes::Bytes,
@@ -64,68 +63,68 @@ const CLUSTER_ALTER_DENIED_MESSAGE: &str = "Request UnregisterController needs A
 const UNSUPPORTED_METADATA_VERSION_MESSAGE: &str =
     "The current MetadataVersion is too old to support controller unregistration.";
 
-#[krabka_macros::decode_dispatch(request = UnregisterControllerRequest, binding(req))]
-pub(crate) async fn handle(
-    broker: &Broker,
-    version: ApiVersion,
-    req_bytes: &[u8],
-    ctx: &RequestContext<'_>,
-) -> DispatchResult {
-    let image = broker.controller.current_image();
-
-    // A broker listener forwards the request untouched, and the controller
-    // authorizes the principal the `Envelope` names. A node that is itself
-    // the active controller has nowhere to forward to and answers in place.
-    if ctx.connection_id != CONTROLLER_ADMIN_CONNECTION_ID
-        && let Some(answer) = to_active_controller(
+crate::handlers::raw_request_handler!(
+    UnregisterControllerRequest,
+    req,
+    broker,
+    version,
+    req_bytes,
+    ctx,
+    {
+        // A broker listener forwards the request untouched, and the controller
+        // authorizes the principal the `Envelope` names. A node that is itself
+        // the active controller has nowhere to forward to and answers in place.
+        if let Some(answer) = forward_if_not_controller(
             broker,
+            ctx,
             unregister_controller_request::API_KEY,
             req_bytes,
             version,
-            ctx,
             |error_code, message| encode(version, error_code, message),
         )
         .await
-    {
-        return answer;
-    }
-    if cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
-        return encode(
-            version,
-            codes::CLUSTER_AUTHORIZATION_FAILED,
-            Some(CLUSTER_ALTER_DENIED_MESSAGE),
-        );
-    }
+        {
+            return answer;
+        }
+        let image = broker.controller.current_image();
+        if cluster_alter_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+            return encode(
+                version,
+                codes::CLUSTER_AUTHORIZATION_FAILED,
+                Some(CLUSTER_ALTER_DENIED_MESSAGE),
+            );
+        }
 
-    let leader = *broker.controller.watch_leader().borrow();
-    if leader != Some(broker.config.node_id) {
-        return encode(
-            version,
-            codes::NOT_CONTROLLER,
-            Some(&wrong_controller_message(leader)),
-        );
-    }
+        let leader = *broker.controller.watch_leader().borrow();
+        if leader != Some(broker.config.node_id) {
+            return encode(
+                version,
+                codes::NOT_CONTROLLER,
+                Some(&wrong_controller_message(leader)),
+            );
+        }
 
-    let Unregistration {
-        error_code,
-        message,
-    } = match refusal(&image, req.controller_id) {
-        Some(refused) => refused,
-        None => submit(broker, req.controller_id).await,
-    };
-    if error_code == codes::NONE {
-        audit_admin_success(
-            broker.audit_log.as_ref(),
-            ctx,
-            "UnregisterController",
-            vec![crate::handlers::audit_resource(
-                "Controller",
-                req.controller_id.to_string(),
-            )],
-        );
+        let Unregistration {
+            error_code,
+            message,
+        } = match refusal(&image, req.controller_id) {
+            Some(refused) => refused,
+            None => submit(broker, req.controller_id).await,
+        };
+        if error_code == codes::NONE {
+            audit_admin_success(
+                broker.audit_log.as_ref(),
+                ctx,
+                "UnregisterController",
+                vec![crate::handlers::audit_resource(
+                    "Controller",
+                    req.controller_id.to_string(),
+                )],
+            );
+        }
+        encode(version, error_code, message.as_deref())
     }
-    encode(version, error_code, message.as_deref())
-}
+);
 
 /// The error code and message that an `UnregisterController` answers with.
 #[derive(Debug, Clone, PartialEq, Eq)]

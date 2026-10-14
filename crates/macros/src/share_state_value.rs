@@ -158,26 +158,31 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, assert2::assert};
+    use super::*;
 
-    #[test]
-    fn refuses_unknown_scalar_types_and_missing_or_invalid_trailers() {
-        for fields in [
+    #[yare::parameterized(
+        wrong_epoch = {
             "epoch: u32, delivery_complete_count: i32, state_batches: Vec<StateBatch>",
-            "epoch: i32, state_batches: Vec<StateBatch>",
-            "epoch: i32, delivery_complete_count: i32",
+        },
+        missing_delivery = { "epoch: i32, state_batches: Vec<StateBatch>" },
+        missing_batches = { "epoch: i32, delivery_complete_count: i32" },
+        wrong_delivery = {
             "epoch: i32, delivery_complete_count: i64, state_batches: Vec<StateBatch>",
-            "epoch: i32, delivery_complete_count: i32, state_batches: StateBatch",
+        },
+        scalar_batches = { "epoch: i32, delivery_complete_count: i32, state_batches: StateBatch" },
+        generic_epoch = {
             "epoch: i32<u8>, delivery_complete_count: i32, state_batches: Vec<StateBatch>",
+        },
+        two_batch_types = {
             "epoch: i32, delivery_complete_count: i32, state_batches: Vec<StateBatch, StateBatch>",
-        ] {
-            let input = format!(
-                "#[share_state(encode_doc = \"encode\", decode_doc = \"decode\")] struct Value {{ {fields} }}"
-            );
-            let item: ItemStruct = moxy::parse!({ input }).unwrap();
-            assert!(expand(item).is_err());
-        }
-        let item: ItemStruct = moxy::parse!("struct Value { epoch: i32 }").unwrap();
-        assert!(expand(item).is_err());
+        },
+        missing_delivery_and_batches = { "epoch: i32" },
+    )]
+    fn refuses_unknown_scalar_types_and_missing_or_invalid_trailers(fields: &str) {
+        let input = format!(
+            "#[share_state(encode_doc = \"encode\", decode_doc = \"decode\")] struct Value {{ {fields} }}"
+        );
+        let item: ItemStruct = moxy::parse!({ input }).unwrap();
+        assert2::assert!(expand(item).is_err());
     }
 }

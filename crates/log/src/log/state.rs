@@ -373,8 +373,7 @@ impl Log {
                 earlier: self
                     .earlier_batches
                     .get(&entry.producer_id)
-                    .map(|earlier| earlier.iter().copied().collect())
-                    .unwrap_or_default(),
+                    .map_or_default(|earlier| earlier.iter().copied().collect()),
             })
             .collect()
     }
@@ -559,28 +558,30 @@ mod tests {
     /// only reaches keeps holding it. Producer 42 writes a transaction at
     /// offset 0 and commits it at offset 1, the high watermark never passes
     /// the marker, and three plain records follow at offsets 2 to 4.
-    #[test]
-    fn raising_the_log_start_past_a_marker_releases_its_transaction() {
+    #[yare::parameterized(
+        reaches_marker = { "the start reaches the marker", 1, false },
+        passes_marker = { "the start passes the marker", 2, true },
+    )]
+    fn raising_the_log_start_past_a_marker_releases_its_transaction(
+        name: &'static str,
+        new_start: i64,
+        released: bool,
+    ) {
         use crate::log::test_support::commit_marker;
 
-        for (name, new_start, released) in [
-            ("the start reaches the marker", 1, false),
-            ("the start passes the marker", 2, true),
-        ] {
-            let TempLog { dir: _dir, mut log } = test_log();
-            append_transaction(&mut log, 42, 0, &["a"]);
-            log.append(&mut commit_marker(42, 0)).unwrap();
-            log.append(&mut sample_batch(3)).unwrap();
-            check!(log.lso() == Offset(0), "{name}: held before the move");
+        let TempLog { dir: _dir, mut log } = test_log();
+        append_transaction(&mut log, 42, 0, &["a"]);
+        log.append(&mut commit_marker(42, 0)).unwrap();
+        log.append(&mut sample_batch(3)).unwrap();
+        check!(log.lso() == Offset(0), "{name}: held before the move");
 
-            log.set_log_start_offset(Offset(new_start)).unwrap();
+        log.set_log_start_offset(Offset(new_start)).unwrap();
 
-            check!(
-                (log.lso() == log.log_end_offset()) == released,
-                "{name}: lso {:?}",
-                log.lso()
-            );
-        }
+        check!(
+            (log.lso() == log.log_end_offset()) == released,
+            "{name}: lso {:?}",
+            log.lso()
+        );
     }
 
     /// Kafka's `maybeIncrementLogStartOffset` →

@@ -312,45 +312,30 @@ mod tests {
         );
     }
 
-    #[test]
-    fn quorum_membership_decode_rejects_a_missing_or_unknown_version() {
-        for (name, descriptor, expected) in [
-            (
-                "pre-1.0 descriptor with no version",
-                serde_json::json!({"voters": [0, 1, 2]}),
-                QuorumMembershipDecodeError::MissingVersion,
-            ),
-            (
-                "pre-1.0 descriptor with election fields",
-                serde_json::json!({
-                    "cluster_id": Uuid::from_u128(17),
-                    "voters": [0, 1, 2],
-                    "kraft_version": 1,
-                    "leader_epoch": 7,
-                }),
-                QuorumMembershipDecodeError::MissingVersion,
-            ),
-            (
-                "future version",
-                serde_json::json!({"version": 1, "voters": [0, 1, 2]}),
-                QuorumMembershipDecodeError::UnsupportedVersion {
-                    found: "1".to_owned(),
-                },
-            ),
-            (
-                "version that is not a number",
-                serde_json::json!({"version": "0", "voters": [0, 1, 2]}),
-                QuorumMembershipDecodeError::UnsupportedVersion {
-                    found: "\"0\"".to_owned(),
-                },
-            ),
-        ] {
-            let bytes = serde_json::to_vec(&descriptor).unwrap();
-            assert!(
-                decode_quorum_membership(&bytes) == Err(expected),
-                "case {name}"
-            );
-        }
+    #[yare::parameterized(
+        no_version = {
+            serde_json::json!({"voters": [0, 1, 2]}),
+            QuorumMembershipDecodeError::MissingVersion,
+        },
+        old_election_fields = {
+            serde_json::json!({"cluster_id": Uuid::from_u128(17), "voters": [0, 1, 2], "kraft_version": 1, "leader_epoch": 7}),
+            QuorumMembershipDecodeError::MissingVersion,
+        },
+        future_version = {
+            serde_json::json!({"version": 1, "voters": [0, 1, 2]}),
+            QuorumMembershipDecodeError::UnsupportedVersion { found: "1".to_owned() },
+        },
+        non_numeric_version = {
+            serde_json::json!({"version": "0", "voters": [0, 1, 2]}),
+            QuorumMembershipDecodeError::UnsupportedVersion { found: "\"0\"".to_owned() },
+        },
+    )]
+    fn quorum_membership_decode_rejects_a_missing_or_unknown_version(
+        descriptor: serde_json::Value,
+        expected: QuorumMembershipDecodeError,
+    ) {
+        let bytes = serde_json::to_vec(&descriptor).unwrap();
+        assert2::assert!(decode_quorum_membership(&bytes) == Err(expected));
     }
 
     #[test]

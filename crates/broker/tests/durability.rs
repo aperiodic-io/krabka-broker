@@ -28,8 +28,8 @@ use {
     support::{
         client::metric_value,
         durability::{
-            create_topic_on_replicas as create_topic, produce_acks, produce_acks_after_isr_shrink,
-            produce_batch, record_batch_with_values,
+            create_topic_on_replicas as create_topic, produce_acks, produce_batch,
+            record_batch_with_values, time_acks_after_isr_shrink,
         },
         topic_id_for,
     },
@@ -328,13 +328,13 @@ async fn acks_all_completes_via_isr_shrink_when_follower_dead() {
     let dead = cluster.pop().expect("3rd broker");
     dead.0.shutdown().await;
 
-    let (offset, elapsed) = produce_acks_after_isr_shrink()
-        .bootstrap(&bootstrap_1)
-        .topic("shrink")
-        .values(&["x", "y", "z"])
-        .timeout(ProduceTimeoutMillis(10_000))
-        .call()
-        .await;
+    let (offset, elapsed) = time_acks_after_isr_shrink(
+        &bootstrap_1,
+        "shrink",
+        &["x", "y", "z"],
+        ProduceTimeoutMillis(10_000),
+    )
+    .await;
     check!(offset == 0);
     check!(
         elapsed >= Duration::from_millis(1_500),

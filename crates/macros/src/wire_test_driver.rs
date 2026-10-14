@@ -155,17 +155,19 @@ mod tests {
         );
         assert!(plain.contains("authentication:authentication.clone(),api:API,operation:"));
         assert!(plain_tokens.to_string().contains("\"decode response\""));
-        for input in [
-            "",
-            "other exchange",
-            "socket exchange",
-            "flexible exchange, CLIENT",
-            "plain exchange []",
-            "plain exchange { request: Request }",
-            "socket exchange, CLIENT extra",
-        ] {
-            assert!(expand(&input.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        unknown = { "other exchange" },
+        missing_socket_arguments = { "socket exchange" },
+        missing_flexible_version = { "flexible exchange, CLIENT" },
+        empty_plain = { "plain exchange []" },
+        incomplete_plain = { "plain exchange { request: Request }" },
+        trailing = { "socket exchange, CLIENT extra" },
+    )]
+    fn exchange_driver_rejects_invalid_inputs(input: &str) {
+        assert2::assert!(expand(&input.parse().unwrap()).is_err());
     }
 
     #[test]
@@ -176,12 +178,16 @@ mod tests {
         assert!(
             output.contains("dispatch_wire(broker,wire::API_KEY,version,request,context).await")
         );
-        for input in [
-            "broker answer {}",
+    }
+
+    #[yare::parameterized(
+        empty = { "broker answer {}" },
+        extra_field = {
             "broker answer { request: Request, response: Response, api: API, operation: \"extra\" }",
-            "broker answer (request: Request)",
-        ] {
-            assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
-        }
+        },
+        tuple = { "broker answer (request: Request)" },
+    )]
+    fn broker_driver_rejects_invalid_inputs(input: &str) {
+        assert2::assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

@@ -72,12 +72,7 @@ impl RestoreArgs {
             bounded.push(&bound.partition);
         }
 
-        for partition in self
-            .to_offset
-            .iter()
-            .map(|bound| &bound.partition)
-            .chain(self.exclude_offset.iter().map(|range| &range.partition))
-        {
+        for partition in super::offset_partitions(self) {
             if !self.selects_topic(&partition.topic) {
                 return Err(RestoreError::InvalidArgument(format!(
                     "a bound names {partition}, which --topic does not select"
@@ -96,26 +91,24 @@ mod tests {
         clap::Parser as _,
     };
 
-    #[test]
-    fn backend_sub_flags_require_their_bucket() {
-        for stray in [
-            vec!["--archive-s3-region", "eu-west-1"],
-            vec!["--archive-s3-endpoint", "http://minio:9000"],
-            vec!["--archive-s3-access-key-id", "key"],
-            vec!["--archive-s3-secret-access-key", "secret"],
-            vec!["--archive-s3-allow-http"],
-            vec!["--archive-gcs-service-account-path", "/etc/sa.json"],
-            vec!["--archive-gcs-endpoint", "http://fake-gcs:4443"],
-            vec!["--archive-gcs-allow-http"],
-        ] {
-            // The archive source in `args_from` is `--archive-local`, so every one
-            // of these names a backend that was not selected.
-            let args = args_from(&stray).expect("args");
-            check!(
-                matches!(args.validate(), Err(RestoreError::InvalidArgument(_))),
-                "{stray:?}"
-            );
-        }
+    #[yare::parameterized(
+        s3_region = { &["--archive-s3-region", "eu-west-1"][..] },
+        s3_endpoint = { &["--archive-s3-endpoint", "http://minio:9000"][..] },
+        s3_access_key = { &["--archive-s3-access-key-id", "key"][..] },
+        s3_secret_key = { &["--archive-s3-secret-access-key", "secret"][..] },
+        s3_http = { &["--archive-s3-allow-http"][..] },
+        gcs_service_account = { &["--archive-gcs-service-account-path", "/etc/sa.json"][..] },
+        gcs_endpoint = { &["--archive-gcs-endpoint", "http://fake-gcs:4443"][..] },
+        gcs_http = { &["--archive-gcs-allow-http"][..] },
+    )]
+    fn backend_sub_flags_require_their_bucket(stray: &[&str]) {
+        // The archive source in `args_from` is `--archive-local`, so every one
+        // of these names a backend that was not selected.
+        let args = args_from(stray).expect("args");
+        check!(
+            matches!(args.validate(), Err(RestoreError::InvalidArgument(_))),
+            "{stray:?}"
+        );
     }
 
     #[test]

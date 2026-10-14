@@ -443,8 +443,7 @@ fn diskless_index_present(metadata: &TopicMetadata, name: &str) -> Result<bool, 
             error
                 .message
                 .as_deref()
-                .map(|message| format!(" {message:?}"))
-                .unwrap_or_default()
+                .map_or_default(|message| format!(" {message:?}"))
         ))),
     }
 }
@@ -941,9 +940,11 @@ async fn read_manifest(store: &Archive, id: &str) -> Result<Manifest, BackupErro
 mod tests {
     use {
         super::{
-            BackupError, DISKLESS_WAL_INDEX, FileEd25519Signer, GROUP_OFFSETS, MANIFEST,
-            METADATA_CHECKPOINT, RLMM_SNAPSHOT, Sha256Digest, capture, list, restore_offsets,
-            verify, verify_offsets_boundary,
+            BackupError, CAPTURE_ROOT, DISKLESS_WAL_INDEX, FileEd25519Signer, GROUP_OFFSETS,
+            MANIFEST, MAX_SNAPSHOT_BYTES, METADATA_CHECKPOINT, RLMM_SNAPSHOT,
+            RLMM_SNAPSHOT_RELATIVE, Sha256Digest, artifact_byte_limit, capture, check_capture_size,
+            list, newest_metadata_checkpoint, restore_offsets, upload_capped, verify,
+            verify_offsets_boundary,
         },
         crate::{
             archive::{Archive, ArchiveArgs},
@@ -971,112 +972,116 @@ mod tests {
 
     krabka_macros::snapshot_node_fixture!(node_with_rlmm);
 
-    #[test]
-    fn capture_size_limits_match_readers_at_the_boundary() {
-        for (name, expected) in [
-            (MANIFEST, 8 * 1024 * 1024),
-            (GROUP_OFFSETS, 64 * 1024 * 1024),
-            (METADATA_CHECKPOINT, 512 * 1024 * 1024),
-            (RLMM_SNAPSHOT, 512 * 1024 * 1024),
-            (DISKLESS_WAL_INDEX, 256 * 1024 * 1024),
-        ] {
-            let limit = super::artifact_byte_limit(name);
-            check!(limit == expected);
-            check!(super::check_capture_size(name, limit, limit).is_ok());
-            check!(super::check_capture_size(name, limit + 1, limit).is_err());
-            check!(super::check_capture_size(name, u64::MAX, limit).is_err());
-        }
+    #[yare::parameterized(
+        manifest = { MANIFEST, 8 * 1024 * 1024 },
+        group_offsets = { GROUP_OFFSETS, 64 * 1024 * 1024 },
+        metadata_checkpoint = { METADATA_CHECKPOINT, 512 * 1024 * 1024 },
+        rlmm_snapshot = { RLMM_SNAPSHOT, 512 * 1024 * 1024 },
+        diskless_wal_index = { DISKLESS_WAL_INDEX, 256 * 1024 * 1024 },
+    )]
+    fn capture_size_limits_match_readers_at_the_boundary(name: &str, expected: u64) {
+        let limit = artifact_byte_limit(name);
+        check!(limit == expected);
+        check!(check_capture_size(name, limit, limit).is_ok());
+        check!(check_capture_size(name, limit + 1, limit).is_err());
+        check!(check_capture_size(name, u64::MAX, limit).is_err());
     }
 
-    #[tokio::test]
-    async fn capture_upload_caps_accept_equality_and_reject_overflow_before_put() {
-        for name in [
-            RLMM_SNAPSHOT,
-            METADATA_CHECKPOINT,
-            GROUP_OFFSETS,
-            DISKLESS_WAL_INDEX,
-        ] {
-            for size in [8, 9] {
-                let ArchiveFixture {
-                    root: _root, store, ..
-                } = archive_fixture();
-                let id = "0000000000000042";
-                // Earlier artifacts may remain orphaned after a later failure.
-                store
-                    .put_new(&capture_key(id, "earlier"), b"valid".to_vec())
-                    .await
-                    .unwrap();
-                let result =
-                    super::upload_capped(&store, id, name, "node", vec![b'x'; size], 8).await;
-                if size == 8 {
-                    check!(
-                        result.unwrap()
-                            == Artifact {
-                                name: name.to_owned(),
-                                source: "node".to_owned(),
-                                size_bytes: 8,
-                                sha256: sha256_hex(&[b'x'; 8]),
-                            }
-                    );
-                    check!(store.get(&capture_key(id, name)).await.unwrap() == vec![b'x'; size]);
-                } else {
-                    let error = result.unwrap_err();
-                    check!(
-                        matches!(&error, BackupError::Io(error) if error.kind() == std::io::ErrorKind::InvalidData)
-                    );
-                    check!(error.to_string().contains(name));
-                    check!(matches!(
-                        store.get(&capture_key(id, name)).await,
-                        Err(BackupError::ObjectStore(
-                            krabka_object_store::ObjectStoreError::NotFound(_)
-                        ))
-                    ));
-                    check!(matches!(
-                        store.get(&capture_key(id, MANIFEST)).await,
-                        Err(BackupError::ObjectStore(
-                            krabka_object_store::ObjectStoreError::NotFound(_)
-                        ))
-                    ));
-                    check!(store.get(&capture_key(id, "earlier")).await.unwrap() == b"valid");
-                }
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn capture_rejects_oversized_local_snapshots_without_committing() {
-        for name in [RLMM_SNAPSHOT, METADATA_CHECKPOINT] {
-            let node = node_with_both_inputs();
-            let path = if name == RLMM_SNAPSHOT {
-                node.path().join(super::RLMM_SNAPSHOT_RELATIVE)
-            } else {
-                super::newest_metadata_checkpoint(node.path()).unwrap()
-            };
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open(path)
-                .unwrap()
-                .set_len(super::MAX_SNAPSHOT_BYTES + 1)
-                .unwrap();
-            let ArchiveFixture {
-                root: _root,
-                args,
-                store,
-            } = archive_fixture();
-            let error = capture(Some(node.path()), None, &args).await.unwrap_err();
+    #[yare::parameterized(
+        rlmm_at_limit = { RLMM_SNAPSHOT, 8usize, true },
+        rlmm_over_limit = { RLMM_SNAPSHOT, 9usize, false },
+        metadata_at_limit = { METADATA_CHECKPOINT, 8usize, true },
+        metadata_over_limit = { METADATA_CHECKPOINT, 9usize, false },
+        offsets_at_limit = { GROUP_OFFSETS, 8usize, true },
+        offsets_over_limit = { GROUP_OFFSETS, 9usize, false },
+        wal_index_at_limit = { DISKLESS_WAL_INDEX, 8usize, true },
+        wal_index_over_limit = { DISKLESS_WAL_INDEX, 9usize, false },
+    )]
+    #[test_macro(tokio::test)]
+    async fn capture_upload_caps_accept_equality_and_reject_overflow_before_put(
+        name: &str,
+        size: usize,
+        expected_success: bool,
+    ) {
+        let ArchiveFixture {
+            root: _root, store, ..
+        } = archive_fixture();
+        let id = "0000000000000042";
+        // Earlier artifacts may remain orphaned after a later failure.
+        store
+            .put_new(&capture_key(id, "earlier"), b"valid".to_vec())
+            .await
+            .unwrap();
+        let result = upload_capped(&store, id, name, "node", vec![b'x'; size], 8).await;
+        if expected_success {
+            check!(
+                result.unwrap()
+                    == Artifact {
+                        name: name.to_owned(),
+                        source: "node".to_owned(),
+                        size_bytes: 8,
+                        sha256: sha256_hex(&[b'x'; 8]),
+                    }
+            );
+            check!(store.get(&capture_key(id, name)).await.unwrap() == vec![b'x'; size]);
+        } else {
+            let error = result.unwrap_err();
+            check!(
+                matches!(&error, BackupError::Io(error) if error.kind() == std::io::ErrorKind::InvalidData)
+            );
             check!(error.to_string().contains(name));
-            let ids = store.child_directories(super::CAPTURE_ROOT).await.unwrap();
-            check!(ids.len() == usize::from(name == METADATA_CHECKPOINT));
-            for id in ids {
-                check!(store.get(&capture_key(&id, RLMM_SNAPSHOT)).await.unwrap() == RLMM_BYTES);
-                for absent in [name, MANIFEST] {
-                    check!(matches!(
-                        store.get(&capture_key(&id, absent)).await,
-                        Err(BackupError::ObjectStore(
-                            krabka_object_store::ObjectStoreError::NotFound(_)
-                        ))
-                    ));
-                }
+            check!(matches!(
+                store.get(&capture_key(id, name)).await,
+                Err(BackupError::ObjectStore(
+                    krabka_object_store::ObjectStoreError::NotFound(_)
+                ))
+            ));
+            check!(matches!(
+                store.get(&capture_key(id, MANIFEST)).await,
+                Err(BackupError::ObjectStore(
+                    krabka_object_store::ObjectStoreError::NotFound(_)
+                ))
+            ));
+            check!(store.get(&capture_key(id, "earlier")).await.unwrap() == b"valid");
+        }
+    }
+
+    #[yare::parameterized(
+        rlmm = { RLMM_SNAPSHOT },
+        metadata_checkpoint = { METADATA_CHECKPOINT },
+    )]
+    #[test_macro(tokio::test)]
+    async fn capture_rejects_oversized_local_snapshots_without_committing(name: &str) {
+        let node = node_with_both_inputs();
+        let path = if name == RLMM_SNAPSHOT {
+            node.path().join(RLMM_SNAPSHOT_RELATIVE)
+        } else {
+            newest_metadata_checkpoint(node.path()).unwrap()
+        };
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_len(MAX_SNAPSHOT_BYTES + 1)
+            .unwrap();
+        let ArchiveFixture {
+            root: _root,
+            args,
+            store,
+        } = archive_fixture();
+        let error = capture(Some(node.path()), None, &args).await.unwrap_err();
+        check!(error.to_string().contains(name));
+        let ids = store.child_directories(CAPTURE_ROOT).await.unwrap();
+        check!(ids.len() == usize::from(name == METADATA_CHECKPOINT));
+        for id in ids {
+            check!(store.get(&capture_key(&id, RLMM_SNAPSHOT)).await.unwrap() == RLMM_BYTES);
+            for absent in [name, MANIFEST] {
+                check!(matches!(
+                    store.get(&capture_key(&id, absent)).await,
+                    Err(BackupError::ObjectStore(
+                        krabka_object_store::ObjectStoreError::NotFound(_)
+                    ))
+                ));
             }
         }
     }
@@ -1179,14 +1184,6 @@ mod tests {
         }
     }
 
-    /// A node directory, a fresh archive root, the arguments that open it, and the id of the capture of the node taken into it.
-    struct CapturedNode {
-        node: tempfile::TempDir,
-        archive_root: tempfile::TempDir,
-        args: ArchiveArgs,
-        id: String,
-    }
-
     fn set_file_len(root: &std::path::Path, key: &str, len: u64) {
         std::fs::OpenOptions::new()
             .write(true)
@@ -1194,6 +1191,14 @@ mod tests {
             .unwrap()
             .set_len(len)
             .unwrap();
+    }
+
+    /// A node directory, a fresh archive root, the arguments that open it, and the id of the capture of the node taken into it.
+    struct CapturedNode {
+        node: tempfile::TempDir,
+        archive_root: tempfile::TempDir,
+        args: ArchiveArgs,
+        id: String,
     }
 
     async fn captured_node() -> CapturedNode {

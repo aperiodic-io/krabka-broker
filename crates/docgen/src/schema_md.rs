@@ -152,8 +152,7 @@ fn write_field_row(
     let default = field
         .get("default")
         .or_else(|| resolved.get("default"))
-        .map(render_default)
-        .unwrap_or_default();
+        .map_or_default(render_default);
     let desc = field
         .get("description")
         .or_else(|| resolved.get("description"))
@@ -291,8 +290,7 @@ fn required_fields(schema: &Value) -> Vec<&str> {
     schema
         .get("required")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default()
+        .map_or_default(|a| a.iter().filter_map(Value::as_str).collect())
 }
 
 #[cfg(test)]

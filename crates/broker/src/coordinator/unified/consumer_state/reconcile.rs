@@ -265,8 +265,7 @@ impl GroupState {
             let target_here: HashSet<i32> = if subscription.contains(&topic_id) {
                 target
                     .get(&topic_id)
-                    .map(|parts| parts.iter().copied().collect())
-                    .unwrap_or_default()
+                    .map_or_default(|parts| parts.iter().copied().collect())
             } else {
                 HashSet::new()
             };
@@ -303,8 +302,7 @@ impl GroupState {
             let pending_here: HashSet<i32> = member
                 .partitions_pending_revocation
                 .get(&topic_id)
-                .map(|parts| parts.iter().copied().collect())
-                .unwrap_or_default();
+                .map_or_default(|parts| parts.iter().copied().collect());
             for partition in partitions {
                 if held_by_others.contains(&TopicIdPartition {
                     topic_id,
@@ -462,9 +460,8 @@ mod tests {
     use {
         super::*,
         crate::coordinator::unified::{
-            consumer_state::{
-                ResolvedRegularExpression,
-                test_support::{NamedTopic, Topics, member, subscribed_member},
+            consumer_state::test_support::{
+                NamedTopic, Topics, member, resolved_regex, subscribed_member,
             },
             test_support::{MemberEpoch, MemberEpochs},
         },
@@ -568,8 +565,7 @@ mod tests {
         let list = |partitions: &Partitions| {
             partitions
                 .get(&T)
-                .map(|ids| ids.iter().copied().map(PartitionIndex).collect())
-                .unwrap_or_default()
+                .map_or_default(|ids| ids.iter().copied().map(PartitionIndex).collect())
         };
         Held {
             epoch: MemberEpoch(member.member_epoch),
@@ -666,33 +662,41 @@ mod tests {
             after: settled_expected(),
             ..Default::default()
         };
+        let withheld_by_other = |name, other| Row {
+            state_change: StateChange::Changed,
+            name,
+            before: single_partition_input(),
+            other,
+            after: unreleased_shape(),
+            ..Default::default()
+        };
 
         let rows = [
             // A member that must revoke stays where it is until it reports an
             // owned set without the pending partitions.
             Row {
                 name: "an absent owned set keeps a member that must revoke",
-                before: revoking_input(),
-                after: revoking_expected(),
+                before: revoking_shape(),
+                after: revoking_shape(),
                 ..Default::default()
             },
             Row {
                 name: "an owned set with the pending partition keeps the member",
-                before: revoking_input(),
+                before: revoking_shape(),
                 owned: Some(&[PartitionIndex(0), PartitionIndex(1), PartitionIndex(2)]),
-                after: revoking_expected(),
+                after: revoking_shape(),
                 ..Default::default()
             },
             settles_owned_partitions(
                 "an owned set without the pending partition moves the member on",
-                revoking_input(),
+                revoking_shape(),
             ),
             // A stable member behind the target epoch learns what to revoke.
             Row {
                 state_change: StateChange::Changed,
                 name: "a shrunk target is a revocation, in the member's epoch",
                 before: expanded_input(),
-                after: revoking_expected(),
+                after: revoking_shape(),
                 ..Default::default()
             },
             settles_owned_partitions(
@@ -706,43 +710,32 @@ mod tests {
                 after: settled_expected(),
                 ..Default::default()
             },
-            Row {
-                state_change: StateChange::Changed,
-                name: "a partition another member holds is withheld",
-                before: single_partition_input(),
-                other: Holding {
-                    assigned: &[PartitionIndex(1)],
-                    pending: &[],
-                },
-                after: withheld_expected(),
-                ..Default::default()
-            },
-            Row {
-                state_change: StateChange::Changed,
-                name: "a partition another member must still revoke is withheld",
-                before: single_partition_input(),
-                other: Holding {
+            withheld_by_other("a partition another member holds is withheld", Holding {
+                assigned: &[PartitionIndex(1)],
+                pending: &[],
+            }),
+            withheld_by_other(
+                "a partition another member must still revoke is withheld",
+                Holding {
                     assigned: &[],
                     pending: &[PartitionIndex(1)],
                 },
-                after: withheld_expected(),
-                ..Default::default()
-            },
+            ),
             Row {
                 state_change: StateChange::Changed,
                 name: "an unreleased partition is granted once it is free",
-                before: unreleased_input(),
+                before: unreleased_shape(),
                 after: settled_expected(),
                 ..Default::default()
             },
             Row {
                 name: "an unreleased partition stays withheld while it is held",
-                before: unreleased_input(),
+                before: unreleased_shape(),
                 other: Holding {
                     assigned: &[PartitionIndex(1)],
                     pending: &[],
                 },
-                after: withheld_expected(),
+                after: unreleased_shape(),
                 ..Default::default()
             },
             Row {
@@ -855,26 +848,33 @@ mod tests {
     }
 
     const U: Uuid = Uuid([2; 16]);
-    const TWO_PARTITIONS_PER_TOPIC: &[TopicParts<'static>] = &[
-        TopicParts {
-            topic: T,
-            parts: &[PartitionIndex(0), PartitionIndex(1)],
-        },
-        TopicParts {
-            topic: U,
-            parts: &[PartitionIndex(0), PartitionIndex(1)],
-        },
-    ];
-    const ONE_PARTITION_PER_TOPIC: &[TopicParts<'static>] = &[
-        TopicParts {
-            topic: T,
-            parts: &[PartitionIndex(0)],
-        },
-        TopicParts {
-            topic: U,
-            parts: &[PartitionIndex(0)],
-        },
-    ];
+    const T_PARTITION_0: TopicParts<'static> = TopicParts {
+        topic: T,
+        parts: &[PartitionIndex(0)],
+    };
+    const U_PARTITION_0: TopicParts<'static> = TopicParts {
+        topic: U,
+        parts: &[PartitionIndex(0)],
+    };
+    const T_PARTITIONS_0_AND_1: TopicParts<'static> = TopicParts {
+        topic: T,
+        parts: &[PartitionIndex(0), PartitionIndex(1)],
+    };
+    const U_PARTITIONS_0_AND_1: TopicParts<'static> = TopicParts {
+        topic: U,
+        parts: &[PartitionIndex(0), PartitionIndex(1)],
+    };
+    const TWO_PARTITIONS_PER_TOPIC: &[TopicParts<'static>] =
+        &[T_PARTITIONS_0_AND_1, U_PARTITIONS_0_AND_1];
+    const EPOCHS_6_6: MemberEpochs = MemberEpochs {
+        current: MemberEpoch(6),
+        previous: MemberEpoch(6),
+    };
+    const EPOCHS_5_4: MemberEpochs = MemberEpochs {
+        current: MemberEpoch(5),
+        previous: MemberEpoch(4),
+    };
+    const ONE_PARTITION_PER_TOPIC: &[TopicParts<'static>] = &[T_PARTITION_0, U_PARTITION_0];
     /// A topic that the metadata does not hold, as one that was deleted.
     const W: Uuid = Uuid([3; 16]);
 
@@ -897,21 +897,16 @@ mod tests {
         pending: &'a [TopicParts<'a>],
     }
 
-    impl<'a> ShapeSetup<'a> {
-        fn revoking_current_epoch(pending: &'a [TopicParts<'a>]) -> Self {
-            Self {
-                epochs: MemberEpochs {
-                    current: MemberEpoch(5),
-                    ..Default::default()
-                },
-                state: MemberAssignmentState::UnrevokedPartitions,
-                assigned: &[TopicParts {
-                    topic: T,
-                    parts: &[PartitionIndex(0)],
-                }],
-                pending,
-            }
-        }
+    fn revoking_current_epoch(pending: &[TopicParts<'_>]) -> Shape {
+        shape()
+            .epochs(MemberEpochs {
+                current: MemberEpoch(5),
+                ..Default::default()
+            })
+            .state(MemberAssignmentState::UnrevokedPartitions)
+            .assigned(&[T_PARTITION_0])
+            .pending(pending)
+            .call()
     }
 
     #[bon::builder]
@@ -1014,10 +1009,7 @@ mod tests {
             before: shape()
                 .epochs(setup.history)
                 .state(MemberAssignmentState::UnreleasedPartitions)
-                .assigned(&[TopicParts {
-                    topic: T,
-                    parts: &[PartitionIndex(0)],
-                }])
+                .assigned(&[T_PARTITION_0])
                 .call(),
             other: topic_parts(&[TopicParts {
                 topic: T,
@@ -1035,141 +1027,61 @@ mod tests {
     fn subscription_rows() -> Vec<SubscriptionRow> {
         use MemberAssignmentState::UnrevokedPartitions;
 
-        let owning_everything = topic_parts(&[
-            TopicParts {
-                topic: T,
-                parts: &[PartitionIndex(0), PartitionIndex(1)],
-            },
-            TopicParts {
-                topic: U,
-                parts: &[PartitionIndex(0)],
-            },
-        ]);
+        let stable_subscription_change = |name, owned, after| SubscriptionRow {
+            name,
+            before: stable_6_5_input(),
+            target: topic_parts(TWO_PARTITIONS_PER_TOPIC),
+            owned,
+            subscription: SubscriptionChange::Changed,
+            after,
+            ..Default::default()
+        };
+        let owning_everything = topic_parts(&[T_PARTITIONS_0_AND_1, U_PARTITION_0]);
         vec![
             SubscriptionRow {
                 name: "an unrevoked member that owns its pending set drops a topic it left",
-                before: revoking_5_4_input(),
+                before: unrevoked_5_4_shape(),
                 target: topic_parts(ONE_PARTITION_PER_TOPIC),
                 owned: Some(owning_everything.clone()),
                 subscription: SubscriptionChange::Changed,
-                after: shape()
-                    .epochs(
-                        ShapeSetup::revoking_current_epoch(&[
-                            TopicParts {
-                                topic: T,
-                                parts: &[PartitionIndex(1)],
-                            },
-                            TopicParts {
-                                topic: U,
-                                parts: &[PartitionIndex(0)],
-                            },
-                        ])
-                        .epochs,
-                    )
-                    .state(
-                        ShapeSetup::revoking_current_epoch(&[
-                            TopicParts {
-                                topic: T,
-                                parts: &[PartitionIndex(1)],
-                            },
-                            TopicParts {
-                                topic: U,
-                                parts: &[PartitionIndex(0)],
-                            },
-                        ])
-                        .state,
-                    )
-                    .assigned(
-                        ShapeSetup::revoking_current_epoch(&[
-                            TopicParts {
-                                topic: T,
-                                parts: &[PartitionIndex(1)],
-                            },
-                            TopicParts {
-                                topic: U,
-                                parts: &[PartitionIndex(0)],
-                            },
-                        ])
-                        .assigned,
-                    )
-                    .pending(
-                        ShapeSetup::revoking_current_epoch(&[
-                            TopicParts {
-                                topic: T,
-                                parts: &[PartitionIndex(1)],
-                            },
-                            TopicParts {
-                                topic: U,
-                                parts: &[PartitionIndex(0)],
-                            },
-                        ])
-                        .pending,
-                    )
-                    .call(),
+                after: revoking_current_epoch(&[
+                    TopicParts {
+                        topic: T,
+                        parts: &[PartitionIndex(1)],
+                    },
+                    TopicParts {
+                        topic: U,
+                        parts: &[PartitionIndex(0)],
+                    },
+                ]),
                 ..Default::default()
             },
             SubscriptionRow {
                 name: "an unrevoked member that owns its pending set keeps it without a change",
-                before: revoking_5_4_input(),
+                before: unrevoked_5_4_shape(),
                 target: topic_parts(ONE_PARTITION_PER_TOPIC),
                 owned: Some(owning_everything.clone()),
-                after: shape()
-                    .epochs(MemberEpochs {
-                        current: MemberEpoch(5),
-                        previous: MemberEpoch(4),
-                    })
+                after: unrevoked_5_4_shape(),
+                ..Default::default()
+            },
+            stable_subscription_change(
+                "a stable member at the target epoch revokes a topic it left and still owns",
+                None,
+                shape()
+                    .epochs(EPOCHS_6_6)
                     .state(UnrevokedPartitions)
-                    .assigned(ONE_PARTITION_PER_TOPIC)
-                    .pending(&[TopicParts {
-                        topic: T,
-                        parts: &[PartitionIndex(1)],
-                    }])
+                    .assigned(&[T_PARTITIONS_0_AND_1])
+                    .pending(&[U_PARTITIONS_0_AND_1])
                     .call(),
-                ..Default::default()
-            },
-            SubscriptionRow {
-                name: "a stable member at the target epoch revokes a topic it left and still owns",
-                before: stable_6_5_input(),
-                target: topic_parts(TWO_PARTITIONS_PER_TOPIC),
-                subscription: SubscriptionChange::Changed,
-                after: shape()
-                    .epochs(MemberEpochs {
-                        previous: MemberEpoch(6),
-                        ..Default::default()
-                    })
-                    .state(UnrevokedPartitions)
-                    .assigned(&[TopicParts {
-                        topic: T,
-                        parts: &[PartitionIndex(0), PartitionIndex(1)],
-                    }])
-                    .pending(&[TopicParts {
-                        topic: U,
-                        parts: &[PartitionIndex(0), PartitionIndex(1)],
-                    }])
+            ),
+            stable_subscription_change(
+                "a stable member at the target epoch drops a topic it left and released",
+                Some(topic_parts(&[T_PARTITIONS_0_AND_1])),
+                shape()
+                    .epochs(EPOCHS_6_6)
+                    .assigned(&[T_PARTITIONS_0_AND_1])
                     .call(),
-                ..Default::default()
-            },
-            SubscriptionRow {
-                name: "a stable member at the target epoch drops a topic it left and released",
-                before: stable_6_5_input(),
-                target: topic_parts(TWO_PARTITIONS_PER_TOPIC),
-                owned: Some(topic_parts(&[TopicParts {
-                    topic: T,
-                    parts: &[PartitionIndex(0), PartitionIndex(1)],
-                }])),
-                subscription: SubscriptionChange::Changed,
-                after: shape()
-                    .epochs(MemberEpochs {
-                        previous: MemberEpoch(6),
-                        ..Default::default()
-                    })
-                    .assigned(&[TopicParts {
-                        topic: T,
-                        parts: &[PartitionIndex(0), PartitionIndex(1)],
-                    }])
-                    .call(),
-                ..Default::default()
-            },
+            ),
             SubscriptionRow {
                 name: "a member with no subscription revokes everything",
                 names: &[],
@@ -1177,10 +1089,7 @@ mod tests {
                 target: topic_parts(ONE_PARTITION_PER_TOPIC),
                 subscription: SubscriptionChange::Changed,
                 after: shape()
-                    .epochs(MemberEpochs {
-                        previous: MemberEpoch(6),
-                        ..Default::default()
-                    })
+                    .epochs(EPOCHS_6_6)
                     .state(UnrevokedPartitions)
                     .pending(ONE_PARTITION_PER_TOPIC)
                     .call(),
@@ -1194,113 +1103,46 @@ mod tests {
             SubscriptionRow {
                 name: "the target of a topic the member left grants nothing",
                 before: stable_5_4_input(),
-                target: topic_parts(&[
-                    TopicParts {
-                        topic: T,
-                        parts: &[PartitionIndex(0)],
-                    },
-                    TopicParts {
-                        topic: U,
-                        parts: &[PartitionIndex(0), PartitionIndex(1)],
-                    },
-                ]),
+                target: topic_parts(&[T_PARTITION_0, U_PARTITIONS_0_AND_1]),
                 after: stable_6_5_expected(),
                 ..Default::default()
             },
             SubscriptionRow {
                 name: "a partition of a topic the member left is revoked though the target holds it",
                 before: shape()
-                    .epochs(MemberEpochs {
-                        current: MemberEpoch(5),
-                        previous: MemberEpoch(4),
-                    })
+                    .epochs(EPOCHS_5_4)
                     .assigned(ONE_PARTITION_PER_TOPIC)
                     .call(),
                 target: topic_parts(ONE_PARTITION_PER_TOPIC),
-                after: shape()
-                    .epochs(
-                        ShapeSetup::revoking_current_epoch(&[TopicParts {
-                            topic: U,
-                            parts: &[PartitionIndex(0)],
-                        }])
-                        .epochs,
-                    )
-                    .state(
-                        ShapeSetup::revoking_current_epoch(&[TopicParts {
-                            topic: U,
-                            parts: &[PartitionIndex(0)],
-                        }])
-                        .state,
-                    )
-                    .assigned(
-                        ShapeSetup::revoking_current_epoch(&[TopicParts {
-                            topic: U,
-                            parts: &[PartitionIndex(0)],
-                        }])
-                        .assigned,
-                    )
-                    .pending(
-                        ShapeSetup::revoking_current_epoch(&[TopicParts {
-                            topic: U,
-                            parts: &[PartitionIndex(0)],
-                        }])
-                        .pending,
-                    )
-                    .call(),
+                after: revoking_current_epoch(&[U_PARTITION_0]),
                 ..Default::default()
             },
             SubscriptionRow {
                 name: "a topic that does not exist is not subscribed",
                 names: &["t", "w"],
                 before: stable_5_4_input(),
-                target: topic_parts(&[
-                    TopicParts {
-                        topic: T,
-                        parts: &[PartitionIndex(0)],
-                    },
-                    TopicParts {
-                        topic: W,
-                        parts: &[PartitionIndex(0)],
-                    },
-                ]),
+                target: topic_parts(&[T_PARTITION_0, TopicParts {
+                    topic: W,
+                    parts: &[PartitionIndex(0)],
+                }]),
                 after: stable_6_5_expected(),
                 ..Default::default()
             },
-            SubscriptionRow {
-                regex: Some(RegexSetup {
-                    pattern: "u.*",
-                    resolved: Some(&["u"]),
-                }),
-                name: "the topics of a resolved regex are subscribed",
-                names: &[],
-                before: stable_5_4_input_two_topics(),
-                target: topic_parts(&[TopicParts {
-                    topic: U,
-                    parts: &[PartitionIndex(0)],
-                }]),
-                after: shape()
+            resolved_regex_row(
+                "the topics of a resolved regex are subscribed",
+                Some(&["u"]),
+                shape()
                     .assigned(&[TopicParts {
                         topic: U,
                         parts: &[PartitionIndex(0)],
                     }])
                     .call(),
-                ..Default::default()
-            },
-            SubscriptionRow {
-                regex: Some(RegexSetup {
-                    pattern: "u.*",
-                    resolved: None,
-                }),
-                name: "a regex the group has not resolved subscribes to nothing",
-                names: &[],
-                before: stable_5_4_input_two_topics(),
-                target: topic_parts(&[TopicParts {
-                    topic: U,
-                    parts: &[PartitionIndex(0)],
-                }]),
-                after: shape().call(),
-                ..Default::default()
-            },
+            ),
+            resolved_regex_row(
+                "a regex the group has not resolved subscribes to nothing",
+                None,
+                shape().call(),
+            ),
             // A member that keeps its epoch still records it as its previous epoch.
             waiting_subscription_row()
                 .name("an unreleased member that keeps waiting records the epoch it stays in")
@@ -1313,6 +1155,28 @@ mod tests {
                 })
                 .call(),
         ]
+    }
+
+    fn resolved_regex_row(
+        name: &'static str,
+        resolved: Option<&'static [&'static str]>,
+        after: Shape,
+    ) -> SubscriptionRow {
+        SubscriptionRow {
+            name,
+            names: &[],
+            regex: Some(RegexSetup {
+                pattern: "u.*",
+                resolved,
+            }),
+            before: stable_5_4_input_two_topics(),
+            target: topic_parts(&[TopicParts {
+                topic: U,
+                parts: &[PartitionIndex(0)],
+            }]),
+            after,
+            ..Default::default()
+        }
     }
 
     /// Kafka's `CurrentAssignmentBuilder` reads the member's subscription:
@@ -1346,11 +1210,7 @@ mod tests {
             {
                 a.subscribed_topic_regex = Some(regex.to_owned());
                 if let Some(topics) = resolved {
-                    g.set_resolved_regex(regex.to_owned(), ResolvedRegularExpression {
-                        topics: topics.iter().map(|topic| (*topic).to_owned()).collect(),
-                        version: 1,
-                        timestamp_ms: 0,
-                    });
+                    g.set_resolved_regex(regex.to_owned(), resolved_regex(topics, 1, 0));
                 }
             }
             g.members.insert("a".into(), a);
@@ -1453,7 +1313,7 @@ mod tests {
         );
         check!(g.held_by_others("a", &Partitions::new()).is_empty());
     }
-    fn revoking_input() -> Held {
+    fn revoking_shape() -> Held {
         held()
             .state(MemberAssignmentState::UnrevokedPartitions)
             .pending(&[PartitionIndex(2)])
@@ -1465,7 +1325,7 @@ mod tests {
             .call()
     }
     fn single_partition_input() -> Held { held().assigned(&[PartitionIndex(0)]).call() }
-    fn unreleased_input() -> Held {
+    fn unreleased_shape() -> Held {
         held()
             .epoch(6)
             .state(MemberAssignmentState::UnreleasedPartitions)
@@ -1473,26 +1333,10 @@ mod tests {
             .call()
     }
     fn current_input() -> Held { held().epoch(6).call() }
-    fn revoking_expected() -> Held {
-        held()
-            .state(MemberAssignmentState::UnrevokedPartitions)
-            .pending(&[PartitionIndex(2)])
-            .call()
-    }
     fn settled_expected() -> Held { held().epoch(6).call() }
-    fn withheld_expected() -> Held {
-        held()
-            .epoch(6)
-            .state(MemberAssignmentState::UnreleasedPartitions)
-            .assigned(&[PartitionIndex(0)])
-            .call()
-    }
-    fn revoking_5_4_input() -> Shape {
+    fn unrevoked_5_4_shape() -> Shape {
         shape()
-            .epochs(MemberEpochs {
-                current: MemberEpoch(5),
-                previous: MemberEpoch(4),
-            })
+            .epochs(EPOCHS_5_4)
             .state(MemberAssignmentState::UnrevokedPartitions)
             .assigned(ONE_PARTITION_PER_TOPIC)
             .pending(&[TopicParts {
@@ -1501,59 +1345,15 @@ mod tests {
             }])
             .call()
     }
-    fn stable_6_5_input() -> Shape {
-        shape()
-            .assigned(&[
-                TopicParts {
-                    topic: T,
-                    parts: &[PartitionIndex(0), PartitionIndex(1)],
-                },
-                TopicParts {
-                    topic: U,
-                    parts: &[PartitionIndex(0), PartitionIndex(1)],
-                },
-            ])
-            .call()
-    }
-    fn stable_5_4_input() -> Shape {
-        shape()
-            .epochs(MemberEpochs {
-                current: MemberEpoch(5),
-                previous: MemberEpoch(4),
-            })
-            .assigned(&[TopicParts {
-                topic: T,
-                parts: &[PartitionIndex(0)],
-            }])
-            .call()
-    }
-    fn stable_6_5_expected() -> Shape {
-        shape()
-            .assigned(&[TopicParts {
-                topic: T,
-                parts: &[PartitionIndex(0)],
-            }])
-            .call()
-    }
-    fn stable_5_4_input_two_topics() -> Shape {
-        shape()
-            .epochs(MemberEpochs {
-                current: MemberEpoch(5),
-                previous: MemberEpoch(4),
-            })
-            .call()
-    }
+    fn stable_6_5_input() -> Shape { shape().assigned(TWO_PARTITIONS_PER_TOPIC).call() }
+    fn stable_5_4_input() -> Shape { shape().epochs(EPOCHS_5_4).assigned(&[T_PARTITION_0]).call() }
+    fn stable_6_5_expected() -> Shape { shape().assigned(&[T_PARTITION_0]).call() }
+    fn stable_5_4_input_two_topics() -> Shape { shape().epochs(EPOCHS_5_4).call() }
     fn withheld_6_6_expected() -> Shape {
         shape()
-            .epochs(MemberEpochs {
-                previous: MemberEpoch(6),
-                ..Default::default()
-            })
+            .epochs(EPOCHS_6_6)
             .state(MemberAssignmentState::UnreleasedPartitions)
-            .assigned(&[TopicParts {
-                topic: T,
-                parts: &[PartitionIndex(0)],
-            }])
+            .assigned(&[T_PARTITION_0])
             .call()
     }
 }

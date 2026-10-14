@@ -14,8 +14,6 @@
 //! `CLIENT_METRICS` enumerates configured subscription names from the
 //! metadata image (see `MetadataImage::client_metrics_subscriptions`).
 
-#[cfg(test)]
-use crate::authorizer::SimpleAclAuthorizer;
 use {
     crate::{
         broker::Broker,
@@ -387,9 +385,13 @@ mod tests {
         test_context ["admin-client"];
     }
 
-    use crate::test_support::{
-        StartedBroker as HandlerStartedBroker, broker_registration, describe_configs_acl_cases,
-        grant_optional_cluster_operation, start_broker_with_authorizer_no_audit as start_broker,
+    use crate::{
+        handlers::test_support::start_empty_acl_broker,
+        test_support::{
+            StartedBroker as HandlerStartedBroker, broker_registration, describe_configs_acl_cases,
+            grant_optional_cluster_operation,
+            start_broker_with_authorizer_no_audit as start_broker,
+        },
     };
 
     /// Request the live topic enumeration, including broker-owned topics.
@@ -513,10 +515,7 @@ mod tests {
         let HandlerStartedBroker {
             broker: broker_handle,
             dir: _dir,
-        } = start_broker(Arc::new(SimpleAclAuthorizer::new(
-            std::collections::HashSet::new(),
-        )))
-        .await;
+        } = start_empty_acl_broker().await;
         seed_topic(&broker_handle, "orders").await;
         let broker = broker_handle.broker_arc_for_test();
         let req = topic_listing_request();

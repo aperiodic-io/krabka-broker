@@ -55,11 +55,16 @@ pub(crate) use self::follower_throttle::ReplicaLag;
 use {
     self::fetch_loop::run_fetcher_loop,
     crate::{
-        broker::spawn_partition_with_replication_target, config::ReplicationRuntimeConfig,
-        log_dir::place_partition_dir_avoiding, log_dir_status::LogDirRegistry,
-        metadata_source::MetadataSource, metrics::BrokerMetrics,
-        network::client::InterBrokerClient, partition::ReplicationTarget,
-        partition_registry::PartitionRegistry, producer_state::ProducerState,
+        broker::spawn_partition_with_replication_target,
+        config::ReplicationRuntimeConfig,
+        log_dir::place_partition_dir_avoiding,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::client::InterBrokerClient,
+        partition::{LogOffset, ReplicationTarget},
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
         throttle::ThrottleState,
     },
 };
@@ -165,6 +170,15 @@ pub(crate) struct Config {
     /// whether the KIP-73 follower throttle applies to it: a follower that has
     /// caught up is never throttled.
     pub lag: ReplicaLag,
+}
+
+/// Drop idempotent-producer entries for the truncated tail. Otherwise a retried
+/// batch can deduplicate against an offset the log no longer holds and stall
+/// the `acks=all` high-watermark gate.
+pub(super) async fn truncate_producer_state(cfg: &Config, end_offset: LogOffset) {
+    cfg.producer_state
+        .truncate(&cfg.topic, cfg.partition, end_offset)
+        .await;
 }
 
 /// A topic and partition, as the fetcher's partition map keys it.

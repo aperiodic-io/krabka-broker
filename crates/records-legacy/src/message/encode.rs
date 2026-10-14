@@ -75,13 +75,14 @@ mod tests {
         },
     };
 
-    #[test]
-    fn message_roundtrips() {
-        for (_name, message) in [("v0", fixture_v0()), ("v1", fixture_v1())] {
-            let RoundTrip { buffer, decoded } = round_trip(&message);
-            assert2::assert!(buffer.len() == message.encoded_len());
-            assert2::assert!(decoded == message);
-        }
+    #[yare::parameterized(
+        v0 = { fixture_v0() },
+        v1 = { fixture_v1() },
+    )]
+    fn message_roundtrips(message: Message) {
+        let RoundTrip { buffer, decoded } = round_trip(&message);
+        assert2::assert!(buffer.len() == message.encoded_len());
+        assert2::assert!(decoded == message);
     }
 
     #[test]

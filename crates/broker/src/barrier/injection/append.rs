@@ -95,22 +95,23 @@ mod tests {
     /// 32767 bytes goes into the log, and one of 32768 bytes is an error that
     /// appends nothing. The marker can reach here from a `WriteBarrierMarkers`
     /// request, so a panic would take down that connection.
-    #[tokio::test]
-    async fn a_group_of_32768_bytes_is_refused_and_appends_nothing() {
+    #[yare::parameterized(
+        at_limit = { MAX_STRING_BYTES, true },
+        over_limit = { MAX_STRING_BYTES + 1, false },
+    )]
+    #[test_macro(tokio::test)]
+    async fn a_group_of_32768_bytes_is_refused_and_appends_nothing(length: usize, appended: bool) {
         let dir = tempfile::tempdir().unwrap();
         let partition = leader_partition(dir.path()).await;
 
-        for (length, appended) in [(MAX_STRING_BYTES, true), (MAX_STRING_BYTES + 1, false)] {
-            let marker = BarrierMarker {
-                group: "g".repeat(length),
-                epoch: 1,
-                triggered_at: 1000,
-            };
-            let result = append_marker(&partition, &marker, NodeId(1), 5).await;
-            assert2::check!(result.is_ok() == appended, "{length} bytes");
-        }
-
-        assert2::check!(partition.log_end_offset() == Offset(1));
+        let marker = BarrierMarker {
+            group: "g".repeat(length),
+            epoch: 1,
+            triggered_at: 1000,
+        };
+        let result = append_marker(&partition, &marker, NodeId(1), 5).await;
+        assert2::check!(result.is_ok() == appended, "{length} bytes");
+        assert2::check!(partition.log_end_offset() == if appended { Offset(1) } else { Offset(0) });
     }
 
     #[tokio::test]

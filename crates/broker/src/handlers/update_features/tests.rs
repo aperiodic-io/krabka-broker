@@ -73,29 +73,22 @@ async fn handle_denies_cluster_alter_with_top_level_error() {
 async fn requests_apply_atomically_with_kafkas_response_shape() {
     let group = "group.version";
     let share = "share.version";
+    let failing_case = |version: i16, case| {
+        (
+            case,
+            version,
+            vec![named_update(group, 0, 2), named_update(share, 9, 1)],
+            false,
+            refused(
+                "Invalid update version 9 for feature share.version. Local controller 1 only \
+                 supports versions 0-1",
+            ),
+            Some(1),
+        )
+    };
     let cases = [
-        (
-            "a failing row fails the request, v1",
-            1,
-            vec![named_update(group, 0, 2), named_update(share, 9, 1)],
-            false,
-            refused(
-                "Invalid update version 9 for feature share.version. Local controller 1 only \
-                 supports versions 0-1",
-            ),
-            Some(1),
-        ),
-        (
-            "a failing row fails the request, v2",
-            2,
-            vec![named_update(group, 0, 2), named_update(share, 9, 1)],
-            false,
-            refused(
-                "Invalid update version 9 for feature share.version. Local controller 1 only \
-                 supports versions 0-1",
-            ),
-            Some(1),
-        ),
+        failing_case(1, "a failing row fails the request, v1"),
+        failing_case(2, "a failing row fails the request, v2"),
         (
             "success, v0",
             0,

@@ -89,35 +89,33 @@ mod tests {
     /// the record's own length prefix: a body of 63 bytes takes a one-byte
     /// prefix and one of 64 takes two, and 8191 takes two where 8192 takes
     /// three.
-    #[test]
-    fn a_record_is_held_to_the_limit_by_its_body_size() {
-        for (value_len, body) in [
-            (0, 13_u32),
-            (50, 63),
-            (51, 64),
-            (100, 114),
-            (8_177, 8_191),
-            (8_178, 8_192),
-            (70_000, 70_015),
-        ] {
-            let held = |limit| {
-                check_records_read(
-                    &batch(CompressionType::Gzip, vec![record(value_len)]),
-                    1,
-                    Some(byte_size(limit)),
-                )
-            };
-            assert2::check!(held(body).is_ok(), "{value_len}");
-            assert2::assert!(let Err(LogError::RecordTooLarge { size, limit }) = held(body - 1));
-            assert2::check!(
-                (size, limit)
-                    == (
-                        usize::try_from(body).unwrap(),
-                        usize::try_from(body - 1).unwrap()
-                    ),
-                "{value_len}"
-            );
-        }
+    #[yare::parameterized(
+        empty_value = { 0, 13_u32 },
+        prefix_one_byte_max = { 50, 63 },
+        prefix_two_byte_min = { 51, 64 },
+        ordinary = { 100, 114 },
+        prefix_two_byte_max = { 8_177, 8_191 },
+        prefix_three_byte_min = { 8_178, 8_192 },
+        large_value = { 70_000, 70_015 },
+    )]
+    fn a_record_is_held_to_the_limit_by_its_body_size(value_len: usize, body: u32) {
+        let held = |limit| {
+            check_records_read(
+                &batch(CompressionType::Gzip, vec![record(value_len)]),
+                1,
+                Some(byte_size(limit)),
+            )
+        };
+        assert2::check!(held(body).is_ok(), "{value_len}");
+        assert2::assert!(let Err(LogError::RecordTooLarge { size, limit }) = held(body - 1));
+        assert2::check!(
+            (size, limit)
+                == (
+                    usize::try_from(body).unwrap(),
+                    usize::try_from(body - 1).unwrap()
+                ),
+            "{value_len}"
+        );
     }
 
     /// The body size of the record `check_records_read` refuses under `limit`,
@@ -140,45 +138,47 @@ mod tests {
 
     /// Only a compressed batch is held to the limit, and the first oversized
     /// record among the ones read decides.
-    #[test]
-    fn only_a_compressed_batch_is_held_to_the_limit() {
-        let small = record(10);
-        let large = record(1_000);
-        for (name, codec, records, read, expected) in [
-            (
-                "compressed, oversized",
-                CompressionType::Gzip,
-                vec![small.clone(), large.clone()],
-                2,
-                Some(1_014),
-            ),
-            (
-                "compressed, oversized record not read",
-                CompressionType::Gzip,
-                vec![small.clone(), large.clone()],
-                1,
-                None,
-            ),
-            (
-                "compressed, within the limit",
-                CompressionType::Snappy,
-                vec![small.clone(), small.clone()],
-                2,
-                None,
-            ),
-            (
-                "uncompressed, oversized",
-                CompressionType::None,
-                vec![small, large],
-                2,
-                None,
-            ),
-        ] {
-            assert2::check!(
-                refused_size(codec, records, read, Some(byte_size(100))) == expected,
-                "{name}"
-            );
-        }
+    #[yare::parameterized(
+        compressed_oversized = {
+            "compressed, oversized",
+            CompressionType::Gzip,
+            vec![record(10), record(1_000)],
+            2,
+            Some(1_014),
+        },
+        compressed_oversized_not_read = {
+            "compressed, oversized record not read",
+            CompressionType::Gzip,
+            vec![record(10), record(1_000)],
+            1,
+            None,
+        },
+        compressed_within_limit = {
+            "compressed, within the limit",
+            CompressionType::Snappy,
+            vec![record(10), record(10)],
+            2,
+            None,
+        },
+        uncompressed_oversized = {
+            "uncompressed, oversized",
+            CompressionType::None,
+            vec![record(10), record(1_000)],
+            2,
+            None,
+        },
+    )]
+    fn only_a_compressed_batch_is_held_to_the_limit(
+        name: &str,
+        codec: CompressionType,
+        records: Vec<Record>,
+        read: usize,
+        expected: Option<usize>,
+    ) {
+        assert2::check!(
+            refused_size(codec, records, read, Some(byte_size(100))) == expected,
+            "{name}"
+        );
     }
 
     #[test]

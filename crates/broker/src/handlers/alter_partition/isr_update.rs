@@ -821,27 +821,25 @@ mod tests {
     /// A v2 request carries no broker epochs, so none is compared, but every
     /// replica in its ISR must still be registered: Kafka checks `new_isr`
     /// with -1 for each epoch.
-    #[test]
-    fn a_v2_request_checks_registration_without_epochs() {
+    #[yare::parameterized(
+        registered_replicas = { &[1, 2][..], codes::NONE },
+        unregistered_replica = { &[1, 2, 3][..], codes::INELIGIBLE_REPLICA },
+    )]
+    fn a_v2_request_checks_registration_without_epochs(new_isr: &[i32], expected: i16) {
         let image = image_with(TWO_REGISTERED_BROKERS);
-        for (new_isr, expected) in [
-            (&[1, 2][..], codes::NONE),
-            (&[1, 2, 3][..], codes::INELIGIBLE_REPLICA),
-        ] {
-            let mut changes = Vec::new();
-            let resp = handle_partition()
-                .image(&image)
-                .changes(&mut changes)
-                .new_isr(
-                    &(new_isr)
-                        .iter()
-                        .copied()
-                        .map(WireBrokerId)
-                        .collect::<Vec<_>>(),
-                )
-                .call();
-            assert2::check!(resp.error_code == expected, "new_isr {new_isr:?}");
-        }
+        let mut changes = Vec::new();
+        let resp = handle_partition()
+            .image(&image)
+            .changes(&mut changes)
+            .new_isr(
+                &new_isr
+                    .iter()
+                    .copied()
+                    .map(WireBrokerId)
+                    .collect::<Vec<_>>(),
+            )
+            .call();
+        assert2::check!(resp.error_code == expected, "new_isr {new_isr:?}");
     }
 
     #[test]

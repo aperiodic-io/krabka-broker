@@ -48,12 +48,8 @@ impl BrokerFeatureFlags {
 
 pub(super) const fn test_feature_flags() -> BrokerFeatureFlags {
     BrokerFeatureFlags {
-        oauthbearer_jwks_ignore_key_use: false,
         auto_leader_rebalance_enable: false,
-        transaction_two_phase_commit_enable: false,
-        unstable_api_versions: UnstableApiVersions::Disabled,
-        unstable_feature_versions: krabka_raft::UnstableFeatureVersions::Disabled,
-        legacy_request_versions: LegacyRequestVersions::Disabled,
+        ..default_feature_flags()
     }
 }
 

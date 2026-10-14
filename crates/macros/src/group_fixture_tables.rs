@@ -228,17 +228,19 @@ mod tests {
         assert!(
             fields.find("client_id:").unwrap() < fields.find("subscribed_topic_regex:").unwrap()
         );
-        for input in [
-            "",
-            "other fn x(id: &str) -> X {}",
-            "plain async fn x(id: &str) -> X {}",
-            "plain fn x() -> X {}",
-            "plain fn x(id: &str) {}",
-            "plain fn x(id: &str) -> X()",
-            "plain fn x(id: &str) -> X {} plain fn x(id: &str) -> X {}",
-        ] {
-            assert!(members(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        wrong_kind = { "other fn x(id: &str) -> X {}" },
+        async_method = { "plain async fn x(id: &str) -> X {}" },
+        no_arguments = { "plain fn x() -> X {}" },
+        no_return = { "plain fn x(id: &str) {}" },
+        call_return = { "plain fn x(id: &str) -> X()" },
+        duplicate = { "plain fn x(id: &str) -> X {} plain fn x(id: &str) -> X {}" },
+    )]
+    fn member_headers_reject_invalid_declarations(input: &str) {
+        assert2::assert!(members(&input.parse().unwrap()).is_err(), "{input}");
     }
 
     #[test]
@@ -255,14 +257,16 @@ mod tests {
             output.find("repartition_source_topics.iter()").unwrap()
                 < output.find("state_changelog_topics.iter()").unwrap()
         );
-        for input in [
-            "fn topics(t: Topology) -> Vec<String>;",
-            "async fn topics(t: &Topology) -> Vec<String>;",
-            "fn topics(t: &mut Topology) -> Vec<String>;",
-            "fn topics(t: &Topology) -> String;",
-            "fn topics(t: &Topology) -> Vec<String>; trailing",
-        ] {
-            assert!(required_topics(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    }
+
+    #[yare::parameterized(
+        owned_topology = { "fn topics(t: Topology) -> Vec<String>;" },
+        async_signature = { "async fn topics(t: &Topology) -> Vec<String>;" },
+        mutable = { "fn topics(t: &mut Topology) -> Vec<String>;" },
+        wrong_return = { "fn topics(t: &Topology) -> String;" },
+        trailing = { "fn topics(t: &Topology) -> Vec<String>; trailing" },
+    )]
+    fn topic_traversal_rejects_invalid_signatures(input: &str) {
+        assert2::assert!(required_topics(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

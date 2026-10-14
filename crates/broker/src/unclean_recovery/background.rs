@@ -251,7 +251,7 @@ impl BackgroundRecovery {
             phase,
             action: action_name(BreakGlassAction::UncleanRecovery).to_owned(),
             target: format!("{}-{}", job.topic, job.partition),
-            proposal_id: job.proposal.map(|id| id.to_string()).unwrap_or_default(),
+            proposal_id: job.proposal.map_or_default(|id| id.to_string()),
             principal: AuditPrincipal {
                 name: format!("Controller:{}", node_id.0),
                 auth_method: "Internal".to_owned(),

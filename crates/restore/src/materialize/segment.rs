@@ -16,7 +16,7 @@ use {
         verify::VerifiedSegment,
     },
     krabka_ids::Offset,
-    krabka_log::{Log, LogConfig, name},
+    krabka_log::Log,
     krabka_protocol::records::RecordBatchBorrowed,
     krabka_remote_storage::TopicIdPartition,
     serde::Serialize,
@@ -95,13 +95,7 @@ pub(crate) async fn write_segment_after_skip(
         return Ok(outcome);
     }
 
-    let mut log = if args.dry_run {
-        None
-    } else {
-        let dir = name::partition_dir(&args.target.log_dir, &partition.topic, partition.partition);
-        std::fs::create_dir_all(&dir)?;
-        Some(Log::open(&dir, LogConfig::default())?)
-    };
+    let mut log = super::open_partition_log(args, &partition.topic, partition.partition)?;
     if let Some(log) = log.as_mut() {
         align_log_to_segment(log, segment, partition, skipped_predecessor)?;
     }
@@ -228,6 +222,7 @@ mod tests {
             topic_id_partition, verified_segment,
         },
         assert2::check,
+        krabka_log::{LogConfig, name},
         krabka_protocol::records::{Attributes, RecordBatch},
     };
 

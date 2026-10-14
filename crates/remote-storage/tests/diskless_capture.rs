@@ -343,20 +343,26 @@ fn signed_capture_binds_state_objects_trust_and_external_head() {
     );
 }
 
-#[test]
-fn decoded_capture_rejects_unordered_duplicate_and_false_cutoff_ranges() {
-    for mutate in [
-        |capture: &mut DisklessWalCapture| capture.partitions[0].recovery_cutoff = 2,
-        |capture: &mut DisklessWalCapture| {
-            let duplicate = capture.partitions[0].ranges[0].clone();
-            capture.partitions[0].ranges.push(duplicate);
-        },
-    ] {
-        let mut capture = signable_capture();
-        mutate(&mut capture);
-        let encoded = serde_json::to_vec(&capture).unwrap();
-        check!(DisklessWalCapture::from_slice(&encoded).is_err());
-    }
+fn set_false_recovery_cutoff(capture: &mut DisklessWalCapture) {
+    capture.partitions[0].recovery_cutoff = 2;
+}
+
+fn duplicate_first_range(capture: &mut DisklessWalCapture) {
+    let duplicate = capture.partitions[0].ranges[0].clone();
+    capture.partitions[0].ranges.push(duplicate);
+}
+
+#[yare::parameterized(
+    false_cutoff = { set_false_recovery_cutoff as fn(&mut DisklessWalCapture) },
+    duplicate_range = { duplicate_first_range as fn(&mut DisklessWalCapture) },
+)]
+fn decoded_capture_rejects_unordered_duplicate_and_false_cutoff_ranges(
+    mutate: fn(&mut DisklessWalCapture),
+) {
+    let mut capture = signable_capture();
+    mutate(&mut capture);
+    let encoded = serde_json::to_vec(&capture).unwrap();
+    check!(DisklessWalCapture::from_slice(&encoded).is_err());
 }
 
 #[test]
@@ -371,12 +377,14 @@ fn decoded_capture_rejects_a_gap_in_the_live_range() {
     check!(error.contains("gap at 1"), "{error}");
 }
 
-#[test]
-fn decoded_capture_rejects_topic_names_that_can_escape_the_target() {
-    for topic in ["/tmp/escape", "../escape", "orders/escape"] {
-        let mut capture = signable_capture();
-        topic.clone_into(&mut capture.partitions[0].topic);
-        let encoded = serde_json::to_vec(&capture).unwrap();
-        check!(DisklessWalCapture::from_slice(&encoded).is_err(), "{topic}");
-    }
+#[yare::parameterized(
+    absolute_path = { "/tmp/escape" },
+    parent_path = { "../escape" },
+    nested_path = { "orders/escape" },
+)]
+fn decoded_capture_rejects_topic_names_that_can_escape_the_target(topic: &str) {
+    let mut capture = signable_capture();
+    topic.clone_into(&mut capture.partitions[0].topic);
+    let encoded = serde_json::to_vec(&capture).unwrap();
+    check!(DisklessWalCapture::from_slice(&encoded).is_err(), "{topic}");
 }

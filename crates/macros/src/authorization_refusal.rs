@@ -94,26 +94,16 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
 
 #[cfg(test)]
 mod tests {
-    use {super::declaration, assert2::assert};
+    use super::declaration;
 
-    #[test]
-    fn refusal_requires_a_response_code_and_two_local_bindings() {
-        assert!(
-            declaration(
-                "response::Response, output, version, DENIED"
-                    .parse()
-                    .unwrap()
-            )
-            .is_ok()
-        );
-        for input in [
-            "Response, output, version",
-            "Response<T>, output, version, DENIED",
-            "Response, &mut output, version, DENIED",
-            "Response, output, version + 1, DENIED",
-            "Response, output, version, DENIED + 1",
-        ] {
-            assert!(declaration(input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        missing_code = { "Response, output, version" },
+        generic_response = { "Response<T>, output, version, DENIED" },
+        borrowed_output = { "Response, &mut output, version, DENIED" },
+        computed_version = { "Response, output, version + 1, DENIED" },
+        computed_code = { "Response, output, version, DENIED + 1" },
+    )]
+    fn refusal_requires_a_response_code_and_two_local_bindings(input: &str) {
+        assert2::assert!(declaration(input.parse().unwrap()).is_err(), "{input}");
     }
 }

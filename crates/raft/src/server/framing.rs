@@ -157,35 +157,13 @@ where
     })
 }
 
+/// Write the selected response-header version and flush the complete frame.
+#[bon::builder]
 pub(super) async fn write_response<S>(
-    stream: &mut S,
-    correlation_id: CorrelationId,
-    body: Bytes,
-) -> Result<(), RaftError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    write_response_frame(stream, correlation_id, body, true).await
-}
-
-/// Write a response without the leading tagged-fields byte. Used only by the
-/// `ApiVersions` v0 path, which decodes a `ResponseHeader v0`.
-pub(super) async fn write_response_no_tagged_fields<S>(
-    stream: &mut S,
-    correlation_id: CorrelationId,
-    body: Bytes,
-) -> Result<(), RaftError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    write_response_frame(stream, correlation_id, body, false).await
-}
-
-pub(super) async fn write_response_frame<S>(
-    stream: &mut S,
-    correlation_id: CorrelationId,
-    body: Bytes,
-    include_tagged_fields: bool,
+    #[builder(start_fn)] stream: &mut S,
+    #[builder(start_fn)] correlation_id: CorrelationId,
+    #[builder(start_fn)] body: Bytes,
+    #[builder(default = true)] include_tagged_fields: bool,
 ) -> Result<(), RaftError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -219,39 +197,60 @@ mod tests {
     /// `socket.request.max.bytes` for the tests that do not probe it.
     const MAX_REQUEST_BYTES: usize = 100 * 1024 * 1024;
 
+    #[yare::parameterized(
+        response_header_v1 = { true, &[0, 0, 0, 7, 1, 2, 3, 4, 0, 0xaa, 0xbb][..] },
+        response_header_v0 = { false, &[0, 0, 0, 6, 1, 2, 3, 4, 0xaa, 0xbb][..] },
+    )]
+    #[test_macro(tokio::test)]
+    async fn response_headers_match_their_wire_versions(tagged: bool, expected: &[u8]) {
+        let (mut client, mut server) = tokio::io::duplex(32);
+        let writer = write_response(&mut server, 0x0102_0304, Bytes::from_static(&[0xaa, 0xbb]));
+        if tagged {
+            writer.call().await
+        } else {
+            writer.include_tagged_fields(false).call().await
+        }
+        .unwrap();
+        drop(server);
+        let mut actual = Vec::new();
+        client.read_to_end(&mut actual).await.unwrap();
+        check!(actual == expected);
+    }
     /// A size prefix over `socket.request.max.bytes`, or negative, is refused
     /// before the frame is read, and one at the limit is read. The stream
     /// carries the prefix alone, so a reader that tried to fill the frame
     /// would report end of input instead of the size error.
-    #[tokio::test]
-    async fn read_one_request_refuses_a_size_prefix_over_the_limit() {
+    #[yare::parameterized(
+        at_limit = { "at the limit", 64_i32, false },
+        one_over = { "one over the limit", 65, true },
+        gigabyte_over = { "a gigabyte over a 64-byte limit", 1 << 30, true },
+        int_max = { "i32::MAX", i32::MAX, true },
+        negative = { "negative", -1, true },
+        int_min = { "i32::MIN", i32::MIN, true },
+    )]
+    #[test_macro(tokio::test)]
+    async fn read_one_request_refuses_a_size_prefix_over_the_limit(
+        case: &str,
+        size: i32,
+        refused: bool,
+    ) {
         let limit = 64_usize;
-        let cases = [
-            ("at the limit", 64_i32, false),
-            ("one over the limit", 65, true),
-            ("a gigabyte over a 64-byte limit", 1 << 30, true),
-            ("i32::MAX", i32::MAX, true),
-            ("negative", -1, true),
-            ("i32::MIN", i32::MIN, true),
-        ];
-        for (case, size, refused) in cases {
-            let (mut client, mut server) = tokio::io::duplex(128);
-            client.write_all(&size.to_be_bytes()).await.unwrap();
-            drop(client);
+        let (mut client, mut server) = tokio::io::duplex(128);
+        client.write_all(&size.to_be_bytes()).await.unwrap();
+        drop(client);
 
-            let err = super::read_one_request(&mut server, None, limit)
-                .await
-                .expect_err("the stream holds no frame");
+        let err = super::read_one_request(&mut server, None, limit)
+            .await
+            .expect_err("the stream holds no frame");
 
-            check!(
-                matches!(
-                    err,
-                    super::RaftError::Protocol(krabka_protocol::ProtocolError::InvalidValue(_))
-                ) == refused,
-                "{case}: {err}"
-            );
-            check!(super::is_eof(&err) == !refused, "{case}: {err}");
-        }
+        check!(
+            matches!(
+                err,
+                super::RaftError::Protocol(krabka_protocol::ProtocolError::InvalidValue(_))
+            ) == refused,
+            "{case}: {err}"
+        );
+        check!(super::is_eof(&err) == !refused, "{case}: {err}");
     }
 
     /// A request is flexible from its API's own `FLEXIBLE_MIN` upward, and an
@@ -261,49 +260,58 @@ mod tests {
     /// minimum is invisible unless the versions either side of the boundary
     /// are asked for. Getting it wrong means reading tagged fields off a wire
     /// that has none, or skipping the ones that are there.
-    #[test]
-    fn a_request_is_flexible_from_its_own_minimum_upward() {
-        use krabka_protocol::owned::{
-            add_raft_voter_request, api_versions_request, describe_quorum_request, fetch_request,
-            vote_request,
-        };
-
-        // (api key, that API's flexible minimum)
-        let apis = [
-            (
-                api_versions_request::API_KEY,
-                api_versions_request::FLEXIBLE_MIN,
-            ),
-            (fetch_request::API_KEY, fetch_request::FLEXIBLE_MIN),
-            (vote_request::API_KEY, vote_request::FLEXIBLE_MIN),
-            (
-                describe_quorum_request::API_KEY,
-                describe_quorum_request::FLEXIBLE_MIN,
-            ),
-            (
-                add_raft_voter_request::API_KEY,
-                add_raft_voter_request::FLEXIBLE_MIN,
-            ),
-        ];
-        for (api_key, flexible_min) in apis {
+    #[yare::parameterized(
+        api_versions = {
+            "ApiVersions",
+            krabka_protocol::owned::api_versions_request::API_KEY,
+            Some(krabka_protocol::owned::api_versions_request::FLEXIBLE_MIN)
+        },
+        fetch = {
+            "Fetch",
+            krabka_protocol::owned::fetch_request::API_KEY,
+            Some(krabka_protocol::owned::fetch_request::FLEXIBLE_MIN)
+        },
+        vote = {
+            "Vote",
+            krabka_protocol::owned::vote_request::API_KEY,
+            Some(krabka_protocol::owned::vote_request::FLEXIBLE_MIN)
+        },
+        describe_quorum = {
+            "DescribeQuorum",
+            krabka_protocol::owned::describe_quorum_request::API_KEY,
+            Some(krabka_protocol::owned::describe_quorum_request::FLEXIBLE_MIN)
+        },
+        add_raft_voter = {
+            "AddRaftVoter",
+            krabka_protocol::owned::add_raft_voter_request::API_KEY,
+            Some(krabka_protocol::owned::add_raft_voter_request::FLEXIBLE_MIN)
+        },
+        unknown_api = { "an unknown API", i16::MAX, None },
+    )]
+    fn a_request_is_flexible_from_its_own_minimum_upward(
+        name: &str,
+        api_key: i16,
+        flexible_min: Option<i16>,
+    ) {
+        if let Some(flexible_min) = flexible_min {
             check!(
                 request_is_flexible(api_key, flexible_min, None),
-                "api {api_key} at its own minimum {flexible_min}"
+                "{name} api {api_key} at its own minimum {flexible_min}"
             );
             check!(
                 request_is_flexible(api_key, flexible_min + 1, None),
-                "api {api_key} above its minimum"
+                "{name} api {api_key} above its minimum"
             );
             if let Some(below) = flexible_min.checked_sub(1) {
                 check!(
                     !request_is_flexible(api_key, below, None),
-                    "api {api_key} below its minimum"
+                    "{name} api {api_key} below its minimum"
                 );
             }
+        } else {
+            // An API this server does not route, with no admin extension to claim it.
+            check!(!request_is_flexible(api_key, 0, None), "{name}");
         }
-
-        // An API this server does not route, with no admin extension to claim it.
-        check!(!request_is_flexible(i16::MAX, 0, None));
     }
 
     /// A KIP-919 Admin router that declares one API surface and routes nothing.
@@ -341,31 +349,11 @@ mod tests {
         request
     }
 
-    #[derive(
-        Debug,
-        Clone,
-        Copy,
-        Default,
-        PartialEq,
-        Eq,
-        derive_more::Display,
-        derive_more::From,
-        derive_more::Into,
-    )]
+    #[krabka_macros::test_scalar]
     struct FrameCorrelationId(i32);
 
     /// Signed wire lengths include the null sentinel and malformed negative cases.
-    #[derive(
-        Debug,
-        Clone,
-        Copy,
-        Default,
-        PartialEq,
-        Eq,
-        derive_more::Display,
-        derive_more::From,
-        derive_more::Into,
-    )]
+    #[krabka_macros::test_scalar]
     struct ClientIdLength(i16);
 
     #[derive(Clone, Copy, krabka_macros::FieldDefaults)]

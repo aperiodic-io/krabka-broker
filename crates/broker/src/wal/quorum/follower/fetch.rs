@@ -101,74 +101,64 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fetch_frontiers_require_an_ordered_nonnegative_range() {
-        assert!(
-            validate_fetch_frontiers(&frontiers(5, 6, 7))
-                == Ok(WalFetchFrontiers {
-                    start: Offset(5),
-                    end: Offset(7),
-                })
-        );
-        for invalid in [
-            frontiers(-1, 0, 1),
-            frontiers(0, -1, 1),
-            frontiers(0, 2, 1),
-            frontiers(2, 2, 1),
-            frontiers(0, 0, -1),
-        ] {
-            assert!(validate_fetch_frontiers(&invalid).is_err());
-        }
-    }
-
-    #[test]
-    fn reset_offset_must_fall_inside_the_leader_log() {
-        assert!(validate_reset_offset(&frontiers(5, 5, 7)) == Ok(Offset(5)));
-        for invalid in [frontiers(-1, 0, 7), frontiers(8, 8, 7), frontiers(0, 0, -1)] {
-            assert!(validate_reset_offset(&invalid).is_err());
-        }
-    }
-
-    #[test]
-    fn diverging_epoch_is_absent_at_the_kafka_default_and_needs_a_real_epoch() {
-        for (name, epoch, end_offset, expected) in [
-            ("kafka default", -1, -1, Ok(None)),
-            ("negative end offset", 3, -1, Ok(None)),
-            (
-                "named divergence",
-                3,
-                10,
-                Ok(Some(LogOffsetMetadata {
-                    offset: 10,
-                    epoch: 3,
-                })),
-            ),
-            (
-                "epoch zero",
-                0,
-                0,
-                Ok(Some(LogOffsetMetadata {
-                    offset: 0,
-                    epoch: 0,
-                })),
-            ),
-            (
-                "negative epoch",
-                -1,
-                10,
-                Err(String::from(
-                    "leader returned an invalid WAL diverging epoch",
-                )),
-            ),
-        ] {
-            let mut partition = frontiers(0, 0, 10);
-            partition.diverging_epoch.epoch = epoch;
-            partition.diverging_epoch.end_offset = end_offset;
-            assert!(
-                validate_diverging_epoch(&partition) == expected,
-                "case {name}"
+    #[yare::parameterized(
+        valid = { frontiers(5, 6, 7), true },
+        negative_start = { frontiers(-1, 0, 1), false },
+        negative_high_watermark = { frontiers(0, -1, 1), false },
+        high_watermark_after_end = { frontiers(0, 2, 1), false },
+        start_after_end = { frontiers(2, 2, 1), false },
+        negative_end = { frontiers(0, 0, -1), false },
+    )]
+    fn fetch_frontiers_require_an_ordered_nonnegative_range(data: PartitionData, valid: bool) {
+        let result = validate_fetch_frontiers(&data);
+        if valid {
+            assert2::assert!(
+                result
+                    == Ok(WalFetchFrontiers {
+                        start: Offset(5),
+                        end: Offset(7),
+                    })
             );
+        } else {
+            assert2::assert!(result.is_err());
         }
+    }
+
+    #[yare::parameterized(
+        at_log_start = { frontiers(5, 5, 7), true },
+        negative_start = { frontiers(-1, 0, 7), false },
+        start_after_end = { frontiers(8, 8, 7), false },
+        negative_end = { frontiers(0, 0, -1), false },
+    )]
+    fn reset_offset_must_fall_inside_the_leader_log(data: PartitionData, valid: bool) {
+        let result = validate_reset_offset(&data);
+        if valid {
+            assert2::assert!(result == Ok(Offset(5)));
+        } else {
+            assert2::assert!(result.is_err());
+        }
+    }
+
+    #[yare::parameterized(
+        kafka_default = { -1, -1, Ok(None) },
+        negative_end_offset = { 3, -1, Ok(None) },
+        named_divergence = { 3, 10, Ok(Some(LogOffsetMetadata { offset: 10, epoch: 3 })) },
+        epoch_zero = { 0, 0, Ok(Some(LogOffsetMetadata { offset: 0, epoch: 0 })) },
+        negative_epoch = {
+            -1,
+            10,
+            Err(String::from("leader returned an invalid WAL diverging epoch")),
+        },
+    )]
+    fn diverging_epoch_is_absent_at_the_kafka_default_and_needs_a_real_epoch(
+        epoch: i32,
+        end_offset: i64,
+        expected: Result<Option<LogOffsetMetadata>, String>,
+    ) {
+        let mut partition = frontiers(0, 0, 10);
+        partition.diverging_epoch.epoch = epoch;
+        partition.diverging_epoch.end_offset = end_offset;
+        assert2::assert!(validate_diverging_epoch(&partition) == expected);
     }
 
     #[test]

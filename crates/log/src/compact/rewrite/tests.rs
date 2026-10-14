@@ -163,54 +163,51 @@ fn record_at(offset_delta: i32, key: Option<&[u8]>, delta: i64) -> Record {
 /// retained records' maximum under `CreateTime`, as Kafka's
 /// `MemoryRecordsBuilder.recordWritten` computes it, and keeps its own under
 /// `LogAppendTime`, where `writeDefaultBatchHeader` writes the append time.
-#[test]
-fn a_batch_that_loses_its_newest_record_recomputes_its_max_timestamp() {
-    let cases = [
-        (
-            "CreateTime",
-            Attributes::default(),
-            1_002, // the newest of the kept records
-        ),
-        (
-            "LogAppendTime",
-            Attributes::default().with_timestamp_type(TimestampType::LogAppendTime),
-            1_050, // the append time
-        ),
-    ];
-    for (label, attributes, expected_max_timestamp) in cases {
-        let dir = tempfile::tempdir().unwrap();
-        let batch = RecordBatch {
-            base_offset: 0,
-            last_offset_delta: 3,
-            base_timestamp: 1_000,
-            max_timestamp: 1_050,
-            attributes,
-            records: vec![
-                record_at(0, Some(b"k1"), 0),
-                record_at(1, Some(b"k2"), 1),
-                record_at(2, Some(b"k1"), 2),
-                record_at(3, None, 50), // dropped: it carries the max timestamp
-            ],
-            ..RecordBatch::default()
-        };
-        let seg = write_sealed_batches(dir.path(), &[batch]);
-        let segment_refs = vec![&seg];
-        let out = rewrite_simple(dir.path(), &segment_refs);
+#[yare::parameterized(
+    create_time = { "CreateTime", Attributes::default(), 1_002 },
+    log_append_time = {
+        "LogAppendTime",
+        Attributes::default().with_timestamp_type(TimestampType::LogAppendTime),
+        1_050,
+    },
+)]
+fn a_batch_that_loses_its_newest_record_recomputes_its_max_timestamp(
+    label: &str,
+    attributes: Attributes,
+    expected_max_timestamp: i64,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let batch = RecordBatch {
+        base_offset: 0,
+        last_offset_delta: 3,
+        base_timestamp: 1_000,
+        max_timestamp: 1_050,
+        attributes,
+        records: vec![
+            record_at(0, Some(b"k1"), 0),
+            record_at(1, Some(b"k2"), 1),
+            record_at(2, Some(b"k1"), 2),
+            record_at(3, None, 50), // dropped: it carries the max timestamp
+        ],
+        ..RecordBatch::default()
+    };
+    let seg = write_sealed_batches(dir.path(), &[batch]);
+    let segment_refs = vec![&seg];
+    let out = rewrite_simple(dir.path(), &segment_refs);
 
-        assert2::assert!(
-            decode_all(&fs::read(&out.log_swap).unwrap())
-                == vec![RecordBatch {
-                    base_offset: 0,
-                    last_offset_delta: 3,
-                    base_timestamp: 1_000,
-                    max_timestamp: expected_max_timestamp,
-                    attributes,
-                    records: vec![record_at(1, Some(b"k2"), 1), record_at(2, Some(b"k1"), 2)],
-                    ..RecordBatch::default()
-                }],
-            "{label}"
-        );
-    }
+    assert2::assert!(
+        decode_all(&fs::read(&out.log_swap).unwrap())
+            == vec![RecordBatch {
+                base_offset: 0,
+                last_offset_delta: 3,
+                base_timestamp: 1_000,
+                max_timestamp: expected_max_timestamp,
+                attributes,
+                records: vec![record_at(1, Some(b"k2"), 1), record_at(2, Some(b"k1"), 2)],
+                ..RecordBatch::default()
+            }],
+        "{label}"
+    );
 }
 
 /// (a) End-to-end control-batch bug fix. Two commit markers at different
@@ -535,60 +532,60 @@ fn retain_empty_follows_kafkas_cleaner_rules() {
 /// and no base timestamp, whatever the emptied batch had. The transactional
 /// and timestamp-type bits, the max timestamp and the producer state carry
 /// over.
-#[test]
-fn a_retained_empty_batch_has_no_compression_horizon_or_base_timestamp() {
-    let transactional_append_time = Attributes::default()
-        .with_transactional(true)
-        .with_timestamp_type(TimestampType::LogAppendTime);
-    let cases = [
-        (
-            "compressed",
-            Attributes::default().with_compression(CompressionType::Gzip),
-            Attributes::default(),
-        ),
-        (
-            "delete horizon",
-            Attributes::default().with_delete_horizon(true),
-            Attributes::default(),
-        ),
-        (
-            "transactional LogAppendTime, compressed, with a horizon",
-            transactional_append_time
-                .with_compression(CompressionType::Gzip)
-                .with_delete_horizon(true),
-            transactional_append_time,
-        ),
-    ];
-    for (label, attributes, expected_attributes) in cases {
-        let emptied = RecordBatch {
-            base_offset: 10,
-            partition_leader_epoch: 4,
-            attributes,
-            last_offset_delta: 1,
-            base_timestamp: 500,
-            max_timestamp: 700,
-            producer_id: 1000,
-            producer_epoch: 7,
-            base_sequence: 3,
-            records: vec![make_record(0, None, Some(b"n1"))],
-        };
-        assert2::assert!(
-            bare_header(&emptied)
-                == RecordBatch {
-                    base_offset: 10,
-                    partition_leader_epoch: 4,
-                    attributes: expected_attributes,
-                    last_offset_delta: 1,
-                    base_timestamp: -1,
-                    max_timestamp: 700,
-                    producer_id: 1000,
-                    producer_epoch: 7,
-                    base_sequence: 3,
-                    records: vec![],
-                },
-            "{label}"
-        );
-    }
+#[yare::parameterized(
+    compressed = {
+        "compressed",
+        Attributes::default().with_compression(CompressionType::Gzip),
+        Attributes::default(),
+    },
+    delete_horizon = {
+        "delete horizon",
+        Attributes::default().with_delete_horizon(true),
+        Attributes::default(),
+    },
+    transactional_log_append_time = {
+        "transactional LogAppendTime, compressed, with a horizon",
+        Attributes::default()
+            .with_transactional(true)
+            .with_timestamp_type(TimestampType::LogAppendTime)
+            .with_compression(CompressionType::Gzip)
+            .with_delete_horizon(true),
+        Attributes::default().with_transactional(true).with_timestamp_type(TimestampType::LogAppendTime),
+    },
+)]
+fn a_retained_empty_batch_has_no_compression_horizon_or_base_timestamp(
+    label: &str,
+    attributes: Attributes,
+    expected_attributes: Attributes,
+) {
+    let emptied = RecordBatch {
+        base_offset: 10,
+        partition_leader_epoch: 4,
+        attributes,
+        last_offset_delta: 1,
+        base_timestamp: 500,
+        max_timestamp: 700,
+        producer_id: 1000,
+        producer_epoch: 7,
+        base_sequence: 3,
+        records: vec![make_record(0, None, Some(b"n1"))],
+    };
+    assert2::assert!(
+        bare_header(&emptied)
+            == RecordBatch {
+                base_offset: 10,
+                partition_leader_epoch: 4,
+                attributes: expected_attributes,
+                last_offset_delta: 1,
+                base_timestamp: -1,
+                max_timestamp: 700,
+                producer_id: 1000,
+                producer_epoch: 7,
+                base_sequence: 3,
+                records: vec![],
+            },
+        "{label}"
+    );
 }
 
 /// A round that rewrites several size-bounded groups keeps only the last

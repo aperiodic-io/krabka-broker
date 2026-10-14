@@ -140,68 +140,120 @@ mod tests {
         assert2::check,
     };
 
-    #[test]
-    fn writes_reject_every_lossy_boundary() {
-        use QuorumStateWriteDecision::{Accept, Reject};
-
-        let max = 2_147_483_647;
-        for (version, epoch, has_leader, leader, has_vote, vote, voters_fit, expected) in [
-            (
-                0,
-                max,
-                true,
-                u64::from(max),
-                true,
-                u64::from(max),
-                true,
-                Accept,
-            ),
-            (
-                1,
-                max,
-                true,
-                u64::from(max),
-                true,
-                u64::from(max),
-                false,
-                Accept,
-            ),
-            (2, 0, false, 0, false, 0, true, Reject),
-            (0, max + 1, false, 0, false, 0, true, Reject),
-            (0, 0, true, u64::from(max) + 1, false, 0, true, Reject),
-            (0, 0, false, 0, true, u64::from(max) + 1, true, Reject),
-            (0, 0, false, u64::MAX, false, u64::MAX, true, Accept),
-            (0, 0, false, 0, false, 0, false, Reject),
-        ] {
-            check!(
-                quorum_state_write_decision(
-                    version, epoch, has_leader, leader, has_vote, vote, voters_fit,
-                ) == expected
-            );
-        }
+    #[yare::parameterized(
+        v0_max = {
+            0,
+            i32::MAX as u32,
+            true,
+            i32::MAX as u64,
+            true,
+            i32::MAX as u64,
+            true,
+            QuorumStateWriteDecision::Accept,
+        },
+        v1_max = {
+            1,
+            i32::MAX as u32,
+            true,
+            i32::MAX as u64,
+            true,
+            i32::MAX as u64,
+            false,
+            QuorumStateWriteDecision::Accept,
+        },
+        unsupported_version = { 2, 0, false, 0, false, 0, true, QuorumStateWriteDecision::Reject },
+        epoch_overflow = {
+            0,
+            i32::MAX as u32 + 1,
+            false,
+            0,
+            false,
+            0,
+            true,
+            QuorumStateWriteDecision::Reject,
+        },
+        leader_overflow = {
+            0,
+            0,
+            true,
+            i32::MAX as u64 + 1,
+            false,
+            0,
+            true,
+            QuorumStateWriteDecision::Reject,
+        },
+        vote_overflow = {
+            0,
+            0,
+            false,
+            0,
+            true,
+            i32::MAX as u64 + 1,
+            true,
+            QuorumStateWriteDecision::Reject,
+        },
+        ignored_absent_ids = {
+            0,
+            0,
+            false,
+            u64::MAX,
+            false,
+            u64::MAX,
+            true,
+            QuorumStateWriteDecision::Accept,
+        },
+        v0_voter_overflow = { 0, 0, false, 0, false, 0, false, QuorumStateWriteDecision::Reject },
+    )]
+    fn writes_reject_every_lossy_boundary(
+        version: u16,
+        epoch: u32,
+        has_leader: bool,
+        leader: u64,
+        has_vote: bool,
+        vote: u64,
+        voters_fit: bool,
+        expected: QuorumStateWriteDecision,
+    ) {
+        check!(
+            quorum_state_write_decision(
+                version, epoch, has_leader, leader, has_vote, vote, voters_fit
+            ) == expected
+        );
     }
 
-    #[test]
-    fn loads_require_exact_sentinel_and_version_fields() {
-        use QuorumStateLoadDecision::{Reject, RestoreNoVote, RestoreVote};
-
-        for (version, epoch, vote, fields, dir_valid, dir_nil, expected) in [
-            (0, 0, -1, true, false, false, RestoreNoVote),
-            (0, i32::MAX, 0, true, false, false, RestoreVote),
-            (1, 0, -1, true, true, true, RestoreNoVote),
-            (1, i32::MAX, i32::MAX, true, true, false, RestoreVote),
-            (-1, 0, -1, true, false, false, Reject),
-            (2, 0, -1, true, true, true, Reject),
-            (0, -1, -1, true, false, false, Reject),
-            (0, 0, -2, true, false, false, Reject),
-            (0, 0, -1, false, false, false, Reject),
-            (1, 0, 1, true, false, false, Reject),
-            (1, 0, -1, true, true, false, Reject),
-        ] {
-            check!(
-                quorum_state_load_decision(version, epoch, vote, fields, dir_valid, dir_nil)
-                    == expected
-            );
-        }
+    #[yare::parameterized(
+        v0_no_vote = { 0, 0, -1, true, false, false, QuorumStateLoadDecision::RestoreNoVote },
+        v0_vote = { 0, i32::MAX, 0, true, false, false, QuorumStateLoadDecision::RestoreVote },
+        v1_no_vote = { 1, 0, -1, true, true, true, QuorumStateLoadDecision::RestoreNoVote },
+        v1_vote = {
+            1,
+            i32::MAX,
+            i32::MAX,
+            true,
+            true,
+            false,
+            QuorumStateLoadDecision::RestoreVote,
+        },
+        negative_version = { -1, 0, -1, true, false, false, QuorumStateLoadDecision::Reject },
+        unsupported_version = { 2, 0, -1, true, true, true, QuorumStateLoadDecision::Reject },
+        negative_epoch = { 0, -1, -1, true, false, false, QuorumStateLoadDecision::Reject },
+        invalid_vote_sentinel = { 0, 0, -2, true, false, false, QuorumStateLoadDecision::Reject },
+        invalid_v0_fields = { 0, 0, -1, false, false, false, QuorumStateLoadDecision::Reject },
+        v1_missing_directory = { 1, 0, 1, true, false, false, QuorumStateLoadDecision::Reject },
+        v1_non_nil_no_vote = { 1, 0, -1, true, true, false, QuorumStateLoadDecision::Reject },
+    )]
+    fn loads_require_exact_sentinel_and_version_fields(
+        version: i32,
+        epoch: i32,
+        vote: i32,
+        fields: bool,
+        dir_valid: bool,
+        dir_nil: bool,
+        expected: QuorumStateLoadDecision,
+    ) {
+        check!(
+            quorum_state_load_decision(version, epoch, vote, fields, dir_valid, dir_nil)
+                == expected
+        );
     }
 }

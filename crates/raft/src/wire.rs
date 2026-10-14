@@ -856,25 +856,27 @@ mod tests {
     /// A pruned observer fetch answers with the snapshot id instead of
     /// records, so the id has to survive the round trip as a `Some` and the
     /// `-1` sentinel has to decode back to `None` rather than to `(-1, -1)`.
-    #[test]
-    fn metadata_fetch_response_round_trips_a_snapshot_id() {
-        for want in [Some((4_096_i64, 7_i32)), Some((0, 0)), None] {
-            let resp = KrabkaMetadataFetchResponse {
-                error_code: 0,
-                leader_hint: 1,
-                leader_epoch: 4,
-                log_start_offset: 4_096,
-                high_watermark: 5_000,
-                quorum_high_watermark: 5_000,
-                snapshot_id: want,
-                records: Bytes::new(),
-            };
-            let mut out = Vec::new();
-            resp.encode_v0(&mut out).unwrap();
-            let mut cur: &[u8] = &out;
-            let decoded = KrabkaMetadataFetchResponse::decode_v0(&mut cur).unwrap();
-            assert2::assert!(decoded == resp, "snapshot id {want:?}");
-            assert2::assert!(cur.is_empty());
-        }
+    #[yare::parameterized(
+        nonzero_snapshot = { Some((4_096_i64, 7_i32)) },
+        zero_snapshot = { Some((0, 0)) },
+        no_snapshot = { None },
+    )]
+    fn metadata_fetch_response_round_trips_a_snapshot_id(want: Option<(i64, i32)>) {
+        let resp = KrabkaMetadataFetchResponse {
+            error_code: 0,
+            leader_hint: 1,
+            leader_epoch: 4,
+            log_start_offset: 4_096,
+            high_watermark: 5_000,
+            quorum_high_watermark: 5_000,
+            snapshot_id: want,
+            records: Bytes::new(),
+        };
+        let mut out = Vec::new();
+        resp.encode_v0(&mut out).unwrap();
+        let mut cur: &[u8] = &out;
+        let decoded = KrabkaMetadataFetchResponse::decode_v0(&mut cur).unwrap();
+        assert2::assert!(decoded == resp, "snapshot id {want:?}");
+        assert2::assert!(cur.is_empty());
     }
 }

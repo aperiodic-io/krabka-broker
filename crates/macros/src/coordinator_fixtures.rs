@@ -197,9 +197,15 @@ mod tests {
                 .count()
                 == 3
         );
-        for input in ["", "Reply;", "&Reply"] {
-            assert!(heartbeat(&input.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        semicolon = { "Reply;" },
+        reference = { "&Reply" },
+    )]
+    fn rejects_invalid_heartbeat_schemas(input: &str) {
+        assert2::assert!(heartbeat(&input.parse().unwrap()).is_err());
     }
 
     #[test]
@@ -216,15 +222,17 @@ mod tests {
         assert!(output.contains("pending.target_per_member[0].0=value"));
         assert!(output.contains("pending.current_per_member[0].0=value"));
         assert!(output.contains("length:limit+1,encodes:false"));
-        for input in [
-            "",
-            "Delta; create [factory];",
-            "Delta; factory [];",
-            "Delta; factory {};",
-            "Delta; factory [factory]; extra",
-        ] {
-            assert!(key_boundary_template(&input.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        unknown_clause = { "Delta; create [factory];" },
+        empty_factory = { "Delta; factory [];" },
+        braced_factory = { "Delta; factory {};" },
+        trailing_tokens = { "Delta; factory [factory]; extra" },
+    )]
+    fn rejects_invalid_key_boundary_templates(input: &str) {
+        assert2::assert!(key_boundary_template(&input.parse().unwrap()).is_err());
     }
 
     #[test]
@@ -234,13 +242,15 @@ mod tests {
         assert!(output.contains("letpart=::std::sync::Arc::clone(&part)"));
         assert!(output.find("sleep").unwrap() < output.find("__commit_leader").unwrap());
         assert!(output.find("__commit_leader").unwrap() < output.find("__commit_notify").unwrap());
-        for input in [
-            "",
-            "case, part; captures [] leader(a,b) {} notify {}",
-            "case, part; captures {} leader(a) {} notify {}",
-            "case, part; captures {} leader(a,b) {} notify {} extra",
-        ] {
-            assert!(commit_template(&input.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        unbraced_captures = { "case, part; captures [] leader(a,b) {} notify {}" },
+        missing_leader_binding = { "case, part; captures {} leader(a) {} notify {}" },
+        trailing_tokens = { "case, part; captures {} leader(a,b) {} notify {} extra" },
+    )]
+    fn rejects_invalid_commit_templates(input: &str) {
+        assert2::assert!(commit_template(&input.parse().unwrap()).is_err());
     }
 }

@@ -184,37 +184,32 @@ mod tests {
     /// The size rule counts the log and the snapshots still kept, and breaks
     /// only strictly above the limit, as Kafka's `logSize + snapshotsSize >
     /// retentionMaxBytes` does.
-    #[test]
-    fn the_size_rule_breaks_strictly_above_the_limit() {
-        for (log_size, snapshots_size, max, want) in [
-            (1_000, 1_048, 2_048, false),
-            (1_000, 1_049, 2_048, true),
-            (0, 0, 0, false),
-            (1, 0, 0, true),
-            (u64::MAX, 1, 2_048, true),
-        ] {
-            check!(
-                retention_size_breached(log_size, snapshots_size, bytes(max)) == want,
-                "log {log_size} + snapshots {snapshots_size} against {max}"
-            );
-        }
+    #[yare::parameterized(
+        below_limit = { 1_000, 1_048, 2_048, false },
+        above_limit = { 1_000, 1_049, 2_048, true },
+        zero_sizes_at_zero_limit = { 0, 0, 0, false },
+        positive_size_at_zero_limit = { 1, 0, 0, true },
+        saturating_sum_above_limit = { u64::MAX, 1, 2_048, true },
+    )]
+    fn the_size_rule_breaks_strictly_above_the_limit(
+        log_size: u64,
+        snapshots_size: u64,
+        max: u32,
+        want: bool,
+    ) {
+        check!(retention_size_breached(log_size, snapshots_size, bytes(max)) == want);
     }
 
     /// The age rule breaks once the snapshot's last record is strictly older
     /// than the limit, as Kafka's `now - timestamp > retentionMillis` does.
-    #[test]
-    fn the_age_rule_breaks_strictly_past_the_limit() {
-        for (now, timestamp, max, want) in [
-            (10_000, 0, 10_000, false),
-            (10_001, 0, 10_000, true),
-            (5, 10, 0, false),
-            (i64::MAX, i64::MIN, 1, true),
-        ] {
-            check!(
-                retention_age_breached(now, timestamp, millis(max)) == want,
-                "now {now}, last record {timestamp}, limit {max}"
-            );
-        }
+    #[yare::parameterized(
+        exact_age_limit = { 10_000, 0, 10_000, false },
+        past_age_limit = { 10_001, 0, 10_000, true },
+        future_timestamp = { 5, 10, 0, false },
+        saturating_age_difference = { i64::MAX, i64::MIN, 1, true },
+    )]
+    fn the_age_rule_breaks_strictly_past_the_limit(now: i64, timestamp: i64, max: u32, want: bool) {
+        check!(retention_age_breached(now, timestamp, millis(max)) == want);
     }
 
     /// Only the snapshots at or above the log start are weighed, oldest

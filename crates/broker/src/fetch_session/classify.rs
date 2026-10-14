@@ -610,8 +610,6 @@ mod tests {
         remove_all = { ForgottenPartitionsCase::RemoveAll },
     )]
     fn forgetting_partitions_updates_the_cached_session(case: ForgottenPartitionsCase) {
-        use assert2::assert;
-
         let cache = FetchSessionCache::new(10);
         let (initial, forgotten, expected_partitions) = match case {
             ForgottenPartitionsCase::RemoveOne => (
@@ -654,7 +652,7 @@ mod tests {
             } => {
                 let mut parts: Vec<i32> = partitions.iter().map(|(k, _)| k.partition).collect();
                 parts.sort_unstable();
-                assert!(parts == expected_partitions);
+                assert2::assert!(parts == expected_partitions);
                 let expected_id = if matches!(case, ForgottenPartitionsCase::RemoveAll) {
                     0
                 } else {
@@ -665,8 +663,8 @@ mod tests {
             other => panic!("expected Incremental, got {other:?}"),
         }
         if matches!(case, ForgottenPartitionsCase::RemoveAll) {
-            assert!(cache.len() == 0);
-            assert!(cache.total_partitions_cached() == 0);
+            assert2::assert!(cache.len() == 0);
+            assert2::assert!(cache.total_partitions_cached() == 0);
         }
     }
 }

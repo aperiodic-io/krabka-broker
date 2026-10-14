@@ -94,18 +94,16 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use {super::expand, assert2::assert};
+    use super::expand;
 
-    #[test]
-    fn refuses_incomplete_tables_and_ranges_on_unvalidated_assignments() {
-        for input in [
-            "runtime => cfg; plain:;",
-            "runtime => cfg; plain: enabled",
-            "runtime => cfg; plain: enabled in 0..=1;",
-            "runtime => cfg; duration: timeout in 1..=10;",
-            "runtime => cfg; validate: count => nested.;",
-        ] {
-            assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        missing_plain_value = { "runtime => cfg; plain:;" },
+        missing_plain_terminator = { "runtime => cfg; plain: enabled" },
+        plain_range = { "runtime => cfg; plain: enabled in 0..=1;" },
+        duration_range = { "runtime => cfg; duration: timeout in 1..=10;" },
+        nested_validation = { "runtime => cfg; validate: count => nested.;" },
+    )]
+    fn refuses_incomplete_tables_and_ranges_on_unvalidated_assignments(input: &str) {
+        assert2::assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

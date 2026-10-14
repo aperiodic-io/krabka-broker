@@ -37,6 +37,27 @@ pub(super) fn index(
     )
 }
 
+fn later_marker_fixture() -> (RestoreAbortedTxn, RestoreSegmentExtent, FetchWatermarks) {
+    (
+        RestoreAbortedTxn {
+            producer_id: 7,
+            start_offset: 0,
+            last_offset: 10,
+        },
+        RestoreSegmentExtent {
+            base_offset: 10,
+            last_offset: 10,
+        },
+        FetchWatermarks {
+            log_start: 0,
+            log_end: 20,
+            hw: 20,
+            lso: 20,
+            deliverable: 20,
+        },
+    )
+}
+
 proptest! {
     #[test]
     fn complete_sources_match_an_independent_interval_and_set_oracle(
@@ -62,24 +83,29 @@ proptest! {
     }
 }
 
+#[yare::parameterized(
+    minimum_cut = { 0, i64::MIN },
+    empty_cut = { 0, 0 },
+    end_at_from = { 10, 10 },
+    above_end = { 11, i64::MAX },
+)]
+fn later_marker_sources_exclude_empty_or_outside_ranges(from: i64, cut: i64) {
+    let (entry, owner, w) = later_marker_fixture();
+    assert2::assert!(
+        restored_abort_sources_cover_committed_fetch(
+            &[entry],
+            &[entry],
+            (owner, owner),
+            w,
+            from,
+            cut
+        ) == Some(vec![])
+    );
+}
+
 #[test]
 fn later_marker_sources_are_complete_and_duplicate_wire_rows_are_removed() {
-    let entry = RestoreAbortedTxn {
-        producer_id: 7,
-        start_offset: 0,
-        last_offset: 10,
-    };
-    let owner = RestoreSegmentExtent {
-        base_offset: 10,
-        last_offset: 10,
-    };
-    let w = FetchWatermarks {
-        log_start: 0,
-        log_end: 20,
-        hw: 20,
-        lso: 20,
-        deliverable: 20,
-    };
+    let (entry, owner, w) = later_marker_fixture();
     assert2::assert!(
         restored_abort_sources_cover_committed_fetch(&[entry], &[entry], (owner, owner), w, 0, 1)
             == Some(vec![(7, 0)])
@@ -92,18 +118,6 @@ fn later_marker_sources_are_complete_and_duplicate_wire_rows_are_removed() {
         restored_abort_sources_cover_committed_fetch(&[], &[entry], (owner, owner), w, 0, 1)
             == Some(vec![(7, 0)])
     );
-    for (from, cut) in [(0, i64::MIN), (0, 0), (10, 10), (11, i64::MAX)] {
-        assert2::assert!(
-            restored_abort_sources_cover_committed_fetch(
-                &[entry],
-                &[entry],
-                (owner, owner),
-                w,
-                from,
-                cut
-            ) == Some(vec![])
-        );
-    }
     assert2::assert!(
         unique_aborted_transaction_rows(&[(7, 0), (7, 0), (7, 1), (8, 0)])
             == vec![(7, 0), (7, 1), (8, 0)]

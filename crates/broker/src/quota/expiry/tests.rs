@@ -104,16 +104,21 @@ fn a_user_bucket_releases_the_series_of_its_own_key() {
 /// Kafka charges every quota under its own config key, and the series is
 /// labelled by the `QuotaType` that key names; a sweep that could not make
 /// that trip would leave the label set behind.
+#[yare::parameterized(
+    producer = { "producer_byte_rate", QuotaType::Produce },
+    consumer = { "consumer_byte_rate", QuotaType::Fetch },
+    request = { "request_percentage", QuotaType::Request },
+    controller_mutation = { "controller_mutation_rate", QuotaType::ControllerMutation },
+    connection_creation = { "connection_creation_rate", QuotaType::ConnectionCreation },
+)]
+fn every_quota_key_a_bucket_is_created_under_names_a_quota_type(
+    config_key: &'static str,
+    want: QuotaType,
+) {
+    check!(QuotaType::from_config_key(config_key) == Some(want));
+}
+
 #[test]
-fn every_quota_key_a_bucket_is_created_under_names_a_quota_type() {
-    for (config_key, want) in [
-        ("producer_byte_rate", QuotaType::Produce),
-        ("consumer_byte_rate", QuotaType::Fetch),
-        ("request_percentage", QuotaType::Request),
-        ("controller_mutation_rate", QuotaType::ControllerMutation),
-        ("connection_creation_rate", QuotaType::ConnectionCreation),
-    ] {
-        check!(QuotaType::from_config_key(config_key) == Some(want));
-    }
+fn an_unknown_quota_config_key_has_no_type() {
     check!(QuotaType::from_config_key("not_a_quota") == None);
 }

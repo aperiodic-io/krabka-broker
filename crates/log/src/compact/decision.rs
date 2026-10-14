@@ -150,161 +150,133 @@ mod core_tests {
         }
     }
 
-    #[test]
-    fn control_batch_key_is_never_indexed() {
+    #[yare::parameterized(
+        control_marker = { "control marker key", Some(b"\x00\x00\x00\x01".as_ref()), true, false },
+        null_data = { "null data key", None, false, false },
+        ordinary_data = { "ordinary data key", Some(b"k".as_ref()), false, true },
+    )]
+    fn control_batch_key_is_never_indexed(
+        name: &str,
+        key: Option<&[u8]>,
+        is_control: bool,
+        want: bool,
+    ) {
         // A control batch's key (commit/abort marker) must NOT enter the
         // dedup map, regardless of whether the key is present.
-        for (name, key, is_control, want) in [
-            (
-                "control marker key",
-                Some(b"\x00\x00\x00\x01".as_ref()),
-                true,
+        check!(
+            should_index_key(key, is_control) == want,
+            "case {name}: key={key:?} is_control={is_control}"
+        );
+    }
+
+    #[yare::parameterized(
+        stamp_new_horizon = {
+            "stamp new horizon",
+            None,
+            true,
+            100,
+            RetainDecision::SetHorizon(150),
+        },
+        keep_before_horizon = { "keep before horizon", Some(150), true, 149, RetainDecision::Keep },
+        delete_at_horizon = { "delete at horizon", Some(150), true, 150, RetainDecision::Delete },
+        delete_superseded = { "delete superseded", None, false, 100, RetainDecision::Delete },
+    )]
+    fn tombstone_sets_horizon_then_deletes_after_expiry(
+        name: &str,
+        existing_horizon: Option<i64>,
+        is_newest: bool,
+        now_ms: i64,
+        want: RetainDecision,
+    ) {
+        // Keyed, null-value record (tombstone).
+        check!(
+            retain_decision(
+                data(true, false),
+                batch(false, -1, existing_horizon),
+                is_newest,
+                TxnDataState::NotTransactional,
+                now_ms,
+                50
+            ) == want,
+            "case {name}: horizon={existing_horizon:?} newest={is_newest} now={now_ms}"
+        );
+    }
+
+    #[yare::parameterized(
+        ordinary_sum = { 100, 50, 150 },
+        saturates_maximum = { i64::MAX - 1, 50, i64::MAX },
+        saturates_minimum = { i64::MIN + 1, -50, i64::MIN },
+    )]
+    fn compute_horizon_saturates_at_i64_bounds(timestamp: i64, retention: i64, expected: i64) {
+        assert2::assert!(compute_horizon(timestamp, retention) == expected);
+    }
+
+    #[yare::parameterized(
+        keep_while_data_survives = {
+            "keep while data survives",
+            None,
+            TxnDataState::DataSurvives,
+            100,
+            RetainDecision::Keep,
+        },
+        stamp_after_data_gone = {
+            "stamp after data gone",
+            None,
+            TxnDataState::DataFullyGone,
+            100,
+            RetainDecision::SetHorizon(150),
+        },
+        delete_aged_marker = {
+            "delete aged marker",
+            Some(150),
+            TxnDataState::DataFullyGone,
+            150,
+            RetainDecision::Delete,
+        },
+    )]
+    fn marker_retained_while_data_survives_then_ages(
+        name: &str,
+        existing_horizon: Option<i64>,
+        txn_state: TxnDataState,
+        now_ms: i64,
+        want: RetainDecision,
+    ) {
+        // Control records carry a key, no value.
+        check!(
+            retain_decision(
+                data(true, false),
+                batch(true, 1000, existing_horizon),
                 false,
-            ),
-            // Null-key data is also never indexed.
-            ("null data key", None, false, false),
-            // Ordinary keyed data IS indexed.
-            ("ordinary data key", Some(b"k".as_ref()), false, true),
-        ] {
-            check!(
-                should_index_key(key, is_control) == want,
-                "case {name}: key={key:?} is_control={is_control}"
-            );
-        }
+                txn_state,
+                now_ms,
+                50
+            ) == want,
+            "case {name}: horizon={existing_horizon:?} now={now_ms}"
+        );
     }
 
-    #[test]
-    fn tombstone_sets_horizon_then_deletes_after_expiry() {
-        let rec = data(true, false); // keyed, null value (tombstone)
-        for (name, existing_horizon, is_newest, now_ms, want) in [
-            // Newest tombstone, no existing horizon: stamp now+ret = 100+50 = 150.
-            (
-                "stamp new horizon",
-                None,
-                true,
+    #[yare::parameterized(
+        keep_newest_keyed = { "keep newest keyed data", true, true, RetainDecision::Keep },
+        drop_null_key = { "drop null key", false, true, RetainDecision::Delete },
+        drop_superseded = { "drop superseded keyed data", true, false, RetainDecision::Delete },
+    )]
+    fn live_data_kept_nullkey_dropped(
+        name: &str,
+        has_key: bool,
+        is_newest: bool,
+        want: RetainDecision,
+    ) {
+        check!(
+            retain_decision(
+                data(has_key, true),
+                batch(false, -1, None),
+                is_newest,
+                TxnDataState::NotTransactional,
                 100,
-                RetainDecision::SetHorizon(150),
-            ),
-            // Now=149 < horizon 150: keep.
-            (
-                "keep before horizon",
-                Some(150),
-                true,
-                149,
-                RetainDecision::Keep,
-            ),
-            // Now=150 >= horizon 150: delete.
-            (
-                "delete at horizon",
-                Some(150),
-                true,
-                150,
-                RetainDecision::Delete,
-            ),
-            // Superseded tombstone (not newest-for-key): delete outright.
-            (
-                "delete superseded",
-                None,
-                false,
-                100,
-                RetainDecision::Delete,
-            ),
-        ] {
-            check!(
-                retain_decision(
-                    rec,
-                    batch(false, -1, existing_horizon),
-                    is_newest,
-                    TxnDataState::NotTransactional,
-                    now_ms,
-                    50
-                ) == want,
-                "case {name}: horizon={existing_horizon:?} newest={is_newest} now={now_ms}"
-            );
-        }
-    }
-
-    #[test]
-    fn compute_horizon_saturates_at_i64_bounds() {
-        for (_name, timestamp, retention, expected) in [
-            ("ordinary sum", 100, 50, 150),
-            ("saturates maximum", i64::MAX - 1, 50, i64::MAX),
-            ("saturates minimum", i64::MIN + 1, -50, i64::MIN),
-        ] {
-            assert2::assert!(compute_horizon(timestamp, retention) == expected);
-        }
-    }
-
-    #[test]
-    fn marker_retained_while_data_survives_then_ages() {
-        let marker = data(true, false); // control records carry a key, no value
-        for (name, existing_horizon, txn_state, now_ms, want) in [
-            // Data still survives: keep the marker.
-            (
-                "keep while data survives",
-                None,
-                TxnDataState::DataSurvives,
-                100,
-                RetainDecision::Keep,
-            ),
-            // Data fully gone, no horizon yet: stamp now+ret = 100+50 = 150.
-            (
-                "stamp after data gone",
-                None,
-                TxnDataState::DataFullyGone,
-                100,
-                RetainDecision::SetHorizon(150),
-            ),
-            // Data fully gone, horizon 150, now 150: delete.
-            (
-                "delete aged marker",
-                Some(150),
-                TxnDataState::DataFullyGone,
-                150,
-                RetainDecision::Delete,
-            ),
-        ] {
-            check!(
-                retain_decision(
-                    marker,
-                    batch(true, 1000, existing_horizon),
-                    false,
-                    txn_state,
-                    now_ms,
-                    50
-                ) == want,
-                "case {name}: horizon={existing_horizon:?} now={now_ms}"
-            );
-        }
-    }
-
-    #[test]
-    fn live_data_kept_nullkey_dropped() {
-        for (name, has_key, is_newest, want) in [
-            // Newest-for-key data with a value: keep.
-            ("keep newest keyed data", true, true, RetainDecision::Keep),
-            // Null-key data: dropped regardless of newest-ness.
-            ("drop null key", false, true, RetainDecision::Delete),
-            // Keyed data with a value but not newest-for-key: dropped.
-            (
-                "drop superseded keyed data",
-                true,
-                false,
-                RetainDecision::Delete,
-            ),
-        ] {
-            check!(
-                retain_decision(
-                    data(has_key, true),
-                    batch(false, -1, None),
-                    is_newest,
-                    TxnDataState::NotTransactional,
-                    100,
-                    50
-                ) == want,
-                "case {name}: has_key={has_key} newest={is_newest}"
-            );
-        }
+                50
+            ) == want,
+            "case {name}: has_key={has_key} newest={is_newest}"
+        );
     }
 
     #[test]

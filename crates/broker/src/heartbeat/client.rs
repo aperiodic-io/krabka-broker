@@ -648,15 +648,13 @@ mod tests {
         assert!(all_dirs_offline(&paths, &status));
     }
 
-    #[test]
-    fn heartbeat_rpc_timeout_tracks_interval_with_bounds() {
-        for (interval, want) in [
-            (millis(50), millis(500)),
-            (millis(500), secs(1)),
-            (secs(5), secs(1)),
-        ] {
-            assert!(heartbeat_rpc_timeout(interval) == want, "{interval:?}");
-        }
+    #[yare::parameterized(
+        minimum_timeout = { millis(50), millis(500) },
+        interval_timeout = { millis(500), secs(1) },
+        maximum_timeout = { secs(5), secs(1) },
+    )]
+    fn heartbeat_rpc_timeout_tracks_interval_with_bounds(interval: Time, want: Time) {
+        assert2::assert!(heartbeat_rpc_timeout(interval) == want, "{interval:?}");
     }
 
     #[test]

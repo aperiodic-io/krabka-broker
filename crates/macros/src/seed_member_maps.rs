@@ -182,30 +182,30 @@ mod tests {
         assert!(function.body.unwrap().stmts.len() == 1);
     }
 
-    #[test]
-    fn rejects_incomplete_bindings_missing_blocks_and_trailing_operations() {
-        for source in [
-            "state; a, b; metadata, assignment; |id, member| {}",
-            "state; a, b, c; metadata; |id, member| {}",
-            "state; a, b, c; metadata, assignment; |id| {}",
-            "state; a, b, c; metadata, assignment; |id, member| ()",
-            "state; a, b, c; metadata, assignment; |id, member| {} extra",
-        ] {
-            assert!(
-                Snapshot::parse(&source.parse().unwrap()).is_err(),
-                "{source}"
-            );
-        }
-        for source in [
-            "state, seed; member, current",
-            "state, seed; member current {}",
-            "state, seed; member, current []",
-            "state, seed; member, current {} {}",
-        ] {
-            assert!(
-                Hydration::parse(&source.parse().unwrap()).is_err(),
-                "{source}"
-            );
-        }
+    #[yare::parameterized(
+        too_few_bindings = { "state; a, b; metadata, assignment; |id, member| {}" },
+        missing_assignment = { "state; a, b, c; metadata; |id, member| {}" },
+        missing_member_binding = { "state; a, b, c; metadata, assignment; |id| {}" },
+        non_block_operation = { "state; a, b, c; metadata, assignment; |id, member| ()" },
+        trailing_operation = { "state; a, b, c; metadata, assignment; |id, member| {} extra" },
+    )]
+    fn rejects_incomplete_snapshot_bindings(source: &str) {
+        assert2::assert!(
+            Snapshot::parse(&source.parse().unwrap()).is_err(),
+            "{source}"
+        );
+    }
+
+    #[yare::parameterized(
+        missing_block = { "state, seed; member, current" },
+        missing_binding_comma = { "state, seed; member current {}" },
+        non_block_body = { "state, seed; member, current []" },
+        extra_block = { "state, seed; member, current {} {}" },
+    )]
+    fn rejects_incomplete_hydration_bindings(source: &str) {
+        assert2::assert!(
+            Hydration::parse(&source.parse().unwrap()).is_err(),
+            "{source}"
+        );
     }
 }

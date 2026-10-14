@@ -26,3 +26,4 @@ qubit-clock = { workspace = true }
 [dev-dependencies]
 krabka-macros = { version = "1.0.5", path = "../macros" }
 stateright = { workspace = true }
+yare = { workspace = true }

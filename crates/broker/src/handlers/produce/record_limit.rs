@@ -124,29 +124,32 @@ mod tests {
 
     /// The limit refuses a compressed record above it, on the verbatim and the
     /// owned path alike, and never an uncompressed one.
-    #[test]
-    fn only_a_compressed_batch_is_held_to_the_limit() {
-        let policy = RecordDecompressionPolicy::default();
+    #[yare::parameterized(
+        gzip_verbatim_below_limit = { CompressionType::Gzip, true, 113, true },
+        gzip_verbatim_at_limit = { CompressionType::Gzip, true, 114, false },
+        gzip_owned_below_limit = { CompressionType::Gzip, false, 113, true },
+        gzip_owned_at_limit = { CompressionType::Gzip, false, 114, false },
+        zstd_verbatim_below_limit = { CompressionType::Zstd, true, 50, true },
+        uncompressed_verbatim = { CompressionType::None, true, 50, false },
+        uncompressed_owned = { CompressionType::None, false, 50, false },
+    )]
+    fn only_a_compressed_batch_is_held_to_the_limit(
+        codec: CompressionType,
+        verbatim: bool,
+        limit: usize,
+        expected: bool,
+    ) {
         // The record body is 114 bytes with a 100-byte value: its attributes
         // byte, a two-byte timestamp delta, a one-byte offset delta, `1 + 3`
         // bytes of key, `2 + 100` of value, a one-byte header count, and one
         // header of `1 + 1` bytes of key with a null value. Its encoding is
         // that behind a two-byte length prefix, so a limit of 114 admits it and
         // 113 refuses it.
-        for (codec, verbatim, limit, expected) in [
-            (CompressionType::Gzip, true, 113, true),
-            (CompressionType::Gzip, true, 114, false),
-            (CompressionType::Gzip, false, 113, true),
-            (CompressionType::Gzip, false, 114, false),
-            (CompressionType::Zstd, true, 50, true),
-            (CompressionType::None, true, 50, false),
-            (CompressionType::None, false, 50, false),
-        ] {
-            check!(
-                has_oversized_record(&prepared(&batch(codec, 100), verbatim), limit, policy)
-                    == expected,
-                "{codec:?} verbatim={verbatim} limit={limit}"
-            );
-        }
+        let policy = RecordDecompressionPolicy::default();
+        check!(
+            has_oversized_record(&prepared(&batch(codec, 100), verbatim), limit, policy)
+                == expected,
+            "{codec:?} verbatim={verbatim} limit={limit}"
+        );
     }
 }

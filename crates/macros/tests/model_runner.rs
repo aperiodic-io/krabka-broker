@@ -96,33 +96,25 @@ krabka_macros::model_runner! {
     }
 }
 
-#[test]
-fn valid_models_reach_checks_pin_and_properties() {
-    for runner in [properties_first, properties_last] {
-        STEPS.with(|steps| steps.borrow_mut().clear());
-        runner(ProbeModel { safe: true }, "probe", 2);
-        STEPS.with(|steps| assert!(*steps.borrow() == ["bfs", "native_checks", "pin"]));
-    }
+#[yare::parameterized(
+    first_runner = { super::properties_first },
+    last_runner = { super::properties_last },
+)]
+fn valid_models_reach_checks_pin_and_properties(runner: fn(ProbeModel, &str, usize)) {
+    STEPS.with(|steps| steps.borrow_mut().clear());
+    runner(ProbeModel { safe: true }, "probe", 2);
+    STEPS.with(|steps| assert2::assert!(*steps.borrow() == ["bfs", "native_checks", "pin"]));
 }
 
-#[test]
-fn failing_properties_abort_at_the_declared_diagnostic_position() {
-    struct RunnerCase {
-        runner: fn(ProbeModel, &str, usize),
-        expected: Vec<&'static str>,
-    }
-    for case in [
-        RunnerCase {
-            runner: properties_first,
-            expected: vec!["bfs", "native_checks"],
-        },
-        RunnerCase {
-            runner: properties_last,
-            expected: vec!["bfs", "native_checks", "pin"],
-        },
-    ] {
-        STEPS.with(|steps| steps.borrow_mut().clear());
-        assert!(catch_unwind(|| (case.runner)(ProbeModel { safe: false }, "probe", 2)).is_err());
-        STEPS.with(|steps| assert!(*steps.borrow() == case.expected));
-    }
+#[yare::parameterized(
+    first_runner = { super::properties_first, vec!["bfs", "native_checks"] },
+    last_runner = { super::properties_last, vec!["bfs", "native_checks", "pin"] },
+)]
+fn failing_properties_abort_at_the_declared_diagnostic_position(
+    runner: fn(ProbeModel, &str, usize),
+    expected: Vec<&'static str>,
+) {
+    STEPS.with(|steps| steps.borrow_mut().clear());
+    assert2::assert!(catch_unwind(|| runner(ProbeModel { safe: false }, "probe", 2)).is_err());
+    STEPS.with(|steps| assert2::assert!(*steps.borrow() == expected));
 }

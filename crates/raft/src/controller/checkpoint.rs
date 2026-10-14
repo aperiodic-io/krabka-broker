@@ -158,8 +158,18 @@ mod tests {
         assert2::assert!(latest == ((2, 3), b"best".to_vec()));
     }
 
-    #[tokio::test]
-    async fn read_snapshot_range_rejects_the_end_and_everything_past_it() {
+    #[yare::parameterized(
+        zero = { 0, Some(b"abc".as_slice()) },
+        last_byte = { 2, Some(b"c".as_slice()) },
+        exact_end = { 3, None },
+        past_end = { 4, None },
+        negative = { -1, None },
+    )]
+    #[test_macro(tokio::test)]
+    async fn read_snapshot_range_rejects_the_end_and_everything_past_it(
+        position: i64,
+        expected: Option<&'static [u8]>,
+    ) {
         let (dir, ctrl) = joining_controller("join start").await;
         let checkpoint_dir = metadata_partition_dir(dir.path());
         std::fs::create_dir_all(&checkpoint_dir).unwrap();
@@ -182,15 +192,10 @@ mod tests {
             total_size: 3,
             bytes: bytes::Bytes::from_static(bytes),
         };
-        for (position, expected) in [
-            (0, Some(window(b"abc"))),
-            (2, Some(window(b"c"))),
-            (3, None),
-            (4, None),
-            (-1, None),
-        ] {
-            assert2::assert!(read(position) == expected, "position {position}");
-        }
+        assert2::assert!(
+            read(position) == expected.map(window),
+            "position {position}"
+        );
         ctrl.shutdown().await;
     }
 }

@@ -81,26 +81,28 @@ fn sample() -> RemoteLogSegmentMetadata {
         .call()
 }
 
-#[test]
-fn index_suffixes_match_kafka() {
+#[yare::parameterized(
+    offset = { IndexType::Offset, ".index" },
+    timestamp = { IndexType::Timestamp, ".timeindex" },
+    producer_snapshot = { IndexType::ProducerSnapshot, ".snapshot" },
+    leader_epoch = { IndexType::LeaderEpoch, ".leader_epoch_checkpoint" },
+    transaction = { IndexType::Transaction, ".txnindex" },
+)]
+fn index_suffixes_match_kafka(index_type: IndexType, want: &str) {
     // Filesystem-backed stores key files off these exact suffixes.
-    for (index_type, want) in [
-        (IndexType::Offset, ".index"),
-        (IndexType::Timestamp, ".timeindex"),
-        (IndexType::ProducerSnapshot, ".snapshot"),
-        (IndexType::LeaderEpoch, ".leader_epoch_checkpoint"),
-        (IndexType::Transaction, ".txnindex"),
-    ] {
-        check!(index_type.suffix() == want, "{index_type:?}");
-        check!(IndexType::from_suffix(want) == Some(index_type));
-    }
+    check!(index_type.suffix() == want, "{index_type:?}");
+    check!(IndexType::from_suffix(want) == Some(index_type));
 }
 
-#[test]
-fn from_suffix_rejects_non_index_suffixes() {
-    for suffix in [LOG_FILE_SUFFIX, "", ".INDEX", "index", ".timeindex2"] {
-        check!(IndexType::from_suffix(suffix) == None, "{suffix:?}");
-    }
+#[yare::parameterized(
+    log = { LOG_FILE_SUFFIX },
+    empty = { "" },
+    uppercase = { ".INDEX" },
+    missing_dot = { "index" },
+    extended = { ".timeindex2" },
+)]
+fn from_suffix_rejects_non_index_suffixes(suffix: &str) {
+    check!(IndexType::from_suffix(suffix) == None, "{suffix:?}");
 }
 
 #[test]
@@ -177,51 +179,39 @@ fn parse_partition_dir_name_splits_a_hyphenated_topic_from_the_right() {
     );
 }
 
-#[test]
-fn parse_partition_dir_name_rejects_malformed_names() {
-    for name in [
-        // Topic id one character short of the fixed Base64 width.
-        "orders-7-AAAAAAAAAAAAAAAAAAAAA",
-        // Topic id that decodes to more than 16 bytes.
-        "orders-7-AAAAAAAAAAAAAAAAAAAAAQAA",
-        // Non-numeric partition index.
-        "orders-x-AAAAAAAAAAAAAAAAAAAAAQ",
-        // Empty topic.
-        "-7-AAAAAAAAAAAAAAAAAAAAAQ",
-        // A key separator cannot appear inside one directory name.
-        "or/ders-7-AAAAAAAAAAAAAAAAAAAAAQ",
-        // No partition index at all.
-        "orders-AAAAAAAAAAAAAAAAAAAAAQ",
-        "",
-    ] {
-        check!(parse_partition_dir_name(name) == None, "{name:?}");
-    }
+#[yare::parameterized(
+    short_topic_id = { "orders-7-AAAAAAAAAAAAAAAAAAAAA" },
+    long_topic_id = { "orders-7-AAAAAAAAAAAAAAAAAAAAAQAA" },
+    non_numeric_partition = { "orders-x-AAAAAAAAAAAAAAAAAAAAAQ" },
+    empty_topic = { "-7-AAAAAAAAAAAAAAAAAAAAAQ" },
+    path_separator = { "or/ders-7-AAAAAAAAAAAAAAAAAAAAAQ" },
+    missing_partition = { "orders-AAAAAAAAAAAAAAAAAAAAAQ" },
+    empty = { "" },
+)]
+fn parse_partition_dir_name_rejects_malformed_names(name: &str) {
+    check!(parse_partition_dir_name(name) == None, "{name:?}");
 }
 
-#[test]
-fn parse_segment_file_name_rejects_malformed_names() {
-    for name in [
-        // Base offset one digit short of the fixed width.
-        "0000000000000000001-AAAAAAAAAAAAAAAAAAAA_g.snapshot",
-        // Non-numeric base offset.
-        "0000000000000000001x-AAAAAAAAAAAAAAAAAAAA_g.snapshot",
-        // Segment id one character short of the fixed Base64 width.
-        "00000000000000000011-AAAAAAAAAAAAAAAAAAAA_",
-        // Missing the separator between base offset and segment id.
-        "00000000000000000011xAAAAAAAAAAAAAAAAAAAA_g.snapshot",
-        // Segment id that is not Base64 at all.
-        "00000000000000000011-**********************.snapshot",
-        "",
-    ] {
-        check!(parse_segment_file_name(name) == None, "{name:?}");
-    }
+#[yare::parameterized(
+    short_offset = { "0000000000000000001-AAAAAAAAAAAAAAAAAAAA_g.snapshot" },
+    non_numeric_offset = { "0000000000000000001x-AAAAAAAAAAAAAAAAAAAA_g.snapshot" },
+    short_segment_id = { "00000000000000000011-AAAAAAAAAAAAAAAAAAAA_" },
+    missing_separator = { "00000000000000000011xAAAAAAAAAAAAAAAAAAAA_g.snapshot" },
+    invalid_base64 = { "00000000000000000011-**********************.snapshot" },
+    empty = { "" },
+)]
+fn parse_segment_file_name_rejects_malformed_names(name: &str) {
+    check!(parse_segment_file_name(name) == None, "{name:?}");
 }
 
-#[test]
-fn decode_kafka_uuid_rejects_wrong_length_base64() {
-    for encoded in ["", "AAAA", "AAAAAAAAAAAAAAAAAAAAAQAA", "A"] {
-        check!(decode_kafka_uuid(encoded) == None, "{encoded:?}");
-    }
+#[yare::parameterized(
+    empty = { "" },
+    short = { "AAAA" },
+    long = { "AAAAAAAAAAAAAAAAAAAAAQAA" },
+    invalid_tail = { "A" },
+)]
+fn decode_kafka_uuid_rejects_wrong_length_base64(encoded: &str) {
+    check!(decode_kafka_uuid(encoded) == None, "{encoded:?}");
 }
 
 proptest! {

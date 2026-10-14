@@ -30,17 +30,19 @@ pub enum StreamsGroupStatePhase {
 mod tests {
     use {super::*, assert2::assert};
 
+    #[yare::parameterized(
+        empty = { StreamsGroupStatePhase::Empty, "Empty" },
+        not_ready = { StreamsGroupStatePhase::NotReady, "NotReady" },
+        assigning = { StreamsGroupStatePhase::Assigning, "Assigning" },
+        reconciling = { StreamsGroupStatePhase::Reconciling, "Reconciling" },
+        stable = { StreamsGroupStatePhase::Stable, "Stable" },
+    )]
+    fn group_state_phase_as_str_strings(phase: StreamsGroupStatePhase, want: &str) {
+        assert2::assert!(phase.as_str() == want);
+    }
+
     #[test]
-    fn group_state_phase_as_str_strings() {
-        for (phase, want) in [
-            (StreamsGroupStatePhase::Empty, "Empty"),
-            (StreamsGroupStatePhase::NotReady, "NotReady"),
-            (StreamsGroupStatePhase::Assigning, "Assigning"),
-            (StreamsGroupStatePhase::Reconciling, "Reconciling"),
-            (StreamsGroupStatePhase::Stable, "Stable"),
-        ] {
-            assert!(phase.as_str() == want);
-        }
+    fn default_group_state_phase_is_empty() {
         assert!(StreamsGroupStatePhase::default() == StreamsGroupStatePhase::Empty);
     }
 }

@@ -435,8 +435,28 @@ mod tests {
         uuid::Uuid,
     };
 
-    #[test]
-    fn controller_endpoint_addr_keeps_dns_hostname_not_parsed_socketaddr() {
+    #[derive(Clone, Copy)]
+    enum SubmitResponseExpectation {
+        Applied,
+        TopicExists,
+        UncommittedTail,
+        ClusterAuthorizationFailed,
+        UnsupportedVersion,
+        NotLeaderWithHint,
+        NotLeaderWithoutHint,
+    }
+
+    #[yare::parameterized(
+        registered_voter = {
+            NodeId(2),
+            Some("demo-broker-2-0.demo-broker-headless.default.svc.cluster.local:9093".to_owned()),
+        },
+        unknown_voter = { NodeId(99), None },
+    )]
+    fn controller_endpoint_addr_keeps_dns_hostname_not_parsed_socketaddr(
+        node_id: NodeId,
+        expected: Option<String>,
+    ) {
         // Regression: a voter endpoint host is a per-pod DNS FQDN, NOT a
         // pre-resolved IP. The resolver must return "<host>:<port>" verbatim so
         // the dialer re-resolves it per connect. Parsing to a `SocketAddr`
@@ -454,12 +474,7 @@ mod tests {
             }],
             kraft_version: krabka_metadata::KRaftVersionRange::default(),
         }]);
-        for (_name, node_id, expected) in [
-            ("registered voter", NodeId(2), Some(format!("{host}:9093"))),
-            ("unknown voter", NodeId(99), None),
-        ] {
-            assert2::assert!(controller_endpoint_addr(&voters, node_id) == expected);
-        }
+        assert2::assert!(controller_endpoint_addr(&voters, node_id) == expected);
     }
 
     #[test]
@@ -650,93 +665,102 @@ mod tests {
         );
     }
 
-    #[test]
-    fn translate_submit_change_response_maps_each_error_code() {
-        // 0 => applied.
-        assert2::assert!(
-            translate_submit_change_response(
-                &submit_change_response_bytes(0, -1),
-                NodeId(5),
-                crate::wire::API_KEY_SUBMIT_CHANGE,
-                0
-            )
-            .is_ok()
+    #[yare::parameterized(
+        applied = { 0, -1, API_KEY_SUBMIT_CHANGE, 0, SubmitResponseExpectation::Applied },
+        topic_exists = { 2, -1, API_KEY_SUBMIT_CHANGE, 0, SubmitResponseExpectation::TopicExists },
+        uncommitted_tail = {
+            SUBMIT_CHANGE_UNCOMMITTED_TAIL,
+            -1,
+            API_KEY_SUBMIT_CHANGE,
+            0,
+            SubmitResponseExpectation::UncommittedTail,
+        },
+        cluster_authorization = {
+            PRIVATE_CLUSTER_AUTHORIZATION_FAILED,
+            -1,
+            API_KEY_SUBMIT_CHANGE,
+            0,
+            SubmitResponseExpectation::ClusterAuthorizationFailed,
+        },
+        submit_unsupported_version = {
+            PRIVATE_UNSUPPORTED_VERSION,
+            -1,
+            API_KEY_SUBMIT_CHANGE,
+            2,
+            SubmitResponseExpectation::UnsupportedVersion,
+        },
+        token_unsupported_version = {
+            PRIVATE_UNSUPPORTED_VERSION,
+            -1,
+            API_KEY_DELEGATION_TOKEN_MUTATION,
+            2,
+            SubmitResponseExpectation::UnsupportedVersion,
+        },
+        not_leader_with_hint = {
+            1,
+            9,
+            API_KEY_SUBMIT_CHANGE,
+            0,
+            SubmitResponseExpectation::NotLeaderWithHint,
+        },
+        not_leader_without_hint = {
+            3,
+            -1,
+            API_KEY_SUBMIT_CHANGE,
+            0,
+            SubmitResponseExpectation::NotLeaderWithoutHint,
+        },
+    )]
+    fn translate_submit_change_response_maps_each_error_code(
+        code: i16,
+        leader_hint: i64,
+        api_key: i16,
+        version: i16,
+        expected: SubmitResponseExpectation,
+    ) {
+        let result = translate_submit_change_response(
+            &submit_change_response_bytes(code, leader_hint),
+            NodeId(5),
+            api_key,
+            version,
         );
-
-        // 2 => leader rejected at apply-time: a TopicExists metadata error.
-        let err = translate_submit_change_response(
-            &submit_change_response_bytes(2, -1),
-            NodeId(5),
-            API_KEY_SUBMIT_CHANGE,
-            0,
-        )
-        .expect_err("code 2 is an error");
-        assert2::assert!(matches!(
-            err,
-            RaftError::Metadata(krabka_metadata::MetadataError::TopicExists(_))
-        ));
-
-        // The uncommitted-tail code keeps its meaning across the forward.
-        let err = translate_submit_change_response(
-            &submit_change_response_bytes(SUBMIT_CHANGE_UNCOMMITTED_TAIL, -1),
-            NodeId(5),
-            API_KEY_SUBMIT_CHANGE,
-            0,
-        )
-        .expect_err("an uncommitted tail is an error");
-        assert2::assert!(matches!(err, RaftError::UncommittedTail));
-
-        // Cluster auth failure maps directly to ClusterAuthorizationFailed
-        let err = translate_submit_change_response(
-            &submit_change_response_bytes(PRIVATE_CLUSTER_AUTHORIZATION_FAILED, -1),
-            NodeId(5),
-            API_KEY_SUBMIT_CHANGE,
-            0,
-        )
-        .expect_err("cluster auth failed");
-        assert2::assert!(matches!(err, RaftError::ClusterAuthorizationFailed));
-
-        // UNSUPPORTED_VERSION names the api and the version this build sent,
-        // for each of the two APIs that share the response.
-        for api_key in [API_KEY_SUBMIT_CHANGE, API_KEY_DELEGATION_TOKEN_MUTATION] {
-            let err = translate_submit_change_response(
-                &submit_change_response_bytes(PRIVATE_UNSUPPORTED_VERSION, -1),
-                NodeId(5),
-                api_key,
-                2,
-            )
-            .expect_err("an unsupported version is an error");
-            assert2::assert!(matches!(
-                err,
-                RaftError::UnsupportedPrivateVersion { api_key: got, version: 2 } if got == api_key
-            ));
+        match expected {
+            SubmitResponseExpectation::Applied => assert2::assert!(result.is_ok()),
+            expected => {
+                let error = result.expect_err("response is an error");
+                let matches = match expected {
+                    SubmitResponseExpectation::Applied => unreachable!(),
+                    SubmitResponseExpectation::TopicExists => matches!(
+                        error,
+                        RaftError::Metadata(krabka_metadata::MetadataError::TopicExists(_))
+                    ),
+                    SubmitResponseExpectation::UncommittedTail => {
+                        matches!(error, RaftError::UncommittedTail)
+                    }
+                    SubmitResponseExpectation::ClusterAuthorizationFailed => {
+                        matches!(error, RaftError::ClusterAuthorizationFailed)
+                    }
+                    SubmitResponseExpectation::UnsupportedVersion => matches!(
+                        error,
+                        RaftError::UnsupportedPrivateVersion {
+                            api_key: got,
+                            version: got_version
+                        } if got == api_key && got_version == version
+                    ),
+                    SubmitResponseExpectation::NotLeaderWithHint => {
+                        matches!(error, RaftError::NotLeader {
+                            current_leader: Some(NodeId(9))
+                        })
+                    }
+                    SubmitResponseExpectation::NotLeaderWithoutHint => {
+                        matches!(error, RaftError::NotLeader {
+                            current_leader: None
+                        })
+                    }
+                };
+                assert2::assert!(matches);
+            }
         }
-
-        // Any other code collapses to NotLeader, taking the response's
-        // leader_hint when non-negative.
-        let err = translate_submit_change_response(
-            &submit_change_response_bytes(1, 9),
-            NodeId(5),
-            API_KEY_SUBMIT_CHANGE,
-            0,
-        )
-        .expect_err("code 1 is an error");
-        assert2::assert!(matches!(err, RaftError::NotLeader {
-            current_leader: Some(NodeId(9))
-        }));
-
-        // A negative leader_hint falls back to None (unknown), NOT to the dialed
-        // leader id — distinguishing the `>= 0` guard.
-        let err = translate_submit_change_response(
-            &submit_change_response_bytes(3, -1),
-            NodeId(5),
-            API_KEY_SUBMIT_CHANGE,
-            0,
-        )
-        .expect_err("code 3 is an error");
-        assert2::assert!(matches!(err, RaftError::NotLeader {
-            current_leader: None
-        }));
     }
 
     #[test]

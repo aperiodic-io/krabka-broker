@@ -150,7 +150,7 @@ pub fn select_break_glass_candidate(candidates: &[(i64, u64, u64)]) -> Option<us
 mod tests {
     use super::*;
 
-    fn usable() -> BreakGlassProposalFacts {
+    fn base_facts() -> BreakGlassProposalFacts {
         BreakGlassProposalFacts {
             withdrawn: false,
             consumed: false,
@@ -162,87 +162,71 @@ mod tests {
         }
     }
 
-    #[test]
-    fn break_glass_checks_are_ordered_and_fail_closed() {
-        use BreakGlassAdmission::{
-            Consumed, Expired, NotEnoughApprovals, Unsigned, Usable, Withdrawn,
-        };
-
-        let all_failing = BreakGlassProposalFacts {
+    fn all_failing() -> BreakGlassProposalFacts {
+        BreakGlassProposalFacts {
             withdrawn: true,
             consumed: true,
             expired: true,
             held_approvals: 0,
             signing: BreakGlassApprovalSigning::NotAllSigned,
-            ..usable()
-        };
-        for (facts, expected) in [
-            (all_failing, Withdrawn),
-            (
-                BreakGlassProposalFacts {
-                    withdrawn: false,
-                    ..all_failing
-                },
-                Consumed,
-            ),
-            (
-                BreakGlassProposalFacts {
-                    withdrawn: false,
-                    consumed: false,
-                    ..all_failing
-                },
-                Expired,
-            ),
-            (
-                BreakGlassProposalFacts {
-                    held_approvals: 1,
-                    ..usable()
-                },
-                NotEnoughApprovals,
-            ),
-            (
-                BreakGlassProposalFacts {
-                    signing: BreakGlassApprovalSigning::NotAllSigned,
-                    ..usable()
-                },
-                Unsigned,
-            ),
-            (
-                BreakGlassProposalFacts {
-                    signature_policy: BreakGlassSignaturePolicy::Optional,
-                    signing: BreakGlassApprovalSigning::NotAllSigned,
-                    ..usable()
-                },
-                Usable,
-            ),
-            (usable(), Usable),
-            (
-                BreakGlassProposalFacts {
-                    held_approvals: 3,
-                    ..usable()
-                },
-                Usable,
-            ),
-        ] {
-            assert2::assert!(break_glass_admission(facts) == expected);
+            ..base_facts()
         }
     }
 
-    #[test]
-    fn proposal_selection_uses_expiry_then_uuid_then_first_index() {
-        for (candidates, expected) in [
-            (&[][..], None),
-            (&[(20, 0, 0), (10, 9, 9)][..], Some(1)),
-            (&[(10, 4, 9), (10, 3, 99)][..], Some(1)),
-            (&[(10, 3, 9), (10, 3, 8)][..], Some(1)),
-            (&[(10, 3, 9), (20, 2, 8)][..], Some(0)),
-            (&[(10, 3, 9), (20, 3, 2)][..], Some(0)),
-            (&[(10, 3, 9), (10, 4, 2)][..], Some(0)),
-            // An exact duplicate key keeps the first index.
-            (&[(10, 3, 8), (10, 3, 8)][..], Some(0)),
-            (&[(30, 0, 0), (10, 3, 8), (10, 3, 8)][..], Some(1)),
-        ] {
-            assert2::assert!(select_break_glass_candidate(candidates) == expected);
-        }
+    #[yare::parameterized(
+        withdrawn = { all_failing(), BreakGlassAdmission::Withdrawn },
+        consumed = {
+            BreakGlassProposalFacts { withdrawn: false, ..all_failing() },
+            BreakGlassAdmission::Consumed,
+        },
+        expired = {
+            BreakGlassProposalFacts { withdrawn: false, consumed: false, ..all_failing() },
+            BreakGlassAdmission::Expired,
+        },
+        insufficient_approvals = {
+            BreakGlassProposalFacts { held_approvals: 1, ..base_facts() },
+            BreakGlassAdmission::NotEnoughApprovals,
+        },
+        unsigned = {
+            BreakGlassProposalFacts { signing: BreakGlassApprovalSigning::NotAllSigned, ..base_facts() },
+            BreakGlassAdmission::Unsigned,
+        },
+        optional_unsigned = {
+            BreakGlassProposalFacts {
+                signature_policy: BreakGlassSignaturePolicy::Optional,
+                signing: BreakGlassApprovalSigning::NotAllSigned,
+                ..base_facts()
+            },
+            BreakGlassAdmission::Usable,
+        },
+        admitted = { base_facts(), BreakGlassAdmission::Usable },
+        extra_approvals = {
+            BreakGlassProposalFacts { held_approvals: 3, ..base_facts() },
+            BreakGlassAdmission::Usable,
+        },
+    )]
+    fn break_glass_checks_are_ordered_and_fail_closed(
+        facts: BreakGlassProposalFacts,
+        expected: BreakGlassAdmission,
+    ) {
+        assert2::assert!(break_glass_admission(facts) == expected);
+    }
+
+    #[yare::parameterized(
+        empty = { &[][..], None },
+        earliest_expiry = { &[(20, 0, 0), (10, 9, 9)][..], Some(1) },
+        uuid_high = { &[(10, 4, 9), (10, 3, 99)][..], Some(1) },
+        uuid_low = { &[(10, 3, 9), (10, 3, 8)][..], Some(1) },
+        earlier_expiry = { &[(10, 3, 9), (20, 2, 8)][..], Some(0) },
+        expiry_tie = { &[(10, 3, 9), (20, 3, 2)][..], Some(0) },
+        earlier_uuid = { &[(10, 3, 9), (10, 4, 2)][..], Some(0) },
+        duplicate_keeps_first = { &[(10, 3, 8), (10, 3, 8)][..], Some(0) },
+        duplicate_after_lesser = { &[(30, 0, 0), (10, 3, 8), (10, 3, 8)][..], Some(1) },
+    )]
+    fn proposal_selection_uses_expiry_then_uuid_then_first_index(
+        candidates: &[(i64, u64, u64)],
+        expected: Option<usize>,
+    ) {
+        assert2::assert!(select_break_glass_candidate(candidates) == expected);
     }
 }

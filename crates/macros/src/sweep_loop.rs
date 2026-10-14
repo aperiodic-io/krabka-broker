@@ -184,18 +184,24 @@ mod tests {
         assert!(output.contains("arm(timer,cadence.first,task)"));
         assert!(output.contains("arm(timer,cadence.later,task)"));
         assert!(output.contains("if!crate::time_util::fired(outcome,task){return;}"));
-        for invalid in [
-            "",
-            "timer",
-            "timer wrong;",
-            "timer [];",
-            "timer {};",
-            "cadence [timer];",
-            "timer [timer]",
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        missing_value = { "timer" },
+        wrong_value = { "timer wrong;" },
+        empty_brackets = { "timer [];" },
+        wrong_group_delimiter = { "timer {};" },
+        missing_timer = { "cadence [timer];" },
+        missing_semicolon = { "timer [timer]" },
+        wrong_sweep_group = {
             "timer [timer]; cadence [Cadence { first: 0, later: 1 }]; shutdown [&shutdown]; task [TASK]; sweep []; on_shutdown {};",
+        },
+        unexpected_trailing_input = {
             "timer [timer]; cadence [Cadence { first: 0, later: 1 }]; shutdown [&shutdown]; task [TASK]; sweep {}; on_shutdown {}; extra",
-        ] {
-            assert!(validate(&invalid.parse().unwrap()).is_err(), "{invalid}");
-        }
+        },
+    )]
+    fn refuses_each_invalid_sweep_clause(invalid: &str) {
+        assert2::assert!(validate(&invalid.parse().unwrap()).is_err(), "{invalid}");
     }
 }

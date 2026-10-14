@@ -193,50 +193,35 @@ fn to_wire_uuid(u: uuid::Uuid) -> WireUuid { WireUuid(*u.as_bytes()) }
 mod tests {
     use {super::*, assert2::assert};
 
-    #[test]
-    fn creation_configs_follow_kafkas_metadata_topic() {
-        let cases = [
-            (
-                "defaults match Kafka: delete policy, infinite retention, min.isr 2",
-                KafkaMetadataLogConfig::new("127.0.0.1:9092"),
-                [
-                    ("cleanup.policy", "delete"),
-                    ("min.insync.replicas", "2"),
-                    ("retention.ms", "-1"),
-                ],
-            ),
-            (
-                "an override reaches the topic",
-                KafkaMetadataLogConfig {
-                    min_isr: Some(1),
-                    ..KafkaMetadataLogConfig::new("127.0.0.1:9092")
-                },
-                [
-                    ("cleanup.policy", "delete"),
-                    ("min.insync.replicas", "1"),
-                    ("retention.ms", "-1"),
-                ],
-            ),
-            (
-                "a compacted topic keeps min.isr",
-                KafkaMetadataLogConfig {
-                    compacted: true,
-                    ..KafkaMetadataLogConfig::new("127.0.0.1:9092")
-                },
-                [
-                    ("cleanup.policy", "compact"),
-                    ("min.insync.replicas", "2"),
-                    ("retention.ms", "-1"),
-                ],
-            ),
-        ];
-        for (name, cfg, expected) in cases {
-            let expected = expected
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect::<BTreeMap<_, _>>();
-            assert!(creation_configs(&cfg) == expected, "case {name}");
-        }
+    #[yare::parameterized(
+        defaults = {
+            KafkaMetadataLogConfig::new("127.0.0.1:9092"),
+            [("cleanup.policy", "delete"), ("min.insync.replicas", "2"), ("retention.ms", "-1")]
+        },
+        min_isr_override = {
+            KafkaMetadataLogConfig {
+                min_isr: Some(1),
+                ..KafkaMetadataLogConfig::new("127.0.0.1:9092")
+            },
+            [("cleanup.policy", "delete"), ("min.insync.replicas", "1"), ("retention.ms", "-1")],
+        },
+        compacted = {
+            KafkaMetadataLogConfig {
+                compacted: true,
+                ..KafkaMetadataLogConfig::new("127.0.0.1:9092")
+            },
+            [("cleanup.policy", "compact"), ("min.insync.replicas", "2"), ("retention.ms", "-1")],
+        },
+    )]
+    fn creation_configs_follow_kafkas_metadata_topic(
+        cfg: KafkaMetadataLogConfig,
+        expected: [(&str, &str); 3],
+    ) {
+        let expected = expected
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect::<BTreeMap<_, _>>();
+        assert2::assert!(creation_configs(&cfg) == expected);
     }
 
     #[test]

@@ -183,7 +183,7 @@ fn reconcile_partition(
         duplicate_snapshot_key |= by_key.insert(key, segment.state()).is_some();
     }
 
-    let scan_disagrees = partition.segments.iter().any(|segment| {
+    let scanned_decision = |segment: &SegmentInventory| {
         reconcile_decision(
             true,
             by_key
@@ -193,8 +193,12 @@ fn reconcile_partition(
                 })
                 .copied(),
             retain_deleted_objects,
-        ) == RestoreReconcileDecision::Disagree
-    });
+        )
+    };
+    let scan_disagrees = partition
+        .segments
+        .iter()
+        .any(|segment| scanned_decision(segment) == RestoreReconcileDecision::Disagree);
     let snapshot_disagrees =
         dump.into_iter()
             .flat_map(|dump| &dump.segments)
@@ -219,18 +223,9 @@ fn reconcile_partition(
         });
     }
 
-    partition.segments.retain(|segment| {
-        reconcile_decision(
-            true,
-            by_key
-                .get(&SegmentKey {
-                    segment_id: segment.segment_id,
-                    base_offset: segment.base_offset.get(),
-                })
-                .copied(),
-            retain_deleted_objects,
-        ) == RestoreReconcileDecision::Keep
-    });
+    partition
+        .segments
+        .retain(|segment| scanned_decision(segment) == RestoreReconcileDecision::Keep);
     Ok(())
 }
 
@@ -244,14 +239,12 @@ fn summarize_scan(segments: &[SegmentInventory]) -> String {
 /// One-line summary of what the RLMM snapshot states for a partition, for a
 /// [`RestoreError::MetadataDisagreement`] message.
 fn summarize_dump(dump: Option<&PartitionDump>) -> String {
-    let mut bases: Vec<i64> = dump
-        .map(|dump| {
-            dump.segments
-                .iter()
-                .map(RemoteLogSegmentMetadata::start_offset)
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut bases: Vec<i64> = dump.map_or_default(|dump| {
+        dump.segments
+            .iter()
+            .map(RemoteLogSegmentMetadata::start_offset)
+            .collect()
+    });
     bases.sort_unstable();
     summarize(bases.len(), &bases)
 }

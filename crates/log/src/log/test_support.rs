@@ -28,6 +28,7 @@ use {
 /// budget never clips the result.
 pub const NO_LIMIT: ByteSize = gibibytes(4);
 
+#[cfg(unix)]
 pub fn assert_log_end_offset(log: &Log, expected: Offset) {
     assert2::assert!(log.log_end_offset() == expected);
 }

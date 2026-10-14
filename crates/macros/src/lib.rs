@@ -498,6 +498,7 @@ mod metrics;
 mod model_type;
 mod named_acl_gates;
 mod network_fixtures;
+mod newtype_styles;
 mod node_endpoints;
 mod object_ops;
 mod object_store_config;
@@ -536,6 +537,29 @@ mod wire_state_batch;
 mod wire_values;
 mod worm_object_set;
 
+/// Append the shared topic, topic-id and partition setters of Produce fixtures.
+#[moxy::attribute]
+pub fn share_produce_parameters(
+    meta: TokenStream,
+    item: TokenStream,
+) -> Result<TokenStream, ParseError> {
+    wire_fixtures::share_produce_parameters(meta, item)
+}
+
+/// Share sparse-window and nonnegative base/floor preconditions between timestamp kernels.
+#[moxy::attribute]
+pub fn retained_timestamp_bounds(
+    floor: TokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    let expanded = wire_fixtures::retained_timestamp_bounds(floor, item.into())?;
+    // Creusot captures and MIR bindings must share one identifier context.
+    Ok(expanded
+        .to_string()
+        .parse()
+        .expect("valid timestamp bounds expansion"))
+}
+
 /// Derives `unregistered` and `register` for a struct of metric handles. The
 /// crate documentation lists the field attributes.
 #[moxy::derive(RegisterMetrics, attributes(metric))]
@@ -544,6 +568,24 @@ pub fn register_metrics(item: ItemStruct) -> Result<TokenStream, ParseError> {
 }
 
 // Keep implementations in their own modules and document each adapter below.
+
+/// Give a scalar id transparent JSON, primitive comparisons and integer conversions.
+#[moxy::attribute]
+pub fn scalar_id(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
+    newtype_styles::scalar_id(meta, item)
+}
+
+/// Gives a test scalar the shared display, conversion, value, and default traits.
+#[moxy::attribute]
+pub fn test_scalar(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
+    newtype_styles::test_scalar(meta, item)
+}
+
+/// Share the lowercase hex display and serde identity of byte newtypes.
+#[moxy::attribute]
+pub fn hex_bytes_identity(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
+    newtype_styles::hex_bytes_identity(meta, item)
+}
 
 /// Gives every `Option<Time>`, `Option<ByteSize>` and `Option<Ratio>` field of
 /// a file-config struct its human-unit serde codec and schema marker. The

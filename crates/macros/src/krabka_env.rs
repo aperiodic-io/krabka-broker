@@ -131,11 +131,14 @@ mod tests {
         assert!(env_name("BENCH_", "tls_ca_path") == "BENCH_TLS_CA_PATH");
     }
 
-    #[test]
-    fn types_without_a_single_parser_have_no_default() {
-        for ty in ["usize", "Option<usize>", "Option<Vec<String>>", "Time"] {
-            assert!(type_arguments(ty).is_none(), "{ty}");
-        }
+    #[yare::parameterized(
+        usize = { "usize" },
+        option_usize = { "Option<usize>" },
+        option_vec = { "Option<Vec<String>>" },
+        time = { "Time" },
+    )]
+    fn types_without_a_single_parser_have_no_default(ty: &str) {
+        assert2::assert!(type_arguments(ty).is_none(), "{ty}");
     }
 
     #[test]
@@ -247,34 +250,31 @@ mod tests {
         );
     }
 
-    #[test]
-    fn bad_arguments_and_items_are_errors() {
-        let one_argument = "`krabka_env` takes one argument, `prefix = \"...\"`";
-        for (meta, item, message) in [
-            ("name = \"X_\"", "struct Args {}", one_argument),
-            (
-                "prefix = \"A_\", prefix = \"B_\"",
-                "struct Args {}",
-                one_argument,
-            ),
-            ("prefix", "struct Args {}", ""),
-            ("prefix = 3", "struct Args {}", ""),
-            (
-                "",
-                "struct Args(Option<u32>);",
-                "`krabka_env` needs a struct with named fields",
-            ),
-            (
-                "",
-                "struct Args { window: usize }",
-                "`krabka_env` has no value parser for `usize`; give the field its own `#[arg(...)]`",
-            ),
-        ] {
-            assert!(let Err(error) = expanded(meta, item), "{meta} {item}");
-            assert!(
-                message.is_empty() || error == message,
-                "{meta} {item}: {error}"
-            );
-        }
+    #[yare::parameterized(
+        wrong_name = { "name = \"X_\"", "struct Args {}", "one_argument" },
+        duplicate_prefix = { "prefix = \"A_\", prefix = \"B_\"", "struct Args {}", "one_argument" },
+        missing_value = { "prefix", "struct Args {}", "" },
+        numeric_value = { "prefix = 3", "struct Args {}", "" },
+        tuple_struct = { "", "struct Args(Option<u32>);", "named_fields" },
+        unsupported_parser = { "", "struct Args { window: usize }", "unsupported_usize" },
+    )]
+    fn bad_arguments_and_items_are_errors(meta: &str, item: &str, diagnostic: &str) {
+        let expected = match diagnostic {
+            "one_argument" => "`krabka_env` takes one argument, `prefix = \"...\"`".to_owned(),
+            "named_fields" => "`krabka_env` needs a struct with named fields".to_owned(),
+            "unsupported_usize" => {
+                "`krabka_env` has no value parser for `usize`; give the field its own `#[arg(...)]`"
+                    .to_owned()
+            }
+            "" => String::new(),
+            _ => unreachable!(),
+        };
+        let Err(error) = expanded(meta, item) else {
+            panic!("{meta} {item}")
+        };
+        assert2::assert!(
+            expected.is_empty() || error == expected,
+            "{meta} {item}: {error}"
+        );
     }
 }

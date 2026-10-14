@@ -134,19 +134,20 @@ mod tests {
         assert!(configured.validate().is_ok());
     }
 
-    #[test]
-    fn profiling_config_rejects_invalid_values_and_bounds() {
-        for argument in [
-            "--profiling-cpu-default-duration=0s",
-            "--profiling-cpu-max-duration=-1s",
-            "--profiling-cpu-sample-frequency=0Hz",
-            "--profiling-cpu-sample-frequency=1.5Hz",
-            "--profiling-heap-default-duration=0s",
-            "--profiling-heap-max-duration=-1s",
-        ] {
-            assert!(TestCli::try_parse_from(["test", argument]).is_err());
-        }
+    #[yare::parameterized(
+        cpu_default_zero = { "--profiling-cpu-default-duration=0s" },
+        cpu_max_negative = { "--profiling-cpu-max-duration=-1s" },
+        cpu_frequency_zero = { "--profiling-cpu-sample-frequency=0Hz" },
+        cpu_frequency_fractional = { "--profiling-cpu-sample-frequency=1.5Hz" },
+        heap_default_zero = { "--profiling-heap-default-duration=0s" },
+        heap_max_negative = { "--profiling-heap-max-duration=-1s" },
+    )]
+    fn profiling_config_rejects_invalid_values(argument: &str) {
+        assert2::assert!(TestCli::try_parse_from(["test", argument]).is_err());
+    }
 
+    #[test]
+    fn profiling_config_rejects_inconsistent_duration_bounds() {
         let cpu_bounds = TestCli::parse_from([
             "test",
             "--profiling-cpu-default-duration=2s",

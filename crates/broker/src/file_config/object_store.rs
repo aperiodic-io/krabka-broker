@@ -361,55 +361,53 @@ bucket = "krabka-archive"
         // An empty table still enables WORM; every knob takes its default.
         check!(cfg.remote_storage_worm == Some(krabka_remote_storage::WormConfig::default()));
     }
-    #[test]
-    fn worm_rejects_invalid_combinations() {
-        for (label, source, needle) in [
-            (
-                "local backend cannot enforce write-once",
-                "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n\
-                 [remote_storage.worm]\n",
-                "storage_dir",
-            ),
-            (
-                "worm with a local backend and a key set is still rejected",
-                "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n\
-                 [remote_storage.worm]\nsigning_key_path = \"/k.pk8\"\n\
-                 signing_key_id = \"k1\"\n",
-                "storage_dir",
-            ),
-            (
-                "no backend at all",
-                "[remote_storage.worm]\nwrite_only = true\n",
-                "[remote_storage.s3]",
-            ),
-            (
-                "key path without an id",
-                "[remote_storage.s3]\nbucket = \"b\"\nregion = \"us-east-1\"\n\
-                 [remote_storage.worm]\nsigning_key_path = \"/k.pk8\"\n",
-                "signing_key_id",
-            ),
-            (
-                "key id without a path",
-                "[remote_storage.s3]\nbucket = \"b\"\nregion = \"us-east-1\"\n\
-                 [remote_storage.worm]\nsigning_key_id = \"k1\"\n",
-                "signing_key_path",
-            ),
-        ] {
-            let file: FileConfig = toml::from_str(source).expect("parse worm syntax");
-            let mut cfg = BrokerConfig::default();
-            let error = file
-                .apply_to(&mut cfg)
-                .expect_err("invalid worm config must fail");
-            check!(
-                matches!(error, FileConfigError::InvalidConfig(_)),
-                "{label}: expected InvalidConfig, got {error:?}"
-            );
-            let rendered = error.to_string();
-            check!(
-                rendered.contains(needle),
-                "{label}: message must name {needle:?}, got: {rendered}"
-            );
-        }
+    #[yare::parameterized(
+        local_backend = {
+            "local backend cannot enforce write-once",
+            "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n\
+             [remote_storage.worm]\n",
+            "storage_dir",
+        },
+        local_backend_with_key = {
+            "worm with a local backend and a key set is still rejected",
+            "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n\
+             [remote_storage.worm]\nsigning_key_path = \"/k.pk8\"\n\
+             signing_key_id = \"k1\"\n",
+            "storage_dir",
+        },
+        no_backend = {
+            "no backend at all",
+            "[remote_storage.worm]\nwrite_only = true\n",
+            "[remote_storage.s3]",
+        },
+        key_path_without_id = {
+            "key path without an id",
+            "[remote_storage.s3]\nbucket = \"b\"\nregion = \"us-east-1\"\n\
+             [remote_storage.worm]\nsigning_key_path = \"/k.pk8\"\n",
+            "signing_key_id",
+        },
+        key_id_without_path = {
+            "key id without a path",
+            "[remote_storage.s3]\nbucket = \"b\"\nregion = \"us-east-1\"\n\
+             [remote_storage.worm]\nsigning_key_id = \"k1\"\n",
+            "signing_key_path",
+        },
+    )]
+    fn worm_rejects_invalid_combinations(label: &str, source: &str, needle: &str) {
+        let file: FileConfig = toml::from_str(source).expect("parse worm syntax");
+        let mut config = BrokerConfig::default();
+        let error = file
+            .apply_to(&mut config)
+            .expect_err("invalid worm config must fail");
+        assert2::check!(
+            matches!(error, FileConfigError::InvalidConfig(_)),
+            "{label}: expected InvalidConfig, got {error:?}"
+        );
+        let rendered = error.to_string();
+        assert2::check!(
+            rendered.contains(needle),
+            "{label}: message must name {needle:?}, got: {rendered}"
+        );
     }
     #[test]
     fn worm_absent_leaves_config_none() {

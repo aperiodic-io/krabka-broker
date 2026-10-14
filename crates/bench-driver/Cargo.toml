@@ -74,6 +74,7 @@ krabka-client-core = { version = "0.6.0", features = ["mock"] }
 libtest-mimic = "0.8"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
+yare = { workspace = true }
 
 [[test]]
 name = "scenario_files"

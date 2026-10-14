@@ -72,7 +72,7 @@
 
 use {
     std::{future::Future, time::Duration},
-    support::cluster_lock,
+    support::{SITE_A, SITE_B, SITE_C, SITES, cluster_lock},
 };
 
 mod support;
@@ -95,16 +95,6 @@ mod site_loss;
 mod unreachable_site;
 #[path = "stretch_cluster/view.rs"]
 mod view;
-
-/// The preferred leader site. Placement puts `replicas[0]` here.
-const SITE_A: &str = "site-a";
-/// The second data site: the failover target when `site-a` is lost.
-const SITE_B: &str = "site-b";
-/// The witness site. It replicates and votes; it never leads and serves no
-/// client.
-const SITE_C: &str = "site-c";
-/// `SITES[i]` is the rack of broker `i + 1`.
-const SITES: [&str; 3] = [SITE_A, SITE_B, SITE_C];
 
 /// Cluster index of each site's broker. Node ids are the index plus one.
 const NODE_A: usize = 0;

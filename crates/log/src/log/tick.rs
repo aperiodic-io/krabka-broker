@@ -396,71 +396,76 @@ mod tests {
     /// no timestamp (`-1`) is aged by its `.log` file's modification time, so
     /// it stays while the file is young and goes once the file is older than
     /// `retention.ms`.
-    #[test]
-    fn a_segment_without_record_timestamps_is_aged_by_its_file() {
-        use std::time::Duration;
-        for (name, age, deleted) in [
-            ("a young file stays", Duration::ZERO, false),
-            ("an old file goes", Duration::from_hours(2), true),
-        ] {
-            let dir = tempdir().unwrap();
-            let mut log = Log::open(dir.path(), LogConfig {
-                retention: Some(secs(60 * 60)),
-                ..tiny_segments()
-            })
-            .unwrap();
-            let mut untimed = sample_batch(1);
-            untimed.max_timestamp = -1;
-            log.append(&mut untimed).unwrap();
-            log.append(&mut sample_batch(1)).unwrap();
-            let now = SystemTime::now() + age;
-            // Keep the newest segment inside the window whatever `now` is.
-            let mut fresh = sample_batch(1);
-            fresh.max_timestamp = retention::now_ms(now);
-            log.append(&mut fresh).unwrap();
+    #[yare::parameterized(
+        young_file = { "a young file stays", std::time::Duration::ZERO, false },
+        old_file = { "an old file goes", std::time::Duration::from_hours(2), true },
+    )]
+    fn a_segment_without_record_timestamps_is_aged_by_its_file(
+        case_name: &str,
+        age: std::time::Duration,
+        deleted: bool,
+    ) {
+        let dir = tempdir().unwrap();
+        let mut log = Log::open(dir.path(), LogConfig {
+            retention: Some(secs(60 * 60)),
+            ..tiny_segments()
+        })
+        .unwrap();
+        let mut untimed = sample_batch(1);
+        untimed.max_timestamp = -1;
+        log.append(&mut untimed).unwrap();
+        log.append(&mut sample_batch(1)).unwrap();
+        let now = SystemTime::now() + age;
+        // Keep the newest segment inside the window whatever `now` is.
+        let mut fresh = sample_batch(1);
+        fresh.max_timestamp = retention::now_ms(now);
+        log.append(&mut fresh).unwrap();
 
-            log.tick(now, log.log_end_offset()).unwrap();
+        log.tick(now, log.log_end_offset()).unwrap();
 
-            let first = log.segments.first().map(Segment::base_offset);
-            check!((first != Some(Offset(0))) == deleted, "{name}: {first:?}");
-        }
+        let first = log.segments.first().map(Segment::base_offset);
+        check!(
+            (first != Some(Offset(0))) == deleted,
+            "{case_name}: {first:?}"
+        );
     }
 
     /// Kafka's `deletableSegments` deletes a segment only once the high
     /// watermark has passed its upper bound: the next segment's base, or the
     /// log end for the active segment.
-    #[test]
-    fn retention_stops_at_the_high_watermark() {
+    #[yare::parameterized(
+        nothing_replicated = { "nothing is replicated", Offset(0), Offset(0) },
+        first_segment_replicated = { "the first segment is replicated", Offset(1), Offset(1) },
+        sealed_segments_replicated = { "the sealed segments are replicated", Offset(2), Offset(2) },
+        whole_log_replicated = { "the whole log is replicated", Offset(3), Offset(3) },
+    )]
+    fn retention_stops_at_the_high_watermark(
+        what: &str,
+        high_watermark: Offset,
+        expected_start: Offset,
+    ) {
         // `(what, high watermark, log start after the tick)`. Three
         // one-record segments at 0, 1 and 2, all past retention.ms.
-        let rows = [
-            ("nothing is replicated", Offset(0), Offset(0)),
-            ("the first segment is replicated", Offset(1), Offset(1)),
-            ("the sealed segments are replicated", Offset(2), Offset(2)),
-            ("the whole log is replicated", Offset(3), Offset(3)),
-        ];
-        for (what, high_watermark, expected_start) in rows {
-            let dir = tempdir().unwrap();
-            let config = LogConfig {
-                retention: Some(secs(1)),
-                ..tiny_segments()
-            };
-            let mut log = Log::open(dir.path(), config).unwrap();
-            for _ in 0..3 {
-                let mut batch = sample_batch(1);
-                batch.base_timestamp = 1_000;
-                batch.max_timestamp = 1_000;
-                log.append(&mut batch).unwrap();
-            }
-
-            log.tick(
-                SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(60),
-                high_watermark,
-            )
-            .unwrap();
-
-            assert2::check!(log.log_start_offset() == expected_start, "{what}");
+        let dir = tempdir().unwrap();
+        let config = LogConfig {
+            retention: Some(secs(1)),
+            ..tiny_segments()
+        };
+        let mut log = Log::open(dir.path(), config).unwrap();
+        for _ in 0..3 {
+            let mut batch = sample_batch(1);
+            batch.base_timestamp = 1_000;
+            batch.max_timestamp = 1_000;
+            log.append(&mut batch).unwrap();
         }
+
+        log.tick(
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(60),
+            high_watermark,
+        )
+        .unwrap();
+
+        assert2::check!(log.log_start_offset() == expected_start, "{what}");
     }
 
     #[test]

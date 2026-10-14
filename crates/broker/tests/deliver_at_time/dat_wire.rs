@@ -121,7 +121,7 @@ pub async fn fetch_values(
         .records
         .as_ref()
         .and_then(krabka_protocol::records::RecordsPayload::as_v2)
-        .map(|batches| {
+        .map_or_default(|batches| {
             batches
                 .iter()
                 .flat_map(|batch| batch.records.iter())
@@ -131,7 +131,6 @@ pub async fn fetch_values(
                 })
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 // The offset `ListOffsets` LATEST reports, which is where a seek-to-end lands.

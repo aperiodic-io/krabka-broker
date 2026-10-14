@@ -366,26 +366,27 @@ fn truncate_to_drops_stale_epoch_checkpoint_entries() {
 /// leader epoch at its log end and lost leadership before writing drops that
 /// unbacked entry on any truncation at or past its log end, so the next
 /// leader's epoch can be recorded at the same offset.
-#[test]
-fn a_no_op_truncation_still_drops_an_epoch_no_record_backs() {
+#[yare::parameterized(
+    at_log_end = { "at the log end", 3 },
+    past_log_end = { "past the log end", 9 },
+)]
+fn a_no_op_truncation_still_drops_an_epoch_no_record_backs(name: &str, target: i64) {
     let entry = |epoch, start_offset| EpochEntry {
         epoch: LeaderEpoch(epoch),
         start_offset: Offset(start_offset),
     };
-    for (name, target) in [("at the log end", 3), ("past the log end", 9)] {
-        let TempLog { dir: _dir, mut log } = test_log();
-        log.append(&mut sample_batch_with_epoch(3, 1)).unwrap();
-        log.assign_epoch_start_offset(LeaderEpoch(5), Offset(3))
-            .unwrap();
+    let TempLog { dir: _dir, mut log } = test_log();
+    log.append(&mut sample_batch_with_epoch(3, 1)).unwrap();
+    log.assign_epoch_start_offset(LeaderEpoch(5), Offset(3))
+        .unwrap();
 
-        log.truncate_to(Offset(target)).unwrap();
+    log.truncate_to(Offset(target)).unwrap();
 
-        check!(log.log_end_offset() == Offset(3), "{name}");
-        check!(
-            log.epoch_checkpoint().entries() == &[entry(1, 0)][..],
-            "{name}"
-        );
-    }
+    check!(log.log_end_offset() == Offset(3), "{name}");
+    check!(
+        log.epoch_checkpoint().entries() == &[entry(1, 0)][..],
+        "{name}"
+    );
 }
 
 #[test]
@@ -445,51 +446,49 @@ fn trim_to_offset_idempotent_at_or_below_log_start() {
 /// and one at or below the log start alike -- and the newest one left loads.
 /// A producer whose batches are all below the log start survives because
 /// the loaded snapshot carries it.
-#[test]
-fn truncation_reloads_from_the_newest_snapshot_between_log_start_and_cut() {
-    for (log_start, cut, snapshots, producers) in [
-        // Truncation at a snapshot: it is kept and loaded.
-        (0, 3, vec![1, 2, 3], vec![1, 2, 3]),
-        // Truncation below a snapshot: it is deleted.
-        (0, 2, vec![1, 2], vec![1, 2]),
-        // The snapshot at the log start is deleted; the one at 2 still
-        // carries producer 1, whose only record is below the log start.
-        (1, 2, vec![2], vec![1, 2]),
-        // Truncation to the log start leaves no snapshot and no producer.
-        (2, 2, vec![], vec![]),
-    ] {
-        let dir = tempdir().unwrap();
-        let mut log = rolling_test_log(dir.path());
-        // One record per producer and per segment: segments at 0..=3 and a
-        // snapshot at every roll, 1..=3.
-        for producer_id in 1..=4 {
-            let mut batch = sample_batch(1);
-            batch.producer_id = producer_id;
-            batch.producer_epoch = 0;
-            batch.base_sequence = 0;
-            log.append(&mut batch).unwrap();
-        }
-        log.set_log_start_offset(Offset(log_start)).unwrap();
-
-        log.truncate_to(Offset(cut)).unwrap();
-
-        let mut reloaded: Vec<i64> = log
-            .producer_state_snapshot()
-            .into_iter()
-            .map(|entry| entry.producer_id.get())
-            .collect();
-        reloaded.sort_unstable();
-        check!(reloaded == producers, "log start {log_start}, cut {cut}");
-        check!(
-            producer_snapshot::list(dir.path())
-                .unwrap()
-                .into_iter()
-                .map(|snapshot| snapshot.offset.0)
-                .collect::<Vec<_>>()
-                == snapshots,
-            "log start {log_start}, cut {cut}"
-        );
+#[yare::parameterized(
+    truncation_at_snapshot = { 0, 3, vec![1, 2, 3], vec![1, 2, 3] },
+    truncation_below_snapshot = { 0, 2, vec![1, 2], vec![1, 2] },
+    snapshot_at_log_start_removed = { 1, 2, vec![2], vec![1, 2] },
+    truncate_to_log_start = { 2, 2, vec![], vec![] },
+)]
+fn truncation_reloads_from_the_newest_snapshot_between_log_start_and_cut(
+    log_start: i64,
+    cut: i64,
+    snapshots: Vec<i64>,
+    producers: Vec<i64>,
+) {
+    let dir = tempdir().unwrap();
+    let mut log = rolling_test_log(dir.path());
+    // One record per producer and per segment: segments at 0..=3 and a
+    // snapshot at every roll, 1..=3.
+    for producer_id in 1..=4 {
+        let mut batch = sample_batch(1);
+        batch.producer_id = producer_id;
+        batch.producer_epoch = 0;
+        batch.base_sequence = 0;
+        log.append(&mut batch).unwrap();
     }
+    log.set_log_start_offset(Offset(log_start)).unwrap();
+
+    log.truncate_to(Offset(cut)).unwrap();
+
+    let mut reloaded: Vec<i64> = log
+        .producer_state_snapshot()
+        .into_iter()
+        .map(|entry| entry.producer_id.get())
+        .collect();
+    reloaded.sort_unstable();
+    check!(reloaded == producers, "log start {log_start}, cut {cut}");
+    check!(
+        producer_snapshot::list(dir.path())
+            .unwrap()
+            .into_iter()
+            .map(|snapshot| snapshot.offset.0)
+            .collect::<Vec<_>>()
+            == snapshots,
+        "log start {log_start}, cut {cut}"
+    );
 }
 
 fn active_segment_at_one() -> TempLog {

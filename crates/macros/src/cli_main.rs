@@ -65,7 +65,6 @@ mod tests {
     use {
         super::{Split, expand, split},
         crate::meta::compact,
-        assert2::assert,
         moxy::token::TokenStream,
     };
 
@@ -86,31 +85,29 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_first_top_level_comma_ends_the_path() {
-        for (tokens, path, runtime) in [
-            ("krabka_format", "krabka_format", ""),
-            ("krabka_format,", "krabka_format", ""),
-            (
-                "crate::cli, flavor = \"multi_thread\"",
-                "crate::cli",
-                "flavor=\"multi_thread\"",
-            ),
-            (
-                "app, flavor = \"multi_thread\", worker_threads = 2",
-                "app",
-                "flavor=\"multi_thread\",worker_threads=2",
-            ),
-        ] {
-            assert!(
-                split_text(tokens)
-                    == SplitText {
-                        path: path.to_owned(),
-                        runtime: runtime.to_owned(),
-                    },
-                "{tokens}"
-            );
-        }
+    #[yare::parameterized(
+        crate_name = { "krabka_format", "krabka_format", "" },
+        trailing_comma = { "krabka_format,", "krabka_format", "" },
+        runtime_options = {
+            "crate::cli, flavor = \"multi_thread\"",
+            "crate::cli",
+            "flavor=\"multi_thread\"",
+        },
+        multiple_runtime_options = {
+            "app, flavor = \"multi_thread\", worker_threads = 2",
+            "app",
+            "flavor=\"multi_thread\",worker_threads=2",
+        },
+    )]
+    fn the_first_top_level_comma_ends_the_path(tokens: &str, path: &str, runtime: &str) {
+        assert2::assert!(
+            split_text(tokens)
+                == SplitText {
+                    path: path.to_owned(),
+                    runtime: runtime.to_owned(),
+                },
+            "{tokens}"
+        );
     }
 
     /// `cli_main!($tokens)` expanded and printed without whitespace.
@@ -127,36 +124,38 @@ mod tests {
         )
     }
 
-    #[test]
-    fn the_runtime_arguments_pass_through_to_tokio_main() {
-        for (tokens, attribute, path) in [
-            ("krabka_format", "#[::tokio::main]", "krabka_format"),
-            ("krabka_format,", "#[::tokio::main]", "krabka_format"),
-            (
-                "crate::cli, flavor = \"multi_thread\"",
-                "#[::tokio::main(flavor=\"multi_thread\")]",
-                "crate::cli",
-            ),
-            (
-                "app, flavor = \"multi_thread\", worker_threads = 2",
-                "#[::tokio::main(flavor=\"multi_thread\",worker_threads=2)]",
-                "app",
-            ),
-        ] {
-            assert!(expanded(tokens) == main_under(attribute, path), "{tokens}");
-        }
+    #[yare::parameterized(
+        crate_name = { "krabka_format", "#[::tokio::main]", "krabka_format" },
+        trailing_comma = { "krabka_format,", "#[::tokio::main]", "krabka_format" },
+        runtime_options = {
+            "crate::cli, flavor = \"multi_thread\"",
+            "#[::tokio::main(flavor=\"multi_thread\")]",
+            "crate::cli",
+        },
+        multiple_runtime_options = {
+            "app, flavor = \"multi_thread\", worker_threads = 2",
+            "#[::tokio::main(flavor=\"multi_thread\",worker_threads=2)]",
+            "app",
+        },
+    )]
+    fn the_runtime_arguments_pass_through_to_tokio_main(tokens: &str, attribute: &str, path: &str) {
+        assert2::assert!(expanded(tokens) == main_under(attribute, path), "{tokens}");
     }
 
-    #[test]
-    fn a_call_without_a_crate_path_is_an_error() {
-        for tokens in ["", ",", ", flavor = \"multi_thread\""] {
-            let input: TokenStream = tokens.parse().expect("tokens");
-            assert!(let Err(error) = expand(input), "{tokens}");
-            assert!(
-                error.message()
-                    == "`cli_main!` needs the path of the crate whose `run_from_args` it calls",
-                "{tokens}"
-            );
-        }
+    #[yare::parameterized(
+        empty = { "" },
+        comma_only = { "," },
+        runtime_options_without_path = { ", flavor = \"multi_thread\"" },
+    )]
+    fn a_call_without_a_crate_path_is_an_error(tokens: &str) {
+        let input: TokenStream = tokens.parse().expect("tokens");
+        let Err(error) = expand(input) else {
+            panic!("{tokens}");
+        };
+        assert2::assert!(
+            error.message()
+                == "`cli_main!` needs the path of the crate whose `run_from_args` it calls",
+            "{tokens}"
+        );
     }
 }

@@ -90,7 +90,6 @@ pub(crate) fn resolve_txn_version(image: &MetadataImage) -> TxnVersion {
 mod tests {
     use {
         super::*,
-        assert2::assert,
         krabka_metadata::{FeatureLevelRecord, MetadataRecord},
     };
 
@@ -105,64 +104,59 @@ mod tests {
         m
     }
 
-    #[test]
-    fn resolves_levels() {
-        for (level, want) in [
-            (None, TxnVersion::Classic),
-            (Some(0), TxnVersion::Classic),
-            (Some(1), TxnVersion::Flexible),
-            (Some(2), TxnVersion::Verified),
-        ] {
-            assert!(
-                resolve_txn_version(&image_with_tv(level)) == want,
-                "{level:?}"
-            );
-        }
+    #[yare::parameterized(
+        unfinalized = { None, TxnVersion::Classic },
+        classic = { Some(0), TxnVersion::Classic },
+        flexible = { Some(1), TxnVersion::Flexible },
+        verified = { Some(2), TxnVersion::Verified },
+    )]
+    fn resolves_levels(level: Option<i16>, want: TxnVersion) {
+        assert2::assert!(
+            resolve_txn_version(&image_with_tv(level)) == want,
+            "{level:?}"
+        );
     }
 
-    #[test]
-    fn level_maps_each_version() {
-        for (version, level) in [
-            (TxnVersion::Classic, 0),
-            (TxnVersion::Flexible, 1),
-            (TxnVersion::Verified, 2),
-        ] {
-            assert!(version.level() == level, "{version:?}");
-        }
+    #[yare::parameterized(
+        classic = { TxnVersion::Classic, 0 },
+        flexible = { TxnVersion::Flexible, 1 },
+        verified = { TxnVersion::Verified, 2 },
+    )]
+    fn level_maps_each_version(version: TxnVersion, level: i16) {
+        assert2::assert!(version.level() == level, "{version:?}");
     }
 
-    #[test]
-    fn a_client_version_comes_from_the_request_version_alone() {
-        // (request version, EndTxn client version, AddPartitionsToTxn client version)
-        for (request_version, end_txn, add_partitions) in [
-            (0, TxnVersion::Classic, TxnVersion::Classic),
-            (3, TxnVersion::Classic, TxnVersion::Classic),
-            (4, TxnVersion::Classic, TxnVersion::Verified),
-            (5, TxnVersion::Verified, TxnVersion::Verified),
-        ] {
-            assert!(
-                TxnVersion::for_end_txn(request_version) == end_txn,
-                "EndTxn v{request_version}"
-            );
-            assert!(
-                TxnVersion::for_add_partitions_to_txn(request_version) == add_partitions,
-                "AddPartitionsToTxn v{request_version}"
-            );
-        }
+    #[yare::parameterized(
+        version_0 = { 0, TxnVersion::Classic, TxnVersion::Classic },
+        version_3 = { 3, TxnVersion::Classic, TxnVersion::Classic },
+        version_4 = { 4, TxnVersion::Classic, TxnVersion::Verified },
+        version_5 = { 5, TxnVersion::Verified, TxnVersion::Verified },
+    )]
+    fn a_client_version_comes_from_the_request_version_alone(
+        request_version: i16,
+        end_txn: TxnVersion,
+        add_partitions: TxnVersion,
+    ) {
+        assert2::assert!(
+            TxnVersion::for_end_txn(request_version) == end_txn,
+            "EndTxn v{request_version}"
+        );
+        assert2::assert!(
+            TxnVersion::for_add_partitions_to_txn(request_version) == add_partitions,
+            "AddPartitionsToTxn v{request_version}"
+        );
     }
 
-    #[test]
-    fn behavior_predicates() {
-        for (v, want_flexible, want_verified) in [
-            (TxnVersion::Classic, false, false),
-            (TxnVersion::Flexible, true, false),
-            (TxnVersion::Verified, true, true),
-        ] {
-            assert!(
-                v.flexible_records() == want_flexible,
-                "{v:?} flexible_records"
-            );
-            assert!(v.verified() == want_verified, "{v:?} verified");
-        }
+    #[yare::parameterized(
+        classic = { TxnVersion::Classic, false, false },
+        flexible = { TxnVersion::Flexible, true, false },
+        verified = { TxnVersion::Verified, true, true },
+    )]
+    fn behavior_predicates(v: TxnVersion, want_flexible: bool, want_verified: bool) {
+        assert2::assert!(
+            v.flexible_records() == want_flexible,
+            "{v:?} flexible_records"
+        );
+        assert2::assert!(v.verified() == want_verified, "{v:?} verified");
     }
 }

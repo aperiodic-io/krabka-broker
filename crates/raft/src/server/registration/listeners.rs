@@ -77,6 +77,20 @@ fn protocol_from_wire(protocol: i16) -> Option<ListenerProtocol> {
 mod tests {
     use {super::*, assert2::check};
 
+    fn registration_listener(
+        name: &'static str,
+        host: &'static str,
+        port: u16,
+        protocol: i16,
+    ) -> WireListener<'static> {
+        WireListener {
+            name,
+            host,
+            port,
+            protocol,
+        }
+    }
+
     /// The controller listener decoder reads the wire listener and runs the
     /// shared checks.
     #[test]
@@ -102,94 +116,74 @@ mod tests {
     }
 
     /// The wire's security-protocol numbering, and nothing outside it.
-    #[test]
-    fn listener_protocol_numbers_map_to_their_protocols() {
-        let cases = [
-            (0i16, Some(ListenerProtocol::Plaintext)),
-            (1, Some(ListenerProtocol::Ssl)),
-            (2, Some(ListenerProtocol::SaslPlaintext)),
-            (3, Some(ListenerProtocol::SaslSsl)),
-            (4, None),
-            (-1, None),
-            (i16::MAX, None),
-        ];
-        for (wire, want) in cases {
-            check!(protocol_from_wire(wire) == want, "protocol {wire}");
-        }
+    #[yare::parameterized(
+        plaintext = { 0i16, Some(ListenerProtocol::Plaintext) },
+        ssl = { 1, Some(ListenerProtocol::Ssl) },
+        sasl_plaintext = { 2, Some(ListenerProtocol::SaslPlaintext) },
+        sasl_ssl = { 3, Some(ListenerProtocol::SaslSsl) },
+        unknown = { 4, None },
+        negative = { -1, None },
+        maximum = { i16::MAX, None },
+    )]
+    fn listener_protocol_numbers_map_to_their_protocols(
+        wire: i16,
+        expected: Option<ListenerProtocol>,
+    ) {
+        check!(protocol_from_wire(wire) == expected, "protocol {wire}");
     }
 
     /// A listener set is rejected when any entry is unusable or repeats a
     /// name, and an empty set is rejected outright.
-    #[test]
-    fn registration_listeners_must_be_usable_and_uniquely_named() {
-        struct Row<'a> {
-            what: &'a str,
-            listeners: Vec<WireListener<'a>>,
-            accepted: bool,
-        }
-
-        let listener = |name, host, port, protocol| WireListener {
-            name,
-            host,
-            port,
-            protocol,
-        };
-        let cases = vec![
-            Row {
-                what: "one usable listener",
-                listeners: vec![listener("PLAINTEXT", "host", 9092, 0)],
-                accepted: true,
-            },
-            Row {
-                what: "two, differently named",
-                listeners: vec![
-                    listener("PLAINTEXT", "host", 9092, 0),
-                    listener("SSL", "host", 9093, 1),
-                ],
-                accepted: true,
-            },
-            Row {
-                what: "none at all",
-                listeners: vec![],
-                accepted: false,
-            },
-            Row {
-                what: "a nameless listener",
-                listeners: vec![listener("", "host", 9092, 0)],
-                accepted: false,
-            },
-            Row {
-                what: "a hostless listener",
-                listeners: vec![listener("PLAINTEXT", "", 9092, 0)],
-                accepted: false,
-            },
-            Row {
-                what: "port zero",
-                listeners: vec![listener("PLAINTEXT", "host", 0, 0)],
-                accepted: false,
-            },
-            Row {
-                what: "a repeated name",
-                listeners: vec![
-                    listener("PLAINTEXT", "host", 9092, 0),
-                    listener("PLAINTEXT", "host", 9093, 0),
-                ],
-                accepted: false,
-            },
-            Row {
-                what: "an unknown security protocol",
-                listeners: vec![listener("PLAINTEXT", "host", 9092, 9)],
-                accepted: false,
-            },
-        ];
-        for Row {
-            what,
-            listeners,
-            accepted,
-        } in cases
-        {
-            let got = decode_listeners(listeners.iter().copied());
-            check!(got.is_ok() == accepted, "{what}: {got:?}");
-        }
+    #[yare::parameterized(
+        one_listener = {
+            "one usable listener",
+            vec![registration_listener("PLAINTEXT", "host", 9092, 0)],
+            true
+        },
+        distinct_listeners = {
+            "two, differently named",
+            vec![
+                registration_listener("PLAINTEXT", "host", 9092, 0),
+                registration_listener("SSL", "host", 9093, 1),
+            ],
+            true,
+        },
+        empty = { "none at all", vec![], false },
+        nameless = {
+            "a nameless listener",
+            vec![registration_listener("", "host", 9092, 0)],
+            false
+        },
+        hostless = {
+            "a hostless listener",
+            vec![registration_listener("PLAINTEXT", "", 9092, 0)],
+            false
+        },
+        zero_port = {
+            "port zero",
+            vec![registration_listener("PLAINTEXT", "host", 0, 0)],
+            false
+        },
+        duplicate_name = {
+            "a repeated name",
+            vec![
+                registration_listener("PLAINTEXT", "host", 9092, 0),
+                registration_listener("PLAINTEXT", "host", 9093, 0),
+            ],
+            false,
+        },
+        unknown_protocol = {
+            "an unknown security protocol",
+            vec![registration_listener("PLAINTEXT", "host", 9092, 9)],
+            false
+        },
+    )]
+    fn registration_listeners_must_be_usable_and_uniquely_named(
+        case: &str,
+        listeners: Vec<WireListener<'static>>,
+        accepted: bool,
+    ) {
+        let got = decode_listeners(listeners.iter().copied());
+        check!(got.is_ok() == accepted, "{case}: {got:?}");
     }
 }

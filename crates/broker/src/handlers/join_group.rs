@@ -217,27 +217,29 @@ mod tests {
     /// #791: Kafka's `GroupCoordinatorService.joinGroup` request checks with
     /// the default `group.min.session.timeout.ms` and
     /// `group.max.session.timeout.ms`.
-    #[test]
-    fn request_checks_match_kafka_defaults() {
+    #[yare::parameterized(
+        empty_group = { "", 10_000, Some(codes::INVALID_GROUP_ID) },
+        negative_timeout = { "g", -1, Some(codes::INVALID_SESSION_TIMEOUT) },
+        below_minimum = { "g", 5_999, Some(codes::INVALID_SESSION_TIMEOUT) },
+        at_minimum = { "g", 6_000, None },
+        at_maximum = { "g", 1_800_000, None },
+        above_maximum = { "g", 1_800_001, Some(codes::INVALID_SESSION_TIMEOUT) },
+    )]
+    fn request_checks_match_kafka_defaults(
+        group_id: &str,
+        session_timeout_ms: i32,
+        want: Option<i16>,
+    ) {
         let config = NextGenConfig::default();
-        for (group_id, session_timeout_ms, want) in [
-            ("", 10_000, Some(codes::INVALID_GROUP_ID)),
-            ("g", -1, Some(codes::INVALID_SESSION_TIMEOUT)),
-            ("g", 5_999, Some(codes::INVALID_SESSION_TIMEOUT)),
-            ("g", 6_000, None),
-            ("g", 1_800_000, None),
-            ("g", 1_800_001, Some(codes::INVALID_SESSION_TIMEOUT)),
-        ] {
-            let req = JoinGroupRequest {
-                group_id: group_id.into(),
-                session_timeout_ms,
-                ..Default::default()
-            };
-            assert2::check!(
-                request_error(&req, &config) == want,
-                "{group_id:?} {session_timeout_ms}"
-            );
-        }
+        let req = JoinGroupRequest {
+            group_id: group_id.into(),
+            session_timeout_ms,
+            ..Default::default()
+        };
+        assert2::check!(
+            request_error(&req, &config) == want,
+            "{group_id:?} {session_timeout_ms}"
+        );
     }
 
     /// Kafka's `JoinGroupResponse` constructor sends an empty `ProtocolName`

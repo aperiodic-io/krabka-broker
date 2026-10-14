@@ -70,31 +70,27 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use {super::arguments, assert2::assert};
+    use super::arguments;
 
-    #[test]
-    fn parses_the_projection_and_optional_debug_flag() {
-        for (input, debug) in [
-            ("State, canonical", false),
-            ("State, canonical, debug", true),
-        ] {
-            let args = arguments(input.parse().unwrap()).unwrap();
-            assert!(args.name == "State");
-            assert!(args.projection == "canonical");
-            assert!(args.debug == debug);
-        }
+    #[yare::parameterized(
+        without_debug = { "State, canonical", false },
+        with_debug = { "State, canonical, debug", true },
+    )]
+    fn parses_the_projection_and_optional_debug_flag(input: &str, debug: bool) {
+        let args = arguments(input.parse().unwrap()).unwrap();
+        assert2::assert!(args.name == "State");
+        assert2::assert!(args.projection == "canonical");
+        assert2::assert!(args.debug == debug);
     }
 
-    #[test]
-    fn rejects_incomplete_arguments_and_unknown_flags() {
-        for input in [
-            "",
-            "State",
-            "State canonical",
-            "State, 3",
-            "State, canonical, other",
-        ] {
-            assert!(arguments(input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        empty = { "" },
+        missing_projection = { "State" },
+        missing_comma = { "State canonical" },
+        non_identifier = { "State, 3" },
+        unknown_flag = { "State, canonical, other" },
+    )]
+    fn rejects_incomplete_arguments_and_unknown_flags(input: &str) {
+        assert2::assert!(arguments(input.parse().unwrap()).is_err(), "{input}");
     }
 }

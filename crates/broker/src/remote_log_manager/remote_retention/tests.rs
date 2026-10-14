@@ -223,69 +223,58 @@ async fn scheduled_remote_retention_holds_unreadable_activation_evidence() {
 /// `maxTimestampMs` is strictly below `cleanupUntilMs = now - retention.ms`,
 /// whatever that timestamp is, and there is no time axis at all while
 /// `cleanupUntilMs` is negative. `now` is 10 000 ms throughout.
-#[test]
-fn remote_time_retention_follows_kafkas_cleanup_until() {
-    for (name, max_ts, retention_ms, deleted) in [
-        ("an unknown timestamp is older than any cutoff", -1, 1, true),
-        ("one below the cutoff goes", 8_999, 1_000, true),
-        ("one on the cutoff stays", 9_000, 1_000, false),
-        (
-            "a window longer than the clock reading deletes nothing",
-            -1,
-            10_001,
-            false,
-        ),
-        (
-            "a window the clock reading just covers still applies",
-            -1,
-            10_000,
-            true,
-        ),
-    ] {
-        let segments = vec![synth_remote_md(10, 0, 9, max_ts, 100)];
-        let out = remote_retention_eviction_set(
-            ArchiveMode::Mutable.into(),
-            &segments,
-            Some(millis(retention_ms)),
-            None,
-            None,
-            10_000,
-            NO_BYTES,
-        );
-        check!(out.len() == usize::from(deleted), "{name}");
-    }
+#[yare::parameterized(
+    unknown_timestamp = { -1, 1, true },
+    below_cutoff = { 8_999, 1_000, true },
+    on_cutoff = { 9_000, 1_000, false },
+    window_longer_than_clock = { -1, 10_001, false },
+    window_at_clock = { -1, 10_000, true },
+)]
+fn remote_time_retention_follows_kafkas_cleanup_until(
+    max_ts: i64,
+    retention_ms: u32,
+    deleted: bool,
+) {
+    let segments = vec![synth_remote_md(10, 0, 9, max_ts, 100)];
+    let out = remote_retention_eviction_set(
+        ArchiveMode::Mutable.into(),
+        &segments,
+        Some(millis(retention_ms)),
+        None,
+        None,
+        10_000,
+        NO_BYTES,
+    );
+    check!(
+        out.len() == usize::from(deleted),
+        "{max_ts}, {retention_ms}"
+    );
 }
 
 /// Kafka's `buildRetentionSizeData` counts the local bytes the remote tier
 /// does not hold yet (`onlyLocalLogSegmentsSize`) toward `retention.bytes`,
 /// so they push the oldest remote segment out. Two 100-byte remote segments
 /// under a 200-byte budget.
-#[test]
-fn local_bytes_not_yet_copied_count_toward_the_remote_size_budget() {
+#[yare::parameterized(
+    nothing_local = { 0, 0 },
+    below_segment_size = { 99, 0 },
+    one_segment_size = { 100, 1 },
+)]
+fn local_bytes_not_yet_copied_count_toward_the_remote_size_budget(only_local: u32, deleted: usize) {
     let segments = vec![
         synth_remote_md(10, 0, 9, 0, 100),
         synth_remote_md(11, 10, 19, 0, 100),
     ];
-    for (name, only_local, deleted) in [
-        ("nothing local keeps both", 0, 0),
-        ("less than a segment of local bytes keeps both", 99, 0),
-        (
-            "a segment's worth of local bytes pushes the oldest out",
-            100,
-            1,
-        ),
-    ] {
-        let out = remote_retention_eviction_set(
-            ArchiveMode::Mutable.into(),
-            &segments,
-            None,
-            Some(bytes(200)),
-            None,
-            10_000,
-            bytes(only_local),
-        );
-        check!(out.len() == deleted, "{name}");
-    }
+    let out = remote_retention_eviction_set(
+        ArchiveMode::Mutable.into(),
+        &segments,
+        None,
+        Some(bytes(200)),
+        None,
+        10_000,
+        bytes(only_local),
+    );
+    check!(out.len() == deleted);
 }
 
 /// Kafka's `onlyLocalLogSegmentsSize`: a local segment counts when its base

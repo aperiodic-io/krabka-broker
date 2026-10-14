@@ -207,21 +207,19 @@ mod tests {
         check!(spec_of(&entry(&["orders"], -1, 3)) == expected);
     }
 
-    #[test]
-    fn a_topic_name_is_usable_up_to_32767_bytes() {
-        for (length, fault) in [
-            (MAX_STRING_BYTES, None),
-            (
-                MAX_STRING_BYTES + 1,
-                Some("a barrier group topic name is 32768 bytes, and the limit is 32767"),
-            ),
-        ] {
-            let list = vec!["orders".to_owned(), "t".repeat(length)];
-            check!(
-                topic_list_fault(&list) == fault.map(ToOwned::to_owned),
-                "{length} bytes"
-            );
-        }
+    #[yare::parameterized(
+        at_limit = { MAX_STRING_BYTES, None },
+        over_limit = {
+            MAX_STRING_BYTES + 1,
+            Some("a barrier group topic name is 32768 bytes, and the limit is 32767")
+        },
+    )]
+    fn a_topic_name_is_usable_up_to_32767_bytes(length: usize, fault: Option<&str>) {
+        let list = vec!["orders".to_owned(), "t".repeat(length)];
+        check!(
+            topic_list_fault(&list) == fault.map(ToOwned::to_owned),
+            "{length} bytes"
+        );
     }
 
     #[test]

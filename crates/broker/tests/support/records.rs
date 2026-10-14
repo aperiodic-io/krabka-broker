@@ -46,17 +46,7 @@ pub fn empty_record_batch(n: i32) -> RecordBatch {
 /// # Panics
 /// Panics if the count or an index does not fit its original i32 field.
 /// A producer's sequence coordinate, independent of log offsets.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
+#[krabka_macros::test_scalar]
 pub struct ProducerSequence(pub i32);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]

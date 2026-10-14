@@ -157,32 +157,24 @@ required_approval = 2
     assert!(toml::from_str::<FileConfig>(toml).is_err());
 }
 
-#[test]
-fn background_unclean_recovery_accepts_exactly_three_spellings() {
-    for (name, spelling, expected) in [
-        ("off", "off", Some(BackgroundUncleanRecovery::Off)),
-        (
-            "audit-only",
-            "audit-only",
-            Some(BackgroundUncleanRecovery::AuditOnly),
-        ),
-        (
-            "require",
-            "require",
-            Some(BackgroundUncleanRecovery::Require),
-        ),
-        ("a fourth spelling", "audit_only", None),
-        ("a mode that does not exist", "warn", None),
-    ] {
-        let toml = format!(
-            "[break_glass]\nsigned_actions = []\nbackground_unclean_recovery = {spelling:?}\n"
-        );
-        let parsed = toml::from_str::<FileConfig>(&toml)
-            .ok()
-            .and_then(|file| file.break_glass)
-            .and_then(|section| section.background_unclean_recovery);
-        check!(parsed == expected, "case {name}");
-    }
+#[yare::parameterized(
+    off = { "off", Some(BackgroundUncleanRecovery::Off) },
+    audit_only = { "audit-only", Some(BackgroundUncleanRecovery::AuditOnly) },
+    require = { "require", Some(BackgroundUncleanRecovery::Require) },
+    fourth_spelling = { "audit_only", None },
+    unknown_mode = { "warn", None },
+)]
+fn background_unclean_recovery_accepts_exactly_three_spellings(
+    spelling: &str,
+    expected: Option<BackgroundUncleanRecovery>,
+) {
+    let toml =
+        format!("[break_glass]\nsigned_actions = []\nbackground_unclean_recovery = {spelling:?}\n");
+    let parsed = toml::from_str::<FileConfig>(&toml)
+        .ok()
+        .and_then(|file| file.break_glass)
+        .and_then(|section| section.background_unclean_recovery);
+    check!(parsed == expected, "case {spelling}");
 }
 
 /// Apply privileged-action sections beside the fixture's Alice operator key.
@@ -270,38 +262,40 @@ fn freeze_and_break_glass_values_replace_the_broker_defaults() {
     );
 }
 
-#[test]
-fn break_glass_required_approvals_below_two_is_a_config_error() {
+#[yare::parameterized(
+    zero = { "no approvals at all", 0_usize, false },
+    one = { "a one-person two-person rule", 1, false },
+    minimum = { "the documented minimum", 2, true },
+    three_of_five = { "three of five", 3, true },
+)]
+fn break_glass_required_approvals_below_two_is_a_config_error(
+    name: &str,
+    required: usize,
+    accepted: bool,
+) {
     let dir = TempDir::new().expect("tempdir");
     let keys = operator_key_fixture(&dir, "alice-yubi", "User:alice");
-    for (name, required, accepted) in [
-        ("no approvals at all", 0_usize, false),
-        ("a one-person two-person rule", 1, false),
-        ("the documented minimum", 2, true),
-        ("three of five", 3, true),
-    ] {
-        let toml = format!(
-            "{keys}\n[break_glass]\napprovers = [\"User:alice\"]\n\
-             required_approvals = {required}\n"
+    let toml = format!(
+        "{keys}\n[break_glass]\napprovers = [\"User:alice\"]\n\
+         required_approvals = {required}\n"
+    );
+    let file: FileConfig = toml::from_str(&toml).expect("parse config");
+    let mut config = BrokerConfig::default();
+
+    let outcome = file.apply_to(&mut config);
+
+    assert2::check!(outcome.is_ok() == accepted, "case {name}");
+    if accepted {
+        assert2::check!(
+            config.break_glass.required_approvals == required,
+            "case {name}"
         );
-        let file: FileConfig = toml::from_str(&toml).expect("parse config");
-        let mut cfg = BrokerConfig::default();
-
-        let outcome = file.apply_to(&mut cfg);
-
-        check!(outcome.is_ok() == accepted, "case {name}");
-        if accepted {
-            check!(
-                cfg.break_glass.required_approvals == required,
-                "case {name}"
-            );
-        } else {
-            assert!(let Err(error) = outcome, "case {name}");
-            check!(
-                matches!(error, FileConfigError::InvalidConfig(_)),
-                "case {name}"
-            );
-        }
+    } else {
+        assert2::assert!(let Err(error) = outcome, "case {name}");
+        assert2::check!(
+            matches!(error, FileConfigError::InvalidConfig(_)),
+            "case {name}"
+        );
     }
 }
 
@@ -318,30 +312,28 @@ fn freeze_max_entries_of_zero_is_a_config_error() {
     assert!(matches!(error, FileConfigError::InvalidConfig(_)));
 }
 
-#[test]
-fn demanding_a_signature_with_no_operator_key_is_a_startup_error() {
+#[yare::parameterized(
+    named_action = {
+        "signed_actions names an action",
+        "[break_glass]\napprovers = [\"User:alice\"]\n\
+         signed_actions = [\"delete_topic\"]\n",
+    },
+    default_actions = {
+        "signed_actions defaults to the irreversible set",
+        "[break_glass]\napprovers = [\"User:alice\"]\n",
+    },
+    freeze_signature = {
+        "freeze.require_signature is on",
+        "[freeze]\nrequire_signature = true\n",
+    },
+)]
+fn demanding_a_signature_with_no_operator_key_is_a_startup_error(name: &str, toml: &str) {
     // Both rules exist so the refusal happens at boot with an explanation,
     // not at run time on every request with none.
-    for (name, toml) in [
-        (
-            "signed_actions names an action",
-            "[break_glass]\napprovers = [\"User:alice\"]\n\
-             signed_actions = [\"delete_topic\"]\n",
-        ),
-        (
-            "signed_actions defaults to the irreversible set",
-            "[break_glass]\napprovers = [\"User:alice\"]\n",
-        ),
-        (
-            "freeze.require_signature is on",
-            "[freeze]\nrequire_signature = true\n",
-        ),
-    ] {
-        let file: FileConfig = toml::from_str(toml).expect("parse config");
-        let mut cfg = BrokerConfig::default();
+    let file: FileConfig = toml::from_str(toml).expect("parse config");
+    let mut config = BrokerConfig::default();
 
-        check_operator_key_refusal(file, &mut cfg, name);
-    }
+    check_operator_key_refusal(file, &mut config, name);
 }
 
 #[test]
@@ -358,35 +350,33 @@ fn an_empty_signed_actions_list_needs_no_operator_key() {
     check!(cfg.operator_keys.is_empty());
 }
 
-#[test]
-fn a_signed_action_that_names_no_action_is_a_startup_error() {
+#[yare::parameterized(
+    plural_misspelling = { "a plural misspelling", "delete_topics" },
+    hyphenated_spelling = { "a hyphenated spelling", "delete-topic" },
+    capitalized_spelling = { "a capitalised spelling", "Delete_Topic" },
+    wire_spelling = { "the wire spelling", "DeleteTopic" },
+    invented_action = { "an invented action", "reformat_cluster" },
+)]
+fn a_signed_action_that_names_no_action_is_a_startup_error(label: &str, spelling: &str) {
     // A name that matches no action demands a signature for nothing. The
     // operator believes the action is protected and it is not, so the
     // broker refuses to boot rather than run the downgrade silently.
-    for (label, spelling) in [
-        ("a plural misspelling", "delete_topics"),
-        ("a hyphenated spelling", "delete-topic"),
-        ("a capitalised spelling", "Delete_Topic"),
-        ("the wire spelling", "DeleteTopic"),
-        ("an invented action", "reformat_cluster"),
-    ] {
-        // No `[[operator_keys]]`. The name check runs inside the
-        // `[break_glass]` block, ahead of the rule that a demanded
-        // signature needs a key to verify it, so the refusal here is the
-        // name one and the assertions below can say so.
-        let file: FileConfig =
-            toml::from_str(&format!("[break_glass]\nsigned_actions = [{spelling:?}]\n"))
-                .expect("parse break_glass section");
-        let mut cfg = BrokerConfig::default();
+    // No `[[operator_keys]]`. The name check runs inside the
+    // `[break_glass]` block, ahead of the rule that a demanded
+    // signature needs a key to verify it, so the refusal here is the
+    // name one and the assertions below can say so.
+    let file: FileConfig =
+        toml::from_str(&format!("[break_glass]\nsigned_actions = [{spelling:?}]\n"))
+            .expect("parse break_glass section");
+    let mut config = BrokerConfig::default();
 
-        let result = file.apply_to(&mut cfg);
+    let result = file.apply_to(&mut config);
 
-        assert!(let Err(_) = &result, "case {label}");
-        let message = result.expect_err("refusal").to_string();
-        check!(message.contains("signed_actions"), "case {label}");
-        check!(message.contains(spelling), "case {label}");
-        check!(message.contains("delete_topic"), "case {label}");
-    }
+    assert2::assert!(let Err(_) = &result, "case {label}");
+    let message = result.expect_err("refusal").to_string();
+    assert2::check!(message.contains("signed_actions"), "case {label}");
+    assert2::check!(message.contains(spelling), "case {label}");
+    assert2::check!(message.contains("delete_topic"), "case {label}");
 }
 
 #[test]

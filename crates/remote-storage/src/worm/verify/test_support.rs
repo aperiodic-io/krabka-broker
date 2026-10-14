@@ -66,8 +66,7 @@ pub(super) struct Segment {
 pub(super) fn first_break_reason(report: &ArchiveVerifyReport) -> String {
     report
         .first_break()
-        .map(|found| found.reason.clone())
-        .unwrap_or_default()
+        .map_or_default(|found| found.reason.clone())
 }
 
 /// A WORM archive built object by object, the way a backend writes one.

@@ -161,19 +161,17 @@ fn resource_type_str(t: ResourceType) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, assert2::assert};
+    use super::*;
 
     /// The OPA input's `operation` string must be the Kafka enum name,
     /// including KIP-939's `TWO_PHASE_COMMIT`. This pins the mapping, so the
     /// test catches a regression or a blanket mutation of `operation_str`.
-    #[test]
-    fn operation_str_maps_kafka_names() {
-        for (op, want) in [
-            (AclOperation::Read, "READ"),
-            (AclOperation::Write, "WRITE"),
-            (AclOperation::TwoPhaseCommit, "TWO_PHASE_COMMIT"),
-        ] {
-            assert!(operation_str(op) == want, "{op:?}");
-        }
+    #[yare::parameterized(
+        read = { AclOperation::Read, "READ" },
+        write = { AclOperation::Write, "WRITE" },
+        two_phase_commit = { AclOperation::TwoPhaseCommit, "TWO_PHASE_COMMIT" },
+    )]
+    fn operation_str_maps_kafka_names(op: AclOperation, want: &str) {
+        assert2::assert!(operation_str(op) == want, "{op:?}");
     }
 }

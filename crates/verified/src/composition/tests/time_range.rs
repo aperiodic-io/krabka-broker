@@ -111,19 +111,7 @@ fn inclusive_cursors_cannot_crop_a_timestamp_range_scan() {
 }
 
 #[test]
-fn time_range_rejects_invalid_extents_and_preserves_signed_extremes() {
-    for (base, end) in [(0, -1), (2, 1), (0, i64::MAX), (i64::MAX, i64::MAX)] {
-        check_range((&[], &[], &[]), (base, end, 0), (i64::MIN, i64::MAX));
-    }
-    for end in [0, 1, i64::from(u32::MAX)] {
-        check_range(
-            (&[0, 1, u32::MAX], &[i64::MAX, i64::MIN, i64::MAX], &[(
-                0, 0,
-            )]),
-            (0, end, 1),
-            (i64::MIN, i64::MIN),
-        );
-    }
+fn time_range_preserves_signed_endpoints_when_bounds_collapse() {
     check_range(
         (&[0], &[i64::MIN], &[(0, 0)]),
         (i64::MAX, i64::MAX, i64::MAX),
@@ -134,17 +122,48 @@ fn time_range_rejects_invalid_extents_and_preserves_signed_extremes() {
         (i64::MAX, i64::MAX, i64::MAX),
         (i64::MAX, i64::MAX),
     );
-    for lower in [i64::MIN, 0, i64::MAX] {
-        check_cursors(
-            &[
-                TimeEntry::new(i64::MIN, 0),
-                TimeEntry::new(i64::MAX, u32::MAX),
-            ],
-            0,
-            i64::from(u32::MAX),
-            lower,
-            i64::MAX,
-        );
-        check_cursors(&[TimeEntry::new(i64::MIN, 1)], -1, 1, lower, i64::MAX);
-    }
+}
+
+#[yare::parameterized(
+    negative_end = { 0, -1 },
+    end_before_base = { 2, 1 },
+    unrepresentable_width = { 0, i64::MAX },
+    max_zero_width = { i64::MAX, i64::MAX },
+)]
+fn time_range_rejects_invalid_extents(base: i64, end: i64) {
+    check_range((&[], &[], &[]), (base, end, 0), (i64::MIN, i64::MAX));
+}
+
+#[yare::parameterized(
+    empty = { 0 },
+    one_offset = { 1 },
+    maximum_width = { i64::from(u32::MAX) },
+)]
+fn time_range_rejects_out_of_extent_offsets_at_boundary_widths(end: i64) {
+    check_range(
+        (&[0, 1, u32::MAX], &[i64::MAX, i64::MIN, i64::MAX], &[(
+            0, 0,
+        )]),
+        (0, end, 1),
+        (i64::MIN, i64::MIN),
+    );
+}
+
+#[yare::parameterized(
+    minimum_lower = { i64::MIN },
+    zero_lower = { 0 },
+    maximum_lower = { i64::MAX },
+)]
+fn cursors_preserve_signed_extremes(lower: i64) {
+    check_cursors(
+        &[
+            TimeEntry::new(i64::MIN, 0),
+            TimeEntry::new(i64::MAX, u32::MAX),
+        ],
+        0,
+        i64::from(u32::MAX),
+        lower,
+        i64::MAX,
+    );
+    check_cursors(&[TimeEntry::new(i64::MIN, 1)], -1, 1, lower, i64::MAX);
 }

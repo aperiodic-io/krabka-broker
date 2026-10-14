@@ -42,6 +42,35 @@ fn prefixed_topic_write_allowed_when(denial: AclSetup) {
     );
 }
 
+fn resource_auth_context(
+    entries: Vec<krabka_metadata::AclEntry>,
+    flag: bool,
+) -> (krabka_metadata::MetadataImage, SimpleAclAuthorizer) {
+    let mut image = img();
+    for entry in entries {
+        image.apply(&MetadataRecord::V1AccessControlEntry(entry));
+    }
+    let authorizer = SimpleAclAuthorizer::new(no_super()).with_allow_everyone_if_no_acl_found(flag);
+    (image, authorizer)
+}
+
+fn check_resource_auth_context(
+    entries: Vec<krabka_metadata::AclEntry>,
+    flag: bool,
+    expected: AuthorizationResult,
+    authorize: impl FnOnce(
+        &krabka_metadata::MetadataImage,
+        &SimpleAclAuthorizer,
+        &Principal,
+        &std::net::SocketAddr,
+    ) -> AuthorizationResult,
+) {
+    let (image, authorizer) = resource_auth_context(entries, flag);
+    let principal = alice();
+    let host = addr();
+    assert2::assert!(authorize(&image, &authorizer, &principal, &host) == expected);
+}
+
 #[test]
 fn empty_image_with_no_super_users_defaults_to_deny() {
     // There is no compat shim that returns Allow in this case —
@@ -197,7 +226,7 @@ fn simple_acl_authorizer_is_configured() {
 mod authorize_by_resource_type {
     use {
         super::*,
-        krabka_metadata::{AclOperation, MetadataRecord, PatternType, ResourceType},
+        krabka_metadata::{AclOperation, PatternType, ResourceType},
     };
 
     #[test]
@@ -274,73 +303,63 @@ mod authorize_by_resource_type {
         });
     }
 
-    #[test]
-    fn prefix_grants_survive_finite_literal_and_narrower_prefix_exclusions() {
-        for (case, exclusions, witness, expected) in [
-            (
-                "literal collision with the former synthetic probe",
-                vec![
-                    (PatternType::Literal, "ord"),
-                    (PatternType::Literal, "ord\u{10ffff}"),
-                ],
-                "orders",
-                AuthorizationResult::Allow,
-            ),
-            (
-                "narrower prefix collision with the former probe",
-                vec![
-                    (PatternType::Literal, "ord"),
-                    (PatternType::Prefixed, "ord\u{10ffff}"),
-                    (PatternType::Prefixed, "order"),
-                    (PatternType::Prefixed, "ord-"),
-                ],
-                "ordinary",
-                AuthorizationResult::Allow,
-            ),
-            (
-                "the same prefix denies every descendant",
-                vec![(PatternType::Prefixed, "ord")],
-                "orders",
-                AuthorizationResult::Deny,
-            ),
-            (
-                "a broader prefix denies every descendant",
-                vec![(PatternType::Prefixed, "or")],
-                "orders",
-                AuthorizationResult::Deny,
-            ),
-            (
-                "the wildcard denies every descendant",
-                vec![(PatternType::Literal, "*")],
-                "orders",
-                AuthorizationResult::Deny,
-            ),
-        ] {
-            let grant = topic_acl()
+    #[yare::parameterized(
+        literal_probe_collision = {
+            vec![(PatternType::Literal, "ord"), (PatternType::Literal, "ord\u{10ffff}")],
+            "orders",
+            AuthorizationResult::Allow,
+        },
+        narrower_prefix_probe_collision = {
+            vec![
+                (PatternType::Literal, "ord"),
+                (PatternType::Prefixed, "ord\u{10ffff}"),
+                (PatternType::Prefixed, "order"),
+                (PatternType::Prefixed, "ord-"),
+            ],
+            "ordinary",
+            AuthorizationResult::Allow,
+        },
+        same_prefix_denies = {
+            vec![(PatternType::Prefixed, "ord")],
+            "orders",
+            AuthorizationResult::Deny,
+        },
+        broader_prefix_denies = {
+            vec![(PatternType::Prefixed, "or")],
+            "orders",
+            AuthorizationResult::Deny,
+        },
+        wildcard_denies = {
+            vec![(PatternType::Literal, "*")],
+            "orders",
+            AuthorizationResult::Deny,
+        },
+    )]
+    fn prefix_grants_survive_finite_literal_and_narrower_prefix_exclusions(
+        exclusions: Vec<(PatternType, &'static str)>,
+        witness: &'static str,
+        expected: AuthorizationResult,
+    ) {
+        let grant = topic_acl()
+            .op(AclOperation::Write)
+            .pattern(PatternType::Prefixed)
+            .name("ord")
+            .call();
+        let denies = exclusions.into_iter().map(|(pattern, name)| {
+            topic_acl()
+                .permission(PermissionType::Deny)
                 .op(AclOperation::Write)
-                .pattern(PatternType::Prefixed)
-                .name("ord")
-                .call();
-            let denies = exclusions.into_iter().map(|(pattern, name)| {
-                topic_acl()
-                    .permission(PermissionType::Deny)
-                    .op(AclOperation::Write)
-                    .pattern(pattern)
-                    .name(name)
-                    .call()
-            });
-            let image = acl_image(std::iter::once(grant).chain(denies));
-            let caller = AliceAuthorizer::default();
-            assert2::check!(
-                caller.authorize(&image, witness, AclOperation::Write) == expected,
-                "{case}: concrete resource"
-            );
-            assert2::check!(
-                caller.authorize_by_resource_type(&image, ResourceType::Topic, AclOperation::Write)
-                    == expected,
-                "{case}: resource type"
-            );
-        }
+                .pattern(pattern)
+                .name(name)
+                .call()
+        });
+        let image = acl_image(std::iter::once(grant).chain(denies));
+        let caller = AliceAuthorizer::default();
+        assert2::check!(caller.authorize(&image, witness, AclOperation::Write) == expected);
+        assert2::check!(
+            caller.authorize_by_resource_type(&image, ResourceType::Topic, AclOperation::Write)
+                == expected
+        );
     }
 
     #[test]
@@ -389,83 +408,75 @@ mod authorize_by_resource_type {
         }
     }
 
-    #[test]
-    fn literal_and_wildcard_grants_follow_kafka_pattern_dominance() {
-        for (grant, denied_pattern, denied_name, expected) in [
-            (
-                "orders",
-                PatternType::Literal,
-                "orders",
-                AuthorizationResult::Deny,
-            ),
-            (
-                "orders",
-                PatternType::Prefixed,
-                "ord",
-                AuthorizationResult::Deny,
-            ),
-            (
-                "orders",
-                PatternType::Prefixed,
-                "orders-",
-                AuthorizationResult::Allow,
-            ),
-            (
-                "*",
-                PatternType::Literal,
-                "hardcode",
-                AuthorizationResult::Allow,
-            ),
-            (
-                "*",
-                PatternType::Prefixed,
-                "hard",
-                AuthorizationResult::Allow,
-            ),
-            ("*", PatternType::Literal, "*", AuthorizationResult::Deny),
-        ] {
-            let image = acl_image([
-                topic_acl().op(AclOperation::Write).name(grant).call(),
-                topic_acl()
-                    .permission(PermissionType::Deny)
-                    .op(AclOperation::Write)
-                    .pattern(denied_pattern)
-                    .name(denied_name)
-                    .call(),
-            ]);
-            check_resource_type_access(&image, ResourceType::Topic, AclOperation::Write, expected);
-        }
+    #[yare::parameterized(
+        literal_denies_same_name = {
+            "orders",
+            PatternType::Literal,
+            "orders",
+            AuthorizationResult::Deny,
+        },
+        prefix_denies_within_range = {
+            "orders",
+            PatternType::Prefixed,
+            "ord",
+            AuthorizationResult::Deny,
+        },
+        prefix_denies_outside_range = {
+            "orders",
+            PatternType::Prefixed,
+            "orders-",
+            AuthorizationResult::Allow,
+        },
+        wildcard_grant_literal_deny = {
+            "*",
+            PatternType::Literal,
+            "hardcode",
+            AuthorizationResult::Allow,
+        },
+        wildcard_grant_prefix_deny = {
+            "*",
+            PatternType::Prefixed,
+            "hard",
+            AuthorizationResult::Allow,
+        },
+        wildcard_denies_wildcard = { "*", PatternType::Literal, "*", AuthorizationResult::Deny },
+    )]
+    fn literal_and_wildcard_grants_follow_kafka_pattern_dominance(
+        grant: &'static str,
+        denied_pattern: PatternType,
+        denied_name: &'static str,
+        expected: AuthorizationResult,
+    ) {
+        let image = acl_image([
+            topic_acl().op(AclOperation::Write).name(grant).call(),
+            topic_acl()
+                .permission(PermissionType::Deny)
+                .op(AclOperation::Write)
+                .pattern(denied_pattern)
+                .name(denied_name)
+                .call(),
+        ]);
+        check_resource_type_access(&image, ResourceType::Topic, AclOperation::Write, expected);
     }
 
-    #[test]
-    fn resource_type_denials_match_the_caller_host_operation_and_type() {
-        for excluded in [
-            AclSetup {
-                principal: "User:bob",
-                op: AclOperation::Write,
-                ..Default::default()
-            },
-            AclSetup {
-                host: "192.0.2.1",
-                op: AclOperation::Write,
-                ..Default::default()
-            },
-            AclSetup {
-                op: AclOperation::Read,
-                ..Default::default()
-            },
-            AclSetup {
-                rt: ResourceType::Group,
-                op: AclOperation::Write,
-                ..Default::default()
-            },
-        ] {
-            prefixed_topic_write_allowed_when(AclSetup {
-                permission: PermissionType::Deny,
-                name: "*",
-                ..excluded
-            });
-        }
+    #[yare::parameterized(
+        different_principal = {
+            AclSetup { principal: "User:bob", op: AclOperation::Write, ..Default::default() },
+        },
+        different_host = {
+            AclSetup { host: "192.0.2.1", op: AclOperation::Write, ..Default::default() },
+        },
+        different_operation = { AclSetup { op: AclOperation::Read, ..Default::default() } },
+        different_resource_type = {
+            AclSetup { rt: ResourceType::Group, op: AclOperation::Write, ..Default::default() },
+        },
+    )]
+    fn resource_type_denials_match_the_caller_host_operation_and_type(excluded: AclSetup) {
+        prefixed_topic_write_allowed_when(AclSetup {
+            permission: PermissionType::Deny,
+            name: "*",
+            ..excluded
+        });
     }
 
     /// Kafka's default `authorizeByResourceType` first authorizes the
@@ -474,76 +485,89 @@ mod authorize_by_resource_type {
     /// topic ACL covers the name, so a principal with no topic ACL gets in
     /// even though it has no ALLOW entry for the scan to find. This is what
     /// admits an idempotent producer once a cluster ACL exists.
-    #[test]
-    fn hardcoded_name_probe_honours_allow_everyone_if_no_acl_found() {
-        // (stored entries, allow.everyone.if.no.acl.found, result)
-        let other_topic = |pattern, name| {
-            topic_acl()
-                .op(AclOperation::Write)
-                .principal("User:bob")
-                .pattern(pattern)
-                .name(name)
-                .call()
-        };
-        let cases = [
-            (
-                "no acls, flag off",
-                vec![],
-                false,
-                AuthorizationResult::Deny,
-            ),
-            ("no acls, flag on", vec![], true, AuthorizationResult::Allow),
-            (
-                "acl on another topic, flag off",
-                vec![other_topic(PatternType::Literal, "orders")],
-                false,
-                AuthorizationResult::Deny,
-            ),
-            (
-                "acl on another topic, flag on",
-                vec![other_topic(PatternType::Literal, "orders")],
-                true,
-                AuthorizationResult::Allow,
-            ),
-            (
-                "literal acl on hardcode, flag on",
-                vec![other_topic(PatternType::Literal, "hardcode")],
-                true,
-                AuthorizationResult::Deny,
-            ),
-            (
-                "prefixed acl covering hardcode, flag on",
-                vec![other_topic(PatternType::Prefixed, "hard")],
-                true,
-                AuthorizationResult::Deny,
-            ),
-            (
-                "wildcard acl, flag on",
-                vec![other_topic(PatternType::Literal, "*")],
-                true,
-                AuthorizationResult::Deny,
-            ),
-        ];
-        for (label, entries, flag, expected) in cases {
-            let mut img = img();
-            for entry in entries {
-                img.apply(&MetadataRecord::V1AccessControlEntry(entry));
-            }
-            let a = alice();
-            let h = addr();
-            let auth =
-                SimpleAclAuthorizer::new(no_super()).with_allow_everyone_if_no_acl_found(flag);
-            assert2::check!(
-                auth.authorize_by_resource_type(
-                    &img,
-                    &a,
-                    &h,
+    #[yare::parameterized(
+        no_acl_flag_off = { vec![], false, AuthorizationResult::Deny },
+        no_acl_flag_on = { vec![], true, AuthorizationResult::Allow },
+        other_topic_flag_off = {
+            vec![
+                topic_acl()
+                    .op(AclOperation::Write)
+                    .principal("User:bob")
+                    .pattern(PatternType::Literal)
+                    .name("orders")
+                    .call(),
+            ],
+            false,
+            AuthorizationResult::Deny,
+        },
+        other_topic_flag_on = {
+            vec![
+                topic_acl()
+                    .op(AclOperation::Write)
+                    .principal("User:bob")
+                    .pattern(PatternType::Literal)
+                    .name("orders")
+                    .call(),
+            ],
+            true,
+            AuthorizationResult::Allow,
+        },
+        literal_hardcode = {
+            vec![
+                topic_acl()
+                    .op(AclOperation::Write)
+                    .principal("User:bob")
+                    .pattern(PatternType::Literal)
+                    .name("hardcode")
+                    .call(),
+            ],
+            true,
+            AuthorizationResult::Deny,
+        },
+        prefix_covers_hardcode = {
+            vec![
+                topic_acl()
+                    .op(AclOperation::Write)
+                    .principal("User:bob")
+                    .pattern(PatternType::Prefixed)
+                    .name("hard")
+                    .call(),
+            ],
+            true,
+            AuthorizationResult::Deny,
+        },
+        wildcard = {
+            vec![
+                topic_acl()
+                    .op(AclOperation::Write)
+                    .principal("User:bob")
+                    .pattern(PatternType::Literal)
+                    .name("*")
+                    .call(),
+            ],
+            true,
+            AuthorizationResult::Deny,
+        },
+    )]
+    fn hardcoded_name_probe_honours_allow_everyone_if_no_acl_found(
+        entries: Vec<krabka_metadata::AclEntry>,
+        flag: bool,
+        expected: AuthorizationResult,
+    ) {
+        check_resource_auth_context(
+            entries,
+            flag,
+            expected,
+            |image, authorizer, principal, host| {
+                authorizer.authorize_by_resource_type(
+                    image,
+                    principal,
+                    host,
                     ResourceType::Topic,
-                    AclOperation::Write
-                ) == expected,
-                "{label}"
-            );
-        }
+                    AclOperation::Write,
+                )
+            },
+        );
     }
 }
 
@@ -553,114 +577,53 @@ mod authorize_by_resource_type {
 /// principal, host, operation, or permission type. If at least one ACL
 /// applies to the resource and none of them matches the request, the
 /// request is still denied.
-#[test]
-fn allow_everyone_if_no_acl_found_applies_only_when_no_acl_touches_the_resource() {
-    enum Case {
-        /// No ACL at all on the image.
-        NoAcls,
-        /// An ACL exists for the resource, but for a different principal
-        /// (so it "applies to the resource" without matching the request).
-        AclForResourceOtherPrincipal,
-        /// An ACL exists for a completely different resource.
-        AclForOtherResource,
-        /// A matching ALLOW ACL exists.
-        MatchingAllow,
-        /// A matching DENY ACL exists.
-        MatchingDeny,
-    }
-
-    let cases = [
-        (
-            "no acls at all + flag off",
-            Case::NoAcls,
-            false,
-            AuthorizationResult::Deny,
-        ),
-        (
-            "no acls at all + flag on",
-            Case::NoAcls,
-            true,
-            AuthorizationResult::Allow,
-        ),
-        (
-            "acl on resource, principal mismatch + flag off",
-            Case::AclForResourceOtherPrincipal,
-            false,
-            AuthorizationResult::Deny,
-        ),
-        (
-            "acl on resource, principal mismatch + flag on",
-            Case::AclForResourceOtherPrincipal,
-            true,
-            AuthorizationResult::Deny,
-        ),
-        (
-            "acl on a different resource + flag off",
-            Case::AclForOtherResource,
-            false,
-            AuthorizationResult::Deny,
-        ),
-        (
-            "acl on a different resource + flag on",
-            Case::AclForOtherResource,
-            true,
-            AuthorizationResult::Allow,
-        ),
-        (
-            "matching allow acl + flag off",
-            Case::MatchingAllow,
-            false,
-            AuthorizationResult::Allow,
-        ),
-        (
-            "matching allow acl + flag on",
-            Case::MatchingAllow,
-            true,
-            AuthorizationResult::Allow,
-        ),
-        (
-            "matching deny acl + flag off",
-            Case::MatchingDeny,
-            false,
-            AuthorizationResult::Deny,
-        ),
-        (
-            "matching deny acl + flag on",
-            Case::MatchingDeny,
-            true,
-            AuthorizationResult::Deny,
-        ),
-    ];
-
-    for (name, case, flag, expected) in cases {
-        let mut img = img();
-        match case {
-            Case::NoAcls => {}
-            Case::AclForResourceOtherPrincipal => {
-                img.apply(&MetadataRecord::V1AccessControlEntry(
-                    topic_acl().principal("User:bob").call(),
-                ));
-            }
-            Case::AclForOtherResource => {
-                img.apply(&MetadataRecord::V1AccessControlEntry(
-                    topic_acl().name("other").call(),
-                ));
-            }
-            Case::MatchingAllow => {
-                img.apply(&MetadataRecord::V1AccessControlEntry(topic_acl().call()));
-            }
-            Case::MatchingDeny => {
-                img.apply(&MetadataRecord::V1AccessControlEntry(
-                    topic_acl().permission(PermissionType::Deny).call(),
-                ));
-            }
-        }
-        let a = alice();
-        let h = addr();
-        let auth = SimpleAclAuthorizer::new(no_super()).with_allow_everyone_if_no_acl_found(flag);
-        assert2::assert!(
-            auth.authorize(&img, &req().p(&a).host(&h).call()) == expected,
-            "{name}"
-        );
-    }
+#[yare::parameterized(
+    no_acl_flag_off = { vec![], false, AuthorizationResult::Deny },
+    no_acl_flag_on = { vec![], true, AuthorizationResult::Allow },
+    resource_acl_other_principal_flag_off = {
+        vec![topic_acl().principal("User:bob").call()],
+        false,
+        AuthorizationResult::Deny,
+    },
+    resource_acl_other_principal_flag_on = {
+        vec![topic_acl().principal("User:bob").call()],
+        true,
+        AuthorizationResult::Deny,
+    },
+    other_resource_flag_off = {
+        vec![topic_acl().name("other").call()],
+        false,
+        AuthorizationResult::Deny,
+    },
+    other_resource_flag_on = {
+        vec![topic_acl().name("other").call()],
+        true,
+        AuthorizationResult::Allow,
+    },
+    matching_allow_flag_off = { vec![topic_acl().call()], false, AuthorizationResult::Allow },
+    matching_allow_flag_on = { vec![topic_acl().call()], true, AuthorizationResult::Allow },
+    matching_deny_flag_off = {
+        vec![topic_acl().permission(PermissionType::Deny).call()],
+        false,
+        AuthorizationResult::Deny,
+    },
+    matching_deny_flag_on = {
+        vec![topic_acl().permission(PermissionType::Deny).call()],
+        true,
+        AuthorizationResult::Deny,
+    },
+)]
+fn allow_everyone_if_no_acl_found_applies_only_when_no_acl_touches_the_resource(
+    entries: Vec<krabka_metadata::AclEntry>,
+    flag: bool,
+    expected: AuthorizationResult,
+) {
+    check_resource_auth_context(
+        entries,
+        flag,
+        expected,
+        |image, authorizer, principal, host| {
+            authorizer.authorize(image, &req().p(principal).host(host).call())
+        },
+    );
 }

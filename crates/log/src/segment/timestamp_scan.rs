@@ -393,45 +393,59 @@ mod tests {
             .call()
     }
 
-    #[test]
-    fn first_record_timestamp_survives_appends_and_reloads_after_truncation() {
-        use krabka_compression::CompressionType;
-
-        for codec in [CompressionType::None, CompressionType::Lz4] {
-            for timestamp_type in [TimestampType::CreateTime, TimestampType::LogAppendTime] {
-                let TempSegment {
-                    dir,
-                    segment: mut seg,
-                } = test_segment();
-                assert2::assert!(seg.first_record_timestamp().is_none());
-                let mut batch = sample_batch().records(2).call();
-                batch.records[0].timestamp_delta = -5;
-                batch.attributes = batch
-                    .attributes
-                    .with_compression(codec)
-                    .with_timestamp_type(timestamp_type);
-                let expected = if timestamp_type == TimestampType::LogAppendTime {
-                    batch.max_timestamp
-                } else {
-                    -5
-                };
-                seg.append(&batch, DENSE_INDEX).unwrap();
-                assert2::assert!(seg.first_record_timestamp() == Some(expected));
-                seg.append(&sample_batch().offset(2).timestamp(100).call(), DENSE_INDEX)
-                    .unwrap();
-                assert2::assert!(seg.first_record_timestamp() == Some(expected));
-                drop(seg);
-                let mut seg = Segment::open_active(dir.path(), Offset(0), true).unwrap();
-                assert2::assert!(seg.first_record_timestamp() == Some(expected));
-                seg.truncate_to_relative(2).unwrap();
-                assert2::assert!(seg.first_record_timestamp() == Some(expected));
-                seg.truncate_to_relative(0).unwrap();
-                assert2::assert!(seg.first_record_timestamp().is_none());
-                seg.append(&sample_batch().timestamp(200).call(), DENSE_INDEX)
-                    .unwrap();
-                assert2::assert!(seg.first_record_timestamp() == Some(200));
-            }
-        }
+    #[yare::parameterized(
+        none_create_time = {
+            krabka_compression::CompressionType::None,
+            TimestampType::CreateTime,
+        },
+        none_log_append_time = {
+            krabka_compression::CompressionType::None,
+            TimestampType::LogAppendTime,
+        },
+        lz4_create_time = {
+            krabka_compression::CompressionType::Lz4,
+            TimestampType::CreateTime,
+        },
+        lz4_log_append_time = {
+            krabka_compression::CompressionType::Lz4,
+            TimestampType::LogAppendTime,
+        },
+    )]
+    fn first_record_timestamp_survives_appends_and_reloads_after_truncation(
+        codec: krabka_compression::CompressionType,
+        timestamp_type: TimestampType,
+    ) {
+        let TempSegment {
+            dir,
+            segment: mut seg,
+        } = test_segment();
+        assert2::assert!(seg.first_record_timestamp().is_none());
+        let mut batch = sample_batch().records(2).call();
+        batch.records[0].timestamp_delta = -5;
+        batch.attributes = batch
+            .attributes
+            .with_compression(codec)
+            .with_timestamp_type(timestamp_type);
+        let expected = if timestamp_type == TimestampType::LogAppendTime {
+            batch.max_timestamp
+        } else {
+            -5
+        };
+        seg.append(&batch, DENSE_INDEX).unwrap();
+        assert2::assert!(seg.first_record_timestamp() == Some(expected));
+        seg.append(&sample_batch().offset(2).timestamp(100).call(), DENSE_INDEX)
+            .unwrap();
+        assert2::assert!(seg.first_record_timestamp() == Some(expected));
+        drop(seg);
+        let mut seg = Segment::open_active(dir.path(), Offset(0), true).unwrap();
+        assert2::assert!(seg.first_record_timestamp() == Some(expected));
+        seg.truncate_to_relative(2).unwrap();
+        assert2::assert!(seg.first_record_timestamp() == Some(expected));
+        seg.truncate_to_relative(0).unwrap();
+        assert2::assert!(seg.first_record_timestamp().is_none());
+        seg.append(&sample_batch().timestamp(200).call(), DENSE_INDEX)
+            .unwrap();
+        assert2::assert!(seg.first_record_timestamp() == Some(200));
     }
 
     /// The scan reports the offset of the maximum timestamp as
@@ -549,8 +563,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn offset_for_timestamp_finds_first_ge() {
+    #[yare::parameterized(
+        first_exact = { 100, Some((Offset(0), 100)) },
+        within_first_batch = { 101, Some((Offset(1), 101)) },
+        between_batches = { 150, Some((Offset(3), 200)) },
+        last_exact = { 201, Some((Offset(4), 201)) },
+        past_end = { 202, None },
+    )]
+    fn offset_for_timestamp_finds_first_ge(ts: i64, want: Option<(Offset, i64)>) {
         // Two batches: offsets 0..=2 ts 100..=102, offsets 3..=4 ts 200..=201.
         let TempSegment { dir, segment: seg } = seeded_fixture()
             .batches(FIVE_OFFSET_TIMESTAMP_BATCHES)
@@ -558,20 +578,18 @@ mod tests {
         // sample_batch sets per-record timestamp_delta = i, base_timestamp = ts_base.
         // Batch 1 records: (off0,ts100),(off1,ts101),(off2,ts102).
         // Batch 2 records: (off3,ts200),(off4,ts201).
-        for (name, ts, want) in [
-            ("first exact", 100, Some((Offset(0), 100))),
-            ("within first batch", 101, Some((Offset(1), 101))),
-            ("between batches", 150, Some((Offset(3), 200))),
-            ("last exact", 201, Some((Offset(4), 201))),
-            ("past end", 202, None),
-        ] {
-            check!(seg.offset_for_timestamp(ts) == want, "case {name}: ts={ts}");
-        }
+        check!(seg.offset_for_timestamp(ts) == want, "ts={ts}");
         drop(dir);
     }
 
-    #[test]
-    fn scan_from_floor_finds_match_beyond_first_window() {
+    #[yare::parameterized(
+        match_at_final_record = { 1_049, Some((Offset(49), 1_049)) },
+        no_matching_record = { 10_001, None },
+    )]
+    fn scan_from_floor_finds_match_beyond_first_window(
+        threshold: i64,
+        expected: Option<(Offset, i64)>,
+    ) {
         let TempSegment {
             dir,
             segment: mut seg,
@@ -599,21 +617,11 @@ mod tests {
         // A window of 1 byte forces one batch per read (anti-stall rule).
         // Target ts is the very last record's, so the loop must advance
         // through every window before matching.
-        let target = 1_000 + (n - 1);
-        for (_name, threshold, expected) in [
-            (
-                "match at final record",
-                target,
-                Some((Offset(n - 1), target)),
-            ),
-            ("no matching record", 10_001, None),
-        ] {
-            assert2::assert!(
-                seg.scan_from_floor_windowed(Offset(0), bytes(1), threshold, None)
-                    .unwrap()
-                    == expected
-            );
-        }
+        assert2::assert!(
+            seg.scan_from_floor_windowed(Offset(0), bytes(1), threshold, None)
+                .unwrap()
+                == expected
+        );
         drop(dir);
     }
 
@@ -774,68 +782,77 @@ mod record_limit_tests {
     /// decompressed, and a batch is read only up to the record the lookup
     /// returns, so the limit fails a lookup only for a record Kafka reads. An
     /// uncompressed batch is never held to it.
-    #[test]
-    fn a_lookup_by_timestamp_refuses_only_the_records_kafka_reads() {
-        for (name, codec, limit, target, expected) in [
-            (
-                "found before the oversized batch",
-                CompressionType::Gzip,
-                Some(LIMIT),
-                1_000,
-                Ok(Some((Offset(0), 1_000))),
+    #[yare::parameterized(
+        before_oversized_batch = {
+            "found before the oversized batch",
+            CompressionType::Gzip,
+            Some(LIMIT),
+            1_000,
+            Ok(Some((Offset(0), 1_000))),
+        },
+        oversized_match = {
+            "the oversized record is the match",
+            CompressionType::Gzip,
+            Some(LIMIT),
+            1_001,
+            Err(LARGE),
+        },
+        gzip_without_limit = {
+            "no limit",
+            CompressionType::Gzip,
+            None,
+            1_001,
+            Ok(Some((Offset(1), 1_001))),
+        },
+        uncompressed = {
+            "an uncompressed batch is never held to it",
+            CompressionType::None,
+            Some(LIMIT),
+            1_001,
+            Ok(Some((Offset(1), 1_001))),
+        },
+    )]
+    fn a_lookup_by_timestamp_refuses_only_the_records_kafka_reads(
+        name: &str,
+        codec: CompressionType,
+        limit: Option<ByteSize>,
+        target: i64,
+        expected: Lookup,
+    ) {
+        let TempSegment {
+            dir: _dir,
+            segment: seg,
+        } = segment(&[
+            batch(
+                0,
+                &[TimedRecord {
+                    timestamp: 1_000,
+                    value_len: 10,
+                }],
+                codec,
             ),
-            (
-                "the oversized record is the match",
-                CompressionType::Gzip,
-                Some(LIMIT),
-                1_001,
-                Err(LARGE),
+            batch(
+                1,
+                &[TimedRecord {
+                    timestamp: 1_001,
+                    value_len: 1_000,
+                }],
+                codec,
             ),
-            (
-                "no limit",
-                CompressionType::Gzip,
-                None,
-                1_001,
-                Ok(Some((Offset(1), 1_001))),
-            ),
-            (
-                "an uncompressed batch is never held to it",
-                CompressionType::None,
-                Some(LIMIT),
-                1_001,
-                Ok(Some((Offset(1), 1_001))),
-            ),
-        ] {
-            let TempSegment {
-                dir: _dir,
-                segment: seg,
-            } = segment(&[
-                batch(
-                    0,
-                    &[TimedRecord {
-                        timestamp: 1_000,
-                        value_len: 10,
-                    }],
-                    codec,
-                ),
-                batch(
-                    1,
-                    &[TimedRecord {
-                        timestamp: 1_001,
-                        value_len: 1_000,
-                    }],
-                    codec,
-                ),
-            ]);
-            let found = seg.offset_for_timestamp_with_window(target, WINDOW, limit);
-            check!(answer(found) == expected, "{name}");
-        }
+        ]);
+        let found = seg.offset_for_timestamp_with_window(target, WINDOW, limit);
+        check!(answer(found) == expected, "{name}");
     }
 
     /// Kafka's iterator decodes lazily, so a record after the one it returns is
     /// never read, and one before it always is.
-    #[test]
-    fn a_lookup_stops_reading_a_batch_at_the_record_it_returns() {
+    #[yare::parameterized(
+        first_record = { 1_000, Ok(Some((Offset(0), 1_000))) },
+        oversized_match = { 1_001, Err(LARGE) },
+        oversized_before_match = { 1_002, Err(LARGE) },
+        skip_below_maximum = { 1_003, Ok(None) },
+    )]
+    fn a_lookup_stops_reading_a_batch_at_the_record_it_returns(target: i64, expected: Lookup) {
         let TempSegment {
             dir: _dir,
             segment: seg,
@@ -857,18 +874,8 @@ mod record_limit_tests {
             ],
             CompressionType::Gzip,
         )]);
-        for (target, expected) in [
-            (1_000, Ok(Some((Offset(0), 1_000)))),
-            (1_001, Err(LARGE)),
-            // The scan walks past the oversized record to reach the last one.
-            (1_002, Err(LARGE)),
-            // The batch's max timestamp is below the target, so Kafka skips it
-            // without decompressing it.
-            (1_003, Ok(None)),
-        ] {
-            let found = seg.offset_for_timestamp_with_window(target, WINDOW, Some(LIMIT));
-            check!(answer(found) == expected, "target {target}");
-        }
+        let found = seg.offset_for_timestamp_with_window(target, WINDOW, Some(LIMIT));
+        check!(answer(found) == expected, "target {target}");
     }
 
     /// `RecordBatch.offsetOfMaxTimestamp` decompresses the batch that holds the

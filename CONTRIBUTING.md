@@ -149,7 +149,7 @@ with a line saying why; anything else it reports is a link to fix.
 ## Duplicate Code
 
 Run `aspect check-cpd` before submitting Rust refactors. The required CPD job
-uses **jscpd 5.4.1** at **60 tokens / 5 lines**, ignoring whitespace and comments.
+uses **jscpd 5.4.1** at **47 tokens / 5 lines**, ignoring whitespace and comments.
 Every duplicate fails; there is no baseline allowance or suppression list.
 The scan includes all tracked and non-ignored untracked Rust sources, including
 tests and hidden directories, copied into an isolated inventory.

@@ -1,12 +1,68 @@
 //! Wire and metadata fixtures shared across test crates.
 
 use {
-    crate::fixtures::{function, name, named_items},
+    crate::{
+        fixtures::{function, name, named_items, record_batch_records},
+        meta::item_body,
+    },
     moxy::{
         ast::ParseError,
         token::{Span, TokenStream, TokenTree},
     },
 };
+
+pub(crate) fn share_produce_parameters(
+    meta: TokenStream,
+    item: TokenStream,
+) -> Result<TokenStream, ParseError> {
+    if let Some(token) = meta.into_iter().next() {
+        return Err(ParseError::new(token.span(), "expected no arguments"));
+    }
+    let mut tokens = item_body(item, "share_produce_parameters", TokenTree::is_keyword_fn)?.tokens;
+    let function = tokens.iter().position(TokenTree::is_keyword_fn).unwrap();
+    let Some(TokenTree::Group(arguments)) = tokens.get_mut(function + 2) else {
+        return Err(ParseError::new(
+            Span::call_site(),
+            "expected nongeneric function parameters",
+        ));
+    };
+    if !arguments.delim.is_paren() || arguments.tokens.is_empty() {
+        return Err(ParseError::new(
+            Span::call_site(),
+            "expected nonempty function parameters",
+        ));
+    }
+    if !arguments
+        .tokens
+        .iter()
+        .last()
+        .is_some_and(TokenTree::is_punct_comma)
+    {
+        arguments.tokens.extend(moxy::template! { , });
+    }
+    arguments.tokens.extend(moxy::template! {
+        #[builder(default = "t")] topic: &'_ str,
+        #[builder(default)] topic_id: ::uuid::Uuid,
+        #[builder(into, default)] partition: ::krabka_ids::PartitionIndex,
+    });
+    Ok(tokens.into())
+}
+
+pub(crate) fn retained_timestamp_bounds(
+    floor: TokenStream,
+    item: TokenStream,
+) -> Result<TokenStream, ParseError> {
+    let floor = name(floor)?;
+    let tokens = item_body(item, "retained_timestamp_bounds", TokenTree::is_keyword_fn)?.tokens;
+    let item: TokenStream = tokens.into();
+    let view: TokenStream = "@".parse().expect("Creusot view operator");
+    let requires = moxy::template! { requires };
+    Ok(moxy::template! {
+        #[{{ requires }}(super::time_index::sparse_timestamp_window_valid(window.0{{ view }}, window.1{{ view }}, window.2{{ view }}))]
+        #[{{ requires }}(base{{ view }} >= 0 && {{ floor }}{{ view }} >= 0)]
+        {{ item }}
+    })
+}
 
 pub(crate) fn topic_record(tokens: TokenStream) -> Result<TokenStream, ParseError> {
     let name = name(tokens)?;
@@ -37,6 +93,8 @@ pub(crate) fn producer_batch(input: TokenStream) -> Result<TokenStream, ParseErr
             ));
         }
     };
+    let record_list =
+        record_batch_records(&moxy::template! { records }, &TokenStream::new(), &value);
     Ok(moxy::template! {
         #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ::derive_more::From, ::derive_more::Into)]
         pub(crate) struct BatchProducerEpoch(pub i16);
@@ -82,9 +140,7 @@ pub(crate) fn producer_batch(input: TokenStream) -> Result<TokenStream, ParseErr
                 attributes: ::krabka_protocol::records::Attributes::default().with_transactional(transaction == BatchTransactionMode::Transactional),
                 last_offset_delta: records - 1, base_timestamp: max_timestamp, max_timestamp,
                 producer_id, producer_epoch, base_sequence,
-                records: (0..records).map(|offset_delta| ::krabka_protocol::records::Record {
-                    offset_delta, value: Some({{ value }}), ..Default::default()
-                }).collect(),
+                {{ record_list }}
                 ..Default::default()
             }
         }
@@ -220,4 +276,74 @@ pub(crate) fn control_marker(tokens: TokenStream) -> Result<TokenStream, ParseEr
         }
         pub use {{ name }}::{control_key, control_value};
     })
+}
+
+#[cfg(test)]
+mod fixture_tests {
+    use {
+        super::{producer_batch, retained_timestamp_bounds, share_produce_parameters},
+        assert2::check,
+        moxy::ast::{File, ItemFn},
+    };
+
+    #[test]
+    fn producer_batch_emits_a_parseable_record_batch_builder() {
+        let expanded =
+            producer_batch("make_batch, ::bytes::Bytes::new()".parse().unwrap()).unwrap();
+        let _: File = moxy::parse!({ expanded } as File).unwrap();
+    }
+
+    #[yare::parameterized(
+        trailing_comma = { "pub async fn fixture(client: &Client, values: Vec<Bytes>,) {}" },
+        no_trailing_comma = { "pub async fn fixture(client: &Client, values: Vec<Bytes>) {}" },
+    )]
+    fn produce_parameters_preserve_the_function_and_append_three_setters(declaration: &str) {
+        let expanded =
+            share_produce_parameters("".parse().unwrap(), declaration.parse().unwrap()).unwrap();
+        let function = moxy::parse!({ expanded } as ItemFn).unwrap();
+        check!(function.sig.ident == "fixture");
+        check!(function.sig.asyncness.is_some());
+        check!(function.sig.params.inner.inputs.len() == 5);
+    }
+
+    #[test]
+    fn timestamp_bounds_retain_the_signature_and_add_two_preconditions() {
+        let expanded = retained_timestamp_bounds(
+            "minimum".parse().unwrap(),
+            "fn candidate(base: i64, minimum: i64) -> i64 { base.max(minimum) }"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        check!(expanded.to_string().contains("requires"));
+        let function = moxy::parse!({ expanded } as ItemFn).unwrap();
+        check!(function.sig.ident == "candidate");
+        check!(function.sig.params.inner.inputs.len() == 2);
+        check!(function.attrs.len() == 2);
+    }
+
+    #[yare::parameterized(
+        missing_floor = { "", "fn fixture() {}" },
+        multiple_floors = { "first, second", "fn fixture() {}" },
+        wrong_item = { "minimum", "struct Fixture {}" },
+    )]
+    fn rejects_invalid_timestamp_bound_inputs(floor: &str, declaration: &str) {
+        check!(
+            retained_timestamp_bounds(floor.parse().unwrap(), declaration.parse().unwrap())
+                .is_err()
+        );
+    }
+
+    #[yare::parameterized(
+        options = { "unexpected", "fn fixture(client: &Client,) {}" },
+        wrong_item = { "", "struct Fixture {}" },
+        generic_function = { "", "fn fixture<T>(client: &T,) {}" },
+        empty_parameters = { "", "fn fixture() {}" },
+    )]
+    fn rejects_unsupported_signatures(options: &str, declaration: &str) {
+        check!(
+            share_produce_parameters(options.parse().unwrap(), declaration.parse().unwrap())
+                .is_err()
+        );
+    }
 }

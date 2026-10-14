@@ -790,10 +790,16 @@ pub(crate) fn response_required(
 mod durability_tests {
     use super::durability_frontier;
 
-    #[test]
-    fn adapter_rejects_malformed_and_overflowing_frontiers() {
-        assert2::assert!(durability_frontier(10, 2) == Some(krabka_log::Offset(13)));
-        assert2::assert!(durability_frontier(10, -1).is_none());
-        assert2::assert!(durability_frontier(i64::MAX, 0).is_none());
+    #[yare::parameterized(
+        valid_frontier = { 10, 2, Some(krabka_log::Offset(13)) },
+        malformed_frontier = { 10, -1, None },
+        overflowing_frontier = { i64::MAX, 0, None },
+    )]
+    fn adapter_rejects_malformed_and_overflowing_frontiers(
+        last_offset: i64,
+        last_offset_delta: i32,
+        expected: Option<krabka_log::Offset>,
+    ) {
+        assert2::assert!(durability_frontier(last_offset, last_offset_delta) == expected);
     }
 }

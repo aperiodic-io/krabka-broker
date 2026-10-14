@@ -9,7 +9,7 @@
 use {
     super::{
         ALICE, ALICE_KEY, BOB, BOB_KEY, CLUSTER_ID, NOW_MS, OTHER_CLUSTER_ID, SigningFixture,
-        check_against, record, signed, signing_fixture, trust,
+        check_against, record, signed, signed_record_with_unknown_key_id, signing_fixture, trust,
     },
     crate::{
         codes,
@@ -55,10 +55,7 @@ fn every_forged_or_replayed_record_is_refused_with_one_code() {
         },
         Case {
             label: "an unknown key_id",
-            record: TopicFreezeRecord {
-                key_id: "carol-yubi".to_owned(),
-                ..signed(&trust.alice, CLUSTER_ID, &good)
-            },
+            record: signed_record_with_unknown_key_id(&trust, &good),
             check: check_against(&trust, ALICE),
         },
         Case {

@@ -156,8 +156,32 @@ fn tierable_segments_carry_leader_epochs() {
     }
 }
 
-#[test]
-fn epochs_for_range_clamps_and_filters() {
+#[yare::parameterized(
+    within_one_epoch = {
+        "within one epoch",
+        Offset(60),
+        Offset(90),
+        vec![(LeaderEpoch(1), Offset(60))],
+    },
+    straddles_epochs = {
+        "straddles epochs",
+        Offset(40),
+        Offset(60),
+        vec![(LeaderEpoch(0), Offset(40)), (LeaderEpoch(1), Offset(50))],
+    },
+    covers_all_epochs = {
+        "covers all epochs",
+        Offset(0),
+        Offset(200),
+        vec![(LeaderEpoch(0), Offset(0)), (LeaderEpoch(1), Offset(50)), (LeaderEpoch(2), Offset(100))],
+    },
+)]
+fn epochs_for_range_clamps_and_filters(
+    name: &str,
+    start: Offset,
+    end: Offset,
+    want: Vec<(LeaderEpoch, Offset)>,
+) {
     use crate::leader_epoch_checkpoint::EpochEntry;
     let entries = vec![
         EpochEntry {
@@ -173,31 +197,12 @@ fn epochs_for_range_clamps_and_filters() {
             start_offset: Offset(100),
         },
     ];
-    for (name, start, end, want) in [
-        // Segment [60, 90] sits entirely in epoch 1.
-        ("within one epoch", Offset(60), Offset(90), vec![(
-            LeaderEpoch(1),
-            Offset(60),
-        )]),
-        // Segment [40, 60] straddles epoch 0 (->clamped to 40) and epoch 1.
-        ("straddles epochs", Offset(40), Offset(60), vec![
-            (LeaderEpoch(0), Offset(40)),
-            (LeaderEpoch(1), Offset(50)),
-        ]),
-        // Segment [0, 200] covers all three.
-        ("covers all epochs", Offset(0), Offset(200), vec![
-            (LeaderEpoch(0), Offset(0)),
-            (LeaderEpoch(1), Offset(50)),
-            (LeaderEpoch(2), Offset(100)),
-        ]),
-    ] {
-        check!(
-            epochs_for_range(&entries, start, end) == want,
-            "case {name}: range [{}, {}]",
-            start.0,
-            end.0
-        );
-    }
+    check!(
+        epochs_for_range(&entries, start, end) == want,
+        "case {name}: range [{}, {}]",
+        start.0,
+        end.0
+    );
     // No entries -> empty.
     assert2::assert!(epochs_for_range(&[], Offset(0), Offset(100)).is_empty());
 }
@@ -563,32 +568,34 @@ fn roll_seals_the_active_records_and_never_rolls_an_empty_segment() {
 // The active segment's export carries Kafka's `largestTimestamp()`: the
 // newest record timestamp, or the `.log` file's modification time when no
 // record carries one.
-#[test]
-fn active_segment_export_ages_the_segment_the_way_retention_does() {
-    for (name, max_timestamp, ages_by_file) in [
-        ("a stamped record", 5_000, false),
-        ("no record timestamp", -1, true),
-    ] {
-        let TempLog { dir, mut log } = test_log();
-        let mut batch = sample_batch(2);
-        batch.max_timestamp = max_timestamp;
-        log.append(&mut batch).unwrap();
-        let size = log.size();
-        let last_modified_ms = last_modified_ms(&name::log_path(dir.path(), 0));
+#[yare::parameterized(
+    stamped_record = { "a stamped record", 5_000, false },
+    no_record_timestamp = { "no record timestamp", -1, true },
+)]
+fn active_segment_export_ages_the_segment_the_way_retention_does(
+    case_name: &str,
+    max_timestamp: i64,
+    ages_by_file: bool,
+) {
+    let TempLog { dir, mut log } = test_log();
+    let mut batch = sample_batch(2);
+    batch.max_timestamp = max_timestamp;
+    log.append(&mut batch).unwrap();
+    let size = log.size();
+    let last_modified_ms = last_modified_ms(&name::log_path(dir.path(), 0));
 
-        check!(
-            log.active_segment_export()
-                == Some(ActiveSegmentExport {
-                    base_offset: Offset(0),
-                    max_timestamp: if ages_by_file {
-                        last_modified_ms
-                    } else {
-                        max_timestamp
-                    },
-                    last_modified_ms,
-                    size,
-                }),
-            "{name}"
-        );
-    }
+    check!(
+        log.active_segment_export()
+            == Some(ActiveSegmentExport {
+                base_offset: Offset(0),
+                max_timestamp: if ages_by_file {
+                    last_modified_ms
+                } else {
+                    max_timestamp
+                },
+                last_modified_ms,
+                size,
+            }),
+        "{case_name}"
+    );
 }

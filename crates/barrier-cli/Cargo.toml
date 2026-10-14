@@ -44,3 +44,4 @@ krabka-client-admin = { version = "0.6.0" }
 # now that the facade crate is gone.
 krabka-broker = { version = "1.0.5", path = "../broker", features = ["test-helpers"] }
 tempfile = { workspace = true }
+yare = { workspace = true }

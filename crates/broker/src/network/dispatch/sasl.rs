@@ -580,8 +580,7 @@ fn claimed_principal(
             .and_then(|user| std::str::from_utf8(user).ok())
             // The same `User:<name>` form [`audit_principal`] renders, so a
             // failed row and a successful one name one person identically.
-            .map(|user| format!("User:{user}"))
-            .unwrap_or_default(),
+            .map_or_default(|user| format!("User:{user}")),
         _ => String::new(),
     };
     krabka_audit::AuditPrincipal {

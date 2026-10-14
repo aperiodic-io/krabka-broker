@@ -114,19 +114,21 @@ mod tests {
 
     /// A peer whose range ends below the engine's version gets its maximum;
     /// any other peer gets the engine's version.
-    #[test]
-    fn negotiation_takes_the_peer_maximum_only_below_the_engine_version() {
-        let cases = [
-            ("no range", api_key::FETCH, None, FETCH_VERSION),
-            ("a 4.3 peer", api_key::FETCH, Some((4, 18)), FETCH_VERSION),
-            ("a 4.0 peer", api_key::FETCH, Some((4, 17)), 17),
-            ("a newer peer", api_key::FETCH, Some((4, 19)), FETCH_VERSION),
-            ("vote", api_key::VOTE, Some((0, 2)), VOTE_VERSION),
-            ("an old vote peer", api_key::VOTE, Some((0, 1)), 1),
-        ];
-        for (name, key, range, expected) in cases {
-            check!(negotiated_version(key, range) == expected, "{name}");
-        }
+    #[yare::parameterized(
+        no_range = { "no range", api_key::FETCH, None, FETCH_VERSION },
+        peer_4_3 = { "a 4.3 peer", api_key::FETCH, Some((4, 18)), FETCH_VERSION },
+        peer_4_0 = { "a 4.0 peer", api_key::FETCH, Some((4, 17)), 17 },
+        newer_peer = { "a newer peer", api_key::FETCH, Some((4, 19)), FETCH_VERSION },
+        vote = { "vote", api_key::VOTE, Some((0, 2)), VOTE_VERSION },
+        old_vote_peer = { "an old vote peer", api_key::VOTE, Some((0, 1)), 1 },
+    )]
+    fn negotiation_takes_the_peer_maximum_only_below_the_engine_version(
+        name: &'static str,
+        key: i16,
+        range: Option<(i16, i16)>,
+        expected: i16,
+    ) {
+        check!(negotiated_version(key, range) == expected, "{name}");
     }
 
     /// A v18 Fetch re-encoded at v17 loses only `HighWatermark`, which v17

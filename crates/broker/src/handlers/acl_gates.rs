@@ -16,7 +16,10 @@ use {
         },
     },
     krabka_metadata::{AclOperation, MetadataImage, ResourceType},
-    std::collections::{HashMap, HashSet},
+    std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    },
 };
 
 /// Kafka's resource-specific refusal for the two config mutation APIs.
@@ -115,6 +118,15 @@ krabka_macros::named_acl_gates!(
     /// The barrier, write-freeze and break-glass control planes all use this gate.
     cluster_describe_denied: Cluster(Describe),
 );
+
+/// The metadata image authorized for a cluster-wide `Describe` request.
+pub(crate) fn cluster_describe_image(
+    broker: &Broker,
+    ctx: &RequestContext<'_>,
+) -> Option<Arc<MetadataImage>> {
+    let image = broker.controller.current_image();
+    (!cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx)).then_some(image)
+}
 
 /// Kafka's cluster shortcut is quiet: a denial falls back to per-topic checks.
 pub(crate) fn cluster_shortcut_denied(
@@ -361,34 +373,23 @@ mod tests {
     /// The barrier, write-freeze, and break-glass read APIs all gate on
     /// [`cluster_describe_denied`], and every one of them answers
     /// `CLUSTER_AUTHORIZATION_FAILED` (31) when it returns `true`.
-    #[test]
-    fn cluster_describe_denied_refuses_a_principal_with_no_cluster_describe() {
+    #[yare::parameterized(
+        no_super_users = { None, true },
+        matching_super_user = { Some("alice"), false },
+        another_super_user = { Some("bob"), true },
+    )]
+    fn cluster_describe_denied_refuses_a_principal_with_no_cluster_describe(
+        super_user: Option<&str>,
+        denied: bool,
+    ) {
         let image = MetadataImage::new(uuid::Uuid::nil());
         let principal = principal();
         let peer = peer();
         let ctx = test_context(&principal, &peer, "krabka-guard");
+        let super_users = super_user.into_iter().map(String::from).collect();
+        let authorizer = SimpleAclAuthorizer::new(super_users);
 
-        for (label, super_users, denied) in [
-            ("an empty acl store denies by default", Vec::new(), true),
-            (
-                "a super user reads the cluster",
-                vec![principal.name.clone()],
-                false,
-            ),
-            (
-                "another super user does not lend its grant",
-                vec!["bob".to_string()],
-                true,
-            ),
-        ] {
-            let authorizer =
-                SimpleAclAuthorizer::new(super_users.into_iter().collect::<HashSet<String>>());
-
-            check!(
-                cluster_describe_denied(&authorizer, &image, &ctx) == denied,
-                "case {label}"
-            );
-        }
+        check!(cluster_describe_denied(&authorizer, &image, &ctx) == denied);
 
         // The code every caller answers on a denial, and the number Kafka
         // assigns it.
@@ -398,8 +399,23 @@ mod tests {
     /// [`denied_topics`] and [`allowed_topics`] keep exactly the names the
     /// authorizer denies and allows, with each one owned and every duplicate
     /// folded into one entry.
-    #[test]
-    fn denied_and_allowed_topics_split_the_names_by_decision() {
+    #[yare::parameterized(
+        no_names = { AclOperation::Write, &[], &[], &[] },
+        granted_name = { AclOperation::Write, &["orders"], &[], &["orders"] },
+        denied_duplicate_once = {
+            AclOperation::Write,
+            &["orders", "shipments", "shipments"],
+            &["shipments"],
+            &["orders"],
+        },
+        other_operation = { AclOperation::Read, &["orders"], &["orders"], &[] },
+    )]
+    fn denied_and_allowed_topics_split_the_names_by_decision(
+        operation: AclOperation,
+        names: &[&str],
+        denied: &[&str],
+        allowed: &[&str],
+    ) {
         let principal = principal();
         let peer = peer();
         let ctx = RequestContext::new(
@@ -416,61 +432,30 @@ mod tests {
         ));
         let authorizer = SimpleAclAuthorizer::new(HashSet::new());
 
-        for (label, operation, names, denied, allowed) in [
-            ("no names", AclOperation::Write, vec![], vec![], vec![]),
-            (
-                "the granted name passes",
-                AclOperation::Write,
-                vec!["orders"],
-                vec![],
-                vec!["orders"],
-            ),
-            (
-                "an ungranted name is denied once",
-                AclOperation::Write,
-                vec!["orders", "shipments", "shipments"],
-                vec!["shipments"],
-                vec!["orders"],
-            ),
-            (
-                "a grant for another operation does not lend itself",
-                AclOperation::Read,
-                vec!["orders"],
-                vec!["orders"],
-                vec![],
-            ),
-        ] {
-            let owned = |names: Vec<&str>| -> HashSet<String> {
-                names.into_iter().map(String::from).collect()
-            };
-            check!(
-                denied_topics(&authorizer, &image, &ctx, operation, names.clone()) == owned(denied),
-                "case {label}"
-            );
-            check!(
-                allowed_topics(&authorizer, &image, &ctx, operation, names) == owned(allowed),
-                "case {label}"
-            );
-        }
+        let owned = |names: &[&str]| -> HashSet<String> {
+            names.iter().map(|name| String::from(*name)).collect()
+        };
+        check!(
+            denied_topics(&authorizer, &image, &ctx, operation, names.to_vec()) == owned(denied)
+        );
+        check!(
+            allowed_topics(&authorizer, &image, &ctx, operation, names.to_vec()) == owned(allowed)
+        );
     }
 
     /// [`requested_topic_name`] prefers the wire name and gives the empty
     /// name when neither the name nor the id names a topic.
-    #[test]
-    fn requested_topic_name_prefers_the_wire_name() {
+    #[yare::parameterized(
+        wire_name = { "orders", krabka_protocol::primitives::uuid::Uuid([7; 16]), "orders" },
+        neither = { "", krabka_protocol::primitives::uuid::Uuid::ZERO, "" },
+        unknown_id = { "", krabka_protocol::primitives::uuid::Uuid([7; 16]), "" },
+    )]
+    fn requested_topic_name_prefers_the_wire_name(
+        name: &str,
+        id: krabka_protocol::primitives::uuid::Uuid,
+        expected: &str,
+    ) {
         let image = MetadataImage::new(uuid::Uuid::nil());
-        let unknown = krabka_protocol::primitives::uuid::Uuid([7; 16]);
-        let zero = krabka_protocol::primitives::uuid::Uuid::ZERO;
-
-        for (label, name, id, expected) in [
-            ("a wire name wins over an id", "orders", unknown, "orders"),
-            ("no name and no id", "", zero, ""),
-            ("an id that does not resolve", "", unknown, ""),
-        ] {
-            check!(
-                requested_topic_name(&image, name, id) == expected,
-                "case {label}"
-            );
-        }
+        check!(requested_topic_name(&image, name, id) == expected);
     }
 }

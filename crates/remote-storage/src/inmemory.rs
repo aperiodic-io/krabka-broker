@@ -138,8 +138,7 @@ impl RemoteLogMetadataManager for InmemoryRemoteLogMetadataManager {
         let guard = self.partitions.lock().expect("metadata mutex poisoned");
         Ok(guard
             .get(topic_id_partition)
-            .map(RemoteLogMetadataCache::list)
-            .unwrap_or_default())
+            .map_or_default(RemoteLogMetadataCache::list))
     }
 
     fn list_remote_log_segments_by_epoch(
@@ -150,8 +149,7 @@ impl RemoteLogMetadataManager for InmemoryRemoteLogMetadataManager {
         let guard = self.partitions.lock().expect("metadata mutex poisoned");
         Ok(guard
             .get(topic_id_partition)
-            .map(|c| c.list_by_epoch(leader_epoch))
-            .unwrap_or_default())
+            .map_or_default(|c| c.list_by_epoch(leader_epoch)))
     }
 
     fn put_remote_partition_delete_metadata(

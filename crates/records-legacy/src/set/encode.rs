@@ -188,29 +188,27 @@ mod tests {
         assert2::assert!(wire.is_empty());
     }
 
-    #[test]
-    fn message_set_roundtrips() {
-        for (_name, magic, codec) in [
-            ("flat v0", Magic::V0, None),
-            ("flat v1", Magic::V1, None),
-            ("gzip v0", Magic::V0, Some(CompressionType::Gzip)),
-            ("gzip v1", Magic::V1, Some(CompressionType::Gzip)),
-            ("snappy v1", Magic::V1, Some(CompressionType::Snappy)),
-        ] {
-            let records = match magic {
-                Magic::V0 => sample_records_v0(),
-                Magic::V1 => sample_records_v1(),
-            };
-            let mut buffer = BytesMut::new();
-            if let Some(codec) = codec {
-                encode_compressed_message_set(&records, magic, codec, &mut buffer).unwrap();
-            } else {
-                encode_flat_message_set(records.clone(), magic, &mut buffer);
-            }
-
-            let decoded = decode_message_set(&mut &buffer[..], buffer.len()).unwrap();
-            assert2::assert!(decoded == records);
+    #[yare::parameterized(
+        flat_v0 = { Magic::V0, None },
+        flat_v1 = { Magic::V1, None },
+        gzip_v0 = { Magic::V0, Some(CompressionType::Gzip) },
+        gzip_v1 = { Magic::V1, Some(CompressionType::Gzip) },
+        snappy_v1 = { Magic::V1, Some(CompressionType::Snappy) },
+    )]
+    fn message_set_roundtrips(magic: Magic, codec: Option<CompressionType>) {
+        let records = match magic {
+            Magic::V0 => sample_records_v0(),
+            Magic::V1 => sample_records_v1(),
+        };
+        let mut buffer = BytesMut::new();
+        if let Some(codec) = codec {
+            encode_compressed_message_set(&records, magic, codec, &mut buffer).unwrap();
+        } else {
+            encode_flat_message_set(records.clone(), magic, &mut buffer);
         }
+
+        let decoded = decode_message_set(&mut &buffer[..], buffer.len()).unwrap();
+        assert2::assert!(decoded == records);
     }
 
     #[test]

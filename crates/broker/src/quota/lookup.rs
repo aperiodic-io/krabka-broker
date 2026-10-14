@@ -555,6 +555,13 @@ mod tests {
             expected: Option<MatchedQuota>,
         }
         let levels = alice_app_levels();
+        let alice_without_client = |label, quota| Row {
+            label,
+            configured: vec![quota, levels.default_client.clone()],
+            principal: "alice",
+            client_id: "",
+            expected: Some(MatchedQuota::new(user_key("alice"), 64.0)),
+        };
         let cases: Vec<Row> = vec![
             Row {
                 label: "a default client quota does not throttle a client with no id",
@@ -584,20 +591,14 @@ mod tests {
                 client_id: "",
                 expected: None,
             },
-            Row {
-                label: "the user quota applies without a client id",
-                configured: vec![levels.alice.clone(), levels.default_client.clone()],
-                principal: "alice",
-                client_id: "",
-                expected: Some(MatchedQuota::new(user_key("alice"), 64.0)),
-            },
-            Row {
-                label: "the default user quota applies without a client id",
-                configured: vec![levels.default_user.clone(), levels.default_client.clone()],
-                principal: "alice",
-                client_id: "",
-                expected: Some(MatchedQuota::new(user_key("alice"), 64.0)),
-            },
+            alice_without_client(
+                "the user quota applies without a client id",
+                levels.alice.clone(),
+            ),
+            alice_without_client(
+                "the default user quota applies without a client id",
+                levels.default_user.clone(),
+            ),
             Row {
                 label: "the client quota applies without a principal",
                 configured: vec![levels.app.clone(), levels.alice.clone()],

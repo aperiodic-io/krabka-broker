@@ -46,23 +46,24 @@ pub fn remote_txn_overlap_decision(
 mod tests {
     use {super::*, assert2::check};
 
-    #[test]
-    fn overlap_is_inclusive_and_invalid_intervals_fail_closed() {
-        use RemoteTxnOverlapDecision::{Disjoint, Invalid, Overlap};
-
-        for (entry_start, entry_last, query_from, query_to, expected) in [
-            (10, 14, 0, 9, Disjoint),
-            (10, 14, 0, 10, Overlap),
-            (10, 10, 10, 10, Overlap),
-            (10, 14, 14, 100, Overlap),
-            (10, 14, 15, 100, Disjoint),
-            (14, 10, 0, 100, Invalid),
-            (10, 14, 100, 0, Invalid),
-        ] {
-            check!(
-                remote_txn_overlap_decision(entry_start, entry_last, query_from, query_to)
-                    == expected
-            );
-        }
+    #[yare::parameterized(
+        before_range = { 10, 14, 0, 9, RemoteTxnOverlapDecision::Disjoint },
+        overlap_start = { 10, 14, 0, 10, RemoteTxnOverlapDecision::Overlap },
+        exact_single = { 10, 10, 10, 10, RemoteTxnOverlapDecision::Overlap },
+        overlap_end = { 10, 14, 14, 100, RemoteTxnOverlapDecision::Overlap },
+        after_range = { 10, 14, 15, 100, RemoteTxnOverlapDecision::Disjoint },
+        inverted_entry = { 14, 10, 0, 100, RemoteTxnOverlapDecision::Invalid },
+        inverted_query = { 10, 14, 100, 0, RemoteTxnOverlapDecision::Invalid },
+    )]
+    fn overlap_is_inclusive_and_invalid_intervals_fail_closed(
+        entry_start: i64,
+        entry_last: i64,
+        query_from: i64,
+        query_to: i64,
+        expected: RemoteTxnOverlapDecision,
+    ) {
+        check!(
+            remote_txn_overlap_decision(entry_start, entry_last, query_from, query_to) == expected
+        );
     }
 }

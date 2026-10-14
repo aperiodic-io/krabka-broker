@@ -269,9 +269,7 @@ async fn v0_handshake_runs_the_exchange_as_raw_tokens() {
         log_dir: _log_dir,
         handle,
         mut stream,
-    } = plain_handshake_fixture().await;
-
-    check!(plain_handshake(&mut stream, 0).await.error_code == 0);
+    } = plain_handshake_fixture(0).await;
 
     let mut token = vec![0_u8];
     token.extend_from_slice(b"alice");
@@ -310,9 +308,7 @@ async fn v0_raw_token_with_bad_credentials_closes_without_response() {
         log_dir: _log_dir,
         handle,
         mut stream,
-    } = plain_handshake_fixture().await;
-
-    check!(plain_handshake(&mut stream, 0).await.error_code == 0);
+    } = plain_handshake_fixture(0).await;
     write_raw_frame(&mut stream, b"\0alice\0not-the-password").await;
     check!(stream.read_u32().await.is_err());
 
@@ -328,9 +324,7 @@ async fn api_versions_after_the_handshake_answers_34_then_closes() {
         log_dir: _log_dir,
         handle,
         mut stream,
-    } = plain_handshake_fixture().await;
-
-    check!(plain_handshake(&mut stream, 1).await.error_code == 0);
+    } = plain_handshake_fixture(1).await;
 
     let mut av_body = BytesMut::new();
     ApiVersionsRequest::default()
@@ -371,10 +365,11 @@ struct PlainHandshake {
     stream: TcpStream,
 }
 
-async fn plain_handshake_fixture() -> PlainHandshake {
+async fn plain_handshake_fixture(version: i16) -> PlainHandshake {
     let log_dir = tempfile::tempdir().unwrap();
     let handle = start_plain_sasl_broker(log_dir.path()).await;
-    let stream = TcpStream::connect(handle.listen_addr()).await.unwrap();
+    let mut stream = TcpStream::connect(handle.listen_addr()).await.unwrap();
+    check!(plain_handshake(&mut stream, version).await.error_code == 0);
     PlainHandshake {
         log_dir,
         handle,

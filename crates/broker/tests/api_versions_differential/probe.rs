@@ -96,13 +96,14 @@ mod tests {
             .expect("spawn sh")
     }
 
-    #[test]
-    fn a_child_that_exits_in_time_reports_its_status() {
-        for (script, expected_success) in [("exit 0", true), ("exit 3", false)] {
-            let mut child = spawn(script);
-            let status = wait_bounded(&mut child, Duration::from_secs(30));
-            assert!(status.map(|status| status.success()) == Some(expected_success));
-        }
+    #[yare::parameterized(
+        success = { "exit 0", true },
+        failure = { "exit 3", false },
+    )]
+    fn a_child_that_exits_in_time_reports_its_status(script: &str, expected_success: bool) {
+        let mut child = spawn(script);
+        let status = wait_bounded(&mut child, Duration::from_secs(30));
+        assert2::assert!(status.map(|status| status.success()) == Some(expected_success));
     }
 
     #[test]

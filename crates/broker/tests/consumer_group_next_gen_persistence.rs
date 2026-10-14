@@ -13,6 +13,7 @@ use {
     krabka_client_core::Client,
     krabka_protocol::owned::{
         consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
         create_topics_request::{CreatableTopic, CreateTopicsRequest},
     },
     std::sync::Arc,
@@ -76,19 +77,13 @@ async fn replay_preserves_group_epoch_and_members() {
         broker.shutdown().await;
     }
 
-    {
-        let BrokerWithClient {
-            broker: _broker,
-            client,
-        } = restart(log_dir, false).await;
-        let req = ConsumerGroupHeartbeatRequest {
-            subscribed_topic_names: Some(vec!["tp".into()]),
-            rebalance_timeout_ms: 60_000,
-            ..consumer_heartbeat("gp", member_id.clone(), initial_epoch)
-        };
-        let resp = client.send(req).await.unwrap();
-        assert!(resp.error_code == 0, "post-restart heartbeat must succeed");
-    }
+    let req = ConsumerGroupHeartbeatRequest {
+        subscribed_topic_names: Some(vec!["tp".into()]),
+        rebalance_timeout_ms: 60_000,
+        ..consumer_heartbeat("gp", member_id.clone(), initial_epoch)
+    };
+    let (_broker, resp) = restarted_heartbeat(log_dir, req).await;
+    assert!(resp.error_code == 0, "post-restart heartbeat must succeed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -126,19 +121,13 @@ async fn next_gen_state_cleared_after_leave_then_restart() {
         broker.shutdown().await;
     }
 
-    {
-        let BrokerWithClient {
-            broker: _broker,
-            client,
-        } = restart(log_dir, false).await;
-        // After leave + restart, the member should be unknown.
-        let req = ConsumerGroupHeartbeatRequest {
-            subscribed_topic_names: Some(vec!["tp2".into()]),
-            ..consumer_heartbeat("gpx", member_id.clone(), 5)
-        };
-        let resp = client.send(req).await.unwrap();
-        assert!(resp.error_code == krabka_broker::codes::UNKNOWN_MEMBER_ID);
-    }
+    // After leave + restart, the member should be unknown.
+    let req = ConsumerGroupHeartbeatRequest {
+        subscribed_topic_names: Some(vec!["tp2".into()]),
+        ..consumer_heartbeat("gpx", member_id.clone(), 5)
+    };
+    let (_broker, resp) = restarted_heartbeat(log_dir, req).await;
+    assert!(resp.error_code == krabka_broker::codes::UNKNOWN_MEMBER_ID);
 }
 
 /// Kafka persists the topics that a `SubscribedTopicRegex` resolved to
@@ -242,4 +231,12 @@ async fn restart(log_dir: std::path::PathBuf, wait_for_group: bool) -> BrokerWit
     let bootstrap = broker.listen_addr().to_string();
     let client = Arc::new(connect_client(bootstrap.as_str(), Some("c")).await);
     BrokerWithClient { broker, client }
+}
+
+async fn restarted_heartbeat(
+    log_dir: std::path::PathBuf,
+    request: ConsumerGroupHeartbeatRequest,
+) -> (krabka_broker::BrokerHandle, ConsumerGroupHeartbeatResponse) {
+    let BrokerWithClient { broker, client } = restart(log_dir, false).await;
+    (broker, client.send(request).await.unwrap())
 }

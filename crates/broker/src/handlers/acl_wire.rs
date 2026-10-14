@@ -219,48 +219,49 @@ mod tests {
         }
     }
 
-    #[test]
-    fn concrete_parsers_distinguish_wildcards_from_unknown_discriminants() {
+    #[yare::parameterized(
+        literal = { 3, Ok(PatternType::Literal) },
+        prefixed = { 4, Ok(PatternType::Prefixed) },
+        unknown = { WIRE_UNKNOWN, Err(WireAclError::AnyRequiresFilter) },
+        any = { WIRE_ANY, Err(WireAclError::AnyRequiresFilter) },
+        match_pattern = { WIRE_PATTERN_MATCH, Err(WireAclError::AnyRequiresFilter) },
+        unknown_discriminant = { 5, Err(WireAclError::UnknownDiscriminant) },
+    )]
+    fn concrete_parsers_distinguish_wildcards_from_unknown_discriminants(
+        byte: PatternTypeCode,
+        want: Result<PatternType, WireAclError>,
+    ) {
         // The wildcard bytes (UNKNOWN/ANY, and MATCH for pattern types) must
         // report AnyRequiresFilter — a different wire error than a junk
         // discriminant — and the concrete codes must map, not fall through.
-        let pattern_cases = [
-            (3, Ok(PatternType::Literal)),
-            (4, Ok(PatternType::Prefixed)),
-            (WIRE_UNKNOWN, Err(WireAclError::AnyRequiresFilter)),
-            (WIRE_ANY, Err(WireAclError::AnyRequiresFilter)),
-            (WIRE_PATTERN_MATCH, Err(WireAclError::AnyRequiresFilter)),
-            (5, Err(WireAclError::UnknownDiscriminant)),
-        ];
-        for (byte, want) in pattern_cases {
-            check!(pattern_type_concrete(byte) == want, "pattern byte {byte}");
-        }
-
-        for byte in [WIRE_UNKNOWN, WIRE_ANY] {
-            check!(
-                operation_concrete(byte) == Err(WireAclError::AnyRequiresFilter),
-                "operation byte {byte}"
-            );
-            check!(
-                permission_concrete(byte) == Err(WireAclError::AnyRequiresFilter),
-                "permission byte {byte}"
-            );
-        }
+        check!(pattern_type_concrete(byte) == want, "pattern byte {byte}");
     }
 
-    #[test]
-    fn operation_round_trip_through_wire() {
-        for op in [
-            AclOperation::All,
-            AclOperation::Read,
-            AclOperation::Write,
-            AclOperation::IdempotentWrite,
-            // KIP-939: TWO_PHASE_COMMIT, wire byte 15.
-            AclOperation::TwoPhaseCommit,
-        ] {
-            let b = operation_to_wire(op);
-            assert!(operation_concrete(b).unwrap() == op);
-        }
+    #[yare::parameterized(
+        unknown = { WIRE_UNKNOWN },
+        any = { WIRE_ANY },
+    )]
+    fn operation_and_permission_wildcards_require_a_filter(byte: i8) {
+        check!(
+            operation_concrete(byte) == Err(WireAclError::AnyRequiresFilter),
+            "operation byte {byte}"
+        );
+        check!(
+            permission_concrete(byte) == Err(WireAclError::AnyRequiresFilter),
+            "permission byte {byte}"
+        );
+    }
+
+    #[yare::parameterized(
+        all = { AclOperation::All },
+        read = { AclOperation::Read },
+        write = { AclOperation::Write },
+        idempotent_write = { AclOperation::IdempotentWrite },
+        two_phase_commit = { AclOperation::TwoPhaseCommit },
+    )]
+    fn operation_round_trip_through_wire(op: AclOperation) {
+        let b = operation_to_wire(op);
+        assert2::assert!(operation_concrete(b).unwrap() == op);
     }
 
     /// KIP-939: the `TWO_PHASE_COMMIT` operation is wire byte 15 and must
@@ -277,16 +278,18 @@ mod tests {
     /// `DESCRIBE_TOKENS` (14) operations round-trip through the wire codec,
     /// with Kafka's `ResourceType` and `AclOperation` codes.
     #[test]
-    fn kip_373_user_resource_and_token_operations_round_trip() {
+    fn kip_373_user_resource_has_wire_code_seven() {
         check!(resource_type_concrete(7) == Ok(ResourceType::User));
         check!(resource_type_to_wire(ResourceType::User) == 7);
-        for (code, operation) in [
-            (13, AclOperation::CreateTokens),
-            (14, AclOperation::DescribeTokens),
-        ] {
-            check!(operation_concrete(code) == Ok(operation));
-            check!(operation_to_wire(operation) == code);
-        }
+    }
+
+    #[yare::parameterized(
+        create_tokens = { 13, AclOperation::CreateTokens },
+        describe_tokens = { 14, AclOperation::DescribeTokens },
+    )]
+    fn kip_373_user_resource_and_token_operations_round_trip(code: i8, operation: AclOperation) {
+        check!(operation_concrete(code) == Ok(operation));
+        check!(operation_to_wire(operation) == code);
     }
 
     /// The KIP-48 `TOKEN` resource type, also named `DELEGATION_TOKEN`, is

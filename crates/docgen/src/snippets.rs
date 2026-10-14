@@ -104,19 +104,25 @@ mod tests {
     }
 
     #[test]
-    fn extract_requires_an_exact_comment_marker_and_unique_pair() {
+    fn extract_uses_the_unique_exact_comment_marker_pair() {
         let source = "// docs:begin foobar\nwrong();\n// docs:end foobar\n\
                       // docs:begin foo\nright();\n// docs:end foo\n";
         assert2::assert!(extract(source, "foo").unwrap() == "right();");
-        for invalid in [
-            "// docs:begin foobar\nwrong();\n// docs:end foobar\n",
+    }
+
+    #[yare::parameterized(
+        wrong_marker_name = { "// docs:begin foobar\nwrong();\n// docs:end foobar\n" },
+        marker_text_in_strings = {
             "let s = \"// docs:begin foo\";\nwrong();\nlet e = \"// docs:end foo\";\n",
-            "// docs:begin foo\n// docs:begin foo\n// docs:end foo\n",
+        },
+        duplicate_begin = { "// docs:begin foo\n// docs:begin foo\n// docs:end foo\n" },
+        duplicate_pairs = {
             "// docs:begin foo\none();\n// docs:end foo\n// docs:begin foo\ntwo();\n// docs:end foo\n",
-            "// docs:end foo\n// docs:begin foo\n",
-        ] {
-            assert2::assert!(extract(invalid, "foo").is_err());
-        }
+        },
+        reversed_markers = { "// docs:end foo\n// docs:begin foo\n" },
+    )]
+    fn extract_requires_an_exact_comment_marker_and_unique_pair(invalid: &str) {
+        assert2::assert!(extract(invalid, "foo").is_err());
     }
 
     #[test]

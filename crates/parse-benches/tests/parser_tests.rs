@@ -364,13 +364,6 @@ fn missing_repeated_samples_cannot_pass() {
 #[test]
 fn comparison_rejects_invalid_inputs() {
     let good = repeated_summaries(&[100.0, 101.0, 99.0], "good");
-    for tolerance in [-1.0, f64::NAN, f64::INFINITY] {
-        assert!(matches!(
-            compare_summaries(&good, &good, tolerance),
-            Err(ParseBenchesError::InvalidTolerance)
-        ));
-    }
-
     let empty = vec![
         BenchmarkSummary {
             suite: "test".into(),
@@ -408,6 +401,19 @@ fn comparison_rejects_invalid_inputs() {
     assert!(matches!(
         compare_summaries(&good, &invalid, 0.03),
         Err(ParseBenchesError::InvalidSample(name)) if name == "hot/path"
+    ));
+}
+
+#[yare::parameterized(
+    negative = { -1.0 },
+    nan = { f64::NAN },
+    infinity = { f64::INFINITY },
+)]
+fn comparison_rejects_invalid_tolerance(tolerance: f64) {
+    let good = repeated_summaries(&[100.0, 101.0, 99.0], "good");
+    assert2::assert!(matches!(
+        compare_summaries(&good, &good, tolerance),
+        Err(ParseBenchesError::InvalidTolerance)
     ));
 }
 

@@ -50,13 +50,12 @@ pub fn election_partition_errors(
         .replica_election_results
         .into_iter()
         .find(|row| row.topic == topic)
-        .map(|row| {
+        .map_or_default(|row| {
             row.partition_result
                 .into_iter()
                 .map(|partition| (partition.partition_id, partition.error_code))
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// Start the native admin fixtures' standalone broker and default admin client.

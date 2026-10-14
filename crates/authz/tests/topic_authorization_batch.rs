@@ -50,8 +50,15 @@ impl Authorizer for DispatchProbe {
     }
 }
 
-#[test]
-fn batch_dispatch_keeps_quiet_checks_borrowed_keys_and_repeated_names() {
+#[yare::parameterized(
+    normal_dispatch = { || None },
+    logging_enabled = { || Some(true) },
+    logging_disabled = { || Some(false) },
+)]
+fn batch_dispatch_keeps_quiet_checks_borrowed_keys_and_repeated_names(
+    log_denied: fn() -> Option<bool>,
+) {
+    let log_denied = log_denied();
     let principal = Principal {
         name: "batch".into(),
         auth_method: AuthMethod::SaslPlain,
@@ -61,42 +68,40 @@ fn batch_dispatch_keeps_quiet_checks_borrowed_keys_and_repeated_names() {
     let host = "127.0.0.1:9092".parse().unwrap();
     let topics = ["first".to_owned(), "second".to_owned()];
     let names = [topics[0].as_str(), topics[0].as_str(), topics[1].as_str()];
-    for log_denied in [None, Some(true), Some(false)] {
-        let probe = DispatchProbe::default();
-        let decisions = match log_denied {
-            Some(flag) => authorize_topics_logged(
-                &probe,
-                &source,
-                &principal,
-                &host,
-                AclOperation::Write,
-                names,
-                flag,
-            ),
-            None => authorize_topics(
-                &probe,
-                &source,
-                &principal,
-                &host,
-                AclOperation::Write,
-                names,
-            ),
-        };
-        let logged = log_denied.unwrap_or(true);
-        assert!(
-            decisions.len() == 2
-                && decisions
-                    .values()
-                    .all(|decision| *decision == AuthorizationResult::Deny)
-        );
-        let expected = ["first", "first", "second"].map(|resource| DispatchCall {
-            logged,
-            resource: resource.to_owned(),
-        });
-        assert!(probe.calls.lock().unwrap().as_slice() == expected.as_slice());
-        for original in &topics {
-            let (borrowed, _) = decisions.get_key_value(original.as_str()).unwrap();
-            assert!(std::ptr::eq(borrowed.as_ptr(), original.as_ptr()));
-        }
+    let probe = DispatchProbe::default();
+    let decisions = match log_denied {
+        Some(flag) => authorize_topics_logged(
+            &probe,
+            &source,
+            &principal,
+            &host,
+            AclOperation::Write,
+            names,
+            flag,
+        ),
+        None => authorize_topics(
+            &probe,
+            &source,
+            &principal,
+            &host,
+            AclOperation::Write,
+            names,
+        ),
+    };
+    let logged = log_denied.unwrap_or(true);
+    assert2::assert!(
+        decisions.len() == 2
+            && decisions
+                .values()
+                .all(|decision| *decision == AuthorizationResult::Deny)
+    );
+    let expected = ["first", "first", "second"].map(|resource| DispatchCall {
+        logged,
+        resource: resource.to_owned(),
+    });
+    assert2::assert!(probe.calls.lock().unwrap().as_slice() == expected.as_slice());
+    for original in &topics {
+        let (borrowed, _) = decisions.get_key_value(original.as_str()).unwrap();
+        assert2::assert!(std::ptr::eq(borrowed.as_ptr(), original.as_ptr()));
     }
 }

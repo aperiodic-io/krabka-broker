@@ -43,23 +43,25 @@ fn drain(captured: &Captured) -> Vec<String> {
     )
 }
 
-#[test]
-fn kafka_level_names_round_trip() {
-    for level in [
-        LogLevel::Fatal,
-        LogLevel::Error,
-        LogLevel::Warn,
-        LogLevel::Info,
-        LogLevel::Debug,
-        LogLevel::Trace,
-    ] {
-        check!(LogLevel::from_kafka_name(level.kafka_name()) == Some(level));
-    }
-    // Kafka matches its value against a set of uppercase names, so anything
-    // else is not a level.
-    check!(LogLevel::from_kafka_name("info") == None);
-    check!(LogLevel::from_kafka_name("OFF") == None);
-    check!(LogLevel::from_kafka_name("") == None);
+#[yare::parameterized(
+    fatal = { LogLevel::Fatal },
+    error = { LogLevel::Error },
+    warn = { LogLevel::Warn },
+    info = { LogLevel::Info },
+    debug = { LogLevel::Debug },
+    trace = { LogLevel::Trace },
+)]
+fn kafka_level_names_round_trip(level: LogLevel) {
+    check!(LogLevel::from_kafka_name(level.kafka_name()) == Some(level));
+}
+
+#[yare::parameterized(
+    lowercase = { "info" },
+    off = { "OFF" },
+    empty = { "" },
+)]
+fn kafka_level_names_reject_non_levels(name: &str) {
+    check!(LogLevel::from_kafka_name(name) == None);
 }
 
 #[test]
@@ -212,28 +214,28 @@ fn a_span_open_before_a_level_change_keeps_its_directive() {
     assert!(drain(&captured) == vec!["inside_open_span:DEBUG".to_string(); 2]);
 }
 
-#[test]
-fn every_level_syntax_env_filter_takes_is_an_editable_level() {
+#[yare::parameterized(
+    numeric_fatal = { "numeric=0", LogLevel::Fatal },
+    numeric_error = { "numeric=1", LogLevel::Error },
+    numeric_warn = { "numeric=2", LogLevel::Warn },
+    numeric_info = { "numeric=3", LogLevel::Info },
+    numeric_debug = { "numeric=4", LogLevel::Debug },
+    numeric_trace = { "numeric=5", LogLevel::Trace },
+    named_debug = { "numeric=DEBUG", LogLevel::Debug },
+    empty_level = { "numeric=", LogLevel::Trace },
+)]
+fn every_level_syntax_env_filter_takes_is_an_editable_level(
+    directive: &'static str,
+    expected: LogLevel,
+) {
     // `EnvFilter` hands a directive's level to `LevelFilter`'s `FromStr`,
     // which reads a number from 0 to 5 as well as a name. The empty level of
     // a `target=` directive it reads itself, as TRACE.
-    let cases = [
-        ("numeric=0", LogLevel::Fatal),
-        ("numeric=1", LogLevel::Error),
-        ("numeric=2", LogLevel::Warn),
-        ("numeric=3", LogLevel::Info),
-        ("numeric=4", LogLevel::Debug),
-        ("numeric=5", LogLevel::Trace),
-        ("numeric=DEBUG", LogLevel::Debug),
-        ("numeric=", LogLevel::Trace),
-    ];
-    for (directive, expected) in cases {
-        let (controller, _filter) = LogLevelController::new(&format!("info,{directive}"));
-        check!(
-            controller.loggers().get("numeric") == Some(&expected),
-            "{directive}"
-        );
-    }
+    let (controller, _filter) = LogLevelController::new(&format!("info,{directive}"));
+    check!(
+        controller.loggers().get("numeric") == Some(&expected),
+        "{directive}"
+    );
 
     // A bare number is the root level, the same as a bare name.
     let (controller, _filter) = LogLevelController::new("4");

@@ -741,108 +741,85 @@ mod tests {
     /// A key writes each of its strings with an `INT16` length, in every
     /// family. A string of 32767 bytes encodes, and one of 32768 bytes is an
     /// error rather than a panic.
-    #[test]
-    fn a_key_string_over_32767_bytes_does_not_encode() {
+    fn key_with_long_test_string(field: &str, value: String) -> Key {
         use crate::coordinator::unified::{
             persistence_next_gen::NextGenKey, share::persistence::ShareGroupKey,
             streams::persistence::StreamsGroupKey,
         };
-
-        struct KeyCase {
-            name: &'static str,
-            make: fn(String) -> Key,
-        }
-
-        let keys: [KeyCase; 11] = [
-            KeyCase {
-                name: "offset group id",
-                make: |s| Key::OffsetCommit {
-                    group_id: s,
-                    topic: "t".into(),
-                    partition: 0,
-                },
+        match field {
+            "offset group id" => Key::OffsetCommit {
+                group_id: value,
+                topic: "t".into(),
+                partition: 0,
             },
-            KeyCase {
-                name: "offset topic",
-                make: |s| Key::OffsetCommit {
-                    group_id: "g".into(),
-                    topic: s,
-                    partition: 0,
-                },
+            "offset topic" => Key::OffsetCommit {
+                group_id: "g".into(),
+                topic: value,
+                partition: 0,
             },
-            KeyCase {
-                name: "classic group id",
-                make: |s| Key::GroupMetadata { group_id: s },
-            },
-            KeyCase {
-                name: "next-gen group id",
-                make: |s| Key::NextGen(NextGenKey::GroupMetadata { group_id: s }),
-            },
-            KeyCase {
-                name: "next-gen member id",
-                make: |s| {
-                    Key::NextGen(NextGenKey::MemberMetadata {
-                        group_id: "g".into(),
-                        member_id: s,
-                    })
-                },
-            },
-            KeyCase {
-                name: "next-gen regular expression",
-                make: |s| {
-                    Key::NextGen(NextGenKey::RegularExpression {
-                        group_id: "g".into(),
-                        regex: s,
-                    })
-                },
-            },
-            KeyCase {
-                name: "share group id",
-                make: |s| Key::Share(ShareGroupKey::GroupMetadata { group_id: s }),
-            },
-            KeyCase {
-                name: "share member id",
-                make: |s| {
-                    Key::Share(ShareGroupKey::MemberMetadata {
-                        group_id: "g".into(),
-                        member_id: s,
-                    })
-                },
-            },
-            KeyCase {
-                name: "streams group id",
-                make: |s| Key::Streams(StreamsGroupKey::GroupMetadata { group_id: s }),
-            },
-            KeyCase {
-                name: "streams member id",
-                make: |s| {
-                    Key::Streams(StreamsGroupKey::MemberMetadata {
-                        group_id: "g".into(),
-                        member_id: s,
-                    })
-                },
-            },
-            KeyCase {
-                name: "streams topology group id",
-                make: |s| Key::Streams(StreamsGroupKey::Topology { group_id: s }),
-            },
-        ];
-        for KeyCase { name, make } in keys {
-            for (length, encodes) in [(MAX_STRING_BYTES, true), (MAX_STRING_BYTES + 1, false)] {
-                let key = make("a".repeat(length));
-
-                let encoded = encode_key(&key);
-
-                assert!(encoded.is_ok() == encodes, "{name} of {length} bytes");
-                if let Ok(bytes) = encoded {
-                    assert!(parse_key(&bytes).unwrap() == key, "{name}");
-                } else {
-                    assert!(
-                        matches!(encoded, Err(BrokerError::Protocol(_))),
-                        "{name} of {length} bytes is a protocol error"
-                    );
-                }
+            "classic group id" => Key::GroupMetadata { group_id: value },
+            "next-gen group id" => Key::NextGen(NextGenKey::GroupMetadata { group_id: value }),
+            "next-gen member id" => Key::NextGen(NextGenKey::MemberMetadata {
+                group_id: "g".into(),
+                member_id: value,
+            }),
+            "next-gen regular expression" => Key::NextGen(NextGenKey::RegularExpression {
+                group_id: "g".into(),
+                regex: value,
+            }),
+            "share group id" => Key::Share(ShareGroupKey::GroupMetadata { group_id: value }),
+            "share member id" => Key::Share(ShareGroupKey::MemberMetadata {
+                group_id: "g".into(),
+                member_id: value,
+            }),
+            "streams group id" => Key::Streams(StreamsGroupKey::GroupMetadata { group_id: value }),
+            "streams member id" => Key::Streams(StreamsGroupKey::MemberMetadata {
+                group_id: "g".into(),
+                member_id: value,
+            }),
+            "streams topology group id" => {
+                Key::Streams(StreamsGroupKey::Topology { group_id: value })
             }
+            _ => unreachable!(),
+        }
+    }
+
+    #[yare::parameterized(
+        offset_group_at_limit = { "offset group id", MAX_STRING_BYTES, true },
+        offset_group_over_limit = { "offset group id", MAX_STRING_BYTES + 1, false },
+        offset_topic_at_limit = { "offset topic", MAX_STRING_BYTES, true },
+        offset_topic_over_limit = { "offset topic", MAX_STRING_BYTES + 1, false },
+        classic_group_at_limit = { "classic group id", MAX_STRING_BYTES, true },
+        classic_group_over_limit = { "classic group id", MAX_STRING_BYTES + 1, false },
+        next_gen_group_at_limit = { "next-gen group id", MAX_STRING_BYTES, true },
+        next_gen_group_over_limit = { "next-gen group id", MAX_STRING_BYTES + 1, false },
+        next_gen_member_at_limit = { "next-gen member id", MAX_STRING_BYTES, true },
+        next_gen_member_over_limit = { "next-gen member id", MAX_STRING_BYTES + 1, false },
+        next_gen_regex_at_limit = { "next-gen regular expression", MAX_STRING_BYTES, true },
+        next_gen_regex_over_limit = { "next-gen regular expression", MAX_STRING_BYTES + 1, false },
+        share_group_at_limit = { "share group id", MAX_STRING_BYTES, true },
+        share_group_over_limit = { "share group id", MAX_STRING_BYTES + 1, false },
+        share_member_at_limit = { "share member id", MAX_STRING_BYTES, true },
+        share_member_over_limit = { "share member id", MAX_STRING_BYTES + 1, false },
+        streams_group_at_limit = { "streams group id", MAX_STRING_BYTES, true },
+        streams_group_over_limit = { "streams group id", MAX_STRING_BYTES + 1, false },
+        streams_member_at_limit = { "streams member id", MAX_STRING_BYTES, true },
+        streams_member_over_limit = { "streams member id", MAX_STRING_BYTES + 1, false },
+        streams_topology_at_limit = { "streams topology group id", MAX_STRING_BYTES, true },
+        streams_topology_over_limit = { "streams topology group id", MAX_STRING_BYTES + 1, false },
+    )]
+    fn a_key_string_over_32767_bytes_does_not_encode(field: &str, length: usize, encodes: bool) {
+        let key = key_with_long_test_string(field, "a".repeat(length));
+        let encoded = encode_key(&key);
+
+        assert2::assert!(encoded.is_ok() == encodes, "{field} of {length} bytes");
+        if let Ok(bytes) = encoded {
+            assert2::assert!(parse_key(&bytes).unwrap() == key, "{field}");
+        } else {
+            assert2::assert!(
+                matches!(encoded, Err(BrokerError::Protocol(_))),
+                "{field} of {length} bytes is a protocol error"
+            );
         }
     }
 

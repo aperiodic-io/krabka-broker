@@ -244,64 +244,58 @@ mod tests {
         retry_backoff: Duration::from_millis(200),
     };
 
-    #[test]
-    fn range_steps_follow_batch_progress_to_the_end() {
-        let cases = [
-            // A batch that ends inside the range continues past it, even
-            // across a compacted hole wider than one offset.
-            (4, 10, Some(5), RangeStep::Continue(5)),
-            (4, 10, Some(8), RangeStep::Continue(8)),
-            // Reaching or passing the end finishes the read.
-            (4, 10, Some(10), RangeStep::Done),
-            (4, 10, Some(12), RangeStep::Done),
-            // No batch, or no progress, cannot finish the range.
-            (4, 10, None, RangeStep::Stalled),
-            (4, 10, Some(4), RangeStep::Stalled),
-            (4, 10, Some(3), RangeStep::Stalled),
-        ];
-        for (current, end, next, expected) in cases {
-            check!(
-                next_range_step(current, end, next) == expected,
-                "current {current}, end {end}, next {next:?}"
-            );
-        }
+    #[yare::parameterized(
+        advances_one = { 4, 10, Some(5), RangeStep::Continue(5) },
+        skips_compacted_offsets = { 4, 10, Some(8), RangeStep::Continue(8) },
+        reaches_end = { 4, 10, Some(10), RangeStep::Done },
+        passes_end = { 4, 10, Some(12), RangeStep::Done },
+        no_batch = { 4, 10, None, RangeStep::Stalled },
+        no_progress = { 4, 10, Some(4), RangeStep::Stalled },
+        regresses = { 4, 10, Some(3), RangeStep::Stalled },
+    )]
+    fn range_steps_follow_batch_progress_to_the_end(
+        current: i64,
+        end: i64,
+        next: Option<i64>,
+        expected: RangeStep,
+    ) {
+        check!(
+            next_range_step(current, end, next) == expected,
+            "current {current}, end {end}, next {next:?}"
+        );
     }
 
-    #[test]
-    fn retriable_fetch_failures_are_leader_moves_and_broken_connections() {
-        let address = "127.0.0.1:9092".parse().unwrap();
-        let cases = [
-            (ClientError::Server { error_code: 6 }, true), // NOT_LEADER_OR_FOLLOWER
-            (ClientError::Server { error_code: 74 }, true), // FENCED_LEADER_EPOCH
-            (ClientError::Server { error_code: 75 }, true), // UNKNOWN_LEADER_EPOCH
-            (ClientError::Server { error_code: 5 }, true), // LEADER_NOT_AVAILABLE
-            (ClientError::Server { error_code: 9 }, true), // REPLICA_NOT_AVAILABLE
-            (ClientError::Server { error_code: 56 }, true), // KAFKA_STORAGE_ERROR
-            (ClientError::Server { error_code: 78 }, true), // OFFSET_NOT_AVAILABLE
-            (ClientError::Server { error_code: 100 }, true), // UNKNOWN_TOPIC_ID
-            (ClientError::Server { error_code: -1 }, true), // UNKNOWN_SERVER_ERROR
-            (ClientError::Disconnected, true),
-            (ClientError::Timeout(secs(30)), true),
-            (
-                ClientError::Io(std::io::ErrorKind::ConnectionReset.into()),
-                true,
-            ),
-            (
-                ClientError::Connect {
-                    addr: address,
-                    source: std::io::ErrorKind::ConnectionRefused.into(),
-                },
-                true,
-            ),
-            (ClientError::Server { error_code: 1 }, false), // OFFSET_OUT_OF_RANGE
-            (ClientError::Server { error_code: 2 }, false), // CORRUPT_MESSAGE
-            (ClientError::Server { error_code: 29 }, false), // TOPIC_AUTHORIZATION_FAILED
-            (ClientError::Server { error_code: 35 }, false), // UNSUPPORTED_VERSION
-            (ClientError::InvalidConfig("bad".into()), false),
-        ];
-        for (error, expected) in cases {
-            check!(range_fetch_retriable(&error) == expected, "{error:?}");
-        }
+    #[yare::parameterized(
+        not_leader = { ClientError::Server { error_code: 6 }, true },
+        fenced_epoch = { ClientError::Server { error_code: 74 }, true },
+        unknown_leader_epoch = { ClientError::Server { error_code: 75 }, true },
+        leader_unavailable = { ClientError::Server { error_code: 5 }, true },
+        replica_unavailable = { ClientError::Server { error_code: 9 }, true },
+        storage_error = { ClientError::Server { error_code: 56 }, true },
+        offset_unavailable = { ClientError::Server { error_code: 78 }, true },
+        unknown_topic = { ClientError::Server { error_code: 100 }, true },
+        unknown_server = { ClientError::Server { error_code: -1 }, true },
+        disconnected = { ClientError::Disconnected, true },
+        timeout = { ClientError::Timeout(secs(30)), true },
+        connection_reset = { ClientError::Io(std::io::ErrorKind::ConnectionReset.into()), true },
+        connection_refused = {
+            ClientError::Connect {
+                addr: "127.0.0.1:9092".parse().unwrap(),
+                source: std::io::ErrorKind::ConnectionRefused.into(),
+            },
+            true,
+        },
+        offset_out_of_range = { ClientError::Server { error_code: 1 }, false },
+        corrupt_message = { ClientError::Server { error_code: 2 }, false },
+        topic_authorization = { ClientError::Server { error_code: 29 }, false },
+        unsupported_version = { ClientError::Server { error_code: 35 }, false },
+        invalid_config = { ClientError::InvalidConfig("bad".into()), false },
+    )]
+    fn retriable_fetch_failures_are_leader_moves_and_broken_connections(
+        error: ClientError,
+        expected: bool,
+    ) {
+        check!(range_fetch_retriable(&error) == expected, "{error:?}");
     }
 
     fn fetched(offset: i64, value: Option<&'static [u8]>) -> FetchedRecord {
@@ -539,17 +533,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_empty_or_out_of_range_read_sends_nothing() {
+    async fn an_empty_read_sends_nothing() {
         let fetcher = ScriptedFetcher::new([], []);
 
         check!(read(&fetcher, 1, 5, 5).await.unwrap().is_empty());
-        for partition in [-1, 2] {
-            check!(matches!(
-                read(&fetcher, partition, 0, 1).await,
-                Err(MetadataLogError::PartitionOutOfRange { partition: got, count: 2 })
-                    if got == partition
-            ));
-        }
+        check!(fetcher.calls().is_empty());
+    }
+
+    #[yare::parameterized(
+        negative = { -1 },
+        upper_bound = { 2 },
+    )]
+    #[test_macro(tokio::test)]
+    async fn out_of_range_read_sends_nothing(partition: i32) {
+        let fetcher = ScriptedFetcher::new([], []);
+
+        check!(matches!(
+            read(&fetcher, partition, 0, 1).await,
+            Err(MetadataLogError::PartitionOutOfRange { partition: got, count: 2 })
+                if got == partition
+        ));
         check!(fetcher.calls().is_empty());
     }
 }

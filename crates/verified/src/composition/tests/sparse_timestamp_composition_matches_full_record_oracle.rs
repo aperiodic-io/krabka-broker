@@ -182,43 +182,41 @@ proptest! {
     }
 }
 
-#[test]
-fn checkpoint_recovery_handles_empty_interior_and_extreme_frontiers() {
-    for (ends, physical_start, floor, start, cut, expected) in [
-        (&[3, 6][..], 0, 0, 0, 1, None),
-        (&[3, 6][..], 0, 0, 1, 3, Some((1, 3))),
-        (&[3, 6][..], 0, 1, 1, 1, Some((0, 1))),
-        (
-            &[][..],
-            i64::MAX,
-            i64::MAX,
-            i64::MAX,
-            i64::MAX,
-            Some((0, i64::MAX)),
-        ),
-        (
-            &[i64::MAX][..],
-            i64::MAX - 3,
-            i64::MAX - 2,
-            i64::MAX - 2,
-            i64::MAX,
-            Some((1, i64::MAX)),
-        ),
-    ] {
-        assert!(
-            checkpoint_truncation_bounds_fetch(
-                ends,
-                physical_start,
-                FetchWatermarks {
-                    log_start: floor,
-                    log_end: ends.last().copied().unwrap_or(physical_start),
-                    hw: i64::MAX,
-                    lso: i64::MAX,
-                    deliverable: i64::MAX
-                },
-                start,
-                cut
-            ) == expected
-        );
-    }
+#[yare::parameterized(
+    cut_inside_batch = { &[3, 6][..], 0, 0, 0, 1, None },
+    complete_first_batch = { &[3, 6][..], 0, 0, 1, 3, Some((1, 3)) },
+    empty_prefix_at_floor = { &[3, 6][..], 0, 1, 1, 1, Some((0, 1)) },
+    empty_maximum_log = { &[][..], i64::MAX, i64::MAX, i64::MAX, i64::MAX, Some((0, i64::MAX)) },
+    maximum_frontier = {
+        &[i64::MAX][..],
+        i64::MAX - 3,
+        i64::MAX - 2,
+        i64::MAX - 2,
+        i64::MAX,
+        Some((1, i64::MAX)),
+    },
+)]
+fn checkpoint_recovery_handles_empty_interior_and_extreme_frontiers(
+    ends: &[i64],
+    physical_start: i64,
+    floor: i64,
+    start: i64,
+    cut: i64,
+    expected: Option<(usize, i64)>,
+) {
+    assert2::assert!(
+        checkpoint_truncation_bounds_fetch(
+            ends,
+            physical_start,
+            FetchWatermarks {
+                log_start: floor,
+                log_end: ends.last().copied().unwrap_or(physical_start),
+                hw: i64::MAX,
+                lso: i64::MAX,
+                deliverable: i64::MAX
+            },
+            start,
+            cut
+        ) == expected
+    );
 }

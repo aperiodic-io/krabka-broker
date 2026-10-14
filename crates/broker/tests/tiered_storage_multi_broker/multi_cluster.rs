@@ -181,6 +181,21 @@ pub(crate) async fn await_all_rlmm_active(b1: &BrokerHandle, b2: &BrokerHandle, 
     .await;
 }
 
+pub(crate) async fn await_pair_leader(
+    b1: &BrokerHandle,
+    b2: &BrokerHandle,
+    topic: &str,
+    partition: i32,
+) -> (u64, u64) {
+    let (b1_id, b2_id) = (b1.node_id(), b2.node_id());
+    b1.wait_for_image(|img| {
+        img.partition(topic, partition)
+            .is_some_and(|p| p.leader == b1_id || p.leader == b2_id)
+    })
+    .await;
+    (b1_id, b2_id)
+}
+
 /// Connect the admin only once registration and the topic-backed RLMM are ready.
 pub(crate) async fn ready_admin(
     brokers: [&BrokerHandle; 3],

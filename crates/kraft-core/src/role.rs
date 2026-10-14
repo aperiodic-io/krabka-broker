@@ -243,71 +243,51 @@ mod tests {
 
     /// `LeaderState.isReplicaCaughtUp`: caught up at some point, and fetched
     /// within the last hour.
-    #[test]
-    fn caught_up_needs_a_caught_up_time_and_a_fetch_within_the_hour() {
+    #[yare::parameterized(
+        never_fetched = { 0, 0, false },
+        fetched_not_caught_up = { 10 * 3_600_000 - 1, 0, false },
+        currently_caught_up = { 10 * 3_600_000 - 1, 10 * 3_600_000 - 1, true },
+        caught_up_long_ago = { 10 * 3_600_000 - 1, 5 * 3_600_000, true },
+        just_inside_window = {
+            10 * 3_600_000 - 3_600_000 + 1,
+            10 * 3_600_000 - 3_600_000 + 1,
+            true,
+        },
+        exact_window_edge = { 10 * 3_600_000 - 3_600_000, 10 * 3_600_000 - 3_600_000, false },
+        silent_two_hours = { 8 * 3_600_000, 8 * 3_600_000, false },
+    )]
+    fn caught_up_needs_a_caught_up_time_and_a_fetch_within_the_hour(
+        last_fetch: u64,
+        last_caught_up: u64,
+        expected: bool,
+    ) {
         const HOUR: u64 = 3_600_000;
         let now = SimInstant(10 * HOUR);
-        let progress = |last_fetch: u64, last_caught_up: u64| ReplicaProgress {
+        let progress = ReplicaProgress {
             last_fetch: SimInstant(last_fetch),
             last_caught_up: SimInstant(last_caught_up),
             ..Default::default()
         };
-        let cases = [
-            ("never fetched", progress(0, 0), false),
-            ("fetched but never caught up", progress(now.0 - 1, 0), false),
-            (
-                "caught up and fetching",
-                progress(now.0 - 1, now.0 - 1),
-                true,
-            ),
-            (
-                "caught up long ago, fetching now",
-                progress(now.0 - 1, now.0 - 5 * HOUR),
-                true,
-            ),
-            (
-                "caught up, last fetch just inside the hour",
-                progress(now.0 - HOUR + 1, now.0 - HOUR + 1),
-                true,
-            ),
-            (
-                "caught up, last fetch exactly an hour ago",
-                progress(now.0 - HOUR, now.0 - HOUR),
-                false,
-            ),
-            (
-                "caught up, silent for two hours",
-                progress(now.0 - 2 * HOUR, now.0 - 2 * HOUR),
-                false,
-            ),
-        ];
-        for (label, progress, expected) in cases {
-            assert2::assert!(progress.is_caught_up(now) == expected, "{label}");
-        }
+        assert2::assert!(progress.is_caught_up(now) == expected);
     }
 
     /// A leader forgets an observer that has been silent for the hour, and no
     /// sooner: until then `is_caught_up` may still read it.
-    #[test]
-    fn a_replica_is_forgotten_only_after_an_hour_of_silence() {
+    #[yare::parameterized(
+        never_fetched = { 0, false },
+        fetched_moment_ago = { 10 * 3_600_000 - 1, true },
+        silent_six_minutes = { 10 * 3_600_000 - 360_000, true },
+        just_inside_hour = { 10 * 3_600_000 - 3_600_000 + 1, true },
+        exactly_one_hour = { 10 * 3_600_000 - 3_600_000, false },
+    )]
+    fn a_replica_is_forgotten_only_after_an_hour_of_silence(last_fetch: u64, expected: bool) {
         const HOUR: u64 = 3_600_000;
         let now = SimInstant(10 * HOUR);
-        let fetched_at = |last_fetch: u64| ReplicaProgress {
+        let progress = ReplicaProgress {
             last_fetch: SimInstant(last_fetch),
             ..Default::default()
         };
-        for (label, progress, expected) in [
-            ("never fetched", fetched_at(0), false),
-            ("fetched a moment ago", fetched_at(now.0 - 1), true),
-            ("silent for six minutes", fetched_at(now.0 - 360_000), true),
-            ("just inside the hour", fetched_at(now.0 - HOUR + 1), true),
-            ("exactly an hour ago", fetched_at(now.0 - HOUR), false),
-        ] {
-            assert2::assert!(
-                progress.fetched_within_caught_up_window(now) == expected,
-                "{label}"
-            );
-        }
+        assert2::assert!(progress.fetched_within_caught_up_window(now) == expected);
     }
 
     #[test]

@@ -44,3 +44,4 @@ mutants = { workspace = true }
 krabka-security = { version = "0.6.0" }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util", "time"] }
+yare = { workspace = true }

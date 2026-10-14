@@ -548,12 +548,10 @@ fn broker_configs(
             // `DYNAMIC_DEFAULT_BROKER_CONFIG` entries, so only a named broker
             // shows the default beneath them.
             let default = if node_id.is_some() {
-                broker_default(key, unstable)
-                    .map(|value| DefaultLayer {
-                        value: Some(value),
-                        name: Some(key),
-                    })
-                    .unwrap_or_default()
+                broker_default(key, unstable).map_or_default(|value| DefaultLayer {
+                    value: Some(value),
+                    name: Some(key),
+                })
             } else {
                 DefaultLayer::default()
             };

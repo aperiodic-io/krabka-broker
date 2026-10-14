@@ -189,34 +189,35 @@ mod tests {
         assert!(TxnState::CompleteCommit.can_transition_to(TxnState::Empty));
     }
 
-    #[test]
-    fn kafka_status_round_trips_all_states() {
-        for s in [
-            TxnState::Empty,
-            TxnState::Ongoing,
-            TxnState::PrepareCommit,
-            TxnState::PrepareAbort,
-            TxnState::CompleteCommit,
-            TxnState::CompleteAbort,
-            TxnState::Dead,
-        ] {
-            assert!(TxnState::from_kafka_status(s.to_kafka_status()) == Some(s));
-        }
+    #[yare::parameterized(
+        empty = { TxnState::Empty },
+        ongoing = { TxnState::Ongoing },
+        prepare_commit = { TxnState::PrepareCommit },
+        prepare_abort = { TxnState::PrepareAbort },
+        complete_commit = { TxnState::CompleteCommit },
+        complete_abort = { TxnState::CompleteAbort },
+        dead = { TxnState::Dead },
+    )]
+    fn kafka_status_round_trips_all_states(state: TxnState) {
+        assert2::assert!(TxnState::from_kafka_status(state.to_kafka_status()) == Some(state));
     }
 
-    #[test]
-    fn kafka_status_values_match_kafka() {
+    #[yare::parameterized(
+        ongoing = { TxnState::Ongoing, 1 },
+        empty = { TxnState::Empty, 0 },
+        dead = { TxnState::Dead, 6 },
+    )]
+    fn kafka_status_values_match_kafka(state: TxnState, want: i8) {
         // Empirically pinned: cp-kafka 4.0 Ongoing record had TransactionStatus=1.
-        for (state, want) in [
-            (TxnState::Ongoing, 1),
-            (TxnState::Empty, 0),
-            (TxnState::Dead, 6),
-        ] {
-            assert!(state.to_kafka_status() == want, "{state:?}");
-        }
-        // PrepareEpochFence (7) and out-of-range are not modeled.
-        for status in [7, -1] {
-            assert!(TxnState::from_kafka_status(status).is_none(), "{status}");
-        }
+        assert2::assert!(state.to_kafka_status() == want, "{state:?}");
+    }
+
+    // PrepareEpochFence (7) and out-of-range are not modeled.
+    #[yare::parameterized(
+        prepare_epoch_fence = { 7 },
+        below_range = { -1 },
+    )]
+    fn kafka_status_values_outside_model_are_absent(status: i8) {
+        assert2::assert!(TxnState::from_kafka_status(status).is_none(), "{status}");
     }
 }

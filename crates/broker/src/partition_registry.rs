@@ -239,8 +239,7 @@ impl PartitionRegistry {
     pub(crate) fn partitions_of(&self, topic: &str) -> Vec<PartitionIndex> {
         self.inner
             .get(topic)
-            .map(|m| m.iter().map(|e| *e.key()).collect())
-            .unwrap_or_default()
+            .map_or_default(|m| m.iter().map(|e| *e.key()).collect())
     }
 
     /// Snapshot of all partition handles, as cheap `Arc` clones. Maintenance

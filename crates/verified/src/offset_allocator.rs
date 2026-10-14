@@ -143,22 +143,31 @@ mod tests {
         assert!(wal_reservation_epoch_ready(8, 7));
     }
 
-    #[test]
-    fn response_admission_binds_identity_epoch_and_exact_range() {
-        assert!(wal_reservation_response(true, 0, 0, 0, 0, 1) == Some(0));
-        assert!(wal_reservation_response(true, 7, 7, 7, 11, 3) == Some(11));
-        assert!(wal_reservation_response(true, -1, -1, 7, 11, 3) == Some(11));
-        for rejected in [
-            wal_reservation_response(false, 7, 7, 7, 11, 3),
-            wal_reservation_response(true, 7, 8, 7, 11, 3),
-            wal_reservation_response(true, 7, 7, 6, 11, 3),
-            wal_reservation_response(true, -2, -2, 7, 11, 3),
-            wal_reservation_response(true, -1, -1, -1, 11, 3),
-            wal_reservation_response(true, 7, 7, 7, -1, 3),
-            wal_reservation_response(true, 7, 7, 7, 11, 0),
-            wal_reservation_response(true, 7, 7, 7, i64::MAX, 1),
-        ] {
-            assert!(rejected.is_none());
-        }
+    #[yare::parameterized(
+        first_offset = { true, 0, 0, 0, 0, 1, Some(0) },
+        current_epoch = { true, 7, 7, 7, 11, 3, Some(11) },
+        unknown_epoch_sentinel = { true, -1, -1, 7, 11, 3, Some(11) },
+        not_leader = { false, 7, 7, 7, 11, 3, None },
+        claimed_identity_mismatch = { true, 7, 8, 7, 11, 3, None },
+        local_epoch_mismatch = { true, 7, 7, 6, 11, 3, None },
+        invalid_identity = { true, -2, -2, 7, 11, 3, None },
+        unknown_epoch_with_no_local_epoch = { true, -1, -1, -1, 11, 3, None },
+        negative_next = { true, 7, 7, 7, -1, 3, None },
+        empty_count = { true, 7, 7, 7, 11, 0, None },
+        range_overflow = { true, 7, 7, 7, i64::MAX, 1, None },
+    )]
+    fn response_admission_binds_identity_epoch_and_exact_range(
+        is_leader: bool,
+        authenticated: i64,
+        claimed: i64,
+        local: i64,
+        next: i64,
+        count: i64,
+        expected: Option<i64>,
+    ) {
+        assert2::assert!(
+            wal_reservation_response(is_leader, authenticated, claimed, local, next, count)
+                == expected
+        );
     }
 }

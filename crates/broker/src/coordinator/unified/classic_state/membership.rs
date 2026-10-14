@@ -56,10 +56,7 @@ impl ClassicGroup {
         session_timeout: Duration,
     ) {
         if let Some(member) = self.members.get_mut(member_id) {
-            member.protocol_metadata = protocols
-                .first()
-                .map(|(_, b)| b.clone())
-                .unwrap_or_default();
+            member.protocol_metadata = protocols.first().map_or_default(|(_, b)| b.clone());
             member.protocols = protocols;
             member.rebalance_timeout = rebalance_timeout;
             member.session_timeout = session_timeout;

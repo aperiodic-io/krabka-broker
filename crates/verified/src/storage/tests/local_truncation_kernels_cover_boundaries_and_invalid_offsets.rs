@@ -100,89 +100,94 @@ fn remote_partition_delete_transition_matrix_matches_kafka() {
     }
 }
 
-#[test]
-fn remote_cache_actions_are_idempotent_and_never_resurrect() {
-    use {
-        RemoteCacheAction::{Noop, Reject, Remove, StoreFinished, StoreHidden},
-        RemoteSegmentLifecycle::{CopyFinished, CopyStarted, DeleteFinished, DeleteStarted},
-    };
-
-    for (what, current, target, retry, expected) in [
-        (
-            "an update cannot resurrect",
-            None,
-            CopyFinished,
-            false,
-            Reject,
-        ),
-        (
-            "a missing tombstone is idempotent",
-            None,
-            DeleteFinished,
-            false,
-            Noop,
-        ),
-        ("an exact retry", Some(CopyStarted), CopyStarted, true, Noop),
-        (
-            "a conflicting duplicate",
-            Some(CopyStarted),
-            CopyStarted,
-            false,
-            Reject,
-        ),
-        (
-            "the copy finishes",
-            Some(CopyStarted),
-            CopyFinished,
-            false,
-            StoreFinished,
-        ),
-        (
-            "an unfinished copy is deleted",
-            Some(CopyStarted),
-            DeleteStarted,
-            false,
-            StoreHidden,
-        ),
-        (
-            "a finished copy is deleted",
-            Some(CopyFinished),
-            DeleteStarted,
-            false,
-            StoreHidden,
-        ),
-        (
-            "a delete cannot skip its start",
-            Some(CopyFinished),
-            DeleteFinished,
-            false,
-            Reject,
-        ),
-        (
-            "the delete finishes",
-            Some(DeleteStarted),
-            DeleteFinished,
-            false,
-            Remove,
-        ),
-        (
-            "the lifecycle never moves back",
-            Some(DeleteStarted),
-            CopyFinished,
-            false,
-            Reject,
-        ),
-        (
-            "a finished delete stays finished",
-            Some(DeleteFinished),
-            CopyStarted,
-            false,
-            Reject,
-        ),
-    ] {
-        assert2::check!(
-            remote_cache_action(current, target, retry) == expected,
-            "{what}"
-        );
-    }
+#[yare::parameterized(
+    cannot_resurrect = {
+        "an update cannot resurrect",
+        None,
+        RemoteSegmentLifecycle::CopyFinished,
+        false,
+        RemoteCacheAction::Reject,
+    },
+    missing_tombstone = {
+        "a missing tombstone is idempotent",
+        None,
+        RemoteSegmentLifecycle::DeleteFinished,
+        false,
+        RemoteCacheAction::Noop,
+    },
+    exact_retry = {
+        "an exact retry",
+        Some(RemoteSegmentLifecycle::CopyStarted),
+        RemoteSegmentLifecycle::CopyStarted,
+        true,
+        RemoteCacheAction::Noop,
+    },
+    conflicting_duplicate = {
+        "a conflicting duplicate",
+        Some(RemoteSegmentLifecycle::CopyStarted),
+        RemoteSegmentLifecycle::CopyStarted,
+        false,
+        RemoteCacheAction::Reject,
+    },
+    copy_finishes = {
+        "the copy finishes",
+        Some(RemoteSegmentLifecycle::CopyStarted),
+        RemoteSegmentLifecycle::CopyFinished,
+        false,
+        RemoteCacheAction::StoreFinished,
+    },
+    unfinished_copy_deleted = {
+        "an unfinished copy is deleted",
+        Some(RemoteSegmentLifecycle::CopyStarted),
+        RemoteSegmentLifecycle::DeleteStarted,
+        false,
+        RemoteCacheAction::StoreHidden,
+    },
+    finished_copy_deleted = {
+        "a finished copy is deleted",
+        Some(RemoteSegmentLifecycle::CopyFinished),
+        RemoteSegmentLifecycle::DeleteStarted,
+        false,
+        RemoteCacheAction::StoreHidden,
+    },
+    delete_skips_start = {
+        "a delete cannot skip its start",
+        Some(RemoteSegmentLifecycle::CopyFinished),
+        RemoteSegmentLifecycle::DeleteFinished,
+        false,
+        RemoteCacheAction::Reject,
+    },
+    delete_finishes = {
+        "the delete finishes",
+        Some(RemoteSegmentLifecycle::DeleteStarted),
+        RemoteSegmentLifecycle::DeleteFinished,
+        false,
+        RemoteCacheAction::Remove,
+    },
+    lifecycle_never_moves_back = {
+        "the lifecycle never moves back",
+        Some(RemoteSegmentLifecycle::DeleteStarted),
+        RemoteSegmentLifecycle::CopyFinished,
+        false,
+        RemoteCacheAction::Reject,
+    },
+    finished_delete_stays_finished = {
+        "a finished delete stays finished",
+        Some(RemoteSegmentLifecycle::DeleteFinished),
+        RemoteSegmentLifecycle::CopyStarted,
+        false,
+        RemoteCacheAction::Reject,
+    },
+)]
+fn remote_cache_actions_are_idempotent_and_never_resurrect(
+    what: &'static str,
+    current: Option<RemoteSegmentLifecycle>,
+    target: RemoteSegmentLifecycle,
+    retry: bool,
+    expected: RemoteCacheAction,
+) {
+    assert2::check!(
+        remote_cache_action(current, target, retry) == expected,
+        "{what}"
+    );
 }

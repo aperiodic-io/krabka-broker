@@ -252,22 +252,21 @@ fn a_plan_for_idle_partitions_carries_no_empty_ops() {
 
 /// A topic name that only a compact string can carry is refused below v12 as a
 /// protocol error, where `put_string` would panic the connection task.
-#[test]
-fn a_topic_name_over_the_string_limit_is_refused_by_the_int16_encodings() {
-    use crate::coordinator::unified::persistence::MAX_STRING_BYTES;
-
-    for (version, length, expected_ok) in [
-        (7i16, MAX_STRING_BYTES, true),
-        (7, MAX_STRING_BYTES + 1, false),
-        (11, MAX_STRING_BYTES + 1, false),
-        // Flexible versions carry a varint length and write any size.
-        (12, MAX_STRING_BYTES + 1, true),
-    ] {
-        let mut response = test_support::one_partition_response(version, None);
-        response.responses[0].topic = "t".repeat(length);
-        assert2::assert!(
-            fetch_response_write_plan(&response, version).is_ok() == expected_ok,
-            "version {version}, {length} bytes"
-        );
-    }
+#[yare::parameterized(
+    short_version_at_limit = { 7_i16, 32_767, true },
+    short_version_over_limit = { 7, 32_768, false },
+    short_version_11_over_limit = { 11, 32_768, false },
+    flexible_over_limit = { 12, 32_768, true },
+)]
+fn a_topic_name_over_the_string_limit_is_refused_by_the_int16_encodings(
+    version: i16,
+    length: usize,
+    expected_ok: bool,
+) {
+    let mut response = test_support::one_partition_response(version, None);
+    response.responses[0].topic = "t".repeat(length);
+    assert2::assert!(
+        fetch_response_write_plan(&response, version).is_ok() == expected_ok,
+        "version {version}, {length} bytes"
+    );
 }

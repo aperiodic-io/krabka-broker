@@ -95,13 +95,12 @@ pub fn stamp_range_insertion_index(
 /// May panic if `lasts` is shorter than `bases`; equal lengths are a caller
 /// precondition, not a runtime check.
 #[requires(stamp_range_arrays_parallel(bases@, lasts@))]
-#[ensures(match result {
-    Some(index) => index@ < bases@.len()
-        && bases@[index@]@ == target_base@
-        && lasts@[index@]@ == target_last@
-        && (no_exact_stamp_range(bases@, lasts@, index@, target_base@, target_last@)),
-    None => no_exact_stamp_range(bases@, lasts@, bases@.len(), target_base@, target_last@),
-})]
+#[ensures(stamp_lookup_result(
+    result,
+    bases@,
+    lasts@,
+    StampLookupQuery::Exact { base: target_base, last: target_last },
+))]
 #[must_use]
 pub fn exact_stamp_range_index(
     bases: &[i64],
@@ -110,8 +109,12 @@ pub fn exact_stamp_range_index(
     target_last: i64,
 ) -> Option<usize> {
     let mut index = 0usize;
-    #[invariant(stamp_cursor_in_bounds(bases@, lasts@, index@))]
-    #[invariant(no_exact_stamp_range(bases@, lasts@, index@, target_base@, target_last@))]
+    #[invariant(stamp_lookup_cursor_valid(
+        bases@,
+        lasts@,
+        index@,
+        StampLookupQuery::Exact { base: target_base, last: target_last },
+    ))]
     #[variant(bases@.len() - index@)]
     while index < bases.len() {
         if bases[index] == target_base && lasts[index] == target_last {
@@ -124,24 +127,24 @@ pub fn exact_stamp_range_index(
 
 /// Find the first inclusive range that covers `offset`.
 ///
-/// `bases` and `lasts` must have equal lengths.
-///
-/// # Panics
-///
-/// May panic if `lasts` is shorter than `bases`; equal lengths are a caller
-/// precondition, not a runtime check.
+/// The slices must have equal lengths; a shorter `lasts` slice may panic
+/// because the implementation indexes it alongside `bases`.
 #[requires(stamp_range_arrays_parallel(bases@, lasts@))]
-#[ensures(match result {
-    Some(index) => index@ < bases@.len()
-        && bases@[index@]@ <= offset@ && offset@ <= lasts@[index@]@
-        && (no_covering_stamp_range(bases@, lasts@, index@, offset@)),
-    None => no_covering_stamp_range(bases@, lasts@, bases@.len(), offset@),
-})]
+#[ensures(stamp_lookup_result(
+    result,
+    bases@,
+    lasts@,
+    StampLookupQuery::Covering { offset },
+))]
 #[must_use]
 pub fn covering_stamp_range_index(bases: &[i64], lasts: &[i64], offset: i64) -> Option<usize> {
     let mut index = 0usize;
-    #[invariant(stamp_cursor_in_bounds(bases@, lasts@, index@))]
-    #[invariant(no_covering_stamp_range(bases@, lasts@, index@, offset@))]
+    #[invariant(stamp_lookup_cursor_valid(
+        bases@,
+        lasts@,
+        index@,
+        StampLookupQuery::Covering { offset },
+    ))]
     #[variant(bases@.len() - index@)]
     while index < bases.len() {
         if bases[index] <= offset && offset <= lasts[index] {
@@ -155,9 +158,9 @@ pub fn covering_stamp_range_index(bases: &[i64], lasts: &[i64], offset: i64) -> 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]
 #[cfg_attr(test, mutants::skip)]
-#[logic(open)]
+#[logic(open(crate))]
 /// Both parallel arrays contain every index before this scan cursor.
-fn stamp_cursor_in_bounds(bases: Seq<i64>, lasts: Seq<i64>, index: Int) -> bool {
+pub(crate) fn stamp_cursor_in_bounds(bases: Seq<i64>, lasts: Seq<i64>, index: Int) -> bool {
     pearlite! { index <= bases.len() && stamp_range_arrays_parallel(bases, lasts) }
 }
 
@@ -170,28 +173,71 @@ pub fn stamp_range_arrays_parallel(bases: Seq<i64>, lasts: Seq<i64>) -> bool {
     pearlite! { bases.len() == lasts.len() }
 }
 
-// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]
-#[cfg_attr(test, mutants::skip)]
-#[logic(open)]
-/// The scanned prefix contains no range with these exact inclusive boundaries.
-fn no_exact_stamp_range(
-    bases: Seq<i64>,
-    lasts: Seq<i64>,
-    count: Int,
-    base: Int,
-    last: Int,
-) -> bool {
-    pearlite! { forall<i: Int> 0 <= i && i < count ==> bases[i]@ != base || lasts[i]@ != last }
+#[derive(Clone, Copy)]
+pub(crate) enum StampLookupQuery {
+    Exact { base: i64, last: i64 },
+    Covering { offset: i64 },
 }
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]
 #[cfg_attr(test, mutants::skip)]
-#[logic(open)]
-/// The scanned prefix contains no inclusive range covering this offset.
-fn no_covering_stamp_range(bases: Seq<i64>, lasts: Seq<i64>, count: Int, offset: Int) -> bool {
-    pearlite! { forall<i: Int> 0 <= i && i < count ==> offset < bases[i]@ || lasts[i]@ < offset }
+#[logic(open(crate))]
+pub(crate) fn stamp_lookup_matches(query: StampLookupQuery, base: i64, last: i64) -> bool {
+    pearlite! { match query {
+        StampLookupQuery::Exact { base: target_base, last: target_last } =>
+            base@ == target_base@ && last@ == target_last@,
+        StampLookupQuery::Covering { offset } => base@ <= offset@ && offset@ <= last@,
+    } }
+}
+
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open(crate))]
+pub(crate) fn no_stamp_lookup_before(
+    bases: Seq<i64>,
+    lasts: Seq<i64>,
+    count: Int,
+    query: StampLookupQuery,
+) -> bool {
+    pearlite! { forall<i: Int> 0 <= i && i < count
+    ==> !stamp_lookup_matches(query, bases[i], lasts[i]) }
+}
+
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open(crate))]
+pub(crate) fn stamp_lookup_cursor_valid(
+    bases: Seq<i64>,
+    lasts: Seq<i64>,
+    index: Int,
+    query: StampLookupQuery,
+) -> bool {
+    pearlite! {
+        stamp_cursor_in_bounds(bases, lasts, index)
+            && no_stamp_lookup_before(bases, lasts, index, query)
+    }
+}
+
+// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
+#[cfg(creusot)]
+#[cfg_attr(test, mutants::skip)]
+#[logic(open(crate))]
+pub(crate) fn stamp_lookup_result(
+    result: Option<usize>,
+    bases: Seq<i64>,
+    lasts: Seq<i64>,
+    query: StampLookupQuery,
+) -> bool {
+    pearlite! { match result {
+        Some(index) => index@ < bases.len()
+            && stamp_lookup_matches(query, bases[index@], lasts[index@])
+            && no_stamp_lookup_before(bases, lasts, index@, query),
+        None => no_stamp_lookup_before(bases, lasts, bases.len(), query),
+    } }
 }
 
 #[cfg(test)]

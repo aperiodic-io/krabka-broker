@@ -155,21 +155,21 @@ fn unclean_recovery_commit_requires_the_selection_snapshot() {
     ));
 }
 
-#[test]
-fn java_string_hash_partition_matches_jvm_goldens() {
-    for (key, partitions, expected) in [
-        ("g:BQUFBQUFBQUFBQUFBQUFBQ:0", 50, 2),
-        ("consumer-group", 50, 38),
-        ("🦀:BQUFBQUFBQUFBQUFBQUFBQ:7", 17, 8),
-        // This is the canonical Java String whose hashCode is
-        // Integer.MIN_VALUE. Kafka Utils.abs maps that corner to zero.
-        ("polygenelubricants", 50, 0),
-    ] {
-        let units: Vec<u16> = key.encode_utf16().collect();
-        assert!(java_string_hash_partition(&units, partitions) == Some(expected));
-    }
-    assert!(java_string_hash_partition(&[], 0) == None);
-    assert!(java_string_hash_partition(&[], -1) == None);
+#[yare::parameterized(
+    kafka_group = { "g:BQUFBQUFBQUFBQUFBQUFBQ:0", 50, Some(2) },
+    consumer_group = { "consumer-group", 50, Some(38) },
+    unicode_group = { "🦀:BQUFBQUFBQUFBQUFBQUFBQ:7", 17, Some(8) },
+    minimum_hash = { "polygenelubricants", 50, Some(0) },
+    zero_partitions = { "", 0, None },
+    negative_partitions = { "", -1, None },
+)]
+fn java_string_hash_partition_matches_jvm_goldens(
+    key: &'static str,
+    partitions: i32,
+    expected: Option<i32>,
+) {
+    let units: Vec<u16> = key.encode_utf16().collect();
+    assert2::assert!(java_string_hash_partition(&units, partitions) == expected);
 }
 
 #[test]

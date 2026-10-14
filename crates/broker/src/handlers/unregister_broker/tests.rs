@@ -13,6 +13,7 @@ use {
         break_glass::gate::tests::{approved_proposal, image_of},
         broker::Broker,
         config::BreakGlassConfig,
+        controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
         handlers::{
             RequestContext,
             test_support::{
@@ -25,7 +26,8 @@ use {
         test_support::{
             self as broker_fixture_support, DenyAll, PartitionCount, PartitionEpoch,
             broker_registration, decode_response as test_decode_response,
-            encode_request as test_encode_request, principal, request_context,
+            encode_request as test_encode_request, gated_break_glass_config as gated_config,
+            principal, request_context,
             start_broker_with_authorizer_no_audit as start_authorizer_broker,
         },
     },
@@ -147,13 +149,6 @@ async fn handle_unregisters_registered_broker_with_success_shape() {
 const DOOMED: NodeId = NodeId(7);
 /// The epoch of the registration an unregistration of [`DOOMED`] removes.
 const DOOMED_EPOCH: i64 = 42;
-
-fn gated_config() -> BreakGlassConfig {
-    BreakGlassConfig {
-        approvers: ["User:alice", "User:bob"].map(str::to_owned).to_vec(),
-        ..BreakGlassConfig::default()
-    }
-}
 
 const NOW_MS: i64 = 60_000;
 

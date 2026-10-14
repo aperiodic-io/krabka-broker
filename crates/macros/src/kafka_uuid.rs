@@ -49,31 +49,25 @@ pub(crate) fn expand(item: ItemStruct) -> Result<moxy::token::TokenStream, Parse
 mod tests {
     use {super::expand, crate::meta::compact, assert2::assert};
 
-    #[test]
-    fn refuses_non_newtypes_and_generic_wrappers() {
-        for input in [
-            "struct Id;",
-            "struct Id {}",
-            "struct Id { value: Uuid }",
-            "struct Id(Uuid, Uuid);",
-            "struct Id<const DOMAIN: u8>(Uuid);",
-        ] {
-            let item: moxy::ast::ItemStruct = moxy::parse!({ input }).unwrap();
-            assert!(expand(item).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        unit_struct = { "struct Id;" },
+        empty_named_struct = { "struct Id {}" },
+        named_field = { "struct Id { value: Uuid }" },
+        multiple_tuple_fields = { "struct Id(Uuid, Uuid);" },
+        const_generic = { "struct Id<const DOMAIN: u8>(Uuid);" },
+    )]
+    fn refuses_non_newtypes_and_generic_wrappers(input: &str) {
+        let item: moxy::ast::ItemStruct = moxy::parse!({ input }).unwrap();
+        assert2::assert!(expand(item).is_err(), "{input}");
     }
 
     #[test]
     fn emits_the_four_trait_implementations_for_a_single_field_wrapper() {
         let item: moxy::ast::ItemStruct = moxy::parse!("pub struct Id(pub Uuid);").unwrap();
         let output = compact(&expand(item).unwrap());
-        for implementation in [
-            "DisplayforId",
-            "FromStrforId",
-            "SerializeforId",
-            "Deserialize<'de>forId",
-        ] {
-            assert!(output.contains(implementation), "{implementation}");
-        }
+        assert!(output.contains("DisplayforId"));
+        assert!(output.contains("FromStrforId"));
+        assert!(output.contains("SerializeforId"));
+        assert!(output.contains("Deserialize<'de>forId"));
     }
 }

@@ -61,3 +61,4 @@ mutants = { workspace = true }
 stateright = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
+yare = { workspace = true }

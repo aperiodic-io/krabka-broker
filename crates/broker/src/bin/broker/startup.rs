@@ -560,38 +560,26 @@ mod tests {
 
     // `broker_main` halts the process on exactly this failure. The error comes
     // to it boxed, as `run` boxes what `?` and `serve` return.
-    #[test]
-    fn only_the_fatal_fault_of_the_controller_halts_the_process() {
-        struct Row {
-            name: &'static str,
-            error: Box<dyn std::error::Error>,
-            halts: bool,
-        }
-        let rows: [Row; 4] = [
-            Row {
-                name: "the controller's fatal fault",
-                error: BrokerError::FatalFault(FAULT.to_owned()).into(),
-                halts: true,
-            },
-            Row {
-                name: "another failure of the start",
-                error: BrokerError::Startup("no leader".to_owned()).into(),
-                halts: false,
-            },
-            Row {
-                name: "a broker that is shutting down",
-                error: BrokerError::Shutdown.into(),
-                halts: false,
-            },
-            Row {
-                name: "a bare message",
-                error: "failed to read the config".into(),
-                halts: false,
-            },
-        ];
-        for Row { name, error, halts } in rows {
-            assert!(is_fatal_fault(error.as_ref()) == halts, "{name}: {error}");
-        }
+    #[yare::parameterized(
+        fatal_controller_fault = {
+            Box::new(BrokerError::FatalFault(FAULT.to_owned())) as Box<dyn std::error::Error>,
+            true,
+        },
+        startup_error = {
+            Box::new(BrokerError::Startup("no leader".to_owned())) as Box<dyn std::error::Error>,
+            false,
+        },
+        shutdown = { Box::new(BrokerError::Shutdown) as Box<dyn std::error::Error>, false },
+        bare_message = {
+            Box::new(std::io::Error::other("failed to read the config")) as Box<dyn std::error::Error>,
+            false,
+        },
+    )]
+    fn only_the_fatal_fault_of_the_controller_halts_the_process(
+        error: Box<dyn std::error::Error>,
+        halts: bool,
+    ) {
+        assert2::assert!(is_fatal_fault(error.as_ref()) == halts, "{error}");
     }
     /// The `BrokerConfig` that startup builds from these flags and a
     /// `--config-file` holding `toml`, by the calls `broker_main` and `run`
@@ -617,49 +605,40 @@ mod tests {
         .map_err(|error| error.to_string())
     }
 
-    // A Kafka cluster with a single controller: node 2 is a broker, and its
-    // id comes from the file alone. It used to run raft as node 1, the flag's
-    // default, and so refused to start as a non-controller in its own quorum.
-    #[test]
-    fn a_broker_only_node_takes_its_raft_id_from_the_file() {
-        let config = configured(
-            &[],
+    #[yare::parameterized(
+        broker_only_uses_file_id = {
             "broker_id = 2\n\
              controller_quorum_voters = [\"1@controller-1:9592\"]\n\
              [process]\n\
              roles = [\"broker\"]\n",
-        )
-        .expect("the config assembles");
-
-        assert!(config.validate().is_ok());
-        assert!(
+            2,
+            krabka_broker::NodeId(2),
+            krabka_broker::NodeId(1),
+            "controller-1:9592",
+        },
+        combined_without_voters_seeds_itself = {
+            "broker_id = 42\n",
+            42,
+            krabka_broker::NodeId(42),
+            krabka_broker::NodeId(42),
+            "0.0.0.0:9093",
+        },
+    )]
+    fn file_broker_id_seeds_the_raft_node_identity(
+        toml: &'static str,
+        broker_id: i32,
+        node_id: krabka_broker::NodeId,
+        voter_id: krabka_broker::NodeId,
+        voter_addr: &'static str,
+    ) {
+        let config = configured(&[], toml).expect("the config assembles");
+        assert2::assert!(config.validate().is_ok());
+        assert2::assert!(
             (
                 config.broker_id,
                 config.node_id,
                 config.controller_quorum_voters
-            ) == (2, krabka_broker::NodeId(2), vec![(
-                krabka_broker::NodeId(1),
-                "controller-1:9592".to_owned()
-            )])
-        );
-    }
-
-    // With no voter set anywhere, the node is the single voter of its own
-    // quorum, under the id the file names.
-    #[test]
-    fn a_combined_node_without_voters_seeds_itself_under_the_file_id() {
-        let config = configured(&[], "broker_id = 42\n").expect("the config assembles");
-
-        assert!(config.validate().is_ok());
-        assert!(
-            (
-                config.broker_id,
-                config.node_id,
-                config.controller_quorum_voters
-            ) == (42, krabka_broker::NodeId(42), vec![(
-                krabka_broker::NodeId(42),
-                "0.0.0.0:9093".to_owned()
-            )])
+            ) == (broker_id, node_id, vec![(voter_id, voter_addr.to_owned())])
         );
     }
 
@@ -667,117 +646,59 @@ mod tests {
     /// `metadata_log_dir`, and without either the metadata log is in the first
     /// log directory, as Kafka's `metadata.log.dir` defaults to the first entry
     /// of `log.dirs`. A separate directory is not a data directory.
-    #[test]
-    fn the_metadata_log_directory_comes_from_the_flag_then_the_file_then_log_dir() {
-        struct Case {
-            what: &'static str,
-            flags: &'static [&'static str],
-            toml: &'static str,
-            /// The metadata directory the config resolves.
-            metadata: &'static str,
-            /// The data directories the config resolves.
-            data: &'static [&'static str],
-        }
-        let cases: [Case; 4] = [
-            Case {
-                what: "neither",
-                flags: &[],
-                toml: "log_dir = \"/data\"\n",
-                metadata: "/data",
-                data: &["/data"],
-            },
-            Case {
-                what: "the file",
-                flags: &[],
-                toml: "log_dir = \"/data\"\nmetadata_log_dir = \"/meta\"\n",
-                metadata: "/meta",
-                data: &["/data"],
-            },
-            Case {
-                what: "the flag over the file",
-                flags: &["--metadata-log-dir=/flag"],
-                toml: "log_dir = \"/data\"\nmetadata_log_dir = \"/meta\"\n",
-                metadata: "/flag",
-                data: &["/data"],
-            },
-            Case {
-                what: "one of the data directories",
-                flags: &["--metadata-log-dir=/more"],
-                toml: "log_dir = \"/data\"\nextra_log_dirs = [\"/more\"]\n",
-                metadata: "/more",
-                data: &["/data", "/more"],
-            },
-        ];
-        for Case {
-            what,
-            flags,
-            toml,
-            metadata,
-            data,
-        } in cases
-        {
-            let config = configured(flags, toml).unwrap_or_else(|error| panic!("{what}: {error}"));
-            assert!(
-                (config.metadata_dir().to_path_buf(), config.all_log_dirs())
-                    == (
-                        std::path::PathBuf::from(metadata),
-                        data.iter()
-                            .map(std::path::PathBuf::from)
-                            .collect::<Vec<_>>()
-                    ),
-                "{what}"
-            );
-        }
+    #[yare::parameterized(
+        neither = { &[] as &'static [&'static str], "log_dir = \"/data\"\n", "/data", &["/data"] },
+        file = {
+            &[] as &'static [&'static str],
+            "log_dir = \"/data\"\nmetadata_log_dir = \"/meta\"\n",
+            "/meta",
+            &["/data"],
+        },
+        flag_over_file = {
+            &["--metadata-log-dir=/flag"],
+            "log_dir = \"/data\"\nmetadata_log_dir = \"/meta\"\n",
+            "/flag",
+            &["/data"],
+        },
+        data_directory = {
+            &["--metadata-log-dir=/more"],
+            "log_dir = \"/data\"\nextra_log_dirs = [\"/more\"]\n",
+            "/more",
+            &["/data", "/more"],
+        },
+    )]
+    fn the_metadata_log_directory_comes_from_the_flag_then_the_file_then_log_dir(
+        flags: &'static [&'static str],
+        toml: &'static str,
+        metadata: &'static str,
+        data: &'static [&'static str],
+    ) {
+        let config = configured(flags, toml).expect("the config assembles");
+        assert2::assert!(
+            (config.metadata_dir().to_path_buf(), config.all_log_dirs())
+                == (
+                    std::path::PathBuf::from(metadata),
+                    data.iter()
+                        .map(std::path::PathBuf::from)
+                        .collect::<Vec<_>>()
+                )
+        );
     }
 
-    #[test]
-    fn the_flag_wins_over_the_file_and_the_file_over_the_default() {
-        struct Case {
-            name: &'static str,
-            flags: &'static [&'static str],
-            toml: &'static str,
-            id: i32,
-        }
-        let cases: [Case; 4] = [
-            Case {
-                name: "the file alone",
-                flags: &[],
-                toml: "broker_id = 2\n",
-                id: 2,
-            },
-            Case {
-                name: "the flag over the file",
-                flags: &["--broker-id=7"],
-                toml: "broker_id = 2\n",
-                id: 7,
-            },
-            Case {
-                name: "the flag alone",
-                flags: &["--broker-id=7"],
-                toml: "",
-                id: 7,
-            },
-            Case {
-                name: "neither",
-                flags: &[],
-                toml: "",
-                id: krabka_broker::config::DEFAULT_BROKER_ID,
-            },
-        ];
-        for Case {
-            name,
-            flags,
-            toml,
-            id,
-        } in cases
-        {
-            let config = configured(flags, toml).unwrap_or_else(|error| panic!("{name}: {error}"));
-            let node_id = krabka_broker::NodeId(u64::try_from(id).expect("a positive id"));
-            assert!(
-                (config.broker_id, config.node_id) == (id, node_id),
-                "{name}"
-            );
-        }
+    #[yare::parameterized(
+        file_alone = { &[] as &'static [&'static str], "broker_id = 2\n", 2 },
+        flag_over_file = { &["--broker-id=7"], "broker_id = 2\n", 7 },
+        flag_alone = { &["--broker-id=7"], "", 7 },
+        neither = { &[] as &'static [&'static str], "", krabka_broker::config::DEFAULT_BROKER_ID },
+    )]
+    fn the_flag_wins_over_the_file_and_the_file_over_the_default(
+        flags: &'static [&'static str],
+        toml: &'static str,
+        id: i32,
+    ) {
+        let config = configured(flags, toml).expect("the config assembles");
+        let node_id = krabka_broker::NodeId(u64::try_from(id).expect("a positive id"));
+        assert2::assert!((config.broker_id, config.node_id) == (id, node_id));
     }
 
     #[test]

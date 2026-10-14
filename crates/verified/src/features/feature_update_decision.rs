@@ -4,13 +4,10 @@ use super::{
 #[cfg(creusot)]
 use creusot_std::prelude::*;
 
-// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
-#[cfg(creusot)]
-#[cfg_attr(test, mutants::skip)]
-#[logic(open)]
-/// The reference decision: the first failed rule in `updateFeature`'s
-/// order, or what the admitted row does.
-pub fn feature_update_model(facts: FeatureUpdateFacts) -> FeatureUpdateDecision {
+crate::creusot_open_spec! {
+    /// The reference decision: the first failed rule in `updateFeature`'s
+    /// order, or what the admitted row does.
+    pub fn feature_update_model(facts: FeatureUpdateFacts) -> FeatureUpdateDecision {
     pearlite! {
         match facts.update_type {
             None => FeatureUpdateDecision::UnknownUpdateType,
@@ -55,6 +52,7 @@ pub fn feature_update_model(facts: FeatureUpdateFacts) -> FeatureUpdateDecision 
                 }
             }
         }
+    }
     }
 }
 

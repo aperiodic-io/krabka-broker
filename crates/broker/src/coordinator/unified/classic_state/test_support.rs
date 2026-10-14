@@ -2,16 +2,7 @@
 
 use {super::member::Member, bytes::Bytes, std::time::Duration};
 
-pub(super) fn sample_member(id: &str) -> Member {
-    Member::new(
-        id,
-        "test-client",
-        "127.0.0.1",
-        Duration::from_secs(30),
-        Duration::from_mins(1),
-        vec![("range".into(), Bytes::new())],
-    )
-}
+pub(super) fn sample_member(id: &str) -> Member { member_with_protocols(id, vec![("range", &[])]) }
 
 pub(super) fn member_with_protocols(id: &str, protocols: Vec<(&str, &[u8])>) -> Member {
     Member::new(

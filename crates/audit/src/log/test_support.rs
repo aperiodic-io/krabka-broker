@@ -210,17 +210,7 @@ pub fn params(sink: Arc<dyn AuditSink>, spool: Spool, stats: Arc<AuditStats>) ->
 }
 
 /// A count of accepted audit events.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
+#[krabka_macros::test_scalar]
 pub struct AuditEventCount(pub u64);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

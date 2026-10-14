@@ -127,22 +127,20 @@ mod tests {
         assert!(!generated.contains("pubconstRELEASE"));
     }
 
-    #[test]
-    fn rejects_missing_sections_duplicates_bad_values_and_trailing_tokens() {
-        for input in [
-            "release R {} trunk T {}",
-            "trunk T {} release R {} private P {}",
-            "release R {} trunk R {} private P {}",
-            "release R { A = 0; } trunk T { A = 1; } private P {}",
-            "release R { A = 32768; } trunk T {} private P {}",
-            "release R { A = -32769; } trunk T {} private P {}",
-            "release R { A = 1.5; } trunk T {} private P {}",
-            "release R { A = 1 + 2; } trunk T {} private P {}",
-            "release R { A = 1 } trunk T {} private P {}",
-            "release R [] trunk T {} private P {}",
-            "release R {} trunk T {} private P {} extra",
-        ] {
-            assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        missing_private = { "release R {} trunk T {}" },
+        out_of_order = { "trunk T {} release R {} private P {}" },
+        duplicate_name = { "release R {} trunk R {} private P {}" },
+        duplicate_value = { "release R { A = 0; } trunk T { A = 1; } private P {}" },
+        too_positive = { "release R { A = 32768; } trunk T {} private P {}" },
+        too_negative = { "release R { A = -32769; } trunk T {} private P {}" },
+        float = { "release R { A = 1.5; } trunk T {} private P {}" },
+        expression = { "release R { A = 1 + 2; } trunk T {} private P {}" },
+        missing_semicolon = { "release R { A = 1 } trunk T {} private P {}" },
+        bracketed = { "release R [] trunk T {} private P {}" },
+        trailing = { "release R {} trunk T {} private P {} extra" },
+    )]
+    fn rejects_missing_sections_duplicates_bad_values_and_trailing_tokens(input: &str) {
+        assert2::assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

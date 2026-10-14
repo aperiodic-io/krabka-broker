@@ -24,6 +24,23 @@ pub(super) const OPERATION_WRITE: i8 = 4;
 pub(super) const PERMISSION_ANY: i8 = 1;
 pub(super) const PERMISSION_ALLOW: i8 = 3;
 
+macro_rules! acl_request_filter {
+    ($request:ident, $resource_name:expr, $principal:expr, $operation:expr) => {
+        $request {
+            resource_type_filter: $crate::handlers::acl_test_support::RESOURCE_TYPE_TOPIC,
+            resource_name_filter: $resource_name.map(Into::into),
+            pattern_type_filter: $crate::handlers::acl_test_support::PATTERN_TYPE_LITERAL,
+            principal_filter: $principal.map(Into::into),
+            host_filter: Some("*".into()),
+            operation: $operation,
+            permission_type: $crate::handlers::acl_test_support::PERMISSION_ALLOW,
+            ..Default::default()
+        }
+    };
+}
+
+pub(super) use acl_request_filter;
+
 /// An explicitly configured authorizer with `admin` as its only super user.
 pub(super) fn configured_authorizer() -> Arc<dyn Authorizer> {
     Arc::new(SimpleAclAuthorizer::new(

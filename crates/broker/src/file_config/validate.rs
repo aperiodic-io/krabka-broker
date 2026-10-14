@@ -333,71 +333,71 @@ mod tests {
         );
     }
 
-    #[test]
-    fn runtime_file_config_rejects_fractional_protocol_milliseconds() {
-        for (field, source) in [
-            (
-                "client_metrics_default_interval",
-                "[runtime]\nclient_metrics_default_interval = \"1.5ms\"\n",
-            ),
-            (
-                "producer_id_expiration",
-                "[runtime]\nproducer_id_expiration = \"1.5ms\"\n",
-            ),
-        ] {
-            let error = configured(source, "parse runtime config")
-                .expect_err("fractional protocol milliseconds must fail");
-            assert!(error.to_string().contains(field));
-        }
+    #[yare::parameterized(
+        client_metrics_default_interval = {
+            "client_metrics_default_interval",
+            "[runtime]\nclient_metrics_default_interval = \"1.5ms\"\n",
+        },
+        producer_id_expiration = {
+            "producer_id_expiration",
+            "[runtime]\nproducer_id_expiration = \"1.5ms\"\n",
+        },
+    )]
+    fn runtime_file_config_rejects_fractional_protocol_milliseconds(field: &str, source: &str) {
+        let error = configured(source, "parse runtime config")
+            .expect_err("fractional protocol milliseconds must fail");
+        assert2::assert!(error.to_string().contains(field));
     }
     /// Both KIP-98 expiry knobs are Kafka `ConfigDef.Type::INT`, so a value
     /// wider than an `i32` of milliseconds, or a fractional one, is refused
     /// with the field named. The expiry itself must run, matching Kafka's
     /// `atLeast(1)`; zero on the sweep cadence disables the sweep and is
     /// accepted.
-    #[test]
-    fn runtime_file_config_bounds_the_transactional_id_expiry_knobs_to_an_i32() {
-        for (label, source, field) in [
-            (
-                "an expiry above the i32 millisecond ceiling",
-                "[runtime]\ntxn_id_expiration = \"2147483648ms\"\n",
-                Some("txn_id_expiration"),
-            ),
-            (
-                "a zero expiry, which Kafka's atLeast(1) refuses",
-                "[runtime]\ntxn_id_expiration = \"0ms\"\n",
-                Some("txn_id_expiration"),
-            ),
-            (
-                "a fractional expiry",
-                "[runtime]\ntxn_id_expiration = \"1.5ms\"\n",
-                Some("txn_id_expiration"),
-            ),
-            (
-                "a sweep cadence above the i32 millisecond ceiling",
-                "[runtime]\ntxn_id_expiration_cleanup_interval = \"2147483648ms\"\n",
-                Some("txn_id_expiration_cleanup_interval"),
-            ),
-            (
-                "a zero sweep cadence, which disables the sweep",
-                "[runtime]\ntxn_id_expiration_cleanup_interval = \"0ms\"\n",
-                None,
-            ),
-        ] {
-            let result = configured(source, "parse runtime config");
+    #[yare::parameterized(
+        expiry_above_i32_limit = {
+            "an expiry above the i32 millisecond ceiling",
+            "[runtime]\ntxn_id_expiration = \"2147483648ms\"\n",
+            Some("txn_id_expiration"),
+        },
+        zero_expiry = {
+            "a zero expiry, which Kafka's atLeast(1) refuses",
+            "[runtime]\ntxn_id_expiration = \"0ms\"\n",
+            Some("txn_id_expiration"),
+        },
+        fractional_expiry = {
+            "a fractional expiry",
+            "[runtime]\ntxn_id_expiration = \"1.5ms\"\n",
+            Some("txn_id_expiration"),
+        },
+        sweep_above_i32_limit = {
+            "a sweep cadence above the i32 millisecond ceiling",
+            "[runtime]\ntxn_id_expiration_cleanup_interval = \"2147483648ms\"\n",
+            Some("txn_id_expiration_cleanup_interval"),
+        },
+        zero_sweep_is_accepted = {
+            "a zero sweep cadence, which disables the sweep",
+            "[runtime]\ntxn_id_expiration_cleanup_interval = \"0ms\"\n",
+            None,
+        },
+    )]
+    fn runtime_file_config_bounds_the_transactional_id_expiry_knobs_to_an_i32(
+        label: &str,
+        source: &str,
+        field: Option<&str>,
+    ) {
+        let result = configured(source, "parse runtime config");
 
-            if let Some(field) = field {
-                let error = result.expect_err(label);
-                check!(error.to_string().contains(field), "{label}");
-            } else {
-                check!(result.is_ok(), "{label}");
-                let cfg = result.unwrap();
-                check!(
-                    cfg.txn_id_expiration_cleanup_interval
-                        == <krabka_units::Time as krabka_units::convert::TimeExt>::ZERO,
-                    "{label}"
-                );
-            }
+        if let Some(field) = field {
+            let error = result.expect_err(label);
+            check!(error.to_string().contains(field), "{label}");
+        } else {
+            check!(result.is_ok(), "{label}");
+            let cfg = result.unwrap();
+            check!(
+                cfg.txn_id_expiration_cleanup_interval
+                    == <krabka_units::Time as krabka_units::convert::TimeExt>::ZERO,
+                "{label}"
+            );
         }
     }
 
@@ -406,162 +406,153 @@ mod tests {
     /// source is provenance. Supplying Kafka's own default is the case that
     /// separates the two: `apache/kafka:4.3.1` still reports
     /// `STATIC_BROKER_CONFIG` for it, so krabka has to know the key was named.
-    #[test]
-    fn runtime_file_config_records_which_expiry_knobs_the_operator_supplied() {
-        for (label, source, expected) in [
-            (
-                "nothing supplied",
-                "[runtime]\n",
-                expected_origins(false, false),
-            ),
-            (
-                "the expiry supplied, at Kafka's own default value",
-                "[runtime]\ntxn_id_expiration = \"604800000ms\"\n",
-                expected_origins(true, false),
-            ),
-            (
-                "both supplied",
-                "[runtime]\ntxn_id_expiration = \"120000ms\"\n\
-                 txn_id_expiration_cleanup_interval = \"60000ms\"\n",
-                expected_origins(true, true),
-            ),
-            (
-                "the KIP-464 topic-creation defaults supplied, at Kafka's own default value",
-                "[runtime]\nnum_partitions = 1\ndefault_replication_factor = 1\n",
-                StaticConfigOrigins {
-                    topic_creation: TopicCreationOrigins {
-                        num_partitions: true,
-                        default_replication_factor: true,
-                    },
-                    ..expected_origins(false, false)
+    #[yare::parameterized(
+        nothing_supplied = {
+            "nothing supplied",
+            "[runtime]\n",
+            expected_origins(false, false),
+        },
+        expiry_at_kafka_default = {
+            "the expiry supplied, at Kafka's own default value",
+            "[runtime]\ntxn_id_expiration = \"604800000ms\"\n",
+            expected_origins(true, false),
+        },
+        both_expiry_knobs_supplied = {
+            "both supplied",
+            "[runtime]\ntxn_id_expiration = \"120000ms\"\n\
+             txn_id_expiration_cleanup_interval = \"60000ms\"\n",
+            expected_origins(true, true),
+        },
+        topic_creation_defaults_supplied = {
+            "the KIP-464 topic-creation defaults supplied, at Kafka's own default value",
+            "[runtime]\nnum_partitions = 1\ndefault_replication_factor = 1\n",
+            StaticConfigOrigins {
+                topic_creation: TopicCreationOrigins {
+                    num_partitions: true,
+                    default_replication_factor: true,
                 },
-            ),
-            (
-                "the log defaults that back a topic key supplied, at Kafka's own default value",
-                "[runtime]\nmessage_max_bytes = \"1048588B\"\nlog_segment_bytes = \"1GiB\"\n\
-                 default_min_insync_replicas = 1\n",
-                StaticConfigOrigins {
-                    log: LogOrigins {
-                        message_max_bytes: true,
-                        log_segment_bytes: true,
-                        min_insync_replicas: true,
-                    },
-                    ..expected_origins(false, false)
+                ..expected_origins(false, false)
+            },
+        },
+        log_defaults_supplied = {
+            "the log defaults that back a topic key supplied, at Kafka's own default value",
+            "[runtime]\nmessage_max_bytes = \"1048588B\"\nlog_segment_bytes = \"1GiB\"\n\
+                     default_min_insync_replicas = 1\n",
+            StaticConfigOrigins {
+                log: LogOrigins {
+                    message_max_bytes: true,
+                    log_segment_bytes: true,
+                    min_insync_replicas: true,
                 },
-            ),
-            (
-                "the authentication limits supplied, at Kafka's own default value",
-                "[runtime]\nsasl_server_max_receive = \"524288B\"\n\
-                 connection_failed_authentication_delay = \"100ms\"\n",
-                StaticConfigOrigins {
-                    authentication: AuthenticationOrigins {
-                        sasl_server_max_receive: true,
-                        connection_failed_authentication_delay: true,
-                    },
-                    ..expected_origins(false, false)
+                ..expected_origins(false, false)
+            },
+        },
+        authentication_limits_supplied = {
+            "the authentication limits supplied, at Kafka's own default value",
+            "[runtime]\nsasl_server_max_receive = \"524288B\"\n\
+                     connection_failed_authentication_delay = \"100ms\"\n",
+            StaticConfigOrigins {
+                authentication: AuthenticationOrigins {
+                    sasl_server_max_receive: true,
+                    connection_failed_authentication_delay: true,
                 },
-            ),
-        ] {
-            let cfg = configured(source, "parse runtime config").expect("apply runtime config");
+                ..expected_origins(false, false)
+            },
+        },
+    )]
+    fn runtime_file_config_records_which_expiry_knobs_the_operator_supplied(
+        label: &str,
+        source: &str,
+        expected: StaticConfigOrigins,
+    ) {
+        let cfg = configured(source, "parse runtime config").expect("apply runtime config");
 
-            check!(cfg.static_config_origins == expected, "{label}");
-        }
+        check!(cfg.static_config_origins == expected, "{label}");
     }
 
-    #[test]
-    fn runtime_file_config_rejects_invalid_dimensioned_sizes_and_ratios() {
-        for field in [
-            "client_metrics_telemetry_max",
-            "replication_fetch_max",
-            "replication_fetch_min",
-            "observer_fetch_max",
-            "audit_tail_read_max",
-            "share_coordinator_load_buffer_size",
-            "socket_request_max",
-            "sasl_server_max_receive",
-            "sendfile_min",
-            "socket_send_buffer",
-            "socket_receive_buffer",
-            "record_decompression_output_floor",
-            "record_decompression_output_ceiling",
-            // `message_max_bytes` is deliberately absent: Kafka declares it an
-            // `INT` with `atLeast(0)` and `apache/kafka:4.3.1` boots on
-            // `message.max.bytes=0`, so zero is a value and not an error.
-            // `message_max_bytes_takes_kafkas_int_at_least_zero` in
-            // `runtime_storage` covers its whole domain.
-            "future_log_move_read_chunk",
-            "metadata_max_bytes_between_snapshots",
-            "metadata_snapshot_fetch_max",
-        ] {
-            let source = format!("[runtime]\n{field} = \"0B\"\n");
-            let error =
-                configured(&source, "parse runtime config").expect_err("zero byte size must fail");
-            assert!(error.to_string().contains(field), "{error}");
-        }
-
-        let field = "record_decompression_max_ratio";
-        let source = format!("[runtime]\n{field} = \"0\"\n");
+    #[yare::parameterized(
+        client_metrics_telemetry_max = { "client_metrics_telemetry_max", "0B" },
+        replication_fetch_max = { "replication_fetch_max", "0B" },
+        replication_fetch_min = { "replication_fetch_min", "0B" },
+        observer_fetch_max = { "observer_fetch_max", "0B" },
+        audit_tail_read_max = { "audit_tail_read_max", "0B" },
+        share_coordinator_load_buffer_size = { "share_coordinator_load_buffer_size", "0B" },
+        socket_request_max = { "socket_request_max", "0B" },
+        sasl_server_max_receive = { "sasl_server_max_receive", "0B" },
+        sendfile_min = { "sendfile_min", "0B" },
+        socket_send_buffer = { "socket_send_buffer", "0B" },
+        socket_receive_buffer = { "socket_receive_buffer", "0B" },
+        record_decompression_output_floor = { "record_decompression_output_floor", "0B" },
+        record_decompression_output_ceiling = { "record_decompression_output_ceiling", "0B" },
+        future_log_move_read_chunk = { "future_log_move_read_chunk", "0B" },
+        metadata_max_bytes_between_snapshots = { "metadata_max_bytes_between_snapshots", "0B" },
+        metadata_snapshot_fetch_max = { "metadata_snapshot_fetch_max", "0B" },
+        record_decompression_max_ratio = { "record_decompression_max_ratio", "0" },
+    )]
+    fn runtime_file_config_rejects_invalid_dimensioned_sizes_and_ratios(field: &str, value: &str) {
+        // `message_max_bytes` is deliberately absent: Kafka declares it an
+        // `INT` with `atLeast(0)` and `apache/kafka:4.3.1` boots on
+        // `message.max.bytes=0`, so zero is a value and not an error.
+        // `message_max_bytes_takes_kafkas_int_at_least_zero` in
+        // `runtime_storage` covers its whole domain.
+        let source = format!("[runtime]\n{field} = \"{value}\"\n");
         let error =
-            configured(&source, "parse runtime config").expect_err("invalid ratio must fail");
-        assert!(error.to_string().contains(field), "{error}");
+            configured(&source, "parse runtime config").expect_err("invalid value must fail");
+        assert2::assert!(error.to_string().contains(field), "{error}");
     }
 
-    #[test]
-    fn runtime_file_config_rejects_fractional_and_overflowing_sizes() {
-        for (field, value) in [
-            ("client_metrics_telemetry_max", "1.5B"),
-            ("replication_fetch_max", "2147483648B"),
-            ("fetch_max_bytes", "2147483648B"),
-            ("observer_fetch_max", "4294967296B"),
-            ("socket_request_max", "4294967296B"),
-            ("sasl_server_max_receive", "4294967296B"),
-            ("audit_tail_read_max", "1.5B"),
-            ("record_decompression_output_floor", "1.5B"),
-            ("record_decompression_output_ceiling", "1073741825B"),
-            (
-                "metadata_max_bytes_between_snapshots",
-                "18446744073709551616B",
-            ),
-            ("metadata_snapshot_fetch_max", "1.5B"),
-            ("metadata_snapshot_fetch_max", "1073741825B"),
-            ("message_max_bytes", "1.5B"),
-            ("message_max_bytes", "2147483648B"),
-        ] {
-            let source = format!("[runtime]\n{field} = \"{value}\"\n");
-            let error = configured(&source, "parse runtime config")
-                .expect_err("fractional or overflowing byte size must fail");
-            let expected = if field == "record_decompression_output_ceiling" {
-                "record_decompression"
-            } else {
-                field
-            };
-            assert!(error.to_string().contains(expected), "{error}");
-        }
+    #[yare::parameterized(
+        client_metrics_fractional = { "client_metrics_telemetry_max", "1.5B" },
+        replication_fetch_overflow = { "replication_fetch_max", "2147483648B" },
+        fetch_max_overflow = { "fetch_max_bytes", "2147483648B" },
+        observer_fetch_overflow = { "observer_fetch_max", "4294967296B" },
+        socket_request_overflow = { "socket_request_max", "4294967296B" },
+        sasl_server_overflow = { "sasl_server_max_receive", "4294967296B" },
+        audit_tail_fractional = { "audit_tail_read_max", "1.5B" },
+        decompression_floor_fractional = { "record_decompression_output_floor", "1.5B" },
+        decompression_ceiling_overflow = {
+            "record_decompression_output_ceiling",
+            "1073741825B",
+        },
+        metadata_snapshot_bytes_overflow = {
+            "metadata_max_bytes_between_snapshots",
+            "18446744073709551616B",
+        },
+        snapshot_fetch_fractional = { "metadata_snapshot_fetch_max", "1.5B" },
+        snapshot_fetch_overflow = { "metadata_snapshot_fetch_max", "1073741825B" },
+        message_max_fractional = { "message_max_bytes", "1.5B" },
+        message_max_overflow = { "message_max_bytes", "2147483648B" },
+    )]
+    fn runtime_file_config_rejects_fractional_and_overflowing_sizes(field: &str, value: &str) {
+        let source = format!("[runtime]\n{field} = \"{value}\"\n");
+        let error = configured(&source, "parse runtime config")
+            .expect_err("fractional or overflowing byte size must fail");
+        let expected = if field == "record_decompression_output_ceiling" {
+            "record_decompression"
+        } else {
+            field
+        };
+        assert2::assert!(error.to_string().contains(expected), "{error}");
     }
 
-    #[test]
-    fn metadata_max_snapshot_interval_accepts_zero_and_whole_millis_only() {
-        for (source, expect_ok) in [
-            (
-                "[runtime]\nmetadata_max_snapshot_interval = \"0ms\"\n",
-                true,
-            ),
-            (
-                "[runtime]\nmetadata_max_snapshot_interval = \"1ms\"\n",
-                true,
-            ),
-            ("[runtime]\nmetadata_max_snapshot_interval = \"1h\"\n", true),
-            // A positive sub-millisecond value truncates to 0ms under
-            // `millis_i64()`, which the engine reads as "disabled" — so it
-            // must be rejected here rather than silently doing nothing.
-            (
-                "[runtime]\nmetadata_max_snapshot_interval = \"250us\"\n",
-                false,
-            ),
-        ] {
-            let result = configured(source, "parse runtime config");
-            assert!(result.is_ok() == expect_ok, "{source}: {result:?}");
-        }
+    #[yare::parameterized(
+        zero = { "[runtime]\nmetadata_max_snapshot_interval = \"0ms\"\n", true },
+        one_millisecond = { "[runtime]\nmetadata_max_snapshot_interval = \"1ms\"\n", true },
+        one_hour = { "[runtime]\nmetadata_max_snapshot_interval = \"1h\"\n", true },
+        // A positive sub-millisecond value truncates to 0ms under
+        // `millis_i64()`, which the engine reads as "disabled" — so it
+        // must be rejected here rather than silently doing nothing.
+        positive_submillisecond = {
+            "[runtime]\nmetadata_max_snapshot_interval = \"250us\"\n",
+            false,
+        },
+    )]
+    fn metadata_max_snapshot_interval_accepts_zero_and_whole_millis_only(
+        source: &str,
+        expect_ok: bool,
+    ) {
+        let result = configured(source, "parse runtime config");
+        assert2::assert!(result.is_ok() == expect_ok, "{source}: {result:?}");
     }
 
     /// Each of the five `MetadataLogConfig` keys takes the domain Kafka's

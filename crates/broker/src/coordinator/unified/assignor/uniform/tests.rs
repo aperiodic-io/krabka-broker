@@ -70,6 +70,19 @@ fn member(id: &str, topics: &[Uuid], current: Partitions<'_>) -> MemberSubscript
     }
 }
 
+fn uneven_two_topic_members(primary: Uuid, secondary: Uuid) -> Vec<MemberSubscription> {
+    vec![
+        member("A", &[primary, secondary], &[
+            owns(primary, &[0, 2]),
+            owns(secondary, &[0]),
+        ]),
+        member("B", &[primary, secondary], &[
+            owns(primary, &[1]),
+            owns(secondary, &[1, 2]),
+        ]),
+    ]
+}
+
 fn group(subscription_type: SubscriptionType, members: Vec<MemberSubscription>) -> GroupSpec {
     GroupSpec {
         members,
@@ -166,24 +179,30 @@ fn homogeneous_builder_matches_kafka_scenarios() {
     run(homogeneous_rows_late());
 }
 
+#[bon::builder]
+fn empty_homogeneous_assignment(
+    name: &'static str,
+    #[builder(default = &[])] subscriptions: &[Uuid],
+) -> Scenario<'static> {
+    Scenario {
+        name,
+        group: group(HOMOGENEOUS, vec![member("A", subscriptions, &[])]),
+        topics: metadata(&[sized(tid(1), 3)]),
+        expected: assignment(&[expects("A", &[])]),
+    }
+}
+
 fn homogeneous_rows_early() -> Vec<Scenario<'static>> {
     let (first, second) = (tid(1), tid(2));
     vec![
-        Scenario {
-            name: "testOneMemberNoTopicSubscription",
-            group: group(HOMOGENEOUS, vec![member("A", &[], &[])]),
-            topics: metadata(&[sized(first, 3)]),
-            expected: assignment(&[expects("A", &[])]),
-        },
-        Scenario {
-            // Kafka throws PartitionAssignorException. The reconciler
-            // resolves subscriptions from the same snapshot, so a missing
-            // topic is skipped instead.
-            name: "testOneMemberSubscribedToNonexistentTopic",
-            group: group(HOMOGENEOUS, vec![member("A", &[second], &[])]),
-            topics: metadata(&[sized(first, 3)]),
-            expected: assignment(&[expects("A", &[])]),
-        },
+        empty_homogeneous_assignment()
+            .name("testOneMemberNoTopicSubscription")
+            .call(),
+        // The reconciler skips a topic absent from the subscription snapshot.
+        empty_homogeneous_assignment()
+            .name("testOneMemberSubscribedToNonexistentTopic")
+            .subscriptions(&[second])
+            .call(),
         Scenario {
             // Kafka's HashSet visits topic3 before topic1.
             name: "testFirstAssignmentTwoMembersTwoTopicsNoMemberRacks",
@@ -234,20 +253,13 @@ fn homogeneous_rows_early() -> Vec<Scenario<'static>> {
 
 fn homogeneous_rows_late() -> Vec<Scenario<'static>> {
     let (first, second) = (tid(1), tid(2));
+    let mut growing_members = uneven_two_topic_members(first, second);
+    growing_members.push(member("C", &[first, second], &[]));
     vec![
         Scenario {
             // Kafka's HashSet visits topic2 before topic1.
             name: "testReassignmentWhenPartitionsAreAddedForTwoMembersTwoTopics",
-            group: group(HOMOGENEOUS, vec![
-                member("A", &[second, first], &[
-                    owns(second, &[0, 2]),
-                    owns(first, &[0]),
-                ]),
-                member("B", &[second, first], &[
-                    owns(second, &[1]),
-                    owns(first, &[1, 2]),
-                ]),
-            ]),
+            group: group(HOMOGENEOUS, uneven_two_topic_members(second, first)),
             topics: metadata(&[sized(second, 6), sized(first, 5)]),
             expected: assignment(&[
                 expects("A", &[owns(second, &[0, 2]), owns(first, &[0, 3, 4])]),
@@ -256,17 +268,7 @@ fn homogeneous_rows_late() -> Vec<Scenario<'static>> {
         },
         Scenario {
             name: "testReassignmentWhenOneMemberAddedAfterInitialAssignmentWithTwoMembersTwoTopics",
-            group: group(HOMOGENEOUS, vec![
-                member("A", &[first, second], &[
-                    owns(first, &[0, 2]),
-                    owns(second, &[0]),
-                ]),
-                member("B", &[first, second], &[
-                    owns(first, &[1]),
-                    owns(second, &[1, 2]),
-                ]),
-                member("C", &[first, second], &[]),
-            ]),
+            group: group(HOMOGENEOUS, growing_members),
             topics: metadata(&[sized(first, 3), sized(second, 3)]),
             expected: assignment(&[
                 expects("A", &[owns(first, &[0, 2])]),

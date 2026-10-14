@@ -80,8 +80,7 @@ impl ProcessState {
             .member_task_counts
             .iter()
             .min_by_key(|(member_id, count)| (**count, (*member_id).clone()))
-            .map(|(member_id, _)| member_id.clone())
-            .unwrap_or_default();
+            .map_or_default(|(member_id, _)| member_id.clone());
         self.add_task(&member_id, task, is_active)
     }
 }

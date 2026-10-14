@@ -64,58 +64,79 @@ mod tests {
         uuid::Uuid,
     };
 
+    fn describe_quorum_request_body(version: i16, topic: &str, partition: i32) -> Bytes {
+        use krabka_protocol::Encode as _;
+
+        let request = quorum_request(topic, partition);
+        let mut buf = BytesMut::new();
+        request.encode(&mut buf, version).expect("encode request");
+        buf.freeze()
+    }
+
     /// The listener answers `DescribeQuorum` from the live engine: the
     /// elected leader describes the metadata partition, and a request for
     /// another partition gets `UNKNOWN_TOPIC_OR_PARTITION`. The response rows
     /// are covered as whole structs in `server::describe_quorum`.
-    #[tokio::test]
-    async fn describe_quorum_answers_only_for_the_metadata_partition() {
-        use krabka_protocol::{
-            Encode as _,
-            owned::{describe_quorum_request, describe_quorum_response::DescribeQuorumResponse},
+    #[yare::parameterized(
+        metadata_partition = { "the metadata partition", "__cluster_metadata", 0, 0, 1 },
+        another_topic = { "another topic", "orders", 0, 3, 0 },
+        another_partition = { "another partition", "__cluster_metadata", 7, 3, 0 },
+    )]
+    #[test_macro(tokio::test)]
+    async fn describe_quorum_answers_only_for_the_metadata_partition(
+        label: &'static str,
+        topic: &'static str,
+        index: i32,
+        error_code: i16,
+        leader_id: i32,
+    ) {
+        use krabka_protocol::owned::{
+            describe_quorum_request, describe_quorum_response::DescribeQuorumResponse,
         };
-
-        fn body(version: i16, topic: &str, partition: i32) -> Bytes {
-            let request = quorum_request(topic, partition);
-            let mut buf = BytesMut::new();
-            request.encode(&mut buf, version).expect("encode request");
-            buf.freeze()
-        }
 
         let version = describe_quorum_request::MAX_VERSION;
         let (engine, _dir) = single_voter_engine();
         wait_for_leader(&engine).await;
 
-        // (label, topic, partition, error code, leader id)
-        for (label, topic, index, error_code, leader_id) in [
-            ("the metadata partition", "__cluster_metadata", 0, 0, 1),
-            ("another topic", "orders", 0, 3, 0),
-            ("another partition", "__cluster_metadata", 7, 3, 0),
-        ] {
-            let answered = describe_quorum_response(version, &body(version, topic, index), &engine)
-                .await
-                .expect("an answer");
-            let decoded =
-                DescribeQuorumResponse::decode(&mut &answered[..], version).expect("decode");
-            let partition = &decoded.topics[0].partitions[0];
-            check!(
-                (
-                    partition.partition_index,
-                    partition.error_code,
-                    partition.leader_id
-                ) == (index, error_code, leader_id),
-                "{label}"
-            );
-        }
+        let answered = describe_quorum_response(
+            version,
+            &describe_quorum_request_body(version, topic, index),
+            &engine,
+        )
+        .await
+        .expect("an answer");
+        let decoded = DescribeQuorumResponse::decode(&mut &answered[..], version).expect("decode");
+        let partition = &decoded.topics[0].partitions[0];
+        check!(
+            (
+                partition.partition_index,
+                partition.error_code,
+                partition.leader_id
+            ) == (index, error_code, leader_id),
+            "{label}"
+        );
+    }
 
-        // A voter of a two-voter quorum with no leader yet leads nothing.
+    #[tokio::test]
+    async fn describe_quorum_without_a_leader_reports_no_leader() {
+        use krabka_protocol::owned::describe_quorum_request;
+
+        let version = describe_quorum_request::MAX_VERSION;
         let (follower, _follower_dir) =
             test_engine_with_voters(1, [voter(1, vec![]), voter(2, vec![])]);
-        let answered =
-            describe_quorum_response(version, &body(version, "__cluster_metadata", 0), &follower)
-                .await
-                .expect("an answer");
-        let decoded = DescribeQuorumResponse::decode(&mut &answered[..], version).expect("decode");
+        let answered = describe_quorum_response(
+            version,
+            &describe_quorum_request_body(version, "__cluster_metadata", 0),
+            &follower,
+        )
+        .await
+        .expect("an answer");
+        let decoded =
+            krabka_protocol::owned::describe_quorum_response::DescribeQuorumResponse::decode(
+                &mut &answered[..],
+                version,
+            )
+            .expect("decode");
         check!(decoded.topics[0].partitions[0].error_code == 6);
     }
 

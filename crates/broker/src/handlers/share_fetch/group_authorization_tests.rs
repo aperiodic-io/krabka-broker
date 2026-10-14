@@ -19,7 +19,7 @@ use {
         broker::{Broker, BrokerHandle},
         codes,
         handlers::test_support::{StartedBroker, create_topic as create_topic_from_test_support},
-        share_partition::session::FetchPartitions,
+        share_partition::session::{FetchPartitions, ShareFetchSessionRequest},
         test_support::{
             decode_response, encode_request, initialize_share_state, peer, principal,
             request_context, start_broker_no_audit_with, try_dispatch_context,
@@ -255,14 +255,15 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
                 .shared
                 .share_partition_leaders
                 .update_fetch_session(
-                    (GROUP, &member),
-                    ctx.connection_id,
-                    0,
-                    FetchPartitions {
-                        requested: &[(topic, 0)],
-                        forgotten: &std::collections::HashSet::new(),
-                    },
-                    false,
+                    ShareFetchSessionRequest::builder()
+                        .identity((GROUP, &member))
+                        .connection_id(ctx.connection_id)
+                        .epoch(0)
+                        .partitions(FetchPartitions {
+                            requested: &[(topic, 0)],
+                            forgotten: &std::collections::HashSet::new(),
+                        })
+                        .build(),
                 )
                 .expect("open share session");
             let request = ShareAcknowledgeRequest {

@@ -86,57 +86,47 @@ struct ChangeCase {
     expected: &'static [&'static str],
 }
 
-#[tokio::test]
-async fn optional_commit_actions_capture_first_and_notify_after_the_watermark_write() {
-    for case in [
-        ChangeCase {
-            moves_to: None,
-            hw_later: None,
-            expected: &["capture"],
-        },
-        ChangeCase {
-            moves_to: Some(LeaderMove {
-                leader: 2,
-                epoch: 9,
-            }),
-            hw_later: None,
-            expected: &["capture", "leader"],
-        },
-        ChangeCase {
-            moves_to: None,
-            hw_later: Some(12),
-            expected: &["capture", "notify"],
-        },
-        ChangeCase {
-            moves_to: Some(LeaderMove {
-                leader: 2,
-                epoch: 9,
-            }),
-            hw_later: Some(12),
-            expected: &["capture", "leader", "notify"],
-        },
-    ] {
-        let partition = Arc::new(Partition {
-            replica_state: Mutex::new(Replica { hw: Offset(0) }),
-        });
-        let events = Arc::new(StdMutex::new(Vec::new()));
-        let task = krabka_macros::schedule_commit_changes!(case, partition;
-            captures {
-                events.lock().unwrap().push("capture");
-                let events = Arc::clone(&events);
-            }
-            leader(next_leader, next_epoch) {
-                assert!(next_leader == 2 && next_epoch == 9);
-                events.lock().unwrap().push("leader");
-            }
-            notify {
-                assert!(partition.replica_state.lock().await.hw.0 == 12);
-                events.lock().unwrap().push("notify");
-            }
-        );
-        assert!(partition.replica_state.lock().await.hw.0 == 0);
-        task.await.unwrap();
-        assert!(*events.lock().unwrap() == case.expected);
-        assert!(partition.replica_state.lock().await.hw.0 == case.hw_later.unwrap_or(0));
-    }
+#[yare::parameterized(
+    capture_only = { None, None, &["capture"][..] },
+    leader_move = { Some(LeaderMove { leader: 2, epoch: 9 }), None, &["capture", "leader"][..] },
+    notify = { None, Some(12), &["capture", "notify"][..] },
+    leader_and_notify = {
+        Some(LeaderMove { leader: 2, epoch: 9 }),
+        Some(12),
+        &["capture", "leader", "notify"][..]
+    },
+)]
+#[test_macro(tokio::test)]
+async fn optional_commit_actions_capture_first_and_notify_after_the_watermark_write(
+    moves_to: Option<LeaderMove>,
+    hw_later: Option<i64>,
+    expected: &[&str],
+) {
+    let partition = Arc::new(Partition {
+        replica_state: Mutex::new(Replica { hw: Offset(0) }),
+    });
+    let events = Arc::new(StdMutex::new(Vec::new()));
+    let case = ChangeCase {
+        moves_to,
+        hw_later,
+        expected,
+    };
+    let task = krabka_macros::schedule_commit_changes!(case, partition;
+        captures {
+            events.lock().unwrap().push("capture");
+            let events = Arc::clone(&events);
+        }
+        leader(next_leader, next_epoch) {
+            assert2::assert!(next_leader == 2 && next_epoch == 9);
+            events.lock().unwrap().push("leader");
+        }
+        notify {
+            assert2::assert!(partition.replica_state.lock().await.hw.0 == 12);
+            events.lock().unwrap().push("notify");
+        }
+    );
+    assert2::assert!(partition.replica_state.lock().await.hw.0 == 0);
+    task.await.unwrap();
+    assert2::assert!(*events.lock().unwrap() == case.expected);
+    assert2::assert!(partition.replica_state.lock().await.hw.0 == case.hw_later.unwrap_or(0));
 }

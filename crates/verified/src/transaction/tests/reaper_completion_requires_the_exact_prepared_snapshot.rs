@@ -1,136 +1,130 @@
 use {super::*, assert2::assert};
 
-#[test]
-fn reaper_completion_requires_the_exact_prepared_snapshot() {
-    use TransactionReaperCompletionDecision::{
-        AlreadyComplete, Proceed, RejectChangedPreparedState, RejectMalformed, RejectStaleIdentity,
-    };
-
-    let prepared = snapshot().call();
-    let completion = snapshot().producer_epoch(4).state(COMPLETE_ABORT).call();
-    // (current, prepared, completion, exact snapshot, expected).
-    let cases = [
-        // The entry is exactly as the reaper prepared it.
-        (prepared, prepared, completion, true, Proceed),
-        (
-            snapshot().producer_id(0).producer_epoch(0).call(),
-            snapshot().producer_id(0).producer_epoch(0).call(),
-            snapshot()
-                .producer_id(0)
-                .producer_epoch(1)
-                .state(COMPLETE_ABORT)
-                .call(),
-            true,
-            Proceed,
-        ),
-        // Same identity and state, but another field of the entry moved,
-        // such as a late partition registration.
-        (
-            prepared,
-            prepared,
-            completion,
-            false,
-            RejectChangedPreparedState,
-        ),
-        // Same identity, different state: another caller moved it.
-        (
-            snapshot().state(ONGOING).call(),
-            prepared,
-            completion,
-            true,
-            RejectChangedPreparedState,
-        ),
-        // An `InitProducerId` bumped the epoch or rotated the PID.
-        (
-            snapshot().producer_epoch(5).call(),
-            prepared,
-            completion,
-            true,
-            RejectStaleIdentity,
-        ),
-        (
-            snapshot().producer_id(9).call(),
-            prepared,
-            completion,
-            false,
-            RejectStaleIdentity,
-        ),
-        // The completion identity at the prepare state is not the
-        // completion.
-        (
-            snapshot().producer_epoch(4).call(),
-            prepared,
-            completion,
-            true,
-            RejectStaleIdentity,
-        ),
-        // The intended completion is already durable, whatever the
-        // snapshot comparison says.
-        (completion, prepared, completion, false, AlreadyComplete),
-        (completion, prepared, completion, true, AlreadyComplete),
-        // A negative PID or epoch in any snapshot.
-        (
-            snapshot().producer_id(-1).call(),
-            prepared,
-            completion,
-            true,
-            RejectMalformed,
-        ),
-        (
-            snapshot().producer_epoch(-1).call(),
-            prepared,
-            completion,
-            true,
-            RejectMalformed,
-        ),
-        (
-            prepared,
-            snapshot().producer_id(-1).call(),
-            completion,
-            true,
-            RejectMalformed,
-        ),
-        (
-            prepared,
-            snapshot().producer_epoch(-1).call(),
-            completion,
-            true,
-            RejectMalformed,
-        ),
-        (
-            prepared,
-            prepared,
-            snapshot()
-                .producer_id(-1)
-                .producer_epoch(4)
-                .state(COMPLETE_ABORT)
-                .call(),
-            true,
-            RejectMalformed,
-        ),
-        (
-            prepared,
-            prepared,
-            snapshot().producer_epoch(-1).state(COMPLETE_ABORT).call(),
-            true,
-            RejectMalformed,
-        ),
-    ];
-    for (current, prepared, completion, exact, expected) in cases {
-        assert!(
-            transaction_reaper_completion_decision(current, prepared, completion, exact)
-                == expected,
-            "current={current:?}, prepared={prepared:?}, completion={completion:?}, \
-             exact={exact}"
-        );
-    }
+#[yare::parameterized(
+    prepared_exactly = {
+        snapshot().call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::Proceed,
+    },
+    zero_identity = {
+        snapshot().producer_id(0).producer_epoch(0).call(),
+        snapshot().producer_id(0).producer_epoch(0).call(),
+        snapshot().producer_id(0).producer_epoch(1).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::Proceed,
+    },
+    changed_prepared_state = {
+        snapshot().call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        false,
+        TransactionReaperCompletionDecision::RejectChangedPreparedState,
+    },
+    current_state_changed = {
+        snapshot().state(ONGOING).call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::RejectChangedPreparedState,
+    },
+    epoch_advanced = {
+        snapshot().producer_epoch(5).call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::RejectStaleIdentity,
+    },
+    pid_rotated = {
+        snapshot().producer_id(9).call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        false,
+        TransactionReaperCompletionDecision::RejectStaleIdentity,
+    },
+    completion_identity_pending = {
+        snapshot().producer_epoch(4).call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::RejectStaleIdentity,
+    },
+    already_complete_not_exact = {
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        false,
+        TransactionReaperCompletionDecision::AlreadyComplete,
+    },
+    already_complete_exact = {
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::AlreadyComplete,
+    },
+    negative_current_pid = {
+        snapshot().producer_id(-1).call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::RejectMalformed,
+    },
+    negative_current_epoch = {
+        snapshot().producer_epoch(-1).call(),
+        snapshot().call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::RejectMalformed,
+    },
+    negative_prepared_pid = {
+        snapshot().call(),
+        snapshot().producer_id(-1).call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::RejectMalformed,
+    },
+    negative_prepared_epoch = {
+        snapshot().call(),
+        snapshot().producer_epoch(-1).call(),
+        snapshot().producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::RejectMalformed,
+    },
+    negative_completion_pid = {
+        snapshot().call(),
+        snapshot().call(),
+        snapshot().producer_id(-1).producer_epoch(4).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::RejectMalformed,
+    },
+    negative_completion_epoch = {
+        snapshot().call(),
+        snapshot().call(),
+        snapshot().producer_epoch(-1).state(COMPLETE_ABORT).call(),
+        true,
+        TransactionReaperCompletionDecision::RejectMalformed,
+    },
+)]
+fn reaper_completion_requires_the_exact_prepared_snapshot(
+    current: TransactionSnapshot,
+    prepared: TransactionSnapshot,
+    completion: TransactionSnapshot,
+    exact: bool,
+    expected: TransactionReaperCompletionDecision,
+) {
+    assert2::assert!(
+        transaction_reaper_completion_decision(current, prepared, completion, exact) == expected,
+        "current={current:?}, prepared={prepared:?}, completion={completion:?}, exact={exact}"
+    );
 }
 
 #[test]
 fn partition_registration_fences_generation_and_retries_exactly() {
     use TransactionRegistrationDecision::{
         PersistRegistration, PersistRetry, RejectNotCoordinator, RejectPendingTransition,
-        RejectProducerEpoch, RejectProducerId, RejectState, RejectUnknownProducer,
+        RejectProducerEpoch, RejectProducerId, RejectState,
     };
 
     let admitted = TransactionRegistrationFacts {
@@ -157,18 +151,6 @@ fn partition_registration_fences_generation_and_retries_exactly() {
     let mut facts = admitted;
     facts.ownership.is_coordinator = false;
     assert!(transaction_partition_registration(facts) == RejectNotCoordinator);
-    for malformed in [
-        (false, true, true),
-        (true, false, true),
-        (true, true, false),
-    ] {
-        let mut facts = admitted;
-        facts.ownership.producer_id_valid = malformed.0;
-        facts.ownership.entry_exists = malformed.1;
-        facts.identity.matching.transactional_id_matches = malformed.2;
-        assert!(transaction_partition_registration(facts) == RejectUnknownProducer);
-    }
-
     // The pending-transition check runs ahead of the producer id and
     // epoch checks, so it wins even when both of those also mismatch.
     let mut facts = admitted;
@@ -202,6 +184,43 @@ fn partition_registration_fences_generation_and_retries_exactly() {
     assert!(transaction_partition_registration(facts) == PersistRegistration);
 
     assert!(transaction_partition_registration(admitted) == PersistRegistration);
+}
+
+#[yare::parameterized(
+    invalid_producer_id = { false, true, true },
+    missing_entry = { true, false, true },
+    wrong_transactional_id = { true, true, false },
+)]
+fn partition_registration_rejects_each_unknown_producer_fact(
+    producer_id_valid: bool,
+    entry_exists: bool,
+    transactional_id_matches: bool,
+) {
+    let facts = TransactionRegistrationFacts {
+        ownership: TransactionRegistrationOwnershipFacts {
+            is_coordinator: true,
+            producer_id_valid,
+            entry_exists,
+        },
+        identity: TransactionRegistrationIdentityFacts {
+            pending_transition: false,
+            matching: TransactionRegistrationIdentityMatchFacts {
+                transactional_id_matches,
+                producer_id_matches: true,
+                producer_epoch_matches: true,
+            },
+        },
+        state: TransactionRegistrationStateFacts {
+            state_allows_registration: true,
+            state_is_ongoing: true,
+            exact_partitions_registered: false,
+        },
+    };
+
+    assert2::assert!(
+        transaction_partition_registration(facts)
+            == TransactionRegistrationDecision::RejectUnknownProducer
+    );
 }
 
 #[test]

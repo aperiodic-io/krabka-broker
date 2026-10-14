@@ -99,170 +99,114 @@ fn plan(records: Vec<MetadataRecord>, features: &[&str]) -> UpdatePlan {
 
 /// The row-validation cases of krabka-io/krabka-broker#780, each against
 /// Kafka 4.3.1's `FeatureControlManager.updateFeature`.
-#[test]
-fn rows_validate_as_kafkas_update_feature() {
-    let mv = "metadata.version";
-    let group = "group.version";
-    let share = "share.version";
-    let elr = "eligible.leader.replicas.version";
-    let cases = [
-        (
-            "empty request",
-            image(&[FeatureLevel {
-                name: mv,
+#[yare::parameterized(
+    empty_request = {
+        "empty request",
+        image(&[FeatureLevel { name: "metadata.version", level: 25 }]),
+        vec![],
+        Ok(plan(vec![], &[])),
+    },
+    repeated_name_keeps_last_row = {
+        "a repeated name keeps its last row",
+        image(&[FeatureLevel { name: "metadata.version", level: 25 }]),
+        vec![named_update("group.version", 9, UPGRADE), named_update("group.version", 1, UPGRADE)],
+        Ok(plan(vec![feature_record("group.version", 1)], &["group.version"])),
+    },
+    unknown_feature_above_zero = {
+        "unknown feature above level 0",
+        image(&[FeatureLevel { name: "metadata.version", level: 25 }]),
+        vec![named_update("no.such.feature", 1, UPGRADE)],
+        Err(invalid("no.such.feature", 1, "Local controller 1 does not support this feature.")),
+    },
+    unknown_feature_at_zero = {
+        "unknown feature at level 0",
+        image(&[FeatureLevel { name: "metadata.version", level: 25 }]),
+        vec![named_update("no.such.feature", 0, SAFE)],
+        Err(invalid("no.such.feature", 0, "Feature no.such.feature not found.")),
+    },
+    level_zero_downgrade_of_unfinalized_feature = {
+        "level 0 downgrade of a feature that is not finalized",
+        image(&[FeatureLevel { name: "metadata.version", level: 25 }]),
+        vec![named_update("share.version", 0, SAFE)],
+        Ok(plan(vec![feature_record("share.version", 0)], &["share.version"])),
+    },
+    unknown_upgrade_type = {
+        "an unknown upgrade type",
+        image(&[FeatureLevel { name: "metadata.version", level: 25 }]),
+        vec![named_update("group.version", 1, 0)],
+        Err(invalid("group.version", 1, "The controller does not support the given upgrade type.")),
+    },
+    negative_level = {
+        "a negative level",
+        image(&[FeatureLevel { name: "metadata.version", level: 25 }]),
+        vec![named_update("group.version", -1, UPGRADE)],
+        Err(invalid("group.version", -1, "A feature version cannot be less than 0.")),
+    },
+    above_local_range = {
+        "a level above the local range",
+        image(&[FeatureLevel { name: "metadata.version", level: 25 }]),
+        vec![named_update("share.version", 9, UPGRADE)],
+        Err(invalid("share.version", 9, "Local controller 1 only supports versions 0-1")),
+    },
+    downgrade_without_downgrade_type = {
+        "a downgrade without a downgrade type",
+        image(&[
+            FeatureLevel {
+                name: "metadata.version",
                 level: 25,
-            }]),
-            vec![],
-            Ok(plan(vec![], &[])),
-        ),
-        (
-            "a repeated name keeps its last row",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 25,
-            }]),
-            vec![
-                named_update(group, 9, UPGRADE),
-                named_update(group, 1, UPGRADE),
-            ],
-            Ok(plan(vec![feature_record(group, 1)], &[group])),
-        ),
-        (
-            "unknown feature above level 0",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 25,
-            }]),
-            vec![named_update("no.such.feature", 1, UPGRADE)],
-            Err(invalid(
-                "no.such.feature",
-                1,
-                "Local controller 1 does not support this feature.",
-            )),
-        ),
-        (
-            "unknown feature at level 0",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 25,
-            }]),
-            vec![named_update("no.such.feature", 0, SAFE)],
-            Err(invalid(
-                "no.such.feature",
-                0,
-                "Feature no.such.feature not found.",
-            )),
-        ),
-        (
-            "level 0 downgrade of a feature that is not finalized",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 25,
-            }]),
-            vec![named_update(share, 0, SAFE)],
-            Ok(plan(vec![feature_record(share, 0)], &[share])),
-        ),
-        (
-            "an unknown upgrade type",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 25,
-            }]),
-            vec![named_update(group, 1, 0)],
-            Err(invalid(
-                group,
-                1,
-                "The controller does not support the given upgrade type.",
-            )),
-        ),
-        (
-            "a negative level",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 25,
-            }]),
-            vec![named_update(group, -1, UPGRADE)],
-            Err(invalid(
-                group,
-                -1,
-                "A feature version cannot be less than 0.",
-            )),
-        ),
-        (
-            "a level above the local range",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 25,
-            }]),
-            vec![named_update(share, 9, UPGRADE)],
-            Err(invalid(
-                share,
-                9,
-                "Local controller 1 only supports versions 0-1",
-            )),
-        ),
-        (
-            "a downgrade without a downgrade type",
-            image(&[
-                FeatureLevel {
-                    name: mv,
-                    level: 25,
-                },
-                FeatureLevel {
-                    name: group,
-                    level: 1,
-                },
-            ]),
-            vec![named_update(group, 0, UPGRADE)],
-            Err(invalid(
-                group,
-                0,
-                "Can't downgrade the version of this feature without setting the upgrade type \
-                 to either safe or unsafe downgrade.",
-            )),
-        ),
-        (
-            "a downgrade type that raises the level",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 25,
-            }]),
-            vec![named_update(group, 1, SAFE)],
-            Err(invalid(group, 1, "Can't downgrade to a newer version.")),
-        ),
-        (
-            "dependencies read the levels the request proposes",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 22,
-            }]),
-            vec![metadata_update(23, UPGRADE), elr_update(1, UPGRADE)],
-            Ok(UpdatePlan {
-                enables_elr: true,
-                ..plan(vec![feature_record(mv, 23), feature_record(elr, 1)], &[
-                    mv, elr,
-                ])
-            }),
-        ),
-        (
-            "an unmet dependency",
-            image(&[FeatureLevel {
-                name: mv,
-                level: 22,
-            }]),
-            vec![elr_update(1, UPGRADE)],
-            Err(invalid(
-                elr,
-                1,
-                "eligible.leader.replicas.version could not be set to 1 because it depends on \
-                 metadata.version level 23",
-            )),
-        ),
-    ];
-    for (case, image, updates, expected) in cases {
-        let actual = plan_updates(&validate_only(updates), &image, LOCAL);
-        assert!(actual == expected, "{case}");
-    }
+            },
+            FeatureLevel {
+                name: "group.version",
+                level: 1,
+            },
+        ]),
+        vec![named_update("group.version", 0, UPGRADE)],
+        Err(invalid(
+            "group.version",
+            0,
+            "Can't downgrade the version of this feature without setting the upgrade type to either safe or unsafe downgrade.",
+        )),
+    },
+    downgrade_type_raises_level = {
+        "a downgrade type that raises the level",
+        image(&[FeatureLevel { name: "metadata.version", level: 25 }]),
+        vec![named_update("group.version", 1, SAFE)],
+        Err(invalid("group.version", 1, "Can't downgrade to a newer version.")),
+    },
+    dependency_uses_proposed_levels = {
+        "dependencies read the levels the request proposes",
+        image(&[FeatureLevel { name: "metadata.version", level: 22 }]),
+        vec![metadata_update(23, UPGRADE), elr_update(1, UPGRADE)],
+        Ok(UpdatePlan {
+            enables_elr: true,
+            ..plan(
+                vec![
+                    feature_record("metadata.version", 23),
+                    feature_record("eligible.leader.replicas.version", 1),
+                ],
+                &["metadata.version", "eligible.leader.replicas.version"],
+            )
+        }),
+    },
+    unmet_dependency = {
+        "an unmet dependency",
+        image(&[FeatureLevel { name: "metadata.version", level: 22 }]),
+        vec![elr_update(1, UPGRADE)],
+        Err(invalid(
+            "eligible.leader.replicas.version",
+            1,
+            "eligible.leader.replicas.version could not be set to 1 because it depends on metadata.version level 23",
+        )),
+    },
+)]
+fn rows_validate_as_kafkas_update_feature(
+    case: &str,
+    image: krabka_metadata::MetadataImage,
+    updates: Vec<FeatureUpdateKey>,
+    expected: Result<UpdatePlan, UpdateError>,
+) {
+    let actual = plan_updates(&validate_only(updates), &image, LOCAL);
+    assert2::assert!(actual == expected, "{case}");
 }
 
 /// A version 0 row carries `AllowDowngrade` rather than `UpgradeType`, and
@@ -272,39 +216,48 @@ fn rows_validate_as_kafkas_update_feature() {
 /// controller supports unless `unstable.feature.versions.enable` is set, and
 /// is refused with `QuorumFeatures.reasonNotSupported`'s text, as a 4.3.1
 /// controller refuses it. With the flag set, trunk's levels are accepted.
-#[test]
-fn an_unstable_metadata_version_needs_unstable_feature_versions() {
-    let mv = "metadata.version";
-    let trunk = LocalController {
-        unstable_features: UnstableFeatureVersions::Enabled,
-        ..LOCAL
-    };
-    let refused = |level| {
-        Err(invalid(
-            mv,
-            level,
-            "Local controller 1 only supports versions 7-30",
-        ))
-    };
-    let accepted = |level| Ok(plan(vec![feature_record(mv, level)], &[mv]));
-    for (local, level, expected) in [
-        (LOCAL, 30, accepted(30)),
-        (LOCAL, 31, refused(31)),
-        (LOCAL, 33, refused(33)),
-        (trunk, 31, accepted(31)),
-        (trunk, 33, accepted(33)),
-    ] {
-        let image = image(&[FeatureLevel {
-            name: mv,
-            level: 30,
-        }]);
-        let request = validate_only(vec![metadata_update(level, UPGRADE)]);
-        assert!(
-            plan_updates(&request, &image, local) == expected,
-            "{:?} level {level}",
-            local.unstable_features
-        );
-    }
+#[yare::parameterized(
+    latest_stable_level = {
+        LOCAL,
+        30,
+        Ok(plan(vec![feature_record("metadata.version", 30)], &["metadata.version"])),
+    },
+    first_unstable_level_is_refused = {
+        LOCAL,
+        31,
+        Err(invalid("metadata.version", 31, "Local controller 1 only supports versions 7-30")),
+    },
+    higher_unstable_level_is_refused = {
+        LOCAL,
+        33,
+        Err(invalid("metadata.version", 33, "Local controller 1 only supports versions 7-30")),
+    },
+    enabled_unstable_level = {
+        LocalController { unstable_features: UnstableFeatureVersions::Enabled, ..LOCAL },
+        31,
+        Ok(plan(vec![feature_record("metadata.version", 31)], &["metadata.version"])),
+    },
+    enabled_higher_unstable_level = {
+        LocalController { unstable_features: UnstableFeatureVersions::Enabled, ..LOCAL },
+        33,
+        Ok(plan(vec![feature_record("metadata.version", 33)], &["metadata.version"])),
+    },
+)]
+fn an_unstable_metadata_version_needs_unstable_feature_versions(
+    local: LocalController,
+    level: i16,
+    expected: Result<UpdatePlan, UpdateError>,
+) {
+    let image = image(&[FeatureLevel {
+        name: "metadata.version",
+        level: 30,
+    }]);
+    let request = validate_only(vec![metadata_update(level, UPGRADE)]);
+    assert2::assert!(
+        plan_updates(&request, &image, local) == expected,
+        "{:?} level {level}",
+        local.unstable_features
+    );
 }
 
 #[test]
@@ -429,48 +382,41 @@ fn metadata_version_downgrades_follow_did_metadata_change() {
     }
 }
 
-#[test]
-fn kraft_version_rows_follow_kafka() {
-    let kraft = "kraft.version";
-    let cases = [
-        (
-            "upgrade",
-            vec![named_update(kraft, 1, UPGRADE)],
-            Ok(UpdatePlan {
-                kraft_upgrade: Some(1),
-                ..plan(vec![], &[kraft])
-            }),
-        ),
-        (
-            "upgrade to the current level",
-            vec![named_update(kraft, 0, UPGRADE)],
-            Ok(plan(vec![], &[kraft])),
-        ),
-        (
-            "a downgrade type that raises the level",
-            vec![named_update(kraft, 1, SAFE)],
-            Err(invalid(kraft, 1, "Can't downgrade to a newer version.")),
-        ),
-        (
-            "above the supported range",
-            vec![named_update(kraft, 2, UPGRADE)],
-            Err(invalid(
-                kraft,
-                2,
-                "Local controller 1 only supports versions 0-1",
-            )),
-        ),
-    ];
-    for (case, updates, expected) in cases {
-        let image = image(&[FeatureLevel {
-            name: "metadata.version",
-            level: 25,
-        }]);
-        assert!(
-            plan_updates(&validate_only(updates), &image, LOCAL) == expected,
-            "{case}"
-        );
-    }
+#[yare::parameterized(
+    upgrade = {
+        "upgrade",
+        vec![named_update("kraft.version", 1, UPGRADE)],
+        Ok(UpdatePlan { kraft_upgrade: Some(1), ..plan(vec![], &["kraft.version"]) }),
+    },
+    upgrade_to_current = {
+        "upgrade to the current level",
+        vec![named_update("kraft.version", 0, UPGRADE)],
+        Ok(plan(vec![], &["kraft.version"])),
+    },
+    downgrade_type_raises_level = {
+        "a downgrade type that raises the level",
+        vec![named_update("kraft.version", 1, SAFE)],
+        Err(invalid("kraft.version", 1, "Can't downgrade to a newer version.")),
+    },
+    above_supported_range = {
+        "above the supported range",
+        vec![named_update("kraft.version", 2, UPGRADE)],
+        Err(invalid("kraft.version", 2, "Local controller 1 only supports versions 0-1")),
+    },
+)]
+fn kraft_version_rows_follow_kafka(
+    case: &str,
+    updates: Vec<FeatureUpdateKey>,
+    expected: Result<UpdatePlan, UpdateError>,
+) {
+    let image = image(&[FeatureLevel {
+        name: "metadata.version",
+        level: 25,
+    }]);
+    assert2::assert!(
+        plan_updates(&validate_only(updates), &image, LOCAL) == expected,
+        "{case}"
+    );
 }
 
 /// An image at 4.3-IV0, with `eligible.leader.replicas.version` finalized at
@@ -513,26 +459,27 @@ fn elr_image(elr_level: Option<i16>, published: bool) -> krabka_metadata::Metada
 /// KIP-966: finalizing the feature back to 0 clears the memberships it
 /// published, ahead of the feature record; a cluster that never published
 /// any writes the feature record alone.
-#[test]
-fn an_elr_downgrade_clears_the_published_state_before_the_feature_record() {
+#[yare::parameterized(published = { true }, never_published = { false })]
+fn an_elr_downgrade_clears_the_published_state_before_the_feature_record(published: bool) {
     let elr = ELR_VERSION;
-    let clear = MetadataRecord::V1PartitionElr(krabka_metadata::PartitionElrRecord {
-        topic: "orders".into(),
-        partition: 0,
-        eligible_leader_replicas: vec![],
-        last_known_elr: vec![],
-    });
-    for (published, records) in [
-        (true, vec![clear, feature_record(elr, 0)]),
-        (false, vec![feature_record(elr, 0)]),
-    ] {
-        let image = elr_image(Some(1), published);
-        let request = validate_only(vec![elr_update(0, SAFE)]);
-        assert!(
-            plan_updates(&request, &image, LOCAL) == Ok(plan(records, &[elr])),
-            "{published}"
-        );
+    let mut records = Vec::new();
+    if published {
+        records.push(MetadataRecord::V1PartitionElr(
+            krabka_metadata::PartitionElrRecord {
+                topic: "orders".into(),
+                partition: 0,
+                eligible_leader_replicas: vec![],
+                last_known_elr: vec![],
+            },
+        ));
     }
+    records.push(feature_record(elr, 0));
+    let image = elr_image(Some(1), published);
+    let request = validate_only(vec![elr_update(0, SAFE)]);
+    assert2::assert!(
+        plan_updates(&request, &image, LOCAL) == Ok(plan(records, &[elr])),
+        "{published}"
+    );
 }
 
 /// A broker that did not register a feature supports only level 0, so it

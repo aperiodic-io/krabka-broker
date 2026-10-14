@@ -758,6 +758,14 @@ mod tests {
         krabka_units::prelude::ByteSize,
     };
 
+    fn append_torn_frame(path: &std::path::Path, partial_body: &[u8]) {
+        use std::io::Write;
+
+        let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        file.write_all(&100u32.to_be_bytes()).unwrap();
+        file.write_all(partial_body).unwrap();
+    }
+
     #[test]
     fn append_then_read_round_trips_records_with_headers() {
         let dir = tempfile::tempdir().unwrap();
@@ -910,7 +918,6 @@ mod tests {
 
     #[test]
     fn open_heals_torn_tail_frame() {
-        use std::io::Write;
         let SeededSpool {
             dir,
             record: r0,
@@ -919,14 +926,7 @@ mod tests {
         drop(spool);
 
         // Simulate a crash mid-append: a length prefix claiming 100 bytes, only 3 follow.
-        {
-            let mut f = std::fs::OpenOptions::new()
-                .append(true)
-                .open(dir.path().join("audit.spool"))
-                .unwrap();
-            f.write_all(&100u32.to_be_bytes()).unwrap();
-            f.write_all(b"abc").unwrap();
-        }
+        append_torn_frame(&dir.path().join("audit.spool"), b"abc");
         // Reopen heals the torn tail; the good record survives and appends continue contiguously.
         let mut s = Spool::open(dir.path(), ROOMY_CAP).unwrap();
         assert2::check!((s.count().0, s.read_all().unwrap()) == (1, vec![r0.clone()]));
@@ -940,7 +940,6 @@ mod tests {
     /// cutting good bytes off the end.
     #[test]
     fn open_reports_whether_it_healed_a_torn_tail() {
-        use std::io::Write;
         let SeededSpool { dir, spool, .. } = seeded_spool(b"good");
         drop(spool);
         let spool_file = dir.path().join(SPOOL_FILE);
@@ -953,14 +952,7 @@ mod tests {
         check!(std::fs::metadata(&spool_file).unwrap().len() == intact_len);
 
         // A crash mid-append: a length prefix promising 100 bytes, 3 behind it.
-        {
-            let mut f = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&spool_file)
-                .unwrap();
-            f.write_all(&100u32.to_be_bytes()).unwrap();
-            f.write_all(b"abc").unwrap();
-        }
+        append_torn_frame(&spool_file, b"abc");
         let healed = Spool::open(dir.path(), ROOMY_CAP).unwrap();
         check!(healed.recovered_torn_tail());
         check!(std::fs::metadata(&spool_file).unwrap().len() == intact_len);
@@ -1018,12 +1010,7 @@ mod tests {
 
             // Model a process dying after the next frame's prefix and only a
             // fragment of its body reached the file.
-            let mut file = OpenOptions::new()
-                .append(true)
-                .open(dir.join(SPOOL_FILE))
-                .unwrap();
-            file.write_all(&100u32.to_be_bytes()).unwrap();
-            file.write_all(b"torn").unwrap();
+            append_torn_frame(&dir.join(SPOOL_FILE), b"torn");
             std::process::abort();
         }
 
@@ -1340,6 +1327,9 @@ mod tests {
         0x00, 0x00, 0x00, 0x02, b'v', b'1', // value
     ];
 
+    const FUTURE_HEADER: &[u8] = &[b'K', b'A', b'U', b'D', 0x00, 0x01];
+    const NEGATIVE_HEADER: &[u8] = &[b'K', b'A', b'U', b'D', 0xff, 0xff];
+
     fn golden_record() -> AuditRecord {
         AuditRecord {
             class: AuditEventClass::ApplicationLifecycle,
@@ -1352,13 +1342,6 @@ mod tests {
     struct ExpectedSidecar {
         file: &'static str,
         want: Vec<u8>,
-    }
-
-    /// A spool file with its contents and the version its header refusal must name.
-    struct HeaderCase {
-        file: &'static str,
-        contents: Vec<u8>,
-        found: Option<i16>,
     }
 
     fn spooled_golden_record() -> TempSpool {
@@ -1467,76 +1450,67 @@ mod tests {
     /// Every file in the spool directory refuses a header it does not know:
     /// none at all (the 0.x layout, which started straight with the data) is
     /// `found: None`, and a version other than 0 is named.
-    #[test]
-    fn open_refuses_a_missing_or_unknown_file_header() {
-        let v0_frame = &GOLDEN_SPOOL[6..];
-        let future: &[u8] = &[b'K', b'A', b'U', b'D', 0x00, 0x01];
-        let negative: &[u8] = &[b'K', b'A', b'U', b'D', 0xff, 0xff];
-        let case = |file, contents, found| HeaderCase {
-            file,
-            contents,
-            found,
+    #[yare::parameterized(
+        spool_v0_frame = { SPOOL_FILE, GOLDEN_SPOOL[6..].to_vec(), None },
+        spool_empty = { SPOOL_FILE, Vec::new(), None },
+        spool_short_header = { SPOOL_FILE, b"KAU".to_vec(), None },
+        spool_future_version = {
+            SPOOL_FILE,
+            [FUTURE_HEADER, &GOLDEN_SPOOL[6..]].concat(),
+            Some(1),
+        },
+        spool_negative_version = { SPOOL_FILE, NEGATIVE_HEADER.to_vec(), Some(-1) },
+        losses_empty_version = { LOSS_STATE_FILE, [0u8; 16].to_vec(), None },
+        losses_future_version = { LOSS_STATE_FILE, [FUTURE_HEADER, &[0u8; 16]].concat(), Some(1) },
+        replay_offset_empty_version = { REPLAY_OFFSET_FILE, [0u8; 8].to_vec(), None },
+        replay_offset_future_version = {
+            REPLAY_OFFSET_FILE,
+            [FUTURE_HEADER, &[0u8; 8]].concat(),
+            Some(1),
+        },
+        replay_poison_empty_version = {
+            REPLAY_POISON_FILE,
+            [&0u64.to_be_bytes()[..], &GOLDEN_SPOOL[6..]].concat(),
+            None,
+        },
+        replay_poison_future_version = {
+            REPLAY_POISON_FILE,
+            [FUTURE_HEADER, &0u64.to_be_bytes(), &GOLDEN_SPOOL[6..]].concat(),
+            Some(1),
+        },
+    )]
+    fn open_refuses_a_missing_or_unknown_file_header(
+        file: &str,
+        contents: Vec<u8>,
+        found: Option<i16>,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(file), &contents).unwrap();
+        let got = match Spool::open(dir.path(), ROOMY_CAP) {
+            Err(AuditError::UnsupportedSpoolFormat { file, found }) => Some((file, found)),
+            _ => None,
         };
-        let cases: Vec<HeaderCase> = vec![
-            case(SPOOL_FILE, v0_frame.to_vec(), None),
-            case(SPOOL_FILE, Vec::new(), None),
-            case(SPOOL_FILE, b"KAU".to_vec(), None),
-            case(SPOOL_FILE, [future, v0_frame].concat(), Some(1)),
-            case(SPOOL_FILE, negative.to_vec(), Some(-1)),
-            case(LOSS_STATE_FILE, [0u8; 16].to_vec(), None),
-            case(LOSS_STATE_FILE, [future, &[0u8; 16]].concat(), Some(1)),
-            case(REPLAY_OFFSET_FILE, [0u8; 8].to_vec(), None),
-            case(REPLAY_OFFSET_FILE, [future, &[0u8; 8]].concat(), Some(1)),
-            case(
-                REPLAY_POISON_FILE,
-                [&0u64.to_be_bytes()[..], v0_frame].concat(),
-                None,
-            ),
-            case(
-                REPLAY_POISON_FILE,
-                [future, &0u64.to_be_bytes(), v0_frame].concat(),
-                Some(1),
-            ),
-        ];
-        for HeaderCase {
-            file,
-            contents,
-            found,
-        } in cases
-        {
-            let dir = tempfile::tempdir().unwrap();
-            std::fs::write(dir.path().join(file), &contents).unwrap();
-            let got = match Spool::open(dir.path(), ROOMY_CAP) {
-                Err(AuditError::UnsupportedSpoolFormat { file, found }) => Some((file, found)),
-                _ => None,
-            };
-            check!(
-                got == Some((file.to_owned(), found)),
-                "{file} {contents:x?}"
-            );
-        }
+        check!(
+            got == Some((file.to_owned(), found)),
+            "{file} {contents:x?}"
+        );
     }
 
-    #[test]
-    fn unsupported_spool_format_names_the_file_and_the_version() {
-        let cases = [
-            (
-                None,
-                "audit spool file audit.spool: has no version header; it predates krabka 1.0, \
-                 so the audit spool directory must be emptied (the node reformatted) before \
-                 this broker starts",
-            ),
-            (
-                Some(3),
-                "audit spool file audit.spool: has version 3, which this build does not read",
-            ),
-        ];
-        for (found, want) in cases {
-            let error = AuditError::UnsupportedSpoolFormat {
-                file: SPOOL_FILE.into(),
-                found,
-            };
-            check!(error.to_string() == want);
-        }
+    #[yare::parameterized(
+        no_header = {
+            None,
+            "audit spool file audit.spool: has no version header; it predates krabka 1.0, so the audit spool directory must be emptied (the node reformatted) before this broker starts",
+        },
+        future_version = {
+            Some(3),
+            "audit spool file audit.spool: has version 3, which this build does not read",
+        },
+    )]
+    fn unsupported_spool_format_names_the_file_and_the_version(found: Option<i16>, want: &str) {
+        let error = AuditError::UnsupportedSpoolFormat {
+            file: SPOOL_FILE.into(),
+            found,
+        };
+        check!(error.to_string() == want);
     }
 }

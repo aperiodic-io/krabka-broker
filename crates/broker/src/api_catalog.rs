@@ -1936,14 +1936,6 @@ mod tests {
         after: Option<VersionRange>,
     }
 
-    /// A gated request version and whether each gate combination of
-    /// [`EVERY_GATE`] disables it.
-    struct GatedVersion {
-        api_key: i16,
-        version: i16,
-        disabled: [bool; 4],
-    }
-
     /// The client listener's table, which is what a Kafka client reads.
     fn client_apis() -> Vec<ApiVersion> {
         supported_apis(ListenerKind::Client, ClientMetricsReceiver::Absent, STRICT)
@@ -2172,8 +2164,12 @@ mod tests {
     /// #784: what each switch moves, in the whole table. Table-driven over
     /// every combination: each row names the keys whose advertised range
     /// differs from the default table, and how.
-    #[test]
-    fn each_switch_moves_only_its_own_rows() {
+    #[yare::parameterized(
+        unstable_only = { EVERY_GATE[1] },
+        legacy_only = { EVERY_GATE[2] },
+        both_enabled = { ALL },
+    )]
+    fn each_switch_moves_only_its_own_rows(gates: VersionGates) {
         type Moved = Vec<MovedRange>;
         let table = |gates| {
             supported_apis(
@@ -2261,13 +2257,13 @@ mod tests {
             rows.sort_unstable_by_key(|row| row.api_key);
             rows
         };
-        for (gates, expected) in [
-            (EVERY_GATE[1], unstable),
-            (EVERY_GATE[2], legacy),
-            (ALL, both),
-        ] {
-            assert!(moved(gates) == expected, "{gates:?}");
-        }
+        let expected = match (gates.unstable, gates.legacy) {
+            (UnstableApiVersions::Enabled, LegacyRequestVersions::Disabled) => unstable,
+            (UnstableApiVersions::Disabled, LegacyRequestVersions::Enabled) => legacy,
+            (UnstableApiVersions::Enabled, LegacyRequestVersions::Enabled) => both,
+            (UnstableApiVersions::Disabled, LegacyRequestVersions::Disabled) => unreachable!(),
+        };
+        assert2::assert!(moved(gates) == expected, "{gates:?}");
     }
 
     /// #784: a version is refused on receive exactly when it is not
@@ -2275,133 +2271,69 @@ mod tests {
     /// combination. `Produce` v0-v2 is refused by default although it is
     /// advertised, as Kafka 4.3.1 refuses it; `ApiVersions` is never refused
     /// here, since its handler answers `UNSUPPORTED_VERSION`.
-    #[test]
-    fn a_gated_version_is_refused_exactly_when_it_is_not_accepted() {
+    #[yare::parameterized(
+        produce_v0 = { 0, 0, [true, true, false, false] },
+        produce_v2 = { 0, 2, [true, true, false, false] },
+        produce_v3 = { 0, 3, [false, false, false, false] },
+        fetch_v3 = { 1, 3, [true, true, false, false] },
+        fetch_v4 = { 1, 4, [false, false, false, false] },
+        list_offsets_v0 = { 2, 0, [true, true, false, false] },
+        list_offsets_v1 = { 2, 1, [false, false, false, false] },
+        api_versions_v5 = { 18, 5, [false, false, false, false] },
+        heartbeat_v6 = { 22, 6, [true, false, true, false] },
+        offset_commit_v6 = { 28, 6, [true, false, true, false] },
+        offset_commit_v5 = { 28, 5, [false, false, false, false] },
+        describe_topic_partitions_v1 = { 88, 1, [true, false, true, false] },
+        share_fetch_v1 = { 89, 1, [true, false, true, false] },
+        share_group_heartbeat_v0 = { 93, 0, [true, false, true, false] },
+        share_group_describe_v0 = { 94, 0, [true, false, true, false] },
+        private_api_v0 = { 1020, 0, [false, false, false, false] },
+    )]
+    fn a_gated_version_is_refused_exactly_when_it_is_not_accepted(
+        api_key: i16,
+        version: i16,
+        want: [bool; 4],
+    ) {
         let [strict, unstable, legacy, all] = EVERY_GATE;
-        // `disabled` is under [strict, unstable, legacy, all].
-        let cases: &[GatedVersion] = &[
-            GatedVersion {
-                api_key: 0,
-                version: 0,
-                disabled: [true, true, false, false],
-            },
-            GatedVersion {
-                api_key: 0,
-                version: 2,
-                disabled: [true, true, false, false],
-            },
-            GatedVersion {
-                api_key: 0,
-                version: 3,
-                disabled: [false, false, false, false],
-            },
-            GatedVersion {
-                api_key: 1,
-                version: 3,
-                disabled: [true, true, false, false],
-            },
-            GatedVersion {
-                api_key: 1,
-                version: 4,
-                disabled: [false, false, false, false],
-            },
-            GatedVersion {
-                api_key: 2,
-                version: 0,
-                disabled: [true, true, false, false],
-            },
-            GatedVersion {
-                api_key: 2,
-                version: 1,
-                disabled: [false, false, false, false],
-            },
-            GatedVersion {
-                api_key: 18,
-                version: 5,
-                disabled: [false, false, false, false],
-            },
-            GatedVersion {
-                api_key: 22,
-                version: 6,
-                disabled: [true, false, true, false],
-            },
-            GatedVersion {
-                api_key: 28,
-                version: 6,
-                disabled: [true, false, true, false],
-            },
-            GatedVersion {
-                api_key: 28,
-                version: 5,
-                disabled: [false, false, false, false],
-            },
-            GatedVersion {
-                api_key: 88,
-                version: 1,
-                disabled: [true, false, true, false],
-            },
-            GatedVersion {
-                api_key: 89,
-                version: 1,
-                disabled: [true, false, true, false],
-            },
-            GatedVersion {
-                api_key: 93,
-                version: 0,
-                disabled: [true, false, true, false],
-            },
-            GatedVersion {
-                api_key: 94,
-                version: 0,
-                disabled: [true, false, true, false],
-            },
-            GatedVersion {
-                api_key: 1020,
-                version: 0,
-                disabled: [false, false, false, false],
-            },
-        ];
-        for GatedVersion {
-            api_key,
-            version,
-            disabled: want,
-        } in cases
-        {
-            for (gates, disabled) in [strict, unstable, legacy, all].into_iter().zip(*want) {
-                assert!(
-                    is_disabled_version(*api_key, *version, gates) == disabled,
-                    "api_key {api_key} v{version} {gates:?}"
-                );
-            }
+        // `want` is under [strict, unstable, legacy, all].
+        for (gates, disabled) in [strict, unstable, legacy, all].into_iter().zip(want) {
+            assert2::assert!(
+                is_disabled_version(api_key, version, gates) == disabled,
+                "api_key {api_key} v{version} {gates:?}"
+            );
         }
     }
 
     /// The single row Kafka puts in an `UNSUPPORTED_VERSION` answer
     /// (`ApiVersionsResponse.toApiVersion(API_VERSIONS)`) is the same
     /// `ApiVersions` row every listener advertises.
-    #[test]
-    fn the_unsupported_version_row_is_the_advertised_api_versions_row() {
-        for (gates, max_version) in [(STRICT, 4), (ALL, 5)] {
-            let advertised: Vec<ApiVersion> =
-                supported_apis(ListenerKind::Client, ClientMetricsReceiver::Absent, gates)
-                    .into_iter()
-                    .filter(|api| api.api_key == 18)
-                    .collect();
-            assert!(
-                advertised
-                    == vec![ApiVersion {
-                        api_key: 18,
-                        min_version: 0,
-                        max_version,
-                        ..Default::default()
-                    }],
-                "{gates:?}"
-            );
-            assert!(
-                krabka_raft::unsupported_version_response(gates.unstable).api_keys == advertised,
-                "{gates:?}"
-            );
-        }
+    #[yare::parameterized(
+        stable = { STRICT, 4 },
+        unstable = { ALL, 5 },
+    )]
+    fn the_unsupported_version_row_is_the_advertised_api_versions_row(
+        gates: VersionGates,
+        max_version: i16,
+    ) {
+        let advertised: Vec<ApiVersion> =
+            supported_apis(ListenerKind::Client, ClientMetricsReceiver::Absent, gates)
+                .into_iter()
+                .filter(|api| api.api_key == 18)
+                .collect();
+        assert2::assert!(
+            advertised
+                == vec![ApiVersion {
+                    api_key: 18,
+                    min_version: 0,
+                    max_version,
+                    ..Default::default()
+                }],
+            "{gates:?}"
+        );
+        assert2::assert!(
+            krabka_raft::unsupported_version_response(gates.unstable).api_keys == advertised,
+            "{gates:?}"
+        );
     }
 
     /// The KIP number of a `KIP-<n>` key, or `None` for a scope-only key.

@@ -63,8 +63,7 @@ impl Model for ReconModel {
                         .client_owned
                         .iter()
                         .find(|row| row.member_id == m.id)
-                        .map(|row| row.partitions.clone())
-                        .unwrap_or_default();
+                        .map_or_default(|row| row.partitions.clone());
                     m.assignment_state == MemberAssignmentState::Stable && owned == m.target
                 })
         },

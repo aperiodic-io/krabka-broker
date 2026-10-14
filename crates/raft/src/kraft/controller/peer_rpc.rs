@@ -97,8 +97,7 @@ impl Engine {
         let leader_endpoints = state
             .voters
             .get(self.me)
-            .map(|voter| voter.endpoints.clone())
-            .unwrap_or_default();
+            .map_or_default(|voter| voter.endpoints.clone());
         for peer in self.other_voters() {
             let body = wire::PeerRequest::BeginQuorumEpoch {
                 cluster_id: Some(state.cluster_id),

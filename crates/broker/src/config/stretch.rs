@@ -287,66 +287,66 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn stretch_rejects_a_min_insync_that_a_site_loss_would_break() {
+    #[yare::parameterized(
+        below_safe_minimum = { 1 },
+        above_safe_minimum = { 3 },
+    )]
+    fn stretch_rejects_a_min_insync_that_a_site_loss_would_break(min_insync: i32) {
         // Three replicas over three sites leave two after a site loss, so 2
         // is the only safe value. 1 loses an acknowledged write with one
         // broker, and 3 stalls every acks=all write while a site is down.
-        for min_insync in [1, 3] {
-            let mut c = stretch_node("dc-a", vec![NodeRole::Controller, NodeRole::Broker]);
-            c.offsets_topic_replication_factor = 3;
-            c.default_min_insync_replicas = min_insync;
-            check!(matches!(
-                c.validate(),
-                Err(BrokerError::StretchMinInsyncUnsafe {
-                    min_insync: got,
-                    replication_factor: 3
-                }) if got == min_insync
-            ));
-        }
+        let mut c = stretch_node("dc-a", vec![NodeRole::Controller, NodeRole::Broker]);
+        c.offsets_topic_replication_factor = 3;
+        c.default_min_insync_replicas = min_insync;
+        check!(matches!(
+            c.validate(),
+            Err(BrokerError::StretchMinInsyncUnsafe {
+                min_insync: got,
+                replication_factor: 3
+            }) if got == min_insync
+        ));
     }
 
     /// A topic created with an omitted replication factor gets
     /// `default_replication_factor`, so the site-loss check covers it as it
     /// covers the offsets topic.
-    #[test]
-    fn stretch_rejects_a_topic_creation_default_that_a_site_loss_would_break() {
-        for replication_factor in [1, 2] {
-            let mut c = stretch_node("dc-a", vec![NodeRole::Controller, NodeRole::Broker]);
-            c.default_replication_factor = replication_factor;
-            check!(matches!(
-                c.validate(),
-                Err(BrokerError::StretchMinInsyncUnsafe {
-                    min_insync: 2,
-                    replication_factor: got,
-                }) if got == replication_factor
-            ));
-        }
+    #[yare::parameterized(
+        one_replica = { 1 },
+        two_replicas = { 2 },
+    )]
+    fn stretch_rejects_a_topic_creation_default_that_a_site_loss_would_break(
+        replication_factor: i16,
+    ) {
+        let mut c = stretch_node("dc-a", vec![NodeRole::Controller, NodeRole::Broker]);
+        c.default_replication_factor = replication_factor;
+        check!(matches!(
+            c.validate(),
+            Err(BrokerError::StretchMinInsyncUnsafe {
+                min_insync: 2,
+                replication_factor: got,
+            }) if got == replication_factor
+        ));
     }
 
-    #[test]
-    fn stretch_rejects_replication_factor_above_the_verified_bound() {
-        for (field, set) in [
-            (
-                "offsets_topic_replication_factor",
-                (|c: &mut BrokerConfig| c.offsets_topic_replication_factor = 1025)
-                    as fn(&mut BrokerConfig),
-            ),
-            ("default_replication_factor", |c: &mut BrokerConfig| {
-                c.default_replication_factor = 1025;
-            }),
-        ] {
-            let mut c = stretch_node("dc-a", vec![NodeRole::Controller, NodeRole::Broker]);
-            set(&mut c);
-
-            check!(
-                matches!(
-                    c.validate(),
-                    Err(BrokerError::InvalidRuntimeConfig(message))
-                        if message == format!("{field} exceeds the stretch verification bound of 1024")
-                ),
-                "{field}"
-            );
+    #[yare::parameterized(
+        offsets_topic = { "offsets_topic_replication_factor" },
+        topic_default = { "default_replication_factor" },
+    )]
+    fn stretch_rejects_replication_factor_above_the_verified_bound(field: &str) {
+        let mut c = stretch_node("dc-a", vec![NodeRole::Controller, NodeRole::Broker]);
+        match field {
+            "offsets_topic_replication_factor" => c.offsets_topic_replication_factor = 1025,
+            "default_replication_factor" => c.default_replication_factor = 1025,
+            _ => unreachable!(),
         }
+
+        check!(
+            matches!(
+                c.validate(),
+                Err(BrokerError::InvalidRuntimeConfig(message))
+                    if message == format!("{field} exceeds the stretch verification bound of 1024")
+            ),
+            "{field}"
+        );
     }
 }

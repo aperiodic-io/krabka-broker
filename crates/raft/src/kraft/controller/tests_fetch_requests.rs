@@ -231,31 +231,30 @@ async fn a_fetch_is_checked_as_handle_fetch_request_checks_it() {
 /// `LeaderState.updateReplicaState` ignores a fetch from a negative replica
 /// id: it is served, but its offset does not count toward the high
 /// watermark, and it is not taken for replica 0.
-#[tokio::test]
-async fn a_negative_replica_id_moves_no_replica_state() {
-    for (name, replica_id, hwm_moves) in [("replica -1", -1, false), ("replica 0", 0, true)] {
-        let LeaderOf0And1 {
-            mut engine,
-            dir: _dir,
-            epoch,
-        } = leader_of_0_and_1();
-        let log_end = engine.log.log_end_offset();
-        let before = engine.log.hwm();
-        let mut request = fetch(epoch, log_end.0);
-        request.replica_state.replica_id = replica_id;
+#[yare::parameterized(
+    negative_replica_id = { -1, false },
+    zero_replica_id = { 0, true },
+)]
+#[test_macro(tokio::test)]
+async fn a_negative_replica_id_moves_no_replica_state(replica_id: i32, hwm_moves: bool) {
+    let LeaderOf0And1 {
+        mut engine,
+        dir: _dir,
+        epoch,
+    } = leader_of_0_and_1();
+    let log_end = engine.log.log_end_offset();
+    let before = engine.log.hwm();
+    let mut request = fetch(epoch, log_end.0);
+    request.replica_state.replica_id = replica_id;
 
-        let Delivery {
-            answer: response,
-            pending: _answer,
-        } = deliver(&mut engine, &request);
+    let Delivery {
+        answer: response,
+        pending: _answer,
+    } = deliver(&mut engine, &request);
 
-        let hwm = if hwm_moves { log_end } else { before };
-        check!(engine.log.hwm() == hwm, "{name}");
-        check!(
-            response == Some(answer(&engine, 0, hwm.0, bytes::Bytes::new())),
-            "{name}"
-        );
-    }
+    let hwm = if hwm_moves { log_end } else { before };
+    check!(engine.log.hwm() == hwm);
+    check!(response == Some(answer(&engine, 0, hwm.0, bytes::Bytes::new())));
 }
 
 /// What happens to a parked fetch before it is answered.
@@ -274,77 +273,75 @@ enum WhileParked {
 /// or when `MaxWaitMs` runs out, with the answer it would have had on
 /// arrival. A fetcher whose high watermark is below the leader's is answered
 /// at once.
-#[tokio::test]
-async fn a_fetch_with_nothing_new_waits_until_there_is_something_to_send() {
-    for (name, fetcher_hwm_behind, while_parked) in [
-        ("the wait runs out", false, WhileParked::Nothing),
-        ("the log grows", false, WhileParked::Append),
-        ("leadership ends", false, WhileParked::LoseLeadership),
-        (
-            "the fetcher's high watermark is behind",
-            true,
-            WhileParked::Nothing,
-        ),
-    ] {
-        let LeaderOf0And1 {
-            mut engine,
-            dir: _dir,
-            epoch,
-        } = leader_of_0_and_1();
-        let log_end = engine.log.log_end_offset();
-        // Replica 0 catches up, which commits the log.
-        let Delivery {
-            answer: caught_up,
-            pending: _answer,
-        } = deliver(&mut engine, &fetch(epoch, log_end.0));
-        check!(caught_up.is_some(), "{name}");
-        check!(engine.log.hwm() == log_end, "{name}");
+#[yare::parameterized(
+    wait_runs_out = { false,
+    WhileParked::Nothing },
+    log_grows = { false,
+    WhileParked::Append },
+    leadership_ends = { false,
+    WhileParked::LoseLeadership },
+    fetcher_high_watermark_is_behind = { true,
+    WhileParked::Nothing }
+)]
+#[test_macro(tokio::test)]
+async fn a_fetch_with_nothing_new_waits_until_there_is_something_to_send(
+    fetcher_hwm_behind: bool,
+    while_parked: WhileParked,
+) {
+    let LeaderOf0And1 {
+        mut engine,
+        dir: _dir,
+        epoch,
+    } = leader_of_0_and_1();
+    let log_end = engine.log.log_end_offset();
+    // Replica 0 catches up, which commits the log.
+    let Delivery {
+        answer: caught_up,
+        pending: _answer,
+    } = deliver(&mut engine, &fetch(epoch, log_end.0));
+    check!(caught_up.is_some());
+    check!(engine.log.hwm() == log_end);
 
-        let mut request = fetch(epoch, log_end.0);
-        request.max_wait_ms = 500;
-        partition(&mut request).high_watermark = if fetcher_hwm_behind {
-            log_end.0 - 1
-        } else {
-            log_end.0
-        };
-        let Delivery {
-            answer: immediate,
-            pending: mut parked,
-        } = deliver(&mut engine, &request);
-        if fetcher_hwm_behind {
-            check!(
-                immediate == Some(answer(&engine, 0, log_end.0, bytes::Bytes::new())),
-                "{name}"
-            );
-            continue;
-        }
-        check!(immediate == None, "{name}: the fetch waits");
-        // Nothing moved, so the fetch is still waiting just before its
-        // deadline.
-        engine.complete_parked_fetches(Instant::now());
-        check!(parked.try_recv().is_err(), "{name}: still waiting");
-
-        let expected = match while_parked {
-            WhileParked::Nothing => {
-                engine.complete_parked_fetches(Instant::now() + StdDuration::from_secs(1));
-                answer(&engine, 0, log_end.0, bytes::Bytes::new())
-            }
-            WhileParked::Append => {
-                let mut batch = one_offset_batch(log_end.0, epoch, b"new");
-                engine.log.append(&mut batch, 0).expect("append");
-                engine.complete_parked_fetches(Instant::now());
-                answer(&engine, 0, log_end.0, engine.serve_fetch_records(log_end))
-            }
-            WhileParked::LoseLeadership => {
-                engine.on_event(Event::ReceiveBeginQuorumEpoch {
-                    leader_id: NodeId(0),
-                    leader_epoch: engine.core.quorum_state().leader_epoch + 1,
-                });
-                engine.complete_parked_fetches(Instant::now());
-                answer(&engine, NOT_LEADER_OR_FOLLOWER, -1, bytes::Bytes::new())
-            }
-        };
-        let body = parked.try_recv().expect("the parked fetch is answered");
-        check!(decode(&body) == expected, "{name}");
+    let mut request = fetch(epoch, log_end.0);
+    request.max_wait_ms = 500;
+    partition(&mut request).high_watermark = if fetcher_hwm_behind {
+        log_end.0 - 1
+    } else {
+        log_end.0
+    };
+    let Delivery {
+        answer: immediate,
+        pending: mut parked,
+    } = deliver(&mut engine, &request);
+    if fetcher_hwm_behind {
+        check!(immediate == Some(answer(&engine, 0, log_end.0, bytes::Bytes::new())));
+        return;
     }
+    check!(immediate == None, "the fetch waits");
+    // Nothing moved, so the fetch is still waiting just before its deadline.
+    engine.complete_parked_fetches(Instant::now());
+    check!(parked.try_recv().is_err(), "still waiting");
+
+    let expected = match while_parked {
+        WhileParked::Nothing => {
+            engine.complete_parked_fetches(Instant::now() + StdDuration::from_secs(1));
+            answer(&engine, 0, log_end.0, bytes::Bytes::new())
+        }
+        WhileParked::Append => {
+            let mut batch = one_offset_batch(log_end.0, epoch, b"new");
+            engine.log.append(&mut batch, 0).expect("append");
+            engine.complete_parked_fetches(Instant::now());
+            answer(&engine, 0, log_end.0, engine.serve_fetch_records(log_end))
+        }
+        WhileParked::LoseLeadership => {
+            engine.on_event(Event::ReceiveBeginQuorumEpoch {
+                leader_id: NodeId(0),
+                leader_epoch: engine.core.quorum_state().leader_epoch + 1,
+            });
+            engine.complete_parked_fetches(Instant::now());
+            answer(&engine, NOT_LEADER_OR_FOLLOWER, -1, bytes::Bytes::new())
+        }
+    };
+    let body = parked.try_recv().expect("the parked fetch is answered");
+    check!(decode(&body) == expected);
 }

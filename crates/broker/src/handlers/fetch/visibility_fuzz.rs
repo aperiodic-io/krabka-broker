@@ -107,7 +107,7 @@ proptest! {
         prop_assert!(w.response_hw.0 == hw && w.response_lso.0 == lso.min(hw));
     }
 
-    /// KIP-227 monotonicity: an advance of hw, lso, or log_end never
+    /// `KIP-227` monotonicity: an advance of `hw`, `lso`, or `log_end` never
     /// lowers the reported HW or LSO for any fixed fetch shape.
     #[test]
     fn response_monotonic(

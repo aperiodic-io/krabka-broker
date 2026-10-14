@@ -112,31 +112,36 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
 
 #[cfg(test)]
 mod tests {
-    use {super::exporter, assert2::assert};
+    use super::exporter;
 
-    #[test]
-    fn typed_declarations_select_both_exporter_paths_and_preserve_method_choices() {
-        for target in ["SpanExporter", "LogExporter"] {
-            let input = format!("#[doc = \"export\"] pub(crate) fn build(&self) -> Result<{target}, TelemetryError>;").parse().unwrap();
-            assert!(exporter(&input).unwrap().is_ident(target));
-        }
+    #[yare::parameterized(
+        span_exporter = { "SpanExporter" },
+        log_exporter = { "LogExporter" },
+    )]
+    fn typed_declarations_select_both_exporter_paths_and_preserve_method_choices(target: &str) {
+        let input = format!(
+            "#[doc = \"export\"] pub(crate) fn build(&self) -> Result<{target}, TelemetryError>;"
+        )
+        .parse()
+        .unwrap();
+        assert2::assert!(exporter(&input).unwrap().is_ident(target));
     }
 
-    #[test]
-    fn rejects_incompatible_receivers_outputs_and_extra_items() {
-        for input in [
-            "fn build(self) -> Result<SpanExporter, TelemetryError>;",
-            "fn build(&mut self) -> Result<SpanExporter, TelemetryError>;",
-            "async fn build(&self) -> Result<SpanExporter, TelemetryError>;",
+    #[yare::parameterized(
+        owned_receiver = { "fn build(self) -> Result<SpanExporter, TelemetryError>;" },
+        mutable_receiver = { "fn build(&mut self) -> Result<SpanExporter, TelemetryError>;" },
+        async_method = { "async fn build(&self) -> Result<SpanExporter, TelemetryError>;" },
+        extra_argument = {
             "fn build(&self, extra: bool) -> Result<SpanExporter, TelemetryError>;",
-            "fn build(&self) -> SpanExporter;",
-            "fn build(&self) -> Result<Other, TelemetryError>;",
-            "fn build(&self) -> Result<SpanExporter, OtherError>;",
-            "fn build(&self) -> Result<SpanExporter>;",
-            "fn build(&self) -> Result<SpanExporter, TelemetryError> {}",
-            "fn build(&self) -> Result<SpanExporter, TelemetryError>; fn extra();",
-        ] {
-            assert!(exporter(&input.parse().unwrap()).is_err(), "{input}");
-        }
+        },
+        bare_result = { "fn build(&self) -> SpanExporter;" },
+        wrong_exporter = { "fn build(&self) -> Result<Other, TelemetryError>;" },
+        wrong_error = { "fn build(&self) -> Result<SpanExporter, OtherError>;" },
+        missing_error_type = { "fn build(&self) -> Result<SpanExporter>;" },
+        function_body = { "fn build(&self) -> Result<SpanExporter, TelemetryError> {}" },
+        extra_item = { "fn build(&self) -> Result<SpanExporter, TelemetryError>; fn extra();" },
+    )]
+    fn rejects_incompatible_receivers_outputs_and_extra_items(input: &str) {
+        assert2::assert!(exporter(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

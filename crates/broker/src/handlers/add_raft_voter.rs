@@ -204,22 +204,20 @@ mod tests {
     /// Decode→encode round-trip at min and max versions. Guards against
     /// the response failing to encode at either end of the version range
     /// the schema declares.
-    #[test]
-    fn response_round_trips_at_min_and_max_versions() {
+    #[yare::parameterized(
+        minimum = { add_raft_voter_response::MIN_VERSION },
+        maximum = { add_raft_voter_response::MAX_VERSION },
+    )]
+    fn response_round_trips_at_min_and_max_versions(version: i16) {
         use krabka_protocol::owned::add_raft_voter_response::AddRaftVoterResponse;
-        for version in [
-            add_raft_voter_response::MIN_VERSION,
-            add_raft_voter_response::MAX_VERSION,
-        ] {
-            let resp = AddRaftVoterResponse {
-                error_code: codes::NOT_LEADER_OR_FOLLOWER,
-                error_message: Some("not the raft leader".into()),
-                ..Default::default()
-            };
-            let (decoded, consumed) = round_trip_response(&resp, krabka_ids::ApiVersion(version));
-            assert!(decoded.error_code == codes::NOT_LEADER_OR_FOLLOWER);
-            assert!(consumed, "all bytes consumed at v{version}");
-        }
+        let resp = AddRaftVoterResponse {
+            error_code: codes::NOT_LEADER_OR_FOLLOWER,
+            error_message: Some("not the raft leader".into()),
+            ..Default::default()
+        };
+        let (decoded, consumed) = round_trip_response(&resp, krabka_ids::ApiVersion(version));
+        assert2::assert!(decoded.error_code == codes::NOT_LEADER_OR_FOLLOWER);
+        assert2::assert!(consumed, "all bytes consumed at v{version}");
     }
 
     #[tokio::test]

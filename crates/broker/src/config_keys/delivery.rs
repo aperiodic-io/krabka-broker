@@ -65,48 +65,44 @@ mod tests {
         std::collections::BTreeMap,
     };
 
-    #[test]
-    fn validate_delivery_mode_accepts_the_two_modes_only() {
-        let cases = [
-            (DELIVERY_MODE_IMMEDIATE, true),
-            (DELIVERY_MODE_SCHEDULED, true),
-            ("later", false),
-            ("", false),
-        ];
-        for (value, want_ok) in cases {
-            assert!(
-                validate_topic_config(DELIVERY_MODE, value).is_ok() == want_ok,
-                "delivery.mode={value}"
-            );
-        }
+    #[yare::parameterized(
+        immediate = { DELIVERY_MODE_IMMEDIATE, true },
+        scheduled = { DELIVERY_MODE_SCHEDULED, true },
+        unknown = { "later", false },
+        empty = { "", false },
+    )]
+    fn validate_delivery_mode_accepts_the_two_modes_only(value: &str, want_ok: bool) {
+        assert2::assert!(
+            validate_topic_config(DELIVERY_MODE, value).is_ok() == want_ok,
+            "delivery.mode={value}"
+        );
     }
 
-    #[test]
-    fn validate_delivery_max_delay_ms_boundary_cases() {
-        let cases = [
-            ("0", true),         // no delay at all is legal
-            ("604800000", true), // the default, 7 days
-            ("-1", true),        // -1 (unbounded) accepted
-            ("-2", false),       // below -1 rejected
-            ("soon", false),     // non-integer rejected
-        ];
-        for (value, want_ok) in cases {
-            assert!(
-                validate_topic_config(DELIVERY_MAX_DELAY_MS, value).is_ok() == want_ok,
-                "delivery.max.delay.ms={value}"
-            );
-        }
+    #[yare::parameterized(
+        zero = { "0", true },
+        default = { "604800000", true },
+        unlimited = { "-1", true },
+        below_unlimited = { "-2", false },
+        non_integer = { "soon", false },
+    )]
+    fn validate_delivery_max_delay_ms_boundary_cases(value: &str, want_ok: bool) {
+        assert2::assert!(
+            validate_topic_config(DELIVERY_MAX_DELAY_MS, value).is_ok() == want_ok,
+            "delivery.max.delay.ms={value}"
+        );
     }
 
-    #[test]
-    fn validate_delivery_schedule_monotonic_accepts_bools_only() {
-        let cases = [("true", true), ("false", true), ("yes", false), ("", false)];
-        for (value, want_ok) in cases {
-            assert!(
-                validate_topic_config(DELIVERY_SCHEDULE_MONOTONIC, value).is_ok() == want_ok,
-                "delivery.schedule.monotonic={value}"
-            );
-        }
+    #[yare::parameterized(
+        true_value = { "true", true },
+        false_value = { "false", true },
+        non_boolean = { "yes", false },
+        empty = { "", false },
+    )]
+    fn validate_delivery_schedule_monotonic_accepts_bools_only(value: &str, want_ok: bool) {
+        assert2::assert!(
+            validate_topic_config(DELIVERY_SCHEDULE_MONOTONIC, value).is_ok() == want_ok,
+            "delivery.schedule.monotonic={value}"
+        );
     }
 
     #[test]

@@ -16,25 +16,26 @@ use {
     wiremock::{Mock, MockServer, ResponseTemplate, matchers::method},
 };
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_broker_with_no_registry_rejects_a_topic_that_asks_for_validation() {
-    // No `[schema_registry]` section at all.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let config = BrokerConfig::for_tests(dir.path().to_path_buf());
-    let (broker, client) = boot_config(config).await;
+#[yare::parameterized(
+    no_registry_section = { false },
+    registry_returns_500 = { true },
+)]
+#[test_macro(tokio::test(flavor = "multi_thread", worker_threads = 2))]
+async fn a_registry_that_cannot_answer_fails_closed(registry_returns_500: bool) {
+    let registry = if registry_returns_500 {
+        Some(unavailable_registry().await)
+    } else {
+        None
+    };
+    let (broker, client, _dir) = if let Some(registry) = &registry {
+        boot(&registry.uri()).await
+    } else {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = BrokerConfig::for_tests(dir.path().to_path_buf());
+        let (broker, client) = boot_config(config).await;
+        (broker, client, dir)
+    };
 
-    expect_fail_closed(&broker, &client).await;
-    broker.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_unreachable_registry_fails_closed_by_default() {
-    // A server that accepts the connection and then answers 500 for
-    // everything: the registry failing to answer, rather than answering "not
-    // registered".
-    let registry = unavailable_registry().await;
-
-    let (broker, client, _dir) = boot(&registry.uri()).await;
     expect_fail_closed(&broker, &client).await;
     broker.shutdown().await;
 }

@@ -200,78 +200,82 @@ pub(crate) fn expand(
 
 #[cfg(test)]
 mod tests {
-    use {super::adapter, crate::meta::compact, assert2::assert};
+    use {super::adapter, crate::meta::compact};
 
     const HANDLER: &str = "pub(crate) async fn handle(source: &Broker, mut owned: Request, negotiated: ApiVersion, caller: &RequestContext<'_>) -> DispatchResult { if unrelated::<Type>(&value) { operation().await?; } }";
     const OPTIONS: &str = "name = \"handle_control\", api = \"Control\", level = \"info\"";
 
-    #[test]
-    fn infers_owned_request_and_preserves_bindings_for_both_span_levels() {
-        for level in ["info", "debug"] {
-            let meta = OPTIONS.replace("info", level).parse().unwrap();
-            let output = adapter(&meta, &HANDLER.parse().unwrap()).unwrap();
-            assert!(
-                compact(&output.parameters)
-                    == "source:&Broker,negotiated:ApiVersion,_correlation_id:i32,req_bytes:&[u8],caller:&RequestContext<'_>"
-            );
-            assert!(
-                compact(&output.decode)
-                    == "letmutowned=crate::handlers::decode_request::<Request>(req_bytes,negotiated)?;"
-            );
-            let trace = compact(&output.tracing);
-            assert!(trace.contains("name=\"handle_control\""));
-            assert!(trace.contains("api=\"Control\""));
-            assert!(trace.contains(&format!("level=\"{level}\"")));
-            assert!(trace.ends_with(",err)]"));
-        }
+    #[yare::parameterized(
+        info = { "info" },
+        debug = { "debug" },
+    )]
+    fn infers_owned_request_and_preserves_bindings_for_both_span_levels(level: &str) {
+        let meta = OPTIONS.replace("info", level).parse().unwrap();
+        let output = adapter(&meta, &HANDLER.parse().unwrap()).unwrap();
+        assert2::assert!(
+            compact(&output.parameters)
+                == "source:&Broker,negotiated:ApiVersion,_correlation_id:i32,req_bytes:&[u8],caller:&RequestContext<'_>"
+        );
+        assert2::assert!(
+            compact(&output.decode)
+                == "letmutowned=crate::handlers::decode_request::<Request>(req_bytes,negotiated)?;"
+        );
+        let trace = compact(&output.tracing);
+        assert2::assert!(trace.contains("name=\"handle_control\""));
+        assert2::assert!(trace.contains("api=\"Control\""));
+        assert2::assert!(trace.contains(&format!("level=\"{level}\"")));
+        assert2::assert!(trace.ends_with(",err)]"));
     }
 
-    #[test]
-    fn rejects_invalid_metadata_and_incompatible_headers() {
+    #[yare::parameterized(
+        empty = { "" },
+        missing_level = { "name = \"n\", api = \"a\"" },
+        empty_name = { "name = \"\", api = \"a\", level = \"info\"" },
+        empty_api = { "name = \"n\", api = \"\", level = \"info\"" },
+        nonstring_name = { "name = 1, api = \"a\", level = \"info\"" },
+        unsupported_level = { "name = \"n\", api = \"a\", level = \"trace\"" },
+        extra_option = { "name = \"n\", api = \"a\", level = \"info\", extra = true" },
+        duplicate_name = { "name = \"n\", name = \"other\", api = \"a\", level = \"info\"" },
+    )]
+    fn rejects_invalid_metadata(meta: &str) {
         let valid = HANDLER.parse().unwrap();
-        for meta in [
-            "",
-            "name = \"n\", api = \"a\"",
-            "name = \"\", api = \"a\", level = \"info\"",
-            "name = \"n\", api = \"\", level = \"info\"",
-            "name = 1, api = \"a\", level = \"info\"",
-            "name = \"n\", api = \"a\", level = \"trace\"",
-            "name = \"n\", api = \"a\", level = \"info\", extra = true",
-            "name = \"n\", name = \"other\", api = \"a\", level = \"info\"",
-        ] {
-            assert!(adapter(&meta.parse().unwrap(), &valid).is_err(), "{meta}");
-        }
-        let meta = OPTIONS.parse().unwrap();
-        for item in [
-            HANDLER.replace("async ", ""),
-            HANDLER.replace("handle", "other"),
-            HANDLER.replace("handle(", "handle<T>("),
-            HANDLER.replace("async fn", "async unsafe fn"),
-            HANDLER.replace("async fn", "async extern \"C\" fn"),
-            HANDLER.replace("async fn", "const async fn"),
-            HANDLER.replace("DispatchResult", "Result<(), Error>"),
-            HANDLER.replace("mut owned: Request", "owned: &Request"),
-            HANDLER.replace("source: &Broker", "source: &mut Broker"),
-            HANDLER.replace("caller: &RequestContext<'_>", "caller: Context"),
+        assert2::assert!(adapter(&meta.parse().unwrap(), &valid).is_err(), "{meta}");
+    }
+
+    #[yare::parameterized(
+        sync = { HANDLER.replace("async ", "") },
+        wrong_name = { HANDLER.replace("handle", "other") },
+        generic = { HANDLER.replace("handle(", "handle<T>(") },
+        unsafe_fn = { HANDLER.replace("async fn", "async unsafe fn") },
+        extern_fn = { HANDLER.replace("async fn", "async extern \"C\" fn") },
+        const_fn = { HANDLER.replace("async fn", "const async fn") },
+        wrong_result = { HANDLER.replace("DispatchResult", "Result<(), Error>") },
+        borrowed_request = { HANDLER.replace("mut owned: Request", "owned: &Request") },
+        mutable_broker = { HANDLER.replace("source: &Broker", "source: &mut Broker") },
+        wrong_context = { HANDLER.replace("caller: &RequestContext<'_>", "caller: Context") },
+        duplicate_wire_name = {
             HANDLER.replace("negotiated: ApiVersion", "req_bytes: ApiVersion"),
-            HANDLER.replace("negotiated: ApiVersion", "negotiated: u16"),
-            HANDLER.replace("mut owned", "ref owned"),
-            HANDLER.replace("mut owned", "source"),
-            HANDLER.replace("source: &Broker, ", ""),
-            HANDLER.replace("source: &Broker", "&self"),
-            HANDLER.replace("source: &Broker", "mut source: &Broker"),
-            HANDLER.replace("mut owned", "(left, right)"),
-            HANDLER.replace("mut owned", "#[cfg(any())] owned"),
+        },
+        wrong_version = { HANDLER.replace("negotiated: ApiVersion", "negotiated: u16") },
+        ref_pattern = { HANDLER.replace("mut owned", "ref owned") },
+        duplicate_pattern = { HANDLER.replace("mut owned", "source") },
+        missing_broker = { HANDLER.replace("source: &Broker, ", "") },
+        receiver = { HANDLER.replace("source: &Broker", "&self") },
+        mutable_source = { HANDLER.replace("source: &Broker", "mut source: &Broker") },
+        destructured_request = { HANDLER.replace("mut owned", "(left, right)") },
+        attributed_pattern = { HANDLER.replace("mut owned", "#[cfg(any())] owned") },
+        where_clause = {
             HANDLER.replace("DispatchResult {", "DispatchResult where Request: Clone {"),
-            HANDLER.replace(
-                "caller: &RequestContext<'_>",
-                "caller: &RequestContext<'_>, ...",
-            ),
-            HANDLER.split('{').next().unwrap().to_owned(),
-            format!("{HANDLER} fn extra() {{}}"),
-            "struct Request {}".into(),
-        ] {
-            assert!(adapter(&meta, &item.parse().unwrap()).is_err(), "{item}");
-        }
+        },
+        variadic = {
+            HANDLER.replace("caller: &RequestContext<'_>", "caller: &RequestContext<'_>, ..."),
+        },
+        missing_body = { HANDLER.split('{').next().unwrap().to_owned() },
+        trailing_item = { format!("{HANDLER} fn extra() {{}}") },
+        non_function = { "struct Request {}".to_owned() },
+    )]
+    fn rejects_incompatible_headers(item: String) {
+        let meta = OPTIONS.parse().unwrap();
+        assert2::assert!(adapter(&meta, &item.parse().unwrap()).is_err(), "{item}");
     }
 }

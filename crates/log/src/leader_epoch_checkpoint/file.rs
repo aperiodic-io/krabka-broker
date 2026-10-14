@@ -178,47 +178,46 @@ mod tests {
 
     /// An empty file and a header with no count line both hold no entries,
     /// as Kafka's reader returns an empty list when a line runs out.
-    #[test]
-    fn a_file_that_ends_early_has_no_entries() {
-        for contents in ["", "0\n"] {
-            let TempPath { dir: _d, path } = fresh();
-            std::fs::write(&path, contents).unwrap();
-            let c = LeaderEpochCheckpoint::open(path).unwrap();
-            assert2::assert!(c.entries() == &[][..], "{contents:?}");
-        }
+    #[yare::parameterized(
+        empty_file = { "" },
+        version_without_count = { "0\n" },
+    )]
+    fn a_file_that_ends_early_has_no_entries(contents: &str) {
+        let TempPath { dir: _d, path } = fresh();
+        std::fs::write(&path, contents).unwrap();
+        let c = LeaderEpochCheckpoint::open(path).unwrap();
+        assert2::assert!(c.entries() == &[][..], "{contents:?}");
     }
 
     /// A header that is an integer other than 0 is an unrecognized version,
     /// as in Kafka. A first line that is no integer is a file without a
     /// header.
-    #[test]
-    fn open_refuses_an_unknown_or_missing_version() {
-        for (contents, found) in [
-            ("1\n3\n0 0\n1 50\n2 100\n", Some(1)),
-            ("-1\n0\n", Some(-1)),
-            ("99999999999\n0\n", Some(99_999_999_999)),
-            ("3\n0 0\n1 50\n2 100\n", Some(3)),
-            ("0 0\n1 50\n", None),
-            (" 0\n0\n", None),
-            ("v0\n0\n", None),
-        ] {
-            let TempPath { dir: _d, path } = fresh();
-            std::fs::write(&path, contents).unwrap();
-            let error = LeaderEpochCheckpoint::open(path.clone()).unwrap_err();
-            let got = match error {
-                LogError::UnsupportedFormatVersion {
-                    artifact: ARTIFACT,
-                    path: named,
-                    found,
-                } if named == path => Some(Some(found)),
-                LogError::MissingFormatVersion {
-                    artifact: ARTIFACT,
-                    path: named,
-                } if named == path => Some(None),
-                _ => None,
-            };
-            assert2::assert!(got == Some(found), "{contents:?}");
-        }
+    #[yare::parameterized(
+        version_1 = { "1\n3\n0 0\n1 50\n2 100\n", Some(1) },
+        version_negative = { "-1\n0\n", Some(-1) },
+        version_overflow = { "99999999999\n0\n", Some(99_999_999_999) },
+        version_3 = { "3\n0 0\n1 50\n2 100\n", Some(3) },
+        missing_count = { "0 0\n1 50\n", None },
+        leading_space = { " 0\n0\n", None },
+        nonnumeric_version = { "v0\n0\n", None },
+    )]
+    fn open_refuses_an_unknown_or_missing_version(contents: &str, found: Option<i64>) {
+        let TempPath { dir: _d, path } = fresh();
+        std::fs::write(&path, contents).unwrap();
+        let error = LeaderEpochCheckpoint::open(path.clone()).unwrap_err();
+        let got = match error {
+            LogError::UnsupportedFormatVersion {
+                artifact: ARTIFACT,
+                path: named,
+                found,
+            } if named == path => Some(Some(found)),
+            LogError::MissingFormatVersion {
+                artifact: ARTIFACT,
+                path: named,
+            } if named == path => Some(None),
+            _ => None,
+        };
+        assert2::assert!(got == Some(found), "{contents:?}");
     }
 
     #[test]

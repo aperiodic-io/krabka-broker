@@ -8,7 +8,7 @@
 use {
     super::{
         ALICE, BOB, CLUSTER_ID, NOW_MS, OTHER_CLUSTER_ID, SigningFixture, check_against, signed,
-        signed_at, signing_fixture,
+        signed_at, signed_record_with_unknown_key_id, signing_fixture,
     },
     crate::{
         codes,
@@ -39,10 +39,7 @@ fn each_refusal_names_its_own_check_under_one_code() {
     let cases: Vec<Case<'_>> = vec![
         Case {
             label: "an unknown key_id",
-            record: TopicFreezeRecord {
-                key_id: "carol-yubi".to_owned(),
-                ..signed(&trust.alice, CLUSTER_ID, &good)
-            },
+            record: signed_record_with_unknown_key_id(&trust, &good),
             check: check_against(&trust, ALICE),
             expected: SignatureRefusal::UnknownKeyId,
         },

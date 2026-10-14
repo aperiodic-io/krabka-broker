@@ -66,41 +66,49 @@ pub(crate) fn expand(
 
 #[cfg(test)]
 mod tests {
-    use {super::admission, crate::meta::compact, assert2::assert};
+    use {super::admission, crate::meta::compact};
 
-    #[test]
-    fn both_handlers_retain_snapshot_and_ordered_early_refusal() {
-        for api in ["Fetch", "Acknowledge"] {
-            let input = format!(
-                "pub(crate) async fn handle(broker: &Broker, req: Share{api}Request, version: ApiVersion, ctx: &RequestContext<'_>) -> Result<Share{api}Response, BrokerError> {{ if opaque::<1, 2>() {{ return operation(); }} else {{ operation()? }} }}"
-            );
-            let output = compact(&admission(&input.parse().unwrap()).unwrap());
-            let clone = output.find("broker.config.share_group.clone()").unwrap();
-            let image = output.find("broker.controller.current_image()").unwrap();
-            let resolve = output.find("resolve_share_identity(").unwrap();
-            assert!(clone < image && image < resolve);
-            assert!(output.contains("req.group_id.as_ref(),req.member_id.as_ref()"));
-            assert!(output.contains(&format!(
-                "Err(code)=>returnOk(Share{api}Response::error(code,None))"
-            )));
-        }
+    #[yare::parameterized(fetch = { "Fetch" }, acknowledge = { "Acknowledge" })]
+    fn both_handlers_retain_snapshot_and_ordered_early_refusal(api: &str) {
+        let input = format!(
+            "pub(crate) async fn handle(broker: &Broker, req: Share{api}Request, version: ApiVersion, ctx: &RequestContext<'_>) -> Result<Share{api}Response, BrokerError> {{ if opaque::<1, 2>() {{ return operation(); }} else {{ operation()? }} }}"
+        );
+        let output = compact(&admission(&input.parse().unwrap()).unwrap());
+        let clone = output.find("broker.config.share_group.clone()").unwrap();
+        let image = output.find("broker.controller.current_image()").unwrap();
+        let resolve = output.find("resolve_share_identity(").unwrap();
+        assert2::assert!(clone < image && image < resolve);
+        assert2::assert!(output.contains("req.group_id.as_ref(),req.member_id.as_ref()"));
+        assert2::assert!(output.contains(&format!(
+            "Err(code)=>returnOk(Share{api}Response::error(code,None))"
+        )));
     }
 
-    #[test]
-    fn refuses_wrong_request_response_and_header_shapes() {
+    #[yare::parameterized(
+        sync = { "sync" },
+        wrong_method = { "wrong_method" },
+        mutable_request = { "mutable_request" },
+        wrong_request = { "wrong_request" },
+        wrong_response = { "wrong_response" },
+        wrong_version = { "wrong_version" },
+        owned_broker = { "owned_broker" },
+        wrong_context = { "wrong_context" },
+        extra_item = { "extra_item" },
+    )]
+    fn refuses_wrong_request_response_and_header_shapes(case: &str) {
         let valid = "async fn handle(broker: &Broker, req: ShareFetchRequest, version: ApiVersion, ctx: &RequestContext<'_>) -> Result<ShareFetchResponse, BrokerError> {}";
-        for invalid in [
-            valid.replace("async fn", "fn"),
-            valid.replace("handle", "other"),
-            valid.replace("req:", "mut req:"),
-            valid.replace("ShareFetchRequest", "OtherRequest"),
-            valid.replace("ShareFetchResponse", "ShareAcknowledgeResponse"),
-            valid.replace("ApiVersion", "u8"),
-            valid.replace("&Broker", "Broker"),
-            valid.replace("&RequestContext<'_>", "&OtherContext"),
-            format!("{valid} fn extra() {{}}"),
-        ] {
-            assert!(admission(&invalid.parse().unwrap()).is_err(), "{invalid}");
-        }
+        let invalid = match case {
+            "sync" => valid.replace("async fn", "fn"),
+            "wrong_method" => valid.replace("handle", "other"),
+            "mutable_request" => valid.replace("req:", "mut req:"),
+            "wrong_request" => valid.replace("ShareFetchRequest", "OtherRequest"),
+            "wrong_response" => valid.replace("ShareFetchResponse", "ShareAcknowledgeResponse"),
+            "wrong_version" => valid.replace("ApiVersion", "u8"),
+            "owned_broker" => valid.replace("&Broker", "Broker"),
+            "wrong_context" => valid.replace("&RequestContext<'_>", "&OtherContext"),
+            "extra_item" => format!("{valid} fn extra() {{}}"),
+            _ => unreachable!(),
+        };
+        assert2::assert!(admission(&invalid.parse().unwrap()).is_err(), "{invalid}");
     }
 }

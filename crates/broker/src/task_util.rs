@@ -99,6 +99,21 @@ pub(crate) async fn finish_tasks(
     }
 }
 
+macro_rules! recover_after_refresh {
+    ($this:ident, $(#[$attribute:meta])* $body:block) => {
+        $(#[$attribute])*
+        pub(crate) async fn recover(
+            self: &Arc<Self>,
+            image: &krabka_metadata::MetadataImage,
+        ) -> Result<(), crate::error::BrokerError> {
+            let $this = self;
+            $this.refresh_leader_partitions(image).await.finished().await;
+            $body
+        }
+    };
+}
+pub(crate) use recover_after_refresh;
+
 #[cfg(test)]
 mod tests {
     use {

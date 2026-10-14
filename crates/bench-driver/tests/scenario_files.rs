@@ -139,8 +139,7 @@ fn main() -> ExitCode {
             // so nextest filters and CI history keep matching.
             let file = path
                 .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default();
+                .map_or_default(|name| name.to_string_lossy().into_owned());
             libtest_mimic::Trial::test(format!("scenario_file::{file}"), move || {
                 scenario_file(&path).map_err(libtest_mimic::Failed::from)
             })

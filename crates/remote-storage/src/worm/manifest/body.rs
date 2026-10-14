@@ -150,36 +150,38 @@ mod tests {
         krabka_ids::LeaderEpoch,
     };
 
+    #[yare::parameterized(
+        every_optional_populated = {
+            SegmentManifest {
+                body: ManifestBody {
+                    objects: vec![located_object()],
+                    ..sample_body()
+                },
+                signature: Some(ManifestSignature {
+                    key_id: KEY_ID.to_string(),
+                    public_key: HexBytes(vec![0x01, 0x02, 0x03]),
+                    signature: HexBytes(vec![0xfe, 0xed]),
+                }),
+            },
+        },
+        every_optional_absent = {
+            SegmentManifest {
+                body: ManifestBody {
+                    objects: vec![bare_object()],
+                    ..sample_body()
+                },
+                signature: None,
+            },
+        },
+    )]
+    fn manifest_json_round_trips(manifest: SegmentManifest) {
+        let json = serde_json::to_string(&manifest).unwrap();
+        let parsed: SegmentManifest = serde_json::from_str(&json).unwrap();
+        check!(parsed == manifest);
+    }
+
     #[test]
-    fn manifest_json_round_trips() {
-        let every_optional_populated = SegmentManifest {
-            body: ManifestBody {
-                objects: vec![located_object()],
-                ..sample_body()
-            },
-            signature: Some(ManifestSignature {
-                key_id: KEY_ID.to_string(),
-                public_key: HexBytes(vec![0x01, 0x02, 0x03]),
-                signature: HexBytes(vec![0xfe, 0xed]),
-            }),
-        };
-        let every_optional_absent = SegmentManifest {
-            body: ManifestBody {
-                objects: vec![bare_object()],
-                ..sample_body()
-            },
-            signature: None,
-        };
-
-        for (name, manifest) in [
-            ("every optional populated", every_optional_populated),
-            ("every optional absent", every_optional_absent),
-        ] {
-            let json = serde_json::to_string(&manifest).unwrap();
-            let parsed: SegmentManifest = serde_json::from_str(&json).unwrap();
-            check!(parsed == manifest, "case {name}");
-        }
-
+    fn manifest_json_rejects_unknown_fields_and_reads_legacy_precondition() {
         // An unknown field is a decode failure, not a silently dropped one.
         let with_extra = serde_json::json!({
             "body": {"format_version": 1, "surprise": true},

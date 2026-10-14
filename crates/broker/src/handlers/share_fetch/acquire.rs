@@ -659,23 +659,30 @@ mod tests {
         assert2::{assert, check},
     };
 
-    #[test]
-    fn materialization_stops_at_the_deferred_record_bound() {
+    #[yare::parameterized(
+        one_below_bound = {
+            SHARE_DELIVERY_MAX_DEFERRED_RECORDS - 1,
+            SHARE_DELIVERY_MAX_DEFERRED_RECORDS + 9,
+        },
+        at_bound = {
+            SHARE_DELIVERY_MAX_DEFERRED_RECORDS,
+            SHARE_DELIVERY_MAX_DEFERRED_RECORDS,
+        },
+    )]
+    fn materialization_stops_at_the_deferred_record_bound(deferred: i64, expected_end: i64) {
         let bound = SHARE_DELIVERY_MAX_DEFERRED_RECORDS;
         let inflight = i32::try_from(bound).expect("the bound fits an inflight budget");
-        for (deferred, expected_end) in [(bound - 1, bound + 9), (bound, bound)] {
-            let mut state = AcquisitionState::new(Offset(0));
-            state.materialize(Offset(deferred), inflight);
-            state.defer_internal(Offset(0), Offset(deferred - 1));
-            assert!(state.deferred_records() == deferred);
+        let mut state = AcquisitionState::new(Offset(0));
+        state.materialize(Offset(deferred), inflight);
+        state.defer_internal(Offset(0), Offset(deferred - 1));
+        assert2::assert!(state.deferred_records() == deferred);
 
-            materialize_within_deferral_bound(&mut state, Offset(deferred + 10), 10);
+        materialize_within_deferral_bound(&mut state, Offset(deferred + 10), 10);
 
-            assert!(
-                state.end_offset == Offset(expected_end),
-                "deferred={deferred}"
-            );
-        }
+        assert2::assert!(
+            state.end_offset == Offset(expected_end),
+            "deferred={deferred}"
+        );
     }
 
     /// A transactional batch at offsets 0-2 from producer 1000, its end marker

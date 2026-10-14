@@ -72,11 +72,7 @@ mod tests {
     #[test]
     fn group_read_denied_yields_group_authorization_failed() {
         let EmptyAclImage { authorizer, image } = empty_acl_image();
-        krabka_macros::request_test_identity! {
-            bind(principal, peer, ctx);
-            user ["ANONYMOUS"];
-            client ["heartbeat-client"];
-        };
+        anonymous_request_identity!(principal, peer, ctx, "heartbeat-client",);
 
         assert!(group_read_denied(&authorizer, &image, &ctx, "g"));
 

@@ -43,15 +43,7 @@ pub(super) fn spawn_storage_security_maintenance(
         // Kafka sends `AlterPartition` to the active controller on its
         // CONTROLLER listener, as it sends `BrokerHeartbeat`. An isolated
         // controller has no broker listener at all.
-        dialer: ControllerDialer {
-            outbound_client: Arc::clone(inter_broker_client),
-            listener_protocol: config.controller_listener_protocol,
-            server_name: config
-                .controller_server_name
-                .clone()
-                .unwrap_or_else(|| "localhost".to_owned()),
-            quorum_voters: config.controller_quorum_voters.clone(),
-        },
+        dialer: ControllerDialer::from_config(config, inter_broker_client),
         node_id: config.node_id,
         partitions: Arc::clone(partitions),
         controller: Arc::clone(controller),

@@ -31,44 +31,39 @@ fn append_boundaries_and_cadence_do_not_wrap() {
     );
 }
 
-#[test]
-fn loss_settlement_keeps_later_losses_in_a_fresh_generation() {
-    let losses = |generation, count| AuditLosses { generation, count };
-    // (case, pending, marker's batch, pending after settlement)
-    for (case, state, batch, expected) in [
-        (
-            "the marker reports every pending loss",
-            losses(4, 2),
-            losses(4, 2),
-            losses(4, 0),
-        ),
-        (
-            "a loss emitted after the snapshot moves to a fresh generation",
-            losses(4, 3),
-            losses(4, 2),
-            losses(5, 1),
-        ),
-        (
-            "another generation's marker settles nothing",
-            losses(5, 1),
-            losses(4, 2),
-            losses(5, 1),
-        ),
-        (
-            "an over-reporting batch clamps to zero",
-            losses(4, 1),
-            losses(4, 2),
-            losses(4, 0),
-        ),
-        (
-            "the last generation saturates",
-            losses(u64::MAX, 3),
-            losses(u64::MAX, 1),
-            losses(u64::MAX, 2),
-        ),
-    ] {
-        check!(settle_loss_batch(state, batch) == expected, "{case}");
-    }
+#[yare::parameterized(
+    reports_every_pending_loss = {
+        AuditLosses { generation: 4, count: 2 },
+        AuditLosses { generation: 4, count: 2 },
+        AuditLosses { generation: 4, count: 0 },
+    },
+    later_loss_moves_to_new_generation = {
+        AuditLosses { generation: 4, count: 3 },
+        AuditLosses { generation: 4, count: 2 },
+        AuditLosses { generation: 5, count: 1 },
+    },
+    different_generation_marker_settles_nothing = {
+        AuditLosses { generation: 5, count: 1 },
+        AuditLosses { generation: 4, count: 2 },
+        AuditLosses { generation: 5, count: 1 },
+    },
+    over_report_clamps_to_zero = {
+        AuditLosses { generation: 4, count: 1 },
+        AuditLosses { generation: 4, count: 2 },
+        AuditLosses { generation: 4, count: 0 },
+    },
+    final_generation_saturates = {
+        AuditLosses { generation: u64::MAX, count: 3 },
+        AuditLosses { generation: u64::MAX, count: 1 },
+        AuditLosses { generation: u64::MAX, count: 2 },
+    },
+)]
+fn loss_settlement_keeps_later_losses_in_a_fresh_generation(
+    state: AuditLosses,
+    batch: AuditLosses,
+    expected: AuditLosses,
+) {
+    check!(settle_loss_batch(state, batch) == expected);
 }
 
 #[test]
@@ -82,25 +77,31 @@ fn checkpoint_requires_an_exact_nonempty_position() {
     check!(audit_checkpoint_admission(true, true, u64::MAX, u64::MAX) == RejectSequence);
 }
 
-#[test]
-fn loss_marker_shape_count_and_generation_are_exact() {
-    use AuditLossMarkerAdmission::{Admit, Reject};
-
-    // (header matches, field count, count, generation, previous, expected)
-    for (header, fields, count, generation, previous, expected) in [
-        (true, 2, 3, Some(2), 1, Admit { generation: 2 }),
-        (true, 2, 3, Some(1), 0, Admit { generation: 1 }),
-        // A one-field body without a generation is not a marker.
-        (true, 1, 3, None, 0, Reject),
-        (true, 2, 3, None, 0, Reject),
-        (true, 3, 3, Some(2), 1, Reject),
-        (false, 2, 3, Some(2), 1, Reject),
-        (true, 2, 0, Some(2), 1, Reject),
-        (true, 2, 3, Some(1), 1, Reject),
-        (true, 2, 3, Some(u64::MAX), u64::MAX, Reject),
-    ] {
-        check!(
-            audit_loss_marker_admission(header, fields, count, generation, previous) == expected
-        );
-    }
+#[yare::parameterized(
+    exact_marker = { true, 2, 3, Some(2), 1, AuditLossMarkerAdmission::Admit { generation: 2 } },
+    earlier_generation = {
+        true,
+        2,
+        3,
+        Some(1),
+        0,
+        AuditLossMarkerAdmission::Admit { generation: 1 },
+    },
+    missing_generation_one_field = { true, 1, 3, None, 0, AuditLossMarkerAdmission::Reject },
+    missing_generation = { true, 2, 3, None, 0, AuditLossMarkerAdmission::Reject },
+    too_many_fields = { true, 3, 3, Some(2), 1, AuditLossMarkerAdmission::Reject },
+    wrong_header = { false, 2, 3, Some(2), 1, AuditLossMarkerAdmission::Reject },
+    empty_count = { true, 2, 0, Some(2), 1, AuditLossMarkerAdmission::Reject },
+    previous_not_before_generation = { true, 2, 3, Some(1), 1, AuditLossMarkerAdmission::Reject },
+    maximum_generation = { true, 2, 3, Some(u64::MAX), u64::MAX, AuditLossMarkerAdmission::Reject },
+)]
+fn loss_marker_shape_count_and_generation_are_exact(
+    header: bool,
+    fields: u64,
+    count: u64,
+    generation: Option<u64>,
+    previous: u64,
+    expected: AuditLossMarkerAdmission,
+) {
+    check!(audit_loss_marker_admission(header, fields, count, generation, previous) == expected);
 }

@@ -41,23 +41,21 @@ mod tests {
 
     // ── KIP-511 client-info validation ─────────────────────────────────────
 
-    #[test]
-    fn valid_client_info_accepts_typical_names() {
-        for s in [
-            "apache-kafka-java",
-            "krabka-client-core",
-            "librdkafka",
-            "kafka-python",
-            "node-rdkafka",
-            "Sarama",
-            "3.6.2",
-            "0.0.0",
-            "1.0.0-SNAPSHOT",
-            "a", // single alnum char — allowed
-            "1.2.3.4",
-        ] {
-            assert!(is_valid_client_info(s), "{s:?} should be valid");
-        }
+    #[yare::parameterized(
+        apache_java = { "apache-kafka-java" },
+        krabka_client = { "krabka-client-core" },
+        librdkafka = { "librdkafka" },
+        kafka_python = { "kafka-python" },
+        node_rdkafka = { "node-rdkafka" },
+        sarama = { "Sarama" },
+        version = { "3.6.2" },
+        zero_version = { "0.0.0" },
+        snapshot_version = { "1.0.0-SNAPSHOT" },
+        single_alnum = { "a" },
+        four_part_version = { "1.2.3.4" },
+    )]
+    fn valid_client_info_accepts_typical_names(s: &str) {
+        assert2::assert!(is_valid_client_info(s), "{s:?} should be valid");
     }
 
     #[test]
@@ -65,26 +63,29 @@ mod tests {
         assert!(!is_valid_client_info(""));
     }
 
-    #[test]
-    fn valid_client_info_rejects_leading_or_trailing_special() {
-        for s in ["-leading", "trailing-", ".dotstart", "dotend.", "-only-"] {
-            assert!(!is_valid_client_info(s), "{s:?} should be rejected");
-        }
+    #[yare::parameterized(
+        leading_hyphen = { "-leading" },
+        trailing_hyphen = { "trailing-" },
+        leading_dot = { ".dotstart" },
+        trailing_dot = { "dotend." },
+        only_hyphens = { "-only-" },
+    )]
+    fn valid_client_info_rejects_leading_or_trailing_special(s: &str) {
+        assert2::assert!(!is_valid_client_info(s), "{s:?} should be rejected");
     }
 
-    #[test]
-    fn valid_client_info_rejects_disallowed_interior_chars() {
-        for s in [
-            "has space",
-            "has/slash",
-            "has\\backslash",
-            "has;semi",
-            "has@at",
-            "has(paren)",
-            "has\"quote",
-            "café", // non-ASCII alphanumeric — KIP-511 regex is ASCII-only
-        ] {
-            assert!(!is_valid_client_info(s), "{s:?} should be rejected");
-        }
+    #[yare::parameterized(
+        space = { "has space" },
+        slash = { "has/slash" },
+        backslash = { "has\\backslash" },
+        semicolon = { "has;semi" },
+        at = { "has@at" },
+        parentheses = { "has(paren)" },
+        quote = { "has\"quote" },
+        non_ascii = { "café" },
+    )]
+    fn valid_client_info_rejects_disallowed_interior_chars(s: &str) {
+        // KIP-511's alphanumeric class is ASCII-only.
+        assert2::assert!(!is_valid_client_info(s), "{s:?} should be rejected");
     }
 }

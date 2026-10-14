@@ -52,6 +52,16 @@ pub(crate) struct GroupDescription {
 }
 
 impl BarrierCoordinator {
+    pub(super) fn groups_snapshot(&self) -> Vec<NamedGroup> {
+        self.groups
+            .iter()
+            .map(|entry| NamedGroup {
+                name: entry.key().clone(),
+                entry: entry.value().clone(),
+            })
+            .collect()
+    }
+
     /// Ask for `__barrier_state` if it does not exist, and wait until the
     /// partition `group` hashes to has this broker as its leader.
     ///
@@ -250,13 +260,7 @@ impl BarrierCoordinator {
     /// `names` is empty.
     pub(crate) async fn describe_groups(&self, names: &[String]) -> Vec<GroupDescription> {
         let selected: Vec<NamedGroup> = if names.is_empty() {
-            self.groups
-                .iter()
-                .map(|e| NamedGroup {
-                    name: e.key().clone(),
-                    entry: e.value().clone(),
-                })
-                .collect()
+            self.groups_snapshot()
         } else {
             names
                 .iter()

@@ -100,8 +100,20 @@ async fn scrape(addr: SocketAddr) -> String { scrape_metrics(addr).await }
 
 // ── KIP-511 validation paths ────────────────────────────────────────────────
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn v3_valid_client_info_accepted() {
+#[yare::parameterized(
+    valid = { "krabka-client-core", "0.1.1", 0, Some(true) },
+    empty_name = { "", "1.0.0", INVALID_REQUEST, Some(false) },
+    empty_version = { "krabka", "", INVALID_REQUEST, None::<bool> },
+    invalid_name = { "has space", "1.0.0", INVALID_REQUEST, None::<bool> },
+    leading_dash_version = { "krabka", "-1.0.0", INVALID_REQUEST, None::<bool> },
+)]
+#[test_macro(tokio::test(flavor = "multi_thread", worker_threads = 2))]
+async fn v3_client_info_validation(
+    software_name: &'static str,
+    software_version: &'static str,
+    expected_error: i16,
+    api_list_nonempty: Option<bool>,
+) {
     let BootedBroker {
         kafka_addr,
         metrics_addr: _metrics_addr,
@@ -109,98 +121,13 @@ async fn v3_valid_client_info_accepted() {
         tempdir: _td,
     } = boot().await;
 
-    let resp = send_api_versions(kafka_addr, 3, "krabka-client-core", "0.1.1")
+    let resp = send_api_versions(kafka_addr, 3, software_name, software_version)
         .await
         .expect("ApiVersions");
-    assert!(resp.error_code == 0, "valid v3 must succeed: {resp:?}");
-    assert!(
-        !resp.api_keys.is_empty(),
-        "valid v3 must return the API list",
-    );
-
-    handle.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn v3_empty_software_name_rejected_with_invalid_request() {
-    let BootedBroker {
-        kafka_addr,
-        metrics_addr: _metrics_addr,
-        handle,
-        tempdir: _td,
-    } = boot().await;
-
-    let resp = send_api_versions(kafka_addr, 3, "", "1.0.0")
-        .await
-        .expect("ApiVersions");
-    assert!(
-        resp.error_code == INVALID_REQUEST,
-        "empty name must be rejected: {resp:?}"
-    );
-    assert!(
-        resp.api_keys.is_empty(),
-        "error path must not advertise APIs",
-    );
-
-    handle.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn v3_empty_software_version_rejected_with_invalid_request() {
-    let BootedBroker {
-        kafka_addr,
-        metrics_addr: _metrics_addr,
-        handle,
-        tempdir: _td,
-    } = boot().await;
-
-    let resp = send_api_versions(kafka_addr, 3, "krabka", "")
-        .await
-        .expect("ApiVersions");
-    assert!(
-        resp.error_code == INVALID_REQUEST,
-        "empty version must be rejected: {resp:?}"
-    );
-
-    handle.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn v3_invalid_char_in_name_rejected() {
-    let BootedBroker {
-        kafka_addr,
-        metrics_addr: _metrics_addr,
-        handle,
-        tempdir: _td,
-    } = boot().await;
-
-    let resp = send_api_versions(kafka_addr, 3, "has space", "1.0.0")
-        .await
-        .expect("ApiVersions");
-    assert!(
-        resp.error_code == INVALID_REQUEST,
-        "spaces must be rejected: {resp:?}"
-    );
-
-    handle.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn v3_leading_dash_in_version_rejected() {
-    let BootedBroker {
-        kafka_addr,
-        metrics_addr: _metrics_addr,
-        handle,
-        tempdir: _td,
-    } = boot().await;
-
-    let resp = send_api_versions(kafka_addr, 3, "krabka", "-1.0.0")
-        .await
-        .expect("ApiVersions");
-    assert!(
-        resp.error_code == INVALID_REQUEST,
-        "leading dash must be rejected: {resp:?}"
-    );
+    assert2::assert!(resp.error_code == expected_error, "{resp:?}");
+    if let Some(expected) = api_list_nonempty {
+        assert2::assert!((!resp.api_keys.is_empty()) == expected, "{resp:?}");
+    }
 
     handle.shutdown().await;
 }

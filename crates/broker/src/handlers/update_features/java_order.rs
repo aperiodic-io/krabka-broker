@@ -52,16 +52,13 @@ pub(super) fn hash_map_order<'a>(keys: impl IntoIterator<Item = &'a str>) -> Vec
 mod tests {
     use {super::*, assert2::assert};
 
-    #[test]
-    fn java_string_hash_matches_the_jvm() {
-        // "hello".hashCode() and "polygenelubricants".hashCode() on a JVM.
-        for (key, want) in [
-            ("", 0),
-            ("hello", 99_162_322),
-            ("polygenelubricants", i32::MIN),
-        ] {
-            assert!(java_string_hash(key) == want, "{key}");
-        }
+    #[yare::parameterized(
+        empty = { "", 0 },
+        hello = { "hello", 99_162_322 },
+        overflow = { "polygenelubricants", i32::MIN },
+    )]
+    fn java_string_hash_matches_the_jvm(key: &str, want: i32) {
+        assert2::assert!(java_string_hash(key) == want, "{key}");
     }
 
     /// The feature names in insertion order, and the order that Kafka iterates

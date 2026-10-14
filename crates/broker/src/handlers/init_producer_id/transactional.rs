@@ -916,13 +916,7 @@ mod tests {
             .await
             .expect("init responds");
             check!(
-                fenced
-                    == InitProducerIdResponse {
-                        error_code: codes::CONCURRENT_TRANSACTIONS,
-                        producer_id: -1,
-                        producer_epoch: -1,
-                        ..Default::default()
-                    },
+                fenced == concurrent_transactions_response(),
                 "{}",
                 case.name
             );
@@ -1166,10 +1160,8 @@ mod tests {
         const TID: &str = "tid-rotated";
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let SeededCoordinator {
-            coordinator,
-            partition: _part,
-        } = coordinator_with_completed_transaction(dir.path(), TID).await;
+        let SeededCoordinator { coordinator, .. } =
+            coordinator_with_completed_transaction(dir.path(), TID).await;
         {
             let handle = coordinator.get(TID).expect("the seeded entry");
             let mut entry = handle.lock().await;
@@ -1215,10 +1207,8 @@ mod tests {
         const TID: &str = "tid-overlapping-init";
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let SeededCoordinator {
-            coordinator,
-            partition: _part,
-        } = coordinator_with_completed_transaction(dir.path(), TID).await;
+        let SeededCoordinator { coordinator, .. } =
+            coordinator_with_completed_transaction(dir.path(), TID).await;
 
         // Both calls park on the entry lock while the test holds it.
         let handle = coordinator.get(TID).expect("the seeded entry");
@@ -1258,10 +1248,8 @@ mod tests {
         const TID: &str = "tid-fresh-race";
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let SeededCoordinator {
-            coordinator,
-            partition: _part,
-        } = coordinator_with_completed_transaction(dir.path(), "tid-seeded").await;
+        let SeededCoordinator { coordinator, .. } =
+            coordinator_with_completed_transaction(dir.path(), "tid-seeded").await;
         check!(coordinator.get(TID).is_none());
 
         let write_lock = coordinator.lock_state_partition_for(TID).await;
@@ -1324,10 +1312,8 @@ mod tests {
         // (transaction version, whether the fence is recorded as failed)
         for (txnv, failed_fence) in [(TxnVersion::Flexible, true), (TxnVersion::Verified, false)] {
             let dir = tempfile::tempdir().expect("tempdir");
-            let SeededCoordinator {
-                coordinator,
-                partition: _part,
-            } = coordinator_with_completed_transaction(dir.path(), TID).await;
+            let SeededCoordinator { coordinator, .. } =
+                coordinator_with_completed_transaction(dir.path(), TID).await;
 
             // An ongoing transaction over a partition this broker does not
             // host yet: the abort marker cannot be delivered, so the fan-out
@@ -1348,12 +1334,7 @@ mod tests {
                         .expect("InitProducerId responds")
                 }
             };
-            let concurrent = InitProducerIdResponse {
-                error_code: codes::CONCURRENT_TRANSACTIONS,
-                producer_id: -1,
-                producer_epoch: -1,
-                ..Default::default()
-            };
+            let concurrent = concurrent_transactions_response();
 
             check!(init((1000, 3)).await == concurrent, "{txnv:?}");
             let published = coordinator.get(TID).expect("entry").lock().await.clone();
@@ -1456,15 +1437,7 @@ mod tests {
         let response = init.await.expect("init task").expect("init responds");
 
         check!(expired == vec![TID.to_string()]);
-        check!(
-            response
-                == InitProducerIdResponse {
-                    error_code: codes::CONCURRENT_TRANSACTIONS,
-                    producer_id: -1,
-                    producer_epoch: -1,
-                    ..Default::default()
-                }
-        );
+        check!(response == concurrent_transactions_response());
         // The id stays expired: nothing was published back into the map, and
         // the log ends at the tombstone the sweep appended.
         check!(coordinator.get(TID).is_none());
@@ -1498,15 +1471,7 @@ mod tests {
         seed(&coordinator, ongoing).await;
 
         let fenced = init_near_exhaustion(&coordinator, TID).await;
-        check!(
-            fenced
-                == InitProducerIdResponse {
-                    error_code: codes::CONCURRENT_TRANSACTIONS,
-                    producer_id: -1,
-                    producer_epoch: -1,
-                    ..Default::default()
-                }
-        );
+        check!(fenced == concurrent_transactions_response());
 
         let entry = coordinator.get(TID).expect("entry").lock().await.clone();
         check!(entry.state == TxnState::CompleteAbort);
@@ -1559,10 +1524,8 @@ mod tests {
         const TID: &str = "tid-stale-token-across-fence";
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let SeededCoordinator {
-            coordinator,
-            partition: _part,
-        } = coordinator_with_completed_transaction(dir.path(), TID).await;
+        let SeededCoordinator { coordinator, .. } =
+            coordinator_with_completed_transaction(dir.path(), TID).await;
 
         // The seeded entry starts at epoch 3. Bump it once (3 -> 4) so the
         // legitimate 4 -> 5 bump below has a live epoch to name.

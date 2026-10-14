@@ -59,8 +59,7 @@ struct Ports {
 }
 
 fn ports() -> &'static Ports {
-    static PORTS: std::sync::OnceLock<Ports> = std::sync::OnceLock::new();
-    PORTS.get_or_init(|| {
+    crate::once_value!(Ports, {
         let (client, controller) = (support::free_port(), support::free_port());
         Ports {
             advertised: format!("host.docker.internal:{client}"),

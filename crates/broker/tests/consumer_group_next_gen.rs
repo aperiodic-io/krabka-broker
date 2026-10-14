@@ -6,7 +6,7 @@ mod support;
 use {
     crate::support::{
         classic::{ClassicTimeouts, classic_join_request},
-        client::connect_client,
+        client::{connect_client, list_groups_by_type},
         consumer_groups::{consumer_heartbeat, reported_assignment},
         discovery::named_topic_metadata,
         topics::{creatable_topic, create_topic_request},
@@ -84,6 +84,17 @@ fn heartbeat(group: &str, member_id: &str, epoch: i32) -> ConsumerGroupHeartbeat
         topic_partitions: (epoch == 0).then(Vec::new),
         ..consumer_heartbeat(group, member_id, epoch)
     }
+}
+
+async fn join_group_on_topic(
+    client: &Client,
+    group: &str,
+    member_id: &str,
+    topic: &str,
+) -> ConsumerGroupHeartbeatResponse {
+    let mut request = heartbeat(group, member_id, 0);
+    request.subscribed_topic_names = Some(vec![topic.into()]);
+    client.send(request).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -337,9 +348,7 @@ async fn first_join_with_client_member_id_echoes_and_assigns() {
     } = consumer_case("tc", 2, "c").await;
 
     // Client supplies its own member id (GA KIP-848 semantics).
-    let mut req = heartbeat("gc", "client-generated-id", 0);
-    req.subscribed_topic_names = Some(vec!["tc".into()]);
-    let resp = client.send(req).await.unwrap();
+    let resp = join_group_on_topic(&client, "gc", "client-generated-id", "tc").await;
 
     assert!(resp.error_code == 0, "client-id first-join failed");
     assert!(
@@ -373,20 +382,11 @@ async fn list_groups_includes_next_gen_consumer_group() {
     } = consumer_case("tlist", 2, "c").await;
 
     // Join a next-gen consumer group so it is registered in the coordinator.
-    let mut req = heartbeat("glist", "", 0);
-    req.subscribed_topic_names = Some(vec!["tlist".into()]);
-    let resp = client.send(req).await.unwrap();
+    let resp = join_group_on_topic(&client, "glist", "", "tlist").await;
     assert!(resp.error_code == 0, "join failed: {:?}", resp.error_code);
 
     // types_filter = ["consumer"] → contains glist tagged "consumer".
-    let resp = client
-        .send(ListGroupsRequest {
-            types_filter: vec!["consumer".into()],
-            ..Default::default()
-        })
-        .await
-        .expect("ListGroups[consumer]");
-    assert!(resp.error_code == 0, "list error: {:?}", resp.error_code);
+    let resp = list_groups_by_type(&client, "consumer").await;
     let row = resp
         .groups
         .iter()
@@ -404,13 +404,7 @@ async fn list_groups_includes_next_gen_consumer_group() {
     );
 
     // types_filter = ["share"] → glist must NOT appear.
-    let resp = client
-        .send(ListGroupsRequest {
-            types_filter: vec!["share".into()],
-            ..Default::default()
-        })
-        .await
-        .expect("ListGroups[share]");
+    let resp = list_groups_by_type(&client, "share").await;
     let ids: Vec<_> = resp.groups.iter().map(|g| g.group_id.as_str()).collect();
     assert!(
         !ids.contains(&"glist"),

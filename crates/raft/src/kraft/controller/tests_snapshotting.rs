@@ -6,18 +6,21 @@
 use {
     super::*,
     crate::{
-        kraft::controller::{
-            checkpoint::{
-                checkpoint_id_is_newer, latest_checkpoint_id, load_checkpoint_by_id,
-                load_latest_checkpoint, parse_checkpoint_name, retain_latest_checkpoint,
-                retain_recent_checkpoints, write_checkpoint,
+        kraft::{
+            controller::{
+                checkpoint::{
+                    checkpoint_id_is_newer, latest_checkpoint_id, load_checkpoint_by_id,
+                    load_latest_checkpoint, parse_checkpoint_name, retain_latest_checkpoint,
+                    retain_recent_checkpoints, write_checkpoint,
+                },
+                records::decode_control_record,
+                test_support::{
+                    ControllerInDir, await_leader, build, build_engine_only,
+                    elect_single_voter_engine, one_offset_batch, open_test_controller_with,
+                    submit_change_with_timeout, topic_record, voter_set,
+                },
             },
-            records::decode_control_record,
-            test_support::{
-                ControllerInDir, await_leader, build, build_engine_only, elect_single_voter_engine,
-                one_offset_batch, open_test_controller_with, submit_change_with_timeout,
-                topic_record, voter_set,
-            },
+            snapshot_fetch::SnapshotId,
         },
         snapshot::SnapshotWriter,
     },
@@ -62,36 +65,40 @@ fn snapshot_pruning_stays_at_or_below_the_committed_frontier() {
     assert2::assert!(!krabka_verified::snapshot_prune_admission(-1, 10));
 }
 
-#[test]
-fn checkpoint_id_ordering_prefers_higher_offset_then_epoch_without_equal_replacement() {
-    for (_case, candidate, current, want) in [
-        ("higher offset", (11, 1), (10, 9), true),
-        ("same offset higher epoch", (10, 9), (10, 2), true),
-        ("same offset lower epoch", (10, 2), (10, 9), false),
-        ("equal checkpoint", (10, 9), (10, 9), false),
-    ] {
-        assert2::assert!(checkpoint_id_is_newer(candidate, current) == want);
-    }
+#[yare::parameterized(
+    higher_offset = { (11, 1), (10, 9), true },
+    same_offset_higher_epoch = { (10, 9), (10, 2), true },
+    same_offset_lower_epoch = { (10, 2), (10, 9), false },
+    equal_checkpoint = { (10, 9), (10, 9), false },
+)]
+fn checkpoint_id_ordering_prefers_higher_offset_then_epoch_without_equal_replacement(
+    candidate: SnapshotId,
+    current: SnapshotId,
+    want: bool,
+) {
+    assert2::assert!(checkpoint_id_is_newer(candidate, current) == want);
 }
 
 #[test]
-fn checkpoint_names_must_use_the_canonical_fixed_width_encoding() {
+fn checkpoint_names_use_canonical_fixed_width_encoding() {
     assert2::assert!(
         parse_checkpoint_name("00000000000000000010-0000000002.checkpoint") == Some((10, 2))
     );
     assert2::assert!(
         parse_checkpoint_name("00000000000000000000-0000000000.checkpoint") == Some((0, 0))
     );
-    for malformed in [
-        "10-2.checkpoint",
-        "00000000000000000010-0000000002",
-        "00000000000000000010-0000000002.checkpoint.tmp",
-        "-0000000000000000001-0000000002.checkpoint",
-        "00000000000000000010--000000001.checkpoint",
-        "not-a-checkpoint",
-    ] {
-        assert2::assert!(parse_checkpoint_name(malformed).is_none(), "{malformed}");
-    }
+}
+
+#[yare::parameterized(
+    short_widths = { "10-2.checkpoint" },
+    missing_suffix = { "00000000000000000010-0000000002" },
+    extra_suffix = { "00000000000000000010-0000000002.checkpoint.tmp" },
+    negative_offset = { "-0000000000000000001-0000000002.checkpoint" },
+    malformed_epoch = { "00000000000000000010--000000001.checkpoint" },
+    not_a_checkpoint = { "not-a-checkpoint" }
+)]
+fn malformed_checkpoint_names_are_rejected(malformed: &str) {
+    assert2::assert!(parse_checkpoint_name(malformed).is_none());
 }
 
 #[test]

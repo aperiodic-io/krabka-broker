@@ -1035,10 +1035,8 @@ notes,errors_count\n",
             ),
             None => (String::new(), String::new(), String::new()),
         };
-        let opt_bytes =
-            |o: Option<ByteSize>| o.map(|v| v.bytes_i64().to_string()).unwrap_or_default();
-        let opt_millis =
-            |o: Option<Time>| o.map(|v| v.millis_i64().to_string()).unwrap_or_default();
+        let opt_bytes = |o: Option<ByteSize>| o.map_or_default(|v| v.bytes_i64().to_string());
+        let opt_millis = |o: Option<Time>| o.map_or_default(|v| v.millis_i64().to_string());
         let p = &r.producer_latency;
         let c = &r.consumer_e2e_latency;
         let cols = [
@@ -1389,13 +1387,17 @@ mod tests {
         write_failover_runs(dir, krabka, kafka);
         let violations = failover_gate_violations(dir, true).unwrap();
         for expected in expected {
-            assert2::assert!(
-                violations
-                    .iter()
-                    .any(|violation| violation.contains(expected)),
-                "{expected}"
-            );
+            assert_violation_contains(&violations, expected);
         }
+    }
+
+    fn assert_violation_contains(violations: &[String], expected: &str) {
+        assert2::assert!(
+            violations
+                .iter()
+                .any(|violation| violation.contains(expected)),
+            "{expected}: {violations:?}"
+        );
     }
 
     fn write_run(path: impl AsRef<Path>, run: &RunOutput) {
@@ -1493,11 +1495,7 @@ mod tests {
 
         let violations = failover_gate_violations(dir.path(), true).unwrap();
 
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("missing failover results"))
-        );
+        assert_violation_contains(&violations, "missing failover results");
     }
 
     #[test]
@@ -1520,12 +1518,14 @@ mod tests {
 
         let violations = failover_gate_violations(dir.path(), true).unwrap();
 
-        assert2::assert!(violations.iter().any(|v| v.contains(
-            "failover @ 3 broker(s), 12 partitions, RF=3: missing kafka failover disturbance result"
-        )));
-        assert2::assert!(violations
-                .iter()
-                .any(|v| v.contains("failover @ 3 broker(s), 24 partitions, RF=3: missing Krabka failover disturbance result")));
+        assert_violation_contains(
+            &violations,
+            "failover @ 3 broker(s), 12 partitions, RF=3: missing kafka failover disturbance result",
+        );
+        assert_violation_contains(
+            &violations,
+            "failover @ 3 broker(s), 24 partitions, RF=3: missing Krabka failover disturbance result",
+        );
     }
 
     #[test]
@@ -1573,30 +1573,23 @@ mod tests {
     fn failover_gate_fails_when_krabka_message_rate_never_recovers() {
         let dir = tempdir().unwrap();
         let mut krabka = fake_failover_run(Stack::Krabka, secs(2), per_sec(8_000));
-        for sample in krabka
-            .samples
-            .iter_mut()
-            .filter(|sample| sample.t_offset_ms >= 4_000)
-        {
-            sample.producer_rate = per_sec(8_500);
-        }
         let mut kafka = fake_failover_run(Stack::Kafka, secs(3), per_sec(6_000));
-        for sample in kafka
-            .samples
-            .iter_mut()
-            .filter(|sample| sample.t_offset_ms >= 4_000)
-        {
-            sample.producer_rate = per_sec(8_500);
-        }
+        let set_slow_rate = |run: &mut RunOutput| {
+            for sample in run
+                .samples
+                .iter_mut()
+                .filter(|sample| sample.t_offset_ms >= 4_000)
+            {
+                sample.producer_rate = per_sec(8_500);
+            }
+        };
+        set_slow_rate(&mut krabka);
+        set_slow_rate(&mut kafka);
         write_failover_runs(dir.path(), &krabka, &kafka);
 
         let violations = failover_gate_violations(dir.path(), true).unwrap();
 
-        assert2::assert!(
-            violations
-                .iter()
-                .any(|v| v.contains("Krabka producer rate did not recover"))
-        );
+        assert_violation_contains(&violations, "Krabka producer rate did not recover");
     }
 
     #[test]

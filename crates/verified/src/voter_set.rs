@@ -104,40 +104,43 @@ mod tests {
         assert2::check,
     };
 
-    #[test]
-    fn voter_admission_classifies_every_invalid_boundary() {
-        use VoterWireDecision::{
-            Accept, DirectoryMismatch, InvalidEndpoint, InvalidVersionRange, NegativeId,
-        };
-
-        for (id, directory, count, endpoints, min, max, expected) in [
-            (0, true, 1, true, 0, 0, Accept),
-            (i32::MAX, true, usize::MAX, true, 0, i16::MAX, Accept),
-            (-1, true, 1, true, 0, 0, NegativeId),
-            (0, false, 1, true, 0, 0, DirectoryMismatch),
-            (0, true, 0, true, 0, 0, InvalidEndpoint),
-            (0, true, 1, false, 0, 0, InvalidEndpoint),
-            (0, true, 1, true, -1, 0, InvalidVersionRange),
-            (0, true, 1, true, 0, -1, InvalidVersionRange),
-            (0, true, 1, true, 1, 0, InvalidVersionRange),
-        ] {
-            check!(voter_wire_decision(id, directory, count, endpoints, min, max) == expected);
-        }
+    #[yare::parameterized(
+        zero_id = { 0, true, 1, true, 0, 0, VoterWireDecision::Accept },
+        maximum_id = { i32::MAX, true, usize::MAX, true, 0, i16::MAX, VoterWireDecision::Accept },
+        negative_id = { -1, true, 1, true, 0, 0, VoterWireDecision::NegativeId },
+        directory_mismatch = { 0, false, 1, true, 0, 0, VoterWireDecision::DirectoryMismatch },
+        zero_endpoints = { 0, true, 0, true, 0, 0, VoterWireDecision::InvalidEndpoint },
+        invalid_endpoints = { 0, true, 1, false, 0, 0, VoterWireDecision::InvalidEndpoint },
+        negative_minimum = { 0, true, 1, true, -1, 0, VoterWireDecision::InvalidVersionRange },
+        negative_maximum = { 0, true, 1, true, 0, -1, VoterWireDecision::InvalidVersionRange },
+        inverted_range = { 0, true, 1, true, 1, 0, VoterWireDecision::InvalidVersionRange },
+    )]
+    fn voter_admission_classifies_every_invalid_boundary(
+        id: i32,
+        directory: bool,
+        count: usize,
+        endpoints: bool,
+        min: i16,
+        max: i16,
+        expected: VoterWireDecision,
+    ) {
+        check!(voter_wire_decision(id, directory, count, endpoints, min, max) == expected);
     }
 
-    #[test]
-    fn voter_set_admission_requires_version_zero_and_unique_members() {
-        use VoterSetWireDecision::{Accept, DuplicateId, Empty, UnsupportedRecordVersion};
-
-        for (version, count, unique, expected) in [
-            (0, 1, true, Accept),
-            (0, usize::MAX, true, Accept),
-            (-1, 1, true, UnsupportedRecordVersion),
-            (1, 1, true, UnsupportedRecordVersion),
-            (0, 0, true, Empty),
-            (0, 2, false, DuplicateId),
-        ] {
-            check!(voter_set_wire_decision(version, count, unique) == expected);
-        }
+    #[yare::parameterized(
+        one_member = { 0, 1, true, VoterSetWireDecision::Accept },
+        maximum_count = { 0, usize::MAX, true, VoterSetWireDecision::Accept },
+        negative_version = { -1, 1, true, VoterSetWireDecision::UnsupportedRecordVersion },
+        newer_version = { 1, 1, true, VoterSetWireDecision::UnsupportedRecordVersion },
+        empty = { 0, 0, true, VoterSetWireDecision::Empty },
+        duplicate_id = { 0, 2, false, VoterSetWireDecision::DuplicateId },
+    )]
+    fn voter_set_admission_requires_version_zero_and_unique_members(
+        version: i16,
+        count: usize,
+        unique: bool,
+        expected: VoterSetWireDecision,
+    ) {
+        check!(voter_set_wire_decision(version, count, unique) == expected);
     }
 }

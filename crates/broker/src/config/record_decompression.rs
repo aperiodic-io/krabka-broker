@@ -59,29 +59,35 @@ mod tests {
         assert!(policy.output_ceiling() == mebibytes(512));
     }
 
-    #[test]
-    fn record_decompression_rejects_invalid_security_bounds() {
-        for cfg in [
+    #[yare::parameterized(
+        ratio_over_limit = {
             BrokerConfig {
                 record_decompression_max_ratio: fraction(101.0),
                 ..BrokerConfig::default()
             },
+        },
+        floor_over_ceiling = {
             BrokerConfig {
                 record_decompression_output_floor: gibibytes(1),
                 record_decompression_output_ceiling: mebibytes(16),
                 ..BrokerConfig::default()
             },
+        },
+        ceiling_over_limit = {
             BrokerConfig {
                 record_decompression_output_ceiling: gibibytes(2),
                 ..BrokerConfig::default()
             },
+        },
+        fractional_floor = {
             BrokerConfig {
                 record_decompression_output_floor: ByteSize::from_bytes_f64(1.5),
                 ..BrokerConfig::default()
             },
-        ] {
-            let error = cfg.validate().expect_err("invalid policy must fail");
-            assert!(error.to_string().contains("record_decompression"));
-        }
+        },
+    )]
+    fn record_decompression_rejects_invalid_security_bounds(cfg: BrokerConfig) {
+        let error = cfg.validate().expect_err("invalid policy must fail");
+        assert2::assert!(error.to_string().contains("record_decompression"));
     }
 }

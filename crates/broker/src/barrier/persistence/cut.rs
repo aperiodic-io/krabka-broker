@@ -276,10 +276,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_status_survives_its_wire_code() {
-        for status in [CutStatus::Complete, CutStatus::Partial] {
-            assert!(CutStatus::try_from(status.code()).ok() == Some(status));
-        }
+    #[yare::parameterized(
+        complete = { CutStatus::Complete },
+        partial = { CutStatus::Partial },
+    )]
+    fn a_status_survives_its_wire_code(status: CutStatus) {
+        assert2::assert!(CutStatus::try_from(status.code()).ok() == Some(status));
     }
 }

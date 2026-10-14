@@ -169,15 +169,7 @@ impl TopicCreator {
         let config = &broker.config;
         Self::from_parts(
             Arc::clone(&broker.controller),
-            ControllerDialer {
-                outbound_client: Arc::clone(&broker.inter_broker_client),
-                listener_protocol: config.controller_listener_protocol,
-                server_name: config
-                    .controller_server_name
-                    .clone()
-                    .unwrap_or_else(|| "localhost".to_owned()),
-                quorum_voters: config.controller_quorum_voters.clone(),
-            },
+            ControllerDialer::from_config(config, &broker.inter_broker_client),
             // Kafka's channel `NetworkClient` uses
             // `String.valueOf(config.brokerId())` as its client id.
             config.broker_id.to_string(),

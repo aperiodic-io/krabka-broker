@@ -1,19 +1,22 @@
 use super::*;
 
-#[test]
-fn barrier_cut_expiry_is_exact_and_fails_closed_at_extremes() {
-    for (published, retained, held, expected) in [
-        (10, 3, 6, true),
-        (10, 3, 7, true),
-        (10, 3, 8, false),
-        (10, 0, i64::MIN, false),
-        (10, -1, i64::MIN, false),
-        (i64::MIN, 1, i64::MIN, false),
-        (i64::MIN + 1, 1, i64::MIN, true),
-        (i64::MAX, i32::MAX, i64::MAX, false),
-    ] {
-        check!(barrier_cut_expired(published, retained, held) == expected);
-    }
+#[yare::parameterized(
+    before_expiry = { 10, 3, 6, true },
+    at_expiry = { 10, 3, 7, true },
+    after_expiry = { 10, 3, 8, false },
+    no_retained_cuts = { 10, 0, i64::MIN, false },
+    negative_retained_cuts = { 10, -1, i64::MIN, false },
+    minimum_published = { i64::MIN, 1, i64::MIN, false },
+    minimum_successor = { i64::MIN + 1, 1, i64::MIN, true },
+    maximum_published = { i64::MAX, i32::MAX, i64::MAX, false },
+)]
+fn barrier_cut_expiry_is_exact_and_fails_closed_at_extremes(
+    published: i64,
+    retained: i32,
+    held: i64,
+    expected: bool,
+) {
+    check!(barrier_cut_expired(published, retained, held) == expected);
 }
 
 /// Kafka scenarios for `UnifiedLog.deleteOldSegments`: the log-start

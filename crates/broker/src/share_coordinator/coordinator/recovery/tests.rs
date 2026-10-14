@@ -27,6 +27,7 @@ use {
     arc_swap::ArcSwap,
     assert2::{assert, check},
     krabka_log::{Log, LogConfig},
+    krabka_metadata::MetadataImage,
     krabka_protocol::records::{Record, RecordBatch},
     tempfile::tempdir,
 };

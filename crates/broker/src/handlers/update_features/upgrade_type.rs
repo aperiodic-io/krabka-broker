@@ -21,19 +21,17 @@ pub(super) fn update_type(upgrade_type: i8) -> Option<FeatureUpdateType> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, assert2::assert};
+    use super::*;
 
-    #[test]
-    fn update_type_follows_from_code() {
-        for (code, want) in [
-            (0, None),
-            (1, Some(FeatureUpdateType::Upgrade)),
-            (2, Some(FeatureUpdateType::SafeDowngrade)),
-            (3, Some(FeatureUpdateType::UnsafeDowngrade)),
-            (4, None),
-            (-1, None),
-        ] {
-            assert!(update_type(code) == want, "{code}");
-        }
+    #[yare::parameterized(
+        unknown = { 0, None },
+        upgrade = { 1, Some(FeatureUpdateType::Upgrade) },
+        safe_downgrade = { 2, Some(FeatureUpdateType::SafeDowngrade) },
+        unsafe_downgrade = { 3, Some(FeatureUpdateType::UnsafeDowngrade) },
+        too_large = { 4, None },
+        negative = { -1, None },
+    )]
+    fn update_type_follows_from_code(code: i8, want: Option<FeatureUpdateType>) {
+        assert2::assert!(update_type(code) == want, "{code}");
     }
 }

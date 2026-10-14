@@ -544,6 +544,10 @@ mod tests {
             .call()
     }
 
+    fn leader_one_full_isr_three_replicas() -> PartitionRecord {
+        partition_record(1, &[1, 2, 3], &[1, 2, 3])
+    }
+
     fn expected_unclean_election(leader: NodeId) -> super::FailoverDecision {
         super::FailoverDecision::Elect {
             leader,
@@ -559,7 +563,7 @@ mod tests {
         // replica behind it, broker 3, must take leadership instead. The
         // whole decision is compared, so the emitted ISR is pinned too: it
         // still carries the witness, which is what keeps `acks=all` writable.
-        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
+        let pr = leader_one_full_isr_three_replicas();
         let decision = decide(
             &pr,
             /*dead*/ 1,
@@ -578,53 +582,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn only_witnesses_alive_is_unavailable_whatever_the_unclean_flag_says() {
-        struct Case {
-            strategy: RecoveryStrategy,
-            unclean_enabled: bool,
-        }
-
+    #[yare::parameterized(
+        none_unclean_disabled = { RecoveryStrategy::None, false },
+        none_unclean_enabled = { RecoveryStrategy::None, true },
+        balanced_unclean_disabled = { RecoveryStrategy::Balanced, false },
+        aggressive_unclean_enabled = { RecoveryStrategy::Aggressive, true },
+    )]
+    fn only_witnesses_alive_is_unavailable_whatever_the_unclean_flag_says(
+        strategy: RecoveryStrategy,
+        unclean_enabled: bool,
+    ) {
         // Leader 1 and data replica 3 are dead. Only witness 2 is alive, and
         // it holds every committed record. Electing 3 would discard them, so
         // the answer is Unavailable: never Recover, never an unclean Elect.
-        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
-        let cases = [
-            Case {
-                strategy: RecoveryStrategy::None,
-                unclean_enabled: false,
-            },
-            Case {
-                strategy: RecoveryStrategy::None,
-                unclean_enabled: true,
-            },
-            Case {
-                strategy: RecoveryStrategy::Balanced,
-                unclean_enabled: false,
-            },
-            Case {
-                strategy: RecoveryStrategy::Aggressive,
-                unclean_enabled: true,
-            },
-        ];
-        for Case {
+        let pr = leader_one_full_isr_three_replicas();
+        let decision = decide(
+            &pr,
+            /*dead*/ 1,
+            /*alive*/ &[2],
+            /*witness_ids*/ &[2],
             strategy,
             unclean_enabled,
-        } in cases
-        {
-            let decision = decide(
-                &pr,
-                /*dead*/ 1,
-                /*alive*/ &[2],
-                /*witness_ids*/ &[2],
-                strategy,
-                unclean_enabled,
-            );
-            assert!(
-                decision == super::FailoverDecision::Unavailable,
-                "strategy {strategy:?}, unclean_enabled {unclean_enabled}"
-            );
-        }
+        );
+        assert2::assert!(decision == super::FailoverDecision::Unavailable);
     }
 
     #[test]
@@ -663,7 +643,7 @@ mod tests {
     fn isr_shrink_for_a_non_leader_death_keeps_the_witness() {
         // Broker 3 dies and the leader is alive, so this is a plain shrink.
         // The witness stays in the emitted ISR.
-        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
+        let pr = leader_one_full_isr_three_replicas();
         let decision = decide(
             &pr,
             /*dead*/ 3,
@@ -758,7 +738,7 @@ mod tests {
     /// ordinary clean election decides and keeps them both.
     #[test]
     fn a_live_isr_decides_the_election_and_the_published_elr_does_not() {
-        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
+        let pr = leader_one_full_isr_three_replicas();
         let decision = decide_with_elr(
             &pr,
             /*dead*/ 1,
@@ -858,7 +838,7 @@ mod tests {
     /// leader is healthy to the URM.
     #[test]
     fn an_unclean_restart_removes_only_the_returning_broker_from_the_isr() {
-        let pr = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
+        let pr = leader_one_full_isr_three_replicas();
 
         let decision = restart_decide(
             &pr,
@@ -964,7 +944,7 @@ mod tests {
             },
             KafkaCase {
                 label: "follower dies under a down leader: a live ISR member takes over",
-                pr: partition_record(1, &[1, 2, 3], &[1, 2, 3]),
+                pr: leader_one_full_isr_three_replicas(),
                 dead: 3,
                 alive: &[2],
                 unclean_enabled: false,
@@ -988,7 +968,7 @@ mod tests {
             },
             KafkaCase {
                 label: "leader dies: a down follower keeps its ISR place for its own event",
-                pr: partition_record(1, &[1, 2, 3], &[1, 2, 3]),
+                pr: leader_one_full_isr_three_replicas(),
                 dead: 1,
                 alive: &[2],
                 unclean_enabled: false,
@@ -1042,7 +1022,7 @@ mod tests {
     fn an_empty_witness_set_leaves_every_failover_decision_unchanged() {
         // The regression guard for non-stretch clusters: each case is decided
         // with no witnesses, and the expected value is the pre-witness answer.
-        let clean = partition_record(1, &[1, 2, 3], &[1, 2, 3]);
+        let clean = leader_one_full_isr_three_replicas();
         let empty_isr = partition_record(1, &[1, 2, 3], &[1]);
         let cases = [
             // Clean election picks the first valid replica in assignment order.

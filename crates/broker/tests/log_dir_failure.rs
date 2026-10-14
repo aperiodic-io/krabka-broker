@@ -19,6 +19,8 @@
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
+#[cfg(unix)]
+use std::path::PathBuf;
 use {
     crate::support::{
         NodeIndex, RoleNodeSetup, client::create_topic_for_broker, producer::producer_record,
@@ -33,7 +35,7 @@ use {
     krabka_client_producer::{Acks, Producer, ProducerRecord},
     std::{
         collections::BTreeMap,
-        path::{Path, PathBuf},
+        path::Path,
         time::{Duration, SystemTime, UNIX_EPOCH},
     },
     tempfile::TempDir,
@@ -238,7 +240,10 @@ struct ReadOnlyTree;
 impl ReadOnlyTree {
     fn new(_root: &Path) -> Self { Self }
 
-    fn refuses_writes(&self) -> bool { false }
+    fn refuses_writes(&self) -> bool {
+        let _ = self;
+        false
+    }
 }
 
 /// Produces one record to partition 0 of [`TOPIC`] with the timestamp
@@ -337,6 +342,7 @@ async fn a_follower_whose_log_directory_fails_leaves_the_isr() {
     let read_only = ReadOnlyTree::new(follower.extra.path());
     if !read_only.refuses_writes() {
         // Root writes through the permission bits, so nothing fails.
+        #[cfg(unix)]
         drop(read_only);
         cluster.shutdown().await;
         return;
@@ -380,6 +386,7 @@ async fn a_follower_whose_log_directory_fails_leaves_the_isr() {
     );
 
     drop(producer);
+    #[cfg(unix)]
     drop(read_only);
     cluster.shutdown().await;
 }

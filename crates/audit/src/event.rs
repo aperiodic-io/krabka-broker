@@ -219,19 +219,21 @@ mod tests {
         assert2::check,
     };
 
+    #[yare::parameterized(
+        authentication = { AuditEventClass::Authentication },
+        authorization = { AuditEventClass::Authorization },
+        api_activity = { AuditEventClass::ApiActivity },
+        application_lifecycle = { AuditEventClass::ApplicationLifecycle },
+        checkpoint = { AuditEventClass::Checkpoint },
+        records_lost = { AuditEventClass::RecordsLost },
+    )]
+    fn class_tag_round_trips_and_header_maps(class: AuditEventClass) {
+        check!(AuditEventClass::from_tag(class.tag()) == Some(class));
+        check!(AuditEventClass::from_header(class.as_header()) == Some(class));
+    }
+
     #[test]
-    fn class_tag_round_trips_and_header_maps() {
-        for c in [
-            AuditEventClass::Authentication,
-            AuditEventClass::Authorization,
-            AuditEventClass::ApiActivity,
-            AuditEventClass::ApplicationLifecycle,
-            AuditEventClass::Checkpoint,
-            AuditEventClass::RecordsLost,
-        ] {
-            check!(AuditEventClass::from_tag(c.tag()) == Some(c));
-            check!(AuditEventClass::from_header(c.as_header()) == Some(c));
-        }
+    fn class_tag_and_header_reject_unknown_values() {
         check!(AuditEventClass::from_tag(99) == None);
         check!(AuditEventClass::from_header("nope") == None);
     }
@@ -264,23 +266,22 @@ mod tests {
         );
     }
 
+    #[yare::parameterized(
+        attempted = { PrivilegedPhase::Attempted, "attempted" },
+        proposed = { PrivilegedPhase::Proposed, "proposed" },
+        approved = { PrivilegedPhase::Approved, "approved" },
+        consumed = { PrivilegedPhase::Consumed, "consumed" },
+        applied = { PrivilegedPhase::Applied, "applied" },
+        refused = { PrivilegedPhase::Refused, "refused" },
+        bypassed = { PrivilegedPhase::Bypassed, "bypassed" },
+    )]
+    fn privileged_phase_name_round_trips(phase: PrivilegedPhase, name: &str) {
+        check!(phase.as_name() == name);
+        check!(PrivilegedPhase::from_name(phase.as_name()) == Some(phase));
+    }
+
     #[test]
-    fn privileged_phase_name_round_trips() {
-        for (label, phase, name) in [
-            ("attempted", PrivilegedPhase::Attempted, "attempted"),
-            ("proposed", PrivilegedPhase::Proposed, "proposed"),
-            ("approved", PrivilegedPhase::Approved, "approved"),
-            ("consumed", PrivilegedPhase::Consumed, "consumed"),
-            ("applied", PrivilegedPhase::Applied, "applied"),
-            ("refused", PrivilegedPhase::Refused, "refused"),
-            ("bypassed", PrivilegedPhase::Bypassed, "bypassed"),
-        ] {
-            check!(phase.as_name() == name, "case {label}");
-            check!(
-                PrivilegedPhase::from_name(phase.as_name()) == Some(phase),
-                "case {label}"
-            );
-        }
+    fn privileged_phase_rejects_unknown_name() {
         check!(PrivilegedPhase::from_name("nope") == None);
     }
 }

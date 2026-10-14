@@ -531,36 +531,34 @@ introspection_client_id = "kafka-broker"
         let _cfg = configured_unwrap_parse(toml).unwrap();
     }
 
-    #[test]
-    fn introspection_calls_userinfo_only_when_an_endpoint_is_configured() {
-        for (userinfo, expected) in [
-            (
-                "userinfo_endpoint_uri = \"https://idp.example/userinfo\"\n",
-                true,
-            ),
-            ("", false),
-        ] {
-            let ClientSecret {
-                dir: _dir,
-                path: secret_path,
-            } = client_secret("x");
-            let toml = format!(
-                r#"
+    #[yare::parameterized(
+        configured = { "userinfo_endpoint_uri = \"https://idp.example/userinfo\"\n", true },
+        absent = { "", false },
+    )]
+    fn introspection_calls_userinfo_only_when_an_endpoint_is_configured(
+        userinfo: &str,
+        expected: bool,
+    ) {
+        let ClientSecret {
+            dir: _dir,
+            path: secret_path,
+        } = client_secret("x");
+        let toml = format!(
+            r#"
 [oauthbearer]
 introspection_endpoint_uri = "https://idp.example/introspect"
 {userinfo}introspection_client_id = "id"
 introspection_client_secret_path = '{}'
 "#,
-                secret_path.display()
-            );
-            let cfg = configured_unwrap_parse(&toml).unwrap();
-            match cfg.oauthbearer_validator {
-                krabka_security::OAuthBearerValidator::Introspection(v) => assert!(
-                    v.call_userinfo == expected,
-                    "userinfo endpoint: {userinfo:?}"
-                ),
-                other => panic!("expected Introspection, got {other:?}"),
-            }
+            secret_path.display()
+        );
+        let cfg = configured_unwrap_parse(&toml).unwrap();
+        match cfg.oauthbearer_validator {
+            krabka_security::OAuthBearerValidator::Introspection(v) => assert2::assert!(
+                v.call_userinfo == expected,
+                "userinfo endpoint: {userinfo:?}"
+            ),
+            other => panic!("expected Introspection, got {other:?}"),
         }
     }
 }

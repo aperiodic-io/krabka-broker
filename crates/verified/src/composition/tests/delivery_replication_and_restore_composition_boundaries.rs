@@ -1,8 +1,4 @@
-use {
-    super::*,
-    crate::restore::{RestoreContentExclusions, RestoreTimestampType},
-    assert2::assert,
-};
+use {super::*, crate::restore::RestoreTimestampType, assert2::assert};
 
 #[test]
 fn delivery_replication_and_restore_composition_boundaries() {
@@ -91,14 +87,7 @@ fn delivery_replication_and_restore_composition_boundaries() {
     // while read-committed Fetch stays capped by the remaining watermarks.
     assert!(fenced_replication_bounds_fetch(facts, -1, 7, 1, 8, w) == (9, 8, 6));
     assert!(fenced_replication_bounds_fetch(facts, -1, 6, -1, 8, w) == (6, 6, 6));
-    let exclusions = RestoreExclusions {
-        producer: false,
-        offset: false,
-        content: RestoreContentExclusions {
-            key: false,
-            header: false,
-        },
-    };
+    let exclusions = restore_exclusions(false);
     let records = [
         (
             RestoreRecordDeltas {

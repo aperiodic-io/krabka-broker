@@ -54,25 +54,36 @@ fn child_exit_code(test: &str, flavor: &str, code: i32) -> Option<i32> {
         .code()
 }
 
-#[test]
-fn main_exits_with_what_run_from_args_returns() {
+fn child_test_name(run: fn()) -> String {
     if std::env::var_os(CHILD_EXIT).is_some() {
-        default_runtime::run();
+        run();
     }
-    let test = "main_exits_with_what_run_from_args_returns";
-    for code in [0, 1, 2] {
-        assert!(child_exit_code(test, "MultiThread", code) == Some(code));
-    }
+    std::thread::current()
+        .name()
+        .expect("test thread name")
+        .to_owned()
+}
+
+#[yare::parameterized(
+    success = { 0 },
+    ordinary_failure = { 1 },
+    usage_error = { 2 },
+)]
+fn main_exits_with_what_run_from_args_returns(code: i32) {
+    let test = child_test_name(default_runtime::run);
+    assert2::assert!(child_exit_code(&test, "MultiThread", code) == Some(code));
+}
+
+#[test]
+fn main_panics_when_run_from_args_uses_the_wrong_runtime() {
+    let test = child_test_name(default_runtime::run);
     // The child panics, and exits with 101, when the runtime is not the one
     // it expects.
-    assert!(child_exit_code(test, "CurrentThread", 0) == Some(101));
+    assert!(child_exit_code(&test, "CurrentThread", 0) == Some(101));
 }
 
 #[test]
 fn runtime_arguments_reach_tokio_main() {
-    if std::env::var_os(CHILD_EXIT).is_some() {
-        single_threaded::run();
-    }
-    let test = "runtime_arguments_reach_tokio_main";
-    assert!(child_exit_code(test, "CurrentThread", 3) == Some(3));
+    let test = child_test_name(single_threaded::run);
+    assert!(child_exit_code(&test, "CurrentThread", 3) == Some(3));
 }

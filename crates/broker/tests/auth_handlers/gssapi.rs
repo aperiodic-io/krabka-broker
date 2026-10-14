@@ -11,6 +11,7 @@ use {
         harness::{round_trip, start_broker_stream},
         inter_broker::run_inter_broker_auth_test,
         support::{
+            gssapi::broker_config,
             manifest_dir,
             sasl::sasl_temp_config,
             wire::{CorrelationId as WireCorrelationId, SocketExchangeSetup},
@@ -134,16 +135,10 @@ async fn gssapi_inter_broker_client_authenticates_from_keytab() {
         std::env::var("SSPI_KDC_URL").unwrap_or_else(|_| "tcp://localhost:88".to_string());
 
     let (_log_dir, mut cfg) = sasl_temp_config(vec![SaslMechanism::Gssapi]);
-    cfg.gssapi = Some(krabka_broker::GssapiConfig {
-        keytab_path: fixtures.join("kafka.keytab"),
-        service_name: "kafka".to_string(),
-        // DEFAULT rule + matching default realm maps alice@CRABKA.TEST to
-        // the short name "alice".
-        principal_to_local_rules: vec![krabka_broker::KerberosRule::Default],
-        realm: Some("CRABKA.TEST".to_string()),
-        kdc: Some(kdc_url.clone()),
-        max_time_skew: krabka_security::gssapi::DEFAULT_GSSAPI_MAX_TIME_SKEW,
-    });
+    cfg.gssapi = Some(broker_config(
+        fixtures.join("kafka.keytab"),
+        kdc_url.clone(),
+    ));
 
     let result =
         run_inter_broker_auth_test(cfg, krabka_broker::config::InterBrokerCredentials::Gssapi {

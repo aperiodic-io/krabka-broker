@@ -667,20 +667,18 @@ fn client_first_parses_as_kafka_does() {
 }
 
 /// `ScramFormatter.username`.
-#[test]
-fn sasl_name_decoding_matches_scram_formatter() {
-    for (sasl_name, expected) in [
-        ("alice", Some("alice")),
-        ("a=2Cb", Some("a,b")),
-        ("a=3Db", Some("a=b")),
-        ("=3D2C", Some("=2C")),
-        ("a=41", None),
-    ] {
-        check!(
-            decode_sasl_name(sasl_name).as_deref() == expected,
-            "{sasl_name}"
-        );
-    }
+#[yare::parameterized(
+    plain = { "alice", Some("alice") },
+    comma_escape = { "a=2Cb", Some("a,b") },
+    equals_escape = { "a=3Db", Some("a=b") },
+    escaped_equals_followed_by_text = { "=3D2C", Some("=2C") },
+    invalid_escape = { "a=41", None },
+)]
+fn sasl_name_decoding_matches_scram_formatter(sasl_name: &str, expected: Option<&str>) {
+    check!(
+        decode_sasl_name(sasl_name).as_deref() == expected,
+        "{sasl_name}"
+    );
 }
 
 /// A metadata source holding one active token, and the token's expiry.

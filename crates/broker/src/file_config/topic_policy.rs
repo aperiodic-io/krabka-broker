@@ -145,14 +145,12 @@ forbidden = { "unclean.leader.election.enable" = "true" }
         check!(parsed.is_err());
     }
 
-    #[test]
-    fn a_zero_bound_is_a_config_error() {
-        for toml in [
-            "[topic_policy]\nmin_replication_factor = 0\n",
-            "[topic_policy]\nmax_partitions = 0\n",
-            "[topic_policy]\nmin_insync_replicas = 0\n",
-        ] {
-            check!(apply(toml).is_err(), "{toml}");
-        }
+    #[yare::parameterized(
+        minimum_replication_factor = { "[topic_policy]\nmin_replication_factor = 0\n" },
+        maximum_partitions = { "[topic_policy]\nmax_partitions = 0\n" },
+        minimum_insync_replicas = { "[topic_policy]\nmin_insync_replicas = 0\n" },
+    )]
+    fn a_zero_bound_is_a_config_error(toml: &str) {
+        check!(apply(toml).is_err(), "{toml}");
     }
 }

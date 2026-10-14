@@ -256,31 +256,32 @@ fn write_all_verbatim(segment: &mut Segment, interval: ByteSize) {
 /// the last entry, and nothing was written before the first. The second
 /// batch's entry carries the maximum the first one set, so the time index
 /// still names the batch ending at 2.
-#[test]
-fn the_append_paths_write_the_indexes_kafka_dump_log_verifies() {
+#[yare::parameterized(
+    encoding_append = { "encoding append", false },
+    verbatim_append = { "verbatim append", true },
+)]
+fn the_append_paths_write_the_indexes_kafka_dump_log_verifies(label: &'static str, verbatim: bool) {
     let expected_time_entries = vec![time_entry(102, 2), time_entry(201, 5), time_entry(300, 7)];
-    for (label, verbatim) in [("encoding append", false), ("verbatim append", true)] {
-        let TempSegment { dir, mut segment } = test_segment();
-        if verbatim {
-            write_all_verbatim(&mut segment, DENSE_INDEX);
-        } else {
-            write_all_encoded(&mut segment, DENSE_INDEX);
-        }
-
-        let offsets: Vec<u32> = offset_entries(dir.path(), 0)
-            .iter()
-            .map(|entry| entry.relative_offset)
-            .collect();
-        assert2::assert!(offsets == vec![3, 5, 6, 7], "{label}");
-        assert2::assert!(
-            time_entries(dir.path(), 0) == expected_time_entries,
-            "{label}"
-        );
-        assert2::assert!(
-            dump_log_problems(dir.path(), 0) == Vec::<String>::new(),
-            "{label}"
-        );
+    let TempSegment { dir, mut segment } = test_segment();
+    if verbatim {
+        write_all_verbatim(&mut segment, DENSE_INDEX);
+    } else {
+        write_all_encoded(&mut segment, DENSE_INDEX);
     }
+
+    let offsets: Vec<u32> = offset_entries(dir.path(), 0)
+        .iter()
+        .map(|entry| entry.relative_offset)
+        .collect();
+    assert2::assert!(offsets == vec![3, 5, 6, 7], "{label}");
+    assert2::assert!(
+        time_entries(dir.path(), 0) == expected_time_entries,
+        "{label}"
+    );
+    assert2::assert!(
+        dump_log_problems(dir.path(), 0) == Vec::<String>::new(),
+        "{label}"
+    );
 }
 
 /// A sparse index takes an entry only once the batches since the last entry

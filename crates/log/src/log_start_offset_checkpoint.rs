@@ -138,14 +138,19 @@ mod tests {
         remove(dir.path()).unwrap();
     }
 
-    #[test]
-    fn rejects_a_checkpoint_it_cannot_trust() {
-        for contents in ["", "0\n", "1\n7\n", "0\nnot-a-number\n", "0\n-1\n", "7\n"] {
-            let dir = tempfile::tempdir().unwrap();
-            fs::write(name::log_start_offset_checkpoint_path(dir.path()), contents).unwrap();
-            let error = read(dir.path()).unwrap_err();
-            assert!(matches!(error, LogError::Corrupt(_)), "{contents:?}");
-        }
+    #[yare::parameterized(
+        empty = { "" },
+        missing_offset = { "0\n" },
+        extra_line = { "1\n7\n" },
+        malformed_offset = { "0\nnot-a-number\n" },
+        negative_offset = { "0\n-1\n" },
+        missing_newline = { "7\n" },
+    )]
+    fn rejects_a_checkpoint_it_cannot_trust(contents: &str) {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(name::log_start_offset_checkpoint_path(dir.path()), contents).unwrap();
+        let error = read(dir.path()).unwrap_err();
+        assert2::assert!(matches!(error, LogError::Corrupt(_)), "{contents:?}");
     }
 
     #[test]

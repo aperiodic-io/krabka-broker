@@ -29,16 +29,12 @@ pub use crate::support::client::{connect_c1 as connect, create_topic};
 
 /// Active-task partitions for a given subtopology id, sorted.
 pub fn active_partitions_for(resp: &StreamsGroupHeartbeatResponse, sub: &str) -> Vec<i32> {
-    let mut parts: Vec<i32> = resp
-        .active_tasks
-        .as_ref()
-        .map(|v| {
-            v.iter()
-                .filter(|t| t.subtopology_id == sub)
-                .flat_map(|t| t.partitions.clone())
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut parts: Vec<i32> = resp.active_tasks.as_ref().map_or_default(|v| {
+        v.iter()
+            .filter(|t| t.subtopology_id == sub)
+            .flat_map(|t| t.partitions.clone())
+            .collect()
+    });
     parts.sort_unstable();
     parts
 }
@@ -48,8 +44,7 @@ pub fn active_partitions_for(resp: &StreamsGroupHeartbeatResponse, sub: &str) ->
 pub fn status_codes(resp: &StreamsGroupHeartbeatResponse) -> Vec<i8> {
     resp.status
         .as_ref()
-        .map(|v| v.iter().map(|s| s.status_code).collect())
-        .unwrap_or_default()
+        .map_or_default(|v| v.iter().map(|s| s.status_code).collect())
 }
 
 pub async fn describe(

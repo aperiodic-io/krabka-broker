@@ -8,7 +8,7 @@ use {
         broker::Broker,
         codes,
         fetch_session::{
-            CachedPartitionState, FIRST_TOPIC_ID_FETCH_VERSION, FetchSessionKey,
+            CachedPartitionState, FIRST_TOPIC_ID_FETCH_VERSION, FetchPartitionKey, FetchSessionKey,
             INVALID_SESSION_ID, SessionDecision,
         },
     },
@@ -160,7 +160,7 @@ fn snapshot_response_state(
         for ep in &et.partitions {
             if !et.topic.is_empty() {
                 by_name.insert(
-                    PartitionByName {
+                    FetchPartitionKey {
                         topic: et.topic.clone(),
                         partition: ep.partition,
                     },
@@ -169,8 +169,8 @@ fn snapshot_response_state(
             }
             if et.topic_id != WireUuid::ZERO {
                 by_id.insert(
-                    PartitionById {
-                        topic_id: et.topic_id,
+                    FetchPartitionKey {
+                        topic: et.topic_id,
                         partition: ep.partition,
                     },
                     ep,
@@ -196,12 +196,12 @@ fn snapshot_response_state(
                 ..Default::default()
             };
             let ep = by_id
-                .get(&PartitionById {
-                    topic_id: tr.topic_id,
+                .get(&FetchPartitionKey {
+                    topic: tr.topic_id,
                     partition: p.partition_index,
                 })
                 .or_else(|| {
-                    by_name.get(&PartitionByName {
+                    by_name.get(&FetchPartitionKey {
                         topic: tr.topic.clone(),
                         partition: p.partition_index,
                     })
@@ -234,26 +234,9 @@ struct CachedIndex<'cache> {
     by_name: std::collections::HashMap<PartitionByNameRef<'cache>, CachedEntry<'cache>>,
 }
 
-/// A partition named by its topic id.
-#[derive(PartialEq, Eq, Hash)]
-struct PartitionById {
-    topic_id: WireUuid,
-    partition: i32,
-}
-
-/// A partition named by its topic name.
-#[derive(PartialEq, Eq, Hash)]
-struct PartitionByName {
-    topic: String,
-    partition: i32,
-}
-
-/// A partition named by a borrowed topic name.
-#[derive(PartialEq, Eq, Hash)]
-struct PartitionByNameRef<'a> {
-    topic: &'a str,
-    partition: i32,
-}
+type PartitionById = FetchPartitionKey<WireUuid>;
+type PartitionByName = FetchPartitionKey<String>;
+type PartitionByNameRef<'a> = FetchPartitionKey<&'a str>;
 
 /// A cached partition: the key the cache holds it under and its state.
 #[derive(Clone, Copy)]
@@ -273,8 +256,8 @@ impl<'cache> CachedIndex<'cache> {
         for (key, state) in cached {
             if key.topic_id != WireUuid::ZERO {
                 index.by_id.insert(
-                    PartitionById {
-                        topic_id: key.topic_id,
+                    FetchPartitionKey {
+                        topic: key.topic_id,
                         partition: key.partition,
                     },
                     CachedEntry { key, state },
@@ -282,7 +265,7 @@ impl<'cache> CachedIndex<'cache> {
             }
             if !key.topic_name.is_empty() {
                 index.by_name.insert(
-                    PartitionByNameRef {
+                    FetchPartitionKey {
                         topic: key.topic_name.as_str(),
                         partition: key.partition,
                     },
@@ -300,12 +283,12 @@ impl<'cache> CachedIndex<'cache> {
         partition: i32,
     ) -> Option<CachedEntry<'cache>> {
         self.by_id
-            .get(&PartitionById {
-                topic_id,
+            .get(&FetchPartitionKey {
+                topic: topic_id,
                 partition,
             })
             .or_else(|| {
-                self.by_name.get(&PartitionByNameRef {
+                self.by_name.get(&FetchPartitionKey {
                     topic: topic_name,
                     partition,
                 })
@@ -504,8 +487,8 @@ mod tests {
     fn an_unchanged_partition_cached_by_id_alone_is_not_resent() {
         let FilteredSingleTopic { responses, sent } = filter_single_topic("", 7, 42, 42);
 
-        assert!(responses.is_empty());
-        assert!(sent.is_empty());
+        assert2::assert!(responses.is_empty());
+        assert2::assert!(sent.is_empty());
     }
 
     /// The same row, changed. It is sent, and the state comes back under the

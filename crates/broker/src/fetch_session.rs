@@ -75,6 +75,13 @@ mod state;
 #[cfg(test)]
 mod test_support;
 
+/// A topic name or id paired with its partition in a Fetch request or response.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FetchPartitionKey<T> {
+    pub(crate) topic: T,
+    pub(crate) partition: i32,
+}
+
 #[cfg(test)]
 pub(crate) use self::diff::apply_incremental;
 pub use self::{

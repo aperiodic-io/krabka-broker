@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! Apache Kafka-compatible broker for Krabka.
 //!
 //! `krabka-broker` ships a library and a binary that unmodified JVM Kafka

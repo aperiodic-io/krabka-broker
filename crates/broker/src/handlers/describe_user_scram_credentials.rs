@@ -408,15 +408,13 @@ mod tests {
         assert!(mechanisms == vec![1, 2]);
     }
 
-    #[test]
-    fn sasl_mechanism_byte_mapping() {
-        for (mechanism, want) in [
-            (SaslMechanism::ScramSha256, 1),
-            (SaslMechanism::ScramSha512, 2),
-            (SaslMechanism::Plain, 0),
-        ] {
-            assert!(sasl_mechanism_to_byte(mechanism) == want, "{mechanism:?}");
-        }
+    #[yare::parameterized(
+        scram_sha256 = { SaslMechanism::ScramSha256, 1 },
+        scram_sha512 = { SaslMechanism::ScramSha512, 2 },
+        plain = { SaslMechanism::Plain, 0 },
+    )]
+    fn sasl_mechanism_byte_mapping(mechanism: SaslMechanism, want: i8) {
+        assert2::assert!(sasl_mechanism_to_byte(mechanism) == want, "{mechanism:?}");
     }
 
     /// An empty users filter asks for all credentials at the initial protocol version.
@@ -472,8 +470,15 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
-    #[test]
-    fn denied_response_matches_kafka_get_error_response() {
+    #[yare::parameterized(
+        absent_users = { None, 0 },
+        empty_users = { Some(vec![]), 0 },
+        repeated_users = { Some(vec!["alice", "bob", "alice"]), 3 },
+    )]
+    fn denied_response_matches_kafka_get_error_response(
+        users: Option<Vec<&str>>,
+        expected_rows: usize,
+    ) {
         use krabka_protocol::owned::describe_user_scram_credentials_request::UserName;
 
         let denied_row = krabka_macros::tagged_wire!(DescribeUserScramCredentialsResult {
@@ -482,33 +487,23 @@ mod tests {
             error_message: None,
             credential_infos: Vec::new(),
         });
-        for (users, want_rows) in [
-            (None, Vec::new()),
-            (Some(Vec::new()), Vec::new()),
-            (Some(vec!["alice", "bob", "alice"]), vec![
-                denied_row.clone(),
-                denied_row.clone(),
-                denied_row.clone(),
-            ]),
-        ] {
-            let req = DescribeUserScramCredentialsRequest {
-                users: users.clone().map(|names| {
-                    names
-                        .into_iter()
-                        .map(|name| UserName {
-                            name: name.to_string(),
-                            ..Default::default()
-                        })
-                        .collect()
-                }),
-                ..Default::default()
-            };
-            let want = krabka_macros::unthrottled_wire!(DescribeUserScramCredentialsResponse {
-                error_code: CLUSTER_AUTHORIZATION_FAILED,
-                error_message: None,
-                results: want_rows,
-            });
-            assert!(denied_response(&req) == want, "users = {users:?}");
-        }
+        let req = DescribeUserScramCredentialsRequest {
+            users: users.as_ref().map(|names| {
+                names
+                    .iter()
+                    .map(|name| UserName {
+                        name: name.to_string(),
+                        ..Default::default()
+                    })
+                    .collect()
+            }),
+            ..Default::default()
+        };
+        let want = krabka_macros::unthrottled_wire!(DescribeUserScramCredentialsResponse {
+            error_code: CLUSTER_AUTHORIZATION_FAILED,
+            error_message: None,
+            results: vec![denied_row; expected_rows],
+        });
+        assert2::assert!(denied_response(&req) == want, "users = {users:?}");
     }
 }

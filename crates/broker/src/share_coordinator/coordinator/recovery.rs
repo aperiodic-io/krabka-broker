@@ -12,7 +12,6 @@ use {
     bytes::Bytes,
     krabka_ids::PartitionIndex,
     krabka_log::Offset,
-    krabka_metadata::MetadataImage,
     krabka_protocol::records::RecordBatch,
     std::{collections::HashMap, sync::Arc},
     tokio::sync::Mutex,
@@ -40,26 +39,25 @@ use {
 };
 
 impl ShareCoordinator {
-    /// Applies the leadership of `image` and waits until every load that it
-    /// started has ended.
-    ///
-    /// `Broker::start` calls this method, so the partitions that this broker
-    /// leads at start serve requests as soon as the broker is up.
-    ///
-    /// # Errors
-    ///
-    /// This method does not fail at present. A partition whose replay fails
-    /// is logged and stays failed until the next refresh loads it again.
-    pub(crate) async fn recover(
-        self: &Arc<Self>,
-        image: &MetadataImage,
-    ) -> Result<(), BrokerError> {
-        self.refresh_leader_partitions(image).await.finished().await;
-        info!(
-            keys_loaded = self.state.len(),
-            "ShareCoordinator recovery complete"
-        );
-        Ok(())
+    crate::task_util::recover_after_refresh! {
+        this,
+        /// Applies the leadership of `image` and waits until every load that it
+        /// started has ended.
+        ///
+        /// `Broker::start` calls this method, so the partitions that this broker
+        /// leads at start serve requests as soon as the broker is up.
+        ///
+        /// # Errors
+        ///
+        /// This method does not fail at present. A partition whose replay fails
+        /// is logged and stays failed until the next refresh loads it again.
+        {
+            info!(
+                keys_loaded = this.state.len(),
+                "ShareCoordinator recovery complete"
+            );
+            Ok(())
+        }
     }
 
     /// Replays `state_partition` and installs the result for term

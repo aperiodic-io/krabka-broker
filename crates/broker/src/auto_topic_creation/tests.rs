@@ -38,6 +38,20 @@ fn configs(pairs: &[ConfigPair<'_>]) -> Vec<CreatableTopicConfig> {
         .collect()
 }
 
+fn segment_bytes() -> ConfigPair<'static> {
+    ConfigPair {
+        name: "segment.bytes",
+        value: "104857600",
+    }
+}
+
+fn compact_cleanup() -> ConfigPair<'static> {
+    ConfigPair {
+        name: "cleanup.policy",
+        value: "compact",
+    }
+}
+
 struct AutoTopicSetup<'a> {
     name: &'a str,
     num_partitions: PartitionCount,
@@ -127,18 +141,12 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
                 .num_partitions(11)
                 .replication_factor(3)
                 .configs(configs(&[
-                    ConfigPair {
-                        name: "cleanup.policy",
-                        value: "compact",
-                    },
+                    compact_cleanup(),
                     ConfigPair {
                         name: "compression.type",
                         value: "producer",
                     },
-                    ConfigPair {
-                        name: "segment.bytes",
-                        value: "104857600",
-                    },
+                    segment_bytes(),
                 ]))
                 .call(),
         ),
@@ -151,10 +159,7 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
                 .num_partitions(12)
                 .replication_factor(2)
                 .configs(configs(&[
-                    ConfigPair {
-                        name: "cleanup.policy",
-                        value: "compact",
-                    },
+                    compact_cleanup(),
                     ConfigPair {
                         name: "compression.type",
                         value: "uncompressed",
@@ -163,10 +168,7 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
                         name: "min.insync.replicas",
                         value: "2",
                     },
-                    ConfigPair {
-                        name: "segment.bytes",
-                        value: "104857600",
-                    },
+                    segment_bytes(),
                     ConfigPair {
                         name: "unclean.leader.election.enable",
                         value: "false",
@@ -199,10 +201,7 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
                         name: "retention.ms",
                         value: "-1",
                     },
-                    ConfigPair {
-                        name: "segment.bytes",
-                        value: "104857600",
-                    },
+                    segment_bytes(),
                 ]))
                 .call(),
         ),
@@ -214,10 +213,7 @@ fn creatable_topic_follows_kafkas_creatable_topic() {
                 .name(STATE_TOPIC)
                 .num_partitions(14)
                 .replication_factor(5)
-                .configs(configs(&[ConfigPair {
-                    name: "cleanup.policy",
-                    value: "compact",
-                }]))
+                .configs(configs(&[compact_cleanup()]))
                 .call(),
         ),
         ("no default supplied", &config, "orders", topic().call()),
@@ -464,13 +460,11 @@ async fn a_streams_creation_skips_a_backed_off_or_in_flight_topic() {
         .errors
         .put("backed-off", "no brokers".into(), 60_000, now_ms());
     assert!(creation.hold_for_test("in-flight"));
+    let internal_topic = |name| topic().name(name).num_partitions(1).call();
 
     creation.create_streams_internal_topics(
         &broker,
-        vec![
-            topic().name("backed-off").num_partitions(1).call(),
-            topic().name("in-flight").num_partitions(1).call(),
-        ],
+        vec![internal_topic("backed-off"), internal_topic("in-flight")],
         identity.clone(),
         60_000,
     );
@@ -478,10 +472,7 @@ async fn a_streams_creation_skips_a_backed_off_or_in_flight_topic() {
 
     creation.create_streams_internal_topics(
         &broker,
-        vec![
-            topic().name("backed-off").num_partitions(1).call(),
-            topic().name("fresh").num_partitions(1).call(),
-        ],
+        vec![internal_topic("backed-off"), internal_topic("fresh")],
         identity,
         60_000,
     );

@@ -268,35 +268,33 @@ async fn malformed_keys_land_in_unrecognized_not_dropped_and_not_an_error() {
 /// The sample is capped and the rest counted, so a `--archive-prefix` that
 /// points at the wrong tree costs a bounded amount of memory however many
 /// keys the bucket holds. The total is still exact.
-#[test]
-fn unrecognized_keys_keep_a_bounded_sample_and_count_the_rest() {
-    for seen in [
-        0,
-        1,
-        UNRECOGNIZED_SAMPLE_LIMIT - 1,
-        UNRECOGNIZED_SAMPLE_LIMIT,
-        UNRECOGNIZED_SAMPLE_LIMIT + 1,
-        UNRECOGNIZED_SAMPLE_LIMIT * 10,
-    ] {
-        let mut keys = UnrecognizedKeys::default();
-        for index in 0..seen {
-            keys.record(Path::from(format!("junk/{index}")));
-        }
-
-        let kept = seen.min(UNRECOGNIZED_SAMPLE_LIMIT);
-        check!(
-            keys == UnrecognizedKeys {
-                sample: (0..kept).map(|i| Path::from(format!("junk/{i}"))).collect(),
-                omitted: u64::try_from(seen - kept).expect("the fixture counts are small"),
-            },
-            "after {seen} keys",
-        );
-        check!(
-            keys.total() == u64::try_from(seen).expect("the fixture counts are small"),
-            "after {seen} keys",
-        );
-        check!(keys.is_empty() == (seen == 0), "after {seen} keys");
+#[yare::parameterized(
+    empty = { 0 },
+    one_key = { 1 },
+    one_below_limit = { UNRECOGNIZED_SAMPLE_LIMIT - 1 },
+    at_limit = { UNRECOGNIZED_SAMPLE_LIMIT },
+    one_above_limit = { UNRECOGNIZED_SAMPLE_LIMIT + 1 },
+    ten_times_limit = { UNRECOGNIZED_SAMPLE_LIMIT * 10 },
+)]
+fn unrecognized_keys_keep_a_bounded_sample_and_count_the_rest(seen: usize) {
+    let mut keys = UnrecognizedKeys::default();
+    for index in 0..seen {
+        keys.record(Path::from(format!("junk/{index}")));
     }
+
+    let kept = seen.min(UNRECOGNIZED_SAMPLE_LIMIT);
+    check!(
+        keys == UnrecognizedKeys {
+            sample: (0..kept).map(|i| Path::from(format!("junk/{i}"))).collect(),
+            omitted: u64::try_from(seen - kept).expect("the fixture counts are small"),
+        },
+        "after {seen} keys",
+    );
+    check!(
+        keys.total() == u64::try_from(seen).expect("the fixture counts are small"),
+        "after {seen} keys",
+    );
+    check!(keys.is_empty() == (seen == 0), "after {seen} keys");
 }
 
 #[tokio::test]

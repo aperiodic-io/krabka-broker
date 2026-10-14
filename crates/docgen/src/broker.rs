@@ -39,7 +39,7 @@ pub fn topic_configs_md() -> String {
          |-----|------|---------|-----|-------------|\n",
     );
     for d in krabka_broker::topic_config_docs() {
-        let default = d.default.map(|x| format!("`{x}`")).unwrap_or_default();
+        let default = d.default.map_or_default(|x| format!("`{x}`"));
         let kip = d.kip.unwrap_or("—");
         let _ = writeln!(
             out,

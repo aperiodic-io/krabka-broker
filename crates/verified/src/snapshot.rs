@@ -142,23 +142,25 @@ mod tests {
         assert2::check,
     };
 
-    #[test]
-    fn install_admission_rejects_malformed_and_separates_stale_from_future() {
-        use SnapshotInstallDecision::{Install, Reject, Stale};
-
-        for (pending, end, epoch, log_end, expected) in [
-            (false, 0, 0, 0, Stale),
-            (false, 1, 0, 0, Install),
-            (false, 11, 3, 10, Install),
-            (false, 10, 3, 10, Stale),
-            (false, 9, 3, 10, Stale),
-            (true, 11, 3, 10, Reject),
-            (false, -1, 3, 10, Reject),
-            (false, 11, -1, 10, Reject),
-            (false, 11, 3, -1, Reject),
-        ] {
-            check!(snapshot_install_decision(pending, end, epoch, log_end) == expected);
-        }
+    #[yare::parameterized(
+        empty_stale = { false, 0, 0, 0, SnapshotInstallDecision::Stale },
+        after_empty = { false, 1, 0, 0, SnapshotInstallDecision::Install },
+        beyond_log_end = { false, 11, 3, 10, SnapshotInstallDecision::Install },
+        at_log_end = { false, 10, 3, 10, SnapshotInstallDecision::Stale },
+        before_log_end = { false, 9, 3, 10, SnapshotInstallDecision::Stale },
+        pending = { true, 11, 3, 10, SnapshotInstallDecision::Reject },
+        negative_end = { false, -1, 3, 10, SnapshotInstallDecision::Reject },
+        negative_epoch = { false, 11, -1, 10, SnapshotInstallDecision::Reject },
+        negative_log_end = { false, 11, 3, -1, SnapshotInstallDecision::Reject },
+    )]
+    fn install_admission_rejects_malformed_and_separates_stale_from_future(
+        pending: bool,
+        end: i64,
+        epoch: i32,
+        log_end: i64,
+        expected: SnapshotInstallDecision,
+    ) {
+        check!(snapshot_install_decision(pending, end, epoch, log_end) == expected);
     }
 
     #[test]
@@ -169,33 +171,81 @@ mod tests {
         check!(!snapshot_prune_admission(-1, 10));
     }
 
-    #[test]
-    fn chunk_admission_covers_retries_order_bounds_and_completion() {
-        use SnapshotChunkDecision::{Complete, Continue, Restart};
-
+    #[yare::parameterized(
+        next_chunk = {
+            true,
+            None,
+            0,
+            6,
+            0,
+            3,
+            10,
+            SnapshotChunkDecision::Continue { next_position: 3 },
+        },
+        final_chunk = { true, Some(6), 3, 6, 3, 3, 10, SnapshotChunkDecision::Complete },
+        empty_snapshot = { true, None, 0, 0, 0, 0, 10, SnapshotChunkDecision::Complete },
+        empty_snapshot_at_zero_cap = { true, None, 0, 0, 0, 0, 0, SnapshotChunkDecision::Complete },
+        exact_max_size = { true, None, 0, 10, 0, 10, 10, SnapshotChunkDecision::Complete },
+        identity_changed = { false, Some(6), 3, 6, 3, 3, 10, SnapshotChunkDecision::Restart },
+        fixed_size_changed = { true, Some(7), 3, 6, 3, 3, 10, SnapshotChunkDecision::Restart },
+        position_replayed = { true, Some(6), 3, 6, 0, 3, 10, SnapshotChunkDecision::Restart },
+        position_skipped = { true, Some(6), 3, 6, 2, 3, 10, SnapshotChunkDecision::Restart },
+        chunk_starts_after_position = {
+            true,
+            Some(6),
+            3,
+            6,
+            4,
+            2,
+            10,
+            SnapshotChunkDecision::Restart,
+        },
+        chunk_exceeds_declared_size = {
+            true,
+            Some(6),
+            3,
+            6,
+            3,
+            4,
+            10,
+            SnapshotChunkDecision::Restart,
+        },
+        negative_received = { true, None, -1, 6, -1, 3, 10, SnapshotChunkDecision::Restart },
+        negative_chunk_size = { true, None, 0, 6, 0, -1, 10, SnapshotChunkDecision::Restart },
+        negative_max_size = { true, None, 0, 6, 0, 3, -1, SnapshotChunkDecision::Restart },
+        negative_declared_size = { true, None, 0, -1, 0, 0, 10, SnapshotChunkDecision::Restart },
+        exceeds_max_size = { true, None, 0, 11, 0, 1, 10, SnapshotChunkDecision::Restart },
+        addition_overflow = {
+            true,
+            None,
+            i64::MAX,
+            i64::MAX,
+            i64::MAX,
+            1,
+            i64::MAX,
+            SnapshotChunkDecision::Restart,
+        },
+    )]
+    fn chunk_admission_covers_retries_order_bounds_and_completion(
+        identity_matches: bool,
+        fixed_size: Option<i64>,
+        received: i64,
+        declared_size: i64,
+        position: i64,
+        chunk_len: i64,
+        max_size: i64,
+        expected: SnapshotChunkDecision,
+    ) {
         check!(
-            snapshot_chunk_admission(true, None, 0, 6, 0, 3, 10) == Continue { next_position: 3 }
+            snapshot_chunk_admission(
+                identity_matches,
+                fixed_size,
+                received,
+                declared_size,
+                position,
+                chunk_len,
+                max_size
+            ) == expected
         );
-        check!(snapshot_chunk_admission(true, Some(6), 3, 6, 3, 3, 10) == Complete);
-        check!(snapshot_chunk_admission(true, None, 0, 0, 0, 0, 10) == Complete);
-        check!(snapshot_chunk_admission(true, None, 0, 0, 0, 0, 0) == Complete);
-        check!(snapshot_chunk_admission(true, None, 0, 10, 0, 10, 10) == Complete);
-
-        for decision in [
-            snapshot_chunk_admission(false, Some(6), 3, 6, 3, 3, 10),
-            snapshot_chunk_admission(true, Some(7), 3, 6, 3, 3, 10),
-            snapshot_chunk_admission(true, Some(6), 3, 6, 0, 3, 10),
-            snapshot_chunk_admission(true, Some(6), 3, 6, 2, 3, 10),
-            snapshot_chunk_admission(true, Some(6), 3, 6, 4, 2, 10),
-            snapshot_chunk_admission(true, Some(6), 3, 6, 3, 4, 10),
-            snapshot_chunk_admission(true, None, -1, 6, -1, 3, 10),
-            snapshot_chunk_admission(true, None, 0, 6, 0, -1, 10),
-            snapshot_chunk_admission(true, None, 0, 6, 0, 3, -1),
-            snapshot_chunk_admission(true, None, 0, -1, 0, 0, 10),
-            snapshot_chunk_admission(true, None, 0, 11, 0, 1, 10),
-            snapshot_chunk_admission(true, None, i64::MAX, i64::MAX, i64::MAX, 1, i64::MAX),
-        ] {
-            check!(decision == Restart);
-        }
     }
 }

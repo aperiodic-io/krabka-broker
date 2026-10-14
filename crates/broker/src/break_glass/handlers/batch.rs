@@ -158,27 +158,27 @@ impl GatedBatch {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, assert2::assert};
+    use super::*;
 
-    #[test]
-    fn an_append_that_did_not_commit_is_audited_as_a_refusal() {
+    #[yare::parameterized(
+        committed = {
+            None,
+            AppendOutcome { phase: PrivilegedPhase::Applied, reason: "committed in the append" },
+        },
+        refused = {
+            Some("submit failed: not the controller"),
+            AppendOutcome { phase: PrivilegedPhase::Refused, reason: "submit failed: not the controller" },
+        },
+    )]
+    fn an_append_that_did_not_commit_is_audited_as_a_refusal(
+        failure: Option<&str>,
+        expected: AppendOutcome<'_>,
+    ) {
         let batch = GatedBatch::new(
             BreakGlassAction::UncleanElectLeaders,
             "admitted before the append",
             "committed in the append",
         );
-
-        for (failure, expected) in [
-            (None, AppendOutcome {
-                phase: PrivilegedPhase::Applied,
-                reason: "committed in the append",
-            }),
-            (Some("submit failed: not the controller"), AppendOutcome {
-                phase: PrivilegedPhase::Refused,
-                reason: "submit failed: not the controller",
-            }),
-        ] {
-            assert!(batch.outcome(failure) == expected, "{failure:?}");
-        }
+        assert2::assert!(batch.outcome(failure) == expected, "{failure:?}");
     }
 }

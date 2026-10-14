@@ -93,15 +93,13 @@ mod tests {
         assert2::assert!(parse_scram_spec("SCRAM-SHA-512=[name=a,password=b,foo=bar]").is_err());
     }
 
-    #[test]
-    fn parse_scram_spec_error_branches() {
-        for bad in [
-            "SCRAM-SHA-512=[name=a,password=b", // missing closing ]
-            "SCRAM-SHA-512=[name=a,password=b,iterations=xx]", // bad iterations
-            "SCRAM-SHA-512=[name=a,badattr]",   // malformed attr (no '=')
-            "SCRAM-SHA-512=[name=a,iterations=4096]", // missing password
-        ] {
-            assert2::assert!(parse_scram_spec(bad).is_err());
-        }
+    #[yare::parameterized(
+        missing_closing_bracket = { "SCRAM-SHA-512=[name=a,password=b" },
+        invalid_iterations = { "SCRAM-SHA-512=[name=a,password=b,iterations=xx]" },
+        malformed_attribute = { "SCRAM-SHA-512=[name=a,badattr]" },
+        missing_password = { "SCRAM-SHA-512=[name=a,iterations=4096]" },
+    )]
+    fn parse_scram_spec_error_branches(bad: &str) {
+        assert2::assert!(parse_scram_spec(bad).is_err());
     }
 }

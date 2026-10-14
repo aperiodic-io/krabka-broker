@@ -44,6 +44,7 @@ krabka-log = { version = "1.0.5", path = "../log" }
 mutants = { workspace = true }
 stateright = { workspace = true }
 tempfile = { workspace = true }
+yare = { workspace = true }
 
 [[bin]]
 name = "krabka-audit"

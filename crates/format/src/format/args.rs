@@ -217,149 +217,137 @@ mod tests {
 
     /// `--log-dir` takes repeated flags and comma-separated lists alike, and
     /// keeps the order they were given in.
-    #[test]
-    fn log_dir_is_repeatable_and_comma_separated() {
-        let cases: [&[&str]; 3] = [
-            &["--log-dir", "/a", "--log-dir", "/b"],
-            &["--log-dir", "/a,/b"],
-            &["--log-dir=/a", "--log-dir=/b"],
-        ];
-        for argv in cases {
-            let cli = Cli::try_parse_from(
-                ["krabka-format", "--node-id", "1"]
-                    .into_iter()
-                    .chain(argv.iter().copied()),
-            )
-            .expect("parse");
-            check!(
-                cli.args.log_dirs == vec![PathBuf::from("/a"), PathBuf::from("/b")],
-                "{argv:?}"
-            );
-        }
-        check!(crate::Cli::try_parse_from(["krabka-format", "--node-id", "1"]).is_err());
+    #[yare::parameterized(
+        repeated_flags = { &["--log-dir", "/a", "--log-dir", "/b"] },
+        comma_separated = { &["--log-dir", "/a,/b"] },
+        equals_form = { &["--log-dir=/a", "--log-dir=/b"] },
+    )]
+    fn log_dir_is_repeatable_and_comma_separated(argv: &[&str]) {
+        let cli = Cli::try_parse_from(
+            ["krabka-format", "--node-id", "1"]
+                .into_iter()
+                .chain(argv.iter().copied()),
+        )
+        .expect("parse");
+        assert2::check!(
+            cli.args.log_dirs == vec![PathBuf::from("/a"), PathBuf::from("/b")],
+            "{argv:?}"
+        );
     }
 
     /// `--metadata-log-dir` takes one path, comma and all, as Kafka's
     /// `metadata.log.dir` is one path. It is optional, it does not replace the
     /// required `--log-dir`, and clap refuses it twice.
-    #[test]
-    fn metadata_log_dir_is_one_optional_path() {
-        /// The directories a command line names.
-        #[derive(Debug, PartialEq, Eq)]
-        struct Dirs {
-            metadata_log_dir: Option<PathBuf>,
-            log_dirs: Vec<PathBuf>,
-        }
-        type Parsed = Result<Dirs, ErrorKind>;
-        /// An argv after the program name, and what it parses to.
-        struct Case<'a> {
-            argv: &'a [&'a str],
-            want: Parsed,
-        }
-        let path = PathBuf::from;
-        let dirs = |metadata_log_dir, log_dirs| Dirs {
-            metadata_log_dir,
-            log_dirs,
-        };
-        let cases = [
-            Case {
-                argv: &["--log-dir", "/a"],
-                want: Ok(dirs(None, vec![path("/a")])),
+    #[yare::parameterized(
+        log_only = { &["--log-dir", "/a"], None, &["/a"][..], None },
+        metadata_and_logs = {
+            &["--metadata-log-dir", "/m", "--log-dir", "/a,/b"],
+            Some("/m"),
+            &["/a", "/b"][..],
+            None,
+        },
+        same_metadata_and_log = {
+            &["--log-dir=/a", "--metadata-log-dir=/a"],
+            Some("/a"),
+            &["/a"][..],
+            None,
+        },
+        comma_in_metadata_is_path = {
+            &["--metadata-log-dir", "/m,/n", "--log-dir", "/a"],
+            Some("/m,/n"),
+            &["/a"][..],
+            None,
+        },
+        missing_required_log = {
+            &["--metadata-log-dir", "/m"],
+            None,
+            &[][..],
+            Some(ErrorKind::MissingRequiredArgument),
+        },
+        repeated_metadata_conflicts = {
+            &["--metadata-log-dir", "/m", "--metadata-log-dir", "/n", "--log-dir", "/a"],
+            None,
+            &[][..],
+            Some(ErrorKind::ArgumentConflict),
+        },
+    )]
+    fn metadata_log_dir_is_one_optional_path(
+        argv: &[&str],
+        metadata: Option<&str>,
+        log_dirs: &[&str],
+        error: Option<ErrorKind>,
+    ) {
+        let got = Cli::try_parse_from(
+            ["krabka-format", "--node-id", "1"]
+                .into_iter()
+                .chain(argv.iter().copied()),
+        )
+        .map(|cli| (cli.args.metadata_log_dir, cli.args.log_dirs))
+        .map_err(|error| error.kind());
+        let want = error.map_or_else(
+            || {
+                Ok((
+                    metadata.map(PathBuf::from),
+                    log_dirs.iter().map(PathBuf::from).collect(),
+                ))
             },
-            Case {
-                argv: &["--metadata-log-dir", "/m", "--log-dir", "/a,/b"],
-                want: Ok(dirs(Some(path("/m")), vec![path("/a"), path("/b")])),
-            },
-            Case {
-                argv: &["--log-dir=/a", "--metadata-log-dir=/a"],
-                want: Ok(dirs(Some(path("/a")), vec![path("/a")])),
-            },
-            Case {
-                argv: &["--metadata-log-dir", "/m,/n", "--log-dir", "/a"],
-                want: Ok(dirs(Some(path("/m,/n")), vec![path("/a")])),
-            },
-            Case {
-                argv: &["--metadata-log-dir", "/m"],
-                want: Err(ErrorKind::MissingRequiredArgument),
-            },
-            Case {
-                argv: &[
-                    "--metadata-log-dir",
-                    "/m",
-                    "--metadata-log-dir",
-                    "/n",
-                    "--log-dir",
-                    "/a",
-                ],
-                want: Err(ErrorKind::ArgumentConflict),
-            },
-        ];
-        for Case { argv, want } in cases {
-            let got: Parsed = Cli::try_parse_from(
-                ["krabka-format", "--node-id", "1"]
-                    .into_iter()
-                    .chain(argv.iter().copied()),
-            )
-            .map(|cli| dirs(cli.args.metadata_log_dir, cli.args.log_dirs))
-            .map_err(|error| error.kind());
-            check!(got == want, "{argv:?}");
-        }
+            Err,
+        );
+        assert2::check!(got == want, "{argv:?}");
     }
 
     /// A node id is Kafka's `int` without a sign: 0 through 2147483647.
     /// Everything else is an error rather than a silent zero.
-    #[test]
-    fn parse_node_id_takes_kafkas_node_id_range() {
-        // (input, the id, or the message)
-        let cases = [
-            ("7", Ok(7)),
-            ("  7  ", Ok(7)),
-            ("0", Ok(0)),
-            ("2147483647", Ok(2_147_483_647)),
-            (
-                "2147483648",
-                Err("node id: number too large to fit in target type"),
-            ),
-            ("-1", Err("You must specify a valid non-negative node ID.")),
-            ("", Err("node id: cannot parse integer from empty string")),
-            ("1.0", Err("node id: invalid digit found in string")),
-            ("0x7", Err("node id: invalid digit found in string")),
-        ];
-        for (input, want) in cases {
-            check!(
-                parse_node_id(input).map(|n| n.0) == want.map_err(str::to_owned),
-                "{input:?}"
-            );
-        }
+    #[yare::parameterized(
+        ordinary = { "7", Ok(7) },
+        trims_spaces = { "  7  ", Ok(7) },
+        zero = { "0", Ok(0) },
+        max_i32 = { "2147483647", Ok(2_147_483_647) },
+        overflow = { "2147483648", Err("node id: number too large to fit in target type") },
+        negative = { "-1", Err("You must specify a valid non-negative node ID.") },
+        empty = { "", Err("node id: cannot parse integer from empty string") },
+        decimal = { "1.0", Err("node id: invalid digit found in string") },
+        hex = { "0x7", Err("node id: invalid digit found in string") },
+    )]
+    fn parse_node_id_takes_kafkas_node_id_range(input: &str, want: Result<u64, &str>) {
+        assert2::check!(
+            parse_node_id(input).map(|n| n.0) == want.map_err(str::to_owned),
+            "{input:?}"
+        );
     }
 
     /// `--directory-id` takes either id form and refuses the ids that Kafka
     /// reserves, which the broker would refuse at startup.
-    #[test]
-    fn parse_directory_id_refuses_reserved_ids() {
-        let reserved = |n: u128| {
+    #[yare::parameterized(
+        usable_uuid = {
+            uuid::Uuid::from_u64_pair(1, 1).to_string(),
+            Ok(DirectoryId::from(uuid::Uuid::from_u64_pair(1, 1))),
+        },
+        usable_kafka_form = {
+            DirectoryId::from(uuid::Uuid::from_u64_pair(1, 1)).to_string(),
+            Ok(DirectoryId::from(uuid::Uuid::from_u64_pair(1, 1))),
+        },
+        reserved_one = {
+            uuid::Uuid::from_u128(1).to_string(),
             Err(format!(
                 "Invalid reserved directory ID {}: Kafka reserves the 100 lowest directory ids",
-                DirectoryId::from(uuid::Uuid::from_u128(n))
-            ))
-        };
-        let usable = uuid::Uuid::from_u64_pair(1, 1);
-        let cases = [
-            (usable.to_string(), Ok(DirectoryId::from(usable))),
-            (
-                DirectoryId::from(usable).to_string(),
-                Ok(DirectoryId::from(usable)),
-            ),
-            (uuid::Uuid::from_u128(1).to_string(), reserved(1)),
-            (uuid::Uuid::from_u128(99).to_string(), reserved(99)),
-            (
-                uuid::Uuid::from_u128(100).to_string(),
-                Ok(DirectoryId::from(uuid::Uuid::from_u128(100))),
-            ),
-        ];
-        for (input, want) in cases {
-            check!(parse_directory_id(&input) == want, "{input:?}");
-        }
+                DirectoryId::from(uuid::Uuid::from_u128(1))
+            )),
+        },
+        reserved_ninety_nine = {
+            uuid::Uuid::from_u128(99).to_string(),
+            Err(format!(
+                "Invalid reserved directory ID {}: Kafka reserves the 100 lowest directory ids",
+                DirectoryId::from(uuid::Uuid::from_u128(99))
+            )),
+        },
+        first_usable = {
+            DirectoryId::from(uuid::Uuid::from_u128(100)).to_string(),
+            Ok(DirectoryId::from(uuid::Uuid::from_u128(100))),
+        },
+    )]
+    fn parse_directory_id_refuses_reserved_ids(input: String, want: Result<DirectoryId, String>) {
+        assert2::check!(parse_directory_id(&input) == want, "{input:?}");
     }
 
     /// `--node-id` is required, as Kafka's `node.id` is: every

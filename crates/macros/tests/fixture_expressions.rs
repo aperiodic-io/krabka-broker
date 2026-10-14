@@ -65,39 +65,23 @@ async fn command(
     Ok(reply.value)
 }
 
-#[tokio::test]
-async fn command_errors_return_from_the_caller_before_success_interpretation() {
-    struct Case {
-        mode: ReplyMode,
-        expected: Result<i32, Failure>,
-        continues: bool,
-    }
-    for case in [
-        Case {
-            mode: ReplyMode::Success,
-            expected: Ok(42),
-            continues: true,
-        },
-        Case {
-            mode: ReplyMode::Refusal,
-            expected: Ok(-31),
-            continues: false,
-        },
-        Case {
-            mode: ReplyMode::TransportFailure,
-            expected: Err(Failure),
-            continues: false,
-        },
-    ] {
-        let client = Client {
-            sends: Cell::new(0),
-        };
-        let continued = Cell::new(false);
-        let result = command(&client, Request { mode: case.mode }, &continued).await;
-        assert!(
-            result == case.expected && continued.get() == case.continues && client.sends.get() == 1
-        );
-    }
+#[yare::parameterized(
+    success = { ReplyMode::Success, Ok(42), true },
+    refusal = { ReplyMode::Refusal, Ok(-31), false },
+    transport_failure = { ReplyMode::TransportFailure, Err(Failure), false },
+)]
+#[test_macro(tokio::test)]
+async fn command_errors_return_from_the_caller_before_success_interpretation(
+    mode: ReplyMode,
+    expected: Result<i32, Failure>,
+    continues: bool,
+) {
+    let client = Client {
+        sends: Cell::new(0),
+    };
+    let continued = Cell::new(false);
+    let result = command(&client, Request { mode }, &continued).await;
+    assert2::assert!(result == expected && continued.get() == continues && client.sends.get() == 1);
 }
 
 #[derive(Default)]

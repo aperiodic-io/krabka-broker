@@ -352,19 +352,25 @@ mod tests {
         ));
     }
 
+    #[yare::parameterized(
+        one = { 1 },
+        two = { 2 },
+        maximum = { u64::MAX },
+    )]
+    fn offset_counts_are_bounded_by_the_encoded_entries(count: u64) {
+        let mut bytes = BytesMut::new();
+        bytes.put_u16(SNAPSHOT_FORMAT_VERSION);
+        write_uvarint(count, &mut bytes);
+        assert2::assert!(matches!(
+            Snapshot::decode(&bytes),
+            Err(SnapshotError::Malformed(
+                CodecError::UnexpectedEof(_) | CodecError::LengthOverflow(_)
+            ))
+        ));
+    }
+
     #[test]
-    fn offset_counts_are_bounded_by_the_encoded_entries() {
-        for count in [1, 2, u64::MAX] {
-            let mut bytes = BytesMut::new();
-            bytes.put_u16(SNAPSHOT_FORMAT_VERSION);
-            write_uvarint(count, &mut bytes);
-            assert!(matches!(
-                Snapshot::decode(&bytes),
-                Err(SnapshotError::Malformed(
-                    CodecError::UnexpectedEof(_) | CodecError::LengthOverflow(_)
-                ))
-            ));
-        }
+    fn valid_snapshot_round_trips_after_malformed_count_cases() {
         let snapshot = Snapshot {
             committed_offsets: vec![-1],
             dump: RlmmCacheDump::default(),

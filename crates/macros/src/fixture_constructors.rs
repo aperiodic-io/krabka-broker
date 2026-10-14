@@ -141,23 +141,28 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
 mod tests {
     use {super::expand, crate::meta::compact, assert2::assert};
 
+    #[yare::parameterized(
+        temporary_partition = { "temporary_partition" },
+        open_partition = { "open_partition" },
+        election = { "election" },
+        supervisor = { "supervisor" },
+        quota = { "quota" },
+    )]
+    fn fixture_domains_keep_defaults_argument_order_and_visible_return_types(domain: &str) {
+        let input = format!("{domain}: pub first -> Output = construct; second -> Other = other;");
+        let output = compact(&expand(&input.parse().unwrap()).unwrap());
+        assert2::assert!(output.find("fnfirst").unwrap() < output.find("fnsecond").unwrap());
+        assert2::assert!(
+            output.contains("->Output{construct(") && output.contains("->Other{other(")
+        );
+        assert2::assert!(output.contains("#[bon::builder]"));
+        assert2::assert!(
+            output.contains("log_dir:&::std::path::Path") == (domain == "open_partition")
+        );
+    }
+
     #[test]
-    fn fixture_domains_keep_defaults_argument_order_and_visible_return_types() {
-        for domain in [
-            "temporary_partition",
-            "open_partition",
-            "election",
-            "supervisor",
-            "quota",
-        ] {
-            let input =
-                format!("{domain}: pub first -> Output = construct; second -> Other = other;");
-            let output = compact(&expand(&input.parse().unwrap()).unwrap());
-            assert!(output.find("fnfirst").unwrap() < output.find("fnsecond").unwrap());
-            assert!(output.contains("->Output{construct(") && output.contains("->Other{other("));
-            assert!(output.contains("#[bon::builder]"));
-            assert!(output.contains("log_dir:&::std::path::Path") == (domain == "open_partition"));
-        }
+    fn election_fixture_keeps_the_elr_default() {
         let election =
             compact(&expand(&"election: seed -> Record = constructor;".parse().unwrap()).unwrap());
         assert!(
@@ -167,16 +172,14 @@ mod tests {
         assert!(election.contains("ElectionSetup::default().elr"));
     }
 
-    #[test]
-    fn constructor_table_rejects_unknown_empty_duplicate_and_malformed_rows() {
-        for input in [
-            "unknown: a -> Output = make;",
-            "election:",
-            "quota: a -> Output = make; a -> Output = again;",
-            "supervisor: a -> Output = make + other;",
-            "open_partition: a = make;",
-        ] {
-            assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        unknown_domain = { "unknown: a -> Output = make;" },
+        empty_rows = { "election:" },
+        duplicate_row = { "quota: a -> Output = make; a -> Output = again;" },
+        expression_helper = { "supervisor: a -> Output = make + other;" },
+        missing_return_type = { "open_partition: a = make;" },
+    )]
+    fn constructor_table_rejects_unknown_empty_duplicate_and_malformed_rows(input: &str) {
+        assert2::assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

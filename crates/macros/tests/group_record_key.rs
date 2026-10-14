@@ -56,48 +56,36 @@ enum RecordKey {
     RegularExpression { group_id: String, regex: String },
 }
 
-#[test]
-fn concrete_variants_keep_wire_bytes_group_access_and_trailing_byte_acceptance() {
-    struct GoldenCase {
-        key: RecordKey,
-        bytes: &'static [u8],
-    }
-    let cases = [
-        GoldenCase {
-            key: RecordKey::GroupMetadata {
-                group_id: "g".into(),
-            },
-            bytes: b"\x00\x03\x00\x01g",
-        },
-        GoldenCase {
-            key: RecordKey::MemberMetadata {
-                group_id: "g".into(),
-                member_id: "m".into(),
-            },
-            bytes: b"\x00\x05\x00\x01g\x00\x01m",
-        },
-        GoldenCase {
-            key: RecordKey::RegularExpression {
-                group_id: "g".into(),
-                regex: "a.*".into(),
-            },
-            bytes: b"\x00\x10\x00\x01g\x00\x03a.*",
-        },
-    ];
-    for GoldenCase { key, bytes: golden } in cases {
-        assert!(key.group_id() == "g");
-        assert!(key.encode().unwrap().as_ref() == golden);
-        let version = i16::from_be_bytes([golden[0], golden[1]]);
-        assert!(RecordKey::parse(version, &golden[2..]).unwrap() == key);
-        let mut with_trailer = golden[2..].to_vec();
-        with_trailer.extend_from_slice(b"ignored");
-        assert!(RecordKey::parse(version, &with_trailer).unwrap() == key);
-        for length in 2..golden.len() {
-            assert!(
-                RecordKey::parse(version, &golden[2..length]) == Err(BrokerError::InvalidString),
-                "truncated to {length}: {golden:?}"
-            );
-        }
+#[yare::parameterized(
+    group_metadata = {
+        RecordKey::GroupMetadata { group_id: "g".into() },
+        &b"\x00\x03\x00\x01g"[..]
+    },
+    member_metadata = {
+        RecordKey::MemberMetadata { group_id: "g".into(), member_id: "m".into() },
+        &b"\x00\x05\x00\x01g\x00\x01m"[..]
+    },
+    regular_expression = {
+        RecordKey::RegularExpression { group_id: "g".into(), regex: "a.*".into() },
+        &b"\x00\x10\x00\x01g\x00\x03a.*"[..]
+    },
+)]
+fn concrete_variants_keep_wire_bytes_group_access_and_trailing_byte_acceptance(
+    key: RecordKey,
+    golden: &[u8],
+) {
+    assert2::assert!(key.group_id() == "g");
+    assert2::assert!(key.encode().unwrap().as_ref() == golden);
+    let version = i16::from_be_bytes([golden[0], golden[1]]);
+    assert2::assert!(RecordKey::parse(version, &golden[2..]).unwrap() == key);
+    let mut with_trailer = golden[2..].to_vec();
+    with_trailer.extend_from_slice(b"ignored");
+    assert2::assert!(RecordKey::parse(version, &with_trailer).unwrap() == key);
+    for length in 2..golden.len() {
+        assert2::assert!(
+            RecordKey::parse(version, &golden[2..length]) == Err(BrokerError::InvalidString),
+            "truncated to {length}: {golden:?}"
+        );
     }
 }
 
@@ -109,12 +97,18 @@ fn invalid_versions_precede_string_reads_and_helper_errors_propagate() {
                 "unknown fixture key version"
             )))
     );
-    for malformed in [&b"\xff\xff"[..], &b"\x00\x01\xff"[..], &b"\x00\x02g"[..]] {
-        assert!(RecordKey::parse(GROUP, malformed) == Err(BrokerError::InvalidString));
-    }
     let too_long = RecordKey::RegularExpression {
         group_id: "g".into(),
         regex: "x".repeat(32768),
     };
     assert!(too_long.encode() == Err(BrokerError::InvalidString));
+}
+
+#[yare::parameterized(
+    truncated_version = { &b"\xff\xff"[..] },
+    truncated_group = { &b"\x00\x01\xff"[..] },
+    truncated_regex = { &b"\x00\x02g"[..] },
+)]
+fn malformed_key_bytes_return_invalid_string(malformed: &[u8]) {
+    assert2::assert!(RecordKey::parse(GROUP, malformed) == Err(BrokerError::InvalidString));
 }

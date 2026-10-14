@@ -2,7 +2,9 @@
 
 use {
     super::TopicElr,
-    crate::test_support::{finalize_elr_version, partition_elr as elr},
+    crate::test_support::{
+        elr_model_prelude::PartitionElr, finalize_elr_version, partition_elr as elr,
+    },
     assert2::assert,
     krabka_metadata::{
         MetadataImage, MetadataRecord, NodeId, PartitionElrRecord, PartitionRecord,
@@ -22,36 +24,28 @@ fn orders_partition_image() -> MetadataImage {
 
 /// The grammar, one row per shape the controller can publish, plus the
 /// malformed shapes that must degrade to "no ELR" rather than fail a request.
-#[test]
-fn parse_projects_each_partition_of_the_config_value() {
-    for (value, partition, want) in [
-        // Nothing published at all.
-        ("", 0, elr(&[], &[])),
-        // Both sets on one partition.
-        ("0:2,3:4,5", 0, elr(&[2, 3], &[4, 5])),
-        // ELR only, and last-known only.
-        ("0:2,3:", 0, elr(&[2, 3], &[])),
-        ("0::5", 0, elr(&[], &[5])),
-        // A partition the value does not name projects as no ELR.
-        ("0:2:3", 1, elr(&[], &[])),
-        // Several partitions in one value, in either order.
-        ("4::5;0:2,3:", 0, elr(&[2, 3], &[])),
-        ("4::5;0:2,3:", 4, elr(&[], &[5])),
-        // A trailing separator is not an entry.
-        ("0:2:;", 0, elr(&[2], &[])),
-        // Malformed entries drop, and drop only themselves.
-        ("nope:1:2;0:7:", 0, elr(&[7], &[])),
-        ("nope:1:2", 0, elr(&[], &[])),
-        ("0:1", 0, elr(&[], &[])),
-        ("0:1:2:3", 0, elr(&[], &[])),
-        ("0:x:2", 0, elr(&[], &[])),
-        ("0:1,:2", 0, elr(&[], &[])),
-    ] {
-        assert!(
-            TopicElr::parse(value).partition(partition) == want,
-            "value {value:?} partition {partition}"
-        );
-    }
+#[yare::parameterized(
+    empty = { "", 0, elr(&[], &[]) },
+    both_sets = { "0:2,3:4,5", 0, elr(&[2, 3], &[4, 5]) },
+    eligible_only = { "0:2,3:", 0, elr(&[2, 3], &[]) },
+    last_known_only = { "0::5", 0, elr(&[], &[5]) },
+    unnamed_partition = { "0:2:3", 1, elr(&[], &[]) },
+    several_partitions_eligible = { "4::5;0:2,3:", 0, elr(&[2, 3], &[]) },
+    several_partitions_last_known = { "4::5;0:2,3:", 4, elr(&[], &[5]) },
+    trailing_separator = { "0:2:;", 0, elr(&[2], &[]) },
+    malformed_entry_drops_only_itself = { "nope:1:2;0:7:", 0, elr(&[7], &[]) },
+    malformed_only_entry = { "nope:1:2", 0, elr(&[], &[]) },
+    missing_separator = { "0:1", 0, elr(&[], &[]) },
+    too_many_separators = { "0:1:2:3", 0, elr(&[], &[]) },
+    invalid_member = { "0:x:2", 0, elr(&[], &[]) },
+    empty_member = { "0:1,:2", 0, elr(&[], &[]) },
+)]
+fn parse_projects_each_partition_of_the_config_value(
+    value: &'static str,
+    partition: i32,
+    want: PartitionElr,
+) {
+    assert2::assert!(TopicElr::parse(value).partition(partition) == want);
 }
 
 /// The projection reads partition metadata out of the image, so a topic the
@@ -91,21 +85,20 @@ fn of_topic_reads_legacy_elr_until_it_is_migrated() {
 /// so that one replica, when it is the leader the record still names, is what
 /// says the partition has none. `canElectLastKnownLeader` reads the same shape:
 /// a last-known ELR of any other length is not a last known leader.
-#[test]
-fn a_one_member_last_known_elr_naming_the_recorded_leader_marks_the_partition() {
-    for (label, state, recorded_leader, want) in [
-        ("the last leader alone", elr(&[], &[1]), 1, true),
-        ("with an ELR beside it", elr(&[2, 3], &[1]), 1, true),
-        ("a different replica", elr(&[], &[2]), 1, false),
-        ("two members", elr(&[], &[1, 2]), 1, false),
-        ("no last-known ELR", elr(&[2], &[]), 1, false),
-        ("no ELR at all", elr(&[], &[]), 1, false),
-    ] {
-        assert!(
-            state.is_leaderless(NodeId(recorded_leader)) == want,
-            "{label}"
-        );
-    }
+#[yare::parameterized(
+    last_leader_alone = { elr(&[], &[1]), 1, true },
+    eligible_beside_leader = { elr(&[2, 3], &[1]), 1, true },
+    different_replica = { elr(&[], &[2]), 1, false },
+    two_members = { elr(&[], &[1, 2]), 1, false },
+    no_last_known = { elr(&[2], &[]), 1, false },
+    no_elr = { elr(&[], &[]), 1, false },
+)]
+fn a_one_member_last_known_elr_naming_the_recorded_leader_marks_the_partition(
+    state: PartitionElr,
+    recorded_leader: u64,
+    want: bool,
+) {
+    assert2::assert!(state.is_leaderless(NodeId(recorded_leader)) == want);
 }
 
 /// The image-level reader answers from what the log published, per partition.

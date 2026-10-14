@@ -179,140 +179,138 @@ fn unsigned_privilege(
     }
 }
 
-#[test]
-fn privileged_action_maps_to_6003_with_the_whole_body() {
-    let alice = AuditPrincipal {
-        name: "User:alice".into(),
-        auth_method: "MTls".into(),
-    };
-    let bob = AuditPrincipal {
-        name: "User:bob".into(),
-        auth_method: "SaslScram".into(),
-    };
-    let carol = AuditPrincipal {
-        name: "User:carol".into(),
-        auth_method: "MTls".into(),
-    };
-    let cases = [
-        (
-            "signed freeze, verified, no proposal",
-            privileged_freeze(vec![0xde, 0xad, 0xbe, 0xef], 0, 10),
-            serde_json::json!({
-                "class_uid": 6003,
-                "category_uid": 6,
-                "type_uid": 600_300,
-                "activity_id": 0,
-                "time": 10,
-                "status_id": 1,
-                "status_detail": "incident 42",
-                "api": {
-                    "operation": "topic_freeze.applied",
-                    "service": { "name": "kafka" },
+fn signed_freeze_ocsf_case() -> (AuditEvent, serde_json::Value) {
+    (
+        privileged_freeze(vec![0xde, 0xad, 0xbe, 0xef], 0, 10),
+        serde_json::json!({
+            "class_uid": 6003,
+            "category_uid": 6,
+            "type_uid": 600_300,
+            "activity_id": 0,
+            "time": 10,
+            "status_id": 1,
+            "status_detail": "incident 42",
+            "api": { "operation": "topic_freeze.applied", "service": { "name": "kafka" } },
+            "actor": { "user": { "name": "User:alice", "type": "MTls" } },
+            "src_endpoint": { "ip": "10.0.0.4", "port": 9092 },
+            "privileged_action": {
+                "phase": "applied",
+                "action": "topic_freeze",
+                "target": "orders",
+                "proposal_id": "",
+                "counterparties": [],
+                "approver_set_fingerprint": "",
+                "key_id": "op-1",
+                "signature": "deadbeef",
+                "signature_verified": true,
+                "signed_at_ms": 0,
+            },
+            "metadata": expected_metadata(),
+        }),
+    )
+}
+
+fn unsigned_two_person_ocsf_case() -> (AuditEvent, serde_json::Value) {
+    (
+        unsigned_privilege()
+            .principal(AuditPrincipal {
+                name: "User:carol".into(),
+                auth_method: "MTls".into(),
+            })
+            .counterparties(vec![
+                AuditPrincipal {
+                    name: "User:alice".into(),
+                    auth_method: "MTls".into(),
                 },
-                "actor": { "user": { "name": "User:alice", "type": "MTls" } },
-                "src_endpoint": { "ip": "10.0.0.4", "port": 9092 },
-                "privileged_action": {
-                    "phase": "applied",
-                    "action": "topic_freeze",
-                    "target": "orders",
-                    "proposal_id": "",
-                    "counterparties": [],
-                    "approver_set_fingerprint": "",
-                    "key_id": "op-1",
-                    "signature": "deadbeef",
-                    "signature_verified": true,
-                    "signed_at_ms": 0,
+                AuditPrincipal {
+                    name: "User:bob".into(),
+                    auth_method: "SaslScram".into(),
                 },
-                "metadata": expected_metadata(),
-            }),
-        ),
-        (
-            "unsigned two-person consumption",
-            unsigned_privilege()
-                .principal(carol.clone())
-                .counterparties(vec![alice.clone(), bob.clone()])
-                .time_ms(11)
-                .call(),
-            serde_json::json!({
-                "class_uid": 6003,
-                "category_uid": 6,
-                "type_uid": 600_300,
-                "activity_id": 0,
-                "time": 11,
-                "status_id": 1,
-                "status_detail": "",
-                "api": {
-                    "operation": "unclean_elect_leaders.consumed",
-                    "service": { "name": "kafka" },
-                },
-                "actor": { "user": { "name": "User:carol", "type": "MTls" } },
-                "src_endpoint": { "ip": "10.0.0.4", "port": 9092 },
-                "privileged_action": {
-                    "phase": "consumed",
-                    "action": "unclean_elect_leaders",
-                    "target": "orders-3",
-                    "proposal_id": "bg-7",
-                    "counterparties": [
-                        { "name": "User:alice", "type": "MTls" },
-                        { "name": "User:bob", "type": "SaslScram" },
-                    ],
-                    "approver_set_fingerprint": "f00dcafe",
-                    "key_id": "",
-                    "signature": "",
-                    "signature_verified": false,
-                    "signed_at_ms": 0,
-                },
-                "metadata": expected_metadata(),
-            }),
-        ),
-        (
-            "bypassed gate reports failure",
-            unsigned_privilege()
-                .outcome(AuditOutcome::Failure)
-                .phase(PrivilegedPhase::Bypassed)
-                .action("unclean_recovery")
-                .target("orders-9")
-                .proposal_id("")
-                .principal(AuditPrincipal {
-                    name: "broker".into(),
-                    auth_method: "Internal".into(),
-                })
-                .reason("background recovery ran without an approval")
-                .time_ms(12)
-                .call(),
-            serde_json::json!({
-                "class_uid": 6003,
-                "category_uid": 6,
-                "type_uid": 600_300,
-                "activity_id": 0,
-                "time": 12,
-                "status_id": 2,
-                "status_detail": "background recovery ran without an approval",
-                "api": {
-                    "operation": "unclean_recovery.bypassed",
-                    "service": { "name": "kafka" },
-                },
-                "actor": { "user": { "name": "broker", "type": "Internal" } },
-                "src_endpoint": { "ip": "10.0.0.4", "port": 9092 },
-                "privileged_action": {
-                    "phase": "bypassed",
-                    "action": "unclean_recovery",
-                    "target": "orders-9",
-                    "proposal_id": "",
-                    "counterparties": [],
-                    "approver_set_fingerprint": "f00dcafe",
-                    "key_id": "",
-                    "signature": "",
-                    "signature_verified": false,
-                    "signed_at_ms": 0,
-                },
-                "metadata": expected_metadata(),
-            }),
-        ),
-    ];
-    for (label, event, expected) in cases {
-        check!(to_ocsf(&event, &product()) == expected, "case {label}");
-    }
+            ])
+            .time_ms(11)
+            .call(),
+        serde_json::json!({
+            "class_uid": 6003,
+            "category_uid": 6,
+            "type_uid": 600_300,
+            "activity_id": 0,
+            "time": 11,
+            "status_id": 1,
+            "status_detail": "",
+            "api": { "operation": "unclean_elect_leaders.consumed", "service": { "name": "kafka" } },
+            "actor": { "user": { "name": "User:carol", "type": "MTls" } },
+            "src_endpoint": { "ip": "10.0.0.4", "port": 9092 },
+            "privileged_action": {
+                "phase": "consumed",
+                "action": "unclean_elect_leaders",
+                "target": "orders-3",
+                "proposal_id": "bg-7",
+                "counterparties": [
+                    { "name": "User:alice", "type": "MTls" },
+                    { "name": "User:bob", "type": "SaslScram" },
+                ],
+                "approver_set_fingerprint": "f00dcafe",
+                "key_id": "",
+                "signature": "",
+                "signature_verified": false,
+                "signed_at_ms": 0,
+            },
+            "metadata": expected_metadata(),
+        }),
+    )
+}
+
+fn bypassed_failure_ocsf_case() -> (AuditEvent, serde_json::Value) {
+    (
+        unsigned_privilege()
+            .outcome(AuditOutcome::Failure)
+            .phase(PrivilegedPhase::Bypassed)
+            .action("unclean_recovery")
+            .target("orders-9")
+            .proposal_id("")
+            .principal(AuditPrincipal {
+                name: "broker".into(),
+                auth_method: "Internal".into(),
+            })
+            .reason("background recovery ran without an approval")
+            .time_ms(12)
+            .call(),
+        serde_json::json!({
+            "class_uid": 6003,
+            "category_uid": 6,
+            "type_uid": 600_300,
+            "activity_id": 0,
+            "time": 12,
+            "status_id": 2,
+            "status_detail": "background recovery ran without an approval",
+            "api": { "operation": "unclean_recovery.bypassed", "service": { "name": "kafka" } },
+            "actor": { "user": { "name": "broker", "type": "Internal" } },
+            "src_endpoint": { "ip": "10.0.0.4", "port": 9092 },
+            "privileged_action": {
+                "phase": "bypassed",
+                "action": "unclean_recovery",
+                "target": "orders-9",
+                "proposal_id": "",
+                "counterparties": [],
+                "approver_set_fingerprint": "f00dcafe",
+                "key_id": "",
+                "signature": "",
+                "signature_verified": false,
+                "signed_at_ms": 0,
+            },
+            "metadata": expected_metadata(),
+        }),
+    )
+}
+
+#[yare::parameterized(
+    signed_freeze = { signed_freeze_ocsf_case() },
+    unsigned_two_person_consumption = { unsigned_two_person_ocsf_case() },
+    bypassed_gate_failure = { bypassed_failure_ocsf_case() },
+)]
+fn privileged_action_maps_to_6003_with_the_whole_body(case: (AuditEvent, serde_json::Value)) {
+    let (event, expected) = case;
+    check!(to_ocsf(&event, &product()) == expected);
 }
 
 #[test]

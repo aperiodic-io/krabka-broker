@@ -713,11 +713,17 @@ mod tests {
         let head = "ab".repeat(32);
 
         assert!(parse_head(&head).expect("64 hex characters parse") == ChainHead([0xab; 32]));
+    }
 
-        for bad in ["", &"ab".repeat(31), &format!("{head}ab"), &"zz".repeat(32)] {
-            let error = parse_head(bad).expect_err("not 64 hex characters");
-            assert!(error.contains("expected 64 hex characters"), "{error}");
-        }
+    #[yare::parameterized(
+        empty = { String::new() },
+        short = { "ab".repeat(31) },
+        long = { format!("{}ab", "ab".repeat(32)) },
+        non_hex = { "zz".repeat(32) },
+    )]
+    fn expect_head_rejects_invalid_hex_values(bad: String) {
+        let error = parse_head(&bad).expect_err("not 64 valid hex characters");
+        assert2::assert!(error.contains("expected 64 hex characters"), "{error}");
     }
 
     /// `--local-dir` wins over `--bucket`, and the S3 side must hand back the

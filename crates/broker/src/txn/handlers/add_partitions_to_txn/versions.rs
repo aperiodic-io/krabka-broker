@@ -253,16 +253,22 @@ mod tests {
         test_context ["producer-client"];
     }
 
+    macro_rules! anonymous_deny_all_broker {
+        ($handle:ident, $dir:ident, $broker:ident, $context:ident) => {
+            krabka_macros::broker_test_setup! {
+                bind($handle, $dir, $broker, $context);
+                boot [start_broker(Arc::new(DenyAll))];
+                user ["ANONYMOUS"];
+            };
+        };
+    }
+
     /// A v4+ request comes from a broker, so a principal without
     /// `ClusterAction` gets Kafka's top-level `CLUSTER_AUTHORIZATION_FAILED`
     /// and no transaction row.
     #[tokio::test]
     async fn handle_v4_without_cluster_action_returns_the_top_level_error() {
-        krabka_macros::broker_test_setup! {
-            bind(broker_handle, _dir, broker, ctx);
-            boot [start_broker(Arc::new(DenyAll))];
-            user ["ANONYMOUS"];
-        };
+        anonymous_deny_all_broker!(broker_handle, _dir, broker, ctx);
         let req = AddPartitionsToTxnRequest {
             transactions: vec![AddPartitionsToTxnTransaction {
                 transactional_id: "tid-4".into(),
@@ -486,11 +492,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_v3_transactional_id_deny_returns_topic_rows() {
-        krabka_macros::broker_test_setup! {
-            bind(broker_handle, _dir, broker, ctx);
-            boot [start_broker(Arc::new(DenyAll))];
-            user ["ANONYMOUS"];
-        };
+        anonymous_deny_all_broker!(broker_handle, _dir, broker, ctx);
         let req = AddPartitionsToTxnRequest {
             v3_and_below_transactional_id: "tid-3".into(),
             v3_and_below_producer_id: 11,
@@ -517,6 +519,5 @@ mod tests {
             unknown_tagged_fields: krabka_protocol::UnknownTaggedFields(vec![]),
         };
         assert!(resp == expected);
-        broker_handle.shutdown().await;
     }
 }

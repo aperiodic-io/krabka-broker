@@ -202,25 +202,29 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
 mod tests {
     use {super::requests, assert2::assert};
 
-    #[test]
-    fn refuses_invalid_rows_receivers_fields_and_traversal_policies() {
-        for input in [
-            "",
-            "Request(self) { required(); }",
-            "Request(req) { required(); optional(); }",
-            "Request(self, other) { required(); optional(); }",
-            "Request<T>(self) { required(); optional(); }",
-            "Request(self) { required[a]; optional(); }",
-            "Request(self) { required(a.b); optional(); }",
-            "Request(self) { required(); optional(); unknown; }",
-            "Request(self) { required(); optional(); extra {} }",
-            "Request(self) { required(); optional(); extra [self.names.iter()] }",
+    #[yare::parameterized(
+        empty = { "" },
+        missing_optional = { "Request(self) { required(); }" },
+        wrong_receiver = { "Request(req) { required(); optional(); }" },
+        extra_receiver = { "Request(self, other) { required(); optional(); }" },
+        generic_request = { "Request<T>(self) { required(); optional(); }" },
+        indexed_field = { "Request(self) { required[a]; optional(); }" },
+        nested_field = { "Request(self) { required(a.b); optional(); }" },
+        unknown_policy = { "Request(self) { required(); optional(); unknown; }" },
+        extra_empty_block = { "Request(self) { required(); optional(); extra {} }" },
+        extra_list = { "Request(self) { required(); optional(); extra [self.names.iter()] }" },
+        extra_offset_arg = {
             "Request(self) { required(); optional(); offset_metadata(topics, extra); }",
+        },
+        offset_and_extra = {
             "Request(self) { required(); optional(); offset_metadata(topics); extra { self.names.iter() } }",
+        },
+        duplicate_request = {
             "Request(self) { required(); optional(); } Request(self) { required(); optional(); }",
-        ] {
-            assert!(requests(&input.parse().unwrap()).is_err(), "{input}");
-        }
+        },
+    )]
+    fn refuses_invalid_rows_receivers_fields_and_traversal_policies(input: &str) {
+        assert2::assert!(requests(&input.parse().unwrap()).is_err(), "{input}");
     }
 
     #[test]

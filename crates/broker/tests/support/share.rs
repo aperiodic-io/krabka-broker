@@ -134,14 +134,9 @@ pub async fn produce_n(
         .await;
 }
 
+#[krabka_macros::share_produce_parameters]
 #[bon::builder]
-pub async fn produce_values(
-    client: &Client,
-    values: Vec<bytes::Bytes>,
-    #[builder(default = "t")] topic: &'_ str,
-    #[builder(default)] topic_id: uuid::Uuid,
-    #[builder(into, default)] partition: krabka_ids::PartitionIndex,
-) {
+pub async fn produce_values(client: &Client, values: Vec<bytes::Bytes>) {
     let n = i64::try_from(values.len()).unwrap();
     let records: Vec<Record> = values
         .iter()
@@ -181,14 +176,9 @@ pub async fn join(client: &Client, group: &str, topic: &str) -> MemberSession {
 }
 
 /// Produce a supplied batch, preserving its timestamps and record geometry on retries.
+#[krabka_macros::share_produce_parameters]
 #[bon::builder]
-pub async fn produce_batch(
-    client: &Client,
-    batch: RecordBatch,
-    #[builder(default = "t")] topic: &'_ str,
-    #[builder(default)] topic_id: uuid::Uuid,
-    #[builder(into, default)] partition: krabka_ids::PartitionIndex,
-) {
+pub async fn produce_batch(client: &Client, batch: RecordBatch) {
     let partition = partition.0;
     for _ in 0..40 {
         let resp = client

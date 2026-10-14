@@ -325,22 +325,21 @@ mod tests {
             software_name: software.into(),
             ..attrs()
         };
+        let subscription =
+            |name: &'static str, configs: &[(&'static str, &'static str)]| Subscription {
+                name,
+                configs: configs
+                    .iter()
+                    .map(|&(key, value)| ConfigEntry { key, value })
+                    .collect(),
+            };
         let rows: Vec<Row> = vec![
             Row {
                 name: "an interval above the default is capped",
-                subscriptions: vec![Subscription {
-                    name: "s1",
-                    configs: vec![
-                        ConfigEntry {
-                            key: "metrics",
-                            value: "a.",
-                        },
-                        ConfigEntry {
-                            key: "interval.ms",
-                            value: "600000",
-                        },
-                    ],
-                }],
+                subscriptions: vec![subscription("s1", &[
+                    ("metrics", "a."),
+                    ("interval.ms", "600000"),
+                ])],
                 client: attrs(),
                 expected: ComputedSubscription {
                     metrics: vec!["a.".into()],
@@ -350,32 +349,8 @@ mod tests {
             Row {
                 name: "a matched subscription with no metrics lowers the interval",
                 subscriptions: vec![
-                    Subscription {
-                        name: "s1",
-                        configs: vec![
-                            ConfigEntry {
-                                key: "metrics",
-                                value: "a.",
-                            },
-                            ConfigEntry {
-                                key: "interval.ms",
-                                value: "60000",
-                            },
-                        ],
-                    },
-                    Subscription {
-                        name: "s2",
-                        configs: vec![
-                            ConfigEntry {
-                                key: "metrics",
-                                value: "",
-                            },
-                            ConfigEntry {
-                                key: "interval.ms",
-                                value: "1000",
-                            },
-                        ],
-                    },
+                    subscription("s1", &[("metrics", "a."), ("interval.ms", "60000")]),
+                    subscription("s2", &[("metrics", ""), ("interval.ms", "1000")]),
                 ],
                 client: attrs(),
                 expected: ComputedSubscription {
@@ -394,19 +369,10 @@ mod tests {
             },
             Row {
                 name: "an alternation full-matches its longer branch",
-                subscriptions: vec![Subscription {
-                    name: "s1",
-                    configs: vec![
-                        ConfigEntry {
-                            key: "metrics",
-                            value: "*",
-                        },
-                        ConfigEntry {
-                            key: "match",
-                            value: "client_id=app|app-1",
-                        },
-                    ],
-                }],
+                subscriptions: vec![subscription("s1", &[
+                    ("metrics", "*"),
+                    ("match", "client_id=app|app-1"),
+                ])],
                 client: with("app-1", "apache-kafka-java"),
                 expected: ComputedSubscription {
                     metrics: vec!["*".into()],
@@ -415,19 +381,10 @@ mod tests {
             },
             Row {
                 name: "a partial match does not match",
-                subscriptions: vec![Subscription {
-                    name: "s1",
-                    configs: vec![
-                        ConfigEntry {
-                            key: "metrics",
-                            value: "*",
-                        },
-                        ConfigEntry {
-                            key: "match",
-                            value: "client_id=app",
-                        },
-                    ],
-                }],
+                subscriptions: vec![subscription("s1", &[
+                    ("metrics", "*"),
+                    ("match", "client_id=app"),
+                ])],
                 client: with("app-1", "apache-kafka-java"),
                 expected: ComputedSubscription {
                     metrics: vec![],
@@ -436,19 +393,10 @@ mod tests {
             },
             Row {
                 name: "a missing KIP-511 name is unknown",
-                subscriptions: vec![Subscription {
-                    name: "s1",
-                    configs: vec![
-                        ConfigEntry {
-                            key: "metrics",
-                            value: "*",
-                        },
-                        ConfigEntry {
-                            key: "match",
-                            value: "client_software_name=unknown",
-                        },
-                    ],
-                }],
+                subscriptions: vec![subscription("s1", &[
+                    ("metrics", "*"),
+                    ("match", "client_software_name=unknown"),
+                ])],
                 client: with("svc-1", "unknown"),
                 expected: ComputedSubscription {
                     metrics: vec!["*".into()],
@@ -457,19 +405,10 @@ mod tests {
             },
             Row {
                 name: "a repeated selector keeps its last pattern",
-                subscriptions: vec![Subscription {
-                    name: "s1",
-                    configs: vec![
-                        ConfigEntry {
-                            key: "metrics",
-                            value: "*",
-                        },
-                        ConfigEntry {
-                            key: "match",
-                            value: "client_id=a,client_id=b",
-                        },
-                    ],
-                }],
+                subscriptions: vec![subscription("s1", &[
+                    ("metrics", "*"),
+                    ("match", "client_id=a,client_id=b"),
+                ])],
                 client: with("b", "apache-kafka-java"),
                 expected: ComputedSubscription {
                     metrics: vec!["*".into()],

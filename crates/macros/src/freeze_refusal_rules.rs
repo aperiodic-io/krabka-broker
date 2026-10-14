@@ -172,14 +172,25 @@ mod tests {
                 == "matchkind{Kind::Write=>true,Kind::Delete=>true,Kind::Read=>false,}"
         );
         assert!(compact(&refusal_match(&rules, &rules.bindings[1])).starts_with("matchvalue{"));
-        for invalid in [
-            valid.replace("allow [Read]", "allow [Write]"),
-            valid.replace("[Read]", "[]"),
-            valid.replace("const fn", "async fn"),
-            valid.replace("value: Kind", "value: Other"),
-            valid.replace("-> bool", "-> i32"),
-        ] {
-            assert!(declaration(&invalid.parse().unwrap()).is_err(), "{invalid}");
-        }
+    }
+
+    #[yare::parameterized(
+        duplicate_variant = { "duplicate_variant" },
+        empty_allow_list = { "empty_allow_list" },
+        async_runtime = { "async_runtime" },
+        wrong_model_type = { "wrong_model_type" },
+        wrong_return_type = { "wrong_return_type" },
+    )]
+    fn refuses_invalid_rule_headers(case: &str) {
+        let valid = "Kind; refuse [Write,Delete]; allow [Read]; runtime { pub const fn rejects(kind: Kind) -> bool } model { fn logical(value: Kind) -> bool }";
+        let invalid = match case {
+            "duplicate_variant" => valid.replace("allow [Read]", "allow [Write]"),
+            "empty_allow_list" => valid.replace("[Read]", "[]"),
+            "async_runtime" => valid.replace("const fn", "async fn"),
+            "wrong_model_type" => valid.replace("value: Kind", "value: Other"),
+            "wrong_return_type" => valid.replace("-> bool", "-> i32"),
+            _ => unreachable!(),
+        };
+        assert2::assert!(declaration(&invalid.parse().unwrap()).is_err(), "{invalid}");
     }
 }

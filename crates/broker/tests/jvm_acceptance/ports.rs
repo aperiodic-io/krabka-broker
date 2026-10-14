@@ -24,8 +24,7 @@ pub(crate) struct Ports {
 }
 
 pub(crate) fn ports() -> &'static Ports {
-    static PORTS: std::sync::OnceLock<Ports> = std::sync::OnceLock::new();
-    PORTS.get_or_init(|| {
+    crate::once_value!(Ports, {
         let (client, listen, advertised) = jvm_client_ports::<3>();
         let controller: [u16; 3] = std::array::from_fn(|_| free_port());
         Ports {

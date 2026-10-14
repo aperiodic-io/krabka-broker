@@ -3,6 +3,7 @@ use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::*,
     crate::{
+        controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
         handlers::{RequestContext, update_features::answer},
         test_support::{ControllerPeerAllowed, GrantsInPrincipalName, start_broker_with},
     },

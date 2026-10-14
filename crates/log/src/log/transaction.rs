@@ -403,44 +403,45 @@ mod tests {
         assert2::assert!(log.last_stable_offset(log_end) == log_end);
     }
 
-    #[test]
-    fn only_a_valid_marker_for_the_pending_producer_closes_it() {
-        for case in ["malformed", "different-producer"] {
-            let dir = tempdir().unwrap();
-            {
-                let mut log = open_log(dir.path());
-                append_transaction(&mut log, 1000, 0, &["a", "b"]);
-                let held = log.lso();
-                let mut marker = if case == "malformed" {
-                    let mut marker = commit_marker(1000, 0);
-                    marker.records[0].key = Some(Bytes::from_static(&[0, 0, 0]));
-                    marker
-                } else {
-                    commit_marker(2000, 0)
-                };
-                // Kafka's `ControlRecordType.parseTypeId` refuses a key too
-                // short to hold its type, so the malformed marker is never
-                // written.
-                let refused = log.append(&mut marker).err().map(|e| e.to_string());
-                let want = (case == "malformed").then(|| {
-                    "Invalid value size found for end control record key. Must have at least 4 \
-                     bytes, but found only 3"
-                        .to_owned()
-                });
-                assert2::assert!(refused == want, "case {case}");
-                assert2::assert!(log.lso() == held, "case {case}");
-                assert2::assert!(
-                    log.pending_transaction_start(ProducerId(1000)) == Some(Offset(0)),
-                    "case {case}"
-                );
-            }
-            let reopened = open_log(dir.path());
-            assert2::assert!(reopened.lso() == Offset(0), "case {case}");
+    #[yare::parameterized(
+        malformed = { "malformed", true },
+        different_producer = { "different producer", false },
+    )]
+    fn only_a_valid_marker_for_the_pending_producer_closes_it(case: &str, malformed: bool) {
+        let dir = tempdir().unwrap();
+        {
+            let mut log = open_log(dir.path());
+            append_transaction(&mut log, 1000, 0, &["a", "b"]);
+            let held = log.lso();
+            let mut marker = if malformed {
+                let mut marker = commit_marker(1000, 0);
+                marker.records[0].key = Some(Bytes::from_static(&[0, 0, 0]));
+                marker
+            } else {
+                commit_marker(2000, 0)
+            };
+            // Kafka's `ControlRecordType.parseTypeId` refuses a key too
+            // short to hold its type, so the malformed marker is never
+            // written.
+            let refused = log.append(&mut marker).err().map(|e| e.to_string());
+            let want = malformed.then(|| {
+                "Invalid value size found for end control record key. Must have at least 4 \
+                 bytes, but found only 3"
+                    .to_owned()
+            });
+            assert2::assert!(refused == want, "case {case}");
+            assert2::assert!(log.lso() == held, "case {case}");
             assert2::assert!(
-                reopened.pending_transaction_start(ProducerId(1000)) == Some(Offset(0)),
+                log.pending_transaction_start(ProducerId(1000)) == Some(Offset(0)),
                 "case {case}"
             );
         }
+        let reopened = open_log(dir.path());
+        assert2::assert!(reopened.lso() == Offset(0), "case {case}");
+        assert2::assert!(
+            reopened.pending_transaction_start(ProducerId(1000)) == Some(Offset(0)),
+            "case {case}"
+        );
     }
 
     /// Kafka keeps a complete transaction in the first unstable offset until

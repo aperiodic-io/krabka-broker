@@ -1,7 +1,7 @@
 //! The controller adapter's fixed background-task implementations.
 
 use {
-    crate::meta::{impl_block, named_fields},
+    crate::meta::{first_missing_named_field, impl_block, named_fields},
     moxy::{
         ast::{ItemStruct, ParseError},
         token::{Spanner, TokenStream},
@@ -10,16 +10,11 @@ use {
 
 pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     let fields = named_fields(&item, "BackgroundControllers")?;
-    for required in ["handle", "node_id"] {
-        if !fields
-            .iter()
-            .any(|field| field.ident.as_ref().is_some_and(|name| name == required))
-        {
-            return Err(ParseError::new(
-                item.span(),
-                format!("BackgroundControllers needs a `{required}` field"),
-            ));
-        }
+    if let Some(required) = first_missing_named_field(fields, &["handle", "node_id"]) {
+        return Err(ParseError::new(
+            item.span(),
+            format!("BackgroundControllers needs a `{required}` field"),
+        ));
     }
     let common = moxy::template! {
         fn current_image(&self) -> ::std::sync::Arc<krabka_metadata::MetadataImage> {
@@ -69,25 +64,26 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
 mod tests {
     use {
         super::expand,
-        assert2::assert,
         moxy::{ast::ItemStruct, token::TokenStream},
     };
 
-    #[test]
-    fn rejects_missing_adapter_fields_and_unnamed_structs() {
-        for item in [
-            "struct Adapter;",
-            "struct Adapter(bool);",
-            "struct Adapter { handle: Handle }",
-            "struct Adapter { node_id: u64 }",
-        ] {
-            let item: ItemStruct = moxy::parse!({ item.parse::<TokenStream>().unwrap() }).unwrap();
-            assert!(expand(item).is_err());
-        }
+    #[yare::parameterized(
+        unit_struct = { "struct Adapter;" },
+        tuple_struct = { "struct Adapter(bool);" },
+        missing_node_id = { "struct Adapter { handle: Handle }" },
+        missing_handle = { "struct Adapter { node_id: u64 }" },
+    )]
+    fn rejects_missing_adapter_fields_and_unnamed_structs(source: &str) {
+        let item: ItemStruct = moxy::parse!({ source.parse::<TokenStream>().unwrap() }).unwrap();
+        assert2::assert!(expand(item).is_err());
     }
 
-    #[test]
-    fn emits_three_trait_implementations_with_original_generics() {
+    #[yare::parameterized(
+        leader_rebalance = { "crate::leader_rebalance::ControllerLike" },
+        reassignment = { "crate::reassignment::ReassignmentController" },
+        break_glass = { "crate::break_glass::sweep::BreakGlassController" },
+    )]
+    fn emits_three_trait_implementations_with_original_generics(controller: &str) {
         let item: ItemStruct = moxy::parse!({
             "struct Adapter<T> where T: Handle { handle: T, node_id: u64 }"
                 .parse::<TokenStream>()
@@ -95,20 +91,16 @@ mod tests {
         })
         .unwrap();
         let output = expand(item).unwrap().to_string();
-        assert!(output.matches("async_trait").count() == 6);
-        assert!(output.matches("submit_change").count() == 3);
-        assert!(output.matches("holds_leadership").count() == 2);
-        assert!(output.matches("watch_image").count() == 2);
+        assert2::assert!(output.matches("async_trait").count() == 6);
+        assert2::assert!(output.matches("submit_change").count() == 3);
+        assert2::assert!(output.matches("holds_leadership").count() == 2);
+        assert2::assert!(output.matches("watch_image").count() == 2);
         let output: String = output
             .chars()
             .filter(|character| !character.is_whitespace())
             .collect();
-        for controller in [
-            "crate::leader_rebalance::ControllerLike",
-            "crate::reassignment::ReassignmentController",
-            "crate::break_glass::sweep::BreakGlassController",
-        ] {
-            assert!(output.contains(&format!("impl<T>{controller}forAdapter<T>whereT:Handle")));
-        }
+        assert2::assert!(
+            output.contains(&format!("impl<T>{controller}forAdapter<T>whereT:Handle"))
+        );
     }
 }

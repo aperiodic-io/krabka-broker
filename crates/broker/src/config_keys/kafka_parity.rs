@@ -478,47 +478,24 @@ fn every_kafka_topic_key_is_documented() {
 /// Matching Kafka's key set is not the same as accepting anything. Each value
 /// below was refused by `LogConfig.validate` on the 4.3.1 jar, with the
 /// message quoted beside it, and krabka refuses it too.
-#[test]
-fn kafka_refuses_what_krabka_refuses() {
-    for (name, value) in [
-        // `Unknown topic config name: message.downconversion.enable` --
-        // `TopicConfig` still declares the constant, `LogConfig` does not
-        // define the key, and 4.0 made down-conversion impossible.
-        ("message.downconversion.enable", "true"),
-        // `Unknown topic config name: totally.made.up`.
-        ("totally.made.up", "1"),
-        // `Invalid value 0 for configuration compression.gzip.level: Value
-        // must be between 1 and 9 or equal to -1`.
-        ("compression.gzip.level", "0"),
-        // `Invalid value 18 for configuration compression.lz4.level: Value
-        // must be no more than 17`.
-        ("compression.lz4.level", "18"),
-        ("compression.lz4.level", "0"),
-        // `Invalid value -131073 for configuration compression.zstd.level:
-        // Value must be at least -131072`.
-        ("compression.zstd.level", "-131073"),
-        ("compression.zstd.level", "23"),
-        // `Invalid value -1 for configuration max.message.bytes: Value must
-        // be at least 0`.
-        ("max.message.bytes", "-1"),
-        // `Invalid value 1048575 for configuration segment.bytes: Value must
-        // be at least 1048576`. `LogConfig` validates the key with
-        // `atLeast(1024 * 1024)`; `internal.segment.bytes` is the key that
-        // reaches below the floor, and `defineInternal` gives it no validator.
-        ("segment.bytes", "1048575"),
-        ("segment.bytes", "0"),
-        // `Invalid value none for configuration compression.type: String must
-        // be one of: uncompressed, zstd, lz4, snappy, gzip, producer`.
-        // `LogConfig` validates the key with
-        // `ValidString.in(BrokerCompressionType.names())`, and `none` is a
-        // producer-side codec name that enum does not carry.
-        ("compression.type", "none"),
-    ] {
-        check!(
-            validate_topic_config(name, value).is_err(),
-            "{name}={value} must be refused"
-        );
-    }
+#[yare::parameterized(
+    message_downconversion_enable = { "message.downconversion.enable", "true" },
+    made_up_key = { "totally.made.up", "1" },
+    gzip_level_zero = { "compression.gzip.level", "0" },
+    lz4_level_too_high = { "compression.lz4.level", "18" },
+    lz4_level_zero = { "compression.lz4.level", "0" },
+    zstd_level_too_low = { "compression.zstd.level", "-131073" },
+    zstd_level_too_high = { "compression.zstd.level", "23" },
+    negative_max_message_bytes = { "max.message.bytes", "-1" },
+    segment_bytes_below_floor = { "segment.bytes", "1048575" },
+    segment_bytes_zero = { "segment.bytes", "0" },
+    compression_none = { "compression.type", "none" },
+)]
+fn kafka_refuses_what_krabka_refuses(name: &str, value: &str) {
+    check!(
+        validate_topic_config(name, value).is_err(),
+        "{name}={value} must be refused"
+    );
 }
 
 /// Not every Kafka key carries a validator. `LogConfig` declares
@@ -526,20 +503,22 @@ fn kafka_refuses_what_krabka_refuses() {
 /// accepts every value the type holds -- `-2` included, which `retention.ms`
 /// next to it refuses. A `MirrorMaker` replay of a source topic carrying one
 /// has to survive here, so krabka may not invent a floor Kafka does not have.
+#[yare::parameterized(
+    i64_min = { "-9223372036854775808" },
+    minus_two = { "-2" },
+    minus_one = { "-1" },
+    zero = { "0" },
+    i64_max = { "9223372036854775807" },
+)]
+fn a_key_kafka_gives_no_validator_accepts_every_value_of_its_type(value: &str) {
+    check!(
+        validate_topic_config("retention.bytes", value) == Ok(()),
+        "retention.bytes={value}"
+    );
+}
+
 #[test]
-fn a_key_kafka_gives_no_validator_accepts_every_value_of_its_type() {
-    for value in [
-        "-9223372036854775808",
-        "-2",
-        "-1",
-        "0",
-        "9223372036854775807",
-    ] {
-        check!(
-            validate_topic_config("retention.bytes", value) == Ok(()),
-            "retention.bytes={value}"
-        );
-    }
+fn retention_bytes_refuses_a_value_kafka_long_cannot_hold() {
     check!(
         validate_topic_config("retention.bytes", "9223372036854775808").is_err(),
         "a value Kafka's LONG cannot hold is still refused"
@@ -547,20 +526,18 @@ fn a_key_kafka_gives_no_validator_accepts_every_value_of_its_type() {
 }
 
 /// The levels Kafka's own validators accept at each end of their range.
-#[test]
-fn codec_levels_accept_the_bounds_kafka_accepts() {
-    for (name, value) in [
-        ("compression.gzip.level", "-1"),
-        ("compression.gzip.level", "1"),
-        ("compression.gzip.level", "9"),
-        ("compression.lz4.level", "1"),
-        ("compression.lz4.level", "17"),
-        ("compression.zstd.level", "-131072"),
-        ("compression.zstd.level", "22"),
-    ] {
-        check!(
-            validate_topic_config(name, value) == Ok(()),
-            "{name}={value}"
-        );
-    }
+#[yare::parameterized(
+    gzip_unlimited = { "compression.gzip.level", "-1" },
+    gzip_minimum = { "compression.gzip.level", "1" },
+    gzip_maximum = { "compression.gzip.level", "9" },
+    lz4_minimum = { "compression.lz4.level", "1" },
+    lz4_maximum = { "compression.lz4.level", "17" },
+    zstd_minimum = { "compression.zstd.level", "-131072" },
+    zstd_maximum = { "compression.zstd.level", "22" },
+)]
+fn codec_levels_accept_the_bounds_kafka_accepts(name: &str, value: &str) {
+    check!(
+        validate_topic_config(name, value) == Ok(()),
+        "{name}={value}"
+    );
 }

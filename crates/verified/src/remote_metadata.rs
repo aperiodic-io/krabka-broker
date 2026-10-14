@@ -225,23 +225,30 @@ pub const fn remote_metadata_resume_cursor(committed: i64) -> Option<i64> {
 mod tests {
     use {super::*, assert2::check};
 
-    #[test]
-    fn matches_jvm_remote_metadata_partitioner_goldens() {
-        let topic_id = 0x1234_5678_9abc_def0_0011_2233_4455_6677;
-        for (partition, expected) in [(0, 6), (1, 36), (3, 2), (7, 26)] {
-            check!(remote_metadata_partition(topic_id, partition, 50) == Some(expected));
-        }
+    #[yare::parameterized(
+        partition_0 = { 0, Some(6) },
+        partition_1 = { 1, Some(36) },
+        partition_3 = { 3, Some(2) },
+        partition_7 = { 7, Some(26) },
+    )]
+    fn matches_jvm_remote_metadata_partitioner_goldens(partition: i32, expected: Option<i32>) {
+        check!(
+            remote_metadata_partition(0x1234_5678_9abc_def0_0011_2233_4455_6677, partition, 50,)
+                == expected
+        );
     }
 
-    #[test]
-    fn matches_java_signed_uuid_and_partition_extremes() {
-        for (topic_id, partition, expected) in [
-            (0_u128, i32::MIN, 96),
-            (u128::MAX, i32::MAX, 5),
-            (0xffff_ffff_ffff_ffff_8000_0000_0000_0000, i32::MIN, 45),
-        ] {
-            check!(remote_metadata_partition(topic_id, partition, 97) == Some(expected));
-        }
+    #[yare::parameterized(
+        zero_uuid = { 0_u128, i32::MIN, Some(96) },
+        max_uuid = { u128::MAX, i32::MAX, Some(5) },
+        signed_boundary = { 0xffff_ffff_ffff_ffff_8000_0000_0000_0000, i32::MIN, Some(45) },
+    )]
+    fn matches_java_signed_uuid_and_partition_extremes(
+        topic_id: u128,
+        partition: i32,
+        expected: Option<i32>,
+    ) {
+        check!(remote_metadata_partition(topic_id, partition, 97) == expected);
     }
 
     #[test]

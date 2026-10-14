@@ -207,27 +207,30 @@ pub(crate) fn site(
 mod tests {
     use {super::*, assert2::assert};
 
-    #[test]
-    fn cursor_policies_preserve_named_entry_contracts_and_comparison() {
-        for before in ["<", "<="] {
-            let source = format!(
-                "pub(crate) fn search(entries: &[IndexEntry<u32, u32>], target: u32) -> usize; {before};"
-            );
-            let generated = compact(&cursor(source.parse().unwrap()).unwrap());
-            assert!(generated.contains(&format!("entries[mid].key{before}target")));
-            assert!(
-                generated.contains("#[variant(hi-lo)]")
-                    && generated.contains("result@<=entries@.len()")
-            );
-        }
-        for source in [
-            "fn bad(items: &[Row], target: u32) -> usize; <;",
-            "async fn bad(entries: &[Row], target: u32) -> usize; <;",
-            "fn bad(entries: &[Row], target: u32) -> usize; >;",
-            "fn missing();",
-        ] {
-            assert!(cursor(source.parse().unwrap()).is_err());
-        }
+    #[yare::parameterized(
+        strict_predecessor = { "<" },
+        inclusive_predecessor = { "<=" },
+    )]
+    fn cursor_policies_preserve_named_entry_contracts_and_comparison(before: &str) {
+        let source = format!(
+            "pub(crate) fn search(entries: &[IndexEntry<u32, u32>], target: u32) -> usize; {before};"
+        );
+        let generated = compact(&cursor(source.parse().unwrap()).unwrap());
+        assert2::assert!(generated.contains(&format!("entries[mid].key{before}target")));
+        assert2::assert!(
+            generated.contains("#[variant(hi-lo)]")
+                && generated.contains("result@<=entries@.len()")
+        );
+    }
+
+    #[yare::parameterized(
+        wrong_slice_name = { "fn bad(items: &[Row], target: u32) -> usize; <;" },
+        async_cursor = { "async fn bad(entries: &[Row], target: u32) -> usize; <;" },
+        unsupported_comparison = { "fn bad(entries: &[Row], target: u32) -> usize; >;" },
+        missing_semicolon = { "fn missing();" },
+    )]
+    fn rejects_invalid_cursor_signatures(source: &str) {
+        assert2::assert!(cursor(source.parse().unwrap()).is_err());
     }
 
     #[test]
@@ -248,21 +251,28 @@ mod tests {
         );
     }
 
-    #[test]
-    fn selection_and_site_contracts_validate_concrete_policies() {
-        for choice in ["latest", "true", "false"] {
-            assert!(
-                compact(&finished_contract(&choice.parse().unwrap()).unwrap())
-                    .contains(&format!("starts@.len(),{choice}"))
-            );
-        }
-        assert!(finished_contract(&"earliest".parse().unwrap()).is_err());
-        for minimum in ["0", "1"] {
-            assert!(
-                compact(&site_contract(&minimum.parse().unwrap()).unwrap())
-                    .contains(&format!("rf>={minimum}&&sites>=1"))
-            );
-        }
-        assert!(site_contract(&"2".parse().unwrap()).is_err());
+    #[yare::parameterized(
+        latest_selection = { "latest" },
+        prefer_true = { "true" },
+        prefer_false = { "false" },
+    )]
+    fn selection_contract_accepts_concrete_policies(choice: &str) {
+        assert2::assert!(
+            compact(&finished_contract(&choice.parse().unwrap()).unwrap())
+                .contains(&format!("starts@.len(),{choice}"))
+        );
+        assert2::assert!(finished_contract(&"earliest".parse().unwrap()).is_err());
+    }
+
+    #[yare::parameterized(
+        minimum_replication_zero = { "0" },
+        minimum_replication_one = { "1" },
+    )]
+    fn site_contract_accepts_supported_replication_minimums(minimum: &str) {
+        assert2::assert!(
+            compact(&site_contract(&minimum.parse().unwrap()).unwrap())
+                .contains(&format!("rf>={minimum}&&sites>=1"))
+        );
+        assert2::assert!(site_contract(&"2".parse().unwrap()).is_err());
     }
 }

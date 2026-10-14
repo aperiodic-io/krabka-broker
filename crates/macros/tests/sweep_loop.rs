@@ -164,55 +164,65 @@ async fn scenario(
     Arc::try_unwrap(events).unwrap().into_inner().unwrap()
 }
 
-#[tokio::test]
-async fn snapshots_and_delay_are_refreshed_after_each_sweep_with_original_return_scope() {
-    for first in [Duration::ZERO, Duration::from_millis(11)] {
-        let events = scenario(
-            [
-                Deadline::Complete(true),
-                Deadline::Complete(true),
-                Deadline::Pending,
-            ],
-            first,
-            false,
-            0,
-        )
-        .await;
-        assert!(
-            events
-                == [
-                    "timer",
-                    "first",
-                    "later",
-                    "shutdown",
-                    "task",
-                    &format!("arm:test sweeper:{}", first.as_millis()),
-                    "image:1",
-                    "arm:test sweeper:7",
-                    "image:2",
-                    "arm:test sweeper:7",
-                    "shutdown block"
-                ]
-        );
-    }
+#[yare::parameterized(
+    zero_initial_delay = { Duration::ZERO },
+    nonzero_initial_delay = { Duration::from_millis(11) },
+)]
+#[test_macro(tokio::test)]
+async fn snapshots_and_delay_are_refreshed_after_each_sweep_with_original_return_scope(
+    first: Duration,
+) {
+    let events = scenario(
+        [
+            Deadline::Complete(true),
+            Deadline::Complete(true),
+            Deadline::Pending,
+        ],
+        first,
+        false,
+        0,
+    )
+    .await;
+    assert2::assert!(
+        events
+            == [
+                "timer",
+                "first",
+                "later",
+                "shutdown",
+                "task",
+                &format!("arm:test sweeper:{}", first.as_millis()),
+                "image:1",
+                "arm:test sweeper:7",
+                "image:2",
+                "arm:test sweeper:7",
+                "shutdown block"
+            ]
+    );
+}
+
+#[yare::parameterized(
+    refuses_deadline = { Deadline::Refuse },
+    incomplete_deadline = { Deadline::Complete(false) },
+)]
+#[test_macro(tokio::test)]
+async fn refusing_or_failing_timers_stop_without_sweeping_or_spinning(deadline: Deadline) {
+    let events = scenario([deadline], Duration::ZERO, false, 0).await;
+    assert2::assert!(
+        events
+            == [
+                "timer",
+                "first",
+                "later",
+                "shutdown",
+                "task",
+                "arm:test sweeper:0"
+            ]
+    );
 }
 
 #[tokio::test]
-async fn refusing_or_failing_timers_stop_without_sweeping_or_spinning() {
-    for deadline in [Deadline::Refuse, Deadline::Complete(false)] {
-        let events = scenario([deadline], Duration::ZERO, false, 0).await;
-        assert!(
-            events
-                == [
-                    "timer",
-                    "first",
-                    "later",
-                    "shutdown",
-                    "task",
-                    "arm:test sweeper:0"
-                ]
-        );
-    }
+async fn refusal_after_a_completed_sweep_stops_before_another_snapshot() {
     let events = scenario(
         [Deadline::Complete(true), Deadline::Refuse],
         Duration::ZERO,
@@ -220,8 +230,8 @@ async fn refusing_or_failing_timers_stop_without_sweeping_or_spinning() {
         0,
     )
     .await;
-    assert!(events.last().unwrap() == "arm:test sweeper:7");
-    assert!(
+    assert2::assert!(events.last().unwrap() == "arm:test sweeper:7");
+    assert2::assert!(
         events
             .iter()
             .filter(|event| event.starts_with("image:"))

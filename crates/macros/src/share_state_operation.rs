@@ -76,19 +76,33 @@ mod tests {
         );
         assert!(compact(&boundary.answer).contains("self.answer(active,result).await"));
         assert!(boundaries(&"active extra".parse().unwrap(), &signature).is_err());
-        for source in [
-            "fn read(&self, image: &Image, group: &str, topic: Uuid, partition: i32) {}",
+    }
+
+    #[yare::parameterized(
+        sync = { "fn read(&self, image: &Image, group: &str, topic: Uuid, partition: i32) {}" },
+        owned_receiver = {
             "async fn read(self, image: &Image, group: &str, topic: Uuid, partition: i32) {}",
-            "async fn read(&self, image: &Image) {}",
+        },
+        missing_arguments = { "async fn read(&self, image: &Image) {}" },
+        unsafe_signature = {
             "async unsafe fn read(&self, image: &Image, group: &str, topic: Uuid, partition: i32) {}",
+        },
+        extern_signature = {
             "async extern \"C\" fn read(&self, image: &Image, group: &str, topic: Uuid, partition: i32) {}",
+        },
+        generic = {
             "async fn read<T>(&self, image: &Image, group: &str, topic: Uuid, partition: i32) {}",
+        },
+        mutable_receiver = {
             "async fn read(&mut self, image: &Image, group: &str, topic: Uuid, partition: i32) {}",
+        },
+        missing_image_binding = {
             "async fn read(&self, _: &Image, group: &str, topic: Uuid, partition: i32) {}",
-        ] {
-            let signature = function_signature(&source.parse().unwrap()).unwrap();
-            assert!(boundaries(&"active".parse().unwrap(), &signature).is_err());
-        }
+        },
+    )]
+    fn rejects_unsupported_operation_signatures(source: &str) {
+        let signature = function_signature(&source.parse().unwrap()).unwrap();
+        assert2::assert!(boundaries(&"active".parse().unwrap(), &signature).is_err());
     }
 
     #[test]

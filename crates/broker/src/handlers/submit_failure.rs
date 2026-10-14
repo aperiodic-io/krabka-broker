@@ -25,35 +25,33 @@ pub(crate) fn submit_failure_code(error: &RaftError, otherwise: i16) -> i16 {
 mod tests {
     use {super::submit_failure_code, crate::codes, assert2::check, krabka_raft::RaftError};
 
-    #[test]
-    fn an_uncommitted_controller_tail_answers_not_controller() {
-        for (case, error, otherwise, expected) in [
-            (
-                "uncommitted tail, handler default -1",
-                RaftError::UncommittedTail,
-                codes::UNKNOWN_SERVER_ERROR,
-                codes::NOT_CONTROLLER,
-            ),
-            (
-                "uncommitted tail, handler default 15",
-                RaftError::UncommittedTail,
-                codes::COORDINATOR_NOT_AVAILABLE,
-                codes::NOT_CONTROLLER,
-            ),
-            (
-                "a permanent refusal keeps the handler default",
-                RaftError::ChangeRejected("stale".to_owned()),
-                codes::UNKNOWN_SERVER_ERROR,
-                codes::UNKNOWN_SERVER_ERROR,
-            ),
-            (
-                "a shutdown keeps the handler default",
-                RaftError::Shutdown,
-                codes::COORDINATOR_NOT_AVAILABLE,
-                codes::COORDINATOR_NOT_AVAILABLE,
-            ),
-        ] {
-            check!(submit_failure_code(&error, otherwise) == expected, "{case}");
-        }
+    #[yare::parameterized(
+        uncommitted_unknown_server_default = {
+            RaftError::UncommittedTail,
+            codes::UNKNOWN_SERVER_ERROR,
+            codes::NOT_CONTROLLER,
+        },
+        uncommitted_coordinator_default = {
+            RaftError::UncommittedTail,
+            codes::COORDINATOR_NOT_AVAILABLE,
+            codes::NOT_CONTROLLER,
+        },
+        refusal_keeps_default = {
+            RaftError::ChangeRejected("stale".to_owned()),
+            codes::UNKNOWN_SERVER_ERROR,
+            codes::UNKNOWN_SERVER_ERROR,
+        },
+        shutdown_keeps_default = {
+            RaftError::Shutdown,
+            codes::COORDINATOR_NOT_AVAILABLE,
+            codes::COORDINATOR_NOT_AVAILABLE,
+        },
+    )]
+    fn an_uncommitted_controller_tail_answers_not_controller(
+        error: RaftError,
+        otherwise: i16,
+        expected: i16,
+    ) {
+        check!(submit_failure_code(&error, otherwise) == expected);
     }
 }

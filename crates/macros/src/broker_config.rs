@@ -56,18 +56,18 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
 mod tests {
     use {super::expand, assert2::assert};
 
-    #[test]
-    fn requires_exactly_one_named_struct() {
-        for invalid in [
-            "struct Config;",
-            "struct Config(bool);",
-            "enum Config { Enabled }",
-            "struct Config { enabled: bool } struct Other {}",
+    #[yare::parameterized(
+        unit_struct = { "struct Config;" },
+        tuple_struct = { "struct Config(bool);" },
+        enumeration = { "enum Config { Enabled }" },
+        multiple_structs = { "struct Config { enabled: bool } struct Other {}" },
+        nonempty_second_struct = {
             "struct Config {} struct Other { value: Option<std::path::PathBuf> }",
-            "struct Config {} fn trailing() {}",
-        ] {
-            assert!(expand(&invalid.parse().unwrap()).is_err());
-        }
+        },
+        trailing_function = { "struct Config {} fn trailing() {}" },
+    )]
+    fn requires_exactly_one_named_struct(invalid: &str) {
+        assert2::assert!(expand(&invalid.parse().unwrap()).is_err());
     }
 
     #[test]

@@ -176,6 +176,17 @@ mod tests {
         }
         use Op::{Arm, Clear};
 
+        let not_asked = |label: &'static str, secs: u64| Step {
+            label,
+            secs,
+            op: Arm(0, 1_000),
+            answered: Some(false),
+            window: Some(ExpectedWindow {
+                topology_epoch: 0,
+                attempts: 0,
+                ends: 30,
+            }),
+        };
         let start = Instant::now();
         let at = |secs: u64| start + Duration::from_secs(secs);
         let rows: [Step; 9] = [
@@ -190,28 +201,8 @@ mod tests {
                     ends: 30,
                 }),
             },
-            Step {
-                label: "a second member is not asked",
-                secs: 10,
-                op: Arm(0, 1_000),
-                answered: Some(false),
-                window: Some(ExpectedWindow {
-                    topology_epoch: 0,
-                    attempts: 0,
-                    ends: 30,
-                }),
-            },
-            Step {
-                label: "still inside the window",
-                secs: 29,
-                op: Arm(0, 1_000),
-                answered: Some(false),
-                window: Some(ExpectedWindow {
-                    topology_epoch: 0,
-                    attempts: 0,
-                    ends: 30,
-                }),
-            },
+            not_asked("a second member is not asked", 10),
+            not_asked("still inside the window", 29),
             Step {
                 label: "an ended window asks again, twice as long",
                 secs: 30,

@@ -227,37 +227,38 @@ mod tests {
         .map(|ident| ident.text().to_owned())
     }
 
-    #[test]
-    fn derives_every_name_the_tables_use() {
-        for (api, snake) in [
-            ("CreateAcls", "create_acls"),
-            ("AddPartitionsToTxn", "add_partitions_to_txn"),
-            ("ApiVersions", "api_versions"),
-            ("OffsetForLeaderEpoch", "offset_for_leader_epoch"),
-            (
-                "DescribeUserScramCredentials",
-                "describe_user_scram_credentials",
-            ),
-            ("GetTelemetrySubscriptions", "get_telemetry_subscriptions"),
-            (
-                "StreamsGroupTopologyDescriptionUpdate",
-                "streams_group_topology_description_update",
-            ),
-            ("Metadata", "metadata"),
-        ] {
-            let names = ApiNames::new(&Ident::new(api));
-            assert!(
-                texts(&names)
-                    == [
-                        api.to_owned(),
-                        snake.to_owned(),
-                        format!("{snake}_request"),
-                        format!("{snake}_response"),
-                        format!("{api}Request"),
-                        format!("{api}Response"),
-                    ]
-            );
-        }
+    #[yare::parameterized(
+        create_acls = { "CreateAcls", "create_acls" },
+        add_partitions_to_txn = { "AddPartitionsToTxn", "add_partitions_to_txn" },
+        api_versions = { "ApiVersions", "api_versions" },
+        offset_for_leader_epoch = { "OffsetForLeaderEpoch", "offset_for_leader_epoch" },
+        describe_user_scram_credentials = {
+            "DescribeUserScramCredentials",
+            "describe_user_scram_credentials",
+        },
+        get_telemetry_subscriptions = {
+            "GetTelemetrySubscriptions",
+            "get_telemetry_subscriptions",
+        },
+        streams_group_topology_description_update = {
+            "StreamsGroupTopologyDescriptionUpdate",
+            "streams_group_topology_description_update",
+        },
+        metadata = { "Metadata", "metadata" },
+    )]
+    fn derives_every_name_the_tables_use(api: &str, snake: &str) {
+        let names = ApiNames::new(&Ident::new(api));
+        assert2::assert!(
+            texts(&names)
+                == [
+                    api.to_owned(),
+                    snake.to_owned(),
+                    format!("{snake}_request"),
+                    format!("{snake}_response"),
+                    format!("{api}Request"),
+                    format!("{api}Response"),
+                ]
+        );
     }
 
     /// One parsed section: its label and its entries.
@@ -329,20 +330,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rejects_malformed_tables() {
-        for source in [
-            "d: One;",
-            "a: One; a: Two;",
-            "a: One, One;",
-            "a: One; b: One;",
-            "a One;",
-            "a: One",
-            "a: One =>;",
-            "a: One Two;",
-        ] {
-            assert!(parse(source).is_err(), "{source}");
-        }
+    #[yare::parameterized(
+        unknown_section = { "d: One;" },
+        duplicate_section = { "a: One; a: Two;" },
+        duplicate_entry = { "a: One, One;" },
+        duplicate_across_sections = { "a: One; b: One;" },
+        missing_colon = { "a One;" },
+        missing_semicolon = { "a: One" },
+        empty_value = { "a: One =>;" },
+        missing_comma = { "a: One Two;" },
+    )]
+    fn rejects_malformed_tables(source: &str) {
+        assert2::assert!(parse(source).is_err(), "{source}");
     }
 
     #[test]

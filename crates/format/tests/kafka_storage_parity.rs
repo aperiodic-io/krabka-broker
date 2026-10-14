@@ -98,8 +98,21 @@ krabka_macros::directory_tree_fixture!(
 /// and stdout carry Kafka's 22-character form. The reserved ids parse, as
 /// they do in `kafka-storage format -t AAAAAAAAAAAAAAAAAAAAAA`. clap refuses a
 /// bad id with its usage error, exit 2, before anything is written.
-#[test]
-fn the_cluster_id_is_written_and_printed_in_kafka_form() {
+#[yare::parameterized(
+    kafka_form = { "Kafka form" },
+    hyphenated = { "hyphenated form" },
+    uppercase_hyphenated = { "upper-case hyphenated form" },
+    padded = { "Kafka form with canonical padding" },
+    unused_bits = { "unused low bits set in the last character" },
+    reserved_zero = { "the reserved zero id" },
+    reserved_one = { "the reserved one id" },
+    too_short = { "too short" },
+    too_long = { "too long" },
+    invalid_alphabet = { "outside the url-safe alphabet" },
+    invalid_hyphenated = { "hyphenated but not hex" },
+    unhyphenated_hex = { "unhyphenated hex" },
+)]
+fn the_cluster_id_is_written_and_printed_in_kafka_form(scenario: &str) {
     /// What it is, `--cluster-id`, and the id written, or `None` for a refused
     /// one.
     struct Case<'a> {
@@ -169,100 +182,81 @@ fn the_cluster_id_is_written_and_printed_in_kafka_form() {
             written: None,
         },
     ];
-    for Case {
+    let Case {
         what,
         input,
         written,
-    } in cases
-    {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("data");
-        let out = krabka_format(
-            &[
-                "--log-dir",
-                path_str(&dir),
-                "--cluster-id",
-                input,
-                "--node-id",
-                NODE,
-                "--no-initial-controllers",
-            ],
-            None,
+    } = cases
+        .iter()
+        .find(|case| case.what == scenario)
+        .expect("named yare case exists");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("data");
+    let out = krabka_format(
+        &[
+            "--log-dir",
+            path_str(&dir),
+            "--cluster-id",
+            input,
+            "--node-id",
+            NODE,
+            "--no-initial-controllers",
+        ],
+        None,
+    );
+    if let Some(id) = written {
+        assert2::assert!(out.status.code() == Some(0), "{what}: {}", stderr(&out));
+        let got = (
+            written_cluster_id(&dir),
+            manifest_cluster_id(&dir),
+            stdout(&out).contains(&format!("with cluster-id {id} ")),
         );
-        if let Some(id) = written {
-            assert2::assert!(out.status.code() == Some(0), "{what}: {}", stderr(&out));
-            let got = (
-                written_cluster_id(&dir),
-                manifest_cluster_id(&dir),
-                stdout(&out).contains(&format!("with cluster-id {id} ")),
-            );
-            assert2::assert!(got == ((*id).to_owned(), (*id).to_owned(), true), "{what}");
-        } else {
-            assert2::assert!(out.status.code() == Some(2), "{what}");
-            assert2::assert!(!dir.exists(), "{what}: nothing is written");
-        }
+        assert2::assert!(got == ((*id).to_owned(), (*id).to_owned(), true), "{what}");
+    } else {
+        assert2::assert!(out.status.code() == Some(2), "{what}");
+        assert2::assert!(!dir.exists(), "{what}: nothing is written");
     }
 }
 
 /// `--directory-id` and the directory id of an `--initial-controllers` entry
 /// take either form and are written in Kafka's.
-#[test]
-fn directory_ids_are_written_in_kafka_form() {
+#[yare::parameterized(
+    directory_id_kafka_form = { &["--directory-id", "AAAAAAAAAAAAAAAAAAAAZA"] },
+    directory_id_hyphenated = { &["--directory-id", "00000000-0000-0000-0000-000000000064"] },
+    controller_id_kafka_form = {
+        &["--initial-controllers", "1@controller-1:9093:AAAAAAAAAAAAAAAAAAAAZA"],
+    },
+    controller_id_hyphenated = {
+        &["--initial-controllers", "1@controller-1:9093:00000000-0000-0000-0000-000000000064"],
+    },
+)]
+fn directory_ids_are_written_in_kafka_form(extra: &[&str]) {
     const DIRECTORY_ID: &str = "AAAAAAAAAAAAAAAAAAAAZA";
-    /// What it is, and the extra flags.
-    struct Case<'a> {
-        what: &'a str,
-        extra: &'a [&'a str],
-    }
-    let cases: &[Case] = &[
-        Case {
-            what: "--directory-id, Kafka form",
-            extra: &["--directory-id", DIRECTORY_ID],
-        },
-        Case {
-            what: "--directory-id, hyphenated form",
-            extra: &["--directory-id", "00000000-0000-0000-0000-000000000064"],
-        },
-        Case {
-            what: "--initial-controllers, Kafka form",
-            extra: &[
-                "--initial-controllers",
-                "1@controller-1:9093:AAAAAAAAAAAAAAAAAAAAZA",
-            ],
-        },
-        Case {
-            what: "--initial-controllers, hyphenated form",
-            extra: &[
-                "--initial-controllers",
-                "1@controller-1:9093:00000000-0000-0000-0000-000000000064",
-            ],
-        },
+    let current = std::thread::current();
+    let what = current.name().expect("case name");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("data");
+    let mut args = vec![
+        "--log-dir",
+        path_str(&dir),
+        "--cluster-id",
+        CLUSTER_ID,
+        "--node-id",
+        NODE,
     ];
-    for Case { what, extra } in cases {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("data");
-        let mut args = vec![
-            "--log-dir",
-            path_str(&dir),
-            "--cluster-id",
-            CLUSTER_ID,
-            "--node-id",
-            NODE,
-        ];
-        args.extend_from_slice(extra);
-        format_successfully(&args, what);
-        // The broker reads back exactly what was written.
-        assert2::assert!(
-            krabka_broker::bootstrap::read_meta_properties(&dir).ok()
-                == Some(MetaProperties {
-                    cluster_id: CLUSTER_ID.parse().expect("cluster id"),
-                    node_id: NODE_ID,
-                    directory_id: Some(DirectoryId(uuid::Uuid::from_u128(100))),
-                }),
-            "{what}"
-        );
-        assert2::assert!(written_directory_id(&dir) == DIRECTORY_ID, "{what}");
-    }
+    args.extend_from_slice(extra);
+    format_successfully(&args, what);
+    // The broker reads back exactly what was written.
+    assert2::assert!(
+        krabka_broker::bootstrap::read_meta_properties(&dir).ok()
+            == Some(MetaProperties {
+                cluster_id: CLUSTER_ID.parse().expect("cluster id"),
+                node_id: NODE_ID,
+                directory_id: Some(DirectoryId(uuid::Uuid::from_u128(100))),
+            }),
+        "{what}"
+    );
+    assert2::assert!(written_directory_id(&dir) == DIRECTORY_ID, "{what}");
 }
 
 /// What one directory of a multi-directory format holds.
@@ -337,68 +331,60 @@ fn files_under(dir: &Path) -> Vec<String> {
 /// Spells the `--log-dir` flags for two directories.
 type Spelling = fn(&str, &str) -> Vec<String>;
 
-/// What it is, and how it spells the `--log-dir` flags.
-struct SpellingCase {
-    what: &'static str,
-    spell: Spelling,
-}
-
 /// Repeated and comma-separated `--log-dir` format every directory in one
 /// run, as `kafka-storage format` formats every entry of `log.dirs`. The set
 /// shares one cluster id, and each directory has its own id. Only the first
 /// directory gets the bootstrap files and the `__cluster_metadata-0`
 /// checkpoint. It is the metadata log directory, as `metadata.log.dir`
 /// defaults to the first entry of `log.dirs`.
-#[test]
-fn every_log_dir_is_formatted_in_one_run() {
+#[yare::parameterized(
+    repeated_flags = { "repeated", repeated_log_dirs as Spelling },
+    comma_separated = { "comma-separated", comma_separated_log_dirs as Spelling },
+)]
+fn every_log_dir_is_formatted_in_one_run(what: &str, spell: Spelling) {
     let tmp = tempfile::tempdir().expect("tempdir");
     let seed_records = standalone_seed_records(tmp.path());
+    let run = tmp.path().join(what);
+    let (meta_dir, data_dir) = (run.join("meta"), run.join("data"));
+    let mut args = spell(path_str(&meta_dir), path_str(&data_dir));
+    args.extend(["--cluster-id", CLUSTER_ID].map(String::from));
+    args.extend(STANDALONE.iter().map(|a| (*a).to_owned()));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = format_successfully(&args, what);
 
-    let spellings = [
-        SpellingCase {
-            what: "repeated",
-            spell: |a, b| vec!["--log-dir".into(), a.into(), "--log-dir".into(), b.into()],
-        },
-        SpellingCase {
-            what: "comma-separated",
-            spell: |a, b| vec!["--log-dir".into(), format!("{a},{b}")],
-        },
-    ];
-    for SpellingCase { what, spell } in spellings {
-        let run = tmp.path().join(what);
-        let (meta_dir, data_dir) = (run.join("meta"), run.join("data"));
-        let mut args = spell(path_str(&meta_dir), path_str(&data_dir));
-        args.extend(["--cluster-id", CLUSTER_ID].map(String::from));
-        args.extend(STANDALONE.iter().map(|a| (*a).to_owned()));
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let out = format_successfully(&args, what);
-
-        assert2::assert!(
-            [formatted(&meta_dir), formatted(&data_dir)]
-                == [metadata_directory(true, seed_records), data_directory()],
-            "{what}"
-        );
-        let directory_ids: BTreeSet<String> = [&meta_dir, &data_dir]
-            .iter()
-            .map(|dir| written_directory_id(dir))
-            .collect();
-        assert2::assert!(directory_ids.len() == 2, "{what}: {directory_ids:?}");
-        assert2::assert!(
-            stdout(&out).lines().take(2).collect::<Vec<_>>()
-                == vec![
-                    format!(
-                        "Formatting dynamic metadata voter directory {} with metadata.version \
+    assert2::assert!(
+        [formatted(&meta_dir), formatted(&data_dir)]
+            == [metadata_directory(true, seed_records), data_directory()],
+        "{what}"
+    );
+    let directory_ids: BTreeSet<String> = [&meta_dir, &data_dir]
+        .iter()
+        .map(|dir| written_directory_id(dir))
+        .collect();
+    assert2::assert!(directory_ids.len() == 2, "{what}: {directory_ids:?}");
+    assert2::assert!(
+        stdout(&out).lines().take(2).collect::<Vec<_>>()
+            == vec![
+                format!(
+                    "Formatting dynamic metadata voter directory {} with metadata.version \
                          4.3-IV0.",
-                        meta_dir.display()
-                    ),
-                    format!(
-                        "Formatting data directory {} with metadata.version 4.3-IV0.",
-                        data_dir.display()
-                    ),
-                ],
-            "{what}"
-        );
-    }
+                    meta_dir.display()
+                ),
+                format!(
+                    "Formatting data directory {} with metadata.version 4.3-IV0.",
+                    data_dir.display()
+                ),
+            ],
+        "{what}"
+    );
+}
+
+fn repeated_log_dirs(a: &str, b: &str) -> Vec<String> {
+    vec!["--log-dir".into(), a.into(), "--log-dir".into(), b.into()]
+}
+
+fn comma_separated_log_dirs(a: &str, b: &str) -> Vec<String> {
+    vec!["--log-dir".into(), format!("{a},{b}")]
 }
 
 /// `--metadata-log-dir` is `metadata.log.dir`: `kafka-storage format` adds it
@@ -408,8 +394,11 @@ fn every_log_dir_is_formatted_in_one_run() {
 /// `__cluster_metadata-0` checkpoint. Each other directory is a data
 /// directory with `meta.properties` alone. The set shares one cluster id,
 /// each directory has its own id, and the metadata directory is written first.
-#[test]
-fn a_metadata_log_dir_is_formatted_with_the_log_dirs() {
+#[yare::parameterized(
+    separate_metadata_directory = { "a separate metadata log directory" },
+    metadata_is_log_dir = { "a metadata log directory that is also a log directory" },
+)]
+fn a_metadata_log_dir_is_formatted_with_the_log_dirs(scenario: &str) {
     const VOTER: &str = "dynamic metadata voter directory";
     const DATA: &str = "data directory";
     /// A directory and its Kafka description.
@@ -464,84 +453,85 @@ fn a_metadata_log_dir_is_formatted_with_the_log_dirs() {
             ],
         },
     ];
-    for Case {
+    let Case {
         what,
         metadata,
         log_dirs,
         want,
-    } in cases
-    {
-        let run = tmp.path().join(what.replace(' ', "-"));
-        let metadata_dir = run.join(metadata);
-        let joined = log_dirs
-            .iter()
-            .map(|dir| run.join(dir).display().to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        let mut args = vec![
-            "--metadata-log-dir",
-            path_str(&metadata_dir),
-            "--log-dir",
-            &joined,
-            "--cluster-id",
-            CLUSTER_ID,
-        ];
-        args.extend_from_slice(STANDALONE);
-        let out = format_successfully(&args, what);
+    } = cases
+        .iter()
+        .find(|case| case.what == scenario)
+        .expect("named yare case exists");
+    let run = tmp.path().join(what.replace(' ', "-"));
+    let metadata_dir = run.join(metadata);
+    let joined = log_dirs
+        .iter()
+        .map(|dir| run.join(dir).display().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut args = vec![
+        "--metadata-log-dir",
+        path_str(&metadata_dir),
+        "--log-dir",
+        &joined,
+        "--cluster-id",
+        CLUSTER_ID,
+    ];
+    args.extend_from_slice(STANDALONE);
+    let out = format_successfully(&args, what);
 
-        let mut lines: Vec<String> = want
-            .iter()
-            .map(|Written { dir, description }| {
-                format!(
-                    "Formatting {description} {} with metadata.version 4.3-IV0.",
-                    run.join(dir).display()
-                )
-            })
-            .collect();
-        lines.push(format!(
-            "Formatted {} log directories with cluster-id {CLUSTER_ID} ({seed_records} seed \
+    let mut lines: Vec<String> = want
+        .iter()
+        .map(|Written { dir, description }| {
+            format!(
+                "Formatting {description} {} with metadata.version 4.3-IV0.",
+                run.join(dir).display()
+            )
+        })
+        .collect();
+    lines.push(format!(
+        "Formatted {} log directories with cluster-id {CLUSTER_ID} ({seed_records} seed \
              record(s))",
-            want.len()
-        ));
-        assert2::assert!(stdout(&out).lines().collect::<Vec<_>>() == lines, "{what}");
+        want.len()
+    ));
+    assert2::assert!(stdout(&out).lines().collect::<Vec<_>>() == lines, "{what}");
 
-        let dirs: Vec<PathBuf> = want.iter().map(|written| run.join(written.dir)).collect();
-        let got: Vec<Formatted> = dirs.iter().map(|dir| formatted(dir)).collect();
-        let expected: Vec<Formatted> = want
-            .iter()
-            .map(|Written { description, .. }| {
-                if *description == VOTER {
-                    metadata_directory(true, seed_records)
-                } else {
-                    data_directory()
-                }
-            })
-            .collect();
-        assert2::assert!(got == expected, "{what}");
+    let dirs: Vec<PathBuf> = want.iter().map(|written| run.join(written.dir)).collect();
+    let got: Vec<Formatted> = dirs.iter().map(|dir| formatted(dir)).collect();
+    let expected: Vec<Formatted> = want
+        .iter()
+        .map(|Written { description, .. }| {
+            if *description == VOTER {
+                metadata_directory(true, seed_records)
+            } else {
+                data_directory()
+            }
+        })
+        .collect();
+    assert2::assert!(got == expected, "{what}");
+    assert2::assert!(
+        files_under(&metadata_dir)
+            == vec![
+                "__cluster_metadata-0/00000000000000000000-0000000000.checkpoint",
+                "bootstrap.json",
+                "bootstrap.records.bin",
+                META_PROPERTIES,
+            ],
+        "{what}"
+    );
+    for dir in dirs.iter().filter(|dir| **dir != metadata_dir) {
         assert2::assert!(
-            files_under(&metadata_dir)
-                == vec![
-                    "__cluster_metadata-0/00000000000000000000-0000000000.checkpoint",
-                    "bootstrap.json",
-                    "bootstrap.records.bin",
-                    META_PROPERTIES,
-                ],
-            "{what}"
-        );
-        for dir in dirs.iter().filter(|dir| **dir != metadata_dir) {
-            assert2::assert!(
-                files_under(dir) == vec![META_PROPERTIES],
-                "{what}: {}",
-                dir.display()
-            );
-        }
-        let directory_ids: BTreeSet<String> =
-            dirs.iter().map(|dir| written_directory_id(dir)).collect();
-        assert2::assert!(
-            directory_ids.len() == dirs.len(),
-            "{what}: {directory_ids:?}"
+            files_under(dir) == vec![META_PROPERTIES],
+            "{what}: {}",
+            dir.display()
         );
     }
+    let directory_ids: BTreeSet<String> =
+        dirs.iter().map(|dir| written_directory_id(dir)).collect();
+    assert2::assert!(
+        directory_ids.len() == dirs.len(),
+        "{what}: {directory_ids:?}"
+    );
 }
 
 /// Without `--ignore-formatted`, one formatted directory refuses the whole
@@ -665,100 +655,77 @@ fn ignore_formatted_skips_the_formatted_and_formats_the_rest() {
 /// formats without an `rm -rf`, because `meta.properties` is the last file
 /// and is published by a rename. Once the marker has landed, the directory is
 /// formatted, and only `--ignore-formatted` passes it.
-#[test]
-fn an_interrupted_run_can_be_run_again() {
-    /// The file the run stops after, and the exit of a plain rerun.
-    struct Case<'a> {
-        fault: &'a str,
-        rerun_exit: i32,
-    }
-    let cases: &[Case] = &[
-        Case {
-            fault: "00000000000000000000-0000000000.checkpoint",
-            rerun_exit: 0,
-        },
-        Case {
-            fault: "bootstrap.records.bin",
-            rerun_exit: 0,
-        },
-        Case {
-            fault: "bootstrap.json",
-            rerun_exit: 0,
-        },
-        Case {
-            fault: "meta.properties.tmp",
-            rerun_exit: 0,
-        },
-        Case {
-            fault: META_PROPERTIES,
-            rerun_exit: 3,
-        },
-    ];
-    for Case { fault, rerun_exit } in cases {
-        let (_tmp, meta_dir, data_dir) = metadata_and_data_directories();
-        let dirs = format!("{},{}", meta_dir.display(), data_dir.display());
-        let mut args = vec!["--log-dir", &dirs, "--cluster-id", CLUSTER_ID];
-        args.extend_from_slice(STANDALONE);
+#[yare::parameterized(
+    checkpoint_interrupted = { "00000000000000000000-0000000000.checkpoint", 0 },
+    bootstrap_records_interrupted = { "bootstrap.records.bin", 0 },
+    manifest_interrupted = { "bootstrap.json", 0 },
+    temporary_marker_interrupted = { "meta.properties.tmp", 0 },
+    published_marker_interrupted = { META_PROPERTIES, 3 },
+)]
+fn an_interrupted_run_can_be_run_again(fault: &str, rerun_exit: i32) {
+    let (_tmp, meta_dir, data_dir) = metadata_and_data_directories();
+    let dirs = format!("{},{}", meta_dir.display(), data_dir.display());
+    let mut args = vec!["--log-dir", &dirs, "--cluster-id", CLUSTER_ID];
+    args.extend_from_slice(STANDALONE);
 
-        let interrupted = krabka_format(&args, Some(fault));
-        assert2::assert!(interrupted.status.code() == Some(4), "{fault}");
-        assert2::assert!(
-            stderr(&interrupted).contains("injected failure after"),
-            "{fault}"
-        );
+    let interrupted = krabka_format(&args, Some(fault));
+    assert2::assert!(interrupted.status.code() == Some(4), "{fault}");
+    assert2::assert!(
+        stderr(&interrupted).contains("injected failure after"),
+        "{fault}"
+    );
 
-        let rerun = krabka_format(&args, None);
+    let rerun = krabka_format(&args, None);
+    assert2::assert!(
+        rerun.status.code() == Some(rerun_exit),
+        "{fault}: {}",
+        stderr(&rerun)
+    );
+    if rerun_exit != 0 {
+        let mut ignoring = args.clone();
+        ignoring.push("--ignore-formatted");
+        let finished = krabka_format(&ignoring, None);
         assert2::assert!(
-            rerun.status.code() == Some(*rerun_exit),
+            finished.status.code() == Some(0),
             "{fault}: {}",
-            stderr(&rerun)
-        );
-        if *rerun_exit != 0 {
-            let mut ignoring = args.clone();
-            ignoring.push("--ignore-formatted");
-            let finished = krabka_format(&ignoring, None);
-            assert2::assert!(
-                finished.status.code() == Some(0),
-                "{fault}: {}",
-                stderr(&finished)
-            );
-        }
-
-        for dir in [&meta_dir, &data_dir] {
-            let meta = krabka_broker::bootstrap::read_meta_properties(dir)
-                .unwrap_or_else(|e| panic!("{fault}: {} does not read: {e}", dir.display()));
-            assert2::assert!(
-                (meta.cluster_id, meta.node_id)
-                    == (
-                        ClusterId(uuid::Uuid::from_u128(
-                            0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10
-                        )),
-                        NODE_ID
-                    ),
-                "{fault}"
-            );
-        }
-        assert2::assert!(
-            [files_under(&meta_dir), files_under(&data_dir)]
-                == [
-                    vec![
-                        "__cluster_metadata-0/00000000000000000000-0000000000.checkpoint",
-                        "bootstrap.json",
-                        "bootstrap.records.bin",
-                        META_PROPERTIES,
-                    ],
-                    vec![META_PROPERTIES],
-                ],
-            "{fault}"
-        );
-        let records = krabka_broker::bootstrap::load_bootstrap_records(&meta_dir).expect("records");
-        assert2::assert!(
-            records
-                .iter()
-                .all(|r| !matches!(r, MetadataRecord::V1Voters(_))),
-            "{fault}: voters live in the checkpoint"
+            stderr(&finished)
         );
     }
+
+    for dir in [&meta_dir, &data_dir] {
+        let meta = krabka_broker::bootstrap::read_meta_properties(dir)
+            .unwrap_or_else(|e| panic!("{fault}: {} does not read: {e}", dir.display()));
+        assert2::assert!(
+            (meta.cluster_id, meta.node_id)
+                == (
+                    ClusterId(uuid::Uuid::from_u128(
+                        0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10
+                    )),
+                    NODE_ID
+                ),
+            "{fault}"
+        );
+    }
+    assert2::assert!(
+        [files_under(&meta_dir), files_under(&data_dir)]
+            == [
+                vec![
+                    "__cluster_metadata-0/00000000000000000000-0000000000.checkpoint",
+                    "bootstrap.json",
+                    "bootstrap.records.bin",
+                    META_PROPERTIES,
+                ],
+                vec![META_PROPERTIES],
+            ],
+        "{fault}"
+    );
+    let records = krabka_broker::bootstrap::load_bootstrap_records(&meta_dir).expect("records");
+    assert2::assert!(
+        records
+            .iter()
+            .all(|r| !matches!(r, MetadataRecord::V1Voters(_))),
+        "{fault}: voters live in the checkpoint"
+    );
 }
 
 /// Whether `line` is the date comment of `Properties.store` on a UTC host:

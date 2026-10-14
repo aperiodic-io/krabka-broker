@@ -243,64 +243,49 @@ fn codecs_keep_version_selection_flexible_tags_and_complete_consumption() {
     });
 }
 
-#[test]
-fn malformed_or_trailing_response_bytes_and_encoding_errors_still_panic() {
-    for bytes in [&[][..], &[0xff], &[42], &[42, 1], &[42, 0, 7]] {
-        let bytes = Bytes::copy_from_slice(bytes);
-        assert!(catch_unwind(|| variable::decode_response(&bytes, 3)).is_err());
-    }
-    assert!(catch_unwind(|| encoder_only::encode_request(&Message(0xff), 1)).is_err());
+#[yare::parameterized(
+    empty_bytes = { &[][..] },
+    invalid_byte = { &[0xff][..] },
+    truncated_value = { &[42][..] },
+    missing_tag = { &[42, 1][..] },
+    trailing_tag_bytes = { &[42, 0, 7][..] },
+)]
+fn malformed_or_trailing_response_bytes_and_encoding_errors_still_panic(bytes: &[u8]) {
+    let bytes = Bytes::copy_from_slice(bytes);
+    assert2::assert!(catch_unwind(|| variable::decode_response(&bytes, 3)).is_err());
+    assert2::assert!(catch_unwind(|| encoder_only::encode_request(&Message(0xff), 1)).is_err());
 }
 
-#[test]
-fn context_keeps_borrowed_identity_client_scope_and_constructor_defaults() {
+#[yare::parameterized(
+    named_principal = { Principal("admin-client"), "admin-client" },
+    empty_principal_uses_fallback = { Principal(""), "anonymous-client" },
+)]
+fn context_keeps_borrowed_identity_client_scope_and_constructor_defaults(
+    principal: Principal,
+    expected_client: &str,
+) {
     DELEGATIONS.with_borrow_mut(Vec::clear);
     let peer: SocketAddr = "127.0.0.1:9092".parse().unwrap();
-    for IdentityCase {
-        principal,
-        expected_client,
-    } in [
-        IdentityCase {
-            principal: Principal("admin-client"),
-            expected_client: "admin-client",
-        },
-        IdentityCase {
-            principal: Principal(""),
-            expected_client: "anonymous-client",
-        },
-    ] {
-        let context = variable::test_context(&principal, &peer);
-        assert!(ptr::eq(
-            ptr::from_ref(context.principal),
-            ptr::from_ref(&principal)
-        ));
-        assert!(ptr::eq(ptr::from_ref(context.peer), ptr::from_ref(&peer)));
-        assert!(context.client_id == Some(expected_client));
-        assert!(context.connection_id == "test-connection");
-        assert!(!context.sendfile_capable);
-        assert!(context.connection_listener_name == "PLAINTEXT");
-        assert!(context.correlation_id == 0);
-        assert!(context_only::test_context(&principal, &peer).client_id == Some("fixed-client"));
-    }
+    let context = variable::test_context(&principal, &peer);
+    assert2::assert!(ptr::eq(
+        ptr::from_ref(context.principal),
+        ptr::from_ref(&principal)
+    ));
+    assert2::assert!(ptr::eq(ptr::from_ref(context.peer), ptr::from_ref(&peer)));
+    assert2::assert!(context.client_id == Some(expected_client));
+    assert2::assert!(context.connection_id == "test-connection");
+    assert2::assert!(!context.sendfile_capable);
+    assert2::assert!(context.connection_listener_name == "PLAINTEXT");
+    assert2::assert!(context.correlation_id == 0);
+    assert2::assert!(
+        context_only::test_context(&principal, &peer).client_id == Some("fixed-client")
+    );
     DELEGATIONS.with_borrow(|calls| {
-        assert!(
-            *calls
-                == [
-                    Delegation::Context,
-                    Delegation::Context,
-                    Delegation::Context,
-                    Delegation::Context
-                ]
-        );
+        assert2::assert!(*calls == [Delegation::Context, Delegation::Context]);
     });
 }
 
 struct EncodingCase {
     version: i16,
     expected: &'static [u8],
-}
-
-struct IdentityCase {
-    principal: Principal,
-    expected_client: &'static str,
 }

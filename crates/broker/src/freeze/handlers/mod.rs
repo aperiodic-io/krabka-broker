@@ -210,19 +210,21 @@ fn freeze_event(
 mod tests {
     use {super::*, assert2::check};
 
-    #[test]
-    fn a_concrete_pattern_type_byte_names_one_pattern_type() {
-        for (label, byte, expected) in [
-            ("literal", 3_i8, Some(PatternType::Literal)),
-            ("prefixed", 4, Some(PatternType::Prefixed)),
-            ("unknown", 0, None),
-            ("any", 1, None),
-            ("match", 2, None),
-            ("a byte no build knows", 9, None),
-            ("a negative byte", -1, None),
-        ] {
-            check!(pattern_type_concrete(byte) == expected, "{label}");
-        }
+    #[yare::parameterized(
+        literal = { "literal", 3_i8, Some(PatternType::Literal) },
+        prefixed = { "prefixed", 4, Some(PatternType::Prefixed) },
+        unknown = { "unknown", 0, None },
+        any = { "any", 1, None },
+        match_pattern = { "match", 2, None },
+        unrecognized = { "a byte no build knows", 9, None },
+        negative = { "a negative byte", -1, None },
+    )]
+    fn a_concrete_pattern_type_byte_names_one_pattern_type(
+        label: &str,
+        byte: i8,
+        expected: Option<PatternType>,
+    ) {
+        check!(pattern_type_concrete(byte) == expected, "{label}");
     }
 
     #[test]
@@ -259,47 +261,50 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_filter_accepts_the_pattern_types_it_selects() {
-        for (label, filter, pattern_type, expected) in [
-            (
-                "every pattern type takes a literal entry",
-                FreezeFilter::EveryPatternType,
-                PatternType::Literal,
-                true,
-            ),
-            (
-                "every pattern type takes a prefixed entry",
-                FreezeFilter::EveryPatternType,
-                PatternType::Prefixed,
-                true,
-            ),
-            (
-                "one pattern type takes its own",
-                FreezeFilter::One(PatternType::Literal),
-                PatternType::Literal,
-                true,
-            ),
-            (
-                "one pattern type refuses the other",
-                FreezeFilter::One(PatternType::Literal),
-                PatternType::Prefixed,
-                false,
-            ),
-            (
-                "nothing takes no literal entry",
-                FreezeFilter::Nothing,
-                PatternType::Literal,
-                false,
-            ),
-            (
-                "nothing takes no prefixed entry",
-                FreezeFilter::Nothing,
-                PatternType::Prefixed,
-                false,
-            ),
-        ] {
-            check!(filter.accepts(pattern_type) == expected, "{label}");
-        }
+    #[yare::parameterized(
+        every_literal = {
+            "every pattern type takes a literal entry",
+            FreezeFilter::EveryPatternType,
+            PatternType::Literal,
+            true,
+        },
+        every_prefixed = {
+            "every pattern type takes a prefixed entry",
+            FreezeFilter::EveryPatternType,
+            PatternType::Prefixed,
+            true,
+        },
+        one_own = {
+            "one pattern type takes its own",
+            FreezeFilter::One(PatternType::Literal),
+            PatternType::Literal,
+            true,
+        },
+        one_other = {
+            "one pattern type refuses the other",
+            FreezeFilter::One(PatternType::Literal),
+            PatternType::Prefixed,
+            false,
+        },
+        nothing_literal = {
+            "nothing takes no literal entry",
+            FreezeFilter::Nothing,
+            PatternType::Literal,
+            false,
+        },
+        nothing_prefixed = {
+            "nothing takes no prefixed entry",
+            FreezeFilter::Nothing,
+            PatternType::Prefixed,
+            false,
+        },
+    )]
+    fn a_filter_accepts_the_pattern_types_it_selects(
+        label: &str,
+        filter: FreezeFilter,
+        pattern_type: PatternType,
+        expected: bool,
+    ) {
+        check!(filter.accepts(pattern_type) == expected, "{label}");
     }
 }

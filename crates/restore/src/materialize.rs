@@ -25,6 +25,11 @@
 //! corrupt predecessor, preserving the offsets on both sides of the loss. Under
 //! `--dry-run` it does the same work and writes nothing.
 
+use {
+    crate::{RestoreArgs, RestoreError},
+    krabka_log::{Log, LogConfig, name},
+};
+
 mod format;
 pub(crate) mod prepare;
 mod segment;
@@ -39,3 +44,16 @@ pub use self::{
     format::{FormatTargetOutcome, format_target, seed_rlmm_snapshot},
     segment::{SegmentOutcome, write_segment},
 };
+
+pub(crate) fn open_partition_log(
+    args: &RestoreArgs,
+    topic: &str,
+    partition: i32,
+) -> Result<Option<Log>, RestoreError> {
+    if args.dry_run {
+        return Ok(None);
+    }
+    let dir = name::partition_dir(&args.target.log_dir, topic, partition);
+    std::fs::create_dir_all(&dir)?;
+    Ok(Some(Log::open(&dir, LogConfig::default())?))
+}

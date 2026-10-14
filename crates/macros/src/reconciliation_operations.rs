@@ -477,126 +477,135 @@ mod tests {
         assert!(body.contains("movement.add") && body.contains("movement.partition"));
     }
 
-    #[test]
-    fn transition_plan_checks_before_projection_and_conditionally_accepts_native_extra() {
+    #[yare::parameterized(
+        no_extra_projection = { false },
+        extra_projection = { true },
+    )]
+    fn transition_plan_checks_before_projection_and_conditionally_accepts_native_extra(
+        has_extra: bool,
+    ) {
         let signature = function_signature(&"fn next_state(&self, previous: &Self::State, command: Self::Action) -> Option<Self::State> {}".parse().unwrap()).unwrap();
         let args = "action = Action, lookup = find_member, rebuild = rebuild_group, check = assert_epoch, project = project".parse().unwrap();
-        for has_extra in [false, true] {
-            let parts = transition_parts(&args, &signature, has_extra).unwrap();
-            assert!(
-                compact(&parts.before_setup)
-                    .contains("row.member_id.clone(),row.partitions.clone()")
-            );
-            assert!(
-                compact(&parts.before_match).contains("matches!(command,Action::ClientAdd(..))")
-            );
-            assert!(compact(&parts.match_prefix).contains("returnSome(next)"));
-            assert!(compact(&parts.match_suffix).contains("find_member(previous,id)"));
-            let after = compact(&parts.after_match);
-            assert!(
-                after.find("rebuild_group").unwrap()
-                    < after.find("apply_member_heartbeat").unwrap()
-            );
-            assert!(
-                after.find("apply_member_heartbeat").unwrap() < after.find("assert_epoch").unwrap()
-            );
-            assert!(parts.before_extra.is_empty() != has_extra);
-            assert!(compact(&parts.result).contains("projection_extra") == has_extra);
-        }
+        let parts = transition_parts(&args, &signature, has_extra).unwrap();
+        assert2::assert!(
+            compact(&parts.before_setup).contains("row.member_id.clone(),row.partitions.clone()")
+        );
+        assert2::assert!(
+            compact(&parts.before_match).contains("matches!(command,Action::ClientAdd(..))")
+        );
+        assert2::assert!(compact(&parts.match_prefix).contains("returnSome(next)"));
+        assert2::assert!(compact(&parts.match_suffix).contains("find_member(previous,id)"));
+        let after = compact(&parts.after_match);
+        assert2::assert!(
+            after.find("rebuild_group").unwrap() < after.find("apply_member_heartbeat").unwrap()
+        );
+        assert2::assert!(
+            after.find("apply_member_heartbeat").unwrap() < after.find("assert_epoch").unwrap()
+        );
+        assert2::assert!(parts.before_extra.is_empty() != has_extra);
+        assert2::assert!(compact(&parts.result).contains("projection_extra") == has_extra);
     }
 
-    #[test]
-    fn operation_signatures_and_metadata_refuse_unsupported_bindings() {
+    #[yare::parameterized(
+        async_rebuild = { "async fn rebuild(state: &State) -> GroupState {}" },
+        missing_state = { "fn rebuild() -> GroupState {}" },
+        wrong_return_type = { "fn rebuild(state: &State) -> bool {}" },
+        anonymous_state = { "fn rebuild(_: &State) -> GroupState {}" },
+    )]
+    fn rejects_invalid_rebuild_signatures(header: &str) {
         let rebuild_args = "member = member, built = built".parse().unwrap();
-        for header in [
-            "async fn rebuild(state: &State) -> GroupState {}",
-            "fn rebuild() -> GroupState {}",
-            "fn rebuild(state: &State) -> bool {}",
-            "fn rebuild(_: &State) -> GroupState {}",
-        ] {
-            assert!(
-                rebuild_parts(
-                    &rebuild_args,
-                    &function_signature(&header.parse().unwrap()).unwrap()
-                )
-                .is_err(),
-                "{header}"
-            );
-        }
+        assert2::assert!(
+            rebuild_parts(
+                &rebuild_args,
+                &function_signature(&header.parse().unwrap()).unwrap()
+            )
+            .is_err(),
+            "{header}"
+        );
+    }
+
+    #[yare::parameterized(
+        owned_receiver = { "fn actions(self, state: &State, out: &mut Vec<Action>) {}" },
+        mutable_receiver = { "fn actions(&mut self, state: &State, out: &mut Vec<Action>) {}" },
+        wrong_receiver_name = {
+            "fn actions(model: &Model, state: &State, out: &mut Vec<Action>) {}",
+        },
+        wrong_method_name = { "fn events(&self, state: &State, out: &mut Vec<Action>) {}" },
+        return_type = { "fn actions(&self, state: &State, out: &mut Vec<Action>) -> bool {}" },
+        missing_parameters = { "fn actions(&self) {}" },
+    )]
+    fn rejects_invalid_action_signatures(header: &str) {
         let actions_args = "action = Action, lookup = member, member = m"
             .parse()
             .unwrap();
-        for header in [
-            "fn actions(self, state: &State, out: &mut Vec<Action>) {}",
-            "fn actions(&mut self, state: &State, out: &mut Vec<Action>) {}",
-            "fn actions(model: &Model, state: &State, out: &mut Vec<Action>) {}",
-            "fn events(&self, state: &State, out: &mut Vec<Action>) {}",
-            "fn actions(&self, state: &State, out: &mut Vec<Action>) -> bool {}",
-            "fn actions(&self) {}",
-        ] {
-            assert!(
-                action_parts(
-                    &actions_args,
-                    &function_signature(&header.parse().unwrap()).unwrap()
-                )
-                .is_err(),
-                "{header}"
-            );
-        }
+        assert2::assert!(
+            action_parts(
+                &actions_args,
+                &function_signature(&header.parse().unwrap()).unwrap()
+            )
+            .is_err(),
+            "{header}"
+        );
+    }
+
+    #[yare::parameterized(
+        extra_member_expression = { "action = Action, lookup = member, member = m + extra" },
+        extra_action_expression = { "action = Action + Other, lookup = member, member = m" },
+        extra_lookup_expression = { "action = Action, lookup = member + extra, member = m" },
+        missing_member = { "action = Action, lookup = member" },
+    )]
+    fn rejects_invalid_action_metadata(args: &str) {
         let actions_header = function_signature(
             &"fn actions(&self, state: &State, out: &mut Vec<Action>) {}"
                 .parse()
                 .unwrap(),
         )
         .unwrap();
-        for args in [
-            "action = Action, lookup = member, member = m + extra",
-            "action = Action + Other, lookup = member, member = m",
-            "action = Action, lookup = member + extra, member = m",
-            "action = Action, lookup = member",
-        ] {
-            assert!(
-                action_parts(&args.parse().unwrap(), &actions_header).is_err(),
-                "{args}"
-            );
-        }
+        assert2::assert!(
+            action_parts(&args.parse().unwrap(), &actions_header).is_err(),
+            "{args}"
+        );
+    }
+
+    #[yare::parameterized(
+        wrong_method_name = { "fn step(&self, state: &State, action: Action) -> Option<State> {}" },
+        wrong_return_type = { "fn next_state(&self, state: &State, action: Action) -> bool {}" },
+        anonymous_state = { "fn next_state(&self, _: &State, action: Action) -> Option<State> {}" },
+        anonymous_action = { "fn next_state(&self, state: &State, _: Action) -> Option<State> {}" },
+    )]
+    fn rejects_invalid_transition_signatures(header: &str) {
         let next_args =
             "action = Action, lookup = member, rebuild = rebuild, check = check, project = project"
                 .parse()
                 .unwrap();
-        for header in [
-            "fn step(&self, state: &State, action: Action) -> Option<State> {}",
-            "fn next_state(&self, state: &State, action: Action) -> bool {}",
-            "fn next_state(&self, _: &State, action: Action) -> Option<State> {}",
-            "fn next_state(&self, state: &State, _: Action) -> Option<State> {}",
-        ] {
-            assert!(
-                transition_parts(
-                    &next_args,
-                    &function_signature(&header.parse().unwrap()).unwrap(),
-                    false
-                )
-                .is_err(),
-                "{header}"
-            );
-        }
+        assert2::assert!(
+            transition_parts(
+                &next_args,
+                &function_signature(&header.parse().unwrap()).unwrap(),
+                false
+            )
+            .is_err(),
+            "{header}"
+        );
+    }
+
+    #[yare::parameterized(
+        missing_project = { "setup {} actions {}" },
+        wrong_order = { "setup {} project {} actions {}" },
+        non_brace_section = { "setup () actions {} project {}" },
+        trailing_tokens = { "setup {} actions {} project {} extra" },
+        missing_section_body = { "setup {} actions missing project {}" },
+    )]
+    fn section_parser_requires_the_declared_order_and_brace_groups(input: &str) {
+        assert2::assert!(
+            validate_sections(&input.parse().unwrap()).is_err(),
+            "{input}"
+        );
     }
 
     #[test]
-    fn section_parser_accepts_opaque_groups_and_requires_their_declared_order() {
+    fn section_parser_accepts_opaque_brace_groups() {
         let valid = "setup { caller!(@opaque state); } actions { Action::Extra => return None, } project { &committed }".parse().unwrap();
         assert!(validate_sections(&valid).is_ok());
-        for input in [
-            "setup {} actions {}",
-            "setup {} project {} actions {}",
-            "setup () actions {} project {}",
-            "setup {} actions {} project {} extra",
-            "setup {} actions missing project {}",
-        ] {
-            assert!(
-                validate_sections(&input.parse().unwrap()).is_err(),
-                "{input}"
-            );
-        }
     }
 }

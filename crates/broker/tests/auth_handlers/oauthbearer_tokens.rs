@@ -69,15 +69,9 @@ async fn sasl_oauthbearer_invalid_token_two_round_failure() {
     let handle = start_oauthbearer_broker(log_dir.path(), validator).await;
     let addr = handle.listen_addr();
 
-    let result: Result<(), io::Error> = async {
-        let mut session = oauthbearer_session_start(addr).await?;
-
-        // Expired token (exp an hour in the past, zero skew).
-        let token = unsecured_jws("admin", now_unix_secs() - 3600);
-        expect_invalid_token(&mut session.stream, &mut session.corr, &token).await?;
-        Ok(())
-    }
-    .await;
+    // Expired token (exp an hour in the past, zero skew).
+    let token = unsecured_jws("admin", now_unix_secs() - 3600);
+    let result = invalid_token_session(addr, &token).await;
 
     handle.shutdown().await;
     result.expect("OAUTHBEARER failure handshake must complete");
@@ -180,15 +174,9 @@ async fn sasl_oauthbearer_signed_token_wrong_key_two_round_failure() {
     } = es256_key("k1");
     let (_log_dir, handle, addr) = oauthbearer_fixture(signed_validator(&jwks_a), None).await;
 
-    let result: Result<(), io::Error> = async {
-        let mut session = oauthbearer_session_start(addr).await?;
-
-        let claims = format!("{{\"sub\":\"admin\",\"exp\":{}}}", now_unix_secs() + 3600);
-        let token = es256_token(&kp_b, "k1", &claims);
-        expect_invalid_token(&mut session.stream, &mut session.corr, &token).await?;
-        Ok(())
-    }
-    .await;
+    let claims = format!("{{\"sub\":\"admin\",\"exp\":{}}}", now_unix_secs() + 3600);
+    let token = es256_token(&kp_b, "k1", &claims);
+    let result = invalid_token_session(addr, &token).await;
 
     handle.shutdown().await;
     result.expect("signed OAUTHBEARER failure handshake must complete");
@@ -209,6 +197,12 @@ async fn expect_invalid_token(
     // The client's `\x01` dummy → SASL_AUTHENTICATION_FAILED (58).
     let round2 = oauthbearer_authenticate(stream, corr, bytes::Bytes::from_static(&[1u8])).await?;
     assert!(round2.error_code == 58, "round 2 must fail the connection");
+    Ok(())
+}
+
+async fn invalid_token_session(addr: std::net::SocketAddr, token: &str) -> Result<(), io::Error> {
+    let mut session = oauthbearer_session_start(addr).await?;
+    expect_invalid_token(&mut session.stream, &mut session.corr, token).await?;
     Ok(())
 }
 

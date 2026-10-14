@@ -432,15 +432,12 @@ mod tests {
                 row.name
             );
             let response = heartbeat(&mut state, "m2", None);
-            let m2_partitions: usize = response
-                .assignment
-                .map(|a| {
-                    a.topic_partitions
-                        .iter()
-                        .map(|tp| tp.partitions.len())
-                        .sum()
-                })
-                .unwrap_or_default();
+            let m2_partitions: usize = response.assignment.map_or_default(|a| {
+                a.topic_partitions
+                    .iter()
+                    .map(|tp| tp.partitions.len())
+                    .sum()
+            });
             check!(m2_partitions == row.m2_partitions_after, "{}", row.name);
         }
     }

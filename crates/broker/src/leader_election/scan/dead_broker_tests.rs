@@ -355,13 +355,14 @@ struct ElrScanCase<'a> {
 /// only broker 2 is known to hold every committed record -- and Kafka's
 /// `electAnyLeader` elects it and reports the election clean, under every one
 /// of these policies.
-#[tokio::test]
-async fn failover_elects_an_eligible_leader_replica_cleanly_under_every_policy() {
-    let cases = [
+#[yare::parameterized(
+    no_extra_policy = {
         ElrScanCase {
             label: "no unclean election and no offset-aware strategy",
             policy: &[],
         },
+    },
+    unclean_enabled = {
         ElrScanCase {
             label: "unclean election enabled",
             policy: &[TopicConfigOverride::new(
@@ -369,6 +370,8 @@ async fn failover_elects_an_eligible_leader_replica_cleanly_under_every_policy()
                 "true",
             )],
         },
+    },
+    balanced_recovery = {
         ElrScanCase {
             label: "balanced offset-aware recovery",
             policy: &[TopicConfigOverride::new(
@@ -376,6 +379,8 @@ async fn failover_elects_an_eligible_leader_replica_cleanly_under_every_policy()
                 "Balanced",
             )],
         },
+    },
+    aggressive_recovery_and_unclean = {
         ElrScanCase {
             label: "aggressive recovery and unclean election together",
             policy: &[
@@ -383,48 +388,51 @@ async fn failover_elects_an_eligible_leader_replica_cleanly_under_every_policy()
                 TopicConfigOverride::new(UNCLEAN_LEADER_ELECTION_ENABLE, "true"),
             ],
         },
+    },
+)]
+#[test_macro(tokio::test)]
+async fn failover_elects_an_eligible_leader_replica_cleanly_under_every_policy(
+    case: ElrScanCase<'_>,
+) {
+    let mut img = preferred_replica_alone_in_isr();
+    let mut overrides: Vec<TopicConfigOverride<'_>> = vec![
+        TopicConfigOverride::new(ELIGIBLE_LEADER_REPLICAS, "0:2:"),
+        TopicConfigOverride::new(MIN_INSYNC_REPLICAS, "2"),
     ];
-    for case in cases {
-        let mut img = preferred_replica_alone_in_isr();
-        let mut overrides: Vec<TopicConfigOverride<'_>> = vec![
-            TopicConfigOverride::new(ELIGIBLE_LEADER_REPLICAS, "0:2:"),
-            TopicConfigOverride::new(MIN_INSYNC_REPLICAS, "2"),
-        ];
-        overrides.extend_from_slice(case.policy);
-        set_topic_configs().img(&mut img).entries(&overrides).call();
-        let l = ControllerLivenessState::new(krabka_units::secs(10));
-        for n in [2u64, 3] {
-            l.record_heartbeat(n).await;
-        }
-        let metrics = BrokerMetrics::new();
-
-        let plan = compute_failover_changes(&img, /*dead=*/ NodeId(1), &l, &metrics).await;
-
-        let expected = PartitionRecord {
-            topic: "t".into(),
-            partition: 0,
-            leader: NodeId(2),
-            replicas: vec![NodeId(1), NodeId(3), NodeId(2)],
-            isr: vec![NodeId(2)],
-            leader_epoch: LeaderEpoch(6),
-            adding_replicas: vec![],
-            removing_replicas: vec![],
-            directories: vec![],
-            partition_epoch: 1,
-        };
-        assert!(
-            *elected_partition(&plan.changes) == expected,
-            "{}",
-            case.label
-        );
-        assert!(plan.recoveries.is_empty(), "{}", case.label);
-        assert!(plan.unavailable.is_empty(), "{}", case.label);
-        assert!(
-            metrics.unclean_leader_elections_total.get() == 0,
-            "{}: an ELR election loses nothing and must not meter as unclean",
-            case.label
-        );
+    overrides.extend_from_slice(case.policy);
+    set_topic_configs().img(&mut img).entries(&overrides).call();
+    let l = ControllerLivenessState::new(krabka_units::secs(10));
+    for n in [2u64, 3] {
+        l.record_heartbeat(n).await;
     }
+    let metrics = BrokerMetrics::new();
+
+    let plan = compute_failover_changes(&img, /*dead=*/ NodeId(1), &l, &metrics).await;
+
+    let expected = PartitionRecord {
+        topic: "t".into(),
+        partition: 0,
+        leader: NodeId(2),
+        replicas: vec![NodeId(1), NodeId(3), NodeId(2)],
+        isr: vec![NodeId(2)],
+        leader_epoch: LeaderEpoch(6),
+        adding_replicas: vec![],
+        removing_replicas: vec![],
+        directories: vec![],
+        partition_epoch: 1,
+    };
+    assert2::assert!(
+        *elected_partition(&plan.changes) == expected,
+        "{}",
+        case.label
+    );
+    assert2::assert!(plan.recoveries.is_empty(), "{}", case.label);
+    assert2::assert!(plan.unavailable.is_empty(), "{}", case.label);
+    assert2::assert!(
+        metrics.unclean_leader_elections_total.get() == 0,
+        "{}: an ELR election loses nothing and must not meter as unclean",
+        case.label
+    );
 }
 
 /// An eligible leader replica that is not alive fails Kafka's

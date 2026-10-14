@@ -51,6 +51,23 @@ fn config_entry(
     }
 }
 
+macro_rules! config_entries {
+    ($entries:expr) => {
+        ($entries)
+            .iter()
+            .map(|entry| {
+                config_entry(
+                    &entry.name,
+                    entry.value.as_deref(),
+                    entry.config_source,
+                    entry.is_sensitive,
+                    entry.read_only,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_topics_returns_the_configs_describe_configs_reports() {
     let (_cluster, client) = start_n_node_client(1, "admin-handlers-test").await;
@@ -80,21 +97,7 @@ async fn create_topics_returns_the_configs_describe_configs_reports() {
     check!(row.topic_config_error_code == 0);
     check!(row.num_partitions == 1);
     check!(row.replication_factor == 1);
-    let from_create: Vec<ConfigEntry> = row
-        .configs
-        .as_ref()
-        .expect("KIP-525 configs list")
-        .iter()
-        .map(|entry| {
-            config_entry(
-                &entry.name,
-                entry.value.as_deref(),
-                entry.config_source,
-                entry.is_sensitive,
-                entry.read_only,
-            )
-        })
-        .collect();
+    let from_create = config_entries!(row.configs.as_ref().expect("KIP-525 configs list"));
     check!(
         !from_create.is_empty(),
         "the list carries the topic's values"
@@ -124,19 +127,7 @@ async fn create_topics_returns_the_configs_describe_configs_reports() {
         "describe_configs: {:?}",
         result.error_message
     );
-    let from_describe: Vec<ConfigEntry> = result
-        .configs
-        .iter()
-        .map(|entry| {
-            config_entry(
-                &entry.name,
-                entry.value.as_deref(),
-                entry.config_source,
-                entry.is_sensitive,
-                entry.read_only,
-            )
-        })
-        .collect();
+    let from_describe = config_entries!(&result.configs);
 
     assert!(from_create == from_describe);
 }

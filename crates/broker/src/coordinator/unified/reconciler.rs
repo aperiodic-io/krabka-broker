@@ -48,8 +48,7 @@ impl ReconcileInput {
                         topic_id: *topic_id,
                         partition,
                     })
-                    .map(|racks| racks.iter().map(String::as_str).collect())
-                    .unwrap_or_default()
+                    .map_or_default(|racks| racks.iter().map(String::as_str).collect())
             })
             .collect();
         Some(topic_hash::topic_hash(topic_id.0, name, racks.into_iter()))
@@ -265,12 +264,19 @@ mod tests {
     use {
         super::{super::assignor::UniformAssignor, *},
         crate::coordinator::unified::consumer_state::{
-            MemberState, ResolvedRegularExpression, test_support::subscribed_member,
+            MemberState,
+            test_support::{resolved_regex, subscribed_member},
         },
         assert2::{assert, check},
     };
 
     fn fresh_member(id: &str, topic: &str) -> MemberState { subscribed_member(id, &[topic]) }
+
+    fn group_with_single_member(id: &str, topic: &str) -> GroupState {
+        let mut group = GroupState::new("g");
+        group.add_or_update_member(fresh_member(id, topic));
+        group
+    }
 
     /// A snapshot that holds one topic, and the id of that topic.
     struct SingleTopic {
@@ -304,8 +310,7 @@ mod tests {
             ("both", true, 2, 4, (true, 2)),
         ];
         for (case, bump, recorded, now, expected) in rows {
-            let mut g = GroupState::new("g");
-            g.add_or_update_member(fresh_member("m1", "t"));
+            let mut g = group_with_single_member("m1", "t");
             let at_record = input("t", recorded).input;
             g.record_metadata_hash(metadata_hash(&g, &at_record));
             let current = input("t", now).input;
@@ -331,8 +336,7 @@ mod tests {
     /// and installs the target at the group epoch.
     #[test]
     fn compute_target_reports_the_members_whose_target_changed() {
-        let mut g = GroupState::new("g");
-        g.add_or_update_member(fresh_member("m1", "t"));
+        let mut g = group_with_single_member("m1", "t");
         let SingleTopic {
             input: inp,
             topic_id: t,
@@ -355,8 +359,7 @@ mod tests {
 
     #[test]
     fn subscription_topic_ids_resolved() {
-        let mut g = GroupState::new("g");
-        g.add_or_update_member(fresh_member("m1", "t"));
+        let g = group_with_single_member("m1", "t");
         let SingleTopic {
             input: inp,
             topic_id: t,
@@ -398,28 +401,24 @@ mod tests {
     /// Records that `regex` resolved to `topics` in `group`, as a heartbeat
     /// that resolved it does.
     fn resolve(group: &mut GroupState, regex: &str, topics: &[&str]) {
-        group.set_resolved_regex(regex.to_owned(), ResolvedRegularExpression {
-            topics: topics.iter().map(|topic| (*topic).to_owned()).collect(),
-            version: 1,
-            timestamp_ms: 1,
-        });
+        group.set_resolved_regex(regex.to_owned(), resolved_regex(topics, 1, 1));
     }
 
     /// The topics that `member_id` is assigned, by name.
     fn assigned_names(group: &GroupState, input: &ReconcileInput, member_id: &str) -> Vec<String> {
-        let mut names: Vec<String> = group
-            .target
-            .per_member
-            .get(member_id)
-            .map(|topics| {
-                input
-                    .topic_id_by_name
-                    .iter()
-                    .filter(|(_, id)| topics.contains_key(id))
-                    .map(|(name, _)| name.clone())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut names: Vec<String> =
+            group
+                .target
+                .per_member
+                .get(member_id)
+                .map_or_default(|topics| {
+                    input
+                        .topic_id_by_name
+                        .iter()
+                        .filter(|(_, id)| topics.contains_key(id))
+                        .map(|(name, _)| name.clone())
+                        .collect()
+                });
         names.sort();
         names
     }
@@ -611,19 +610,27 @@ mod tests {
         },
     ];
 
+    const RACK_A_1: &[RackEntry] = &[RackEntry {
+        id: 1,
+        partition: 0,
+        rack: "rack-a",
+    }];
+    const RACK_A_9: &[RackEntry] = &[RackEntry {
+        id: 9,
+        partition: 0,
+        rack: "rack-a",
+    }];
+    const RACK_B_1: &[RackEntry] = &[RackEntry {
+        id: 1,
+        partition: 0,
+        rack: "rack-b",
+    }];
+
     /// The snapshots after a change, and whether the metadata hash moves.
     fn hash_rows() -> Vec<(&'static str, ReconcileInput, bool)> {
         let base = BASE;
         vec![
-            (
-                "nothing changes",
-                snapshot(base, &[RackEntry {
-                    id: 1,
-                    partition: 0,
-                    rack: "rack-a",
-                }]),
-                false,
-            ),
+            ("nothing changes", snapshot(base, RACK_A_1), false),
             (
                 "an unsubscribed topic is created",
                 snapshot(
@@ -636,11 +643,7 @@ mod tests {
                         }][..],
                     ]
                     .concat(),
-                    &[RackEntry {
-                        id: 1,
-                        partition: 0,
-                        rack: "rack-a",
-                    }],
+                    RACK_A_1,
                 ),
                 false,
             ),
@@ -656,11 +659,7 @@ mod tests {
                         }][..],
                     ]
                     .concat(),
-                    &[RackEntry {
-                        id: 1,
-                        partition: 0,
-                        rack: "rack-a",
-                    }],
+                    RACK_A_1,
                 ),
                 false,
             ),
@@ -683,11 +682,7 @@ mod tests {
                         ][..],
                     ]
                     .concat(),
-                    &[RackEntry {
-                        id: 1,
-                        partition: 0,
-                        rack: "rack-a",
-                    }],
+                    RACK_A_1,
                 ),
                 false,
             ),
@@ -703,11 +698,7 @@ mod tests {
                         &base[1..],
                     ]
                     .concat(),
-                    &[RackEntry {
-                        id: 1,
-                        partition: 0,
-                        rack: "rack-a",
-                    }],
+                    RACK_A_1,
                 ),
                 true,
             ),
@@ -728,21 +719,13 @@ mod tests {
                         &base[1..],
                     ]
                     .concat(),
-                    &[RackEntry {
-                        id: 9,
-                        partition: 0,
-                        rack: "rack-a",
-                    }],
+                    RACK_A_9,
                 ),
                 true,
             ),
             (
                 "a partition of a subscribed topic moves to another rack",
-                snapshot(base, &[RackEntry {
-                    id: 1,
-                    partition: 0,
-                    rack: "rack-b",
-                }]),
+                snapshot(base, RACK_B_1),
                 true,
             ),
             (
@@ -758,11 +741,7 @@ mod tests {
                         &base[2..],
                     ]
                     .concat(),
-                    &[RackEntry {
-                        id: 1,
-                        partition: 0,
-                        rack: "rack-a",
-                    }],
+                    RACK_A_1,
                 ),
                 true,
             ),
@@ -774,18 +753,10 @@ mod tests {
     /// name or through a resolved regex, and nothing else.
     #[test]
     fn the_metadata_hash_moves_with_the_subscribed_topics_only() {
-        let mut g = GroupState::new("g");
-        g.add_or_update_member(fresh_member("m1", "orders"));
+        let mut g = group_with_single_member("m1", "orders");
         g.add_or_update_member(member_with_regex("m2", &[], Some("^pay.*")));
         resolve(&mut g, "^pay.*", &["payments"]);
-        let before = metadata_hash(
-            &g,
-            &snapshot(BASE, &[RackEntry {
-                id: 1,
-                partition: 0,
-                rack: "rack-a",
-            }]),
-        );
+        let before = metadata_hash(&g, &snapshot(BASE, RACK_A_1));
         let rows = hash_rows();
         let mut found = Vec::new();
         let mut expected = Vec::new();

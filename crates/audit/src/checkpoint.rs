@@ -158,18 +158,16 @@ mod tests {
         check!(!cp.verify(&pubkey));
     }
 
-    #[test]
-    fn from_value_rejects_malformed_hex_without_panicking() {
+    #[yare::parameterized(
+        non_ascii_pair = { "a\u{e9}a" },
+        sign_prefix = { "+f" },
+        odd_length = { "abc" },
+    )]
+    fn from_value_rejects_malformed_hex_without_panicking(bad: &str) {
         let TestSigner { signer: s, .. } = signer();
         let cp = Checkpoint::signed(&s, Seq(1), &[5u8; 32], EpochMs(10));
-        for (name, bad) in [
-            ("non-ASCII straddling a pair", "a\u{e9}a"),
-            ("sign prefix", "+f"),
-            ("odd length", "abc"),
-        ] {
-            let mut v: serde_json::Value = serde_json::from_slice(&cp.to_record().value).unwrap();
-            v["signature"] = serde_json::Value::from(bad);
-            check!(Checkpoint::from_value(&v).is_none(), "case {name}");
-        }
+        let mut v: serde_json::Value = serde_json::from_slice(&cp.to_record().value).unwrap();
+        v["signature"] = serde_json::Value::from(bad);
+        check!(Checkpoint::from_value(&v).is_none());
     }
 }

@@ -9,7 +9,7 @@
 
 use {
     super::{
-        bounds::{MAX_EPOCH, MAX_LEN, NB, NB_U8, has, model_index, model_offset},
+        bounds::{MAX_EPOCH, MAX_LEN, NB_U8, has, model_index, model_offset},
         election::do_failover,
         elr,
         hwm::{consistent_leo, real_hwm, real_wal_hwm},
@@ -400,8 +400,8 @@ impl Model for DpModel {
                 Property::sometimes("divergence_present", |_, s: &DpState| {
                     (0..MAX_LEN).any(|off| {
                         let mut seen: Option<u8> = None;
-                        for b in 0..NB {
-                            if let Some(&e) = s.log[b].get(off) {
+                        for log in &s.log {
+                            if let Some(&e) = log.get(off) {
                                 match seen {
                                     None => seen = Some(e),
                                     Some(x) if x != e => return true,

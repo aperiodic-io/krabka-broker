@@ -223,7 +223,7 @@ fn record_offsets(row: &PartitionData) -> Vec<i64> {
     row.records
         .as_ref()
         .and_then(RecordsPayload::as_v2)
-        .map(|batches| {
+        .map_or_default(|batches| {
             batches
                 .iter()
                 .flat_map(|batch| {
@@ -234,7 +234,6 @@ fn record_offsets(row: &PartitionData) -> Vec<i64> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// What one scenario observes: the offsets that the limited fetch acquired,

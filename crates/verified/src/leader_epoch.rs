@@ -185,78 +185,84 @@ mod tests {
     }
 
     /// One row per `endOffsetFor` branch, plus the gap-epoch variants.
-    #[test]
-    fn lookup_matches_kafka_end_offset_for_rows() {
-        const ENTRIES: &[EpochEntry] = &[entry(0, 0), entry(2, 50), entry(5, 100)];
-        const LATE_START: &[EpochEntry] = &[entry(3, 30), entry(4, 40)];
-        const UNDEFINED: (LeaderEpoch, Offset) = (UNDEFINED_EPOCH, UNDEFINED_EPOCH_OFFSET);
-
-        for (name, entries, requested, log_end, expected) in [
-            ("empty cache", &[][..], 0, 9, UNDEFINED),
-            (
-                "undefined requested epoch, empty cache",
-                &[][..],
-                -1,
-                9,
-                UNDEFINED,
-            ),
-            ("undefined requested epoch", ENTRIES, -1, 200, UNDEFINED),
-            (
-                "latest epoch answers the log end offset",
-                ENTRIES,
-                5,
-                200,
-                (LeaderEpoch(5), Offset(200)),
-            ),
-            (
-                "requested epoch above the latest",
-                ENTRIES,
-                7,
-                200,
-                UNDEFINED,
-            ),
-            (
-                "below the first epoch: requested epoch, first start",
-                LATE_START,
-                1,
-                200,
-                (LeaderEpoch(1), Offset(30)),
-            ),
-            (
-                "exact older epoch: that epoch, next start",
-                ENTRIES,
-                2,
-                200,
-                (LeaderEpoch(2), Offset(100)),
-            ),
-            (
-                "gap epoch: floor epoch, next start",
-                ENTRIES,
-                3,
-                200,
-                (LeaderEpoch(2), Offset(100)),
-            ),
-            (
-                "gap epoch below the latest: floor epoch 2, start of 5",
-                ENTRIES,
-                4,
-                200,
-                (LeaderEpoch(2), Offset(100)),
-            ),
-            (
-                "gap epoch just above the first: floor epoch 0, start of 2",
-                ENTRIES,
-                1,
-                200,
-                (LeaderEpoch(0), Offset(50)),
-            ),
-        ] {
-            assert2::check!(
-                epoch_and_offset_for_entries(entries, LeaderEpoch(requested), Offset(log_end))
-                    == expected,
-                "case {name}"
-            );
-        }
+    #[yare::parameterized(
+        empty_cache = { "empty cache", &[][..], 0, 9, (UNDEFINED_EPOCH, UNDEFINED_EPOCH_OFFSET) },
+        undefined_requested_empty = {
+            "undefined requested epoch, empty cache",
+            &[][..],
+            -1,
+            9,
+            (UNDEFINED_EPOCH, UNDEFINED_EPOCH_OFFSET),
+        },
+        undefined_requested = {
+            "undefined requested epoch",
+            &[entry(0, 0), entry(2, 50), entry(5, 100)][..],
+            -1,
+            200,
+            (UNDEFINED_EPOCH, UNDEFINED_EPOCH_OFFSET),
+        },
+        latest_epoch = {
+            "latest epoch answers the log end offset",
+            &[entry(0, 0), entry(2, 50), entry(5, 100)][..],
+            5,
+            200,
+            (LeaderEpoch(5), Offset(200)),
+        },
+        above_latest = {
+            "requested epoch above the latest",
+            &[entry(0, 0), entry(2, 50), entry(5, 100)][..],
+            7,
+            200,
+            (UNDEFINED_EPOCH, UNDEFINED_EPOCH_OFFSET),
+        },
+        below_first = {
+            "below the first epoch: requested epoch, first start",
+            &[entry(3, 30), entry(4, 40)][..],
+            1,
+            200,
+            (LeaderEpoch(1), Offset(30)),
+        },
+        exact_older = {
+            "exact older epoch: that epoch, next start",
+            &[entry(0, 0), entry(2, 50), entry(5, 100)][..],
+            2,
+            200,
+            (LeaderEpoch(2), Offset(100)),
+        },
+        gap_epoch = {
+            "gap epoch: floor epoch, next start",
+            &[entry(0, 0), entry(2, 50), entry(5, 100)][..],
+            3,
+            200,
+            (LeaderEpoch(2), Offset(100)),
+        },
+        gap_below_latest = {
+            "gap epoch below the latest: floor epoch 2, start of 5",
+            &[entry(0, 0), entry(2, 50), entry(5, 100)][..],
+            4,
+            200,
+            (LeaderEpoch(2), Offset(100)),
+        },
+        gap_above_first = {
+            "gap epoch just above the first: floor epoch 0, start of 2",
+            &[entry(0, 0), entry(2, 50), entry(5, 100)][..],
+            1,
+            200,
+            (LeaderEpoch(0), Offset(50)),
+        },
+    )]
+    fn lookup_matches_kafka_end_offset_for_rows(
+        name: &str,
+        entries: &[EpochEntry],
+        requested: i32,
+        log_end: i64,
+        expected: (LeaderEpoch, Offset),
+    ) {
+        assert2::check!(
+            epoch_and_offset_for_entries(entries, LeaderEpoch(requested), Offset(log_end))
+                == expected,
+            "case {name}"
+        );
     }
 
     proptest! {

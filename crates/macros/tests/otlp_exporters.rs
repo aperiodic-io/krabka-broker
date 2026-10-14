@@ -1,6 +1,6 @@
 //! Both exporter types retain transport selection, configuration and build errors.
 
-use {assert2::assert, std::marker::PhantomData};
+use std::marker::PhantomData;
 
 #[derive(Clone, Copy)]
 enum OtlpProtocol {
@@ -139,87 +139,57 @@ impl OtlpConfig {
     }
 }
 
-#[test]
-fn grpc_and_http_protobuf_configure_both_exporter_types() {
-    for TransportCase { protocol, expected } in [
-        TransportCase {
-            protocol: OtlpProtocol::Grpc,
-            expected: Protocol::Grpc,
-        },
-        TransportCase {
-            protocol: OtlpProtocol::HttpProtobuf,
-            expected: Protocol::HttpBinary,
-        },
-    ] {
-        let cfg = OtlpConfig {
-            protocol,
-            endpoint: "http://collector:4317".into(),
-            timeout: 9,
-        };
-        for built in [
-            cfg.build_exporter().unwrap().built,
-            cfg.build_log_exporter().unwrap().built,
-        ] {
-            assert!(
-                built
-                    == Built {
-                        endpoint: cfg.endpoint.clone(),
-                        timeout: 9,
-                        protocol: expected
-                    }
-            );
-        }
-        assert!(cfg.endpoint == "http://collector:4317");
-    }
-}
-
-#[test]
-fn either_transport_propagates_the_sdk_error_through_both_methods() {
-    for protocol in [OtlpProtocol::Grpc, OtlpProtocol::HttpProtobuf] {
-        for RefusedBuildCase {
-            endpoint,
-            timeout,
-            expected,
-        } in [
-            RefusedBuildCase {
-                endpoint: "",
-                timeout: 9,
-                expected: BuildError::Endpoint,
-            },
-            RefusedBuildCase {
-                endpoint: "http://collector:4317",
-                timeout: 0,
-                expected: BuildError::Timeout,
-            },
-            RefusedBuildCase {
-                endpoint: "",
-                timeout: 0,
-                expected: BuildError::Endpoint,
-            },
-        ] {
-            let cfg = OtlpConfig {
-                protocol,
-                endpoint: endpoint.into(),
-                timeout,
-            };
-            let errors = [
-                cfg.build_exporter().unwrap_err(),
-                cfg.build_log_exporter().unwrap_err(),
-            ];
-            for error in errors {
-                assert!(error == TelemetryError::Exporter(expected));
-            }
-        }
-    }
-}
-
-struct TransportCase {
+#[yare::parameterized(
+    grpc_span = { OtlpProtocol::Grpc, Protocol::Grpc, false },
+    grpc_log = { OtlpProtocol::Grpc, Protocol::Grpc, true },
+    http_span = { OtlpProtocol::HttpProtobuf, Protocol::HttpBinary, false },
+    http_log = { OtlpProtocol::HttpProtobuf, Protocol::HttpBinary, true },
+)]
+fn grpc_and_http_protobuf_configure_both_exporter_types(
     protocol: OtlpProtocol,
     expected: Protocol,
+    log_exporter: bool,
+) {
+    let cfg = OtlpConfig {
+        protocol,
+        endpoint: "http://collector:4317".into(),
+        timeout: 9,
+    };
+    let built = if log_exporter {
+        cfg.build_log_exporter().unwrap().built
+    } else {
+        cfg.build_exporter().unwrap().built
+    };
+    assert2::assert!(
+        built
+            == Built {
+                endpoint: cfg.endpoint.clone(),
+                timeout: 9,
+                protocol: expected
+            }
+    );
+    assert2::assert!(cfg.endpoint == "http://collector:4317");
 }
 
-struct RefusedBuildCase {
-    endpoint: &'static str,
+#[yare::parameterized(
+    grpc_empty_endpoint = { OtlpProtocol::Grpc, "", 9, BuildError::Endpoint },
+    grpc_timeout = { OtlpProtocol::Grpc, "http://collector:4317", 0, BuildError::Timeout },
+    grpc_both_invalid = { OtlpProtocol::Grpc, "", 0, BuildError::Endpoint },
+    http_empty_endpoint = { OtlpProtocol::HttpProtobuf, "", 9, BuildError::Endpoint },
+    http_timeout = { OtlpProtocol::HttpProtobuf, "http://collector:4317", 0, BuildError::Timeout },
+    http_both_invalid = { OtlpProtocol::HttpProtobuf, "", 0, BuildError::Endpoint },
+)]
+fn either_transport_propagates_the_sdk_error_through_both_methods(
+    protocol: OtlpProtocol,
+    endpoint: &str,
     timeout: u64,
     expected: BuildError,
+) {
+    let cfg = OtlpConfig {
+        protocol,
+        endpoint: endpoint.into(),
+        timeout,
+    };
+    assert2::assert!(cfg.build_exporter().unwrap_err() == TelemetryError::Exporter(expected));
+    assert2::assert!(cfg.build_log_exporter().unwrap_err() == TelemetryError::Exporter(expected));
 }

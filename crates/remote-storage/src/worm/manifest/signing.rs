@@ -117,8 +117,25 @@ mod tests {
         }
     }
 
-    #[test]
-    fn manifest_signature_round_trips_and_rejects_tampering() {
+    #[derive(Clone, Copy)]
+    enum SignatureCheck {
+        Authentic,
+        Body,
+        Sequence,
+        AnotherHead,
+        KeyId,
+        Unsigned,
+    }
+
+    #[yare::parameterized(
+        authentic = { SignatureCheck::Authentic },
+        tampered_body = { SignatureCheck::Body },
+        tampered_sequence = { SignatureCheck::Sequence },
+        signature_for_another_head = { SignatureCheck::AnotherHead },
+        tampered_key_id = { SignatureCheck::KeyId },
+        unsigned = { SignatureCheck::Unsigned },
+    )]
+    fn manifest_signature_round_trips_and_rejects_tampering(case: SignatureCheck) {
         let FreshSigner { signer, public_key } = fresh_signer(KEY_ID);
         let base = sample_body();
         let authentic = sign_manifest(base.clone(), &signer);
@@ -157,19 +174,15 @@ mod tests {
             signature: None,
         };
 
-        for (name, manifest, expected) in [
-            ("untampered", &reparsed, true),
-            ("tampered body", &tampered_body, false),
-            ("tampered seq", &tampered_seq, false),
-            ("signature over another head", &tampered_head, false),
-            ("tampered key id", &tampered_key_id, false),
-            ("unsigned", &unsigned, false),
-        ] {
-            check!(
-                verify_manifest_signature(manifest, &public_key) == expected,
-                "case {name}"
-            );
-        }
+        let (manifest, expected) = match case {
+            SignatureCheck::Authentic => (&reparsed, true),
+            SignatureCheck::Body => (&tampered_body, false),
+            SignatureCheck::Sequence => (&tampered_seq, false),
+            SignatureCheck::AnotherHead => (&tampered_head, false),
+            SignatureCheck::KeyId => (&tampered_key_id, false),
+            SignatureCheck::Unsigned => (&unsigned, false),
+        };
+        check!(verify_manifest_signature(manifest, &public_key) == expected);
 
         let FreshSigner {
             public_key: other_public_key,

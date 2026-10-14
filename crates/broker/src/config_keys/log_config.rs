@@ -324,32 +324,52 @@ mod tests {
         assert!(out.segment_size == mebibytes(1));
     }
 
-    #[test]
-    fn apply_preallocate_propagates() {
-        // A corrupt value (`yes`) leaves the base alone, as its neighbours do.
-        use krabka_log::SegmentAllocation::{OnWrite, Preallocate};
-        for (value, base_allocation, expected) in [
-            ("true", OnWrite, Preallocate),
-            ("TRUE", OnWrite, Preallocate),
-            ("false", Preallocate, OnWrite),
-            ("yes", Preallocate, Preallocate),
-            ("yes", OnWrite, OnWrite),
-        ] {
-            let mut o = BTreeMap::new();
-            o.insert(PREALLOCATE.into(), value.into());
-            let base = LogConfig {
-                segment_allocation: base_allocation,
+    #[yare::parameterized(
+        true_enables_preallocation = {
+            "true",
+            krabka_log::SegmentAllocation::OnWrite,
+            krabka_log::SegmentAllocation::Preallocate,
+        },
+        uppercase_true_enables_preallocation = {
+            "TRUE",
+            krabka_log::SegmentAllocation::OnWrite,
+            krabka_log::SegmentAllocation::Preallocate,
+        },
+        false_disables_preallocation = {
+            "false",
+            krabka_log::SegmentAllocation::Preallocate,
+            krabka_log::SegmentAllocation::OnWrite,
+        },
+        invalid_keeps_preallocation = {
+            "yes",
+            krabka_log::SegmentAllocation::Preallocate,
+            krabka_log::SegmentAllocation::Preallocate,
+        },
+        invalid_keeps_on_write = {
+            "yes",
+            krabka_log::SegmentAllocation::OnWrite,
+            krabka_log::SegmentAllocation::OnWrite,
+        },
+    )]
+    fn apply_preallocate_propagates(
+        value: &str,
+        base_allocation: krabka_log::SegmentAllocation,
+        expected: krabka_log::SegmentAllocation,
+    ) {
+        let mut o = BTreeMap::new();
+        o.insert(PREALLOCATE.into(), value.into());
+        let base = LogConfig {
+            segment_allocation: base_allocation,
+            ..LogConfig::default()
+        };
+        let out = apply_to_log_config(&o, &base);
+        assert2::assert!(
+            out == LogConfig {
+                segment_allocation: expected,
                 ..LogConfig::default()
-            };
-            let out = apply_to_log_config(&o, &base);
-            assert!(
-                out == LogConfig {
-                    segment_allocation: expected,
-                    ..LogConfig::default()
-                },
-                "preallocate={value} over base {base_allocation:?}"
-            );
-        }
+            },
+            "preallocate={value} over base {base_allocation:?}"
+        );
     }
 
     #[test]
@@ -371,8 +391,6 @@ mod tests {
         internal_segment_bytes = { INTERNAL_SEGMENT_BYTES, SizeField::Segment },
     )]
     fn corrupt_size_values_leave_the_base_alone(key: &str, field: SizeField) {
-        use assert2::assert;
-
         let base = LogConfig {
             max_message_size: bytes(4096),
             segment_size: bytes(8192),
@@ -386,7 +404,7 @@ mod tests {
                 SizeField::Message => out.max_message_size == base.max_message_size,
                 SizeField::Segment => out.segment_size == base.segment_size,
             };
-            assert!(retained, "{key}={corrupt}");
+            assert2::assert!(retained, "{key}={corrupt}");
         }
     }
 
@@ -408,17 +426,18 @@ mod tests {
         assert!(out.cleanup_policy == krabka_log::CleanupPolicy::Compact);
     }
 
-    #[test]
-    fn apply_cleanup_policy_compact_and_delete_propagates() {
-        for value in ["compact,delete", "delete,compact"] {
-            let mut overrides = BTreeMap::new();
-            overrides.insert(CLEANUP_POLICY.to_string(), value.to_string());
-            let out = apply_to_log_config(&overrides, &LogConfig::default());
-            assert!(
-                out.cleanup_policy == krabka_log::CleanupPolicy::CompactAndDelete,
-                "cleanup.policy={value}"
-            );
-        }
+    #[yare::parameterized(
+        compact_then_delete = { "compact,delete" },
+        delete_then_compact = { "delete,compact" },
+    )]
+    fn apply_cleanup_policy_compact_and_delete_propagates(value: &str) {
+        let mut overrides = BTreeMap::new();
+        overrides.insert(CLEANUP_POLICY.to_string(), value.to_string());
+        let out = apply_to_log_config(&overrides, &LogConfig::default());
+        assert2::assert!(
+            out.cleanup_policy == krabka_log::CleanupPolicy::CompactAndDelete,
+            "cleanup.policy={value}"
+        );
     }
 
     /// The keys Kafka's `TopicConfig` carries that krabka now maps onto the

@@ -72,13 +72,15 @@ mod tests {
             .unwrap();
         assert!(row.sig.params.inner.inputs.len() == 3);
         assert!(!row.sig.output.is_default());
-        for input in [
-            "",
-            "Reply => Topic;",
-            "Reply => Topic, Partition",
-            "Reply => Topic, Partition; extra",
-        ] {
-            assert!(expand(&input.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        missing_partition = { "Reply => Topic;" },
+        missing_semicolon = { "Reply => Topic, Partition" },
+        trailing = { "Reply => Topic, Partition; extra" },
+    )]
+    fn rejects_malformed_fixture_schema_inputs(input: &str) {
+        assert2::assert!(expand(&input.parse().unwrap()).is_err());
     }
 }

@@ -338,26 +338,39 @@ async fn diskless_restore_rejects_one_topic_name_with_multiple_ids() {
     check!(matches!(error, RestoreError::Integrity(_)));
 }
 
-#[tokio::test]
-async fn missing_or_corrupt_required_wal_fails_closed() {
-    for (object, corrupt) in [(false, false), (true, true)] {
-        let RestoreFixture {
-            archive,
-            target,
-            capture_path,
-        } = restore_fixture(object, corrupt);
-        let error = restore(&args(archive.path(), target.path(), &capture_path))
-            .await
-            .unwrap_err();
-        check!(matches!(
-            error,
-            RestoreError::Integrity { .. } | RestoreError::ObjectStore(_)
-        ));
-    }
+#[yare::parameterized(
+    missing = { false, false },
+    corrupt = { true, true },
+)]
+#[test_macro(tokio::test)]
+async fn missing_or_corrupt_required_wal_fails_closed(object: bool, corrupt: bool) {
+    let RestoreFixture {
+        archive,
+        target,
+        capture_path,
+    } = restore_fixture(object, corrupt);
+    let error = restore(&args(archive.path(), target.path(), &capture_path))
+        .await
+        .unwrap_err();
+    check!(matches!(
+        error,
+        RestoreError::Integrity { .. } | RestoreError::ObjectStore(_)
+    ));
 }
 
-#[tokio::test]
-async fn trusted_capture_accepts_only_its_key_head_state_and_wal_bytes() {
+struct TrustedCaptureSetup {
+    archive: tempfile::TempDir,
+    capture_path: std::path::PathBuf,
+    public_path: std::path::PathBuf,
+    rlmm_path: std::path::PathBuf,
+    capture: DisklessWalCapture,
+    wal_key: String,
+    wal: Vec<u8>,
+    head: String,
+    public_key: Vec<u8>,
+}
+
+fn trusted_capture_setup() -> TrustedCaptureSetup {
     let archive = tempfile::tempdir().unwrap();
     let capture_path = archive.path().join("capture.json");
     let public_path = archive.path().join("capture.pub");
@@ -376,7 +389,8 @@ async fn trusted_capture_accepts_only_its_key_head_state_and_wal_bytes() {
     let wal = std::fs::read(archive.path().join(&wal_key)).unwrap();
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
     let signer = FileEd25519Signer::from_pkcs8_bytes(pkcs8.as_ref(), "capture-key".into()).unwrap();
-    std::fs::write(&public_path, signer.public_key()).unwrap();
+    let public_key = signer.public_key().clone();
+    std::fs::write(&public_path, &public_key).unwrap();
     let head = capture
         .seal(
             vec![ObjectEntry {
@@ -393,6 +407,33 @@ async fn trusted_capture_accepts_only_its_key_head_state_and_wal_bytes() {
         .unwrap()
         .to_string();
     write_capture(&capture_path, &capture);
+
+    TrustedCaptureSetup {
+        archive,
+        capture_path,
+        public_path,
+        rlmm_path,
+        capture,
+        wal_key,
+        wal,
+        head,
+        public_key,
+    }
+}
+
+#[tokio::test]
+async fn trusted_capture_accepts_only_its_key_head_state_and_wal_bytes() {
+    let TrustedCaptureSetup {
+        archive,
+        capture_path,
+        public_path,
+        rlmm_path,
+        capture: _capture,
+        wal_key,
+        wal,
+        head,
+        public_key: _public_key,
+    } = trusted_capture_setup();
 
     let target = tempfile::tempdir().unwrap();
     let mut trusted = trusted_args(
@@ -458,42 +499,6 @@ async fn trusted_capture_accepts_only_its_key_head_state_and_wal_bytes() {
     let error = restore(&missing_classic).await.unwrap_err();
     check!(matches!(error, RestoreError::Authenticity { .. }));
 
-    for (name, changed, expected_head, key_bytes) in [
-        (
-            "changed state",
-            {
-                let mut changed = capture.clone();
-                changed.partitions[0].delete_floor = 0;
-                changed
-            },
-            head.clone(),
-            signer.public_key(),
-        ),
-        (
-            "wrong head",
-            capture.clone(),
-            "00".repeat(32),
-            signer.public_key(),
-        ),
-        ("untrusted key", capture.clone(), head.clone(), vec![0; 32]),
-    ] {
-        let target = tempfile::tempdir().unwrap();
-        let changed_path = archive.path().join(format!("{name}.json"));
-        let key_path = archive.path().join(format!("{name}.pub"));
-        write_capture(&changed_path, &changed);
-        std::fs::write(&key_path, key_bytes).unwrap();
-        let error = restore(&trusted_args(
-            archive.path(),
-            target.path(),
-            &changed_path,
-            &key_path,
-            &expected_head,
-        ))
-        .await
-        .unwrap_err();
-        check!(matches!(error, RestoreError::Authenticity { .. }), "{name}");
-    }
-
     let target = tempfile::tempdir().unwrap();
     let mut wal_tampered = wal;
     wal_tampered[10] ^= 1;
@@ -510,6 +515,56 @@ async fn trusted_capture_accepts_only_its_key_head_state_and_wal_bytes() {
     check!(matches!(error, RestoreError::Authenticity { .. }));
 }
 
+#[derive(Clone, Copy)]
+enum TrustedCaptureTampering {
+    ChangedState,
+    WrongHead,
+    UntrustedKey,
+}
+
+#[yare::parameterized(
+    changed_state = { "changed state", TrustedCaptureTampering::ChangedState },
+    wrong_head = { "wrong head", TrustedCaptureTampering::WrongHead },
+    untrusted_key = { "untrusted key", TrustedCaptureTampering::UntrustedKey },
+)]
+#[test_macro(tokio::test)]
+async fn trusted_capture_rejects_changed_state_head_and_key(
+    name: &'static str,
+    tampering: TrustedCaptureTampering,
+) {
+    let setup = trusted_capture_setup();
+    let (changed, expected_head, key_bytes) = match tampering {
+        TrustedCaptureTampering::ChangedState => {
+            let mut changed = setup.capture.clone();
+            changed.partitions[0].delete_floor = 0;
+            (changed, setup.head.clone(), setup.public_key.clone())
+        }
+        TrustedCaptureTampering::WrongHead => (
+            setup.capture.clone(),
+            "00".repeat(32),
+            setup.public_key.clone(),
+        ),
+        TrustedCaptureTampering::UntrustedKey => {
+            (setup.capture.clone(), setup.head.clone(), vec![0; 32])
+        }
+    };
+    let target = tempfile::tempdir().unwrap();
+    let changed_path = setup.archive.path().join(format!("{name}.json"));
+    let key_path = setup.archive.path().join(format!("{name}.pub"));
+    write_capture(&changed_path, &changed);
+    std::fs::write(&key_path, key_bytes).unwrap();
+    let error = restore(&trusted_args(
+        setup.archive.path(),
+        target.path(),
+        &changed_path,
+        &key_path,
+        &expected_head,
+    ))
+    .await
+    .unwrap_err();
+    check!(matches!(error, RestoreError::Authenticity { .. }), "{name}");
+}
+
 #[tokio::test]
 async fn dry_run_rejects_a_capture_that_selects_only_part_of_a_footer_run() {
     let UnwrittenFixture {
@@ -522,13 +577,11 @@ async fn dry_run_rejects_a_capture_that_selects_only_part_of_a_footer_run() {
     capture.partitions[0].ranges[0].entry.byte_len /= 2;
     capture.partitions[0].recovery_cutoff = 1;
     assert_dry_run_error(
-        DryRunErrorSetup::builder()
-            .archive(archive.path())
-            .target(target.path())
-            .capture_path(&capture_path)
-            .capture(&capture)
-            .expectation(DryRunExpectation::IntegrityOrRecords)
-            .build(),
+        archive.path(),
+        target.path(),
+        &capture_path,
+        &capture,
+        DryRunExpectation::IntegrityOrRecords,
     )
     .await;
 }
@@ -540,13 +593,11 @@ async fn dry_run_rejects_an_internal_batch_offset_gap() {
     let capture_path = archive.path().join("capture.json");
     let capture = fixture_with_second_base(archive.path(), true, false, 2);
     assert_dry_run_error(
-        DryRunErrorSetup::builder()
-            .archive(archive.path())
-            .target(target.path())
-            .capture_path(&capture_path)
-            .capture(&capture)
-            .expectation(DryRunExpectation::Integrity)
-            .build(),
+        archive.path(),
+        target.path(),
+        &capture_path,
+        &capture,
+        DryRunExpectation::Integrity,
     )
     .await;
 }
@@ -557,19 +608,16 @@ enum DryRunExpectation {
     IntegrityOrRecords,
 }
 
-#[derive(bon::Builder)]
-struct DryRunErrorSetup<'a> {
-    archive: &'a std::path::Path,
-    target: &'a std::path::Path,
-    capture_path: &'a std::path::Path,
-    capture: &'a DisklessWalCapture,
+async fn assert_dry_run_error(
+    archive: &std::path::Path,
+    target: &std::path::Path,
+    capture_path: &std::path::Path,
+    capture: &DisklessWalCapture,
     expectation: DryRunExpectation,
-}
-
-async fn assert_dry_run_error(setup: DryRunErrorSetup<'_>) {
-    write_capture(setup.capture_path, setup.capture);
-    let error = dry_run_error(setup.archive, setup.target, setup.capture_path).await;
-    match setup.expectation {
+) {
+    write_capture(capture_path, capture);
+    let error = dry_run_error(archive, target, capture_path).await;
+    match expectation {
         DryRunExpectation::Integrity => {
             check!(matches!(error, RestoreError::Integrity(_)));
         }

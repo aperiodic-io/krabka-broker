@@ -156,34 +156,26 @@ mod tests {
         assert2::check,
     };
 
-    #[test]
-    fn only_the_canonical_fixed_width_name_is_a_checkpoint() {
-        let cases = [
-            (
-                "00000000000000123456-0000000042.checkpoint",
-                Some(CheckpointId {
-                    end_offset: 123_456,
-                    epoch: 42,
-                }),
-            ),
-            (
-                "00000000000000000000-0000000000.checkpoint",
-                Some(CheckpointId {
-                    end_offset: 0,
-                    epoch: 0,
-                }),
-            ),
-            // Too few digits in either field: not a name the controller wrote.
-            ("123456-42.checkpoint", None),
-            ("00000000000000123456-42.checkpoint", None),
-            // Not a checkpoint at all.
-            ("snapshot", None),
-            ("high-watermark.checkpoint", None),
-            ("00000000000000123456-0000000042.checkpoint.tmp", None),
-        ];
-        for (name, expected) in cases {
-            check!(checkpoint_id(name) == expected, "for {name}");
-        }
+    #[yare::parameterized(
+        regular = {
+            "00000000000000123456-0000000042.checkpoint",
+            Some(CheckpointId { end_offset: 123_456, epoch: 42 }),
+        },
+        zero = {
+            "00000000000000000000-0000000000.checkpoint",
+            Some(CheckpointId { end_offset: 0, epoch: 0 }),
+        },
+        short_both_fields = { "123456-42.checkpoint", None },
+        short_epoch = { "00000000000000123456-42.checkpoint", None },
+        snapshot = { "snapshot", None },
+        high_watermark = { "high-watermark.checkpoint", None },
+        suffix = { "00000000000000123456-0000000042.checkpoint.tmp", None },
+    )]
+    fn only_the_canonical_fixed_width_name_is_a_checkpoint(
+        name: &str,
+        expected: Option<CheckpointId>,
+    ) {
+        check!(checkpoint_id(name) == expected, "for {name}");
     }
 
     #[test]
@@ -226,11 +218,12 @@ mod tests {
     fn the_controller_directory_wins_when_both_hold_the_same_id() {
         let log_dir = tempfile::tempdir().expect("log dir");
         let name = "00000000000000000042-0000000000.checkpoint";
-        for subdir in ["__cluster_metadata-0", "__cluster_metadata-0/observer"] {
-            let dir = log_dir.path().join(subdir);
-            std::fs::create_dir_all(&dir).expect("create a checkpoint dir");
-            std::fs::write(dir.join(name), b"bytes").expect("write a checkpoint");
-        }
+        let controller = log_dir.path().join("__cluster_metadata-0");
+        let observer = controller.join("observer");
+        std::fs::create_dir_all(&controller).expect("create the controller checkpoint dir");
+        std::fs::create_dir_all(&observer).expect("create the observer checkpoint dir");
+        std::fs::write(controller.join(name), b"bytes").expect("write a checkpoint");
+        std::fs::write(observer.join(name), b"bytes").expect("write a checkpoint");
 
         check!(
             newest_metadata_checkpoint(log_dir.path())

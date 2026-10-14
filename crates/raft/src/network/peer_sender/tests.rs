@@ -450,51 +450,48 @@ async fn fetch_server() -> FetchServer {
 /// the followers commit it only by fetching from that leader. Kafka's
 /// followers address the leader by its announced endpoints, which do not
 /// depend on the voter set.
-#[tokio::test]
-async fn a_peer_stays_reachable_after_it_leaves_the_voter_set() {
-    // (what it is, whether the new voter set still holds the peer)
-    let cases = [
-        ("a voter that stays in the set", true),
-        ("a voter that the new set removes", false),
-    ];
-    for (what, stays) in cases {
-        let FetchServer { addr, task: server } = fetch_server().await;
+#[yare::parameterized(
+    voter_stays_in_the_set = { true },
+    voter_is_removed_from_the_set = { false },
+)]
+#[test_macro(tokio::test)]
+async fn a_peer_stays_reachable_after_voter_membership_changes(stays: bool) {
+    let FetchServer { addr, task: server } = fetch_server().await;
 
-        let host = addr.ip().to_string();
-        let leader = voter_with_controller(NodeId(1), &host, addr.port());
-        // The other voter's port is never dialed.
-        let follower = voter_with_controller(NodeId(2), &host, 1);
-        let sender = RealPeerSender::new(
-            VoterSet::from_voters([leader.clone(), follower.clone()]),
-            &[],
-            "raft-client".into(),
-            Arc::new(PlaintextDialer),
-            krabka_client_core::ConnectionDispatchQueueCapacity::default(),
-            krabka_client_core::ClientFrameMax::default(),
-        );
-        let next = if stays {
-            VoterSet::from_voters([leader, follower])
-        } else {
-            VoterSet::from_voters([follower])
-        };
-        sender.update_voters(&next);
+    let host = addr.ip().to_string();
+    let leader = voter_with_controller(NodeId(1), &host, addr.port());
+    // The other voter's port is never dialed.
+    let follower = voter_with_controller(NodeId(2), &host, 1);
+    let sender = RealPeerSender::new(
+        VoterSet::from_voters([leader.clone(), follower.clone()]),
+        &[],
+        "raft-client".into(),
+        Arc::new(PlaintextDialer),
+        krabka_client_core::ConnectionDispatchQueueCapacity::default(),
+        krabka_client_core::ClientFrameMax::default(),
+    );
+    let next = if stays {
+        VoterSet::from_voters([leader, follower])
+    } else {
+        VoterSet::from_voters([follower])
+    };
+    sender.update_voters(&next);
 
-        let response = sender
-            .send(NodeId(1), api_key::FETCH, Bytes::from_static(b"fetch-body"))
-            .await
-            .map_err(|error| format!("{error:?}"));
-        if response.is_ok() {
-            server.await.expect("fake peer");
-        } else {
-            // No dial reached the fake peer, so it still waits to accept.
-            server.abort();
-        }
-        assert2::check!(
-            response == Ok(Bytes::from_static(b"fetch-response")),
-            "{what}"
-        );
+    let response = sender
+        .send(NodeId(1), api_key::FETCH, Bytes::from_static(b"fetch-body"))
+        .await
+        .map_err(|error| format!("{error:?}"));
+    if response.is_ok() {
+        server.await.expect("fake peer");
+    } else {
+        // No dial reached the fake peer, so it still waits to accept.
+        server.abort();
     }
+    assert2::check!(response == Ok(Bytes::from_static(b"fetch-response")));
+}
 
+#[tokio::test]
+async fn a_peer_becomes_reachable_after_a_voter_set_is_populated_from_empty() {
     // A node that no voter set and no bootstrap server ever named has no
     // address.
     let empty_sender = || {

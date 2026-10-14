@@ -1174,68 +1174,74 @@ mod tests {
 
     fn append_distinct_keys(log: &mut Log) { append_keyed_samples(log, 6, |i| format!("k{i}")); }
 
-    #[test]
-    fn compact_refuses_a_compressed_record_above_the_limit_and_leaves_the_log_alone() {
-        use krabka_compression::CompressionType;
+    #[yare::parameterized(
+        compressed_oversized = {
+            "compressed, oversized",
+            krabka_compression::CompressionType::Gzip,
+            Some(bytes(100)),
+            true,
+        },
+        compressed_without_limit = {
+            "compressed, no limit",
+            krabka_compression::CompressionType::Gzip,
+            None,
+            false,
+        },
+        uncompressed_oversized = {
+            "uncompressed, oversized",
+            krabka_compression::CompressionType::None,
+            Some(bytes(100)),
+            false,
+        },
+    )]
+    fn compact_refuses_a_compressed_record_above_the_limit_and_leaves_the_log_alone(
+        name: &'static str,
+        codec: krabka_compression::CompressionType,
+        limit: Option<ByteSize>,
+        refuses: bool,
+    ) {
+        let dir = tempdir().unwrap();
+        let cfg = LogConfig {
+            cleanup_policy: CleanupPolicy::Compact,
+            max_decompressed_record: limit,
+            ..tiny_segments()
+        };
+        let mut log = Log::open(dir.path(), cfg).unwrap();
+        append_compressed_versions(&mut log, codec);
+        let files = |log: &Log| -> Vec<SegmentFile> {
+            log.segments
+                .iter()
+                .map(|segment| {
+                    let base = segment.base_offset().0;
+                    SegmentFile {
+                        base,
+                        contents: std::fs::read(name::log_path(dir.path(), base)).unwrap(),
+                    }
+                })
+                .collect()
+        };
+        let before = files(&log);
 
-        for (name, codec, limit, refuses) in [
-            (
-                "compressed, oversized",
-                CompressionType::Gzip,
-                Some(bytes(100)),
-                true,
-            ),
-            ("compressed, no limit", CompressionType::Gzip, None, false),
-            (
-                "uncompressed, oversized",
-                CompressionType::None,
-                Some(bytes(100)),
-                false,
-            ),
-        ] {
-            let dir = tempdir().unwrap();
-            let cfg = LogConfig {
-                cleanup_policy: CleanupPolicy::Compact,
-                max_decompressed_record: limit,
-                ..tiny_segments()
-            };
-            let mut log = Log::open(dir.path(), cfg).unwrap();
-            append_compressed_versions(&mut log, codec);
-            let files = |log: &Log| -> Vec<SegmentFile> {
-                log.segments
-                    .iter()
-                    .map(|segment| {
-                        let base = segment.base_offset().0;
-                        SegmentFile {
-                            base,
-                            contents: std::fs::read(name::log_path(dir.path(), base)).unwrap(),
-                        }
-                    })
-                    .collect()
-            };
-            let before = files(&log);
+        let result = log.compact(&compaction_ctx());
 
-            let result = log.compact(&compaction_ctx());
-
-            if refuses {
-                let error = result.unwrap_err();
-                assert2::check!(
-                    matches!(error, LogError::RecordTooLarge { limit: 100, .. }),
-                    "{name}: {error}"
-                );
-                assert2::check!(files(&log) == before, "{name}");
-            } else {
-                result.unwrap();
-                let out = log.read(Offset(0), mebibytes(1)).unwrap();
-                let k1: Vec<&[u8]> = out
-                    .batches
-                    .iter()
-                    .flat_map(|batch| batch.records.iter())
-                    .filter(|record| record.key.as_deref() == Some(b"k1".as_slice()))
-                    .filter_map(|record| record.value.as_deref())
-                    .collect();
-                assert2::check!(k1 == [b"new".as_slice()], "{name}");
-            }
+        if refuses {
+            let error = result.unwrap_err();
+            assert2::check!(
+                matches!(error, LogError::RecordTooLarge { limit: 100, .. }),
+                "{name}: {error}"
+            );
+            assert2::check!(files(&log) == before, "{name}");
+        } else {
+            result.unwrap();
+            let out = log.read(Offset(0), mebibytes(1)).unwrap();
+            let k1: Vec<&[u8]> = out
+                .batches
+                .iter()
+                .flat_map(|batch| batch.records.iter())
+                .filter(|record| record.key.as_deref() == Some(b"k1".as_slice()))
+                .filter_map(|record| record.value.as_deref())
+                .collect();
+            assert2::check!(k1 == [b"new".as_slice()], "{name}");
         }
     }
 
@@ -1244,37 +1250,39 @@ mod tests {
     /// record above `max.decompressed.message.bytes` refuses touches nothing on
     /// disk, and a refusal that dropped the watermark would send every later
     /// sweep of the partition through a full delivery walk.
-    #[test]
-    fn only_a_pass_that_rewrites_resets_the_delivery_watermark() {
+    #[yare::parameterized(
+        refused = { "refused", Some(bytes(100)), true },
+        rewritten = { "rewritten", None, false },
+    )]
+    fn only_a_pass_that_rewrites_resets_the_delivery_watermark(
+        name: &'static str,
+        limit: Option<ByteSize>,
+        refuses: bool,
+    ) {
         use krabka_compression::CompressionType;
 
-        for (name, limit, refuses) in [
-            ("refused", Some(bytes(100)), true),
-            ("rewritten", None, false),
-        ] {
-            let dir = tempdir().unwrap();
-            let cfg = LogConfig {
-                cleanup_policy: CleanupPolicy::Compact,
-                delivery_policy: DeliveryPolicy::Scheduled,
-                max_decompressed_record: limit,
-                ..tiny_segments()
-            };
-            let mut log = Log::open(dir.path(), cfg).unwrap();
-            append_compressed_versions(&mut log, CompressionType::Gzip);
-            // Every batch is stamped 0, long past, so the walk reads them all.
-            log.advance_delivery_watermark(1_000_000);
-            assert2::assert!(log.delivery_watermark() == log.log_end_offset(), "{name}");
+        let dir = tempdir().unwrap();
+        let cfg = LogConfig {
+            cleanup_policy: CleanupPolicy::Compact,
+            delivery_policy: DeliveryPolicy::Scheduled,
+            max_decompressed_record: limit,
+            ..tiny_segments()
+        };
+        let mut log = Log::open(dir.path(), cfg).unwrap();
+        append_compressed_versions(&mut log, CompressionType::Gzip);
+        // Every batch is stamped 0, long past, so the walk reads them all.
+        log.advance_delivery_watermark(1_000_000);
+        assert2::assert!(log.delivery_watermark() == log.log_end_offset(), "{name}");
 
-            let result = log.compact(&compaction_ctx());
+        let result = log.compact(&compaction_ctx());
 
-            assert2::check!(result.is_err() == refuses, "{name}");
-            let expected = if refuses {
-                log.log_end_offset()
-            } else {
-                log.log_start_offset()
-            };
-            assert2::check!(log.delivery_watermark() == expected, "{name}");
-        }
+        assert2::check!(result.is_err() == refuses, "{name}");
+        let expected = if refuses {
+            log.log_end_offset()
+        } else {
+            log.log_start_offset()
+        };
+        assert2::check!(log.delivery_watermark() == expected, "{name}");
     }
 
     #[test]

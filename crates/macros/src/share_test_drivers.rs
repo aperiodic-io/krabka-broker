@@ -94,16 +94,20 @@ mod tests {
         assert2::assert,
     };
 
-    #[test]
-    fn acquisition_closes_the_policy_to_initial_and_incremental_sessions() {
-        for mode in ["Initial", "Incremental"] {
-            let output =
-                compact(&acquisition(&format!("acquire, {mode}").parse().unwrap()).unwrap());
-            assert!(output.contains(&format!("FetchSessionMode::{mode}")));
-        }
-        for input in ["", "acquire", "acquire, Other", "acquire, Initial, extra"] {
-            assert!(acquisition(&input.parse().unwrap()).is_err());
-        }
+    #[yare::parameterized(initial = { "Initial" }, incremental = { "Incremental" })]
+    fn acquisition_closes_the_policy_to_initial_and_incremental_sessions(mode: &str) {
+        let output = compact(&acquisition(&format!("acquire, {mode}").parse().unwrap()).unwrap());
+        assert2::assert!(output.contains(&format!("FetchSessionMode::{mode}")));
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        missing_mode = { "acquire" },
+        other_mode = { "acquire, Other" },
+        trailing = { "acquire, Initial, extra" },
+    )]
+    fn acquisition_rejects_invalid_inputs(input: &str) {
+        assert2::assert!(acquisition(&input.parse().unwrap()).is_err());
     }
 
     #[test]
@@ -132,13 +136,15 @@ mod tests {
                 .unwrap()
                 > output.find("__share_readiness.await").unwrap()
         );
-        for input in [
-            "",
-            "initialize, join, |a,b,c,d,e| []",
-            "initialize, join, |a,b,c,d,e| {}",
-            "initialize, join, |a,b,c,d,e| [ready()] extra",
-        ] {
-            assert!(consumption_template(&input.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        empty_brackets = { "initialize, join, |a,b,c,d,e| []" },
+        empty_braces = { "initialize, join, |a,b,c,d,e| {}" },
+        trailing = { "initialize, join, |a,b,c,d,e| [ready()] extra" },
+    )]
+    fn consumption_template_rejects_invalid_inputs(input: &str) {
+        assert2::assert!(consumption_template(&input.parse().unwrap()).is_err());
     }
 }

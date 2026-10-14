@@ -11,7 +11,7 @@ use {
         fixtures::{BASE_TIMESTAMP, plain_batch, timestamped_record, value_record},
         harness::{reopen, restore_args, run_restore},
     },
-    assert2::{assert, check},
+    assert2::check,
     krabka_ids::Offset,
     krabka_log::LogConfig,
     krabka_protocol::records::RecordBatch,
@@ -67,28 +67,29 @@ async fn to_offset_filters_records_past_a_bound_inside_one_batch() {
 // Scenario 1b: a bound naming a partition the archive lacks is rejected.
 // ---------------------------------------------------------------------
 
-#[tokio::test]
-async fn bounds_on_absent_partitions_are_rejected() {
-    for (extra, expected_topic, expected_partition) in [
-        (&["--to-offset", "orders:3=100"][..], "orders", 3),
-        // Restricting the scan to absent payments must report UnknownPartition
-        // before EmptyArchive, so the error still names the mistaken bound.
-        (
-            &["--topic", "payments", "--to-offset", "payments:0=10"][..],
-            "payments",
-            0,
-        ),
-    ] {
-        let mut fixture = vec![plain_batch(vec![value_record(0, "v0")])];
-        let archive = build_archive("orders", 0, &mut fixture);
-        let target = tempfile::tempdir().expect("target tempdir");
-        let target_dir = target.path().join("restored");
-        let args = restore_args(archive.path(), &target_dir, extra);
-        let error = restore(&args).await.expect_err("unknown partition");
-        assert!(let RestoreError::UnknownPartition { topic, partition } = error);
-        check!(topic == expected_topic);
-        check!(partition == expected_partition);
-    }
+#[yare::parameterized(
+    orders = { &["--to-offset", "orders:3=100"][..], "orders", 3 },
+    selected_missing_topic = {
+        &["--topic", "payments", "--to-offset", "payments:0=10"][..],
+        "payments",
+        0,
+    },
+)]
+#[test_macro(tokio::test)]
+async fn bounds_on_absent_partitions_are_rejected(
+    extra: &[&str],
+    expected_topic: &str,
+    expected_partition: i32,
+) {
+    let mut fixture = vec![plain_batch(vec![value_record(0, "v0")])];
+    let archive = build_archive("orders", 0, &mut fixture);
+    let target = tempfile::tempdir().expect("target tempdir");
+    let target_dir = target.path().join("restored");
+    let args = restore_args(archive.path(), &target_dir, extra);
+    let error = restore(&args).await.expect_err("unknown partition");
+    assert2::assert!(let RestoreError::UnknownPartition { topic, partition } = error);
+    check!(topic == expected_topic);
+    check!(partition == expected_partition);
 }
 
 #[tokio::test]

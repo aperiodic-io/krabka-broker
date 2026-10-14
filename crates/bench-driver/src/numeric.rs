@@ -68,15 +68,13 @@ mod tests {
         check!(event_rate(5, secs(0)) == Frequency::ZERO);
     }
 
-    #[test]
-    fn quantities_count_themselves_in_a_named_unit() {
-        for (counted, want) in [
-            (mebibytes_f64(mebibytes(300)), 300.0),
-            (mebibytes_f64(kibibytes(512)), 0.5),
-            (millis_f64(secs(2)), 2000.0),
-            (millis_f64(micros(1500)), 1.5),
-        ] {
-            check!((counted - want).abs() < f64::EPSILON);
-        }
+    #[yare::parameterized(
+        full_mebibytes = { mebibytes_f64(mebibytes(300)), 300.0 },
+        kibibytes_as_fractional_mebibytes = { mebibytes_f64(kibibytes(512)), 0.5 },
+        seconds_as_milliseconds = { millis_f64(secs(2)), 2000.0 },
+        microseconds_as_fractional_milliseconds = { millis_f64(micros(1500)), 1.5 },
+    )]
+    fn quantities_count_themselves_in_a_named_unit(counted: f64, want: f64) {
+        check!((counted - want).abs() < f64::EPSILON);
     }
 }

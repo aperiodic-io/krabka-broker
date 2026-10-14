@@ -22,7 +22,7 @@ use {
             handle_offset_moved_to_tiered_storage, handle_offset_out_of_range,
         },
     },
-    crate::{codes, partition::Partition},
+    crate::{codes, fetch_session::FetchPartitionKey, partition::Partition},
     bytes::Buf as _,
     krabka_ids::PartitionIndex,
     krabka_log::{Offset, VerbatimBatch},
@@ -171,13 +171,7 @@ pub(super) async fn handle_partition_response(
                     diverging_epoch_truncation_target(&part, &part_resp.diverging_epoch).0;
                 match part.truncate_to(Offset(end_offset)).await {
                     Ok(()) => {
-                        // Drop idempotent-producer dedup entries for the
-                        // truncated tail, or a retried batch deduplicates
-                        // against an offset the log no longer holds and its
-                        // acks=all HW gate stalls forever (failover stall).
-                        cfg.producer_state
-                            .truncate(&cfg.topic, cfg.partition, end_offset)
-                            .await;
+                        super::truncate_producer_state(cfg, end_offset).await;
                         info!(
                             topic = %cfg.topic,
                             partition = cfg.partition.get(),
@@ -400,19 +394,8 @@ pub(super) struct RoundEntry {
     pub(super) request_leader_epoch: i32,
 }
 
-/// A partition addressed by its topic id.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct IdPartition {
-    topic_id: WireUuid,
-    partition: i32,
-}
-
-/// A partition addressed by its topic name.
-#[derive(PartialEq, Eq, Hash)]
-struct NamedPartition {
-    topic: String,
-    partition: i32,
-}
+type IdPartition = FetchPartitionKey<WireUuid>;
+type NamedPartition = FetchPartitionKey<String>;
 
 /// Where a partition's row sits in one response.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -441,8 +424,8 @@ impl FollowedIndex {
         };
         for cfg in followed.values() {
             out.by_id.insert(
-                IdPartition {
-                    topic_id: cfg.topic_id,
+                FetchPartitionKey {
+                    topic: cfg.topic_id,
                     partition: cfg.partition.get(),
                 },
                 Arc::clone(cfg),
@@ -458,8 +441,8 @@ impl FollowedIndex {
     fn config(&self, topic: &FetchableTopicResponse, partition: i32) -> Option<Arc<Config>> {
         let by_id = (topic.topic_id != WireUuid::ZERO)
             .then(|| {
-                self.by_id.get(&IdPartition {
-                    topic_id: topic.topic_id,
+                self.by_id.get(&FetchPartitionKey {
+                    topic: topic.topic_id,
                     partition,
                 })
             })
@@ -534,6 +517,17 @@ struct ResponseIndex {
     by_name: std::collections::HashMap<NamedPartition, Option<RowLocation>>,
 }
 
+fn index_response_row<K: Eq + std::hash::Hash>(
+    index: &mut std::collections::HashMap<K, Option<RowLocation>>,
+    key: K,
+    at: RowLocation,
+) {
+    index
+        .entry(key)
+        .and_modify(|slot| *slot = None)
+        .or_insert(Some(at));
+}
+
 impl ResponseIndex {
     fn of(response: &FetchResponse) -> Self {
         let mut index = Self::default();
@@ -544,24 +538,24 @@ impl ResponseIndex {
                     partition_index,
                 };
                 if topic.topic_id != WireUuid::ZERO {
-                    index
-                        .by_id
-                        .entry(IdPartition {
-                            topic_id: topic.topic_id,
+                    index_response_row(
+                        &mut index.by_id,
+                        FetchPartitionKey {
+                            topic: topic.topic_id,
                             partition: partition.partition_index,
-                        })
-                        .and_modify(|slot| *slot = None)
-                        .or_insert(Some(at));
+                        },
+                        at,
+                    );
                 }
                 if !topic.topic.is_empty() {
-                    index
-                        .by_name
-                        .entry(NamedPartition {
+                    index_response_row(
+                        &mut index.by_name,
+                        FetchPartitionKey {
                             topic: topic.topic.clone(),
                             partition: partition.partition_index,
-                        })
-                        .and_modify(|slot| *slot = None)
-                        .or_insert(Some(at));
+                        },
+                        at,
+                    );
                 }
             }
         }
@@ -573,13 +567,13 @@ impl ResponseIndex {
     fn locate(&self, response: &FetchResponse, cfg: &Config) -> Option<RowLocation> {
         let by_id = (cfg.topic_id != WireUuid::ZERO)
             .then(|| {
-                self.by_id.get(&IdPartition {
-                    topic_id: cfg.topic_id,
+                self.by_id.get(&FetchPartitionKey {
+                    topic: cfg.topic_id,
                     partition: cfg.partition.get(),
                 })
             })
             .flatten();
-        let by_name = self.by_name.get(&NamedPartition {
+        let by_name = self.by_name.get(&FetchPartitionKey {
             topic: cfg.topic.to_string(),
             partition: cfg.partition.get(),
         });
@@ -686,6 +680,24 @@ mod tests {
         }
     }
 
+    fn diverging_response(epoch: i32, end_offset: i64) -> FetchResponse {
+        fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
+            partition_index: PARTITION,
+            error_code: codes::NONE,
+            diverging_epoch: EpochEndOffset {
+                epoch,
+                end_offset,
+                ..EpochEndOffset::default()
+            },
+            ..PartitionData::default()
+        })
+    }
+
+    async fn assert_backoff(response: FetchResponse, cfg: &Config) {
+        let action = handle_response(response, cfg, cfg.leader_epoch.0).await;
+        assert!(action == RowAction::Backoff(secs(37)));
+    }
+
     /// A row that wants a backoff says so and returns; the sleep is the
     /// fetcher's, because a sleep taken here would hold back every other
     /// partition sharing the round.
@@ -700,9 +712,7 @@ mod tests {
         );
 
         let started = tokio::time::Instant::now();
-        let action = handle_response(response, &cfg, cfg.leader_epoch.0).await;
-
-        assert!(action == RowAction::Backoff(secs(37)));
+        assert_backoff(response, &cfg).await;
         assert!(
             started.elapsed() == Duration::ZERO,
             "the row must not sleep on behalf of the round"
@@ -723,31 +733,24 @@ mod tests {
             partition_response(PARTITION, codes::UNKNOWN_LEADER_EPOCH),
         );
 
-        let action = handle_response(response, &cfg, cfg.leader_epoch.0).await;
-
-        assert!(action == RowAction::Backoff(secs(37)));
+        assert_backoff(response, &cfg).await;
         assert!(listener.accept().is_err(), "unexpected epoch lookup");
     }
 
-    #[tokio::test]
-    async fn handle_response_matches_fetch_topic_by_name() {
+    #[yare::parameterized(
+        by_name = { TOPIC, WireUuid::ZERO },
+        by_id = { "", WIRE_TOPIC_ID },
+    )]
+    #[test_macro(tokio::test)]
+    async fn handle_response_matches_fetch_topic_identity(topic: &'static str, topic_id: WireUuid) {
         let (cfg, _log_dir) = test_config(image_with_leader(LEADER_ID));
         let resp = fetch_response(
-            TOPIC,
-            WireUuid::ZERO,
+            topic,
+            topic_id,
             partition_response(PARTITION, codes::NOT_LEADER_OR_FOLLOWER),
         );
 
-        assert!(handle_response(resp, &cfg, cfg.leader_epoch.0).await == RowAction::Drop);
-    }
-
-    #[tokio::test]
-    async fn handle_response_matches_fetch_topic_by_topic_id() {
-        let (cfg, _log_dir) = test_config(image_with_leader(LEADER_ID));
-        let part_resp = partition_response(PARTITION, codes::NOT_LEADER_OR_FOLLOWER);
-        let resp = fetch_response("", WIRE_TOPIC_ID, part_resp);
-
-        assert!(handle_response(resp, &cfg, cfg.leader_epoch.0).await == RowAction::Drop);
+        assert2::assert!(handle_response(resp, &cfg, cfg.leader_epoch.0).await == RowAction::Drop);
     }
 
     #[tokio::test]
@@ -821,16 +824,7 @@ mod tests {
         part.replicate_batch(one_record_batch(0)).await.unwrap();
         assert!(part.log_end_offset() == Offset(1));
 
-        let resp = fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
-            partition_index: PARTITION,
-            error_code: codes::NONE,
-            diverging_epoch: EpochEndOffset {
-                epoch: cfg.leader_epoch.0,
-                end_offset: 0,
-                ..EpochEndOffset::default()
-            },
-            ..PartitionData::default()
-        });
+        let resp = diverging_response(cfg.leader_epoch.0, 0);
 
         assert!(handle_response(resp, &cfg, cfg.leader_epoch.0 - 1).await == RowAction::Drop);
         assert!(part.log_end_offset() == Offset(1));
@@ -864,6 +858,16 @@ mod tests {
             /// The `(epoch, start offset)` entries left in the epoch history.
             expected_epochs: &'static [(i32, i64)],
         }
+        const FOLLOWER_RUNS_4_THEN_6: &[Run] = &[
+            Run {
+                leader_epoch: 4,
+                count: 10,
+            },
+            Run {
+                leader_epoch: 6,
+                count: 5,
+            },
+        ];
         let case = |name, runs, diverging, expected_end, expected_epochs| Case {
             name,
             runs,
@@ -877,16 +881,7 @@ mod tests {
                 // it does not know epoch 5, so it keeps only what epoch 4
                 // ended with, not the leader's end for epoch 5.
                 "two elections: the follower does not know the leader's epoch",
-                &[
-                    Run {
-                        leader_epoch: 4,
-                        count: 10,
-                    },
-                    Run {
-                        leader_epoch: 6,
-                        count: 5,
-                    },
-                ],
+                FOLLOWER_RUNS_4_THEN_6,
                 Diverging {
                     epoch: 5,
                     end_offset: 12,
@@ -931,16 +926,7 @@ mod tests {
             ),
             case(
                 "a known epoch that the leader ended later than the follower",
-                &[
-                    Run {
-                        leader_epoch: 4,
-                        count: 10,
-                    },
-                    Run {
-                        leader_epoch: 6,
-                        count: 5,
-                    },
-                ],
+                FOLLOWER_RUNS_4_THEN_6,
                 Diverging {
                     epoch: 4,
                     end_offset: 12,
@@ -1002,16 +988,7 @@ mod tests {
                     part.log.lock().unwrap().append(&mut batch).unwrap();
                 }
             }
-            let resp = fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
-                partition_index: PARTITION,
-                error_code: codes::NONE,
-                diverging_epoch: EpochEndOffset {
-                    epoch,
-                    end_offset,
-                    ..EpochEndOffset::default()
-                },
-                ..PartitionData::default()
-            });
+            let resp = diverging_response(epoch, end_offset);
 
             let action = handle_response(resp, &cfg, cfg.leader_epoch.0).await;
 
@@ -1199,16 +1176,7 @@ mod tests {
     #[tokio::test]
     async fn handle_response_stops_on_diverging_epoch_after_local_promotion() {
         let (cfg, _log_dir) = test_config(image_with_leader(NODE_ID));
-        let resp = fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
-            partition_index: PARTITION,
-            error_code: codes::NONE,
-            diverging_epoch: EpochEndOffset {
-                epoch: 4,
-                end_offset: 0,
-                ..EpochEndOffset::default()
-            },
-            ..PartitionData::default()
-        });
+        let resp = diverging_response(4, 0);
 
         assert!(handle_response(resp, &cfg, cfg.leader_epoch.0).await == RowAction::Drop);
     }

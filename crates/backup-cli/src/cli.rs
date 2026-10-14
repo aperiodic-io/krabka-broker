@@ -176,21 +176,24 @@ mod tests {
         check!(archive.prefix == Some("prod/".to_owned()));
     }
 
-    #[test]
-    fn every_subcommand_shows_the_archive_flags_under_one_heading() {
+    #[yare::parameterized(
+        capture = { "capture" },
+        list = { "list" },
+        verify = { "verify" },
+        restore_offsets = { "restore-offsets" },
+    )]
+    fn every_subcommand_shows_the_archive_flags_under_one_heading(name: &str) {
         use clap::CommandFactory as _;
 
-        let mut command = Cli::command();
-        for name in ["capture", "list", "verify", "restore-offsets"] {
-            let help = command
-                .find_subcommand_mut(name)
-                .expect("subcommand")
-                .render_long_help()
-                .to_string();
-            let heading = help.find("\nArchive:\n").expect("an Archive heading");
-            check!(help[heading..].contains("--archive-local"), "{name}");
-            check!(help[heading..].contains("--archive-prefix"), "{name}");
-        }
+        let help = Cli::command()
+            .find_subcommand(name)
+            .expect("subcommand")
+            .clone()
+            .render_long_help()
+            .to_string();
+        let heading = help.find("\nArchive:\n").expect("an Archive heading");
+        check!(help[heading..].contains("--archive-local"), "{name}");
+        check!(help[heading..].contains("--archive-prefix"), "{name}");
     }
 
     #[test]

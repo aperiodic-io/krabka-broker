@@ -39,7 +39,7 @@ mod support;
 use {
     assert2::assert,
     krabka_broker::{Broker, BrokerConfig, BrokerHandle, config::ListenerSpec},
-    krabka_security::{ListenerProtocol, SaslMechanism, gssapi::DEFAULT_GSSAPI_MAX_TIME_SKEW},
+    krabka_security::{ListenerProtocol, SaslMechanism},
     std::{
         io::Write,
         path::PathBuf,
@@ -113,15 +113,10 @@ async fn start_host_gssapi_broker() -> HostGssapiBroker {
     ];
     cfg.inter_broker_listener_name = "INTERNAL".to_string();
     cfg.enabled_sasl_mechanisms = vec![SaslMechanism::Gssapi];
-    cfg.gssapi = Some(krabka_broker::GssapiConfig {
-        keytab_path: kdc_fixtures().join("kafka.keytab"),
-        service_name: "kafka".to_string(),
-        // DEFAULT maps alice@CRABKA.TEST → "alice".
-        principal_to_local_rules: vec![krabka_broker::KerberosRule::Default],
-        realm: Some("CRABKA.TEST".to_string()),
-        kdc: Some(kdc_url),
-        max_time_skew: DEFAULT_GSSAPI_MAX_TIME_SKEW,
-    });
+    cfg.gssapi = Some(support::gssapi::broker_config(
+        kdc_fixtures().join("kafka.keytab"),
+        kdc_url,
+    ));
 
     let handle = Broker::start(cfg).await.expect("start gssapi broker");
     eprintln!("KRABKA[test] gssapi broker started listen={LISTEN} advertised={BOOTSTRAP}");

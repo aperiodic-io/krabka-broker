@@ -186,44 +186,45 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn group_config_takes_every_share_offset_reset_strategy_kafka_accepts() {
+    #[yare::parameterized(
+        latest = { "latest", codes::NONE },
+        earliest = { "earliest", codes::NONE },
+        by_duration = { "by_duration:PT1H", codes::NONE },
+        negative_duration = { "by_duration:-PT1H", codes::INVALID_CONFIG },
+        missing_duration = { "by_duration:", codes::INVALID_CONFIG },
+        unknown_strategy = { "none", codes::INVALID_CONFIG },
+    )]
+    fn group_config_takes_every_share_offset_reset_strategy_kafka_accepts(
+        value: &str,
+        want_code: i16,
+    ) {
         // `ShareGroupAutoOffsetResetStrategy` accepts `latest`, `earliest`,
         // and `by_duration:<ISO-8601 duration>`, and refuses anything else.
-        for (value, want_code) in [
-            ("latest", codes::NONE),
-            ("earliest", codes::NONE),
-            ("by_duration:PT1H", codes::NONE),
-            ("by_duration:-PT1H", codes::INVALID_CONFIG),
-            ("by_duration:", codes::INVALID_CONFIG),
-            ("none", codes::INVALID_CONFIG),
-        ] {
-            let resource =
-                make_scoped_resource(RESOURCE_TYPE_GROUP, "share-workers", vec![make_set_cfg(
-                    KEY_SHARE_AUTO_OFFSET_RESET,
-                    value,
-                )]);
-            let Handled {
-                response: out,
-                records,
-            } = drive(&resource, UnstableApiVersions::Enabled);
-            assert!(
-                out.error_code == want_code,
+        let resource =
+            make_scoped_resource(RESOURCE_TYPE_GROUP, "share-workers", vec![make_set_cfg(
+                KEY_SHARE_AUTO_OFFSET_RESET,
+                value,
+            )]);
+        let Handled {
+            response: out,
+            records,
+        } = drive(&resource, UnstableApiVersions::Enabled);
+        assert2::assert!(
+            out.error_code == want_code,
+            "{KEY_SHARE_AUTO_OFFSET_RESET}={value}"
+        );
+        if want_code == codes::NONE {
+            assert2::assert!(
+                matches!(
+                    records.as_slice(),
+                    [MetadataRecord::V1GroupConfig(record)]
+                        if record.configs.get(KEY_SHARE_AUTO_OFFSET_RESET).map(String::as_str)
+                            == Some(value)
+                ),
                 "{KEY_SHARE_AUTO_OFFSET_RESET}={value}"
             );
-            if want_code == codes::NONE {
-                assert!(
-                    matches!(
-                        records.as_slice(),
-                        [MetadataRecord::V1GroupConfig(record)]
-                            if record.configs.get(KEY_SHARE_AUTO_OFFSET_RESET).map(String::as_str)
-                                == Some(value)
-                    ),
-                    "{KEY_SHARE_AUTO_OFFSET_RESET}={value}"
-                );
-            } else {
-                assert!(records.is_empty(), "{KEY_SHARE_AUTO_OFFSET_RESET}={value}");
-            }
+        } else {
+            assert2::assert!(records.is_empty(), "{KEY_SHARE_AUTO_OFFSET_RESET}={value}");
         }
     }
 

@@ -59,19 +59,17 @@ mod tests {
         assert!(output.contains("fninline_schema()->bool{true}"));
     }
 
-    #[test]
-    fn rejects_storage_generic_markers_and_missing_formats() {
-        for declaration in [
-            "struct Marker;",
-            "#[unit_schema(format = \"\")] struct Marker;",
-            "#[unit_schema(format = \"size\")] struct Marker<T>;",
-            "#[unit_schema(format = \"size\")] struct Marker {}",
-            "#[unit_schema(format = \"size\")] struct Marker(u8);",
-        ] {
-            assert!(
-                expand(moxy::parse!({ declaration }).unwrap()).is_err(),
-                "{declaration}"
-            );
-        }
+    #[yare::parameterized(
+        missing_attribute = { "struct Marker;" },
+        empty_format = { "#[unit_schema(format = \"\")] struct Marker;" },
+        generic = { "#[unit_schema(format = \"size\")] struct Marker<T>;" },
+        named_fields = { "#[unit_schema(format = \"size\")] struct Marker {}" },
+        tuple = { "#[unit_schema(format = \"size\")] struct Marker(u8);" },
+    )]
+    fn rejects_storage_generic_markers_and_missing_formats(declaration: &str) {
+        assert2::assert!(
+            expand(moxy::parse!({ declaration }).unwrap()).is_err(),
+            "{declaration}"
+        );
     }
 }

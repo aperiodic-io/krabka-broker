@@ -41,9 +41,8 @@ krabka_macros::single_replica_partition_fixture!(single_replica_partition);
 pub(crate) fn sorted_epoch_pairs(
     epochs: Option<&std::collections::HashMap<i32, i32>>,
 ) -> Vec<(i32, i32)> {
-    let mut pairs: Vec<(i32, i32)> = epochs
-        .map(|epochs| epochs.iter().map(|(&p, &e)| (p, e)).collect())
-        .unwrap_or_default();
+    let mut pairs: Vec<(i32, i32)> =
+        epochs.map_or_default(|epochs| epochs.iter().map(|(&p, &e)| (p, e)).collect());
     pairs.sort_unstable();
     pairs
 }

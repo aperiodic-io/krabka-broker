@@ -41,53 +41,52 @@ const EXPIRY_MS: i64 = 604_800_000;
 /// `TransactionState.isExpirationAllowed()` reports `true` for in the pinned
 /// `apache/kafka:4.3.1` image. `Dead` is krabka's one addition, for the
 /// reason [`state_allows_expiration`] gives.
-#[test]
-fn only_terminal_and_idle_states_expire() {
-    for (state, want) in [
-        (TxnState::Empty, true),
-        (TxnState::Dead, true),
-        (TxnState::CompleteCommit, true),
-        (TxnState::CompleteAbort, true),
-        (TxnState::Ongoing, false),
-        (TxnState::PrepareCommit, false),
-        (TxnState::PrepareAbort, false),
-    ] {
-        check!(
-            should_expire_transactional_id(state, 0, EXPIRY_MS, EXPIRY_MS) == want,
-            "{state:?}"
-        );
-    }
+#[yare::parameterized(
+    empty = { TxnState::Empty, true },
+    dead = { TxnState::Dead, true },
+    complete_commit = { TxnState::CompleteCommit, true },
+    complete_abort = { TxnState::CompleteAbort, true },
+    ongoing = { TxnState::Ongoing, false },
+    prepare_commit = { TxnState::PrepareCommit, false },
+    prepare_abort = { TxnState::PrepareAbort, false },
+)]
+fn only_terminal_and_idle_states_expire(state: TxnState, want: bool) {
+    check!(
+        should_expire_transactional_id(state, 0, EXPIRY_MS, EXPIRY_MS) == want,
+        "{state:?}"
+    );
 }
 
 /// KIP-939: no clock, however far in the future, expires a prepared 2PC
 /// transaction. `i64::MAX` is the strongest statement of "indefinitely" the
 /// type allows.
-#[test]
-fn a_prepared_transaction_never_expires_at_any_clock() {
-    for state in [TxnState::PrepareCommit, TxnState::PrepareAbort] {
-        for now_ms in [EXPIRY_MS, EXPIRY_MS * 1_000, i64::MAX] {
-            check!(
-                !should_expire_transactional_id(state, 0, now_ms, EXPIRY_MS),
-                "{state:?} at {now_ms}"
-            );
-        }
-    }
+#[yare::parameterized(
+    prepare_commit_at_expiry = { TxnState::PrepareCommit, EXPIRY_MS },
+    prepare_commit_well_after_expiry = { TxnState::PrepareCommit, EXPIRY_MS * 1_000 },
+    prepare_commit_at_max_clock = { TxnState::PrepareCommit, i64::MAX },
+    prepare_abort_at_expiry = { TxnState::PrepareAbort, EXPIRY_MS },
+    prepare_abort_well_after_expiry = { TxnState::PrepareAbort, EXPIRY_MS * 1_000 },
+    prepare_abort_at_max_clock = { TxnState::PrepareAbort, i64::MAX },
+)]
+fn a_prepared_transaction_never_expires_at_any_clock(state: TxnState, now_ms: i64) {
+    check!(
+        !should_expire_transactional_id(state, 0, now_ms, EXPIRY_MS),
+        "{state:?} at {now_ms}"
+    );
 }
 
 /// The boundary Kafka uses is `now - last >= expiration`, so the instant the
 /// expiry elapses is already expired and the millisecond before it is not.
-#[test]
-fn expiry_boundary_is_inclusive() {
-    for (now_ms, want) in [
-        (EXPIRY_MS - 1, false),
-        (EXPIRY_MS, true),
-        (EXPIRY_MS + 1, true),
-    ] {
-        check!(
-            should_expire_transactional_id(TxnState::CompleteCommit, 0, now_ms, EXPIRY_MS) == want,
-            "{now_ms}"
-        );
-    }
+#[yare::parameterized(
+    before = { EXPIRY_MS - 1, false },
+    exact = { EXPIRY_MS, true },
+    after = { EXPIRY_MS + 1, true },
+)]
+fn expiry_boundary_is_inclusive(now_ms: i64, want: bool) {
+    check!(
+        should_expire_transactional_id(TxnState::CompleteCommit, 0, now_ms, EXPIRY_MS) == want,
+        "{now_ms}"
+    );
 }
 
 /// A backwards clock must never expire anything, and must not overflow on the

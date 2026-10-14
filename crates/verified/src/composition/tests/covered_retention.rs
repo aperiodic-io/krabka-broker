@@ -112,55 +112,39 @@ fn a_global_maximum_cannot_cover_a_hole_or_hide_later_anchored_coverage() {
     );
 }
 
-#[test]
-fn maximum_offset_can_be_selected_but_has_no_representable_delete_target() {
-    for (remote, local, through, count, target) in [
-        (
-            &[(i64::MIN, i64::MAX)][..],
-            (0, i64::MAX, 0, true),
-            i64::MAX,
-            1,
-            None,
-        ),
-        (
-            &[(i64::MAX, i64::MAX)],
-            (i64::MAX, i64::MAX, u64::MAX, true),
-            i64::MAX,
-            1,
-            None,
-        ),
-        (
-            &[(i64::MAX - 1, i64::MAX)],
-            (i64::MAX - 1, i64::MAX - 1, 0, true),
-            i64::MAX,
-            1,
-            Some(i64::MAX),
-        ),
-        (
-            &[(i64::MAX, i64::MAX)],
-            (i64::MAX, i64::MAX, 0, false),
-            i64::MAX,
-            0,
-            None,
-        ),
-    ] {
-        let facts = vec![
-            LocalRetentionSegment {
-                blocked: false,
-                expired: local.3,
-                size: local.2,
-            },
-            LocalRetentionSegment {
-                blocked: true,
-                expired: false,
-                size: u64::MAX,
-            },
-        ];
-        assert!(
-            remote_coverage_bounds_local_retention(remote, &[local], None, u64::MAX)
-                == (Some(through), facts, count, target)
-        );
-    }
+#[yare::parameterized(
+    minimum_to_maximum = { &[(i64::MIN, i64::MAX)][..], (0, i64::MAX, 0, true), 1, None },
+    maximum_remote = { &[(i64::MAX, i64::MAX)][..], (i64::MAX, i64::MAX, u64::MAX, true), 1, None },
+    maximum_target_representable = {
+        &[(i64::MAX - 1, i64::MAX)][..],
+        (i64::MAX - 1, i64::MAX - 1, 0, true),
+        1,
+        Some(i64::MAX),
+    },
+    live_maximum = { &[(i64::MAX, i64::MAX)][..], (i64::MAX, i64::MAX, 0, false), 0, None },
+)]
+fn maximum_offset_can_be_selected_but_has_no_representable_delete_target(
+    remote: &[(i64, i64)],
+    local: (i64, i64, u64, bool),
+    count: usize,
+    target: Option<i64>,
+) {
+    let facts = vec![
+        LocalRetentionSegment {
+            blocked: false,
+            expired: local.3,
+            size: local.2,
+        },
+        LocalRetentionSegment {
+            blocked: true,
+            expired: false,
+            size: u64::MAX,
+        },
+    ];
+    assert2::assert!(
+        remote_coverage_bounds_local_retention(remote, &[local], None, u64::MAX)
+            == (Some(i64::MAX), facts, count, target)
+    );
 }
 
 #[test]

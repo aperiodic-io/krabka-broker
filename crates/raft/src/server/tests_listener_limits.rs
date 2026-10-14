@@ -158,59 +158,60 @@ async fn a_listener_without_an_idle_window_keeps_a_silent_connection() {
 /// `max.connections` and `max.connections.per.ip` apply to the accept loop: a
 /// connection over the ceiling is closed at once, and its slot returns when
 /// an earlier connection ends.
-#[tokio::test]
-async fn the_accept_loop_closes_connections_over_the_ceiling() {
-    let cases = [
-        ("max.connections", 1, usize::MAX),
-        ("max.connections.per.ip", usize::MAX, 1),
-    ];
-    for (name, max_connections, max_connections_per_ip) in cases {
-        let (engine, _dir) = single_voter_engine();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let shutdown = CancellationToken::new();
-        let limits = ListenerLimits {
-            max_connections,
-            max_connections_per_ip,
-            ..ListenerLimits::default()
-        };
-        let listener_task = tokio::spawn(run(
-            listener,
-            engine,
-            shutdown.clone(),
-            None,
-            None,
-            None,
-            (Unstable::default(), limits),
-        ));
+#[yare::parameterized(
+    max_connections = { 1, usize::MAX },
+    max_connections_per_ip = { usize::MAX, 1 },
+)]
+#[test_macro(tokio::test)]
+async fn the_accept_loop_closes_connections_over_the_ceiling(
+    max_connections: usize,
+    max_connections_per_ip: usize,
+) {
+    let (engine, _dir) = single_voter_engine();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let shutdown = CancellationToken::new();
+    let limits = ListenerLimits {
+        max_connections,
+        max_connections_per_ip,
+        ..ListenerLimits::default()
+    };
+    let listener_task = tokio::spawn(run(
+        listener,
+        engine,
+        shutdown.clone(),
+        None,
+        None,
+        None,
+        (Unstable::default(), limits),
+    ));
 
-        let mut first = TcpStream::connect(addr).await.unwrap();
-        first.write_all(&api_versions_request(1)).await.unwrap();
-        check!(read_correlation_id(&mut first).await == 1, "{name}");
+    let mut first = TcpStream::connect(addr).await.unwrap();
+    first.write_all(&api_versions_request(1)).await.unwrap();
+    check!(read_correlation_id(&mut first).await == 1);
 
-        let mut second = TcpStream::connect(addr).await.unwrap();
-        let mut refused = Vec::new();
-        let closed = tokio::time::timeout(Duration::from_secs(5), second.read_to_end(&mut refused))
-            .await
-            .expect("the refused connection is closed");
-        check!(closed.map_or(true, |read| read == 0), "{name}");
-        check!(refused.is_empty(), "{name}");
+    let mut second = TcpStream::connect(addr).await.unwrap();
+    let mut refused = Vec::new();
+    let closed = tokio::time::timeout(Duration::from_secs(5), second.read_to_end(&mut refused))
+        .await
+        .expect("the refused connection is closed");
+    check!(closed.map_or(true, |read| read == 0));
+    check!(refused.is_empty());
 
-        drop(first);
-        let mut served = false;
-        for attempt in 0..100 {
-            let mut third = TcpStream::connect(addr).await.unwrap();
-            third.write_all(&api_versions_request(3)).await.unwrap();
-            let mut len = [0u8; 4];
-            if third.read_exact(&mut len).await.is_ok() {
-                served = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10 * (attempt % 5 + 1))).await;
+    drop(first);
+    let mut served = false;
+    for attempt in 0..100 {
+        let mut third = TcpStream::connect(addr).await.unwrap();
+        third.write_all(&api_versions_request(3)).await.unwrap();
+        let mut len = [0u8; 4];
+        if third.read_exact(&mut len).await.is_ok() {
+            served = true;
+            break;
         }
-        check!(served, "{name}: the released slot serves a new connection");
-
-        shutdown.cancel();
-        listener_task.await.unwrap();
+        tokio::time::sleep(Duration::from_millis(10 * (attempt % 5 + 1))).await;
     }
+    check!(served, "the released slot serves a new connection");
+
+    shutdown.cancel();
+    listener_task.await.unwrap();
 }

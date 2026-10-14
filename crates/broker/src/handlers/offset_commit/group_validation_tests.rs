@@ -348,8 +348,6 @@ async fn topic_read_is_checked_before_the_group() {
     ];
     let identity = consumer_identity();
     let ctx = identity.context();
-    let mut actual = Vec::new();
-    let mut expected = Vec::new();
     for (group_id, topics, answers) in cases {
         let request = offset_commit_request(group_id, GENERATION + 1, MEMBER, topics);
         let response: OffsetCommitResponse = dispatch_wire(
@@ -360,21 +358,19 @@ async fn topic_read_is_checked_before_the_group() {
             &ctx,
         )
         .await;
-        actual.push((
-            group_id,
-            response,
-            shared.group_coordinator.find(group_id).is_some(),
-        ));
-        expected.push((
-            group_id,
-            OffsetCommitResponse {
-                topics: answers,
-                ..Default::default()
-            },
-            group_id == "authz-mixed",
-        ));
+        assert!(
+            response
+                == OffsetCommitResponse {
+                    topics: answers,
+                    ..Default::default()
+                },
+            "{group_id}"
+        );
+        assert!(
+            shared.group_coordinator.find(group_id).is_some() == (group_id == "authz-mixed"),
+            "{group_id}"
+        );
     }
-    assert!(actual == expected);
     broker.shutdown().await;
 }
 

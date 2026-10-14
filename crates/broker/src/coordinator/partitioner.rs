@@ -66,28 +66,20 @@ mod tests {
     use {super::*, assert2::check};
 
     /// Goldens from the JVM: `Utils.abs(groupId.hashCode()) % partitionCount`.
-    #[test]
-    fn group_partition_matches_jvm_goldens() {
-        for (group_id, partition_count, expected) in [
-            // "".hashCode() == 0.
-            ("", 50, 0),
-            // "abc".hashCode() == 96_354.
-            ("abc", 7, 6),
-            ("abc", 1, 0),
-            // "consumer-group".hashCode() == -1_738_392_088.
-            ("consumer-group", 50, 38),
-            // Java hashes the two UTF-16 surrogate code units of this
-            // character: "🦀".hashCode() == 1_772_802.
-            ("🦀", 50, 2),
-            // "polygenelubricants".hashCode() == Integer.MIN_VALUE, which
-            // `Utils.abs` maps to zero.
-            ("polygenelubricants", 50, 0),
-        ] {
-            check!(
-                partition_for_group_with_count(group_id, partition_count) == expected,
-                "{group_id:?} over {partition_count} partitions"
-            );
-        }
+    #[yare::parameterized(
+        empty = { "", 50, 0 },
+        abc_seven_partitions = { "abc", 7, 6 },
+        abc_single_partition = { "abc", 1, 0 },
+        negative_hash = { "consumer-group", 50, 38 },
+        supplementary_character = { "🦀", 50, 2 },
+        minimum_hash = { "polygenelubricants", 50, 0 },
+    )]
+    fn group_partition_matches_jvm_goldens(
+        group_id: &'static str,
+        partition_count: i32,
+        expected: i32,
+    ) {
+        check!(partition_for_group_with_count(group_id, partition_count) == expected);
     }
 
     #[test]

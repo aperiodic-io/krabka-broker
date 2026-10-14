@@ -5,8 +5,8 @@
 
 use crate::{
     harness::{
-        self as fixture, SimClusterSetup, await_single_leader, await_until, reopen_controller,
-        start_cluster, start_engines, three_voter_network, topic_record,
+        self as fixture, await_single_leader, await_until, reopen_controller, start_cluster,
+        start_engines, three_voter_network, topic_record,
     },
     sim_net::SimNet,
 };
@@ -28,13 +28,19 @@ struct SurvivingLeader {
 }
 
 /// Start the failover fixture and retain its directories through the scenario.
-async fn elected_cluster(net: &SimNet, setup: SimClusterSetup<'_>) -> ElectedCluster {
-    let ids = setup.ids;
+#[bon::builder]
+async fn elected_cluster(
+    net: &SimNet,
+    #[builder(default = &[fixture::NodeId(1), fixture::NodeId(2), fixture::NodeId(3)])]
+    ids: &[fixture::NodeId],
+    #[builder(default)] cluster_id: uuid::Uuid,
+    #[builder(default = &fixture::STAGGERED_TIMEOUTS)] timeouts: &[krabka_units::Time],
+) -> ElectedCluster {
     let dirs = start_engines()
         .net(net)
-        .ids(setup.ids)
-        .cluster_id(setup.cluster_id)
-        .timeouts(setup.timeouts)
+        .ids(ids)
+        .cluster_id(cluster_id)
+        .timeouts(timeouts)
         .call();
     let (leader, epoch) = await_single_leader(net, ids, fixture::Duration::from_secs(10)).await;
     ElectedCluster {
@@ -42,6 +48,19 @@ async fn elected_cluster(net: &SimNet, setup: SimClusterSetup<'_>) -> ElectedClu
         leader,
         epoch,
     }
+}
+
+async fn elect_three_voter_cluster(
+    net: &SimNet,
+    ids: &[fixture::NodeId],
+    cluster_id: uuid::Uuid,
+) -> ElectedCluster {
+    elected_cluster()
+        .net(net)
+        .ids(ids)
+        .cluster_id(cluster_id)
+        .call()
+        .await
 }
 
 /// Polls `ctrl`'s quorum-state snapshot until `f` accepts it, or panics.
@@ -103,12 +122,7 @@ async fn leader_failure_reelects() {
         dirs: _dirs,
         leader,
         epoch: epoch1,
-    } = elected_cluster(&net, SimClusterSetup {
-        ids: &ids,
-        cluster_id: cid,
-        ..Default::default()
-    })
-    .await;
+    } = elect_three_voter_cluster(&net, &ids, cid).await;
 
     // Kill the leader: shut it down and remove it from the registry so peers see
     // it as unreachable.
@@ -205,12 +219,7 @@ async fn isolated_leader_resigns_and_rejoins_after_heal() {
         dirs: _dirs,
         leader,
         epoch: epoch1,
-    } = elected_cluster(&net, SimClusterSetup {
-        ids: &ids,
-        cluster_id: cid,
-        ..Default::default()
-    })
-    .await;
+    } = elect_three_voter_cluster(&net, &ids, cid).await;
     let isolated = net.get(leader).expect("leader is registered");
     net.partition(leader);
 

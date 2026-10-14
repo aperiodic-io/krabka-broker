@@ -84,6 +84,17 @@ mod tests {
         krabka_units::secs,
     };
 
+    fn oauthbearer_source(token_path: &std::path::Path) -> String {
+        format!(
+            r#"
+[inter_broker_credentials]
+type = "oauth-bearer"
+token_path = {}
+"#,
+            toml::Value::String(token_path.to_string_lossy().into_owned())
+        )
+    }
+
     #[test]
     fn apply_to_gssapi_maps_all_fields() {
         let src = r#"
@@ -242,14 +253,7 @@ kdc_url = "tcp://kdc:88"
     #[test]
     fn apply_to_inter_broker_credentials_oauthbearer_reads_redacted_token_file() {
         let (_dir, token_path) = oauth_token_file(OAuthTokenContents::Nonempty);
-        let src = format!(
-            r#"
-[inter_broker_credentials]
-type = "oauth-bearer"
-token_path = {}
-"#,
-            toml::Value::String(token_path.to_string_lossy().into_owned())
-        );
+        let src = oauthbearer_source(&token_path);
         let cfg = configured_unwrap_parse(&src).unwrap();
 
         let Some(InterBrokerCredentials::OAuthBearer {
@@ -265,14 +269,7 @@ token_path = {}
     #[test]
     fn apply_to_inter_broker_credentials_oauthbearer_rejects_empty_token_file() {
         let (_dir, token_path) = oauth_token_file(OAuthTokenContents::Empty);
-        let src = format!(
-            r#"
-[inter_broker_credentials]
-type = "oauth-bearer"
-token_path = {}
-"#,
-            toml::Value::String(token_path.to_string_lossy().into_owned())
-        );
+        let src = oauthbearer_source(&token_path);
         let file: FileConfig = toml::from_str(&src).unwrap();
         let mut cfg = BrokerConfig::default();
         let error = file

@@ -1,7 +1,7 @@
 //! The asymmetric read/write conversions of a locally owned share-state batch.
 
 use {
-    crate::meta::{Tokens, plain_path},
+    crate::meta::{Tokens, first_missing_named_field, plain_path},
     moxy::{
         ast::{ItemStruct, ParseError},
         token::TokenStream,
@@ -27,21 +27,13 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     let fields = named_fields(&item, "WireStateBatch")?;
     if !item.generics.params.is_empty()
         || fields.len() != 4
-        || [
+        || first_missing_named_field(fields, &[
             "first_offset",
             "last_offset",
             "delivery_state",
             "delivery_count",
-        ]
-        .iter()
-        .any(|name| {
-            !fields.iter().any(|field| {
-                field
-                    .ident
-                    .as_ref()
-                    .is_some_and(|ident| ident.text() == *name)
-            })
-        })
+        ])
+        .is_some()
     {
         return Err(ParseError::new(
             item.ident.span(),
@@ -129,19 +121,28 @@ mod tests {
         moxy::ast::ItemStruct,
     };
 
-    #[test]
-    fn preserves_the_four_directional_receiver_contracts() {
+    fn generated_batch() -> String {
         let item: ItemStruct = moxy::parse!("#[wire_state_batch(read = read::Batch, write = write::Batch)] struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8, delivery_count: i16 }").unwrap();
-        let output = compact(&expand(item).unwrap());
-        for implementation in [
-            "From<read::Batch>forBatch",
-            "From<&Batch>forread::Batch",
-            "From<&write::Batch>forBatch",
-            "From<Batch>forwrite::Batch",
-        ] {
-            assert!(output.contains(implementation), "{implementation}");
-        }
+        compact(&expand(item).unwrap())
+    }
+
+    #[test]
+    fn preserves_both_default_tail_conversions() {
+        let output = generated_batch();
         assert!(output.matches("..Self::default()").count() == 2);
+    }
+
+    #[yare::parameterized(
+        read_into_owned = { "From<read::Batch>forBatch" },
+        owned_into_read = { "From<&Batch>forread::Batch" },
+        write_into_owned = { "From<&write::Batch>forBatch" },
+        owned_into_write = { "From<Batch>forwrite::Batch" },
+    )]
+    fn preserves_each_directional_receiver_contract(implementation: &str) {
+        assert2::assert!(
+            generated_batch().contains(implementation),
+            "{implementation}"
+        );
     }
 
     #[test]

@@ -367,30 +367,26 @@ async fn vote_grant_names_the_new_epoch_and_no_leader() {
 
 /// Kafka's `isValidVoterKey` compares the directory id when both sides have
 /// one.
-#[tokio::test]
-async fn vote_refuses_a_voter_key_with_another_directory_id() {
+#[yare::parameterized(
+    another_directory = { Uuid::from_u128(12), 125 },
+    local_directory = { Uuid::from_u128(11), 0 },
+    no_directory = { Uuid::nil(), 0 },
+)]
+#[test_macro(tokio::test)]
+async fn vote_refuses_a_voter_key_with_another_directory_id(directory_id: Uuid, want_error: i16) {
     let EngineInDir {
         mut engine,
         dir: _dir,
     } = engine_with_local_directory();
 
-    for (label, directory_id, want_error) in [
-        ("another directory", Uuid::from_u128(12), 125),
-        ("the local directory", Uuid::from_u128(11), 0),
-        ("no directory", Uuid::nil(), 0),
-    ] {
-        let request = vote_request(|r| {
-            vote_partition(r).voter_directory_id = WireUuid(*directory_id.as_bytes());
-            vote_partition(r).pre_vote = true;
-            vote_partition(r).replica_epoch = 0;
-        });
-        let body = deliver(&mut engine, vote, encode(&request, VOTE_VERSION)).expect("an answer");
-        let response = VoteResponse::decode(&mut &body[..], VOTE_VERSION).expect("decode");
-        check!(
-            response.topics[0].partitions[0].error_code == want_error,
-            "{label}"
-        );
-    }
+    let request = vote_request(|r| {
+        vote_partition(r).voter_directory_id = WireUuid(*directory_id.as_bytes());
+        vote_partition(r).pre_vote = true;
+        vote_partition(r).replica_epoch = 0;
+    });
+    let body = deliver(&mut engine, vote, encode(&request, VOTE_VERSION)).expect("an answer");
+    let response = VoteResponse::decode(&mut &body[..], VOTE_VERSION).expect("decode");
+    check!(response.topics[0].partitions[0].error_code == want_error);
 }
 
 #[tokio::test]

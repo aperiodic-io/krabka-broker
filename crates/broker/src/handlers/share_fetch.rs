@@ -35,6 +35,7 @@ use {
         broker::Broker,
         error::BrokerError,
         handlers::{ApiVersion, RequestContext, leader_endpoints},
+        share_partition::session::ShareFetchSessionRequest,
     },
     krabka_protocol::owned::{
         share_fetch_request::{FetchPartition, ShareFetchRequest},
@@ -208,14 +209,16 @@ pub(crate) async fn handle(
         })
         .collect();
     let session = match mgr.update_fetch_session(
-        (&group, &member),
-        ctx.connection_id,
-        req.share_session_epoch,
-        FetchPartitions {
-            requested: &requested_order,
-            forgotten: &forgotten,
-        },
-        has_acknowledgements,
+        ShareFetchSessionRequest::builder()
+            .identity((&group, &member))
+            .connection_id(ctx.connection_id)
+            .epoch(req.share_session_epoch)
+            .partitions(FetchPartitions {
+                requested: &requested_order,
+                forgotten: &forgotten,
+            })
+            .has_acknowledgements(has_acknowledgements)
+            .build(),
     ) {
         Ok(session) => session,
         Err(codes::SHARE_SESSION_LIMIT_REACHED) => {

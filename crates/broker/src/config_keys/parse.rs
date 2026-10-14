@@ -238,17 +238,15 @@ mod tests {
         check!(list_value("delete,") == vec!["delete", ""]);
     }
 
-    #[test]
-    fn a_double_prints_the_way_java_prints_it() {
-        for (value, printed) in [
-            (2.0, "2.0"),
-            (0.5, "0.5"),
-            (0.001, "0.001"),
-            (0.0001, "1.0E-4"),
-            (1.5e10, "1.5E10"),
-            (-0.0, "-0.0"),
-        ] {
-            check!(java_double(value) == printed, "{value}");
-        }
+    #[yare::parameterized(
+        integer = { 2.0, "2.0" },
+        fraction = { 0.5, "0.5" },
+        small_fraction = { 0.001, "0.001" },
+        scientific_notation = { 0.0001, "1.0E-4" },
+        large_value = { 1.5e10, "1.5E10" },
+        negative_zero = { -0.0, "-0.0" },
+    )]
+    fn a_double_prints_the_way_java_prints_it(value: f64, printed: &str) {
+        check!(java_double(value) == printed, "{value}");
     }
 }

@@ -12,6 +12,19 @@ use {
     },
 };
 
+#[cfg(test)]
+fn assert_topic_name_encoding<E>(
+    length: usize,
+    should_encode: bool,
+    encoded: Result<Vec<u8>, E>,
+    round_trips: impl FnOnce(&[u8]) -> bool,
+) {
+    assert2::assert!(encoded.is_ok() == should_encode, "{length} bytes");
+    if let Ok(bytes) = encoded {
+        assert2::assert!(round_trips(&bytes), "{length} bytes");
+    }
+}
+
 /// A barrier group definition.
 ///
 /// The type is [`PartialEq`] but not [`Eq`], because [`Time`] is backed by a
@@ -74,7 +87,13 @@ mod tests {
     use {
         super::*,
         crate::{
-            barrier::persistence::test_support::sample_group,
+            barrier::persistence::{
+                injection_start::{
+                    InjectionStartValue, TopicTarget, decode_injection_start,
+                    encode_injection_start,
+                },
+                test_support::{sample_group, sample_injection_start},
+            },
             coordinator::unified::persistence::MAX_STRING_BYTES,
         },
         assert2::assert,
@@ -105,20 +124,52 @@ mod tests {
         assert!(decoded.interval.map(TimeExt::millis_i64) == Some(60_000));
     }
 
-    /// A topic name is a string with an `i16` length. The encoder writes one of
-    /// 32767 bytes and refuses a longer one with an error, wherever it sits in
-    /// the list.
-    #[test]
-    fn a_topic_name_of_32767_bytes_encodes_and_one_of_32768_is_refused() {
-        for (length, encodes) in [(MAX_STRING_BYTES, true), (MAX_STRING_BYTES + 1, false)] {
-            let value = GroupValue {
-                topics: vec!["orders".to_owned(), "t".repeat(length)],
-                ..sample_group()
-            };
-            let encoded = encode_group(&value);
-            assert!(encoded.is_ok() == encodes, "{length} bytes");
-            if let Ok(bytes) = encoded {
-                assert!(decode_group(&bytes).ok() == Some(value), "{length} bytes");
+    #[derive(Clone, Copy)]
+    enum TopicNameRecord {
+        Group,
+        InjectionStart,
+    }
+
+    /// Topic names use an `i16` byte length in each barrier record.
+    #[yare::parameterized(
+        group_at_limit = { TopicNameRecord::Group, MAX_STRING_BYTES, true },
+        group_over_limit = { TopicNameRecord::Group, MAX_STRING_BYTES + 1, false },
+        injection_start_at_limit = { TopicNameRecord::InjectionStart, MAX_STRING_BYTES, true },
+        injection_start_over_limit = {
+            TopicNameRecord::InjectionStart,
+            MAX_STRING_BYTES + 1,
+            false,
+        },
+    )]
+    fn topic_name_length_respects_the_i16_encoding_limit(
+        record: TopicNameRecord,
+        length: usize,
+        encodes: bool,
+    ) {
+        match record {
+            TopicNameRecord::Group => {
+                let value = GroupValue {
+                    topics: vec!["orders".to_owned(), "t".repeat(length)],
+                    ..sample_group()
+                };
+                assert_topic_name_encoding(length, encodes, encode_group(&value), |bytes| {
+                    decode_group(bytes).ok() == Some(value)
+                });
+            }
+            TopicNameRecord::InjectionStart => {
+                let value = InjectionStartValue {
+                    targets: vec![TopicTarget {
+                        topic: "t".repeat(length),
+                        partition_count: 2,
+                    }],
+                    ..sample_injection_start()
+                };
+                assert_topic_name_encoding(
+                    length,
+                    encodes,
+                    encode_injection_start(&value),
+                    |bytes| decode_injection_start(bytes).ok() == Some(value),
+                );
             }
         }
     }

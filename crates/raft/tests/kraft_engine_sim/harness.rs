@@ -123,17 +123,7 @@ pub(crate) fn metadata_log() -> krabka_raft::MetadataLogConfig {
 
 /// Engine setup with snapshots disabled by default. Snapshot catch-up scenarios
 /// set a small record interval so the leader snapshots and prunes after a burst.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
+#[krabka_macros::test_scalar]
 pub(crate) struct SnapshotRecordCount(pub u64);
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]

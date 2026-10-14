@@ -165,21 +165,23 @@ mod tests {
         }
     }
 
+    #[yare::parameterized(
+        offset_fetch = { 18, Some(4) },
+        sasl_handshake = { 22, Some(5) },
+        txn_offset_commit = { 28, Some(5) },
+        api_key_88 = { 88, Some(0) },
+        api_key_89 = { 89, Some(0) },
+        api_key_92 = { 92, Some(0) },
+        first_unknown = { 93, None },
+        later_unknown = { 94, None },
+        private_key_unknown = { 1020, None },
+    )]
+    fn lookups_follow_the_table(api_key: i16, want: Option<i16>) {
+        check!(kafka_4_3_1_max(api_key) == want, "api_key {api_key}");
+    }
+
     #[test]
-    fn lookups_follow_the_table() {
-        for (api_key, want) in [
-            (18, Some(4)),
-            (22, Some(5)),
-            (28, Some(5)),
-            (88, Some(0)),
-            (89, Some(0)),
-            (92, Some(0)),
-            (93, None),
-            (94, None),
-            (1020, None),
-        ] {
-            check!(kafka_4_3_1_max(api_key) == want, "api_key {api_key}");
-        }
+    fn api_table_includes_produce() {
         check!(kafka_4_3_1_api(1) == Some(api(1, 4, 18)));
     }
 }

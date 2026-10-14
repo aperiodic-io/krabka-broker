@@ -37,6 +37,16 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
 mod tests {
     use {super::expand, crate::meta::compact, assert2::assert};
 
+    #[yare::parameterized(
+        missing_message = { "part, cfg" },
+        borrowed_part = { "&part, cfg, \"message\"" },
+        computed_message = { "part, cfg, compute()" },
+        extra_argument = { "part, cfg, \"message\", extra" },
+    )]
+    fn guard_rejects_invalid_arguments(input: &str) {
+        assert2::assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
+    }
+
     #[test]
     fn guard_keeps_native_caller_return_and_the_callsite_message() {
         let generated = expand(&"part, cfg, \"stale target\"".parse().unwrap()).unwrap();
@@ -46,13 +56,5 @@ mod tests {
         );
         assert!(output.contains("returnRowAction::Drop"));
         assert!(generated.to_string().contains("\"stale target\""));
-        for input in [
-            "part, cfg",
-            "&part, cfg, \"message\"",
-            "part, cfg, compute()",
-            "part, cfg, \"message\", extra",
-        ] {
-            assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
-        }
     }
 }

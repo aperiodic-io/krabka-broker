@@ -292,100 +292,80 @@ mod tests {
         );
     }
 
-    #[test]
-    fn exactly_one_backend_is_required() {
-        for argv in [
-            &[][..],
-            &["--archive-prefix", "tier"][..],
-            &["--archive-local", "/a", "--archive-s3-bucket", "b"][..],
-            &["--archive-s3-bucket", "b", "--archive-gcs-bucket", "g"][..],
-            &["--archive-local", "/a", "--archive-gcs-bucket", "g"][..],
-        ] {
-            check!(parse(argv).is_err(), "{argv:?}");
-        }
-        for argv in [
-            &["--archive-local", "/a"][..],
-            &["--archive-s3-bucket", "b"][..],
-            &["--archive-gcs-bucket", "g"][..],
-        ] {
-            check!(parse(argv).is_ok(), "{argv:?}");
-        }
+    #[yare::parameterized(
+        no_backend = { &[][..], false },
+        prefix_without_backend = { &["--archive-prefix", "tier"][..], false },
+        local_and_s3 = { &["--archive-local", "/a", "--archive-s3-bucket", "b"][..], false },
+        s3_and_gcs = { &["--archive-s3-bucket", "b", "--archive-gcs-bucket", "g"][..], false },
+        local_and_gcs = { &["--archive-local", "/a", "--archive-gcs-bucket", "g"][..], false },
+        local = { &["--archive-local", "/a"][..], true },
+        s3 = { &["--archive-s3-bucket", "b"][..], true },
+        gcs = { &["--archive-gcs-bucket", "g"][..], true },
+    )]
+    fn exactly_one_backend_is_required(argv: &[&str], accepted: bool) {
+        check!(parse(argv).is_ok() == accepted, "{argv:?}");
     }
 
-    #[test]
-    fn every_sub_flag_needs_the_backend_it_belongs_to() {
-        /// Stray flags, the flag to blame, and the flag that names the backend it needs.
-        struct StrayCase {
-            stray: &'static [&'static str],
-            flag: &'static str,
-            needs: &'static str,
-        }
-        fn stray_case(
-            stray: &'static [&'static str],
-            flag: &'static str,
-            needs: &'static str,
-        ) -> StrayCase {
-            StrayCase { stray, flag, needs }
-        }
-        let cases = [
-            stray_case(
-                &["--archive-s3-region", "eu-west-1"],
-                "--archive-s3-region",
-                "--archive-s3-bucket",
-            ),
-            stray_case(
-                &["--archive-s3-endpoint", "http://minio:9000"],
-                "--archive-s3-endpoint",
-                "--archive-s3-bucket",
-            ),
-            stray_case(
-                &["--archive-s3-access-key-id", "key"],
-                "--archive-s3-access-key-id",
-                "--archive-s3-bucket",
-            ),
-            stray_case(
-                &["--archive-s3-secret-access-key", "secret"],
-                "--archive-s3-secret-access-key",
-                "--archive-s3-bucket",
-            ),
-            stray_case(
-                &["--archive-s3-allow-http"],
-                "--archive-s3-allow-http",
-                "--archive-s3-bucket",
-            ),
-            stray_case(
-                &["--archive-gcs-service-account-path", "/etc/sa.json"],
-                "--archive-gcs-service-account-path",
-                "--archive-gcs-bucket",
-            ),
-            stray_case(
-                &["--archive-gcs-endpoint", "http://fake-gcs:4443"],
-                "--archive-gcs-endpoint",
-                "--archive-gcs-bucket",
-            ),
-            stray_case(
-                &["--archive-gcs-allow-http"],
-                "--archive-gcs-allow-http",
-                "--archive-gcs-bucket",
-            ),
-        ];
-        for StrayCase { stray, flag, needs } in cases {
-            // Each stray flag rides on the backend it does not belong to.
-            let mut argv = vec!["--archive-local", "/archive"];
-            argv.extend_from_slice(stray);
-            let error = parse(&argv)
-                .expect("clap accepts the stray flag")
-                .validate()
-                .expect_err("validate rejects it");
-            check!(error == ArchiveArgsError::OrphanFlag { flag, needs });
-            check!(error.to_string() == format!("{flag} needs {needs}"));
-        }
+    #[yare::parameterized(
+        s3_region = {
+            &["--archive-s3-region", "eu-west-1"][..],
+            "--archive-s3-region",
+            "--archive-s3-bucket",
+        },
+        s3_endpoint = {
+            &["--archive-s3-endpoint", "http://minio:9000"][..],
+            "--archive-s3-endpoint",
+            "--archive-s3-bucket",
+        },
+        s3_access_key = {
+            &["--archive-s3-access-key-id", "key"][..],
+            "--archive-s3-access-key-id",
+            "--archive-s3-bucket",
+        },
+        s3_secret_key = {
+            &["--archive-s3-secret-access-key", "secret"][..],
+            "--archive-s3-secret-access-key",
+            "--archive-s3-bucket",
+        },
+        s3_http = {
+            &["--archive-s3-allow-http"][..],
+            "--archive-s3-allow-http",
+            "--archive-s3-bucket",
+        },
+        gcs_service_account = {
+            &["--archive-gcs-service-account-path", "/etc/sa.json"][..],
+            "--archive-gcs-service-account-path",
+            "--archive-gcs-bucket",
+        },
+        gcs_endpoint = {
+            &["--archive-gcs-endpoint", "http://fake-gcs:4443"][..],
+            "--archive-gcs-endpoint",
+            "--archive-gcs-bucket",
+        },
+        gcs_http = {
+            &["--archive-gcs-allow-http"][..],
+            "--archive-gcs-allow-http",
+            "--archive-gcs-bucket",
+        },
+    )]
+    fn every_sub_flag_needs_the_backend_it_belongs_to(
+        stray: &[&str],
+        flag: &'static str,
+        needs: &'static str,
+    ) {
+        // Each stray flag rides on the backend it does not belong to.
+        let mut argv = vec!["--archive-local", "/archive"];
+        argv.extend_from_slice(stray);
+        let error = parse(&argv)
+            .expect("clap accepts the stray flag")
+            .validate()
+            .expect_err("validate rejects it");
+        check!(error == ArchiveArgsError::OrphanFlag { flag, needs });
+        check!(error.to_string() == format!("{flag} needs {needs}"));
     }
 
-    #[test]
-    fn sub_flags_of_the_selected_backend_are_accepted() {
-        for argv in [
-            &[
+    #[yare::parameterized(
+        s3 = { &[
                 "--archive-s3-bucket",
                 "b",
                 "--archive-s3-region",
@@ -397,8 +377,8 @@ mod tests {
                 "--archive-s3-secret-access-key",
                 "secret",
                 "--archive-s3-allow-http",
-            ][..],
-            &[
+            ][..] },
+        gcs = { &[
                 "--archive-gcs-bucket",
                 "g",
                 "--archive-gcs-service-account-path",
@@ -406,11 +386,11 @@ mod tests {
                 "--archive-gcs-endpoint",
                 "http://fake-gcs:4443",
                 "--archive-gcs-allow-http",
-            ][..],
-            &["--archive-local", "/a", "--archive-prefix", "tier"][..],
-        ] {
-            check!(parse(argv).expect("args").validate().is_ok(), "{argv:?}");
-        }
+            ][..] },
+        local = { &["--archive-local", "/a", "--archive-prefix", "tier"][..] },
+    )]
+    fn sub_flags_of_the_selected_backend_are_accepted(argv: &[&str]) {
+        check!(parse(argv).expect("args").validate().is_ok(), "{argv:?}");
     }
 
     #[test]
@@ -487,27 +467,28 @@ mod tests {
         );
     }
 
+    #[yare::parameterized(
+        absent = { None, None },
+        empty = { Some(""), None },
+        slash = { Some("/"), None },
+        repeated_slashes = { Some("///"), None },
+        whitespace = { Some("   "), None },
+        bare = { Some("tier"), Some("tier") },
+        leading_slash = { Some("/tier"), Some("tier") },
+        trailing_slash = { Some("tier/"), Some("tier") },
+        both_slashes = { Some("/tier/"), Some("tier") },
+        surrounding_whitespace = { Some(" /tier/ "), Some("tier") },
+        nested_prefix = { Some("prod/tier"), Some("prod/tier") },
+    )]
+    fn prefixes_normalize_to_one_spelling(input: Option<&str>, expected: Option<&str>) {
+        check!(
+            normalize_prefix(input).as_deref() == expected,
+            "for {input:?}"
+        );
+    }
+
     #[test]
-    fn prefixes_normalize_to_one_spelling() {
-        let cases = [
-            (None, None),
-            (Some(""), None),
-            (Some("/"), None),
-            (Some("///"), None),
-            (Some("   "), None),
-            (Some("tier"), Some("tier")),
-            (Some("/tier"), Some("tier")),
-            (Some("tier/"), Some("tier")),
-            (Some("/tier/"), Some("tier")),
-            (Some(" /tier/ "), Some("tier")),
-            (Some("prod/tier"), Some("prod/tier")),
-        ];
-        for (input, expected) in cases {
-            check!(
-                normalize_prefix(input).as_deref() == expected,
-                "for {input:?}"
-            );
-        }
+    fn normalized_prefix_is_used_by_args() {
         let args = ArchiveArgs {
             prefix: Some("/prod/tier/".to_owned()),
             ..ArchiveArgs::default()

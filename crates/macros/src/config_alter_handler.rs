@@ -58,51 +58,53 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use {super::expand, crate::meta::compact, assert2::assert};
+    use {super::expand, crate::meta::compact};
 
-    #[test]
-    fn both_apis_keep_image_audit_process_and_response_order() {
-        for audits_in_process in [true, false] {
-            let input = format!(
-                "request = wire::Request, response = wire::Response, operation = \"ConfigMutation\", audit = self::audit, process = self::process, audits_in_process = {audits_in_process}"
-            );
-            let output = compact(&expand(&input.parse().unwrap()).unwrap());
-            let positions = [
-                "broker.controller.current_image()",
-                "duplicate_resource_flags(",
-                "letnamed=self::audit(&resource,&image)",
-                "self::process(broker,&image,ctx,resource,validate_only,is_duplicate).await",
-                "audited.extend(named)",
-                "responses.push(response)",
-                "audit_admin_success(",
-                "Ok(wire::Response{responses,throttle_time_ms:0,..Default::default()})",
-            ]
-            .map(|part| output.find(part).expect(part));
-            assert!(
-                positions
-                    .windows(2)
-                    .all(|positions| positions[0] < positions[1])
-            );
-            assert!(output.contains(&format!("!validate_only&&!{audits_in_process}")));
-            assert!(output.contains("req:wire::Request"));
-            assert!(output.contains("\"ConfigMutation\""));
-        }
+    #[yare::parameterized(
+        audit_in_process = { true },
+        audit_after_process = { false },
+    )]
+    fn both_apis_keep_image_audit_process_and_response_order(audits_in_process: bool) {
+        let input = format!(
+            "request = wire::Request, response = wire::Response, operation = \"ConfigMutation\", audit = self::audit, process = self::process, audits_in_process = {audits_in_process}"
+        );
+        let output = compact(&expand(&input.parse().unwrap()).unwrap());
+        let positions = [
+            "broker.controller.current_image()",
+            "duplicate_resource_flags(",
+            "letnamed=self::audit(&resource,&image)",
+            "self::process(broker,&image,ctx,resource,validate_only,is_duplicate).await",
+            "audited.extend(named)",
+            "responses.push(response)",
+            "audit_admin_success(",
+            "Ok(wire::Response{responses,throttle_time_ms:0,..Default::default()})",
+        ]
+        .map(|part| output.find(part).expect(part));
+        assert2::assert!(
+            positions
+                .windows(2)
+                .all(|positions| positions[0] < positions[1])
+        );
+        assert2::assert!(output.contains(&format!("!validate_only&&!{audits_in_process}")));
+        assert2::assert!(output.contains("req:wire::Request"));
+        assert2::assert!(output.contains("\"ConfigMutation\""));
     }
 
-    #[test]
-    fn rejects_missing_unknown_and_nonpath_operation_selectors() {
-        let valid = "request = Request, response = Response, operation = \"AlterConfigs\", audit = audit, process = process, audits_in_process = true";
-        for invalid in [
-            String::new(),
-            valid.replace(", audits_in_process = true", ""),
-            format!("{valid}, unknown = true"),
-            valid.replace("request = Request", "request = factory()"),
-            valid.replace("response = Response", "response = 1"),
-            valid.replace("audit = audit", "audit = audit()"),
-            valid.replace("process = process", "process = process()"),
-            valid.replace("audits_in_process = true", "audits_in_process = \"yes\""),
-        ] {
-            assert!(expand(&invalid.parse().unwrap()).is_err(), "{invalid}");
-        }
+    const VALID: &str = "request = Request, response = Response, operation = \"AlterConfigs\", audit = audit, process = process, audits_in_process = true";
+
+    #[yare::parameterized(
+        empty = { String::new() },
+        missing_option = { VALID.replace(", audits_in_process = true", "") },
+        unknown_option = { format!("{VALID}, unknown = true") },
+        nonpath_request = { VALID.replace("request = Request", "request = factory()") },
+        invalid_response = { VALID.replace("response = Response", "response = 1") },
+        nonpath_audit = { VALID.replace("audit = audit", "audit = audit()") },
+        nonpath_process = { VALID.replace("process = process", "process = process()") },
+        invalid_boolean = {
+            VALID.replace("audits_in_process = true", "audits_in_process = \"yes\""),
+        },
+    )]
+    fn rejects_missing_unknown_and_nonpath_operation_selectors(invalid: String) {
+        assert2::assert!(expand(&invalid.parse().unwrap()).is_err(), "{invalid}");
     }
 }

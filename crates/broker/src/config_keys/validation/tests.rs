@@ -16,7 +16,7 @@ use {
         *,
     },
     crate::throttle::{FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_REPLICAS_KEY},
-    assert2::{assert, check},
+    assert2::check,
     krabka_log::CleanupPolicy,
 };
 
@@ -41,20 +41,17 @@ fn config_map(pairs: &[ConfigPair<'_>]) -> BTreeMap<String, String> {
 /// a test of nothing.
 const UNKNOWN_KEY: &str = "not.a.topic.config";
 
-#[test]
-fn validate_retention_ms_boundary_cases() {
-    let cases = [
-        ("60000", true), // positive accepted
-        ("-1", true),    // -1 (unlimited) accepted
-        ("-5", false),   // below -1 rejected
-        ("abc", false),  // non-integer rejected
-    ];
-    for (value, want_ok) in cases {
-        assert!(
-            validate_topic_config(RETENTION_MS, value).is_ok() == want_ok,
-            "retention.ms={value}"
-        );
-    }
+#[yare::parameterized(
+    positive = { "60000", true },
+    unlimited = { "-1", true },
+    below_unlimited = { "-5", false },
+    non_integer = { "abc", false },
+)]
+fn validate_retention_ms_boundary_cases(value: &str, want_ok: bool) {
+    assert2::assert!(
+        validate_topic_config(RETENTION_MS, value).is_ok() == want_ok,
+        "retention.ms={value}"
+    );
 }
 
 /// Kafka floors `segment.bytes` at one mebibyte: `LogConfig` validates the key
@@ -63,26 +60,27 @@ fn validate_retention_ms_boundary_cases() {
 /// be at least 1048576`. A coordinator that wants a smaller segment reaches
 /// past the floor through `internal.segment.bytes`, which `defineInternal`
 /// gives no validator at all.
+#[yare::parameterized(
+    zero = { "0", false },
+    one = { "1", false },
+    fourteen = { "14", false },
+    just_below_floor = { "1048575", false },
+    floor = { "1048576", true },
+    above_floor = { "1073741824", true },
+    non_integer = { "not-a-number", false },
+)]
+fn validate_segment_bytes_floors_at_kafkas_one_mebibyte(value: &str, want_ok: bool) {
+    assert2::assert!(
+        validate_topic_config(SEGMENT_BYTES, value).is_ok() == want_ok,
+        "segment.bytes={value}"
+    );
+}
+
 #[test]
-fn validate_segment_bytes_floors_at_kafkas_one_mebibyte() {
-    let cases = [
-        ("0", false),
-        ("1", false),
-        ("14", false),
-        ("1048575", false),
-        ("1048576", true),
-        ("1073741824", true),
-        ("not-a-number", false),
-    ];
-    for (value, want_ok) in cases {
-        assert!(
-            validate_topic_config(SEGMENT_BYTES, value).is_ok() == want_ok,
-            "segment.bytes={value}"
-        );
-    }
+fn internal_segment_bytes_is_not_subject_to_the_topic_floor() {
     // The floor is the topic key's alone. `internal.segment.bytes` is
     // `defineInternal`'d with a null validator, so it still reaches below it.
-    assert!(validate_topic_config(INTERNAL_SEGMENT_BYTES, "1").is_ok());
+    assert2::assert!(validate_topic_config(INTERNAL_SEGMENT_BYTES, "1").is_ok());
 }
 
 /// `retention.bytes` is one of the few keys Kafka defines with no validator at
@@ -90,55 +88,49 @@ fn validate_segment_bytes_floors_at_kafkas_one_mebibyte() {
 /// the type holds is accepted and `LogManager`'s retention test is the plain
 /// `retentionSize < 0`. Refusing `-2` here would lose a `MirrorMaker` replay of
 /// a source topic that carries one.
-#[test]
-fn validate_retention_bytes_accepts_every_long_kafka_accepts() {
-    let cases = [
-        ("-1", true),
-        ("-2", true),
-        ("0", true),
-        ("1073741824", true),
-        ("-9223372036854775808", true),
-        ("9223372036854775807", true),
-        ("9223372036854775808", false),
-        ("abc", false),
-    ];
-    for (value, want_ok) in cases {
-        assert!(
-            validate_topic_config(RETENTION_BYTES, value).is_ok() == want_ok,
-            "retention.bytes={value}"
-        );
-    }
+#[yare::parameterized(
+    minus_one = { "-1", true },
+    minus_two = { "-2", true },
+    zero = { "0", true },
+    positive = { "1073741824", true },
+    i64_min = { "-9223372036854775808", true },
+    i64_max = { "9223372036854775807", true },
+    above_i64_max = { "9223372036854775808", false },
+    non_integer = { "abc", false },
+)]
+fn validate_retention_bytes_accepts_every_long_kafka_accepts(value: &str, want_ok: bool) {
+    assert2::assert!(
+        validate_topic_config(RETENTION_BYTES, value).is_ok() == want_ok,
+        "retention.bytes={value}"
+    );
 }
 
-#[test]
-fn validate_cleanup_policy_follows_kafkas_valid_list() {
-    // Kafka types `cleanup.policy` as a LIST and derives `compact` and
-    // `delete` from it by membership, so either name alone and both names in
-    // either order are all valid. Kafka Streams sends `compact,delete` on
-    // every windowed-store changelog topic. `ValidList.in` allows the empty
-    // list, which runs no cleanup, and refuses a repeated or an empty element.
-    let cases = [
-        ("delete", Some(CleanupPolicy::Delete)),
-        ("compact", Some(CleanupPolicy::Compact)),
-        ("compact,delete", Some(CleanupPolicy::CompactAndDelete)),
-        ("delete,compact", Some(CleanupPolicy::CompactAndDelete)),
-        ("compact, delete", Some(CleanupPolicy::CompactAndDelete)),
-        ("junk", None),
-        ("compact,junk", None),
-        ("compact,", None),
-        ("delete,", None),
-        ("delete,delete", None),
-        ("compact, compact", None),
-        ("", Some(CleanupPolicy::NoCleanup)),
-        (" ", Some(CleanupPolicy::NoCleanup)),
-    ];
-    for (value, expected) in cases {
-        assert!(parse_cleanup_policy(value).ok() == expected, "{value}");
-        assert!(
-            validate_topic_config(CLEANUP_POLICY, value).is_ok() == expected.is_some(),
-            "{value}"
-        );
-    }
+/// Kafka types `cleanup.policy` as a LIST and derives `compact` and `delete`
+/// from it by membership, so either name alone and both names in either order
+/// are all valid. Kafka Streams sends `compact,delete` on every windowed-store
+/// changelog topic. `ValidList.in` allows the empty list, which runs no
+/// cleanup, and refuses a repeated or an empty element.
+#[yare::parameterized(
+    delete = { "delete", Some(CleanupPolicy::Delete) },
+    compact = { "compact", Some(CleanupPolicy::Compact) },
+    compact_then_delete = { "compact,delete", Some(CleanupPolicy::CompactAndDelete) },
+    delete_then_compact = { "delete,compact", Some(CleanupPolicy::CompactAndDelete) },
+    compact_then_spaced_delete = { "compact, delete", Some(CleanupPolicy::CompactAndDelete) },
+    junk = { "junk", None },
+    compact_then_junk = { "compact,junk", None },
+    trailing_compact_separator = { "compact,", None },
+    trailing_delete_separator = { "delete,", None },
+    duplicate_delete = { "delete,delete", None },
+    duplicate_compact = { "compact, compact", None },
+    empty = { "", Some(CleanupPolicy::NoCleanup) },
+    whitespace = { " ", Some(CleanupPolicy::NoCleanup) },
+)]
+fn validate_cleanup_policy_follows_kafkas_valid_list(value: &str, expected: Option<CleanupPolicy>) {
+    assert2::assert!(parse_cleanup_policy(value).ok() == expected, "{value}");
+    assert2::assert!(
+        validate_topic_config(CLEANUP_POLICY, value).is_ok() == expected.is_some(),
+        "{value}"
+    );
 }
 
 /// `LogConfig` validates `compression.type` with
@@ -147,92 +139,84 @@ fn validate_cleanup_policy_follows_kafkas_valid_list() {
 /// `apache/kafka:4.3.1` refuses it with `Invalid value none for configuration
 /// compression.type: String must be one of: uncompressed, zstd, lz4, snappy,
 /// gzip, producer`.
-#[test]
-fn validate_compression_accepts_kafkas_six_names_and_no_others() {
-    let cases = [
-        ("producer", true),
-        ("uncompressed", true),
-        ("gzip", true),
-        ("snappy", true),
-        ("lz4", true),
-        ("zstd", true),
-        ("none", false),
-        ("", false),
-        // `ValidString.in` compares the trimmed string, so the enum's Java
-        // spelling is not a name Kafka accepts either.
-        ("GZIP", false),
-        (" gzip", true),
-    ];
-    for (value, want_ok) in cases {
-        assert!(
-            validate_topic_config(COMPRESSION_TYPE, value).is_ok() == want_ok,
-            "compression.type={value}"
-        );
-    }
+#[yare::parameterized(
+    producer = { "producer", true },
+    uncompressed = { "uncompressed", true },
+    gzip = { "gzip", true },
+    snappy = { "snappy", true },
+    lz4 = { "lz4", true },
+    zstd = { "zstd", true },
+    none = { "none", false },
+    empty = { "", false },
+    uppercase_gzip = { "GZIP", false },
+    leading_space = { " gzip", true },
+)]
+fn validate_compression_accepts_kafkas_six_names_and_no_others(value: &str, want_ok: bool) {
+    assert2::assert!(
+        validate_topic_config(COMPRESSION_TYPE, value).is_ok() == want_ok,
+        "compression.type={value}"
+    );
 }
 
 #[test]
 fn validate_compression_bogus_rejected() {
     let err = validate_topic_config(COMPRESSION_TYPE, "bzip3").unwrap_err();
-    assert!(err.contains("compression.type"), "got: {err}");
+    assert2::assert!(err.contains("compression.type"), "got: {err}");
 }
 
 #[test]
 fn parse_compression_type_maps_producer_to_none() {
-    assert!(parse_compression_type("producer") == Ok(None));
+    assert2::assert!(parse_compression_type("producer") == Ok(None));
+}
+
+#[yare::parameterized(
+    gzip = { "gzip", krabka_compression::CompressionType::Gzip },
+    snappy = { "snappy", krabka_compression::CompressionType::Snappy },
+    lz4 = { "lz4", krabka_compression::CompressionType::Lz4 },
+    zstd = { "zstd", krabka_compression::CompressionType::Zstd },
+    uncompressed = { "uncompressed", krabka_compression::CompressionType::None },
+)]
+fn parse_compression_type_maps_codecs(input: &str, want: krabka_compression::CompressionType) {
+    assert2::assert!(
+        parse_compression_type(input) == Ok(Some(want)),
+        "compression.type={input}"
+    );
 }
 
 #[test]
-fn parse_compression_type_maps_codecs() {
-    use krabka_compression::CompressionType;
-    let cases = [
-        ("gzip", CompressionType::Gzip),
-        ("snappy", CompressionType::Snappy),
-        ("lz4", CompressionType::Lz4),
-        ("zstd", CompressionType::Zstd),
-        ("uncompressed", CompressionType::None),
-    ];
-    assert!(parse_compression_type("none").is_err());
-    for (input, want) in cases {
-        assert!(
-            parse_compression_type(input) == Ok(Some(want)),
-            "compression.type={input}"
-        );
-    }
+fn parse_compression_type_rejects_none() {
+    assert2::assert!(parse_compression_type("none").is_err());
 }
 
 #[test]
 fn validate_min_isr_positive_accepted() {
-    assert!(validate_topic_config(MIN_INSYNC_REPLICAS, "2").is_ok());
+    assert2::assert!(validate_topic_config(MIN_INSYNC_REPLICAS, "2").is_ok());
 }
 
-#[test]
-fn an_int_key_refuses_what_kafkas_int_cannot_hold() {
-    // `DescribeConfigs` reports both keys as `ConfigType::Int`, and
-    // `apache/kafka:4.3.1` refuses a value past `i32::MAX` on both:
-    // `Invalid value 2147483648 for configuration segment.bytes: Not a number
-    // of type INT`. A value the broker accepts must fit the type it
-    // advertises, so the largest accepted value is `i32::MAX`.
-    let cases = [
-        (SEGMENT_BYTES, "2147483647", true),
-        (SEGMENT_BYTES, "2147483648", false),
-        (SEGMENT_BYTES, "9223372036854775807", false),
-        (MIN_INSYNC_REPLICAS, "2147483647", true),
-        (MIN_INSYNC_REPLICAS, "2147483648", false),
-        (MIN_INSYNC_REPLICAS, "0", false),
-        (MIN_INSYNC_REPLICAS, "-1", false),
-    ];
-    for (key, value, want_ok) in cases {
-        assert!(
-            validate_topic_config(key, value).is_ok() == want_ok,
-            "{key}={value}"
-        );
-    }
+/// `DescribeConfigs` reports both keys as `ConfigType::Int`, and
+/// `apache/kafka:4.3.1` refuses a value past `i32::MAX` on both:
+/// `Invalid value 2147483648 for configuration segment.bytes: Not a number
+/// of type INT`. A value the broker accepts must fit the type it advertises,
+/// so the largest accepted value is `i32::MAX`.
+#[yare::parameterized(
+    segment_bytes_max = { SEGMENT_BYTES, "2147483647", true },
+    segment_bytes_above_max = { SEGMENT_BYTES, "2147483648", false },
+    segment_bytes_i64_max = { SEGMENT_BYTES, "9223372036854775807", false },
+    min_isr_max = { MIN_INSYNC_REPLICAS, "2147483647", true },
+    min_isr_above_max = { MIN_INSYNC_REPLICAS, "2147483648", false },
+    min_isr_zero = { MIN_INSYNC_REPLICAS, "0", false },
+    min_isr_negative = { MIN_INSYNC_REPLICAS, "-1", false },
+)]
+fn an_int_key_refuses_what_kafkas_int_cannot_hold(key: &str, value: &str, want_ok: bool) {
+    assert2::assert!(
+        validate_topic_config(key, value).is_ok() == want_ok,
+        "{key}={value}"
+    );
 }
 
 #[test]
 fn validate_unknown_key_rejected() {
-    assert!(
+    assert2::assert!(
         validate_topic_config(UNKNOWN_KEY, "1000")
             == Err(format!("Unknown topic config name: {UNKNOWN_KEY}"))
     );
@@ -240,35 +224,34 @@ fn validate_unknown_key_rejected() {
 
 /// The Kafka `TopicConfig` names krabka registers, with the value Kafka's own
 /// `ConfigDef` accepts and one it refuses.
-#[test]
-fn the_remaining_kafka_topic_config_names_are_accepted() {
-    let cases = [
-        (SEGMENT_MS, "60000", "0"),
-        (SEGMENT_INDEX_BYTES, "10485760", "3"),
-        (SEGMENT_JITTER_MS, "0", "-1"),
-        (MIN_COMPACTION_LAG_MS, "0", "-1"),
-        (MAX_COMPACTION_LAG_MS, "9223372036854775807", "0"),
-        (MIN_CLEANABLE_DIRTY_RATIO, "0.5", "2.0"),
-        (FILE_DELETE_DELAY_MS, "60000", "-1"),
-        (FLUSH_MESSAGES, "10000", "0"),
-        (FLUSH_MS, "1000", "-1"),
-        (INDEX_INTERVAL_BYTES, "4096", "-1"),
-        (PREALLOCATE, "true", "yes"),
-        (MESSAGE_TIMESTAMP_TYPE, "LogAppendTime", "WallClock"),
-        (MESSAGE_TIMESTAMP_AFTER_MAX_MS, "3600000", "-1"),
-        (MESSAGE_TIMESTAMP_BEFORE_MAX_MS, "3600000", "-1"),
-    ];
-    for (key, accepted, refused) in cases {
-        check!(is_recognized(key), "{key}");
-        check!(
-            validate_topic_config(key, accepted) == Ok(()),
-            "{key}={accepted}"
-        );
-        check!(
-            validate_topic_config(key, refused).is_err(),
-            "{key}={refused}"
-        );
-    }
+/// The Kafka `TopicConfig` names krabka registers, with the value Kafka's own
+/// `ConfigDef` accepts and one it refuses.
+#[yare::parameterized(
+    segment_ms = { SEGMENT_MS, "60000", "0" },
+    segment_index_bytes = { SEGMENT_INDEX_BYTES, "10485760", "3" },
+    segment_jitter_ms = { SEGMENT_JITTER_MS, "0", "-1" },
+    min_compaction_lag_ms = { MIN_COMPACTION_LAG_MS, "0", "-1" },
+    max_compaction_lag_ms = { MAX_COMPACTION_LAG_MS, "9223372036854775807", "0" },
+    min_cleanable_dirty_ratio = { MIN_CLEANABLE_DIRTY_RATIO, "0.5", "2.0" },
+    file_delete_delay_ms = { FILE_DELETE_DELAY_MS, "60000", "-1" },
+    flush_messages = { FLUSH_MESSAGES, "10000", "0" },
+    flush_ms = { FLUSH_MS, "1000", "-1" },
+    index_interval_bytes = { INDEX_INTERVAL_BYTES, "4096", "-1" },
+    preallocate = { PREALLOCATE, "true", "yes" },
+    message_timestamp_type = { MESSAGE_TIMESTAMP_TYPE, "LogAppendTime", "WallClock" },
+    message_timestamp_after_max_ms = { MESSAGE_TIMESTAMP_AFTER_MAX_MS, "3600000", "-1" },
+    message_timestamp_before_max_ms = { MESSAGE_TIMESTAMP_BEFORE_MAX_MS, "3600000", "-1" },
+)]
+fn the_remaining_kafka_topic_config_names_are_accepted(key: &str, accepted: &str, refused: &str) {
+    check!(is_recognized(key), "{key}");
+    check!(
+        validate_topic_config(key, accepted) == Ok(()),
+        "{key}={accepted}"
+    );
+    check!(
+        validate_topic_config(key, refused).is_err(),
+        "{key}={refused}"
+    );
 }
 
 /// Streams applications send both override sets on their internal topics.
@@ -279,7 +262,7 @@ fn the_remaining_kafka_topic_config_names_are_accepted() {
             SEGMENT_BYTES.to_string() => "52428800".to_string(),
             RETENTION_MS.to_string() => "-1".to_string(),
             MESSAGE_TIMESTAMP_TYPE.to_string() => "CreateTime".to_string(),
-        }
+        },
     },
     windowed_changelog = {
         maplit::btreemap! {
@@ -287,101 +270,98 @@ fn the_remaining_kafka_topic_config_names_are_accepted() {
             RETENTION_MS.to_string() => "86400000".to_string(),
             MIN_COMPACTION_LAG_MS.to_string() => "0".to_string(),
             MESSAGE_TIMESTAMP_TYPE.to_string() => "CreateTime".to_string(),
-        }
+        },
     },
 )]
 fn streams_topic_override_set_is_accepted(overrides: std::collections::BTreeMap<String, String>) {
     assert2::assert!(validate_topic_config_map(&overrides) == Ok(()));
 }
 
-#[test]
-fn validate_dirty_ratio_accepts_the_closed_unit_interval() {
-    let cases = [
-        ("0", true),
-        ("0.5", true),
-        ("1", true),
-        ("1.0001", false),
-        ("-0.1", false),
-        ("NaN", false),
-        ("half", false),
-    ];
-    for (value, want_ok) in cases {
-        check!(
-            validate_topic_config(MIN_CLEANABLE_DIRTY_RATIO, value).is_ok() == want_ok,
-            "min.cleanable.dirty.ratio={value}"
-        );
-    }
+#[yare::parameterized(
+    zero = { "0", true },
+    midpoint = { "0.5", true },
+    one = { "1", true },
+    above_one = { "1.0001", false },
+    below_zero = { "-0.1", false },
+    nan = { "NaN", false },
+    non_numeric = { "half", false },
+)]
+fn validate_dirty_ratio_accepts_the_closed_unit_interval(value: &str, want_ok: bool) {
+    check!(
+        validate_topic_config(MIN_CLEANABLE_DIRTY_RATIO, value).is_ok() == want_ok,
+        "min.cleanable.dirty.ratio={value}"
+    );
 }
 
 #[test]
 fn validate_remote_storage_enable_accepts_bools() {
-    assert!(validate_topic_config(REMOTE_STORAGE_ENABLE, "true").is_ok());
-    assert!(validate_topic_config(REMOTE_STORAGE_ENABLE, "false").is_ok());
+    assert2::assert!(validate_topic_config(REMOTE_STORAGE_ENABLE, "true").is_ok());
+    assert2::assert!(validate_topic_config(REMOTE_STORAGE_ENABLE, "false").is_ok());
 }
 
 #[test]
 fn validate_remote_storage_enable_rejects_junk() {
     let err = validate_topic_config(REMOTE_STORAGE_ENABLE, "yes").unwrap_err();
-    assert!(err.contains("remote.storage.enable"), "got: {err}");
+    assert2::assert!(err.contains("remote.storage.enable"), "got: {err}");
 }
 
 #[test]
 fn is_recognized_includes_remote_storage_enable() {
-    assert!(is_recognized(REMOTE_STORAGE_ENABLE));
+    assert2::assert!(is_recognized(REMOTE_STORAGE_ENABLE));
 }
 
-#[test]
-fn is_recognized_matches_whitelist() {
-    let cases = [
-        (RETENTION_MS, true),
-        (RETENTION_BYTES, true),
-        (SEGMENT_BYTES, true),
-        (CLEANUP_POLICY, true),
-        (COMPRESSION_TYPE, true),
-        (MIN_INSYNC_REPLICAS, true),
-        (UNKNOWN_KEY, false),
-        ("", false),
-    ];
-    for (key, want) in cases {
-        assert!(is_recognized(key) == want, "key {key:?}");
-    }
+#[yare::parameterized(
+    retention_ms = { RETENTION_MS, true },
+    retention_bytes = { RETENTION_BYTES, true },
+    segment_bytes = { SEGMENT_BYTES, true },
+    cleanup_policy = { CLEANUP_POLICY, true },
+    compression_type = { COMPRESSION_TYPE, true },
+    min_insync_replicas = { MIN_INSYNC_REPLICAS, true },
+    unknown = { UNKNOWN_KEY, false },
+    empty = { "", false },
+)]
+fn is_recognized_matches_whitelist(key: &str, want: bool) {
+    assert2::assert!(is_recognized(key) == want, "key {key:?}");
 }
 
-#[test]
-fn validate_local_retention_ms_accepts_minus_one_minus_two_and_positive() {
-    for value in ["-2", "-1", "60000"] {
-        assert!(
-            validate_topic_config(LOCAL_RETENTION_MS, value) == Ok(()),
-            "local.retention.ms={value}"
-        );
-    }
+#[yare::parameterized(
+    minus_two = { "-2" },
+    minus_one = { "-1" },
+    positive = { "60000" },
+)]
+fn validate_local_retention_ms_accepts_minus_one_minus_two_and_positive(value: &str) {
+    assert2::assert!(
+        validate_topic_config(LOCAL_RETENTION_MS, value) == Ok(()),
+        "local.retention.ms={value}"
+    );
 }
 
 #[test]
 fn validate_local_retention_ms_rejects_below_minus_two() {
-    assert!(validate_topic_config(LOCAL_RETENTION_MS, "-3").is_err());
+    assert2::assert!(validate_topic_config(LOCAL_RETENTION_MS, "-3").is_err());
 }
 
 #[test]
 fn is_recognized_includes_local_retention_keys() {
-    assert!(is_recognized(LOCAL_RETENTION_MS));
-    assert!(is_recognized(LOCAL_RETENTION_BYTES));
+    assert2::assert!(is_recognized(LOCAL_RETENTION_MS));
+    assert2::assert!(is_recognized(LOCAL_RETENTION_BYTES));
 }
 
-#[test]
-fn validate_delete_retention_ms_accepts_nonneg_rejects_negative() {
-    let cases = [("0", true), ("86400000", true), ("-1", false)];
-    for (value, want_ok) in cases {
-        assert!(
-            validate_topic_config(DELETE_RETENTION_MS, value).is_ok() == want_ok,
-            "delete.retention.ms={value}"
-        );
-    }
+#[yare::parameterized(
+    zero = { "0", true },
+    positive = { "86400000", true },
+    negative = { "-1", false },
+)]
+fn validate_delete_retention_ms_accepts_nonneg_rejects_negative(value: &str, want_ok: bool) {
+    assert2::assert!(
+        validate_topic_config(DELETE_RETENTION_MS, value).is_ok() == want_ok,
+        "delete.retention.ms={value}"
+    );
 }
 
 #[test]
 fn is_recognized_includes_delete_retention_ms() {
-    assert!(is_recognized(DELETE_RETENTION_MS));
+    assert2::assert!(is_recognized(DELETE_RETENTION_MS));
 }
 
 #[test]
@@ -402,7 +382,7 @@ fn compact_and_scheduled_delivery_exclude_each_other() {
         if let Some(mode) = mode {
             overrides.insert(DELIVERY_MODE.to_string(), mode.to_string());
         }
-        assert!(
+        assert2::assert!(
             validate_config_combination(&overrides, &TopicDefaults::default(), true).is_ok()
                 == want_ok,
             "overrides {overrides:?}"
@@ -437,7 +417,7 @@ fn a_min_compaction_lag_above_the_max_is_refused() {
         if let Some(max) = max {
             overrides.insert(MAX_COMPACTION_LAG_MS.to_string(), max.to_string());
         }
-        assert!(
+        assert2::assert!(
             validate_config_combination(&overrides, &TopicDefaults::default(), true).is_ok()
                 == want_ok,
             "{case}: {overrides:?}"
@@ -452,7 +432,7 @@ fn the_compaction_lag_conflict_carries_kafkas_message() {
         (MIN_COMPACTION_LAG_MS.to_string(), "60000".to_string()),
         (MAX_COMPACTION_LAG_MS.to_string(), "1".to_string()),
     ]);
-    assert!(
+    assert2::assert!(
         validate_config_combination(&overrides, &TopicDefaults::default(), true)
             == Err(
                 "conflict topic config setting min.compaction.lag.ms (60000) > \
@@ -1013,67 +993,77 @@ fn cross_key_rules_read_the_cluster_broker_defaults() {
 
 /// The per-key refusals of Kafka trunk's four newest topic keys, on a broker
 /// serving trunk.
-#[test]
-fn kafka_trunks_newest_topic_keys_refuse_what_kafka_refuses() {
-    for (key, value) in [
-        (REMOTE_COPY_LAG_MS, "-2"),
-        (REMOTE_COPY_LAG_BYTES, "-2"),
-        (MAX_DECOMPRESSED_MESSAGE_BYTES, "0"),
-        (MAX_DECOMPRESSED_MESSAGE_BYTES, "2147483640"),
-        (ERRORS_DEADLETTERQUEUE_GROUP_ENABLE, "yes"),
-    ] {
-        check!(
-            canonical_topic_config(key, value, UnstableApiVersions::Enabled).is_err(),
-            "{key}={value}"
-        );
-    }
+#[yare::parameterized(
+    remote_copy_lag_ms = { REMOTE_COPY_LAG_MS, "-2" },
+    remote_copy_lag_bytes = { REMOTE_COPY_LAG_BYTES, "-2" },
+    max_decompressed_message_bytes_zero = { MAX_DECOMPRESSED_MESSAGE_BYTES, "0" },
+    max_decompressed_message_bytes_too_large = {
+        MAX_DECOMPRESSED_MESSAGE_BYTES,
+        "2147483640",
+    },
+    errors_deadletterqueue_group_enable = { ERRORS_DEADLETTERQUEUE_GROUP_ENABLE, "yes" },
+)]
+fn kafka_trunks_newest_topic_keys_refuse_what_kafka_refuses(key: &str, value: &str) {
+    check!(
+        canonical_topic_config(key, value, UnstableApiVersions::Enabled).is_err(),
+        "{key}={value}"
+    );
 }
 
 /// #907's companion: Kafka 4.3.1's `LogConfig` does not define Kafka trunk's
 /// four newest topic keys, so `LogConfig.validateNames` refuses each with
 /// `Unknown topic config name`, whatever the value, on every path that
 /// validates a topic's map. `unstable.api.versions.enable` accepts them.
-#[test]
-fn kafka_trunks_newest_topic_keys_need_unstable_api_versions() {
-    for (key, value, canonical) in [
-        (REMOTE_COPY_LAG_MS, " 1000 ", "1000"),
-        (REMOTE_COPY_LAG_BYTES, "-1", "-1"),
-        (MAX_DECOMPRESSED_MESSAGE_BYTES, "2147483639", "2147483639"),
-        (ERRORS_DEADLETTERQUEUE_GROUP_ENABLE, "TRUE", "true"),
-    ] {
-        let unknown = format!("Unknown topic config name: {key}");
-        check!(
-            canonical_topic_config(key, value, UnstableApiVersions::Disabled)
-                == Err(unknown.clone()),
-            "{key}"
-        );
-        check!(
-            canonical_topic_config(key, value, UnstableApiVersions::Enabled)
-                == Ok(canonical.to_owned()),
-            "{key}"
-        );
-        let map = BTreeMap::from([(key.to_owned(), value.to_owned())]);
-        check!(
-            canonical_topic_config_map(
-                &map,
-                &TopicDefaults::default(),
-                true,
-                UnstableApiVersions::Disabled
-            )
-            .map(drop)
-                == Err(unknown),
-            "{key}"
-        );
-        check!(
-            canonical_topic_config_map(
-                &map,
-                &TopicDefaults::default(),
-                true,
-                UnstableApiVersions::Enabled
-            ) == Ok(BTreeMap::from([(key.to_owned(), canonical.to_owned())])),
-            "{key}"
-        );
-    }
+#[yare::parameterized(
+    remote_copy_lag_ms = { REMOTE_COPY_LAG_MS, " 1000 ", "1000" },
+    remote_copy_lag_bytes = { REMOTE_COPY_LAG_BYTES, "-1", "-1" },
+    max_decompressed_message_bytes = {
+        MAX_DECOMPRESSED_MESSAGE_BYTES,
+        "2147483639",
+        "2147483639",
+    },
+    errors_deadletterqueue_group_enable = {
+        ERRORS_DEADLETTERQUEUE_GROUP_ENABLE,
+        "TRUE",
+        "true",
+    },
+)]
+fn kafka_trunks_newest_topic_keys_need_unstable_api_versions(
+    key: &str,
+    value: &str,
+    canonical: &str,
+) {
+    let unknown = format!("Unknown topic config name: {key}");
+    check!(
+        canonical_topic_config(key, value, UnstableApiVersions::Disabled) == Err(unknown.clone()),
+        "{key}"
+    );
+    check!(
+        canonical_topic_config(key, value, UnstableApiVersions::Enabled)
+            == Ok(canonical.to_owned()),
+        "{key}"
+    );
+    let map = BTreeMap::from([(key.to_owned(), value.to_owned())]);
+    check!(
+        canonical_topic_config_map(
+            &map,
+            &TopicDefaults::default(),
+            true,
+            UnstableApiVersions::Disabled
+        )
+        .map(drop)
+            == Err(unknown),
+        "{key}"
+    );
+    check!(
+        canonical_topic_config_map(
+            &map,
+            &TopicDefaults::default(),
+            true,
+            UnstableApiVersions::Enabled
+        ) == Ok(BTreeMap::from([(key.to_owned(), canonical.to_owned())])),
+        "{key}"
+    );
 }
 
 /// Under Kafka 4.3.1 the broker keys `log.remote.copy.lag.ms` and
@@ -1108,7 +1098,9 @@ fn compact_and_delete_is_compaction_for_the_scheduled_delivery_rule() {
     CLEANUP_POLICY.to_string() => "compact,delete".to_string(),
     DELIVERY_MODE.to_string() => DELIVERY_MODE_SCHEDULED.to_string()};
 
-    assert!(validate_config_combination(&overrides, &TopicDefaults::default(), true).is_err());
+    assert2::assert!(
+        validate_config_combination(&overrides, &TopicDefaults::default(), true).is_err()
+    );
 }
 
 /// KFC-1's third exclusion: a scheduled topic reads each batch's
@@ -1153,7 +1145,7 @@ fn validate_topic_config_map_refuses_log_append_time_on_a_scheduled_topic() {
     MESSAGE_TIMESTAMP_TYPE.to_string() => "LogAppendTime".to_string(),
     DELIVERY_MODE.to_string() => DELIVERY_MODE_SCHEDULED.to_string()};
 
-    assert!(validate_topic_config_map(&overrides).is_err());
+    assert2::assert!(validate_topic_config_map(&overrides).is_err());
 }
 
 #[test]
@@ -1163,8 +1155,8 @@ fn compact_plus_scheduled_rejection_names_both_keys() {
     DELIVERY_MODE.to_string() => DELIVERY_MODE_SCHEDULED.to_string()};
     let error =
         validate_config_combination(&overrides, &TopicDefaults::default(), true).unwrap_err();
-    assert!(error.contains(CLEANUP_POLICY), "got: {error}");
-    assert!(error.contains(DELIVERY_MODE), "got: {error}");
+    assert2::assert!(error.contains(CLEANUP_POLICY), "got: {error}");
+    assert2::assert!(error.contains(DELIVERY_MODE), "got: {error}");
 }
 
 #[test]
@@ -1172,18 +1164,18 @@ fn validate_topic_config_map_checks_pairs_and_then_combinations() {
     let accepted = maplit::btreemap! {
     RETENTION_MS.to_string() => "60000".to_string(),
     DELIVERY_MODE.to_string() => DELIVERY_MODE_SCHEDULED.to_string()};
-    assert!(validate_topic_config_map(&accepted) == Ok(()));
+    assert2::assert!(validate_topic_config_map(&accepted) == Ok(()));
 
     let bad_pair = maplit::btreemap! {DELIVERY_MODE.to_string() => "later".to_string()};
-    assert!(validate_topic_config_map(&bad_pair).is_err());
+    assert2::assert!(validate_topic_config_map(&bad_pair).is_err());
 
     let unknown_key = maplit::btreemap! {UNKNOWN_KEY.to_string() => "1000".to_string()};
-    assert!(validate_topic_config_map(&unknown_key).is_err());
+    assert2::assert!(validate_topic_config_map(&unknown_key).is_err());
 
     let bad_combination = maplit::btreemap! {
     CLEANUP_POLICY.to_string() => "compact".to_string(),
     DELIVERY_MODE.to_string() => DELIVERY_MODE_SCHEDULED.to_string()};
-    assert!(validate_topic_config_map(&bad_combination).is_err());
+    assert2::assert!(validate_topic_config_map(&bad_combination).is_err());
 }
 
 /// KIP-950 `LogConfig.validateRemoteStorageConfigs`: tiered storage cannot be
@@ -1242,7 +1234,7 @@ fn disabling_tiered_storage_needs_the_delete_flag() {
             .into_iter()
             .map(|(key, value)| (key.to_string(), value.to_string()))
             .collect();
-        assert!(
+        assert2::assert!(
             validate_remote_storage_disable(current.as_ref(), &next).is_ok() == want_ok,
             "{case}: {next:?}"
         );
@@ -1272,37 +1264,36 @@ fn the_disable_refusal_names_both_ways_out() {
 /// list with `ThrottledReplicaListValidator`'s regex. Each row is Kafka's
 /// result, and an accepted row carries the canonical value krabka stores,
 /// which is `ConfigDef.convertToString` of the parsed value.
-#[test]
-fn values_are_parsed_the_way_kafkas_config_def_parses_them() {
-    let leader = LEADER_THROTTLED_REPLICAS_KEY;
-    let follower = FOLLOWER_THROTTLED_REPLICAS_KEY;
-    let cases = [
-        (PREALLOCATE, "TRUE", Some("true")),
-        (REMOTE_LOG_COPY_DISABLE, " false ", Some("false")),
-        (PREALLOCATE, "yes", None),
-        (RETENTION_MS, " 1000 ", Some("1000")),
-        (SEGMENT_BYTES, "1048576 ", Some("1048576")),
-        (COMPRESSION_TYPE, " gzip", Some("gzip")),
-        (MIN_CLEANABLE_DIRTY_RATIO, "0.5d", Some("0.5")),
-        (MIN_CLEANABLE_DIRTY_RATIO, "1", Some("1.0")),
-        (CLEANUP_POLICY, " compact , delete ", Some("compact,delete")),
-        (CLEANUP_POLICY, " ", Some("")),
-        (leader, " ", Some("")),
-        (leader, " * ", Some("*")),
-        (leader, "0:1,,1:2", Some("0:1,,1:2")),
-        (leader, "-1:1", None),
-        (leader, "+0:1", None),
-        (follower, "0 : 1", None),
-    ];
-    for (key, value, canonical) in cases {
-        check!(
-            canonical_topic_config(key, value, UnstableApiVersions::Disabled)
-                .ok()
-                .as_deref()
-                == canonical,
-            "{key}={value:?}"
-        );
-    }
+#[yare::parameterized(
+    uppercase_boolean = { PREALLOCATE, "TRUE", Some("true") },
+    whitespace_boolean = { REMOTE_LOG_COPY_DISABLE, " false ", Some("false") },
+    invalid_boolean = { PREALLOCATE, "yes", None },
+    trimmed_long = { RETENTION_MS, " 1000 ", Some("1000") },
+    trimmed_int = { SEGMENT_BYTES, "1048576 ", Some("1048576") },
+    trimmed_enum = { COMPRESSION_TYPE, " gzip", Some("gzip") },
+    double_suffix = { MIN_CLEANABLE_DIRTY_RATIO, "0.5d", Some("0.5") },
+    integral_double = { MIN_CLEANABLE_DIRTY_RATIO, "1", Some("1.0") },
+    spaced_cleanup_list = { CLEANUP_POLICY, " compact , delete ", Some("compact,delete") },
+    empty_cleanup_list = { CLEANUP_POLICY, " ", Some("") },
+    blank_leader_throttle = { LEADER_THROTTLED_REPLICAS_KEY, " ", Some("") },
+    wildcard_leader_throttle = { LEADER_THROTTLED_REPLICAS_KEY, " * ", Some("*") },
+    leader_throttle_list = { LEADER_THROTTLED_REPLICAS_KEY, "0:1,,1:2", Some("0:1,,1:2") },
+    negative_leader_throttle = { LEADER_THROTTLED_REPLICAS_KEY, "-1:1", None },
+    signed_leader_throttle = { LEADER_THROTTLED_REPLICAS_KEY, "+0:1", None },
+    spaced_follower_throttle = { FOLLOWER_THROTTLED_REPLICAS_KEY, "0 : 1", None },
+)]
+fn values_are_parsed_the_way_kafkas_config_def_parses_them(
+    key: &str,
+    value: &str,
+    canonical: Option<&str>,
+) {
+    check!(
+        canonical_topic_config(key, value, UnstableApiVersions::Disabled)
+            .ok()
+            .as_deref()
+            == canonical,
+        "{key}={value:?}"
+    );
 }
 
 /// `apply_to_log_config` reads a stored value with the parser validation uses,
@@ -1326,92 +1317,79 @@ fn the_log_config_reader_parses_what_validation_accepts() {
 /// Each refusal is Kafka's own `ConfigException` text: `Unknown topic config
 /// name: <key>`, or `Invalid value <parsed value> for configuration <key>:
 /// <validator message>`.
-#[test]
-fn refusals_carry_kafkas_config_exception_text() {
-    let cases = [
-        ("foo", "1", "Unknown topic config name: foo"),
-        (
-            "max.message.bytes",
-            "-1",
-            "Invalid value -1 for configuration max.message.bytes: Value must be at least 0",
-        ),
-        (
-            "compression.lz4.level",
-            "18",
-            "Invalid value 18 for configuration compression.lz4.level: Value must be no more \
-             than 17",
-        ),
-        (
-            "compression.gzip.level",
-            "0",
-            "Invalid value 0 for configuration compression.gzip.level: Value must be between 1 \
-             and 9 or equal to -1",
-        ),
-        (
-            RETENTION_MS,
-            "abc",
-            "Invalid value abc for configuration retention.ms: Not a number of type LONG",
-        ),
-        (
-            SEGMENT_BYTES,
-            "2147483648",
-            "Invalid value 2147483648 for configuration segment.bytes: Not a number of type INT",
-        ),
-        (
-            PREALLOCATE,
-            "yes",
-            "Invalid value yes for configuration preallocate: Expected value to be either true \
-             or false",
-        ),
-        (
-            COMPRESSION_TYPE,
-            "none",
-            "Invalid value none for configuration compression.type: String must be one of: \
-             uncompressed, zstd, lz4, snappy, gzip, producer",
-        ),
-        (
-            MESSAGE_TIMESTAMP_TYPE,
-            "x",
-            "Invalid value x for configuration message.timestamp.type: String must be one of: \
-             CreateTime, LogAppendTime",
-        ),
-        (
-            CLEANUP_POLICY,
-            "foo",
-            "Invalid value foo for configuration cleanup.policy: String must be one of: \
-             compact, delete",
-        ),
-        (
-            CLEANUP_POLICY,
-            "delete,delete",
-            "Configuration 'cleanup.policy' values must not be duplicated.",
-        ),
-        (
-            CLEANUP_POLICY,
-            "delete,",
-            "Configuration 'cleanup.policy' values must not be empty.",
-        ),
-        (
-            MIN_CLEANABLE_DIRTY_RATIO,
-            "2",
-            "Invalid value 2.0 for configuration min.cleanable.dirty.ratio: Value must be no \
-             more than 1",
-        ),
-        (
-            FOLLOWER_THROTTLED_REPLICAS_KEY,
-            "0 : 1",
-            "Invalid value [0 : 1] for configuration follower.replication.throttled.replicas: \
-             follower.replication.throttled.replicas must be the literal '*' or a list of \
-             replicas in the following format: [partitionId]:[brokerId],[partitionId]:\
-             [brokerId],...",
-        ),
-    ];
-    for (key, value, message) in cases {
-        check!(
-            validate_topic_config(key, value) == Err(message.to_owned()),
-            "{key}={value}"
-        );
-    }
+#[yare::parameterized(
+    unknown_key = { "foo", "1", "Unknown topic config name: foo" },
+    negative_max_message_bytes = {
+        "max.message.bytes",
+        "-1",
+        "Invalid value -1 for configuration max.message.bytes: Value must be at least 0",
+    },
+    lz4_level_too_high = {
+        "compression.lz4.level",
+        "18",
+        "Invalid value 18 for configuration compression.lz4.level: Value must be no more than 17",
+    },
+    gzip_level_zero = {
+        "compression.gzip.level",
+        "0",
+        "Invalid value 0 for configuration compression.gzip.level: Value must be between 1 and 9 or equal to -1",
+    },
+    non_integer_retention_ms = {
+        RETENTION_MS,
+        "abc",
+        "Invalid value abc for configuration retention.ms: Not a number of type LONG",
+    },
+    segment_bytes_int_overflow = {
+        SEGMENT_BYTES,
+        "2147483648",
+        "Invalid value 2147483648 for configuration segment.bytes: Not a number of type INT",
+    },
+    invalid_boolean = {
+        PREALLOCATE,
+        "yes",
+        "Invalid value yes for configuration preallocate: Expected value to be either true or false",
+    },
+    invalid_compression_type = {
+        COMPRESSION_TYPE,
+        "none",
+        "Invalid value none for configuration compression.type: String must be one of: uncompressed, zstd, lz4, snappy, gzip, producer",
+    },
+    invalid_timestamp_type = {
+        MESSAGE_TIMESTAMP_TYPE,
+        "x",
+        "Invalid value x for configuration message.timestamp.type: String must be one of: CreateTime, LogAppendTime",
+    },
+    invalid_cleanup_policy = {
+        CLEANUP_POLICY,
+        "foo",
+        "Invalid value foo for configuration cleanup.policy: String must be one of: compact, delete",
+    },
+    duplicate_cleanup_policy = {
+        CLEANUP_POLICY,
+        "delete,delete",
+        "Configuration 'cleanup.policy' values must not be duplicated.",
+    },
+    empty_cleanup_policy_item = {
+        CLEANUP_POLICY,
+        "delete,",
+        "Configuration 'cleanup.policy' values must not be empty.",
+    },
+    dirty_ratio_too_high = {
+        MIN_CLEANABLE_DIRTY_RATIO,
+        "2",
+        "Invalid value 2.0 for configuration min.cleanable.dirty.ratio: Value must be no more than 1",
+    },
+    invalid_follower_throttle = {
+        FOLLOWER_THROTTLED_REPLICAS_KEY,
+        "0 : 1",
+        "Invalid value [0 : 1] for configuration follower.replication.throttled.replicas: follower.replication.throttled.replicas must be the literal '*' or a list of replicas in the following format: [partitionId]:[brokerId],[partitionId]:[brokerId],...",
+    },
+)]
+fn refusals_carry_kafkas_config_exception_text(key: &str, value: &str, message: &str) {
+    check!(
+        validate_topic_config(key, value) == Err(message.to_owned()),
+        "{key}={value}"
+    );
 }
 
 /// Kafka's `ConfigurationControlManager.validateAlterConfig` refuses a value
@@ -1419,38 +1397,34 @@ fn refusals_carry_kafkas_config_exception_text() {
 /// key, and counts the length as Java's `String.length()` does, in UTF-16 code
 /// units: a value of 32767 units fits, and one of 32768 does not, whatever the
 /// bytes it takes.
+#[yare::parameterized(
+    ascii_fits = { "a".repeat(32_767), true },
+    ascii_one_too_long = { "a".repeat(32_768), false },
+    two_byte_fits = { "é".repeat(32_767), true },
+    two_byte_too_long = { "é".repeat(32_768), false },
+    astral_fits = { "😀".repeat(16_383), true },
+    astral_too_long = { "😀".repeat(16_384), false },
+)]
+fn a_config_value_size_matches_java_string_length(value: String, want_ok: bool) {
+    const MESSAGE: &str = "The configuration value cannot be added because it exceeds the \
+                           maximum value size of 32767 bytes.";
+    let expected = if want_ok {
+        Ok(())
+    } else {
+        Err(MESSAGE.to_owned())
+    };
+    check!(check_value_size(&value) == expected);
+}
+
+/// The aggregate config-map path checks a value's size before validating its
+/// key, and the per-key path uses the same limit for long list values.
 #[test]
-fn a_config_value_longer_than_short_max_value_is_refused_before_any_key_check() {
+fn a_config_value_size_is_checked_before_other_validation() {
     const MESSAGE: &str = "The configuration value cannot be added because it exceeds the \
                            maximum value size of 32767 bytes.";
     // A valid throttled-replicas list: 8000 entries of `0:1` and 7999 commas.
     let fits = vec!["0:1"; 8_000].join(",");
     let too_long = vec!["0:1"; 8_200].join(",");
-    let cases = [
-        ("a value that fits", "a".repeat(32_767), Ok(())),
-        ("one unit too long", "a".repeat(32_768), Err(MESSAGE)),
-        // `é` is one UTF-16 unit and two UTF-8 bytes.
-        ("two-byte characters that fit", "é".repeat(32_767), Ok(())),
-        (
-            "two-byte characters too long",
-            "é".repeat(32_768),
-            Err(MESSAGE),
-        ),
-        // An emoji is two UTF-16 units and four UTF-8 bytes.
-        ("astral characters that fit", "😀".repeat(16_383), Ok(())),
-        (
-            "astral characters too long",
-            "😀".repeat(16_384),
-            Err(MESSAGE),
-        ),
-    ];
-    for (label, value, expected) in cases {
-        check!(
-            check_value_size(&value) == expected.map_err(str::to_owned),
-            "{label}"
-        );
-    }
-
     // The whole-map check answers the size before a key it would refuse: the
     // key here is unknown, and the other value is not an integer, yet the size
     // wins.

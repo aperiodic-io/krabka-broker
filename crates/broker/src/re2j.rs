@@ -297,43 +297,33 @@ mod tests {
     use {super::*, assert2::check};
 
     /// The patterns Kafka's RE2J takes, and the ones it refuses.
-    #[test]
-    fn the_dialect_follows_re2j() {
-        // (pattern, compiles)
-        let cases = [
-            ("txn-.*", true),
-            ("(a|b)+c", true),
-            ("(?i)TXN", true),
-            ("(?s).*", true),
-            ("[a-z0-9_.-]+", true),
-            // Lookaround, backreferences and possessive quantifiers are Perl
-            // syntax that RE2 does not have.
-            ("(?=txn-).*", false),
-            ("(?!txn-).*", false),
-            ("(txn)-\\1", false),
-            ("a*+", false),
-            ("a++", false),
-            ("a?+", false),
-            ("a{2,3}+", false),
-            // A lazy quantifier is in both engines, and a literal `+` in a
-            // class is not a quantifier.
-            ("a+?", true),
-            ("[+*]+", true),
-            ("a\\++", true),
-            // An inline flag RE2J does not know.
-            ("(?x) txn", false),
-            ("(?u)txn", false),
-            // Malformed.
-            ("[", false),
-            ("(", false),
-        ];
-        for (pattern, compiles) in cases {
-            check!(
-                compile_full_match(pattern).is_ok() == compiles,
-                "{pattern:?} should {}compile",
-                if compiles { "" } else { "not " }
-            );
-        }
+    #[yare::parameterized(
+        plain_pattern = { "txn-.*", true },
+        alternation_and_repeat = { "(a|b)+c", true },
+        case_insensitive_flag = { "(?i)TXN", true },
+        dotall_flag = { "(?s).*", true },
+        character_class = { "[a-z0-9_.-]+", true },
+        positive_lookahead = { "(?=txn-).*", false },
+        negative_lookahead = { "(?!txn-).*", false },
+        backreference = { "(txn)-\\1", false },
+        possessive_star = { "a*+", false },
+        possessive_plus = { "a++", false },
+        possessive_optional = { "a?+", false },
+        possessive_range = { "a{2,3}+", false },
+        lazy_quantifier = { "a+?", true },
+        class_quantifiers = { "[+*]+", true },
+        escaped_plus = { "a\\++", true },
+        unsupported_extended_flag = { "(?x) txn", false },
+        unsupported_unicode_flag = { "(?u)txn", false },
+        unmatched_open_bracket = { "[", false },
+        unmatched_open_group = { "(", false },
+    )]
+    fn the_dialect_follows_re2j(pattern: &str, compiles: bool) {
+        check!(
+            compile_full_match(pattern).is_ok() == compiles,
+            "{pattern:?} should {}compile",
+            if compiles { "" } else { "not " }
+        );
     }
 
     #[test]
@@ -353,18 +343,23 @@ mod tests {
         check!(!ended.is_match("+"));
     }
 
-    #[test]
-    fn character_class_operations_keep_re2j_meaning() {
-        let literal_ampersands = compile_full_match("[a&&b]").expect("literal class compiles");
-        for character in ["a", "&", "b"] {
-            check!(literal_ampersands.is_match(character));
-        }
-        check!(!literal_ampersands.is_match("c"));
+    #[yare::parameterized(
+        literal_ampersand_class_a = { "[a&&b]", "a" },
+        literal_ampersand_class_ampersand = { "[a&&b]", "&" },
+        literal_ampersand_class_b = { "[a&&b]", "b" },
+        unioned_group_class_word = { r"[\w&&\d]", "x" },
+        unioned_group_class_digit = { r"[\w&&\d]", "7" },
+        unioned_group_class_ampersand = { r"[\w&&\d]", "&" },
+    )]
+    fn character_class_union_members_keep_re2j_meaning(pattern: &str, character: &str) {
+        let class = compile_full_match(pattern).expect("class compiles");
+        check!(class.is_match(character), "{pattern} includes {character}");
+    }
 
-        let groups_are_unioned = compile_full_match(r"[\w&&\d]").expect("class compiles");
-        for character in ["x", "7", "&"] {
-            check!(groups_are_unioned.is_match(character));
-        }
+    #[test]
+    fn character_class_ranges_keep_re2j_meaning() {
+        let literal_ampersands = compile_full_match("[a&&b]").expect("literal class compiles");
+        check!(!literal_ampersands.is_match("c"));
 
         // RE2J reads the leading pair as a range from '-' to 'a', not set
         // subtraction.

@@ -54,35 +54,38 @@ proptest! {
     }
 }
 
-#[test]
-fn corrupt_snapshot_fallback_retries_only_corruption_and_keeps_original_identity() {
+#[yare::parameterized(
+    newest_success = { [0, 0, 1, 0, 0, 1], Ok((Some(4), 8)) },
+    older_success = { [0, 0, 1, 0, 1, 1], Ok((Some(1), 7)) },
+    newest_corrupt = { [0, 0, 1, 0, 2, 1], Err(4) },
+    no_retained_success = { [0, 1, 1, 0, 1, 1], Ok((None, 7)) },
+)]
+fn corrupt_snapshot_fallback_retries_only_corruption_and_keeps_original_identity(
+    outcomes: [u8; 6],
+    expected: Result<(Option<usize>, i64), usize>,
+) {
     let range = ProducerReloadRange {
         log_start: 3,
         local_start: 7,
         log_end: 20,
     };
     let offsets = [20, 5, 10, 3, 8, 9];
-    for (outcomes, expected) in [
-        ([0, 0, 1, 0, 0, 1], Ok((Some(4), 8))),
-        ([0, 0, 1, 0, 1, 1], Ok((Some(1), 7))),
-        ([0, 0, 1, 0, 2, 1], Err(4)),
-        ([0, 1, 1, 0, 1, 1], Ok((None, 7))),
-    ] {
-        assert!(
-            corrupt_snapshot_fallback_preserves_replay(&offsets, &outcomes, range, 10) == expected
-        );
-    }
-    assert!(
+    assert2::assert!(
+        corrupt_snapshot_fallback_preserves_replay(&offsets, &outcomes, range, 10) == expected
+    );
+    assert2::assert!(
         corrupt_snapshot_fallback_preserves_replay(&[9, 9, 9], &[1, 1, 0], range, 10)
             == Ok((Some(2), 9))
     );
-    assert!(corrupt_snapshot_fallback_preserves_replay(&[], &[], range, 10) == Ok((None, 7)));
+    assert2::assert!(
+        corrupt_snapshot_fallback_preserves_replay(&[], &[], range, 10) == Ok((None, 7))
+    );
     let range = ProducerReloadRange {
         log_start: i64::MAX - 2,
         local_start: i64::MAX - 1,
         log_end: i64::MAX,
     };
-    assert!(
+    assert2::assert!(
         corrupt_snapshot_fallback_preserves_replay(
             &[i64::MAX, i64::MAX - 1],
             &[1, 0],
@@ -108,30 +111,31 @@ proptest! {
     }
 }
 
-#[test]
-fn truncated_snapshot_replay_preserves_exact_boundaries_and_local_floor() {
+#[yare::parameterized(
+    empty = { &[][..], Some((None, 7)) },
+    outside_range = { &[3, 21, -1][..], Some((None, 7)) },
+    newest_survivor = { &[20, 5, 0, 11, -1, 4][..], Some((Some(1), 7)) },
+    maximum_values = { &[i64::MAX, i64::MIN, 9][..], Some((Some(2), 9)) },
+)]
+fn truncated_snapshot_replay_preserves_exact_boundaries_and_local_floor(
+    offsets: &[i64],
+    expected: Option<(Option<usize>, i64)>,
+) {
     let range = ProducerReloadRange {
         log_start: 3,
         local_start: 7,
         log_end: 20,
     };
-    for (offsets, expected) in [
-        (&[][..], Some((None, 7))),
-        (&[3, 21, -1][..], Some((None, 7))),
-        (&[20, 5, 0, 11, -1, 4][..], Some((Some(1), 7))),
-        (&[i64::MAX, i64::MIN, 9][..], Some((Some(2), 9))),
-    ] {
-        assert!(truncated_snapshot_selection_bounds_replay(offsets, range, 10) == expected);
-    }
+    assert2::assert!(truncated_snapshot_selection_bounds_replay(offsets, range, 10) == expected);
     let tied = [20, 10, 10, 3];
     let (selected, cursor) = truncated_snapshot_selection_bounds_replay(&tied, range, 10).unwrap();
-    assert!(selected.map(|index| tied[index]) == Some(10) && cursor == 10);
+    assert2::assert!(selected.map(|index| tied[index]) == Some(10) && cursor == 10);
     let range = ProducerReloadRange {
         log_start: i64::MAX - 2,
         local_start: i64::MAX - 1,
         log_end: i64::MAX,
     };
-    assert!(
+    assert2::assert!(
         truncated_snapshot_selection_bounds_replay(&[i64::MAX], range, i64::MAX)
             == Some((Some(0), i64::MAX))
     );

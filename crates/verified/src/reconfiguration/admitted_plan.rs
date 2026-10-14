@@ -6,20 +6,18 @@ use super::{
 #[cfg(creusot)]
 use creusot_std::prelude::*;
 
-// cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
-#[cfg(creusot)]
-#[cfg_attr(test, mutants::skip)]
-#[logic(open)]
-/// KIP-853's one-change-at-a-time rule: only a leader whose epoch is
-/// committed, with no pending change and no uncommitted control record, may
-/// start a voter change.
-pub fn may_reconfigure(leadership: ReconfigurationLeadership, voters: CurrentVoterSet) -> bool {
+crate::creusot_open_spec! {
+    /// KIP-853's one-change-at-a-time rule: only a leader whose epoch is
+    /// committed, with no pending change and no uncommitted control record, may
+    /// start a voter change.
+    pub fn may_reconfigure(leadership: ReconfigurationLeadership, voters: CurrentVoterSet) -> bool {
     pearlite! {
         leadership.is_leader
             && leadership.no_pending_change
             && leadership.epoch_committed
             && voters.latest_controls_committed
     }
+}
 }
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.

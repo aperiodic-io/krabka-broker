@@ -93,30 +93,38 @@ mod tests {
     use {super::shutdown_message, assert2::assert};
 
     #[test]
-    fn requires_typed_cadence_shutdown_and_nonempty_message() {
+    fn preserves_the_nonempty_shutdown_message() {
         let item = "pub(crate) async fn run(coord: Arc<Coordinator>, interval: Time, shutdown: CancellationToken) { sweep(&coord).await; }".parse().unwrap();
         let metadata = "shutdown_message = \"reaper stopped\"".parse().unwrap();
         assert!(shutdown_message(&metadata, &item).unwrap().value() == "reaper stopped");
-        for meta in [
-            "",
-            "shutdown_message = 1",
-            "shutdown_message = \"\"",
-            "unknown = \"message\"",
-        ] {
-            assert!(shutdown_message(&meta.parse().unwrap(), &item).is_err());
-        }
-        for invalid in [
-            "fn run(interval: Time, shutdown: CancellationToken) {}",
-            "async fn run(interval: Time) {}",
-            "async fn run(interval: Other, shutdown: CancellationToken) {}",
-            "async fn run(interval: Time, shutdown: CancellationToken) -> bool {}",
-            "async fn run<T>(interval: Time, shutdown: CancellationToken) {}",
+    }
+
+    #[yare::parameterized(
+        missing_message = { "" },
+        non_string_message = { "shutdown_message = 1" },
+        empty_message = { "shutdown_message = \"\"" },
+        unknown_option = { "unknown = \"message\"" },
+    )]
+    fn rejects_invalid_reaper_metadata(meta: &str) {
+        let item = "pub(crate) async fn run(coord: Arc<Coordinator>, interval: Time, shutdown: CancellationToken) { sweep(&coord).await; }".parse().unwrap();
+        assert2::assert!(shutdown_message(&meta.parse().unwrap(), &item).is_err());
+    }
+
+    #[yare::parameterized(
+        sync_function = { "fn run(interval: Time, shutdown: CancellationToken) {}" },
+        missing_shutdown = { "async fn run(interval: Time) {}" },
+        wrong_interval_type = { "async fn run(interval: Other, shutdown: CancellationToken) {}" },
+        return_type = { "async fn run(interval: Time, shutdown: CancellationToken) -> bool {}" },
+        generic_function = { "async fn run<T>(interval: Time, shutdown: CancellationToken) {}" },
+        extra_function = {
             "async fn run(interval: Time, shutdown: CancellationToken) {} fn extra() {}",
-        ] {
-            assert!(
-                shutdown_message(&metadata, &invalid.parse().unwrap()).is_err(),
-                "{invalid}"
-            );
-        }
+        },
+    )]
+    fn rejects_invalid_reaper_signatures(invalid: &str) {
+        let metadata = "shutdown_message = \"reaper stopped\"".parse().unwrap();
+        assert2::assert!(
+            shutdown_message(&metadata, &invalid.parse().unwrap()).is_err(),
+            "{invalid}"
+        );
     }
 }

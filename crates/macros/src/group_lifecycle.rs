@@ -163,7 +163,6 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
 mod tests {
     use {
         super::expand,
-        assert2::assert,
         moxy::{
             ast::{Fields, GenericParam, ImplItem, ItemImpl, ItemStruct, WherePredicate},
             token::LitStr,
@@ -184,86 +183,63 @@ mod tests {
         moxy::parse!({ input }).unwrap()
     }
 
-    #[test]
-    fn each_protocol_emits_only_its_existing_lifecycle_contract() {
-        for protocol in ["consumer", "share", "streams"] {
-            let output = expand(declaration(protocol)).unwrap();
-            let implementation: ItemImpl = moxy::parse!({ output }).unwrap();
-            assert!(matches!(implementation.generics.params.first(),
+    #[yare::parameterized(consumer = { "consumer" }, share = { "share" }, streams = { "streams" })]
+    fn each_protocol_emits_only_its_existing_lifecycle_contract(protocol: &str) {
+        let output = expand(declaration(protocol)).unwrap();
+        let implementation: ItemImpl = moxy::parse!({ output }).unwrap();
+        assert2::assert!(matches!(implementation.generics.params.first(),
                 Some(GenericParam::Type(parameter)) if parameter.ident == "T"));
-            assert!(
-                matches!(implementation.generics.where_clause.as_ref().unwrap().predicates.first(),
+        assert2::assert!(
+            matches!(implementation.generics.where_clause.as_ref().unwrap().predicates.first(),
                 Some(WherePredicate::Type(predicate))
                     if predicate.bounded_ty.as_path().unwrap().path.is_ident("T")
                         && predicate.bounds.len() == 1)
-            );
-            let names: Vec<_> = implementation
-                .items
-                .iter()
-                .filter_map(ImplItem::as_fn)
-                .map(|method| method.sig.ident.text())
-                .collect();
-            assert!(names.contains(&"bump_epoch"));
-            assert!(names.contains(&"expired_members"));
-            assert!(names.contains(&"evict_expired"));
-            assert!(names.contains(&"assignment_delayed") == (protocol != "streams"));
-            assert!(names.contains(&"fence_rebalance_timeouts") == (protocol != "share"));
-        }
+        );
+        let names: Vec<_> = implementation
+            .items
+            .iter()
+            .filter_map(ImplItem::as_fn)
+            .map(|method| method.sig.ident.text())
+            .collect();
+        assert2::assert!(names.contains(&"bump_epoch"));
+        assert2::assert!(names.contains(&"expired_members"));
+        assert2::assert!(names.contains(&"evict_expired"));
+        assert2::assert!(names.contains(&"assignment_delayed") == (protocol != "streams"));
+        assert2::assert!(names.contains(&"fence_rebalance_timeouts") == (protocol != "share"));
     }
 
-    #[test]
-    fn refuses_missing_protocol_unknown_protocol_and_nonnamed_layouts() {
-        for input in [
-            "struct State { group_epoch: i32, members: HashMap<String, Member> }",
-            "#[group_lifecycle()] struct State {}",
-            "#[group_lifecycle(protocol = \"classic\")] struct State {}",
-            "#[group_lifecycle(protocol = 0)] struct State {}",
-            "#[group_lifecycle(protocol = \"consumer\")] struct State(i32);",
-        ] {
-            let item: ItemStruct = moxy::parse!({ input }).unwrap();
-            assert!(expand(item).is_err());
-        }
+    #[yare::parameterized(
+        no_attribute = { "struct State { group_epoch: i32, members: HashMap<String, Member> }" },
+        missing_protocol = { "#[group_lifecycle()] struct State {}" },
+        unknown_protocol = { "#[group_lifecycle(protocol = \"classic\")] struct State {}" },
+        numeric_protocol = { "#[group_lifecycle(protocol = 0)] struct State {}" },
+        tuple_struct = { "#[group_lifecycle(protocol = \"consumer\")] struct State(i32);" },
+    )]
+    fn refuses_missing_protocol_unknown_protocol_and_nonnamed_layouts(input: &str) {
+        let item: ItemStruct = moxy::parse!({ input }).unwrap();
+        assert2::assert!(expand(item).is_err());
     }
 
-    #[test]
-    fn refuses_each_required_field_for_the_selected_protocol() {
-        struct RequiredField {
-            protocol: &'static str,
-            missing: &'static str,
-        }
-        for case in [
-            RequiredField {
-                protocol: "consumer",
-                missing: "group_epoch",
-            },
-            RequiredField {
-                protocol: "consumer",
-                missing: "members",
-            },
-            RequiredField {
-                protocol: "share",
-                missing: "assignment_timestamp_ms",
-            },
-            RequiredField {
-                protocol: "streams",
-                missing: "dirty",
-            },
-        ] {
-            let missing = case.missing;
-            let mut item = declaration(case.protocol);
-            let Fields::Named(fields) = &mut item.fields else {
-                panic!("named state fixture")
-            };
-            let mut members: Vec<_> = std::mem::take(&mut fields.fields.inner)
-                .into_iter()
-                .collect();
-            let position = members
-                .iter()
-                .position(|field| field.ident.as_ref().is_some_and(|ident| ident == missing))
-                .unwrap();
-            members.remove(position);
-            fields.fields.inner = members.into_iter().collect();
-            assert!(expand(item).unwrap_err().to_string().contains(missing));
-        }
+    #[yare::parameterized(
+        consumer_epoch = { "consumer", "group_epoch" },
+        consumer_members = { "consumer", "members" },
+        share_assignment_timestamp = { "share", "assignment_timestamp_ms" },
+        streams_dirty = { "streams", "dirty" },
+    )]
+    fn refuses_each_required_field_for_the_selected_protocol(protocol: &str, missing: &str) {
+        let mut item = declaration(protocol);
+        let Fields::Named(fields) = &mut item.fields else {
+            panic!("named state fixture")
+        };
+        let mut members: Vec<_> = std::mem::take(&mut fields.fields.inner)
+            .into_iter()
+            .collect();
+        let position = members
+            .iter()
+            .position(|field| field.ident.as_ref().is_some_and(|ident| ident == missing))
+            .unwrap();
+        members.remove(position);
+        fields.fields.inner = members.into_iter().collect();
+        assert2::assert!(expand(item).unwrap_err().to_string().contains(missing));
     }
 }

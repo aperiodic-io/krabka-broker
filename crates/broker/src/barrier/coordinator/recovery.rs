@@ -75,14 +75,7 @@ impl BarrierCoordinator {
     /// coordinator did not observe the offsets, so the cut names every frozen
     /// target as missing.
     async fn finalize_open_injections(&self, image: &MetadataImage) -> Result<(), BarrierError> {
-        let open: Vec<NamedGroup> = self
-            .groups
-            .iter()
-            .map(|e| NamedGroup {
-                name: e.key().clone(),
-                entry: e.value().clone(),
-            })
-            .collect();
+        let open = self.groups_snapshot();
 
         for NamedGroup {
             name: group,

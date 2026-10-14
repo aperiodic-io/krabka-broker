@@ -120,7 +120,7 @@ mod tests {
     use {
         super::*,
         crate::{
-            index::{IndexFixture, IndexSeed},
+            index::{IndexFixture, IndexSeed, index_fixture},
             test_support::TempPath,
         },
         assert2::check,
@@ -182,84 +182,76 @@ mod tests {
         check!(reopened.lookup(9999) == 100, "the last surviving position");
     }
 
-    #[test]
-    fn append_and_lookup() {
+    #[yare::parameterized(
+        floor_first = { "floor first", 50, 0 },
+        exact_middle = { "exact middle", 100, 4096 },
+        floor_middle = { "floor middle", 150, 4096 },
+        exact_last = { "exact last", 200, 8192 },
+        past_last = { "past last", 9999, 8192 },
+    )]
+    fn append_and_lookup(name: &str, offset: u32, want: u32) {
         let IndexFixture {
             dir: _dir,
             path: _path,
             index: idx,
         } = reference_index();
-        for (name, offset, want) in [
-            ("floor first", 50, 0),
-            ("exact middle", 100, 4096),
-            ("floor middle", 150, 4096),
-            ("exact last", 200, 8192),
-            ("past last", 9999, 8192),
-        ] {
-            check!(idx.lookup(offset) == want, "case {name}: offset={offset}");
-        }
+        check!(idx.lookup(offset) == want, "case {name}: offset={offset}");
     }
 
-    #[test]
-    fn empty_index_returns_zero() {
+    #[yare::parameterized(
+        zero = { "zero", 0 },
+        positive = { "positive", 1000 },
+    )]
+    fn empty_index_returns_zero(_name: &str, offset: u32) {
         let IndexFixture {
             dir: _dir,
             path: _path,
             index: idx,
-        } = super::super::index_fixture("00000000000000000000.index", OffsetIndex::open);
-        for (_name, offset) in [("zero", 0), ("positive", 1000)] {
-            assert2::assert!(idx.lookup(offset) == 0);
+        } = index_fixture("00000000000000000000.index", OffsetIndex::open);
+        assert2::assert!(idx.lookup(offset) == 0);
+    }
+
+    /// Both a cleanly truncated index and Kafka's preallocated zero tail retain
+    /// the same entries when reopened.
+    #[yare::parameterized(
+        clean = { false },
+        preallocated = { true },
+    )]
+    fn persisted_entries_ignore_zero_padding(padded: bool) {
+        let TempPath { dir: _dir, path } = written_index("00000000000000000000.index", &[
+            IndexSeed {
+                key: 0,
+                coordinate: 0,
+            },
+            IndexSeed {
+                key: 100,
+                coordinate: 4096,
+            },
+        ]);
+        if padded {
+            let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+            file.write_all(&[0u8; OFFSET_ENTRY_SIZE * 2]).unwrap();
+            file.sync_data().unwrap();
         }
+        let index = OffsetIndex::open(&path).unwrap();
+        assert_entry_metadata(&index, 2, Some(OffsetIndexEntry::new(100, 4096)));
+        check!(index.lookup(100) == 4096);
+        check!(index.lookup(150) == 4096);
     }
-
-    #[test]
-    fn persists_across_reopen() {
-        let TempPath { dir: _dir, path } = written_index("00000000000000000000.index", &[
-            IndexSeed {
-                key: 0,
-                coordinate: 0,
-            },
-            IndexSeed {
-                key: 100,
-                coordinate: 4096,
-            },
-        ]);
-        let idx = OffsetIndex::open(&path).unwrap();
-        assert2::assert!(idx.entry_count() == 2);
-        assert2::assert!(idx.lookup(100) == 4096);
-    }
-
-    #[test]
-    fn ignores_trailing_zero_padding() {
-        // Kafka preallocates `.index` to `segment.index.bytes` and only
-        // truncates on clean shutdown; an unclean copy carries trailing
-        // zero entries. Loading must stop at the real data so the binary
-        // search stays monotonic.
-        let TempPath { dir: _dir, path } = written_index("00000000000000000000.index", &[
-            IndexSeed {
-                key: 0,
-                coordinate: 0,
-            },
-            IndexSeed {
-                key: 100,
-                coordinate: 4096,
-            },
-        ]);
-        // Append two zero-filled entries (preallocation padding).
-        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
-        f.write_all(&[0u8; OFFSET_ENTRY_SIZE * 2]).unwrap();
-        f.sync_data().unwrap();
-        drop(f);
-
-        let idx = OffsetIndex::open(&path).unwrap();
-        assert_entry_metadata(&idx, 2, Some(OffsetIndexEntry::new(100, 4096)));
-        assert2::assert!(idx.lookup(150) == 4096);
-    }
-
     /// `floor_entry` is the entry `lookup` lands on, so a read can tell whether
     /// the indexed batch ends exactly on its target.
-    #[test]
-    fn floor_entry_is_the_entry_lookup_lands_on() {
+    #[yare::parameterized(
+        below_first = { "below the first entry", 3, None },
+        exact_first = { "exact first", 4, Some(OffsetIndexEntry::new(4, 0)) },
+        between = { "between entries", 8, Some(OffsetIndexEntry::new(4, 0)) },
+        exact_last = { "exact last", 9, Some(OffsetIndexEntry::new(9, 50)) },
+        past_last = { "past the last entry", 100, Some(OffsetIndexEntry::new(9, 50)) },
+    )]
+    fn floor_entry_is_the_entry_lookup_lands_on(
+        name: &str,
+        target: u32,
+        want: Option<OffsetIndexEntry>,
+    ) {
         let IndexFixture {
             dir: _dir,
             path: _path,
@@ -274,43 +266,29 @@ mod tests {
                 coordinate: 50,
             },
         ]);
-        for (name, target, want) in [
-            ("below the first entry", 3, None),
-            ("exact first", 4, Some(OffsetIndexEntry::new(4, 0))),
-            ("between entries", 8, Some(OffsetIndexEntry::new(4, 0))),
-            ("exact last", 9, Some(OffsetIndexEntry::new(9, 50))),
-            (
-                "past the last entry",
-                100,
-                Some(OffsetIndexEntry::new(9, 50)),
-            ),
-        ] {
-            check!(idx.floor_entry(target) == want, "case {name}");
-            check!(
-                idx.lookup(target) == want.map_or(0, |entry| entry.position),
-                "case {name}: lookup agrees"
-            );
-        }
+        check!(idx.floor_entry(target) == want, "case {name}");
+        check!(
+            idx.lookup(target) == want.map_or(0, |entry| entry.position),
+            "case {name}: lookup agrees"
+        );
     }
 
-    #[test]
-    fn position_at_or_after_finds_ceiling() {
+    #[yare::parameterized(
+        exact = { "exact", 100, Some(4096) },
+        ceiling = { "ceiling", 150, Some(8192) },
+        first = { "first", 0, Some(0) },
+        past_last = { "past last", 201, None },
+    )]
+    fn position_at_or_after_finds_ceiling(name: &str, offset: u32, want: Option<u32>) {
         let IndexFixture {
             dir: _dir,
             path: _path,
             index: idx,
         } = reference_index();
-        for (name, offset, want) in [
-            ("exact", 100, Some(4096)),
-            ("ceiling", 150, Some(8192)),
-            ("first", 0, Some(0)),
-            ("past last", 201, None),
-        ] {
-            check!(
-                idx.position_at_or_after(offset) == want,
-                "case {name}: offset={offset}"
-            );
-        }
+        check!(
+            idx.position_at_or_after(offset) == want,
+            "case {name}: offset={offset}"
+        );
     }
 
     #[test]

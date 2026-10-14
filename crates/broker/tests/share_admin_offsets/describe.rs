@@ -240,11 +240,10 @@ pub fn initialized_partitions(
         .topics
         .iter()
         .find(|row| row.topic_name == topic)
-        .map(|row| {
+        .map_or_default(|row| {
             row.partitions
                 .iter()
                 .map(|partition| partition.partition_index)
                 .collect()
         })
-        .unwrap_or_default()
 }

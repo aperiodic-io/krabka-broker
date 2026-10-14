@@ -123,37 +123,41 @@ mod tests {
     use {
         super::{RunnerStatements, options, statements},
         crate::meta::function_signature,
-        assert2::assert,
     };
 
-    #[test]
-    fn runner_policy_keeps_property_order_and_bounds() {
+    #[yare::parameterized(
+        first = { "properties_first" },
+        last = { "properties_last" },
+    )]
+    fn runner_policy_keeps_property_order_and_bounds(order: &str) {
         let header = "fn run(model: Model, label: &str, pinned: usize) {}"
             .parse()
             .unwrap();
         let signature = function_signature(&header).unwrap();
-        for order in ["properties_first", "properties_last"] {
-            let input = format!("bfs = run_bfs, pin = pin_count, depth = DEPTH, states = STATES, checker = checker, order = \"{order}\"").parse().unwrap();
-            let RunnerStatements { before, after } =
-                statements(options(&input).unwrap(), &signature).unwrap();
-            assert!(before.to_string().contains("DEPTH"));
-            assert!(before.to_string().contains("STATES"));
-            let after = after.to_string();
-            assert!(
-                (after.find("assert_properties").unwrap() < after.find("pin_count").unwrap())
-                    == (order == "properties_first")
-            );
-        }
+        let input = format!("bfs = run_bfs, pin = pin_count, depth = DEPTH, states = STATES, checker = checker, order = \"{order}\"").parse().unwrap();
+        let RunnerStatements { before, after } =
+            statements(options(&input).unwrap(), &signature).unwrap();
+        assert2::assert!(before.to_string().contains("DEPTH"));
+        assert2::assert!(before.to_string().contains("STATES"));
+        let after = after.to_string();
+        assert2::assert!(
+            (after.find("assert_properties").unwrap() < after.find("pin_count").unwrap())
+                == (order == "properties_first")
+        );
     }
 
-    #[test]
-    fn runner_metadata_rejects_unknown_order_and_non_names() {
-        for input in [
+    #[yare::parameterized(
+        unknown_order = {
             "bfs = bfs, pin = pin, depth = 1, states = 2, checker = checker, order = \"unknown\"",
+        },
+        computed_bfs = {
             "bfs = bfs + extra, pin = pin, depth = 1, states = 2, checker = checker, order = \"properties_first\"",
+        },
+        parenthesized_checker = {
             "bfs = bfs, pin = pin, depth = 1, states = 2, checker = (checker), order = \"properties_first\"",
-        ] {
-            assert!(options(&input.parse().unwrap()).is_err(), "{input}");
-        }
+        },
+    )]
+    fn runner_metadata_rejects_unknown_order_and_non_names(input: &str) {
+        assert2::assert!(options(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

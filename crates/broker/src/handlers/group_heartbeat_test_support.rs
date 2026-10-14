@@ -1,9 +1,9 @@
 //! Shared group-handler fixtures and subscription authorization cases.
 
 #[cfg(test)]
-use crate::handlers::test_support::LiveBrokerFixture;
-#[cfg(test)]
-use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
+pub(crate) use crate::handlers::test_support::{
+    LiveBrokerFixture, StartedBroker as HandlerStartedBroker,
+};
 use {
     crate::{test_support as broker_fixture_support, test_support::principal as make_principal},
     assert2::assert,

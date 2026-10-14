@@ -12,10 +12,14 @@
 //! quorum -- the same two-tier lookup `ControllerHandle::voter_addr` uses for
 //! the leader it forwards a rejected `submit_change` to.
 
-use crate::{
-    host_port::{HostPort, parse_host_port},
-    metadata_source::MetadataSource,
-    network::client::InterBrokerClient,
+use {
+    crate::{
+        config::BrokerConfig,
+        host_port::{HostPort, parse_host_port},
+        metadata_source::MetadataSource,
+        network::client::InterBrokerClient,
+    },
+    std::sync::Arc,
 };
 
 /// The listener name a controller advertises for the RPCs its peers address
@@ -169,6 +173,24 @@ pub(crate) struct ControllerDialer {
     /// the voter set as a source of the leader's address, for the window
     /// before the committed voter set names it. See [`leader_endpoint`].
     pub quorum_voters: Vec<(krabka_raft::NodeId, String)>,
+}
+
+impl ControllerDialer {
+    /// Builds the controller dialer from one broker's connection settings.
+    pub(crate) fn from_config(
+        config: &BrokerConfig,
+        outbound_client: &Arc<InterBrokerClient>,
+    ) -> Self {
+        Self {
+            outbound_client: Arc::clone(outbound_client),
+            listener_protocol: config.controller_listener_protocol,
+            server_name: config
+                .controller_server_name
+                .clone()
+                .unwrap_or_else(|| "localhost".to_owned()),
+            quorum_voters: config.controller_quorum_voters.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

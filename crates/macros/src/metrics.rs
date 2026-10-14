@@ -140,17 +140,15 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use {super::default_name, assert2::assert};
+    use super::default_name;
 
-    #[test]
-    fn default_name_drops_only_a_trailing_total() {
-        for (field, name) in [
-            ("isr_shrinks_total", "isr_shrinks"),
-            ("partitions_total_led", "partitions_total_led"),
-            ("topic_bytes_in", "topic_bytes_in"),
-            ("total", "total"),
-        ] {
-            assert!(default_name(field) == name);
-        }
+    #[yare::parameterized(
+        strips_trailing_total = { "isr_shrinks_total", "isr_shrinks" },
+        keeps_embedded_total = { "partitions_total_led", "partitions_total_led" },
+        keeps_non_total_suffix = { "topic_bytes_in", "topic_bytes_in" },
+        keeps_total_only_name = { "total", "total" },
+    )]
+    fn default_name_drops_only_a_trailing_total(field: &str, name: &str) {
+        assert2::assert!(default_name(field) == name);
     }
 }

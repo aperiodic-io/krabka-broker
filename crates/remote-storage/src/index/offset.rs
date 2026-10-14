@@ -107,11 +107,15 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn parse_offset_index_round_trips_known_entries() {
+    #[yare::parameterized(
+        one_entry = { vec![(0_u32, 0_u32)] },
+        two_entries = { vec![(0_u32, 0_u32), (10, 256)] },
+        all_known_entries = { vec![(0_u32, 0_u32), (10, 256), (20, 512)] },
+    )]
+    fn parse_offset_index_round_trips_known_entries(specs: Vec<(u32, u32)>) {
         // Mirror OffsetIndex::append: 4B rel BE, 4B pos BE.
         let mut buf = Vec::new();
-        for (rel, pos) in [(0_u32, 0_u32), (10, 256), (20, 512)] {
+        for (rel, pos) in &specs {
             buf.extend_from_slice(&rel.to_be_bytes());
             buf.extend_from_slice(&pos.to_be_bytes());
         }
@@ -120,36 +124,34 @@ mod tests {
             .iter()
             .map(|e| offset_at(e.relative_offset.get(), e.position.get()))
             .collect();
-        assert!(decoded == vec![offset_at(0, 0), offset_at(10, 256), offset_at(20, 512)]);
+        assert2::assert!(
+            decoded
+                == specs
+                    .iter()
+                    .map(|(rel, pos)| offset_at(*rel, *pos))
+                    .collect::<Vec<_>>()
+        );
     }
 
-    #[test]
-    fn position_for_relative_offset_returns_floor() {
-        struct FloorCase<'a> {
-            entries: &'a [OffsetIndexEntry],
-            rel: u32,
-            want: u32,
-        }
+    #[yare::parameterized(
+        exact = { 10, 256 },
+        between = { 15, 256 },
+        first_entry = { 0, 0 },
+        after_last = { 100, 1024 },
+    )]
+    fn position_for_relative_offset_returns_floor(rel: u32, want: u32) {
         let entries = offset_entries(&[
             offset_at(0, 0),
             offset_at(10, 256),
             offset_at(20, 512),
             offset_at(30, 1024),
         ]);
-        let floor = |entries, rel, want| FloorCase { entries, rel, want };
-        let cases = [
-            floor(&entries[..], 10, 256),   // exact
-            floor(&entries[..], 15, 256),   // between
-            floor(&entries[..], 0, 0),      // first entry exact
-            floor(&entries[..], 100, 1024), // after last
-            floor(&[], 50, 0),              // empty
-        ];
-        for FloorCase { entries, rel, want } in cases {
-            assert!(
-                position_for_relative_offset(entries, rel) == want,
-                "rel {rel}"
-            );
-        }
+        assert2::assert!(position_for_relative_offset(&entries, rel) == want);
+    }
+
+    #[test]
+    fn position_for_relative_offset_empty_index_returns_zero() {
+        assert!(position_for_relative_offset(&[], 50) == 0);
     }
 
     #[test]
@@ -159,26 +161,19 @@ mod tests {
         assert!(position_for_relative_offset(&entries, 3) == 0);
     }
 
-    #[test]
-    fn end_position_for_caps_with_max_bytes() {
-        let cases = [
-            // start=0, segment=1024, max_bytes=256 → exclusive_end=256 →
-            // inclusive=255.
-            (0, 1024, 256, Some(255)),
-            // max_bytes >= remaining → read to end.
-            (512, 1024, 999_999, None),
-            // max_bytes=0 → read to end (zero is a no-cap sentinel).
-            (0, 1024, 0, None),
-            // start past the segment-end cap still safe via saturating add.
-            (u32::MAX, 1024, 100, None),
-            // Wider host caps saturate before entering the verified kernel.
-            (0, u32::MAX, usize::MAX, None),
-        ];
-        for (start, segment, max_bytes, want) in cases {
-            assert!(
-                end_position_for(start, segment, max_bytes) == want,
-                "start {start} segment {segment} max_bytes {max_bytes}"
-            );
-        }
+    #[yare::parameterized(
+        finite_inclusive_end = { 0, 1024, 256, Some(255) },
+        cap_beyond_segment = { 512, 1024, 999_999, None },
+        zero_cap_means_no_cap = { 0, 1024, 0, None },
+        start_past_segment = { u32::MAX, 1024, 100, None },
+        wide_cap_saturates = { 0, u32::MAX, usize::MAX, None },
+    )]
+    fn end_position_for_caps_with_max_bytes(
+        start: u32,
+        segment: u32,
+        max_bytes: usize,
+        want: Option<u32>,
+    ) {
+        assert2::assert!(end_position_for(start, segment, max_bytes) == want);
     }
 }

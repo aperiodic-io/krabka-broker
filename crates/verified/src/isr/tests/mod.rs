@@ -8,7 +8,8 @@ const ELIGIBLE: IsrEligibilityFacts = IsrEligibilityFacts {
     alive_broker_epoch: Some(7),
 };
 
-fn check_proposal_changes() {
+#[test]
+fn proposal_change_detection_compares_isr_sizes() {
     assert2::check!(!isr_proposal_changed(0, 0));
     assert2::check!(isr_proposal_changed(1, 0));
     assert2::check!(isr_proposal_changed(0, 1));

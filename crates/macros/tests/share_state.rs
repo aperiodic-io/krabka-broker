@@ -299,51 +299,49 @@ impl AdmissionDomain {
     }
 }
 
-#[tokio::test]
-async fn admission_and_commit_errors_keep_the_guard_and_original_operation_boundary() {
-    struct Case {
-        admitted: bool,
-        committed: bool,
-        image: &'static str,
-        expected: Result<usize, ShareStateError>,
-    }
-    for case in [
-        Case {
-            admitted: false,
-            committed: true,
-            image: "value",
-            expected: Err(ShareStateError::Inactive),
-        },
-        Case {
-            admitted: true,
-            committed: true,
-            image: "value",
-            expected: Ok(5),
-        },
-        Case {
-            admitted: true,
-            committed: true,
-            image: "refuse",
-            expected: Err(ShareStateError::Refused),
-        },
-        Case {
-            admitted: true,
-            committed: false,
-            image: "value",
-            expected: Err(ShareStateError::Commit),
-        },
-    ] {
-        let domain = AdmissionDomain {
-            admitted: case.admitted,
-            committed: case.committed,
-            events: RefCell::new(Vec::new()),
-        };
-        assert!(domain.serve(case.image, "group", [1; 16], 2).await == case.expected);
-        let expected_events: &[&str] = if case.admitted {
-            &["key", "acquire", "operation", "answer", "release"]
-        } else {
-            &["key", "acquire"]
-        };
-        assert!(domain.events.borrow().as_slice() == expected_events);
-    }
+#[yare::parameterized(
+    admission_refused = {
+        false,
+        true,
+        "value",
+        Err(ShareStateError::Inactive),
+    },
+    operation_succeeds = {
+        true,
+        true,
+        "value",
+        Ok(5),
+    },
+    operation_refused = {
+        true,
+        true,
+        "refuse",
+        Err(ShareStateError::Refused),
+    },
+    commit_refused = {
+        true,
+        false,
+        "value",
+        Err(ShareStateError::Commit),
+    },
+)]
+#[test_macro(tokio::test)]
+async fn admission_and_commit_errors_keep_the_guard_and_original_operation_boundary(
+    admitted: bool,
+    committed: bool,
+    image: &str,
+    expected: Result<usize, ShareStateError>,
+) {
+    let domain = AdmissionDomain {
+        admitted,
+        committed,
+        events: RefCell::new(Vec::new()),
+    };
+    assert2::assert!(domain.serve(image, "group", [1; 16], 2).await == expected);
+    let expected_events: &[&str] = if admitted {
+        &["key", "acquire", "operation", "answer", "release"]
+    } else {
+        &["key", "acquire"]
+    };
+    assert2::assert!(domain.events.borrow().as_slice() == expected_events);
 }

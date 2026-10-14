@@ -22,16 +22,6 @@ fn checked_wal_copy_boundaries() {
             == Some((i64::MAX, u64::MAX))
     );
     assert!(checked_wal_copy_replays_exactly(&[], &[], 0, 0, 2, 1).is_none());
-    for source in [
-        [(0, -1, std::vec![1])],
-        [(-1, 0, std::vec![1])],
-        [(i64::MAX, 0, std::vec![1])],
-        [(0, 0, std::vec![])],
-    ] {
-        assert!(
-            checked_wal_copy_replays_exactly(&source, &source, source[0].0, 1, 0, 16).is_none()
-        );
-    }
     let gap = [(0, 0, std::vec![1]), (2, 0, std::vec![2])];
     assert!(checked_wal_copy_replays_exactly(&gap, &gap, 0, 3, 0, 16).is_none());
     let last = [(i64::MAX - 1, 0, std::vec![1])];
@@ -48,6 +38,18 @@ fn checked_wal_copy_boundaries() {
     assert!(
         checked_wal_copy_replays_exactly(&last, &last, i64::MAX - 1, i64::MAX, u64::MAX, u64::MAX)
             .is_none()
+    );
+}
+
+#[yare::parameterized(
+    negative_delta = { [(0, -1, std::vec![1])] },
+    negative_base = { [(-1, 0, std::vec![1])] },
+    offset_overflow = { [(i64::MAX, 0, std::vec![1])] },
+    empty_payload = { [(0, 0, std::vec![])] },
+)]
+fn malformed_wal_copy_sources_are_rejected(source: [WalCopyBatch; 1]) {
+    assert2::assert!(
+        checked_wal_copy_replays_exactly(&source, &source, source[0].0, 1, 0, 16).is_none()
     );
 }
 
@@ -109,21 +111,6 @@ fn installed_wal_fetch_support_boundaries() {
     assert!(installed_wal_quorum_bounds_fetch(&[1, 2], &[10, 10], 1, 3, 0, w).is_none());
     // Raising the floor alone exposes no retained records and need not
     // obtain new support. An inherited HWM needs prior durability evidence.
-    for (current, start) in [(0, 5), (5, 0)] {
-        assert!(
-            installed_wal_quorum_bounds_fetch(
-                &[1, 2, 3],
-                &[0, 0, 0],
-                1,
-                3,
-                current,
-                FetchWatermarks {
-                    log_start: start,
-                    ..w
-                }
-            ) == Some((5, 5, std::vec![]))
-        );
-    }
     let maximum = FetchWatermarks {
         log_end: i64::MAX,
         lso: i64::MAX,
@@ -141,5 +128,25 @@ fn installed_wal_fetch_support_boundaries() {
             deliverable: 6,
             ..w
         }) == Some((8, 5, std::vec![(2, 8), (3, 10)]))
+    );
+}
+
+#[yare::parameterized(
+    raised_floor = { 0, 5 },
+    inherited_hwm = { 5, 0 },
+)]
+fn floor_only_and_inherited_hwm_need_no_new_support(current: i64, start: i64) {
+    let w = FetchWatermarks {
+        log_start: 0,
+        log_end: 10,
+        hw: 0,
+        lso: 10,
+        deliverable: 10,
+    };
+    assert2::assert!(
+        installed_wal_quorum_bounds_fetch(&[1, 2, 3], &[0, 0, 0], 1, 3, current, FetchWatermarks {
+            log_start: start,
+            ..w
+        }) == Some((5, 5, std::vec![]))
     );
 }

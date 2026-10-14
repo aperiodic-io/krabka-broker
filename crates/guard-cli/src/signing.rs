@@ -238,80 +238,36 @@ mod tests {
     /// signature made for one cluster must not authorize the same record in
     /// another. Both properties come from the field being inside the signed
     /// bytes, so every signed field has to change the bytes.
-    #[test]
-    fn a_change_to_any_signed_freeze_field_changes_the_bytes() {
+    #[yare::parameterized(
+        cluster = { FreezeSigningInput { cluster_id: "other-cluster", ..freeze_input() } },
+        pattern_type = { FreezeSigningInput { pattern_type: 4, ..freeze_input() } },
+        scope = { FreezeSigningInput { scope: "payments", ..freeze_input() } },
+        thaw = { FreezeSigningInput { frozen: false, ..freeze_input() } },
+        reason = { FreezeSigningInput { reason: "tenant offboarding", ..freeze_input() } },
+        author = { FreezeSigningInput { set_by: "User:mallory", ..freeze_input() } },
+        timestamp = { FreezeSigningInput { set_at_ms: 1_770_000_000_001, ..freeze_input() } },
+        proposal = { FreezeSigningInput { proposal_id: PROPOSAL_ID, ..freeze_input() } },
+    )]
+    fn a_change_to_any_signed_freeze_field_changes_the_bytes(input: FreezeSigningInput<'static>) {
         let baseline = freeze_signing_bytes(&freeze_input());
-        let cases = [
-            ("another cluster", FreezeSigningInput {
-                cluster_id: "other-cluster",
-                ..freeze_input()
-            }),
-            ("a prefixed scope", FreezeSigningInput {
-                pattern_type: 4,
-                ..freeze_input()
-            }),
-            ("another scope", FreezeSigningInput {
-                scope: "payments",
-                ..freeze_input()
-            }),
-            ("the thaw of the same scope", FreezeSigningInput {
-                frozen: false,
-                ..freeze_input()
-            }),
-            ("another reason", FreezeSigningInput {
-                reason: "tenant offboarding",
-                ..freeze_input()
-            }),
-            ("another author", FreezeSigningInput {
-                set_by: "User:mallory",
-                ..freeze_input()
-            }),
-            ("another timestamp", FreezeSigningInput {
-                set_at_ms: 1_770_000_000_001,
-                ..freeze_input()
-            }),
-            ("another proposal", FreezeSigningInput {
-                proposal_id: PROPOSAL_ID,
-                ..freeze_input()
-            }),
-        ];
-        for (case, input) in cases {
-            check!(freeze_signing_bytes(&input) != baseline, "{case}");
-        }
+        check!(freeze_signing_bytes(&input) != baseline);
     }
 
-    #[test]
-    fn a_change_to_any_signed_approval_field_changes_the_bytes() {
+    #[yare::parameterized(
+        proposal = { ApprovalSigningInput { proposal_id: [0; 16], ..approval_input() } },
+        action = { ApprovalSigningInput { action: 7, ..approval_input() } },
+        target = { ApprovalSigningInput { target: "orders", ..approval_input() } },
+        proposer = { ApprovalSigningInput { proposer: "User:mallory", ..approval_input() } },
+        creation_time = {
+            ApprovalSigningInput { created_at_ms: 1_770_000_000_001, ..approval_input() },
+        },
+        expiry = { ApprovalSigningInput { expires_at_ms: 1_770_000_180_001, ..approval_input() } },
+    )]
+    fn a_change_to_any_signed_approval_field_changes_the_bytes(
+        input: ApprovalSigningInput<'static>,
+    ) {
         let baseline = approval_signing_bytes(&approval_input());
-        let cases = [
-            ("another proposal", ApprovalSigningInput {
-                proposal_id: [0; 16],
-                ..approval_input()
-            }),
-            ("another action", ApprovalSigningInput {
-                action: 7,
-                ..approval_input()
-            }),
-            ("another target", ApprovalSigningInput {
-                target: "orders",
-                ..approval_input()
-            }),
-            ("another proposer", ApprovalSigningInput {
-                proposer: "User:mallory",
-                ..approval_input()
-            }),
-            ("another creation time", ApprovalSigningInput {
-                created_at_ms: 1_770_000_000_001,
-                ..approval_input()
-            }),
-            ("another expiry", ApprovalSigningInput {
-                expires_at_ms: 1_770_000_180_001,
-                ..approval_input()
-            }),
-        ];
-        for (case, input) in cases {
-            check!(approval_signing_bytes(&input) != baseline, "{case}");
-        }
+        check!(approval_signing_bytes(&input) != baseline);
     }
 
     /// A length prefix in front of each text field is what stops two different

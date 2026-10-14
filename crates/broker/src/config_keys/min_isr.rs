@@ -158,78 +158,58 @@ mod tests {
         image
     }
 
-    #[test]
-    fn the_topic_override_wins_then_the_cluster_default_then_kafkas_own() {
-        for (label, topic_override, cluster_default, replication_factor, expected) in [
-            ("nothing published", None, None, 3, 1),
-            ("cluster default only", None, Some("2"), 3, 2),
-            ("topic override wins", Some("3"), Some("2"), 3, 3),
-            ("an unparseable value falls back", Some("many"), None, 3, 1),
-            ("the replication factor caps it", Some("5"), None, 3, 3),
-            ("a cluster default is capped too", None, Some("9"), 2, 2),
-        ] {
-            check!(
-                effective_min_insync_replicas(
-                    &image(topic_override, cluster_default),
-                    "t",
-                    replication_factor,
-                ) == expected,
-                "{label}"
-            );
-        }
+    #[yare::parameterized(
+        nothing_published = { None, None, 3, 1 },
+        cluster_default = { None, Some("2"), 3, 2 },
+        topic_override = { Some("3"), Some("2"), 3, 3 },
+        unparseable_value = { Some("many"), None, 3, 1 },
+        replication_factor_caps_topic = { Some("5"), None, 3, 3 },
+        replication_factor_caps_cluster = { None, Some("9"), 2, 2 },
+    )]
+    fn the_topic_override_wins_then_the_cluster_default_then_kafkas_own(
+        topic_override: Option<&'static str>,
+        cluster_default: Option<&'static str>,
+        replication_factor: usize,
+        expected: usize,
+    ) {
+        check!(
+            effective_min_insync_replicas(
+                &image(topic_override, cluster_default),
+                "t",
+                replication_factor,
+            ) == expected
+        );
     }
 
     /// Node 2 carries a per-node `min.insync.replicas` where node 3 carries
     /// none. Each row is what `(node 2, node 3)` resolve for `t`.
-    #[test]
-    fn a_node_resolves_the_topic_then_its_own_value_then_the_cluster_default() {
-        for (label, topic_override, cluster_default, node_two, expected) in [
-            ("nothing published", None, None, None, (None, None)),
-            (
-                "a node beats the cluster",
-                None,
-                Some("2"),
-                Some("3"),
-                (Some(3), Some(2)),
-            ),
-            (
-                "a node without a cluster default",
-                None,
-                None,
-                Some("2"),
-                (Some(2), None),
-            ),
-            (
-                "the topic beats both",
-                Some("1"),
-                Some("2"),
-                Some("3"),
-                (Some(1), Some(1)),
-            ),
-            (
-                "an unparseable node value reads as none",
-                None,
-                Some("2"),
-                Some("many"),
-                (None, Some(2)),
-            ),
-        ] {
-            let mut image = image(topic_override, cluster_default);
-            if let Some(value) = node_two {
-                image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
-                    node_id: NodeId(2),
-                    config_name: MIN_INSYNC_REPLICAS.to_string(),
-                    config_value: Some(value.to_string()),
-                }));
-            }
-            check!(
-                (
-                    node_min_insync_replicas(&image, NodeId(2), "t"),
-                    node_min_insync_replicas(&image, NodeId(3), "t"),
-                ) == expected,
-                "{label}"
-            );
+    #[yare::parameterized(
+        nothing_published = { None, None, None, (None, None) },
+        node_beats_cluster = { None, Some("2"), Some("3"), (Some(3), Some(2)) },
+        node_without_cluster = { None, None, Some("2"), (Some(2), None) },
+        topic_beats_both = { Some("1"), Some("2"), Some("3"), (Some(1), Some(1)) },
+        unparseable_node_value = { None, Some("2"), Some("many"), (None, Some(2)) },
+    )]
+    fn a_node_resolves_the_topic_then_its_own_value_then_the_cluster_default(
+        topic_override: Option<&'static str>,
+        cluster_default: Option<&'static str>,
+        node_two: Option<&'static str>,
+        expected: (Option<i32>, Option<i32>),
+    ) {
+        let mut image = image(topic_override, cluster_default);
+        if let Some(value) = node_two {
+            image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
+                node_id: NodeId(2),
+                config_name: MIN_INSYNC_REPLICAS.to_string(),
+                config_value: Some(value.to_string()),
+            }));
         }
+        check!(
+            (
+                node_min_insync_replicas(&image, NodeId(2), "t"),
+                node_min_insync_replicas(&image, NodeId(3), "t"),
+            ) == expected
+        );
     }
 
     #[test]

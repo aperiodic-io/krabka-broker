@@ -84,19 +84,20 @@ fn text_is_refused_by_the_integer_parse_then_by_the_rule() {
     let rule_text = GreaterU32::<0>::new(0).unwrap_err().to_string();
     let not_a_number = "x".parse::<u32>().unwrap_err().to_string();
 
-    for (text, expected) in [
-        ("50", Ok(Percent(50))),
-        ("x", Err(not_a_number.clone())),
-        (
-            "101",
-            Err(MinMaxU32::<0, 100>::new(101).unwrap_err().to_string()),
-        ),
-    ] {
-        assert!(parse_percent(text) == expected);
-    }
     assert!("x".parse::<MissLimit>() == Err(not_a_number));
     assert!("0".parse::<MissLimit>() == Err(format!("miss limit: {rule_text}")));
     assert!("0".parse::<Attempts>() == Err(rule_text));
+}
+
+#[yare::parameterized(valid = { "50" }, not_a_number = { "x" }, too_large = { "101" })]
+fn parse_percent_reports_each_input_result(text: &str) {
+    let expected = match text {
+        "50" => Ok(Percent(50)),
+        "x" => Err("x".parse::<u32>().unwrap_err().to_string()),
+        "101" => Err(MinMaxU32::<0, 100>::new(101).unwrap_err().to_string()),
+        _ => unreachable!(),
+    };
+    assert2::assert!(parse_percent(text) == expected);
 }
 
 /// A whole-byte quantity held as an `i32`, with every quantity impl.
@@ -131,34 +132,47 @@ fn quantity_new_takes_a_whole_number_of_the_unit() {
     assert!(SampleFrequency::new(per_sec(99)) == Ok(SampleFrequency(99)));
 }
 
-#[test]
-fn quantity_new_refuses_fractions_infinities_overflow_then_the_rule() {
-    let whole_bytes = "fetch max: must be a whole number of bytes that fits in i32".to_owned();
-    let whole_millis = "must be a whole number of milliseconds that fits in u64".to_owned();
+#[yare::parameterized(
+    fractional = { ByteSize::from_bytes_f64(1.5), true },
+    infinite = { ByteSize::from_bytes_f64(f64::INFINITY), true },
+    nan = { ByteSize::from_bytes_f64(f64::NAN), true },
+    overflow = { ByteSize::from_bytes_i64(i64::from(i32::MAX) + 1), true },
+    zero = { bytes(0), false },
+)]
+fn quantity_byte_inputs_reject_fractions_overflow_and_the_rule(
+    size: ByteSize,
+    whole_value_error: bool,
+) {
+    let whole_bytes = "fetch max: must be a whole number of bytes that fits in i32";
     let positive = GreaterI32::<0>::new(0).unwrap_err().to_string();
+    let expected = if whole_value_error {
+        whole_bytes.to_owned()
+    } else {
+        format!("fetch max: {positive}")
+    };
+    assert2::assert!(FetchMax::new(size) == Err(expected), "{size:?}");
+}
 
-    for (size, expected) in [
-        (ByteSize::from_bytes_f64(1.5), whole_bytes.clone()),
-        (ByteSize::from_bytes_f64(f64::INFINITY), whole_bytes.clone()),
-        (ByteSize::from_bytes_f64(f64::NAN), whole_bytes.clone()),
-        (
-            ByteSize::from_bytes_i64(i64::from(i32::MAX) + 1),
-            whole_bytes.clone(),
-        ),
-        (bytes(0), format!("fetch max: {positive}")),
-    ] {
-        assert!(FetchMax::new(size) == Err(expected), "{size:?}");
-    }
-    for (time, expected) in [
-        (Time::from_micros(1500), whole_millis.clone()),
-        (Time::from_millis(-1), whole_millis),
-        (
-            secs(61),
-            MinMaxU64::<1, 60_000>::new(61_000).unwrap_err().to_string(),
-        ),
-    ] {
-        assert!(Timeout::new(time) == Err(expected), "{time:?}");
-    }
+#[yare::parameterized(
+    fractional_millisecond = { Time::from_micros(1500), true },
+    negative = { Time::from_millis(-1), true },
+    above_maximum = { secs(61), false },
+)]
+fn quantity_time_inputs_reject_fractions_and_out_of_range_values(
+    time: Time,
+    whole_value_error: bool,
+) {
+    let whole_millis = "must be a whole number of milliseconds that fits in u64";
+    let expected = if whole_value_error {
+        whole_millis.to_owned()
+    } else {
+        MinMaxU64::<1, 60_000>::new(61_000).unwrap_err().to_string()
+    };
+    assert2::assert!(Timeout::new(time) == Err(expected), "{time:?}");
+}
+
+#[test]
+fn quantity_new_refuses_fractional_frequency_values() {
     assert!(
         SampleFrequency::new(Frequency::from_per_sec(1.5))
             == Err("sample frequency: must be a whole number of Hz that fits in i32".to_owned())

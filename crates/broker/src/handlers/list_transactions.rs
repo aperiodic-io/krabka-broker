@@ -213,69 +213,69 @@ mod tests {
         assert2::assert,
     };
 
-    #[test]
-    fn txn_state_as_str_matches_jvm_names() {
-        let cases = [
-            (TxnState::Empty, "Empty"),
-            (TxnState::Ongoing, "Ongoing"),
-            (TxnState::PrepareCommit, "PrepareCommit"),
-            (TxnState::PrepareAbort, "PrepareAbort"),
-            (TxnState::CompleteCommit, "CompleteCommit"),
-            (TxnState::CompleteAbort, "CompleteAbort"),
-            (TxnState::Dead, "Dead"),
-        ];
-        for (state, want) in cases {
-            assert!(state.as_str() == want, "{state:?}");
-        }
+    #[yare::parameterized(
+        empty = { TxnState::Empty, "Empty" },
+        ongoing = { TxnState::Ongoing, "Ongoing" },
+        prepare_commit = { TxnState::PrepareCommit, "PrepareCommit" },
+        prepare_abort = { TxnState::PrepareAbort, "PrepareAbort" },
+        complete_commit = { TxnState::CompleteCommit, "CompleteCommit" },
+        complete_abort = { TxnState::CompleteAbort, "CompleteAbort" },
+        dead = { TxnState::Dead, "Dead" },
+    )]
+    fn txn_state_as_str_matches_jvm_names(state: TxnState, want: &str) {
+        assert2::assert!(state.as_str() == want, "{state:?}");
     }
 
-    #[test]
-    fn duration_filter_is_a_strict_lower_bound() {
+    #[yare::parameterized(
+        negative_disables = { 20_000, -2, true },
+        older_than_cutoff = { 8_999, 1_000, true },
+        exactly_on_cutoff = { 9_000, 1_000, false },
+        newer_than_cutoff = { 9_001, 1_000, false },
+        future_start_with_zero_filter = { 11_000, 0, false },
+    )]
+    fn duration_filter_is_a_strict_lower_bound(start_ms: i64, filter: i64, expected: bool) {
         let now_ms = 10_000;
-        let cases = [
-            ("negative disables", 20_000, -2, true),
-            ("older", 8_999, 1_000, true),
-            ("equal", 9_000, 1_000, false),
-            ("newer", 9_001, 1_000, false),
-            ("future", 11_000, 0, false),
-        ];
-
-        for (name, start_ms, filter, expected) in cases {
-            assert!(
-                matches_duration_filter(start_ms, now_ms, filter) == expected,
-                "{name}"
-            );
-        }
+        assert2::assert!(
+            matches_duration_filter(start_ms, now_ms, filter) == expected,
+            "start={start_ms} filter={filter}"
+        );
     }
 
-    #[test]
-    fn transactional_id_pattern_is_optional_and_matches_the_whole_id() {
-        let cases = [
-            (None, "anything", true),
-            (Some(""), "anything", true),
-            (Some("txn-.*"), "txn-alpha", true),
-            (Some("txn-.*"), "prefix-txn-alpha", false),
-            (Some("txn|txn-long"), "txn-long", true),
-        ];
+    #[yare::parameterized(
+        absent_pattern_accepts_anything = { None, "anything", true },
+        empty_pattern_accepts_anything = { Some(""), "anything", true },
+        matching_pattern = { Some("txn-.*"), "txn-alpha", true },
+        match_must_cover_whole_id = { Some("txn-.*"), "prefix-txn-alpha", false },
+        alternation_matches_long_id = { Some("txn|txn-long"), "txn-long", true },
+    )]
+    fn transactional_id_pattern_is_optional_and_matches_the_whole_id(
+        pattern: Option<&str>,
+        transactional_id: &str,
+        expected: bool,
+    ) {
+        let compiled = compile_transactional_id_pattern(pattern).expect("valid pattern");
+        let matches = compiled
+            .as_ref()
+            .is_none_or(|pattern| pattern.is_match(transactional_id));
+        assert2::assert!(
+            matches == expected,
+            "{pattern:?} against {transactional_id}"
+        );
+    }
 
-        for (pattern, transactional_id, expected) in cases {
-            let compiled = compile_transactional_id_pattern(pattern).expect("valid pattern");
-            let matches = compiled
-                .as_ref()
-                .is_none_or(|pattern| pattern.is_match(transactional_id));
-            assert!(
-                matches == expected,
-                "{pattern:?} against {transactional_id}"
-            );
-        }
-        // Kafka compiles the pattern with RE2J, which has no lookahead, no
-        // backreferences and no possessive quantifiers.
-        for refused in ["(?=txn-).*", r"(txn)-\1", "a*+", "(unclosed"] {
-            assert!(
-                compile_transactional_id_pattern(Some(refused)).is_err(),
-                "{refused}"
-            );
-        }
+    /// Kafka compiles the pattern with RE2J, which has no lookahead,
+    /// backreferences, or possessive quantifiers.
+    #[yare::parameterized(
+        lookahead = { "(?=txn-).*" },
+        backreference = { r"(txn)-\1" },
+        possessive_quantifier = { "a*+" },
+        unclosed_group = { "(unclosed" },
+    )]
+    fn transactional_id_pattern_rejects_unsupported_regex(refused: &str) {
+        assert2::assert!(
+            compile_transactional_id_pattern(Some(refused)).is_err(),
+            "{refused}"
+        );
     }
 
     krabka_macros::wire_codec_helpers! {

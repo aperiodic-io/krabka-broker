@@ -43,6 +43,10 @@ fn committed() -> AclCreationResult {
     })
 }
 
+fn response(results: Vec<AclCreationResult>) -> CreateAclsResponse {
+    krabka_macros::unthrottled_wire!(CreateAclsResponse { results })
+}
+
 async fn check_no_acls_created(
     broker: BrokerHandle,
     response: CreateAclsResponse,
@@ -71,9 +75,7 @@ async fn handle_stores_long_resource_names_and_principals() {
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
 
-    let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
-        results: vec![committed(), committed()],
-    });
+    let expected = response(vec![committed(), committed()]);
     assert!(resp == expected);
     let stored = |resource_name: &str, principal: &str| {
         allow_acl()
@@ -105,9 +107,7 @@ async fn handle_denies_cluster_alter_for_each_creation() {
         error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
         error_message: Some("create-acls denied".into()),
     });
-    let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
-        results: vec![denied.clone(), denied],
-    });
+    let expected = response(vec![denied.clone(), denied]);
     check_no_acls_created(broker_handle, resp, expected).await;
 }
 
@@ -127,15 +127,13 @@ async fn handle_submits_valid_creations_and_reports_invalid_creations_in_order()
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
 
-    let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
-        results: vec![
-            committed(),
-            krabka_macros::tagged_wire!(AclCreationResult {
-                error_code: codes::INVALID_REQUEST,
-                error_message: Some("Invalid empty resource name".into()),
-            }),
-        ],
-    });
+    let expected = response(vec![
+        committed(),
+        krabka_macros::tagged_wire!(AclCreationResult {
+            error_code: codes::INVALID_REQUEST,
+            error_message: Some("Invalid empty resource name".into()),
+        }),
+    ]);
     assert!(resp == expected);
 
     let acls = all_acls(&broker_handle);
@@ -170,9 +168,7 @@ async fn handle_answers_security_disabled_for_each_creation_when_no_authorizer_i
         error_code: codes::SECURITY_DISABLED,
         error_message: Some("No Authorizer is configured.".into()),
     });
-    let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
-        results: vec![disabled.clone(), disabled],
-    });
+    let expected = response(vec![disabled.clone(), disabled]);
     check_no_acls_created(broker_handle, resp, expected).await;
 }
 
@@ -220,9 +216,7 @@ async fn handle_stores_any_host_by_default() {
         .await
         .expect("handle");
 
-    let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
-        results: vec![committed(), committed(), committed()],
-    });
+    let expected = response(vec![committed(), committed(), committed()]);
     assert!(resp == expected);
     let mut stored: Vec<String> = all_acls(&broker_handle)
         .into_iter()
@@ -273,9 +267,7 @@ async fn handle_accepts_cidr_host_at_the_cidr_metadata_version() {
     .await;
     let resp = drive_cidr_request(&broker).await;
 
-    let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
-        results: vec![committed()],
-    });
+    let expected = response(vec![committed()]);
     assert!(resp == expected);
     let acls = all_acls(&broker_handle);
     let expected_acls = vec![AclEntry {
@@ -331,9 +323,7 @@ async fn handle_fails_every_creation_when_one_carries_a_filter_only_value() {
         error_code: codes::UNKNOWN_SERVER_ERROR,
         error_message: None,
     });
-    let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
-        results: vec![failed.clone(), failed],
-    });
+    let expected = response(vec![failed.clone(), failed]);
     assert!(resp == expected);
     assert!(all_acls(&broker_handle).is_empty());
     broker_handle.shutdown().await;
@@ -378,17 +368,15 @@ async fn handle_pins_the_cluster_name_and_accepts_other_principal_types() {
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
 
-    let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
-        results: vec![
-            krabka_macros::tagged_wire!(AclCreationResult {
-                error_code: codes::INVALID_REQUEST,
-                error_message: Some(
-                    "The only valid name for the CLUSTER resource is kafka-cluster".into(),
-                ),
-            }),
-            committed(),
-        ],
-    });
+    let expected = response(vec![
+        krabka_macros::tagged_wire!(AclCreationResult {
+            error_code: codes::INVALID_REQUEST,
+            error_message: Some(
+                "The only valid name for the CLUSTER resource is kafka-cluster".into(),
+            ),
+        }),
+        committed(),
+    ]);
     assert!(resp == expected);
     let expected_acls = vec![
         crate::test_support::allow_acl()
@@ -464,7 +452,7 @@ async fn handle_bounds_a_request_to_ten_thousand_new_acls() {
             .await
             .expect("handle");
 
-        let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse { results });
+        let expected = response(results);
         check!(resp == expected, "{label}");
         check!(all_acls(&broker_handle).len() == stored, "{label}");
         broker_handle.shutdown().await;
@@ -528,14 +516,12 @@ async fn check_cidr_refusal(broker_handle: &BrokerHandle) {
     let broker = broker_handle.broker_arc_for_test();
     let resp = drive_cidr_request(&broker).await;
 
-    let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
-        results: vec![krabka_macros::tagged_wire!(AclCreationResult {
-            error_code: codes::UNSUPPORTED_VERSION,
-            error_message: Some(
-                "CIDR-based ACL host patterns require metadata version 4.4-IV1 or higher.".into(),
-            ),
-        })],
-    });
+    let expected = response(vec![krabka_macros::tagged_wire!(AclCreationResult {
+        error_code: codes::UNSUPPORTED_VERSION,
+        error_message: Some(
+            "CIDR-based ACL host patterns require metadata version 4.4-IV1 or higher.".into(),
+        ),
+    })]);
     assert!(resp == expected);
     assert!(all_acls(broker_handle).is_empty());
 }

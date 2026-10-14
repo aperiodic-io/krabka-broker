@@ -145,22 +145,30 @@ fn older_alias_cannot_return_after_leaving_the_completed_window() {
     assert!((source, base, frontier, ready) == (0, 1, 2, true));
 }
 
-#[test]
-fn marker_epoch_and_maximum_offset_keep_exact_retry_bounds() {
-    for request in [(6, 0, 0), (7, 0, 0), (7, 1, 0), (8, 0, 0)] {
-        check(10, 0, Some(7), &[], row(6, 2, 0, 0), request);
-    }
+#[yare::parameterized(
+    older_request_epoch = { (6, 0, 0) },
+    current_epoch = { (7, 0, 0) },
+    current_epoch_nonzero_sequence = { (7, 1, 0) },
+    newer_epoch = { (8, 0, 0) },
+)]
+fn marker_epoch_keeps_exact_retry_bounds(request: (i16, i32, i32)) {
+    check(10, 0, Some(7), &[], row(6, 2, 0, 0), request);
+}
+
+#[yare::parameterized(
+    hwm_at_last_offset = { i64::MAX - 1 },
+    hwm_at_exclusive_end = { i64::MAX },
+)]
+fn maximum_offset_keeps_exact_retry_bounds(hwm: i64) {
     let old = [row(7, i64::MAX - 1, 2, 0)];
-    for hwm in [i64::MAX - 1, i64::MAX] {
-        check(
-            i64::MAX,
-            hwm,
-            Some(7),
-            &old,
-            row(7, 0, 0, 9),
-            (7, i32::MAX - 1, 2),
-        );
-    }
+    check(
+        i64::MAX,
+        hwm,
+        Some(7),
+        &old,
+        row(7, 0, 0, 9),
+        (7, i32::MAX - 1, 2),
+    );
 }
 
 #[test]

@@ -478,58 +478,59 @@ mod tests {
     /// A version other than 0 is refused with the version it found, and a
     /// headerless file, the layout a broker before 1.0 wrote, is refused as
     /// one that predates 1.0.
-    #[test]
-    fn open_refuses_an_unknown_version_and_a_headerless_file() {
+    #[yare::parameterized(
+        one = { "one", 1_i16 },
+        negative = { "negative", -1_i16 },
+        maximum = { "max", i16::MAX },
+    )]
+    fn open_refuses_an_unknown_version(name: &str, version: i16) {
         let dir = TempDir::new().unwrap();
-        for (name, version) in [("one", 1_i16), ("negative", -1), ("max", i16::MAX)] {
-            let path = dir.path().join(format!("{name}.stampindex"));
-            let mut bytes = GOLDEN_BYTES.to_vec();
-            bytes[..2].copy_from_slice(&version.to_be_bytes());
-            std::fs::write(&path, bytes).unwrap();
-            let error = StampIndex::open(path.clone()).unwrap_err();
-            assert2::assert!(
-                let LogError::UnsupportedFormatVersion {
-                    artifact: "stampindex",
-                    path: found_path,
-                    found,
-                } = error,
-                "case {name}"
-            );
-            assert2::assert!(
-                (found_path, found) == (path, i64::from(version)),
-                "case {name}"
-            );
-        }
-        for (name, entries) in [("one entry", 1), ("two entries", 2)] {
-            let path = dir.path().join(format!("{name}.stampindex"));
-            std::fs::write(&path, &GOLDEN_BYTES[2..2 + entries * ENTRY_BYTES]).unwrap();
-            let error = StampIndex::open(path.clone()).unwrap_err();
-            assert2::assert!(
-                let LogError::MissingFormatVersion { artifact: "stampindex", path: found_path } =
-                    error,
-                "case {name}"
-            );
-            assert2::assert!(found_path == path, "case {name}");
-        }
+        let path = dir.path().join(format!("{name}.stampindex"));
+        let mut bytes = GOLDEN_BYTES.to_vec();
+        bytes[..2].copy_from_slice(&version.to_be_bytes());
+        std::fs::write(&path, bytes).unwrap();
+        let error = StampIndex::open(path.clone()).unwrap_err();
+        assert2::assert!(
+            let LogError::UnsupportedFormatVersion {
+                artifact: "stampindex",
+                path: found_path,
+                found,
+            } = error
+        );
+        assert2::assert!((found_path, found) == (path, i64::from(version)));
+    }
+
+    #[yare::parameterized(
+        one_entry = { "one entry", 1 },
+        two_entries = { "two entries", 2 },
+    )]
+    fn open_refuses_a_headerless_file(name: &str, entries: usize) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(format!("{name}.stampindex"));
+        std::fs::write(&path, &GOLDEN_BYTES[2..2 + entries * ENTRY_BYTES]).unwrap();
+        let error = StampIndex::open(path.clone()).unwrap_err();
+        assert2::assert!(
+            let LogError::MissingFormatVersion { artifact: "stampindex", path: found_path } =
+                error
+        );
+        assert2::assert!(found_path == path);
     }
 
     /// A missing file, an empty one, and one that holds only its header all
     /// mean zero stamped ranges.
-    #[test]
-    fn stamp_empty_file_yields_empty_entries() {
+    #[yare::parameterized(
+        missing = { "missing", None },
+        empty = { "empty", Some(Vec::new()) },
+        header_only = { "header only", Some(GOLDEN_BYTES[..2].to_vec()) },
+    )]
+    fn stamp_empty_file_yields_empty_entries(name: &str, bytes: Option<Vec<u8>>) {
         let dir = TempDir::new().unwrap();
-        for (name, bytes) in [
-            ("missing", None),
-            ("empty", Some(Vec::new())),
-            ("header only", Some(GOLDEN_BYTES[..2].to_vec())),
-        ] {
-            let path = dir.path().join(format!("{name}.stampindex"));
-            if let Some(bytes) = bytes {
-                std::fs::write(&path, bytes).unwrap();
-            }
-            let idx = StampIndex::open(path).unwrap();
-            assert2::assert!(idx.entries() == &[], "case {name}");
+        let path = dir.path().join(format!("{name}.stampindex"));
+        if let Some(bytes) = bytes {
+            std::fs::write(&path, bytes).unwrap();
         }
+        let idx = StampIndex::open(path).unwrap();
+        assert2::assert!(idx.entries() == &[]);
     }
 
     #[test]
@@ -559,38 +560,42 @@ mod tests {
 
     /// A torn header, or entry bytes that are not a whole number of
     /// entries, is corrupt.
-    #[test]
-    fn stamp_corrupt_length_is_rejected() {
+    #[yare::parameterized(
+        torn_header = { 1 },
+        partial_first_entry = { HEADER_BYTES + 1 },
+        partial_second_entry = { HEADER_BYTES + ENTRY_BYTES + 1 },
+    )]
+    fn stamp_corrupt_length_is_rejected(len: usize) {
         let dir = TempDir::new().unwrap();
-        for len in [1, HEADER_BYTES + 1, HEADER_BYTES + ENTRY_BYTES + 1] {
-            let path = dir.path().join(format!("{len}.stampindex"));
-            std::fs::write(&path, vec![0_u8; len]).unwrap();
-            let err = StampIndex::open(path).unwrap_err();
-            assert2::assert!(let LogError::Corrupt(_) = err, "length {len}");
-        }
+        let path = dir.path().join(format!("{len}.stampindex"));
+        std::fs::write(&path, vec![0_u8; len]).unwrap();
+        let err = StampIndex::open(path).unwrap_err();
+        assert2::assert!(let LogError::Corrupt(_) = err, "length {len}");
     }
 
     #[test]
-    fn open_canonicalizes_retries_and_rejects_malformed_ranges() {
+    fn open_canonicalizes_exact_retries() {
         let dir = TempDir::new().unwrap();
         let first = stamp_entry(0, 2, 100);
         let second = stamp_entry(10, 12, 200);
         let path = dir.path().join("retries.stampindex");
         write_entries(&path, &[second, first, second]);
         assert2::assert!(StampIndex::open(path).unwrap().entries() == [first, second]);
+    }
 
-        for (name, entries) in [
-            ("inverted", vec![stamp_entry(7, 6, 1)]),
-            ("overlap", vec![stamp_entry(0, 4, 1), stamp_entry(4, 8, 2)]),
-            ("conflicting-retry", vec![
-                stamp_entry(0, 4, 1),
-                stamp_entry(0, 4, 2),
-            ]),
-        ] {
-            let path = dir.path().join(format!("{name}.stampindex"));
-            write_entries(&path, &entries);
-            assert2::assert!(let LogError::Corrupt(_) = StampIndex::open(path).unwrap_err());
-        }
+    #[yare::parameterized(
+        inverted = { "inverted", vec![stamp_entry(7, 6, 1)] },
+        overlap = { "overlap", vec![stamp_entry(0, 4, 1), stamp_entry(4, 8, 2)] },
+        conflicting_retry = {
+            "conflicting-retry",
+            vec![stamp_entry(0, 4, 1), stamp_entry(0, 4, 2)],
+        },
+    )]
+    fn open_rejects_malformed_ranges(name: &str, entries: Vec<StampEntry>) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(format!("{name}.stampindex"));
+        write_entries(&path, &entries);
+        assert2::assert!(let LogError::Corrupt(_) = StampIndex::open(path).unwrap_err());
     }
 
     #[test]
@@ -639,8 +644,15 @@ mod tests {
         assert2::assert!(idx.entries() == [original]);
     }
 
-    #[test]
-    fn stamp_for_offset_finds_covering_range() {
+    #[yare::parameterized(
+        first_start = { Offset(0), Some(100) },
+        first_end = { Offset(4), Some(100) },
+        second_start = { Offset(10), Some(200) },
+        second_end = { Offset(14), Some(200) },
+        gap = { Offset(5), None },
+        past_end = { Offset(15), None },
+    )]
+    fn stamp_for_offset_finds_covering_range(offset: Offset, expected: Option<u64>) {
         let IndexFixture {
             dir: _dir,
             path: _path,
@@ -648,17 +660,7 @@ mod tests {
         } = index_with(&[stamp_entry(0, 4, 100), stamp_entry(10, 14, 200)]);
 
         // Inclusive endpoints and interior offsets resolve to their range.
-        for (offset, expected) in [
-            (0, Some(100)),
-            (4, Some(100)),
-            (10, Some(200)),
-            (14, Some(200)),
-            // Offsets in the gap and past the end are uncovered.
-            (5, None),
-            (15, None),
-        ] {
-            assert2::assert!(idx.stamp_for_offset(Offset(offset)) == expected);
-        }
+        assert2::assert!(idx.stamp_for_offset(offset) == expected);
     }
 
     #[test]
@@ -691,11 +693,20 @@ mod tests {
         idx.upsert(stamp_entry(5, 7, 200)).unwrap();
         assert2::assert!(idx.stamp_for_offset(Offset(6)) == Some(200));
         assert2::assert!(StampIndex::open(path).unwrap().entries() == idx.entries());
+    }
 
-        for (base, last) in [(5, 8), (4, 7)] {
-            let error = idx.upsert(stamp_entry(base, last, 300)).unwrap_err();
-            assert2::assert!(let LogError::Corrupt(_) = error);
-        }
+    #[yare::parameterized(
+        extends_existing_range = { 5, 8 },
+        starts_inside_existing_range = { 4, 7 },
+    )]
+    fn upsert_rejects_non_exact_range(base: i64, last: i64) {
+        let IndexFixture {
+            dir: _dir,
+            path: _path,
+            index: mut idx,
+        } = index_with(&[stamp_entry(5, 7, 100)]);
+        let error = idx.upsert(stamp_entry(base, last, 300)).unwrap_err();
+        assert2::assert!(let LogError::Corrupt(_) = error);
     }
 
     #[test]

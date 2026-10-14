@@ -101,43 +101,57 @@ pub(crate) fn expand(
 
 #[cfg(test)]
 mod tests {
-    use {super::adapter, crate::meta::compact, assert2::assert};
+    use {super::adapter, crate::meta::compact};
 
-    #[test]
-    fn four_operations_decode_before_native_auth_and_encode_without_trailing_validation() {
-        for operation in ["Create", "Renew", "Expire", "Describe"] {
-            let item = format!(
-                "pub(super) async fn answer(broker: &Broker, req: {operation}DelegationTokenRequest, auth: &ConnectionAuth, peer: &SocketAddr) -> {operation}DelegationTokenResponse {{ if native::<1, 2>() {{ mutation().await }} else {{ refusal() }} }}"
-            );
-            let generated = adapter(&item.parse().unwrap()).unwrap();
-            let body = compact(&generated.body);
-            assert!(
-                body.find("::decode(&mutcursor,version)?").unwrap()
-                    < body.find("__token_operation").unwrap()
-            );
-            assert!(
-                body.find("__token_operation").unwrap()
-                    < body.find("encode_response(&response,version)").unwrap()
-            );
-            assert!(!body.contains("cursor.is_empty()"));
-            assert!(
-                compact(&generated.header).contains("_correlation_id:CorrelationId,body:&'a[u8]")
-            );
-        }
+    #[yare::parameterized(
+        create = { "Create" },
+        renew = { "Renew" },
+        expire = { "Expire" },
+        describe = { "Describe" },
+    )]
+    fn four_operations_decode_before_native_auth_and_encode_without_trailing_validation(
+        operation: &str,
+    ) {
+        let item = format!(
+            "pub(super) async fn answer(broker: &Broker, req: {operation}DelegationTokenRequest, auth: &ConnectionAuth, peer: &SocketAddr) -> {operation}DelegationTokenResponse {{ if native::<1, 2>() {{ mutation().await }} else {{ refusal() }} }}"
+        );
+        let generated = adapter(&item.parse().unwrap()).unwrap();
+        let body = compact(&generated.body);
+        assert2::assert!(
+            body.find("::decode(&mutcursor,version)?").unwrap()
+                < body.find("__token_operation").unwrap()
+        );
+        assert2::assert!(
+            body.find("__token_operation").unwrap()
+                < body.find("encode_response(&response,version)").unwrap()
+        );
+        assert2::assert!(!body.contains("cursor.is_empty()"));
+        assert2::assert!(
+            compact(&generated.header).contains("_correlation_id:CorrelationId,body:&'a[u8]")
+        );
     }
 
-    #[test]
-    fn refuses_incompatible_or_extra_headers() {
-        let valid = "async fn answer(broker: &Broker, req: RenewDelegationTokenRequest, auth: &ConnectionAuth, peer: &SocketAddr) -> RenewDelegationTokenResponse {}";
-        for invalid in [
-            valid.replace("async fn", "fn"),
-            valid.replace("req:", "mut req:"),
-            valid.replace("RenewDelegationTokenRequest", "OtherRequest"),
-            valid.replace("RenewDelegationTokenResponse", "OtherResponse"),
-            format!("{valid} fn other() {{}}"),
-            valid.replace("&SocketAddr", "SocketAddr"),
-        ] {
-            assert!(adapter(&invalid.parse().unwrap()).is_err(), "{invalid}");
-        }
+    #[yare::parameterized(
+        sync = {
+            "fn answer(broker: &Broker, req: RenewDelegationTokenRequest, auth: &ConnectionAuth, peer: &SocketAddr) -> RenewDelegationTokenResponse {}",
+        },
+        mutable_request = {
+            "async fn answer(broker: &Broker, mut req: RenewDelegationTokenRequest, auth: &ConnectionAuth, peer: &SocketAddr) -> RenewDelegationTokenResponse {}",
+        },
+        wrong_request = {
+            "async fn answer(broker: &Broker, req: OtherRequest, auth: &ConnectionAuth, peer: &SocketAddr) -> RenewDelegationTokenResponse {}",
+        },
+        wrong_response = {
+            "async fn answer(broker: &Broker, req: RenewDelegationTokenRequest, auth: &ConnectionAuth, peer: &SocketAddr) -> OtherResponse {}",
+        },
+        extra_method = {
+            "async fn answer(broker: &Broker, req: RenewDelegationTokenRequest, auth: &ConnectionAuth, peer: &SocketAddr) -> RenewDelegationTokenResponse {} fn other() {}",
+        },
+        owned_peer = {
+            "async fn answer(broker: &Broker, req: RenewDelegationTokenRequest, auth: &ConnectionAuth, peer: SocketAddr) -> RenewDelegationTokenResponse {}",
+        },
+    )]
+    fn refuses_incompatible_or_extra_headers(invalid: &str) {
+        assert2::assert!(adapter(&invalid.parse().unwrap()).is_err(), "{invalid}");
     }
 }

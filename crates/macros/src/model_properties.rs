@@ -110,17 +110,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rejects_unknown_kinds_missing_oracles_and_extra_bindings() {
-        for input in [
-            "State;",
-            "State; never \"x\" => |s| { true }",
-            "State; always \"x\" => |s, other| { true }",
-            "State; always \"x\" => |s| true",
-            "State; always \"x\" => |s| {}",
-            "State; always \"x\" => |s| { true } extra",
-        ] {
-            assert!(declaration(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        no_properties = { "State;" },
+        unknown_kind = { "State; never \"x\" => |s| { true }" },
+        extra_binding = { "State; always \"x\" => |s, other| { true }" },
+        missing_block = { "State; always \"x\" => |s| true" },
+        empty_block = { "State; always \"x\" => |s| {}" },
+        trailing_tokens = { "State; always \"x\" => |s| { true } extra" },
+    )]
+    fn rejects_unknown_kinds_missing_oracles_and_extra_bindings(input: &str) {
+        assert2::assert!(declaration(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

@@ -126,7 +126,7 @@ impl TopicBasedRemoteLogMetadataManager {
 #[cfg(test)]
 mod tests {
     use {
-        super::*,
+        super::{ResumePlan, TopicBasedRemoteLogMetadataManager},
         crate::{
             log::{InProcessMetadataEventLog, MetadataEventLog},
             manager::test_support::{
@@ -167,25 +167,30 @@ mod tests {
                 .collect::<Vec<_>>()
                 == vec![5, 0, 0]
         );
-
-        for (committed, expected) in [(-1, 0), (4, 5), (i64::MAX - 1, i64::MAX)] {
-            check!(
-                TopicBasedRemoteLogMetadataManager::resume_start_offset(committed).unwrap()
-                    == expected
-            );
-        }
     }
 
-    #[test]
-    fn malformed_and_overflowing_snapshot_cursors_are_rejected() {
-        for committed in [i64::MIN, -2, i64::MAX] {
-            let snapshot = snapshot_with_offsets(vec![committed]);
-            check!(
-                TopicBasedRemoteLogMetadataManager::resume_from_snapshot(Some(&snapshot), 1)
-                    .is_err()
-            );
-            check!(TopicBasedRemoteLogMetadataManager::resume_start_offset(committed).is_err());
-        }
+    #[yare::parameterized(
+        sentinel = { -1, 0 },
+        ordinary = { 4, 5 },
+        last_valid = { i64::MAX - 1, i64::MAX },
+    )]
+    fn resume_start_offsets_match_committed_cursors(committed: i64, expected: i64) {
+        check!(
+            TopicBasedRemoteLogMetadataManager::resume_start_offset(committed).unwrap() == expected
+        );
+    }
+
+    #[yare::parameterized(
+        minimum = { i64::MIN },
+        below_sentinel = { -2 },
+        overflow = { i64::MAX },
+    )]
+    fn malformed_and_overflowing_snapshot_cursors_are_rejected(committed: i64) {
+        let snapshot = snapshot_with_offsets(vec![committed]);
+        check!(
+            TopicBasedRemoteLogMetadataManager::resume_from_snapshot(Some(&snapshot), 1).is_err()
+        );
+        check!(TopicBasedRemoteLogMetadataManager::resume_start_offset(committed).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]

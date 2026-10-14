@@ -254,24 +254,22 @@ fn only_an_empty_no_op_record_is_a_kip835_no_op() {
 
 /// The no-op timer runs only while this node leads and the interval is not
 /// zero.
-#[test]
-fn the_no_op_timer_runs_only_on_a_leader_with_an_interval() {
-    for (what, interval, lead, armed) in [
-        ("a leader", millis(500), true, true),
-        ("a leader with no interval", millis(0), true, false),
-        ("a node that does not lead", millis(500), false, false),
-    ] {
-        let (mut engine, _dir) = build_engine_only()
-            .ids(&[NodeId(1)])
-            .metadata_log(MetadataLogConfig {
-                max_idle_interval: interval,
-                ..MetadataLogConfig::default()
-            })
-            .call();
-        if lead {
-            elect_single_voter_engine(&mut engine);
-        }
-        engine.reconcile_noop_timer();
-        check!(engine.noop_at.is_some() == armed, "{what}");
+#[yare::parameterized(
+    leader_with_interval = { millis(500), true, true },
+    leader_without_interval = { millis(0), true, false },
+    non_leader_with_interval = { millis(500), false, false },
+)]
+fn the_no_op_timer_runs_only_on_a_leader_with_an_interval(interval: Time, lead: bool, armed: bool) {
+    let (mut engine, _dir) = build_engine_only()
+        .ids(&[NodeId(1)])
+        .metadata_log(MetadataLogConfig {
+            max_idle_interval: interval,
+            ..MetadataLogConfig::default()
+        })
+        .call();
+    if lead {
+        elect_single_voter_engine(&mut engine);
     }
+    engine.reconcile_noop_timer();
+    check!(engine.noop_at.is_some() == armed);
 }

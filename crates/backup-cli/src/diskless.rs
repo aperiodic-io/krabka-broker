@@ -158,6 +158,16 @@ mod tests {
         offset: i64,
     }
 
+    const FIRST_TWO_VISITS: [VisitedRecord; 2] = [
+        VisitedRecord {
+            partition: 0,
+            offset: 0,
+        },
+        VisitedRecord {
+            partition: 0,
+            offset: 1,
+        },
+    ];
     /// An in-process index that records what each range read handed over,
     /// and can misbehave on its watermark lookups.
     struct ScriptedLog {
@@ -281,19 +291,7 @@ mod tests {
                     authentication: None,
                 }
         );
-        assert!(
-            visited_offsets(&log)
-                == vec![
-                    VisitedRecord {
-                        partition: 0,
-                        offset: 0
-                    },
-                    VisitedRecord {
-                        partition: 0,
-                        offset: 1
-                    }
-                ]
-        );
+        assert!(visited_offsets(&log) == FIRST_TWO_VISITS);
     }
 
     #[tokio::test]
@@ -320,19 +318,7 @@ mod tests {
                 == "diskless WAL index partition 0 offset 1: unknown diskless WAL index key version \
                     28271"
         );
-        check!(
-            visited_offsets(&log)
-                == vec![
-                    VisitedRecord {
-                        partition: 0,
-                        offset: 0
-                    },
-                    VisitedRecord {
-                        partition: 0,
-                        offset: 1
-                    }
-                ]
-        );
+        check!(visited_offsets(&log) == FIRST_TWO_VISITS);
     }
 
     #[tokio::test]

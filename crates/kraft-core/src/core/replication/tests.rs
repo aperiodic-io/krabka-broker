@@ -155,53 +155,19 @@ fn leader_hwm_does_not_regress_on_reordered_stale_fetch() {
 /// the leader holds the fetch epoch itself out to the fetch offset. Anything
 /// else is answered with the leader's `(epoch, end offset)` for that epoch,
 /// and records no follower progress.
-#[test]
-fn a_fetch_is_valid_only_at_an_epoch_the_leader_holds_to_that_offset() {
-    struct Case {
-        what: &'static str,
-        fetch_epoch: Epoch,
-        fetch_offset: i64,
-        diverging: Option<LogOffsetMetadata>,
-    }
-    let diverging = |epoch, offset| Some(LogOffsetMetadata { offset, epoch });
-    let cases = [
-        Case {
-            what: "inside an epoch the leader holds",
-            fetch_epoch: 4,
-            fetch_offset: 100,
-            diverging: None,
-        },
-        Case {
-            what: "past the end of that epoch",
-            fetch_epoch: 4,
-            fetch_offset: 130,
-            diverging: diverging(4, 120),
-        },
-        Case {
-            what: "an epoch between two the leader holds",
-            fetch_epoch: 5,
-            fetch_offset: 100,
-            diverging: diverging(4, 120),
-        },
-        Case {
-            what: "that epoch beyond the leader's log end",
-            fetch_epoch: 5,
-            fetch_offset: 300,
-            diverging: diverging(4, 120),
-        },
-        Case {
-            what: "inside the current epoch",
-            fetch_epoch: 6,
-            fetch_offset: 150,
-            diverging: None,
-        },
-        Case {
-            what: "an epoch newer than the leader's log",
-            fetch_epoch: 7,
-            fetch_offset: 150,
-            diverging: diverging(6, 200),
-        },
-    ];
+#[yare::parameterized(
+    inside_existing_epoch = { 4, 100, None },
+    past_epoch_end = { 4, 130, Some(LogOffsetMetadata { offset: 120, epoch: 4 }) },
+    missing_middle_epoch = { 5, 100, Some(LogOffsetMetadata { offset: 120, epoch: 4 }) },
+    missing_epoch_beyond_end = { 5, 300, Some(LogOffsetMetadata { offset: 120, epoch: 4 }) },
+    inside_current_epoch = { 6, 150, None },
+    newer_than_leader = { 7, 150, Some(LogOffsetMetadata { offset: 200, epoch: 6 }) },
+)]
+fn a_fetch_is_valid_only_at_an_epoch_the_leader_holds_to_that_offset(
+    fetch_epoch: Epoch,
+    fetch_offset: i64,
+    expected_diverging: Option<LogOffsetMetadata>,
+) {
     let log = RunsLog::new(&[
         EpochRun {
             epoch: 4,
@@ -212,33 +178,31 @@ fn a_fetch_is_valid_only_at_an_epoch_the_leader_holds_to_that_offset() {
             count: 80,
         },
     ]);
-    for case in cases {
-        let mut m = three_voter_leader(&log);
-        let actions = m.on_event(
-            Event::ReceiveFetch {
-                from: NodeId(2),
-                fetch_epoch: case.fetch_epoch,
-                fetch_offset: case.fetch_offset,
-            },
-            &log,
-            SimInstant(2100),
-        );
-        let answered = actions.iter().find_map(|action| match action {
-            Action::ReplyDivergingEpoch(point) => Some(*point),
-            _ => None,
-        });
-        assert2::check!(answered == case.diverging, "{}", case.what);
-        let Role::Leader { replicas, .. } = m.role() else {
-            panic!("{}: expected leader", case.what);
-        };
-        let recorded = replicas[&NodeId(2)].fetch_offset;
-        let expected = if case.diverging.is_none() {
-            case.fetch_offset
-        } else {
-            0
-        };
-        assert2::check!(recorded == expected, "{}", case.what);
-    }
+    let mut m = three_voter_leader(&log);
+    let actions = m.on_event(
+        Event::ReceiveFetch {
+            from: NodeId(2),
+            fetch_epoch,
+            fetch_offset,
+        },
+        &log,
+        SimInstant(2100),
+    );
+    let answered = actions.iter().find_map(|action| match action {
+        Action::ReplyDivergingEpoch(point) => Some(*point),
+        _ => None,
+    });
+    assert2::check!(answered == expected_diverging);
+    let Role::Leader { replicas, .. } = m.role() else {
+        panic!("expected leader");
+    };
+    let recorded = replicas[&NodeId(2)].fetch_offset;
+    let expected = if expected_diverging.is_none() {
+        fetch_offset
+    } else {
+        0
+    };
+    assert2::check!(recorded == expected);
 }
 
 /// krabka-io/krabka-broker#785: a follower at an epoch the leader does not
@@ -304,36 +268,16 @@ fn a_fetch_at_an_epoch_the_leader_lacks_does_not_raise_the_high_watermark() {
 /// Then it fetches again at once, as Kafka's follower does after it truncates
 /// on a diverging epoch: before, it sent nothing more and sat idle until its
 /// fetch timer started an election.
-#[test]
-fn a_follower_truncates_to_where_both_logs_still_hold_the_epoch() {
-    struct Case {
-        what: &'static str,
-        hint: LogOffsetMetadata,
-        truncate_to: i64,
-    }
-    let point = |epoch, offset| LogOffsetMetadata { offset, epoch };
-    let cases = [
-        Case {
-            what: "the follower's own copy of the epoch ends first",
-            hint: point(4, 120),
-            truncate_to: 110,
-        },
-        Case {
-            what: "the leader's copy of the epoch ends first",
-            hint: point(4, 100),
-            truncate_to: 100,
-        },
-        Case {
-            what: "an epoch the follower does not hold",
-            hint: point(3, 100),
-            truncate_to: 0,
-        },
-        Case {
-            what: "epoch 0 truncates to the lower end offset",
-            hint: point(0, 500),
-            truncate_to: 130,
-        },
-    ];
+#[yare::parameterized(
+    follower_epoch_ends_first = { LogOffsetMetadata { epoch: 4, offset: 120 }, 110 },
+    leader_epoch_ends_first = { LogOffsetMetadata { epoch: 4, offset: 100 }, 100 },
+    follower_missing_epoch = { LogOffsetMetadata { epoch: 3, offset: 100 }, 0 },
+    epoch_zero = { LogOffsetMetadata { epoch: 0, offset: 500 }, 130 },
+)]
+fn a_follower_truncates_to_where_both_logs_still_hold_the_epoch(
+    hint: LogOffsetMetadata,
+    truncate_to: i64,
+) {
     let log = RunsLog::new(&[
         EpochRun {
             epoch: 4,
@@ -344,46 +288,42 @@ fn a_follower_truncates_to_where_both_logs_still_hold_the_epoch() {
             count: 20,
         },
     ]);
-    for case in cases {
-        let mut m = three_voter_machine();
-        m.on_event(
-            Event::ReceiveBeginQuorumEpoch {
-                leader_id: NodeId(2),
-                leader_epoch: 6,
-            },
-            &log,
-            SimInstant(10),
-        );
-        let actions = m.on_event(
-            Event::ReceiveFetchResponse {
-                leader_id: NodeId(2),
-                leader_epoch: 6,
-                diverging: Some(case.hint),
-            },
-            &log,
-            SimInstant(11),
-        );
-        // Truncated, it fetches again at once from the new log end and
-        // re-arms its fetch timer: a diverging answer is a successful fetch.
-        assert2::check!(
-            actions
-                == vec![
-                    Action::TruncateTo(LogOffsetMetadata {
-                        offset: case.truncate_to,
-                        epoch: case.hint.epoch,
-                    }),
-                    Action::SendFetch {
-                        leader_id: NodeId(2)
-                    },
-                    Action::ResetTimer {
-                        kind: TimerKind::Fetch,
-                        deadline: SimInstant(11).saturating_add_ms(m.election_timeout_ms),
-                    },
-                ],
-            "{}",
-            case.what
-        );
-    }
+    let mut m = three_voter_machine();
+    m.on_event(
+        Event::ReceiveBeginQuorumEpoch {
+            leader_id: NodeId(2),
+            leader_epoch: 6,
+        },
+        &log,
+        SimInstant(10),
+    );
+    let actions = m.on_event(
+        Event::ReceiveFetchResponse {
+            leader_id: NodeId(2),
+            leader_epoch: 6,
+            diverging: Some(hint),
+        },
+        &log,
+        SimInstant(11),
+    );
+    // Truncated, it fetches again at once from the new log end and
+    // re-arms its fetch timer: a diverging answer is a successful fetch.
+    assert2::check!(
+        actions
+            == vec![
+                Action::TruncateTo(LogOffsetMetadata {
+                    offset: truncate_to,
+                    epoch: hint.epoch,
+                }),
+                Action::SendFetch {
+                    leader_id: NodeId(2)
+                },
+                Action::ResetTimer {
+                    kind: TimerKind::Fetch,
+                    deadline: SimInstant(11).saturating_add_ms(m.election_timeout_ms),
+                },
+            ]
+    );
 }
 
 fn armed_check_quorum(actions: &[Action]) -> Option<SimInstant> {
@@ -417,91 +357,81 @@ fn elect_empty_log(voter_ids: &[NodeId]) -> MachineLogAndActions {
 /// follower fetch deadline uses. A lone voter has nobody to hear from, so it
 /// arms nothing at all -- Kafka's `timeUntilCheckQuorumExpires` reports
 /// `Long.MAX_VALUE` for a single-voter quorum.
-#[test]
-fn promotion_arms_the_check_quorum_window_unless_the_leader_is_alone() {
+#[yare::parameterized(
+    three_voters = { &[NodeId(1), NodeId(2), NodeId(3)][..], Some(SimInstant(3500)) },
+    two_voters = { &[NodeId(1), NodeId(2)][..], Some(SimInstant(3500)) },
+    sole_voter = { &[NodeId(1)][..], None },
+)]
+fn promotion_arms_the_check_quorum_window_unless_the_leader_is_alone(
+    voter_ids: &[NodeId],
+    want: Option<SimInstant>,
+) {
     // `TEST_ELECTION_TIMEOUT` is one second, so the window is 1500ms.
-    for (name, voter_ids, want) in [
-        (
-            "three voters",
-            &[NodeId(1), NodeId(2), NodeId(3)][..],
-            Some(SimInstant(3500)),
-        ),
-        (
-            "two voters",
-            &[NodeId(1), NodeId(2)][..],
-            Some(SimInstant(3500)),
-        ),
-        ("sole voter", &[NodeId(1)][..], None),
-    ] {
-        let MachineLogAndActions {
-            machine: m,
-            actions,
-            ..
-        } = elect_empty_log(voter_ids);
-        assert2::assert!(m.role().is_leader(), "case {name}");
-        assert2::check!(armed_check_quorum(&actions) == want, "case {name}");
-    }
+    let MachineLogAndActions {
+        machine: m,
+        actions,
+        ..
+    } = elect_empty_log(voter_ids);
+    assert2::assert!(m.role().is_leader());
+    assert2::check!(armed_check_quorum(&actions) == want);
 }
 
 /// A fetch re-arms the window only once the leader has heard from the majority
 /// it needs *besides itself*: one follower of three voters, two of five. Every
 /// fetch below that count leaves the window running, so a leader that only ever
 /// hears from a minority still reaches its deadline and resigns.
-#[test]
-fn only_a_majority_of_followers_re_arms_the_check_quorum_window() {
-    for (name, voter_ids, fetchers, want) in [
-        (
-            "three voters, one follower is the majority",
-            &[NodeId(1), NodeId(2), NodeId(3)][..],
-            &[NodeId(2)][..],
-            vec![Some(SimInstant(3600))],
-        ),
-        (
-            "five voters, one follower is short",
-            &[NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(5)][..],
-            &[NodeId(2)][..],
-            vec![None],
-        ),
-        (
-            "five voters, two followers reach it",
-            &[NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(5)][..],
-            &[NodeId(2), NodeId(3)][..],
-            vec![None, Some(SimInstant(3600))],
-        ),
-        (
-            "a repeat fetch from one follower is not two voters",
-            &[NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(5)][..],
-            &[NodeId(2), NodeId(2)][..],
-            vec![None, None],
-        ),
-        (
-            "a non-voter observer never counts",
-            &[NodeId(1), NodeId(2), NodeId(3)][..],
-            &[NodeId(9)][..],
-            vec![None],
-        ),
-    ] {
-        let MachineLogAndActions {
-            machine: mut m,
-            log,
-            ..
-        } = elect_empty_log(voter_ids);
-        let got: Vec<Option<SimInstant>> = fetchers
-            .iter()
-            .map(|&from| {
-                armed_check_quorum(&m.on_event(
-                    Event::ReceiveFetch {
-                        from,
-                        fetch_epoch: 1,
-                        fetch_offset: 0,
-                    },
-                    &log,
-                    SimInstant(2100),
-                ))
-            })
-            .collect();
-        assert2::check!(got == want, "case {name}");
-    }
+#[yare::parameterized(
+    three_voters_one_follower = {
+        &[NodeId(1), NodeId(2), NodeId(3)][..],
+        &[NodeId(2)][..],
+        &[Some(SimInstant(3600))][..]
+    },
+    five_voters_one_follower = {
+        &[NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(5)][..],
+        &[NodeId(2)][..],
+        &[None][..]
+    },
+    five_voters_two_followers = {
+        &[NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(5)][..],
+        &[NodeId(2), NodeId(3)][..],
+        &[None, Some(SimInstant(3600))][..]
+    },
+    repeated_follower = {
+        &[NodeId(1), NodeId(2), NodeId(3), NodeId(4), NodeId(5)][..],
+        &[NodeId(2), NodeId(2)][..],
+        &[None, None][..]
+    },
+    nonvoter_observer = {
+        &[NodeId(1), NodeId(2), NodeId(3)][..],
+        &[NodeId(9)][..],
+        &[None][..]
+    },
+)]
+fn only_a_majority_of_followers_re_arms_the_check_quorum_window(
+    voter_ids: &[NodeId],
+    fetchers: &[NodeId],
+    want: &[Option<SimInstant>],
+) {
+    let MachineLogAndActions {
+        machine: mut m,
+        log,
+        ..
+    } = elect_empty_log(voter_ids);
+    let got: Vec<Option<SimInstant>> = fetchers
+        .iter()
+        .map(|&from| {
+            armed_check_quorum(&m.on_event(
+                Event::ReceiveFetch {
+                    from,
+                    fetch_epoch: 1,
+                    fetch_offset: 0,
+                },
+                &log,
+                SimInstant(2100),
+            ))
+        })
+        .collect();
+    assert2::check!(got == want);
 }
 
 /// A `FetchSnapshot` is contact from that voter even though it moves no

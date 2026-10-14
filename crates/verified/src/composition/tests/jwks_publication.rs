@@ -15,25 +15,23 @@ pub(super) fn expected_trace(initial: u64, fetches: &[bool]) -> (u64, u64) {
     )
 }
 
-#[test]
-fn writer_generations_cover_parity_and_exhaustion() {
-    for generation in [
-        0,
-        1,
-        2,
-        3,
-        u64::MAX - 3,
-        u64::MAX - 2,
-        u64::MAX - 1,
-        u64::MAX,
-    ] {
-        let valid = generation % 2 == 0 && u128::from(generation) + 2 <= u128::from(u64::MAX);
-        let result = jwks_publication_generations(generation);
-        assert2::assert!(result.is_some() == valid);
-        if let Some((writing, committed)) = result {
-            assert2::assert!(u128::from(writing) == u128::from(generation) + 1);
-            assert2::assert!(u128::from(committed) == u128::from(generation) + 2);
-        }
+#[yare::parameterized(
+    initial = { 0 },
+    odd_initial = { 1 },
+    stable_even = { 2 },
+    odd_stable = { 3 },
+    near_max_odd = { u64::MAX - 3 },
+    near_max_even = { u64::MAX - 2 },
+    max_writable = { u64::MAX - 1 },
+    maximum = { u64::MAX },
+)]
+fn writer_generations_cover_parity_and_exhaustion(generation: u64) {
+    let valid = generation.is_multiple_of(2) && u128::from(generation) + 2 <= u128::from(u64::MAX);
+    let result = jwks_publication_generations(generation);
+    assert2::assert!(result.is_some() == valid);
+    if let Some((writing, committed)) = result {
+        assert2::assert!(u128::from(writing) == u128::from(generation) + 1);
+        assert2::assert!(u128::from(committed) == u128::from(generation) + 2);
     }
 }
 

@@ -159,16 +159,17 @@ mod tests {
         krabka_units::prelude::{bytes, kibibytes},
     };
 
+    fn record_at(offset: i64) -> ParsedRecord {
+        ParsedRecord {
+            offset: Offset(offset),
+            timestamp: Some(10),
+            key: None,
+            value: Some(Bytes::from_static(b"v")),
+        }
+    }
+
     fn v1_wrapper(inner_offsets: &[i64], wrapper_offset: i64) -> BytesMut {
-        let inner: Vec<_> = inner_offsets
-            .iter()
-            .map(|&offset| ParsedRecord {
-                offset: Offset(offset),
-                timestamp: Some(10),
-                key: None,
-                value: Some(Bytes::from_static(b"v")),
-            })
-            .collect();
+        let inner: Vec<_> = inner_offsets.iter().copied().map(record_at).collect();
         let mut flat = BytesMut::new();
         encode_flat_message_set(inner, Magic::V1, &mut flat);
         let wrapper = Message {
@@ -185,41 +186,40 @@ mod tests {
         wire
     }
 
-    #[test]
-    fn sparse_v1_wrapper_anchors_last_inner_offset_without_closing_gaps() {
+    #[yare::parameterized(
+        first_sparse_gap = { [0, 2], 102, [100, 102] },
+        second_sparse_gap = { [3, 5], 102, [100, 102] },
+        extreme_sparse_gap = { [i64::MIN, i64::MIN + 2], i64::MAX, [i64::MAX - 2, i64::MAX] },
+    )]
+    fn sparse_v1_wrapper_anchors_last_inner_offset_without_closing_gaps(
+        inner: [i64; 2],
+        outer: i64,
+        absolute: [i64; 2],
+    ) {
         // Construct the inner MessageSet independently of the compressed-set
         // encoder: Kafka retains relative gaps when compaction removes a row.
-        for (inner, outer, absolute) in [
-            ([0, 2], 102, [100, 102]),
-            ([3, 5], 102, [100, 102]),
-            ([i64::MIN, i64::MIN + 2], i64::MAX, [i64::MAX - 2, i64::MAX]),
-        ] {
-            let wire = v1_wrapper(&inner, outer);
-            let decoded = decode_bytes(&wire);
-            let expected: Vec<_> = absolute
-                .into_iter()
-                .map(|offset| ParsedRecord {
-                    offset: Offset(offset),
-                    timestamp: Some(10),
-                    key: None,
-                    value: Some(Bytes::from_static(b"v")),
-                })
-                .collect();
-            assert2::assert!(decoded == expected);
-        }
+        let wire = v1_wrapper(&inner, outer);
+        let decoded = decode_bytes(&wire);
+        let expected: Vec<_> = absolute.into_iter().map(record_at).collect();
+        assert2::assert!(decoded == expected);
     }
 
     #[test]
-    fn v1_wrapper_rejects_unrepresentable_offsets_and_accepts_empty_extremes() {
+    fn v1_wrapper_rejects_unrepresentable_offsets() {
         let wire = v1_wrapper(&[0, 1], i64::MIN);
         assert2::assert!(matches!(
             decode_message_set(&mut &wire[..], wire.len()),
             Err(LegacyRecordsError::Malformed(_))
         ));
-        for outer in [i64::MIN, i64::MAX] {
-            let wire = v1_wrapper(&[], outer);
-            assert2::assert!(decode_bytes(&wire).is_empty());
-        }
+    }
+
+    #[yare::parameterized(
+        minimum = { i64::MIN },
+        maximum = { i64::MAX },
+    )]
+    fn empty_v1_wrapper_accepts_extreme_outer_offsets(outer: i64) {
+        let wire = v1_wrapper(&[], outer);
+        assert2::assert!(decode_bytes(&wire).is_empty());
     }
 
     #[test]

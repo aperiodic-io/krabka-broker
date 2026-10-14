@@ -235,6 +235,14 @@ pub struct RestoreArgs {
 const HEADING_BOUNDS: &str = "Selection and bounds";
 const HEADING_BEHAVIOUR: &str = "Behaviour";
 
+/// Partitions named by offset bounds or exclusions.
+pub(crate) fn offset_partitions(args: &RestoreArgs) -> impl Iterator<Item = &PartitionRef> {
+    args.to_offset
+        .iter()
+        .map(|bound| &bound.partition)
+        .chain(args.exclude_offset.iter().map(|range| &range.partition))
+}
+
 impl RestoreArgs {
     /// Whether `topic` is in the restore set.
     ///

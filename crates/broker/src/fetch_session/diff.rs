@@ -72,66 +72,44 @@ pub(crate) fn apply_incremental(
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::fetch_session::test_support::forgotten_topic, assert2::assert};
+    use {super::*, crate::fetch_session::test_support::forgotten_topic};
 
-    #[test]
-    fn forgotten_topic_name_drops_only_matching_topic_partition() {
+    #[yare::parameterized(
+        topic_name = { WireUuid::ZERO, WireUuid::ZERO, false },
+        topic_id = { WireUuid([1u8; 16]), WireUuid([2u8; 16]), true },
+    )]
+    fn forgotten_topic_drops_only_matching_topic_partition(
+        topic_id: WireUuid,
+        other_topic_id: WireUuid,
+        by_id: bool,
+    ) {
+        let target = FetchSessionKey {
+            topic_name: "t".into(),
+            topic_id,
+            partition: 0,
+        };
+        let other = FetchSessionKey {
+            topic_name: "u".into(),
+            topic_id: other_topic_id,
+            partition: 0,
+        };
         let mut partitions = maplit::hashmap! {
-        FetchSessionKey {
-                topic_name: "t".into(),
-                topic_id: WireUuid::ZERO,
-                partition: 0,
-            } => CachedPartitionState::default(),
-        FetchSessionKey {
-                topic_name: "u".into(),
-                topic_id: WireUuid::ZERO,
-                partition: 0,
-            } => CachedPartitionState::default()};
-        let forgotten = vec![forgotten_topic().call()];
+            target.clone() => CachedPartitionState::default(),
+            other.clone() => CachedPartitionState::default(),
+        };
+        let forgotten = vec![if by_id {
+            forgotten_topic()
+                .topic(String::new())
+                .topic_id(topic_id)
+                .call()
+        } else {
+            forgotten_topic().call()
+        }];
 
         apply_incremental(&mut partitions, &forgotten, &[]);
 
-        assert!(!partitions.contains_key(&FetchSessionKey {
-            topic_name: "t".into(),
-            topic_id: WireUuid::ZERO,
-            partition: 0,
-        }));
-        assert!(partitions.contains_key(&FetchSessionKey {
-            topic_name: "u".into(),
-            topic_id: WireUuid::ZERO,
-            partition: 0,
-        }));
-    }
-
-    #[test]
-    fn forgotten_topic_id_drops_only_matching_topic_partition() {
-        let tid = WireUuid([1u8; 16]);
-        let other_tid = WireUuid([2u8; 16]);
-        let mut partitions = maplit::hashmap! {
-        FetchSessionKey {
-                topic_name: "t".into(),
-                topic_id: tid,
-                partition: 0,
-            } => CachedPartitionState::default(),
-        FetchSessionKey {
-                topic_name: "u".into(),
-                topic_id: other_tid,
-                partition: 0,
-            } => CachedPartitionState::default()};
-        let forgotten = vec![forgotten_topic().topic(String::new()).topic_id(tid).call()];
-
-        apply_incremental(&mut partitions, &forgotten, &[]);
-
-        assert!(!partitions.contains_key(&FetchSessionKey {
-            topic_name: "t".into(),
-            topic_id: tid,
-            partition: 0,
-        }));
-        assert!(partitions.contains_key(&FetchSessionKey {
-            topic_name: "u".into(),
-            topic_id: other_tid,
-            partition: 0,
-        }));
+        assert2::assert!(!partitions.contains_key(&target));
+        assert2::assert!(partitions.contains_key(&other));
     }
 }
 

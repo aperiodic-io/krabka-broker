@@ -1,5 +1,3 @@
-#[cfg(creusot)]
-use super::time_index::sparse_timestamp_window_valid;
 use {
     super::{
         SparseTimestampWindow, constructed_index_retained_candidate,
@@ -12,8 +10,7 @@ use {
 /// retained match to committed remote coverage or the surviving local cache.
 /// Inherited physical frontiers must already obey coverage/lag bounds. Complete
 /// decoding, actual object coverage and durable step completion are external.
-#[requires(sparse_timestamp_window_valid(window.0@, window.1@, window.2@))]
-#[requires(base@ >= 0 && logical_floor@ >= 0)]
+#[krabka_macros::retained_timestamp_bounds(logical_floor)]
 #[requires(0 <= frontiers.3@ && frontiers.3@ <= frontiers.0@
     && frontiers.3@ + frontiers.2@.max(0) <= frontiers.1@)]
 #[requires(0 <= frontiers.4@ && frontiers.4@ <= frontiers.0@

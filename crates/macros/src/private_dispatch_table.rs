@@ -160,30 +160,42 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rejects_missing_duplicate_and_nonpath_routing() {
+    #[yare::parameterized(
+        empty = { "empty" },
+        missing_table = { "missing_table" },
+        wrong_table = { "wrong_table" },
+        duplicate_row = { "duplicate_row" },
+        parentheses = { "parentheses" },
+        missing_handler = { "missing_handler" },
+        computed_key = { "computed_key" },
+        literal_schema = { "literal_schema" },
+        extra_field = { "extra_field" },
+    )]
+    fn rejects_missing_duplicate_and_nonpath_routing(case: &str) {
         let row = "first { api = keys::FIRST, flexible = schema::FLEXIBLE, handler = handle }";
-        for invalid in [
-            String::new(),
-            "register table;".into(),
-            format!("other table; {row}"),
-            format!("register table; {row} {row}"),
-            format!(
+        let invalid = match case {
+            "empty" => String::new(),
+            "missing_table" => "register table;".into(),
+            "wrong_table" => format!("other table; {row}"),
+            "duplicate_row" => format!("register table; {row} {row}"),
+            "parentheses" => format!(
                 "register table; {}",
                 row.replace('{', "(").replace('}', ")")
             ),
-            format!("register table; {}", row.replace(", handler = handle", "")),
-            format!(
+            "missing_handler" => {
+                format!("register table; {}", row.replace(", handler = handle", ""))
+            }
+            "computed_key" => format!(
                 "register table; {}",
                 row.replace("keys::FIRST", "selected::<1>()")
             ),
-            format!("register table; {}", row.replace("schema::FLEXIBLE", "0")),
-            format!(
+            "literal_schema" => format!("register table; {}", row.replace("schema::FLEXIBLE", "0")),
+            "extra_field" => format!(
                 "register table; {}",
                 row.replace("handle }", "handle, extra = true }")
             ),
-        ] {
-            assert!(declaration(&invalid.parse().unwrap()).is_err(), "{invalid}");
-        }
+            _ => unreachable!(),
+        };
+        assert2::assert!(declaration(&invalid.parse().unwrap()).is_err(), "{invalid}");
     }
 }

@@ -231,16 +231,31 @@ struct TrustFileKey {
 #[cfg(test)]
 mod tests {
     use {
-        super::*,
-        assert2::{assert, check},
-        krabka_audit::FileEd25519Signer,
-        krabka_protocol::primitives::uuid::Uuid,
-        ring::signature::Ed25519KeyPair,
+        super::*, assert2::check, krabka_audit::FileEd25519Signer,
+        krabka_protocol::primitives::uuid::Uuid, ring::signature::Ed25519KeyPair,
         tempfile::TempDir,
     };
 
     const CLUSTER: &str = "krabka-test";
     const ALICE: &str = "User:alice";
+
+    #[derive(Clone, Copy)]
+    enum UnprovedEntryCase {
+        Unsigned,
+        UnknownKey,
+        OtherKey,
+        ChangedScope,
+        ChangedAuthor,
+    }
+
+    #[derive(Clone, Copy)]
+    enum TrustFileCase {
+        Missing,
+        InvalidToml,
+        MissingBlock,
+        EmptyBlock,
+        MissingPublicKey,
+    }
 
     /// A signer and the raw public key that goes with it.
     struct TestSigner {
@@ -339,52 +354,43 @@ mod tests {
     /// cluster that does not demand signatures, an unknown key means the tool
     /// could not check, and a failed signature means the tool checked and the
     /// answer is wrong.
-    #[test]
-    fn an_entry_the_local_trust_set_cannot_prove_is_reported() {
+    #[yare::parameterized(
+        unsigned = { UnprovedEntryCase::Unsigned, Unproved::Unsigned },
+        unknown_key = { UnprovedEntryCase::UnknownKey, Unproved::UnknownKeyId },
+        other_key_signature = { UnprovedEntryCase::OtherKey, Unproved::SignatureDidNotVerify },
+        changed_scope = { UnprovedEntryCase::ChangedScope, Unproved::SignatureDidNotVerify },
+        changed_author = { UnprovedEntryCase::ChangedAuthor, Unproved::SignatureDidNotVerify },
+    )]
+    fn an_entry_the_local_trust_set_cannot_prove_is_reported(
+        case: UnprovedEntryCase,
+        expected: Unproved,
+    ) {
         let dir = TempDir::new().expect("tempdir");
         let TestSigner { signer, public } = fresh_signer("alice-yubi");
         let TestSigner { signer: other, .. } = fresh_signer("mallory-yubi");
         let keys = trust_set(&dir, "alice-yubi", ALICE, &public);
 
-        let unsigned = DescribedTopicFreeze {
-            scope: "orders".to_owned(),
-            set_by: ALICE.to_owned(),
-            ..DescribedTopicFreeze::default()
+        let entry = match case {
+            UnprovedEntryCase::Unsigned => DescribedTopicFreeze {
+                scope: "orders".to_owned(),
+                set_by: ALICE.to_owned(),
+                ..DescribedTopicFreeze::default()
+            },
+            UnprovedEntryCase::UnknownKey => signed_entry(&signer, "bob-yubi", "orders"),
+            UnprovedEntryCase::OtherKey => signed_entry(&other, "alice-yubi", "orders"),
+            UnprovedEntryCase::ChangedScope => {
+                let mut entry = signed_entry(&signer, "alice-yubi", "orders");
+                entry.scope = "payments".to_owned();
+                entry
+            }
+            UnprovedEntryCase::ChangedAuthor => {
+                let mut entry = signed_entry(&signer, "alice-yubi", "orders");
+                entry.set_by = "User:bob".to_owned();
+                entry
+            }
         };
-        let unknown_key = signed_entry(&signer, "bob-yubi", "orders");
-        let another_key = signed_entry(&other, "alice-yubi", "orders");
-        let mut tampered = signed_entry(&signer, "alice-yubi", "orders");
-        tampered.scope = "payments".to_owned();
-        let mut another_author = signed_entry(&signer, "alice-yubi", "orders");
-        another_author.set_by = "User:bob".to_owned();
-
-        let cases = [
-            ("no signature at all", unsigned, Unproved::Unsigned),
-            (
-                "a key_id the trust set does not hold",
-                unknown_key,
-                Unproved::UnknownKeyId,
-            ),
-            (
-                "a signature from another key",
-                another_key,
-                Unproved::SignatureDidNotVerify,
-            ),
-            (
-                "a scope changed after signing",
-                tampered,
-                Unproved::SignatureDidNotVerify,
-            ),
-            (
-                "an author the key does not speak for",
-                another_author,
-                Unproved::SignatureDidNotVerify,
-            ),
-        ];
-        for (case, entry, expected) in cases {
-            let outcome = verify_registry(CLUSTER, &keys, &[entry]);
-            check!(outcome.entries[0].unproved == Some(expected), "{case}");
-        }
+        let outcome = verify_registry(CLUSTER, &keys, &[entry]);
+        check!(outcome.entries[0].unproved == Some(expected));
 
         // The control: the table above rejects for real reasons, and not
         // because every entry is rejected.
@@ -415,12 +421,13 @@ mod tests {
         let public_path = dir.path().join("alice.pub");
         std::fs::write(&public_path, &public).expect("write public key");
         let file = dir.path().join("broker.toml");
+        let encoded_public_path =
+            toml::Value::String(public_path.display().to_string()).to_string();
         std::fs::write(
             &file,
             format!(
                 "node_id = 1\n\n[[operator_keys]]\nkey_id = \"alice-yubi\"\nprincipal = \
-                 \"{ALICE}\"\npublic_key_path = \"{}\"\n",
-                public_path.display()
+                 \"{ALICE}\"\npublic_key_path = {encoded_public_path}\n",
             ),
         )
         .expect("write trust file");
@@ -437,8 +444,14 @@ mod tests {
 
     /// Each of these would otherwise leave the tool checking against an empty
     /// or partial trust set, which is a check that silently does nothing.
-    #[test]
-    fn a_trust_file_that_proves_nothing_is_refused() {
+    #[yare::parameterized(
+        missing = { TrustFileCase::Missing },
+        invalid_toml = { TrustFileCase::InvalidToml },
+        missing_block = { TrustFileCase::MissingBlock },
+        empty_block = { TrustFileCase::EmptyBlock },
+        missing_public_key = { TrustFileCase::MissingPublicKey },
+    )]
+    fn a_trust_file_that_proves_nothing_is_refused(case: TrustFileCase) {
         let dir = TempDir::new().expect("tempdir");
         let missing = dir.path().join("absent.toml");
         let not_toml = dir.path().join("not-toml.toml");
@@ -455,15 +468,13 @@ mod tests {
         )
         .expect("write file");
 
-        let cases = [
-            ("a file that is not there", missing),
-            ("a file that is not TOML", not_toml),
-            ("a file with no [[operator_keys]]", no_block),
-            ("an empty [[operator_keys]] array", empty_block),
-            ("a public key file that is missing", bad_key),
-        ];
-        for (case, path) in cases {
-            assert!(load_trust_set(&path).is_err(), "{case}");
-        }
+        let path = match case {
+            TrustFileCase::Missing => missing,
+            TrustFileCase::InvalidToml => not_toml,
+            TrustFileCase::MissingBlock => no_block,
+            TrustFileCase::EmptyBlock => empty_block,
+            TrustFileCase::MissingPublicKey => bad_key,
+        };
+        assert2::assert!(load_trust_set(&path).is_err());
     }
 }

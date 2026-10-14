@@ -205,32 +205,37 @@ mod tests {
     };
 
     #[test]
-    fn maps_both_offset_rows_with_their_declared_builder_names() {
+    fn maps_offset_rows_with_both_builder_styles() {
         let output = offset_fetch_rows(&"wire::Legacy { missing: absent_legacy, stable: committed_legacy } wire::Group { missing: absent_group, stable: committed_group, }".parse().unwrap()).unwrap();
         let rendered = compact(&output);
-        for name in [
-            "absent_legacy",
-            "committed_legacy",
-            "absent_group",
-            "committed_group",
-        ] {
-            assert!(rendered.contains(&format!("fn{name}(")));
-        }
         assert!(rendered.contains("committed_offset:-1"));
         assert!(rendered.contains("committed_offset:entry.offset.0"));
         assert!(rendered.contains("metadata:Some(entry.metadata.clone())"));
-        for invalid in [
-            "",
-            "Row(missing: a, stable: b)",
-            "Row { stable: a, missing: b }",
-            "Row { missing: a, stable: b, other: c }",
-            "Row { missing: a(), stable: b }",
-        ] {
-            assert!(
-                offset_fetch_rows(&invalid.parse().unwrap()).is_err(),
-                "{invalid}"
-            );
-        }
+    }
+
+    #[yare::parameterized(
+        legacy_missing = { "absent_legacy" },
+        legacy_stable = { "committed_legacy" },
+        group_missing = { "absent_group" },
+        group_stable = { "committed_group" },
+    )]
+    fn maps_each_offset_row_with_its_declared_builder_name(name: &str) {
+        let output = offset_fetch_rows(&"wire::Legacy { missing: absent_legacy, stable: committed_legacy } wire::Group { missing: absent_group, stable: committed_group, }".parse().unwrap()).unwrap();
+        assert2::assert!(compact(&output).contains(&format!("fn{name}(")), "{name}");
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        tuple = { "Row(missing: a, stable: b)" },
+        reversed = { "Row { stable: a, missing: b }" },
+        extra_field = { "Row { missing: a, stable: b, other: c }" },
+        call_value = { "Row { missing: a(), stable: b }" },
+    )]
+    fn offset_fetch_rows_reject_invalid_declarations(invalid: &str) {
+        assert2::assert!(
+            offset_fetch_rows(&invalid.parse().unwrap()).is_err(),
+            "{invalid}"
+        );
     }
 
     #[test]
@@ -247,29 +252,32 @@ mod tests {
             output
                 .contains("acknowledge_types:batch.types.into_iter().map(|kind|kind.0).collect()")
         );
-        for invalid in [
-            "",
-            "Batch, [batches]",
-            "Batch; []",
-            "Batch; { batches }",
-            "Batch; [batches] extra",
-        ] {
-            assert!(
-                acknowledgement_target(&invalid.parse().unwrap()).is_err(),
-                "{invalid}"
-            );
-        }
     }
 
-    #[test]
-    fn pins_the_full_empty_group_denial_response() {
-        for target in ["ShareFetchResponse", "wire::ShareAcknowledgeResponse"] {
-            let output = compact(&share_group_denial(&target.parse().unwrap()).unwrap());
-            assert!(output.contains("error_code:crate::codes::GROUP_AUTHORIZATION_FAILED"));
-            assert!(output.contains("acquisition_lock_timeout_ms:0"));
-            assert!(output.contains("node_endpoints:Vec::new(),..Default::default()"));
-        }
-        assert!(share_group_denial(&"Response; more".parse().unwrap()).is_err());
+    #[yare::parameterized(
+        empty = { "" },
+        comma = { "Batch, [batches]" },
+        empty_list = { "Batch; []" },
+        brace_group = { "Batch; { batches }" },
+        trailing = { "Batch; [batches] extra" },
+    )]
+    fn acknowledgement_target_rejects_invalid_inputs(invalid: &str) {
+        assert2::assert!(
+            acknowledgement_target(&invalid.parse().unwrap()).is_err(),
+            "{invalid}"
+        );
+    }
+
+    #[yare::parameterized(
+        share_fetch = { "ShareFetchResponse" },
+        share_acknowledge = { "wire::ShareAcknowledgeResponse" },
+    )]
+    fn pins_the_full_empty_group_denial_response(target: &str) {
+        let output = compact(&share_group_denial(&target.parse().unwrap()).unwrap());
+        assert2::assert!(output.contains("error_code:crate::codes::GROUP_AUTHORIZATION_FAILED"));
+        assert2::assert!(output.contains("acquisition_lock_timeout_ms:0"));
+        assert2::assert!(output.contains("node_endpoints:Vec::new(),..Default::default()"));
+        assert2::assert!(share_group_denial(&"Response; more".parse().unwrap()).is_err());
     }
 
     #[test]
@@ -286,17 +294,19 @@ mod tests {
         ));
         assert!(output.contains("ControlFlow::Break(answer)=>returnanswer"));
         assert!(output.contains("ControlFlow::Continue(request)=>request"));
-        for invalid in [
-            "",
-            "[route()]",
-            "broker, ctx, req; handle, refusal",
-            "broker, ctx, req, version; handle(), refusal",
-            "broker, ctx, req, version; handle, refusal trailing",
-        ] {
-            assert!(
-                controller_route(&invalid.parse().unwrap()).is_err(),
-                "{invalid}"
-            );
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        bracketed = { "[route()]" },
+        missing_version = { "broker, ctx, req; handle, refusal" },
+        call_target = { "broker, ctx, req, version; handle(), refusal" },
+        trailing = { "broker, ctx, req, version; handle, refusal trailing" },
+    )]
+    fn controller_routes_reject_invalid_inputs(invalid: &str) {
+        assert2::assert!(
+            controller_route(&invalid.parse().unwrap()).is_err(),
+            "{invalid}"
+        );
     }
 }

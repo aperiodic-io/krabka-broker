@@ -117,15 +117,19 @@ mod tests {
         let output = compact(&template(&matrix));
         assert!(output.contains("forrowin__matrix_cases"));
         assert!(output.contains("handle.shutdown().await;"));
-        for invalid in [
-            "",
+    }
+
+    #[yare::parameterized(
+        empty_input = { "" },
+        multiple_case_bindings = {
             "case(label,auth,expected) [cases]; bind(h,d,b,c,r); invoke [handle()];",
-            "case(row) []; bind(h,d,b,c,r); invoke [handle()];",
-            "case(row) [cases]; bind(h,d,b,c); invoke [handle()];",
-            "case(row) [cases]; bind(h,d,b,c,r); invoke [];",
-            "case(row) [cases]; bind(h,d,b,c,r); invoke [handle()]; extra",
-        ] {
-            assert!(declaration(&invalid.parse().unwrap()).is_err(), "{invalid}");
-        }
+        },
+        empty_case_list = { "case(row) []; bind(h,d,b,c,r); invoke [handle()];" },
+        short_binding_list = { "case(row) [cases]; bind(h,d,b,c); invoke [handle()];" },
+        empty_invoke = { "case(row) [cases]; bind(h,d,b,c,r); invoke [];" },
+        trailing_tokens = { "case(row) [cases]; bind(h,d,b,c,r); invoke [handle()]; extra" },
+    )]
+    fn rejects_malformed_share_refusal_matrices(invalid: &str) {
+        assert2::assert!(declaration(&invalid.parse().unwrap()).is_err(), "{invalid}");
     }
 }

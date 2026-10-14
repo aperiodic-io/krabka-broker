@@ -175,6 +175,16 @@ mod tests {
         std::{net::SocketAddr, sync::Arc},
     };
 
+    macro_rules! ready_alice_broker {
+        ($($binding:ident),+ $(,)?) => {
+            krabka_macros::broker_test_setup! {
+                bind($($binding),+);
+                boot [join_ready_broker()];
+                user ["alice"];
+            }
+        };
+    }
+
     /// Dispatch every version through its wire codec so omitted fields stay observable.
     async fn wire_heartbeat(
         broker: &Broker,
@@ -372,11 +382,7 @@ mod tests {
     #[tokio::test]
     async fn handle_refuses_a_topology_naming_a_prohibited_or_invalid_topic() {
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        krabka_macros::broker_test_setup!(
-            bind(broker_handle, _dir, broker, principal, peer, ctx);
-            boot [join_ready_broker()];
-            user ["alice"];
-        );
+        ready_alice_broker!(broker_handle, _dir, broker, principal, peer, ctx);
 
         // (group id, source topic, the expected error message)
         let rows = [
@@ -427,13 +433,14 @@ mod tests {
     /// is created.
     #[tokio::test]
     async fn handle_refuses_a_required_topic_denied_for_describe() {
-        let version = streams_group_heartbeat_response::MAX_VERSION;
-        let StartedBroker {
-            broker: broker_handle,
-            dir: _dir,
-        } = start_broker_with_grants().await;
+        let (
+            version,
+            StartedBroker {
+                broker: broker_handle,
+                dir: _dir,
+            },
+        ) = start_granted_streams_broker().await;
         let broker = broker_handle.broker_arc_for_test();
-        set_streams_version(&broker, 1).await;
         let peer = peer();
         // `Group:Read` only: the source topic `in` gets no `Describe`.
         let principal = principal("Group:Read");
@@ -469,13 +476,14 @@ mod tests {
     async fn handle_reports_topics_unauthorized_to_create_in_status() {
         use krabka_protocol::owned::common::streams_group_heartbeat_request::topic_info::TopicInfo;
 
-        let version = streams_group_heartbeat_response::MAX_VERSION;
-        let StartedBroker {
-            broker: broker_handle,
-            dir: _dir,
-        } = start_broker_with_grants().await;
+        let (
+            version,
+            StartedBroker {
+                broker: broker_handle,
+                dir: _dir,
+            },
+        ) = start_granted_streams_broker().await;
         let broker = broker_handle.broker_arc_for_test();
-        set_streams_version(&broker, 1).await;
         create_source_topic(&broker, "in").await;
         let peer = peer();
         // `Read` on the group and `Describe` on the topics, but no `Create`
@@ -526,11 +534,7 @@ mod tests {
         };
 
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        krabka_macros::broker_test_setup!(
-            bind(broker_handle, _dir, broker, principal, peer, ctx);
-            boot [join_ready_broker()];
-            user ["alice"];
-        );
+        ready_alice_broker!(broker_handle, _dir, broker, principal, peer, ctx);
         broker.group_coordinator.mark_share("share");
         let _consumer = broker
             .group_coordinator
@@ -595,11 +599,7 @@ mod tests {
     #[tokio::test]
     async fn handle_refuses_an_invalid_request_and_creates_no_group() {
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        krabka_macros::broker_test_setup!(
-            bind(broker_handle, _dir, broker, principal, peer, ctx);
-            boot [join_ready_broker()];
-            user ["alice"];
-        );
+        ready_alice_broker!(broker_handle, _dir, broker, principal, peer, ctx);
         let req = StreamsGroupHeartbeatRequest {
             member_id: String::new(),
             ..request("invalid-join")
@@ -788,6 +788,13 @@ mod tests {
         StartedBroker { broker, dir }
     }
 
+    async fn start_granted_streams_broker() -> (i16, StartedBroker) {
+        let started = start_broker_with_grants().await;
+        let broker = started.broker.broker_arc_for_test();
+        set_streams_version(&broker, 1).await;
+        (streams_group_heartbeat_response::MAX_VERSION, started)
+    }
+
     /// Writes a `streams.version` `FeatureLevelRecord` at `level` and waits
     /// until the image shows it. Level 0 removes the feature, as in Kafka.
     use crate::handlers::test_support::set_streams_version;
@@ -942,11 +949,7 @@ mod tests {
     #[tokio::test]
     async fn handle_persists_request_client_identity() {
         let version = streams_group_heartbeat_response::MAX_VERSION;
-        krabka_macros::broker_test_setup!(
-            bind(broker_handle, _dir, broker, principal, peer, ctx);
-            boot [join_ready_broker()];
-            user ["alice"];
-        );
+        ready_alice_broker!(broker_handle, _dir, broker, principal, peer, ctx);
 
         let resp = handle(&broker, request("identity-group"), version, &ctx)
             .await

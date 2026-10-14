@@ -535,8 +535,15 @@ fn open_rewrites_a_checkpoint_past_the_log_end_so_appends_cannot_revive_it() {
     assert!(log.log_end_offset() == Offset(9));
 }
 
-#[test]
-fn open_resolves_a_checkpoint_against_what_the_log_holds() {
+#[yare::parameterized(
+    checkpoint_below_derived_start = { Offset(1), Offset(1), Offset(2) },
+    checkpoint_past_log_end = { Offset(9), Offset(3), Offset(3) },
+)]
+fn open_resolves_a_checkpoint_against_what_the_log_holds(
+    checkpointed: Offset,
+    expected_start: Offset,
+    expected_local_start: Offset,
+) {
     // Reopening caps the checkpoint at the log end and leaves it alone below
     // the derived start.
     //
@@ -550,41 +557,27 @@ fn open_resolves_a_checkpoint_against_what_the_log_holds() {
     // segment: raising it to meet the surviving files would hide the band the
     // archive serves. `local_log_start_offset` is the floor that follows the
     // files, and it is what a local read is measured against either way.
-    enum Case {
-        BelowDerivedStart,
-        PastLogEnd,
+    let dir = tempdir().unwrap();
+    {
+        let mut log = rolling_test_log(dir.path());
+        append_samples(&mut log, 3, 1);
+        // Drops the sealed segments below offset 2, so the derived start
+        // is 2 and the log end is 3.
+        log.trim_to_offset(Offset(2)).unwrap();
+        log.sync().unwrap();
     }
+    write(&FileIo, dir.path(), checkpointed).unwrap();
 
-    for (case, expected_start, expected_local_start) in [
-        (Case::BelowDerivedStart, Offset(1), Offset(2)),
-        (Case::PastLogEnd, Offset(3), Offset(3)),
-    ] {
-        let dir = tempdir().unwrap();
-        {
-            let mut log = rolling_test_log(dir.path());
-            append_samples(&mut log, 3, 1);
-            // Drops the sealed segments below offset 2, so the derived start
-            // is 2 and the log end is 3.
-            log.trim_to_offset(Offset(2)).unwrap();
-            log.sync().unwrap();
-        }
-        let checkpointed = match case {
-            Case::BelowDerivedStart => Offset(1),
-            Case::PastLogEnd => Offset(9),
-        };
-        write(&FileIo, dir.path(), checkpointed).unwrap();
+    let log = open_log(dir.path());
 
-        let log = open_log(dir.path());
-
-        assert!(log.log_start_offset() == expected_start);
-        assert!(log.local_log_start_offset() == expected_local_start);
-        // Whatever it resolved to is what is now on disk, so the next open
-        // reads a value that already agrees with the log.
-        drop(log);
-        assert!(
-            crate::log_start_offset_checkpoint::read(dir.path()).unwrap() == Some(expected_start)
-        );
-    }
+    assert2::assert!(log.log_start_offset() == expected_start);
+    assert2::assert!(log.local_log_start_offset() == expected_local_start);
+    // Whatever it resolved to is what is now on disk, so the next open
+    // reads a value that already agrees with the log.
+    drop(log);
+    assert2::assert!(
+        crate::log_start_offset_checkpoint::read(dir.path()).unwrap() == Some(expected_start)
+    );
 }
 
 #[test]
@@ -653,66 +646,67 @@ fn snapshot_offsets(dir: &Path) -> Vec<i64> {
 /// batch is below the log start and whom no surviving snapshot carries.
 /// Every reload ends with a snapshot at the log end, 6, as Kafka's
 /// `rebuildProducerState` ends with `takeSnapshot()`.
-#[test]
-fn reopen_reloads_producer_state_against_the_trimmed_log_start() {
-    for (log_start, snapshots_after_trim, snapshots_after_reopen, reloaded) in [
-        // Snapshots at 2 and 4 are both above the log start: 4 loads.
-        (1, vec![2, 4], vec![2, 4, 6], vec![1, 2, 3]),
-        // The snapshot at the log start is deleted, and the replay from the
-        // log start finds only producer 3.
-        (4, vec![4], vec![6], vec![3]),
-        // The snapshot below the log start is deleted, and the replay starts
-        // inside producer 3's batch at 4..=5.
-        (5, vec![4], vec![6], vec![3]),
-    ] {
-        let dir = tempdir().unwrap();
-        let mut log = three_producer_log(dir.path());
-        log.sync().unwrap();
-        check!(snapshot_offsets(dir.path()) == vec![2, 4]);
+#[yare::parameterized(
+    newest_snapshot_above_start = { 1, vec![2, 4], vec![2, 4, 6], vec![1, 2, 3] },
+    start_snapshot_is_deleted = { 4, vec![4], vec![6], vec![3] },
+    replay_starts_inside_batch = { 5, vec![4], vec![6], vec![3] },
+)]
+fn reopen_reloads_producer_state_against_the_trimmed_log_start(
+    log_start: i64,
+    snapshots_after_trim: Vec<i64>,
+    snapshots_after_reopen: Vec<i64>,
+    reloaded: Vec<i64>,
+) {
+    let dir = tempdir().unwrap();
+    let mut log = three_producer_log(dir.path());
+    log.sync().unwrap();
+    check!(snapshot_offsets(dir.path()) == vec![2, 4]);
 
-        check!(log.trim_to_offset(Offset(log_start)).unwrap() == Offset(log_start));
-        check!(producer_ids(&log) == vec![1, 2, 3], "log start {log_start}");
-        check!(
-            snapshot_offsets(dir.path()) == snapshots_after_trim,
-            "log start {log_start}"
-        );
-        let config = log.config.read().unwrap().clone();
-        drop(log);
+    check!(log.trim_to_offset(Offset(log_start)).unwrap() == Offset(log_start));
+    check!(producer_ids(&log) == vec![1, 2, 3], "log start {log_start}");
+    check!(
+        snapshot_offsets(dir.path()) == snapshots_after_trim,
+        "log start {log_start}"
+    );
+    let config = log.config.read().unwrap().clone();
+    drop(log);
 
-        let reopened = Log::open(dir.path(), config).unwrap();
-        check!(reopened.log_start_offset() == Offset(log_start));
-        check!(producer_ids(&reopened) == reloaded, "log start {log_start}");
-        check!(
-            snapshot_offsets(dir.path()) == snapshots_after_reopen,
-            "log start {log_start}"
-        );
-    }
+    let reopened = Log::open(dir.path(), config).unwrap();
+    check!(reopened.log_start_offset() == Offset(log_start));
+    check!(producer_ids(&reopened) == reloaded, "log start {log_start}");
+    check!(
+        snapshot_offsets(dir.path()) == snapshots_after_reopen,
+        "log start {log_start}"
+    );
 }
 
 /// Kafka's `rebuildProducerState` ends with `updateMapEndOffset(logEnd)` and
 /// `takeSnapshot()`: an open that rebuilt producer state leaves a snapshot at
 /// the log end, and one with nothing past the log start to cover takes none:
 /// an empty log, or one trimmed to its end.
-#[test]
-fn a_reload_takes_a_snapshot_at_the_log_end() {
-    for (name, batches, trim_to, expected) in [
-        ("an empty log takes none", 0, None, vec![]),
-        ("a log with records takes one at its end", 3, None, vec![6]),
-        ("a log trimmed to its end takes none", 3, Some(6), vec![]),
-    ] {
-        let TempLog { dir, mut log } = test_log();
-        for _ in 0..batches {
-            log.append(&mut sample_batch(2)).unwrap();
-        }
-        if let Some(target) = trim_to {
-            log.trim_to_offset(Offset(target)).unwrap();
-        }
-        drop(log);
-
-        let reopened = open_log(dir.path());
-        check!(snapshot_offsets(dir.path()) == expected, "{name}");
-        drop(reopened);
+#[yare::parameterized(
+    empty_log = { "an empty log takes none", 0, None, vec![] },
+    records = { "a log with records takes one at its end", 3, None, vec![6] },
+    trimmed_to_end = { "a log trimmed to its end takes none", 3, Some(6), vec![] },
+)]
+fn a_reload_takes_a_snapshot_at_the_log_end(
+    name: &'static str,
+    batches: usize,
+    trim_to: Option<i64>,
+    expected: Vec<i64>,
+) {
+    let TempLog { dir, mut log } = test_log();
+    for _ in 0..batches {
+        log.append(&mut sample_batch(2)).unwrap();
     }
+    if let Some(target) = trim_to {
+        log.trim_to_offset(Offset(target)).unwrap();
+    }
+    drop(log);
+
+    let reopened = open_log(dir.path());
+    check!(snapshot_offsets(dir.path()) == expected, "{name}");
+    drop(reopened);
 }
 
 /// Kafka's `removeStraySnapshots` runs before the reload: a snapshot no

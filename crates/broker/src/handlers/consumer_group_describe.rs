@@ -87,8 +87,7 @@ pub(crate) async fn handle(
         .config
         .assignors
         .first()
-        .map(|a| a.name())
-        .unwrap_or_default();
+        .map_or_default(|a| a.name());
     // Kafka places every GROUP_AUTHORIZATION_FAILED row first, ahead of the
     // coordinator results, which keep request order among themselves.
     let mut denied: Vec<DescribedGroup> = Vec::new();

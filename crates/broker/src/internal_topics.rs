@@ -154,12 +154,7 @@ pub(crate) fn validate_audit_topic_name(name: &str) -> Result<(), BrokerError> {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::config::DEFAULT_AUDIT_TOPIC,
-        assert2::{assert, check},
-        std::path::PathBuf,
-    };
+    use {super::*, crate::config::DEFAULT_AUDIT_TOPIC, assert2::check, std::path::PathBuf};
 
     /// A config whose audit topic is `name`, for driving [`is_internal_topic`].
     fn config_auditing_to(name: &str) -> BrokerConfig {
@@ -171,46 +166,24 @@ mod tests {
     /// Kafka's three names answer as Kafka answers, Krabka's own topics answer
     /// `true`, and nothing else does. `__remote_log_metadata` is the row that
     /// is easy to guess wrong: broker-owned in spirit, ordinary to Kafka.
-    #[test]
-    fn a_broker_owned_topic_is_internal_and_nothing_else_is() {
+    #[yare::parameterized(
+        offsets = { "__consumer_offsets", true },
+        txn_state = { "__transaction_state", true },
+        share_state = { "__share_group_state", true },
+        audit_log = { "__krabka_audit", true },
+        barrier_state = { "__barrier_state", true },
+        diskless_index = { "__diskless_wal_index", true },
+        remote_log_metadata = { "__remote_log_metadata", false },
+        raft_metadata = { "__cluster_metadata", false },
+        ordinary = { "orders", false },
+        single_underscore = { "_foo", false },
+        user_prefix = { "__user_topic", false },
+        internal_suffix = { "__consumer_offsets-2", false },
+        internal_prefix = { "__consumer_offset", false },
+    )]
+    fn a_broker_owned_topic_is_internal_and_nothing_else_is(name: &str, expected: bool) {
         let config = BrokerConfig::for_tests(PathBuf::from("/nonexistent"));
-        for (label, name, expected) in [
-            ("the offsets topic", "__consumer_offsets", true),
-            ("the transaction state topic", "__transaction_state", true),
-            ("the share group state topic", "__share_group_state", true),
-            ("the audit log", "__krabka_audit", true),
-            ("the barrier state topic", "__barrier_state", true),
-            ("the diskless WAL index", "__diskless_wal_index", true),
-            (
-                "the tiered-storage metadata topic, ordinary on Kafka",
-                "__remote_log_metadata",
-                false,
-            ),
-            (
-                "the raft metadata log, which is never a metadata topic row",
-                "__cluster_metadata",
-                false,
-            ),
-            ("an ordinary topic", "orders", false),
-            ("a single-underscore name", "_foo", false),
-            (
-                "an application topic that borrows the prefix",
-                "__user_topic",
-                false,
-            ),
-            (
-                "a name that only extends an internal one",
-                "__consumer_offsets-2",
-                false,
-            ),
-            (
-                "a name that is only a prefix of an internal one",
-                "__consumer_offset",
-                false,
-            ),
-        ] {
-            check!(is_internal_topic(&config, name) == expected, "{label}");
-        }
+        check!(is_internal_topic(&config, name) == expected, "{name}");
     }
 
     /// An operator who renames the audit log gets the flag on the name the
@@ -246,50 +219,38 @@ mod tests {
     // Only the exact admin client id Kafka's `KafkaApis` compares against,
     // or the broker's own diskless index writer, is let through; nothing
     // else, including a name that merely contains one of them, is.
-    #[test]
-    fn only_the_admin_client_or_the_diskless_index_writer_may_produce_to_an_internal_topic() {
-        for (label, client_id, expected) in [
-            ("the admin client itself", "__admin_client", true),
-            ("an ordinary application", "my-app", false),
-            ("the empty client id", "", false),
-            (
-                "a name that only contains the admin client id",
-                "__admin_client-2",
-                false,
-            ),
-            (
-                "the diskless index writer, broker 1",
-                "krabka-diskless-index-broker-1-producer",
-                true,
-            ),
-            (
-                "the diskless index writer, broker 42",
-                "krabka-diskless-index-broker-42-producer",
-                true,
-            ),
-            (
-                "a name that only contains the diskless index writer prefix",
-                "not-krabka-diskless-index-broker-1-producer",
-                false,
-            ),
-        ] {
-            check!(
-                produce_internal_topics_allowed(client_id) == expected,
-                "{label}"
-            );
-        }
+    #[yare::parameterized(
+        admin_client = { "__admin_client", true },
+        ordinary_application = { "my-app", false },
+        empty_client_id = { "", false },
+        admin_client_suffix = { "__admin_client-2", false },
+        diskless_writer_broker_one = { "krabka-diskless-index-broker-1-producer", true },
+        diskless_writer_broker_42 = { "krabka-diskless-index-broker-42-producer", true },
+        diskless_writer_prefix_in_name = { "not-krabka-diskless-index-broker-1-producer", false },
+    )]
+    fn only_the_admin_client_or_the_diskless_index_writer_may_produce_to_an_internal_topic(
+        client_id: &str,
+        expected: bool,
+    ) {
+        check!(
+            produce_internal_topics_allowed(client_id) == expected,
+            "{client_id}"
+        );
     }
 
     /// The audit topic is the one internal name the prefix rule cannot take on
     /// trust, so validation is what puts it back inside the convention.
-    #[test]
-    fn an_audit_topic_outside_the_convention_is_rejected() {
-        check!(validate_audit_topic_name(crate::config::DEFAULT_AUDIT_TOPIC).is_ok());
-        check!(validate_audit_topic_name("__house_audit").is_ok());
-        for name in ["audit", "_audit", "", "__../x", "__a/b"] {
-            assert!(let Err(error) = validate_audit_topic_name(name), "{name}");
-            check!(error.to_string().contains("audit_topic"), "{name}");
-        }
+    #[yare::parameterized(
+        no_prefix = { "audit" },
+        single_underscore = { "_audit" },
+        empty = { "" },
+        parent_path = { "__../x" },
+        slash = { "__a/b" },
+    )]
+    fn an_audit_topic_outside_the_convention_is_rejected(name: &str) {
+        let result = validate_audit_topic_name(name);
+        assert2::assert!(let Err(error) = result, "{name}");
+        check!(error.to_string().contains("audit_topic"), "{name}");
     }
 
     /// Validation exists to keep the freeze rule and this one in step: any name

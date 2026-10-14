@@ -366,12 +366,10 @@ mod tests {
         true
     }
 
-    fn check_invalid_cli_values(option: &'static str, values: &[&'static str]) {
-        for &invalid in values {
-            let mut args = required_args("krabka");
-            args.extend([option, invalid]);
-            check!(Cli::try_parse_from(args).is_err(), "{option}={invalid}");
-        }
+    fn check_invalid_cli_value(option: &'static str, invalid: &'static str) {
+        let mut args = required_args("krabka");
+        args.extend([option, invalid]);
+        check!(Cli::try_parse_from(args).is_err(), "{option}={invalid}");
     }
 
     #[test]
@@ -406,15 +404,16 @@ mod tests {
         let custom = Cli::try_parse_from(args).unwrap();
         assert!(custom.client_dispatch_queue_capacity == 7);
         assert!(custom.client_frame_max == kibibytes(32));
+    }
 
-        for (option, invalid) in [
-            ("--client-dispatch-queue-capacity", "0"),
-            ("--client-frame-max", "101MiB"),
-        ] {
-            let mut args = required_args("krabka");
-            args.extend([option, invalid]);
-            assert!(Cli::try_parse_from(args).is_err());
-        }
+    #[yare::parameterized(
+        zero_dispatch_capacity = { "--client-dispatch-queue-capacity", "0" },
+        frame_over_limit = { "--client-frame-max", "101MiB" },
+    )]
+    fn client_resource_policy_rejects_invalid_values(option: &'static str, invalid: &'static str) {
+        let mut args = required_args("krabka");
+        args.extend([option, invalid]);
+        assert2::assert!(Cli::try_parse_from(args).is_err());
     }
 
     #[test]
@@ -452,11 +451,23 @@ mod tests {
         assert!(from_cli.client_frame_max == kibibytes(64));
     }
 
-    #[test]
-    fn client_request_timeout_rejects_invalid_cli_values() {
-        for option in ["--producer-request-timeout", "--consumer-request-timeout"] {
-            check_invalid_cli_values(option, &["0s", "not-a-number", "-1s", "2147483648ms", "1"]);
-        }
+    #[yare::parameterized(
+        producer_zero = { "--producer-request-timeout", "0s" },
+        producer_text = { "--producer-request-timeout", "not-a-number" },
+        producer_negative = { "--producer-request-timeout", "-1s" },
+        producer_overflow = { "--producer-request-timeout", "2147483648ms" },
+        producer_missing_unit = { "--producer-request-timeout", "1" },
+        consumer_zero = { "--consumer-request-timeout", "0s" },
+        consumer_text = { "--consumer-request-timeout", "not-a-number" },
+        consumer_negative = { "--consumer-request-timeout", "-1s" },
+        consumer_overflow = { "--consumer-request-timeout", "2147483648ms" },
+        consumer_missing_unit = { "--consumer-request-timeout", "1" },
+    )]
+    fn client_request_timeout_rejects_invalid_cli_values(
+        option: &'static str,
+        invalid: &'static str,
+    ) {
+        check_invalid_cli_value(option, invalid);
     }
 
     #[test]
@@ -467,15 +478,19 @@ mod tests {
         check!(policy == ConsumerBuildRetryPolicy::default());
     }
 
-    #[test]
-    fn consumer_build_retry_rejects_invalid_cli_values() {
-        check_invalid_cli_values("--consumer-build-attempts", &["0", "4294967296"]);
-        for option in [
-            "--consumer-build-initial-backoff",
-            "--consumer-build-max-backoff",
-        ] {
-            check_invalid_cli_values(option, &["0ms", "1"]);
-        }
+    #[yare::parameterized(
+        zero_attempts = { "--consumer-build-attempts", "0" },
+        attempts_overflow = { "--consumer-build-attempts", "4294967296" },
+        zero_initial_backoff = { "--consumer-build-initial-backoff", "0ms" },
+        initial_backoff_missing_unit = { "--consumer-build-initial-backoff", "1" },
+        zero_max_backoff = { "--consumer-build-max-backoff", "0ms" },
+        max_backoff_missing_unit = { "--consumer-build-max-backoff", "1" },
+    )]
+    fn consumer_build_retry_rejects_invalid_cli_values(
+        option: &'static str,
+        invalid: &'static str,
+    ) {
+        check_invalid_cli_value(option, invalid);
     }
 
     #[test]
@@ -546,11 +561,21 @@ mod tests {
         check!(cli.consumer_poll_error_backoff == millis(100));
     }
 
-    #[test]
-    fn consumer_poll_timing_rejects_invalid_cli_values() {
-        for option in ["--consumer-poll-timeout", "--consumer-poll-error-backoff"] {
-            check_invalid_cli_values(option, &["0ms", "not-a-number", "-1ms", "1"]);
-        }
+    #[yare::parameterized(
+        poll_zero = { "--consumer-poll-timeout", "0ms" },
+        poll_text = { "--consumer-poll-timeout", "not-a-number" },
+        poll_negative = { "--consumer-poll-timeout", "-1ms" },
+        poll_fraction = { "--consumer-poll-timeout", "1" },
+        backoff_zero = { "--consumer-poll-error-backoff", "0ms" },
+        backoff_text = { "--consumer-poll-error-backoff", "not-a-number" },
+        backoff_negative = { "--consumer-poll-error-backoff", "-1ms" },
+        backoff_fraction = { "--consumer-poll-error-backoff", "1" },
+    )]
+    fn consumer_poll_timing_rejects_invalid_cli_values(
+        option: &'static str,
+        invalid: &'static str,
+    ) {
+        check_invalid_cli_value(option, invalid);
     }
 
     #[test]
@@ -595,13 +620,14 @@ mod tests {
         assert!(cli.producer_final_drain_timeout == secs(10));
     }
 
-    #[test]
-    fn producer_final_drain_timeout_rejects_invalid_cli_values() {
-        for invalid in ["0s", "not-a-number", "-1s", "1"] {
-            let mut args = required_args("krabka");
-            args.extend(["--producer-final-drain-timeout", invalid]);
-            assert!(Cli::try_parse_from(args).is_err(), "{invalid}");
-        }
+    #[yare::parameterized(
+        zero = { "0s" },
+        text = { "not-a-number" },
+        negative = { "-1s" },
+        missing_unit = { "1" },
+    )]
+    fn producer_final_drain_timeout_rejects_invalid_cli_values(invalid: &'static str) {
+        check_invalid_cli_value("--producer-final-drain-timeout", invalid);
     }
 
     #[test]
@@ -633,13 +659,15 @@ mod tests {
         assert!(cli.sample_interval == secs(2));
     }
 
-    #[test]
-    fn sample_interval_rejects_invalid_cli_values() {
-        for invalid in ["0ms", "not-a-number", "-1ms", "0.5ms", "1"] {
-            let mut args = required_args("krabka");
-            args.extend(["--sample-interval", invalid]);
-            assert!(Cli::try_parse_from(args).is_err(), "{invalid}");
-        }
+    #[yare::parameterized(
+        zero = { "0ms" },
+        text = { "not-a-number" },
+        negative = { "-1ms" },
+        fractional_submillisecond = { "0.5ms" },
+        missing_unit = { "1" },
+    )]
+    fn sample_interval_rejects_invalid_cli_values(invalid: &'static str) {
+        check_invalid_cli_value("--sample-interval", invalid);
     }
 
     #[test]

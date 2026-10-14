@@ -246,6 +246,15 @@ mod tests {
         }
     }
 
+    async fn assert_listed_latest(
+        broker: &Broker,
+        topic: &str,
+        ctx: &RequestContext<'_>,
+        offset: i64,
+    ) {
+        assert!(list_partition(broker, topic, LATEST_TIMESTAMP, ctx).await == latest_row(offset));
+    }
+
     #[tokio::test]
     async fn scheduled_latest_answers_the_delivery_watermark_and_leaves_the_rest_alone() {
         const IMMEDIATE: &str = "list-offsets-delivery-immediate";
@@ -432,13 +441,13 @@ mod tests {
             bind(ctx);
             user ["admin"];
         };
-        assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
+        assert_listed_latest(&broker, TOPIC, &ctx, 2).await;
         timeline
             .advance(std::time::Duration::from_millis(
                 u64::try_from(10_000 + BOUND_MS).unwrap(),
             ))
             .unwrap();
-        assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(6));
+        assert_listed_latest(&broker, TOPIC, &ctx, 6).await;
         broker_handle.shutdown().await;
     }
 
@@ -525,7 +534,7 @@ mod tests {
                 bind(ctx);
                 user ["admin"];
             };
-            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
+            assert_listed_latest(&broker, TOPIC, &ctx, 2).await;
             assert!(
                 latest_offsets_for_test(&broker, TOPIC).await
                     == LatestOffsets {
@@ -546,7 +555,7 @@ mod tests {
                 assert!(log.log_end_offset() == Offset(6));
             }
             assert!(partition.high_watermark().await == Offset(6));
-            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(6));
+            assert_listed_latest(&broker, TOPIC, &ctx, 6).await;
             assert!(
                 latest_offsets_for_test(&broker, TOPIC).await
                     == LatestOffsets {
@@ -558,17 +567,17 @@ mod tests {
                 delivery_policy: DeliveryPolicy::Scheduled,
                 ..config
             });
-            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
+            assert_listed_latest(&broker, TOPIC, &ctx, 2).await;
             timeline
                 .advance(std::time::Duration::from_millis(
                     u64::try_from(10_000 + BOUND_MS - 1).unwrap(),
                 ))
                 .unwrap();
-            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(2));
+            assert_listed_latest(&broker, TOPIC, &ctx, 2).await;
             timeline
                 .advance(std::time::Duration::from_millis(1))
                 .unwrap();
-            assert!(list_partition(&broker, TOPIC, LATEST_TIMESTAMP, &ctx).await == latest_row(6));
+            assert_listed_latest(&broker, TOPIC, &ctx, 6).await;
             drop(client);
             broker_handle.shutdown().await;
         }

@@ -23,7 +23,9 @@ use {
             test_support::{replicated_partition, single_replica_partition},
         },
         leader_election::{ElectionType, test_support::one_partition_change},
-        test_support::{decode_response, start_broker_no_audit_with},
+        test_support::{
+            decode_response, gated_break_glass_config as gated_config, start_broker_no_audit_with,
+        },
     },
     assert2::{assert, check},
     krabka_metadata::{
@@ -47,13 +49,6 @@ mod commit_fencing;
 
 krabka_macros::wire_codec_helpers! {
     test_context ["kafka-leader-election"];
-}
-
-fn gated_config() -> BreakGlassConfig {
-    BreakGlassConfig {
-        approvers: ["User:alice", "User:bob"].map(str::to_owned).to_vec(),
-        ..BreakGlassConfig::default()
-    }
 }
 
 /// One two-replica partition of [`TOPIC`], led by broker 1, beside the

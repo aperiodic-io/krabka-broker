@@ -176,80 +176,55 @@ mod tests {
         std::net::{Ipv4Addr, Ipv6Addr},
     };
 
-    #[test]
-    fn parse_accepts_valid_cidrs() {
-        let cases = [
-            ("10.0.0.0/8", IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 8),
-            (
-                "192.168.0.0/24",
-                IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)),
-                24,
-            ),
-            ("10.0.0.5/32", IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 32),
-            (
-                "2001:db8::/32",
-                IpAddr::V6("2001:db8::".parse().unwrap()),
-                32,
-            ),
-            // `\d{1,3}` octets and a `\d{1,2}` prefix take leading zeros,
-            // read as decimal.
-            ("010.0.0.1/08", IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 8),
-            // `InetAddress.getByName` strips brackets; `parseInt` takes a
-            // sign.
-            (
-                "[2001:db8::]/+32",
-                IpAddr::V6("2001:db8::".parse().unwrap()),
-                32,
-            ),
-        ];
-        for (input, ip, prefix_len) in cases {
-            check!(Cidr::parse(input) == Ok(Cidr { ip, prefix_len }));
-        }
+    #[yare::parameterized(
+        ipv4_8 = { "10.0.0.0/8", IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 8 },
+        ipv4_24 = { "192.168.0.0/24", IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)), 24 },
+        ipv4_single_host = { "10.0.0.5/32", IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 32 },
+        ipv6_32 = { "2001:db8::/32", IpAddr::V6("2001:db8::".parse().unwrap()), 32 },
+        decimal_leading_zeroes = { "010.0.0.1/08", IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 8 },
+        bracketed_ipv6_signed_prefix = {
+            "[2001:db8::]/+32",
+            IpAddr::V6("2001:db8::".parse().unwrap()),
+            32,
+        },
+    )]
+    fn parse_accepts_valid_cidrs(input: &str, ip: IpAddr, prefix_len: u8) {
+        check!(Cidr::parse(input) == Ok(Cidr { ip, prefix_len }));
     }
 
-    #[test]
-    fn parse_rejects_malformed_cidrs() {
-        // commons-net 3.13.0 `SubnetUtils` / `SubnetUtils6` messages.
-        let cases = [
-            ("not-an-ip/8", "Could not parse [not-an-ip/8]"),
-            ("10.0.0.0/thirty", "Could not parse [10.0.0.0/thirty]"),
-            ("10.0.0.0/33", "Value [33] not in range [0,32]"),
-            ("10.0.0.0/100", "Could not parse [10.0.0.0/100]"),
-            ("10.0.256.0/8", "Value [256] not in range [0,255]"),
-            ("10.0.0/8", "Could not parse [10.0.0/8]"),
-            ("10.0.0.0/8/8", "Could not parse [10.0.0.0/8/8]"),
-            (
-                "2001:db8::/129",
-                "Could not parse [2001:db8::/129] - prefix length must be between 0 and 128",
-            ),
-            (
-                "2001:db8::/-1",
-                "Could not parse [2001:db8::/-1] - prefix length must be between 0 and 128",
-            ),
-            (
-                "2001:db8::/x",
-                "Could not parse [2001:db8::/x] - invalid prefix length",
-            ),
-            (
-                "2001:db8::/32/5",
-                "Could not parse [2001:db8::/32/5] - invalid prefix length",
-            ),
-            (
-                "2001:db8::",
-                "Could not parse [2001:db8::] - missing prefix length",
-            ),
-            ("2001:zz8::/32", "Could not parse [2001:zz8::]"),
-            (
-                "::ffff:10.0.0.0/104",
-                "Could not parse [::ffff:10.0.0.0] - not an IPv6 address",
-            ),
-        ];
-        for (input, reason) in cases {
-            check!(
-                Cidr::parse(input) == Err(reason.to_owned()),
-                "input {input}"
-            );
-        }
+    #[yare::parameterized(
+        not_ip = { "not-an-ip/8", "Could not parse [not-an-ip/8]" },
+        non_numeric_ipv4_prefix = { "10.0.0.0/thirty", "Could not parse [10.0.0.0/thirty]" },
+        ipv4_prefix_too_large = { "10.0.0.0/33", "Value [33] not in range [0,32]" },
+        ipv4_prefix_far_too_large = { "10.0.0.0/100", "Could not parse [10.0.0.0/100]" },
+        ipv4_octet_too_large = { "10.0.256.0/8", "Value [256] not in range [0,255]" },
+        short_ipv4 = { "10.0.0/8", "Could not parse [10.0.0/8]" },
+        repeated_prefix = { "10.0.0.0/8/8", "Could not parse [10.0.0.0/8/8]" },
+        ipv6_prefix_too_large = {
+            "2001:db8::/129",
+            "Could not parse [2001:db8::/129] - prefix length must be between 0 and 128",
+        },
+        ipv6_negative_prefix = {
+            "2001:db8::/-1",
+            "Could not parse [2001:db8::/-1] - prefix length must be between 0 and 128",
+        },
+        ipv6_non_numeric_prefix = {
+            "2001:db8::/x",
+            "Could not parse [2001:db8::/x] - invalid prefix length",
+        },
+        ipv6_repeated_prefix = {
+            "2001:db8::/32/5",
+            "Could not parse [2001:db8::/32/5] - invalid prefix length",
+        },
+        missing_prefix = { "2001:db8::", "Could not parse [2001:db8::] - missing prefix length" },
+        malformed_ipv6 = { "2001:zz8::/32", "Could not parse [2001:zz8::]" },
+        mapped_ipv4_in_ipv6_prefix = {
+            "::ffff:10.0.0.0/104",
+            "Could not parse [::ffff:10.0.0.0] - not an IPv6 address",
+        },
+    )]
+    fn parse_rejects_malformed_cidrs(input: &str, reason: &str) {
+        check!(Cidr::parse(input) == Err(reason.to_owned()));
     }
 
     fn check_membership(cidr: &Cidr, members: &[IpAddr], non_members: &[IpAddr]) {
@@ -310,26 +285,20 @@ mod tests {
     /// commons-net `SubnetUtils.SubnetInfo.isInRange(int)` answers `false`
     /// for the zero address in every IPv4 range, including one that holds it
     /// numerically. `SubnetUtils6.SubnetInfo.isInRange` has no such rule.
-    #[test]
-    fn unspecified_address_matches_only_ipv6_ranges() {
-        let cases = [
-            ("0.0.0.0/0", IpAddr::V4(Ipv4Addr::UNSPECIFIED), false),
-            ("0.0.0.0/8", IpAddr::V4(Ipv4Addr::UNSPECIFIED), false),
-            ("0.0.0.0/32", IpAddr::V4(Ipv4Addr::UNSPECIFIED), false),
-            ("0.0.0.0/8", IpAddr::V4(Ipv4Addr::new(0, 0, 0, 1)), true),
-            (
-                "0.0.0.0/0",
-                IpAddr::V6(Ipv4Addr::UNSPECIFIED.to_ipv6_mapped()),
-                false,
-            ),
-            ("::/0", IpAddr::V6(Ipv6Addr::UNSPECIFIED), true),
-            ("::/128", IpAddr::V6(Ipv6Addr::UNSPECIFIED), true),
-        ];
-        for (cidr, ip, expected) in cases {
-            check!(
-                Cidr::parse(cidr).unwrap().contains(ip) == expected,
-                "{cidr} contains {ip}"
-            );
-        }
+    #[yare::parameterized(
+        ipv4_any_unspecified = { "0.0.0.0/0", IpAddr::V4(Ipv4Addr::UNSPECIFIED), false },
+        ipv4_eight_unspecified = { "0.0.0.0/8", IpAddr::V4(Ipv4Addr::UNSPECIFIED), false },
+        ipv4_host_unspecified = { "0.0.0.0/32", IpAddr::V4(Ipv4Addr::UNSPECIFIED), false },
+        ipv4_nonzero_in_range = { "0.0.0.0/8", IpAddr::V4(Ipv4Addr::new(0, 0, 0, 1)), true },
+        ipv4_mapped_unspecified = {
+            "0.0.0.0/0",
+            IpAddr::V6(Ipv4Addr::UNSPECIFIED.to_ipv6_mapped()),
+            false,
+        },
+        ipv6_any_unspecified = { "::/0", IpAddr::V6(Ipv6Addr::UNSPECIFIED), true },
+        ipv6_host_unspecified = { "::/128", IpAddr::V6(Ipv6Addr::UNSPECIFIED), true },
+    )]
+    fn unspecified_address_matches_only_ipv6_ranges(cidr: &str, ip: IpAddr, expected: bool) {
+        check!(Cidr::parse(cidr).unwrap().contains(ip) == expected);
     }
 }

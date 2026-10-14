@@ -19,7 +19,7 @@ use {
     crate::{
         barrier::{
             coordinator::RetainedCut,
-            handlers::{cluster_describe_denied, cut_missing, cut_topics, error_code, error_text},
+            handlers::{cluster_describe_image, cut_missing, cut_topics, error_code, error_text},
         },
         broker::Broker,
         codes,
@@ -43,14 +43,13 @@ pub(crate) async fn handle(
     version: ApiVersion,
     ctx: &RequestContext<'_>,
 ) -> DispatchResult {
-    let image = broker.controller.current_image();
-    if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+    let Some(_image) = cluster_describe_image(broker, ctx) else {
         let refusal = ListBarrierCutsResponse::error(
             codes::CLUSTER_AUTHORIZATION_FAILED,
             Some("list-barrier-cuts denied".to_owned()),
         );
         return encode_response(&refusal, version);
-    }
+    };
 
     let coordinator = &broker.barrier_coordinator;
     if !coordinator.is_coordinator_for(&req.group).await {

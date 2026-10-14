@@ -390,70 +390,50 @@ mod tests {
         );
     }
 
-    #[test]
-    fn next_chain_stamp_ignores_deleted_segments() {
+    #[yare::parameterized(
+        delete_started = { RemoteLogSegmentState::DeleteSegmentStarted },
+        delete_finished = { RemoteLogSegmentState::DeleteSegmentFinished },
+    )]
+    fn next_chain_stamp_ignores_deleted_segments(deleted_state: RemoteLogSegmentState) {
         let expected_stamp = Some(ChainStamp {
             epoch_id: epoch(),
             seq: ManifestSeq(2),
             prev_head: head(0xbb),
         });
-        for (name, deleted_state) in [
-            (
-                "delete started",
-                RemoteLogSegmentState::DeleteSegmentStarted,
+        let segments = [
+            sample_metadata(
+                100,
+                RemoteLogSegmentState::CopySegmentFinished,
+                Some(receipt(1, 0xaa, 0xbb)),
             ),
-            (
-                "delete finished",
-                RemoteLogSegmentState::DeleteSegmentFinished,
-            ),
-        ] {
-            let segments = [
-                sample_metadata(
-                    100,
-                    RemoteLogSegmentState::CopySegmentFinished,
-                    Some(receipt(1, 0xaa, 0xbb)),
-                ),
-                sample_metadata(300, deleted_state, Some(receipt(5, 0xee, 0xff))),
-            ];
-            let actual = next_chain_stamp(&segments, EpochId(Uuid::from_u128(0xfeed)));
-            check!(actual == expected_stamp, "case {name}");
-        }
+            sample_metadata(300, deleted_state, Some(receipt(5, 0xee, 0xff))),
+        ];
+        let actual = next_chain_stamp(&segments, EpochId(Uuid::from_u128(0xfeed)));
+        check!(actual == expected_stamp);
     }
 
-    #[test]
-    fn next_chain_stamp_starts_new_epoch_when_no_receipt_decodes() {
+    #[yare::parameterized(
+        no_custom_metadata = { None },
+        empty_custom_metadata = { Some(CustomMetadata(Vec::new())) },
+        another_backend = { Some(CustomMetadata(b"s3://bucket/key".to_vec())) },
+        unrelated_json = { Some(CustomMetadata(br#"{"key":"value"}"#.to_vec())) },
+        bad_chain_head = {
+            Some(CustomMetadata(br#"{"epoch_id":"00000000-0000-0000-0000-000000000001","seq":1,"prev_head":"zz","head":null,"manifest_version_id":null}"#.to_vec())),
+        },
+    )]
+    fn next_chain_stamp_starts_new_epoch_when_no_receipt_decodes(custom: Option<CustomMetadata>) {
         let fresh = EpochId(Uuid::from_u128(0xfeed));
         let expected = ChainStamp {
             epoch_id: fresh,
             seq: ManifestSeq(0),
             prev_head: ChainHead::GENESIS,
         };
-        for (name, custom) in [
-            ("no custom metadata at all", None),
-            ("empty custom metadata", Some(CustomMetadata(Vec::new()))),
-            (
-                "custom metadata from another backend",
-                Some(CustomMetadata(b"s3://bucket/key".to_vec())),
-            ),
-            (
-                "JSON that is not a chain record",
-                Some(CustomMetadata(br#"{"key":"value"}"#.to_vec())),
-            ),
-            (
-                "chain record with a bad head",
-                Some(CustomMetadata(
-                    br#"{"epoch_id":"00000000-0000-0000-0000-000000000001","seq":1,"prev_head":"zz","head":null,"manifest_version_id":null}"#
-                        .to_vec(),
-                )),
-            ),
-        ] {
-            let segments = [sample_metadata(
-                100,
-                RemoteLogSegmentState::CopySegmentFinished,
-                custom,
-            )];
-            check!(next_chain_stamp(&segments, fresh) == Some(expected), "case {name}");
-        }
+        let segments = [sample_metadata(
+            100,
+            RemoteLogSegmentState::CopySegmentFinished,
+            custom,
+        )];
+        check!(next_chain_stamp(&segments, fresh) == Some(expected));
     }
 
     #[test]
@@ -474,8 +454,31 @@ mod tests {
         check!(next_chain_stamp(&segments, EpochId(Uuid::from_u128(0xfeed))) == None);
     }
 
+    #[yare::parameterized(
+        request = {
+            WormChainRecord::request(ChainStamp {
+                epoch_id: epoch(),
+                seq: ManifestSeq(11),
+                prev_head: head(0x5a),
+            }),
+        },
+        receipt = {
+            WormChainRecord::request(ChainStamp {
+                epoch_id: epoch(),
+                seq: ManifestSeq(11),
+                prev_head: head(0x5a),
+            })
+            .with_head(head(0x6b))
+            .with_manifest_version(Some("3HL4kqtJlcpXroDTDmjVBH40Nrjfkd".to_string())),
+        },
+    )]
+    fn chain_record_round_trips_through_custom_metadata(record: WormChainRecord) {
+        let encoded = record.to_custom_metadata();
+        check!(WormChainRecord::from_custom_metadata(&encoded).unwrap() == record);
+    }
+
     #[test]
-    fn chain_record_round_trips_through_custom_metadata() {
+    fn chain_request_and_receipt_next_stamps_are_defined() {
         let stamp = ChainStamp {
             epoch_id: epoch(),
             seq: ManifestSeq(11),
@@ -486,7 +489,6 @@ mod tests {
             .clone()
             .with_head(head(0x6b))
             .with_manifest_version(Some("3HL4kqtJlcpXroDTDmjVBH40Nrjfkd".to_string()));
-
         check!(
             request
                 == WormChainRecord {
@@ -506,14 +508,6 @@ mod tests {
                     prev_head: head(0x6b),
                 })
         );
-
-        for (name, record) in [("request form", request), ("receipt form", full)] {
-            let encoded = record.to_custom_metadata();
-            check!(
-                WormChainRecord::from_custom_metadata(&encoded).unwrap() == record,
-                "case {name}"
-            );
-        }
     }
 
     fn golden_record() -> WormChainRecord {
@@ -547,38 +541,31 @@ mod tests {
         );
     }
 
-    #[test]
-    fn chain_record_of_a_missing_or_unknown_version_is_refused() {
-        let golden: serde_json::Value = serde_json::from_str(GOLDEN_RECORD).unwrap();
-        let with_version = |version: Option<serde_json::Value>| {
-            let mut record = golden.clone();
-            let object = record.as_object_mut().unwrap();
-            object.remove("version");
-            if let Some(version) = version {
-                object.insert("version".to_owned(), version);
-            }
-            CustomMetadata(serde_json::to_vec(&record).unwrap())
-        };
-        for (name, custom, found) in [
-            ("pre-1.0 record with no version", with_version(None), None),
-            (
-                "future version",
-                with_version(Some(serde_json::json!(1))),
-                Some("1"),
-            ),
-            (
-                "version that is not a number",
-                with_version(Some(serde_json::json!("0"))),
-                Some("\"0\""),
-            ),
-        ] {
-            let err = WormChainRecord::from_custom_metadata(&custom).unwrap_err();
-            assert2::assert!(
-                let WormError::UnsupportedChainRecordVersion { found: actual } = &err,
-                "case {name}: {err}"
-            );
-            check!(actual.as_deref() == found, "case {name}");
+    fn custom_record_with_version(version: Option<serde_json::Value>) -> CustomMetadata {
+        let mut record: serde_json::Value = serde_json::from_str(GOLDEN_RECORD).unwrap();
+        let object = record.as_object_mut().unwrap();
+        object.remove("version");
+        if let Some(version) = version {
+            object.insert("version".to_owned(), version);
         }
+        CustomMetadata(serde_json::to_vec(&record).unwrap())
+    }
+
+    #[yare::parameterized(
+        pre_1_0_no_version = { custom_record_with_version(None), None },
+        future_version = { custom_record_with_version(Some(serde_json::json!(1))), Some("1") },
+        wrong_type = { custom_record_with_version(Some(serde_json::json!("0"))), Some("\"0\"") },
+    )]
+    fn chain_record_of_a_missing_or_unknown_version_is_refused(
+        custom: CustomMetadata,
+        found: Option<&str>,
+    ) {
+        let err = WormChainRecord::from_custom_metadata(&custom).unwrap_err();
+        assert2::assert!(
+            let WormError::UnsupportedChainRecordVersion { found: actual } = &err,
+            "{err}"
+        );
+        check!(actual.as_deref() == found);
     }
 
     #[test]

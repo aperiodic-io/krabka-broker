@@ -10,8 +10,44 @@ use {
     tempfile::TempDir,
 };
 
-#[test]
-fn verify_accepts_only_the_bound_principal_and_the_signing_key() {
+#[yare::parameterized(
+    signing_key_and_bound_principal = {
+        "alice-yubi",
+        "User:alice",
+        b"krabka-topic-freeze-v1\0orders".as_slice(),
+        true,
+    },
+    wrong_principal = {
+        "alice-yubi",
+        "User:bob",
+        b"krabka-topic-freeze-v1\0orders".as_slice(),
+        false,
+    },
+    different_signing_key = {
+        "bob-yubi",
+        "User:bob",
+        b"krabka-topic-freeze-v1\0orders".as_slice(),
+        false,
+    },
+    unconfigured_key = {
+        "carol-yubi",
+        "User:carol",
+        b"krabka-topic-freeze-v1\0orders".as_slice(),
+        false,
+    },
+    tampered_message = {
+        "alice-yubi",
+        "User:alice",
+        b"krabka-topic-freeze-v1\0ordering".as_slice(),
+        false,
+    },
+)]
+fn verify_accepts_only_the_bound_principal_and_the_signing_key(
+    key_id: &str,
+    principal: &str,
+    msg: &[u8],
+    expected: bool,
+) {
     let dir = TempDir::new().expect("tempdir");
     let (alice, alice_public) = fresh_key();
     let (_, bob_public) = fresh_key();
@@ -31,46 +67,5 @@ fn verify_accepts_only_the_bound_principal_and_the_signing_key() {
     let message = b"krabka-topic-freeze-v1\0orders";
     let signature = alice.sign(message).as_ref().to_vec();
 
-    for (name, key_id, principal, msg, expected) in [
-        (
-            "alice's signature under alice's key and principal",
-            "alice-yubi",
-            "User:alice",
-            message.as_slice(),
-            true,
-        ),
-        (
-            "alice's key claiming bob",
-            "alice-yubi",
-            "User:bob",
-            message.as_slice(),
-            false,
-        ),
-        (
-            "bob's key over alice's signature",
-            "bob-yubi",
-            "User:bob",
-            message.as_slice(),
-            false,
-        ),
-        (
-            "an unconfigured key_id",
-            "carol-yubi",
-            "User:carol",
-            message.as_slice(),
-            false,
-        ),
-        (
-            "a tampered message",
-            "alice-yubi",
-            "User:alice",
-            b"krabka-topic-freeze-v1\0ordering".as_slice(),
-            false,
-        ),
-    ] {
-        check!(
-            keys.verify(key_id, principal, msg, &signature) == expected,
-            "case {name}"
-        );
-    }
+    check!(keys.verify(key_id, principal, msg, &signature) == expected);
 }

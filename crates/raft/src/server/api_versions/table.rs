@@ -65,7 +65,10 @@ pub(in crate::server) fn flexible_min(api_key: i16) -> Option<i16> {
 #[cfg(test)]
 mod tests {
     use {
-        super::*,
+        super::{
+            super::{ApiVersionsView, api_versions_response_body},
+            *,
+        },
         crate::{
             UnstableApiVersions,
             kraft::{
@@ -74,7 +77,7 @@ mod tests {
             },
             network::addressing::api_version_for,
         },
-        assert2::{assert, check},
+        assert2::check,
         bytes::Bytes,
         krabka_ids::ApiKey,
         krabka_protocol::{
@@ -195,31 +198,29 @@ mod tests {
     /// dispatch path can really decode. Comparing the decoded table whole means
     /// a `krabka-protocol` bump that widens a generated range without widening
     /// the handler shows up here.
-    #[test]
-    fn advertised_versions_are_the_versions_the_listener_decodes_with() {
+    #[yare::parameterized(
+        stable = { UnstableApiVersions::Disabled, 4 },
+        trunk = { UnstableApiVersions::Enabled, api_versions_request::MAX_VERSION },
+    )]
+    fn advertised_versions_are_the_versions_the_listener_decodes_with(
+        unstable: UnstableApiVersions,
+        api_versions_max: i16,
+    ) {
         // Every key this listener answers itself is one Kafka 4.3.1 has at
         // the vendored range, except `ApiVersions`, whose KIP-1242 v5 is
         // trunk's.
-        for (unstable, api_versions_max) in [
-            (UnstableApiVersions::Disabled, 4),
-            (
-                UnstableApiVersions::Enabled,
-                api_versions_request::MAX_VERSION,
-            ),
-        ] {
-            let image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-            let body = super::super::api_versions_response_body(4, super::super::ApiVersionsView {
-                image: &image,
-                metadata_offset: -1,
-                admin_router: None,
-                unstable,
-            });
-            let response = ApiVersionsResponse::decode(&mut &body[..], 4).expect("decode response");
-            assert!(
-                response.api_keys == expected_entries(api_versions_max),
-                "{unstable:?}"
-            );
-        }
+        let image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
+        let body = api_versions_response_body(4, ApiVersionsView {
+            image: &image,
+            metadata_offset: -1,
+            admin_router: None,
+            unstable,
+        });
+        let response = ApiVersionsResponse::decode(&mut &body[..], 4).expect("decode response");
+        assert2::assert!(
+            response.api_keys == expected_entries(api_versions_max),
+            "{unstable:?}"
+        );
     }
 
     /// The engine encodes each KIP-595 peer body at one captured version and

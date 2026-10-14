@@ -30,58 +30,63 @@ mod tests {
     use {
         super::*,
         DeleteRecordsTrimDecision::{Apply, Noop, RejectMalformed, RejectOutOfRange},
-        assert2::assert,
     };
 
-    #[test]
-    fn trim_decision_covers_bounds_stale_requests_and_retries() {
-        let cases = [
-            (-1, 8, 10, 2, None, Apply { frontier: 8 }),
-            // Scheduled delivery adds a second deletion frontier.
-            (8, 8, 10, 2, Some(5), Apply { frontier: 5 }),
-            // A stale request and an exact retry preserve the current start.
-            (3, 8, 10, 5, None, Noop { frontier: 5 }),
-            (5, 8, 10, 5, None, Noop { frontier: 5 }),
-        ];
-        for (requested, hw, leo, start, delivery, expected) in cases {
-            assert!(
-                trim_decision(
-                    requested,
-                    Offset(hw),
-                    Offset(leo),
-                    Offset(start),
-                    delivery.map(Offset),
-                ) == expected,
-                "requested={requested}"
-            );
-        }
+    fn assert_trim_decision_case(
+        requested: i64,
+        hw: i64,
+        leo: i64,
+        start: i64,
+        delivery: Option<i64>,
+        expected: DeleteRecordsTrimDecision,
+    ) {
+        assert2::assert!(
+            trim_decision(
+                requested,
+                Offset(hw),
+                Offset(leo),
+                Offset(start),
+                delivery.map(Offset),
+            ) == expected,
+            "requested={requested}"
+        );
     }
 
-    #[test]
-    fn trim_decision_fails_closed_on_malformed_and_overflow_edges() {
-        for (requested, hw, leo, start, delivery, expected) in [
-            (-2, 8, 10, 2, None, RejectMalformed),
-            (1, 1, 0, 0, None, RejectMalformed),
-            (1, 3, 10, 4, None, RejectMalformed),
-            (1, 8, 10, 2, Some(1), RejectMalformed),
-            (8, 8, 10, 2, Some(9), Apply { frontier: 8 }),
-            // Explicit requests cannot enter the uncommitted tail, even when
-            // they stay below the log end offset (Kafka:
-            // `UnifiedLog.maybeIncrementLogStartOffset`).
-            (9, 8, 10, 2, None, RejectOutOfRange),
-            (11, 8, 10, 2, None, RejectOutOfRange),
-            (i64::MAX, 8, 10, 2, None, RejectOutOfRange),
-        ] {
-            assert!(
-                trim_decision(
-                    requested,
-                    Offset(hw),
-                    Offset(leo),
-                    Offset(start),
-                    delivery.map(Offset),
-                ) == expected,
-                "requested={requested}"
-            );
-        }
+    #[yare::parameterized(
+        latest = { -1, 8, 10, 2, None, Apply { frontier: 8 } },
+        delivery_frontier = { 8, 8, 10, 2, Some(5), Apply { frontier: 5 } },
+        stale_request = { 3, 8, 10, 5, None, Noop { frontier: 5 } },
+        exact_retry = { 5, 8, 10, 5, None, Noop { frontier: 5 } },
+    )]
+    fn trim_decision_covers_bounds_stale_requests_and_retries(
+        requested: i64,
+        hw: i64,
+        leo: i64,
+        start: i64,
+        delivery: Option<i64>,
+        expected: DeleteRecordsTrimDecision,
+    ) {
+        assert_trim_decision_case(requested, hw, leo, start, delivery, expected);
+    }
+
+    #[yare::parameterized(
+        negative_request = { -2, 8, 10, 2, None, RejectMalformed },
+        high_watermark_above_log_end = { 1, 1, 0, 0, None, RejectMalformed },
+        start_above_log_end = { 1, 3, 10, 4, None, RejectMalformed },
+        delivery_below_start = { 1, 8, 10, 2, Some(1), RejectMalformed },
+        delivery_above_request = { 8, 8, 10, 2, Some(9), Apply { frontier: 8 } },
+        uncommitted_tail = { 9, 8, 10, 2, None, RejectOutOfRange },
+        above_log_end = { 11, 8, 10, 2, None, RejectOutOfRange },
+        maximum_request = { i64::MAX, 8, 10, 2, None, RejectOutOfRange },
+    )]
+    fn trim_decision_fails_closed_on_malformed_and_overflow_edges(
+        requested: i64,
+        hw: i64,
+        leo: i64,
+        start: i64,
+        delivery: Option<i64>,
+        expected: DeleteRecordsTrimDecision,
+    ) {
+        assert_trim_decision_case(requested, hw, leo, start, delivery, expected);
     }
 }

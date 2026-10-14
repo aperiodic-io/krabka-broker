@@ -48,13 +48,10 @@ async fn tls_listener_accepts_tls_handshake_only() {
         key_path,
     } = tls_fixture();
 
-    let cfg = ssl_config(log_dir.path().to_path_buf(), TlsConfig {
-        cert_chain_path: cert_path.clone(),
-        private_key_path: key_path,
-        trust_roots_path: None,
-        client_ca_path: None,
-        client_auth: krabka_security::ClientAuthMode::Disabled,
-    });
+    let cfg = ssl_config(
+        log_dir.path().to_path_buf(),
+        dev_tls_config(cert_path.clone(), key_path),
+    );
 
     let handle = Broker::start(cfg).await.expect("broker must start");
     let addr = handle.listen_addr();
@@ -133,13 +130,7 @@ async fn metadata_response_carries_listener_endpoints() {
         crate::support::listeners::listener("SSL", ssl_bind, ListenerProtocol::Ssl),
     ];
     cfg.inter_broker_listener_name = "PLAINTEXT".to_string();
-    cfg.tls_config = Some(TlsConfig {
-        cert_chain_path: cert_path,
-        private_key_path: key_path,
-        trust_roots_path: None,
-        client_ca_path: None,
-        client_auth: krabka_security::ClientAuthMode::Disabled,
-    });
+    cfg.tls_config = Some(dev_tls_config(cert_path, key_path));
 
     let handle = Broker::start(cfg).await.expect("broker must start");
     let plaintext_addr = handle.listen_addr();
@@ -205,6 +196,19 @@ struct TlsFixture {
     pem_dir: tempfile::TempDir,
     cert_path: std::path::PathBuf,
     key_path: std::path::PathBuf,
+}
+
+fn dev_tls_config(
+    cert_chain_path: std::path::PathBuf,
+    private_key_path: std::path::PathBuf,
+) -> TlsConfig {
+    TlsConfig {
+        cert_chain_path,
+        private_key_path,
+        trust_roots_path: None,
+        client_ca_path: None,
+        client_auth: krabka_security::ClientAuthMode::Disabled,
+    }
 }
 
 fn tls_fixture() -> TlsFixture {

@@ -355,6 +355,13 @@ mod tests {
 
     fn err(message: &str) -> Result<(), EntityError> { Err((INVALID_REQUEST, message.to_owned())) }
 
+    fn rejected(entity: &[EntityPart<'_>], message: &str) -> Alteration {
+        Alteration {
+            results: vec![(key(entity), err(message))],
+            records: vec![],
+        }
+    }
+
     /// Resolves IP literals and the name `localhost`, as the handler's
     /// resolver would.
     fn resolver(name: &str) -> bool {
@@ -411,10 +418,7 @@ mod tests {
                     entity: alice.clone(),
                     ops: vec![op("foo", 1.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(key(&alice), err("Invalid configuration key foo"))],
-                    records: vec![],
-                },
+                expected: rejected(&alice, "Invalid configuration key foo"),
             },
             CaseRow {
                 name: "unknown key, removed, is not validated and writes nothing",
@@ -463,13 +467,7 @@ mod tests {
                     entity: alice.clone(),
                     ops: vec![op("producer_byte_rate", 0.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&alice),
-                        err("Quota producer_byte_rate must be greater than 0"),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(&alice, "Quota producer_byte_rate must be greater than 0"),
             },
             CaseRow {
                 name: "negative",
@@ -477,13 +475,7 @@ mod tests {
                     entity: alice.clone(),
                     ops: vec![op("request_percentage", -1.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&alice),
-                        err("Quota request_percentage must be greater than 0"),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(&alice, "Quota request_percentage must be greater than 0"),
             },
             CaseRow {
                 name: "fractional LONG",
@@ -491,13 +483,7 @@ mod tests {
                     entity: alice.clone(),
                     ops: vec![op("producer_byte_rate", 1024.5)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&alice),
-                        err("producer_byte_rate cannot be a fractional value."),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(&alice, "producer_byte_rate cannot be a fractional value."),
             },
             CaseRow {
                 name: "LONG past Long.MAX_VALUE",
@@ -505,13 +491,10 @@ mod tests {
                     entity: alice.clone(),
                     ops: vec![op("consumer_byte_rate", f64::INFINITY)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&alice),
-                        err("Proposed value for consumer_byte_rate is too large for a LONG."),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(
+                    &alice,
+                    "Proposed value for consumer_byte_rate is too large for a LONG.",
+                ),
             },
             CaseRow {
                 name: "fractional INT",
@@ -519,13 +502,10 @@ mod tests {
                     entity: ip.clone(),
                     ops: vec![op("connection_creation_rate", 1.5)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&ip),
-                        err("connection_creation_rate cannot be a fractional value."),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(
+                    &ip,
+                    "connection_creation_rate cannot be a fractional value.",
+                ),
             },
             CaseRow {
                 name: "INT past Integer.MAX_VALUE",
@@ -533,13 +513,10 @@ mod tests {
                     entity: ip.clone(),
                     ops: vec![op("connection_creation_rate", 3.0e9)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&ip),
-                        err("Proposed value for connection_creation_rate is too large for an INT."),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(
+                    &ip,
+                    "Proposed value for connection_creation_rate is too large for an INT.",
+                ),
             },
             CaseRow {
                 name: "DOUBLE has no upper bound",
@@ -569,13 +546,7 @@ mod tests {
                     entity: alice.clone(),
                     ops: vec![op("connection_creation_rate", 1.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&alice),
-                        err("Invalid configuration key connection_creation_rate"),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(&alice, "Invalid configuration key connection_creation_rate"),
             },
             CaseRow {
                 name: "user key on an ip entity",
@@ -583,13 +554,7 @@ mod tests {
                     entity: ip.clone(),
                     ops: vec![op("producer_byte_rate", 1.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&ip),
-                        err("Invalid configuration key producer_byte_rate"),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(&ip, "Invalid configuration key producer_byte_rate"),
             },
         ]
     }
@@ -603,16 +568,11 @@ mod tests {
                     entity: vec![part("ip", Some("10.0.0.1")), part("user", Some("alice"))],
                     ops: vec![op("connection_creation_rate", 1.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&[part("ip", Some("10.0.0.1")), part("user", Some("alice"))]),
-                        err(
-                            "Invalid quota entity combination, IP entity shouldnot be combined \
-                             with User or ClientId",
-                        ),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(
+                    &[part("ip", Some("10.0.0.1")), part("user", Some("alice"))],
+                    "Invalid quota entity combination, IP entity shouldnot be combined \
+                     with User or ClientId",
+                ),
             },
             CaseRow {
                 name: "IPv6 and a resolvable host name are valid ip names",
@@ -647,13 +607,10 @@ mod tests {
                     entity: vec![part("ip", Some("not-an-ip"))],
                     ops: vec![op("connection_creation_rate", 1.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&[part("ip", Some("not-an-ip"))]),
-                        err("not-an-ip is not a valid IP or resolvable host."),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(
+                    &[part("ip", Some("not-an-ip"))],
+                    "not-an-ip is not a valid IP or resolvable host.",
+                ),
             },
             CaseRow {
                 name: "empty user name",
@@ -661,13 +618,7 @@ mod tests {
                     entity: vec![part("user", Some(""))],
                     ops: vec![op("producer_byte_rate", 1.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&[part("user", Some(""))]),
-                        err("Empty user not supported"),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(&[part("user", Some(""))], "Empty user not supported"),
             },
         ]
     }
@@ -682,13 +633,10 @@ mod tests {
                     entity: vec![part("group", Some("g1"))],
                     ops: vec![op("producer_byte_rate", 1.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&[part("group", Some("g1"))]),
-                        err("Unhandled client quota entity type: group"),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(
+                    &[part("group", Some("g1"))],
+                    "Unhandled client quota entity type: group",
+                ),
             },
             CaseRow {
                 name: "empty entity",
@@ -696,10 +644,7 @@ mod tests {
                     entity: vec![],
                     ops: vec![op("producer_byte_rate", 1.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(vec![], err("Invalid empty client quota entity"))],
-                    records: vec![],
-                },
+                expected: rejected(&[], "Invalid empty client quota entity"),
             },
             CaseRow {
                 name: "the same key twice",
@@ -707,16 +652,11 @@ mod tests {
                     entity: vec![part("client-id", None), part("user", Some("alice"))],
                     ops: vec![op("producer_byte_rate", 1.0), op("producer_byte_rate", 2.0)],
                 }],
-                expected: Alteration {
-                    results: vec![(
-                        key(&[part("client-id", None), part("user", Some("alice"))]),
-                        err(
-                            "Ignoring duplicate entity ClientQuotaEntity(entries={client-id=null, \
-                             user=alice})",
-                        ),
-                    )],
-                    records: vec![],
-                },
+                expected: rejected(
+                    &[part("client-id", None), part("user", Some("alice"))],
+                    "Ignoring duplicate entity ClientQuotaEntity(entries={client-id=null, \
+                     user=alice})",
+                ),
             },
             CaseRow {
                 name: "the same entity twice keeps the first records and answers one row",

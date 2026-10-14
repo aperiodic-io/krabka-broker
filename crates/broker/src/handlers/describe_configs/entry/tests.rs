@@ -298,17 +298,19 @@ fn a_key_with_no_registry_row_is_treated_as_one_the_broker_may_not_disclose() {
     );
 }
 
-#[test]
-fn the_read_only_flag_comes_from_the_registry_row() {
-    for (scope, name, expected) in [
-        (ConfigScope::Topic, DISKLESS, true),
-        (ConfigScope::Topic, WRITE_FREEZE, true),
-        (ConfigScope::Topic, RETENTION_MS, false),
-        (ConfigScope::Broker, BROKER_WITNESS, true),
-        (ConfigScope::Broker, NODE_ID, true),
-    ] {
-        let row = registry::lookup(scope, name).expect(name);
-        let entry = config_entry(Some(row), name, &[], DefaultLayer::default(), NEITHER);
-        check!(entry.read_only == expected, "{name}");
-    }
+#[yare::parameterized(
+    diskless_topic = { ConfigScope::Topic, DISKLESS, true },
+    write_freeze_topic = { ConfigScope::Topic, WRITE_FREEZE, true },
+    retention_topic = { ConfigScope::Topic, RETENTION_MS, false },
+    witness_broker = { ConfigScope::Broker, BROKER_WITNESS, true },
+    node_id_broker = { ConfigScope::Broker, NODE_ID, true },
+)]
+fn the_read_only_flag_comes_from_the_registry_row(
+    scope: ConfigScope,
+    name: &'static str,
+    expected: bool,
+) {
+    let row = registry::lookup(scope, name).expect(name);
+    let entry = config_entry(Some(row), name, &[], DefaultLayer::default(), NEITHER);
+    check!(entry.read_only == expected, "{name}");
 }

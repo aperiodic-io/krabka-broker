@@ -81,9 +81,9 @@ const VALUES_ONLY: EntryOptions = EntryOptions {
 /// The node that serves a request no test routes anywhere in particular.
 const SERVING_NODE: krabka_metadata::NodeId = krabka_metadata::NodeId(1);
 
-fn offsets_retention_documentation() -> String {
-    registry::lookup(ConfigScope::Broker, config_keys::OFFSETS_RETENTION_MINUTES)
-        .expect("offsets.retention.minutes")
+fn broker_config_documentation(key: &str) -> String {
+    registry::lookup(ConfigScope::Broker, key)
+        .expect(key)
         .doc
         .to_owned()
 }
@@ -720,15 +720,9 @@ fn a_broker_reports_its_per_node_override_above_the_cluster_default() {
                             CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER
                         ),
                     ])
-                    .maybe_documentation(Some(
-                        registry::lookup(
-                            ConfigScope::Broker,
-                            crate::throttle::LEADER_THROTTLED_RATE_KEY
-                        )
-                        .expect("leader.replication.throttled.rate")
-                        .doc
-                        .to_owned()
-                    ))
+                    .maybe_documentation(Some(broker_config_documentation(
+                        LEADER_THROTTLED_RATE_KEY
+                    )))
                     .call(),
                 expected_config_entry()
                     .name(NODE_ID)
@@ -772,15 +766,9 @@ fn the_cluster_default_resource_reports_the_defaults_and_no_node_id() {
                         "1024",
                         CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER
                     )])
-                    .maybe_documentation(Some(
-                        registry::lookup(
-                            ConfigScope::Broker,
-                            crate::throttle::LEADER_THROTTLED_RATE_KEY
-                        )
-                        .expect("leader.replication.throttled.rate")
-                        .doc
-                        .to_owned()
-                    ))
+                    .maybe_documentation(Some(broker_config_documentation(
+                        LEADER_THROTTLED_RATE_KEY
+                    )))
                     .call()
             ]
     );
@@ -1541,7 +1529,9 @@ fn an_untuned_broker_reports_both_retention_keys_at_their_default() {
                         CONFIG_SOURCE_DEFAULT
                     )])
                     .config_type(ConfigType::Int.wire())
-                    .maybe_documentation(Some(offsets_retention_documentation()))
+                    .maybe_documentation(Some(broker_config_documentation(
+                        config_keys::OFFSETS_RETENTION_MINUTES,
+                    )))
                     .call(),
             ]
     );
@@ -1591,7 +1581,9 @@ fn a_retuned_retention_knob_reports_the_static_layer_above_the_default() {
                         ),
                     ])
                     .config_type(ConfigType::Int.wire())
-                    .maybe_documentation(Some(offsets_retention_documentation()))
+                    .maybe_documentation(Some(broker_config_documentation(
+                        config_keys::OFFSETS_RETENTION_MINUTES,
+                    )))
                     .call()
             ]
     );

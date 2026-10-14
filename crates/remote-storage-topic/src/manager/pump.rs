@@ -77,7 +77,6 @@ pub async fn pump_loop(
 #[cfg(test)]
 mod tests {
     use {
-        super::*,
         crate::{
             log::{InProcessMetadataEventLog, MetadataEventLog},
             manager::test_support::{
@@ -86,6 +85,8 @@ mod tests {
         },
         assert2::assert,
         krabka_ids::LeaderEpoch,
+        krabka_remote_storage::RemoteLogMetadataManager,
+        std::sync::Arc,
         uuid::Uuid,
     };
 

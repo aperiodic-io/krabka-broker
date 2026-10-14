@@ -71,38 +71,32 @@ struct Value {
     assignment_timestamp_ms: i64,
 }
 
-#[test]
-fn keeps_exact_kafka_bytes_and_every_truncation_error() {
-    for EpochCase {
-        epoch,
-        timestamp,
-        golden,
-    } in [
-        EpochCase {
-            epoch: 7,
-            timestamp: 0,
-            golden: &b"\x00\x00\x00\x00\x00\x07\x00"[..],
-        },
-        EpochCase {
-            epoch: 7,
-            timestamp: 42,
-            golden: &b"\x00\x00\x00\x00\x00\x07\x01\x00\x08\x00\x00\x00\x00\x00\x00\x00\x2a"[..],
-        },
-        EpochCase {
-            epoch: -1,
-            timestamp: -1,
-            golden: &b"\x00\x00\xff\xff\xff\xff\x01\x00\x08\xff\xff\xff\xff\xff\xff\xff\xff"[..],
-        },
-    ] {
-        let value = Value {
-            assignment_epoch: epoch,
-            assignment_timestamp_ms: timestamp,
-        };
-        assert!(value.encode() == golden);
-        assert!(Value::decode(golden) == Ok(value));
-        for end in 0..golden.len() {
-            assert!(Value::decode(&golden[..end]).is_err());
-        }
+#[yare::parameterized(
+    zero_timestamp = { 7, 0, &b"\x00\x00\x00\x00\x00\x07\x00"[..] },
+    tagged_timestamp = {
+        7,
+        42,
+        &b"\x00\x00\x00\x00\x00\x07\x01\x00\x08\x00\x00\x00\x00\x00\x00\x00\x2a"[..],
+    },
+    negative_values = {
+        -1,
+        -1,
+        &b"\x00\x00\xff\xff\xff\xff\x01\x00\x08\xff\xff\xff\xff\xff\xff\xff\xff"[..],
+    },
+)]
+fn keeps_exact_kafka_bytes_and_every_truncation_error(
+    epoch: i32,
+    timestamp: i64,
+    golden: &'static [u8],
+) {
+    let value = Value {
+        assignment_epoch: epoch,
+        assignment_timestamp_ms: timestamp,
+    };
+    assert2::assert!(value.encode() == golden);
+    assert2::assert!(Value::decode(golden) == Ok(value));
+    for end in 0..golden.len() {
+        assert2::assert!(Value::decode(&golden[..end]).is_err());
     }
 }
 
@@ -124,10 +118,4 @@ fn retains_record_specific_version_errors_and_codec_errors() {
                 assignment_timestamp_ms: 0,
             })
     );
-}
-
-struct EpochCase {
-    epoch: i32,
-    timestamp: i64,
-    golden: &'static [u8],
 }

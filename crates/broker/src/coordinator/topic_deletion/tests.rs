@@ -19,20 +19,17 @@ use {
         test_support::start_broker_with_authorizer_no_audit,
     },
     assert2::check,
-    krabka_metadata::{DeleteTopicRecord, MetadataRecord, TopicRecord},
+    krabka_metadata::{DeleteTopicRecord, MetadataRecord},
     std::collections::HashMap,
     uuid::Uuid,
 };
 
 krabka_macros::delete_topic_request!(delete_request);
 
+krabka_macros::topic_record_fixture!(topic_record);
+
 fn topic(name: &str, id: u128) -> MetadataRecord {
-    MetadataRecord::V1Topic(TopicRecord {
-        name: name.into(),
-        topic_id: Uuid::from_u128(id),
-        partitions: 1,
-        replication_factor: 1,
-    })
+    MetadataRecord::V1Topic(topic_record(name, Uuid::from_u128(id)))
 }
 
 fn delete(name: &str) -> MetadataRecord {

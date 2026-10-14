@@ -60,38 +60,21 @@ fn diskless_partition_requires_distributed_identity_and_registry() {
     let log = Arc::new(Mutex::new(
         krabka_log::Log::open(dir.path(), krabka_log::LogConfig::default()).expect("open log"),
     ));
+    let identity = PartitionIdentity {
+        topic: "topic",
+        topic_id: None,
+        partition_id: PartitionIndex(0),
+    };
 
     assert!(
-        partition_wal(
-            PartitionIdentity {
-                topic: "topic",
-                topic_id: None,
-                partition_id: PartitionIndex(0),
-            },
-            log.clone(),
-            false,
-            None,
-            None,
-            3,
-        )
-        .expect("partition wal")
-        .wal
-        .is_none()
+        partition_wal(identity, log.clone(), false, None, None, 3,)
+            .expect("partition wal")
+            .wal
+            .is_none()
     );
-    let error = partition_wal(
-        PartitionIdentity {
-            topic: "topic",
-            topic_id: None,
-            partition_id: PartitionIndex(0),
-        },
-        log.clone(),
-        true,
-        None,
-        None,
-        3,
-    )
-    .err()
-    .expect("missing topic id must fail");
+    let error = partition_wal(identity, log.clone(), true, None, None, 3)
+        .err()
+        .expect("missing topic id must fail");
     assert!(matches!(
         error,
         BrokerError::Replication(message)

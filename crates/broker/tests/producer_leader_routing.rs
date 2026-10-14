@@ -23,11 +23,12 @@
 
 use {
     crate::support::{
-        client::{connect_client, create_topic},
         consumer_groups::{collect_routing_values, routing_consumer},
-        partitions::require_non_bootstrap_partitions,
+        partitions::{
+            require_non_bootstrap_partitions, start_leader_routing_cluster, wait_for_local_replica,
+        },
         producer::producer_record,
-        registered_cluster, shutdown_cluster,
+        shutdown_cluster,
     },
     assert2::assert,
     bytes::Bytes,
@@ -42,8 +43,6 @@ use {
 
 mod support;
 
-use crate::support::partitions::wait_for_local_replica;
-
 /// A native `Producer` against a 3-broker rf=1 cluster must store every
 /// partition's record on the partition's leader. This includes partitions whose
 /// leader, and sole replica, is NOT the broker it bootstrapped at.
@@ -56,39 +55,8 @@ use crate::support::partitions::wait_for_local_replica;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn producer_routes_to_non_bootstrap_leaders() {
     let _g = cluster_lock().lock().await;
-    let cluster = registered_cluster(3).await;
-
-    // Bootstrap everything (admin, producer, consumer) at node 1.
-    let bootstrap = cluster[0].1.listen_addr.to_string();
     let topic = "producer-routing-rf1";
-    // 6 partitions on a 3-broker cluster with rf=1: round-robin places 2
-    // partitions per broker, so at least 4 partitions are led by non-bootstrap
-    // brokers. We assert below that at least one is off-bootstrap.
-    let n_partitions: i32 = 6;
-
-    let admin = connect_client(bootstrap.clone(), None).await;
-
-    // Create the topic with replication_factor=1. Each partition lives on
-    // exactly ONE broker; the bootstrap broker has NO replica for partitions
-    // placed on the other two nodes.
-    create_topic(&admin, topic, n_partitions).await;
-
-    // Wait for all partitions to materialize in the cluster metadata. Partition
-    // records are raft-replicated into every broker's controller image, so once
-    // each is present in the bootstrap node's image the cluster has converged —
-    // awaiting the bootstrap node's image (event-driven) is sufficient.
-    for p in 0..n_partitions {
-        cluster[0].0.wait_until_partition_present(topic, p).await;
-    }
-
-    // Wait until node 1 knows every partition's leader (controller image
-    // propagation may lag slightly after the partitions become present).
-    cluster[0]
-        .0
-        .wait_for_image(|img| {
-            (0..n_partitions).all(|p| img.partition(topic, p).is_some_and(|part| part.leader != 0))
-        })
-        .await;
+    let (cluster, bootstrap, _topic_id, n_partitions) = start_leader_routing_cluster(topic).await;
 
     // A leader appearing in the controller image precedes the supervisor
     // materializing that broker's local writer actor. Producing in that gap can

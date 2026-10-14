@@ -460,13 +460,15 @@ fn a_site_of_fenced_brokers_still_holds_a_replica() {
     }
 }
 
-#[test]
-fn an_impossible_replication_factor_returns_no_assignment() {
+#[yare::parameterized(
+    negative = { -1_i16 },
+    zero = { 0 },
+    too_many_for_cluster = { 4 },
+    large = { 100 },
+)]
+fn an_impossible_replication_factor_returns_no_assignment(replication_factor: i16) {
     let brokers = vec![replica(1, "a"), replica(2, "b"), replica(3, "c")];
-
-    for replication_factor in [-1_i16, 0, 4, 100] {
-        assert!(place(&brokers, 3, replication_factor, None, 0).is_empty());
-    }
+    assert2::assert!(place(&brokers, 3, replication_factor, None, 0).is_empty());
 }
 
 #[test]

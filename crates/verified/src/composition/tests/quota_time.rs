@@ -44,41 +44,39 @@ fn signed_deadline_ledger(
     )
 }
 
-#[test]
-fn a_deadline_releases_debt_without_forgetting_earned_capacity() {
-    for (rate, wait, elapsed, expected) in [
-        (
+#[yare::parameterized(
+    fractional_credit = {
+        1,
+        500_000_000,
+        (250_000_000, 250_000_000),
+        (0, 0, 0, 0, 0, 500_000_000),
+    },
+    whole_token_repaid = {
+        3,
+        500_000_000,
+        (250_000_000, 250_000_000),
+        (1, 1, 0, 0, 0, 500_000_000),
+    },
+    zero_elapsed = { 3, 500_000_000, (0, 0), (1, 1, 0, 0, 1, 0) },
+    two_tokens_earned = { 3, 500_000_000, (500_000_000, 500_000_000), (1, 1, 2, 0, 0, 0) },
+)]
+fn a_deadline_releases_debt_without_forgetting_earned_capacity(
+    rate: u64,
+    wait: u128,
+    elapsed: (u64, u64),
+    expected: (u64, u64, u64, u64, u64, u64),
+) {
+    assert2::assert!(
+        capped_charge_is_repaid_by_elapsed_time(
+            (0, 0, 0),
+            (u64::MAX, wait),
+            elapsed,
+            rate,
+            10,
+            10,
             1,
-            500_000_000,
-            (250_000_000, 250_000_000),
-            (0, 0, 0, 0, 0, 500_000_000),
-        ),
-        (
-            3,
-            500_000_000,
-            (250_000_000, 250_000_000),
-            (1, 1, 0, 0, 0, 500_000_000),
-        ),
-        (3, 500_000_000, (0, 0), (1, 1, 0, 0, 1, 0)),
-        (
-            3,
-            500_000_000,
-            (500_000_000, 500_000_000),
-            (1, 1, 2, 0, 0, 0),
-        ),
-    ] {
-        assert2::assert!(
-            capped_charge_is_repaid_by_elapsed_time(
-                (0, 0, 0),
-                (u64::MAX, wait),
-                elapsed,
-                rate,
-                10,
-                10,
-                1,
-            ) == expected
-        );
-    }
+        ) == expected
+    );
 }
 
 #[test]

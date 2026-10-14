@@ -241,15 +241,13 @@ pub(crate) fn duration_parser_fixture(input: TokenStream) -> Result<TokenStream,
     let assertion = duration_parse_assertion();
     Ok(moxy::template! {
         {{ docs }}
-        #[test]
-        fn a_time_argument_takes_any_unit() {
-            for (raw, expected) in [
-                ("500ms", Some(500)),
-                ("30s", Some(30_000)),
-                {{ cases }}
-            ] {
-                {{ assertion }}
-            }
+        #[yare::parameterized(
+            milliseconds = { "500ms", Some(500) },
+            seconds = { "30s", Some(30_000) },
+            {{ cases }}
+        )]
+        fn a_time_argument_takes_any_unit(raw: &str, expected: Option<i64>) {
+            {{ assertion }}
         }
     })
 }

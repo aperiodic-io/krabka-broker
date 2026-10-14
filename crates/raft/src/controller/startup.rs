@@ -384,37 +384,22 @@ mod tests {
         tempfile::TempDir,
     };
 
-    #[test]
-    fn metadata_log_nonempty_detects_quorum_state_and_log_segments_only() {
-        for (_case, file, expected) in [
-            ("empty directory", None, false),
-            (
-                "quorum state file",
-                Some(("quorum-state", b"state".as_slice())),
-                true,
-            ),
-            (
-                "log segment",
-                Some(("00000000000000000000.log", b"log".as_slice())),
-                true,
-            ),
-            (
-                "empty log segment",
-                Some(("00000000000000000000.log", b"".as_slice())),
-                false,
-            ),
-            (
-                "non-log extension",
-                Some(("00000000000000000000.txt", b"log".as_slice())),
-                false,
-            ),
-        ] {
-            let dir = TempDir::new().unwrap();
-            if let Some((name, contents)) = file {
-                std::fs::write(dir.path().join(name), contents).unwrap();
-            }
-            assert2::assert!(metadata_log_nonempty(dir.path()) == expected);
+    #[yare::parameterized(
+        empty_directory = { None, false },
+        quorum_state_file = { Some(("quorum-state", b"state".as_slice())), true },
+        log_segment = { Some(("00000000000000000000.log", b"log".as_slice())), true },
+        empty_log_segment = { Some(("00000000000000000000.log", b"".as_slice())), false },
+        non_log_extension = { Some(("00000000000000000000.txt", b"log".as_slice())), false },
+    )]
+    fn metadata_log_nonempty_detects_quorum_state_and_log_segments_only(
+        file: Option<(&str, &[u8])>,
+        expected: bool,
+    ) {
+        let dir = TempDir::new().unwrap();
+        if let Some((name, contents)) = file {
+            std::fs::write(dir.path().join(name), contents).unwrap();
         }
+        assert2::assert!(metadata_log_nonempty(dir.path()) == expected);
     }
 
     /// A write to the metadata log directory that fails stops the controller

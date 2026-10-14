@@ -9,21 +9,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 /// Creates a topic with SASL/PLAIN as admin. Asserts success.
 pub use crate::kafka_wire::create_topic_as_admin;
-pub use crate::support::sasl::start_sasl_plaintext_with_acl_users as start_single_broker_sasl_plaintext_with_users;
-use krabka_broker::BrokerHandle;
-
-/// Waits until `handle` sees `(topic, partition)` in its image.
-pub async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition: i32) {
-    handle.wait_until_partition_present(topic, partition).await;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: seed a dummy ACL to disable the compat shim (allow-all when no ACLs)
 // ─────────────────────────────────────────────────────────────────────────────
-
 /// Seeds an ACL that allows alice to Write topic `topic`.
 pub use crate::support::acl::seed_alice_write_acl;
-pub use crate::support::acl::seed_compat_shim_disable_acl;
+pub use crate::support::{
+    acl::seed_compat_shim_disable_acl, partitions::wait_partition_exists,
+    sasl::start_sasl_plaintext_with_acl_users as start_single_broker_sasl_plaintext_with_users,
+};
+use krabka_broker::BrokerHandle;
 
 /// Wait for the exact user quota to reach the committed image.
 pub async fn wait_alice_quota(handle: &BrokerHandle, key: &str, rate: f64) {

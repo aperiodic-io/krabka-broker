@@ -17,7 +17,6 @@
 //! fails beside a healthy one.
 
 #[cfg(test)]
-use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AllowAllAuthorizer,
@@ -25,11 +24,12 @@ use {
         codes,
         handlers::{
             delete_records::handle,
+            group_heartbeat_test_support::HandlerStartedBroker,
             test_support::{
                 OffsetRun, RecordCount, StartedBroker,
                 create_topic as create_topic_from_test_support,
                 produce_records as produce_records_from_test_support, share_fetch_partition_rows,
-                share_fetch_topics, share_fetch_wire, share_topic_uuid,
+                share_fetch_topics, share_fetch_wire, share_topic_uuid, start_allow_all_no_audit,
             },
         },
         test_support::{initialize_share_state, start_broker_no_audit_with},
@@ -72,11 +72,7 @@ fn acquired_run(partition_index: i32, first_offset: i64, last_offset: i64) -> Pa
 /// `DeleteRecords` v2, matching the other handler tests.
 const DELETE_RECORDS_VERSION: i16 = 2;
 
-async fn start() -> StartedBroker {
-    let HandlerStartedBroker { broker, dir } =
-        start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
-    StartedBroker { broker, dir }
-}
+async fn start() -> StartedBroker { start_allow_all_no_audit().await }
 
 async fn create_topic(broker: &BrokerHandle, name: &str, num_partitions: i32) -> WireUuid {
     create_topic_from_test_support()
@@ -402,8 +398,6 @@ enum IsolatedPartitionFailure {
 )]
 #[test_macro(tokio::test)]
 async fn a_partition_failure_does_not_affect_other_partitions(failure: IsolatedPartitionFailure) {
-    use assert2::assert;
-
     let StartedBroker { broker, dir } = start().await;
     let (topic, group) = match failure {
         IsolatedPartitionFailure::CorruptBatch => {
@@ -438,13 +432,13 @@ async fn a_partition_failure_does_not_affect_other_partitions(failure: IsolatedP
         IsolatedPartitionFailure::LogStartPastSpso => {
             // Only partition 0's log start moves past its SPSO.
             let delete_error = delete_records(&broker, topic, 0, 3).await;
-            assert!(delete_error == codes::NONE, "{delete_error}");
+            assert2::assert!(delete_error == codes::NONE, "{delete_error}");
             vec![acquired_run(0, 3, 4), acquired_run(1, 0, 4)]
         }
     };
 
     let by_partition = fetch_incremental_pair(&broker, group, topic_id).await;
-    assert!(by_partition == expected);
+    assert2::assert!(by_partition == expected);
     broker.shutdown().await;
 }
 

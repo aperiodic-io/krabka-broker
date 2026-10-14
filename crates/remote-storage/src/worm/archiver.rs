@@ -369,32 +369,33 @@ mod tests {
         assert!(let Ok(archiver) = WormArchiver::from_config(&both));
         assert!(let Some(signer) = archiver.signer.as_ref());
         check!(signer.key_id() == KEY_ID);
+    }
 
-        for (label, cfg) in [
-            ("path without id", WormConfig {
-                signing_key_path: Some(path.clone()),
-                signing_key_id: None,
-                write_only: false,
-            }),
-            ("id without path", WormConfig {
-                signing_key_path: None,
-                signing_key_id: Some(KEY_ID.to_string()),
-                write_only: false,
-            }),
-            ("path to something that is not a key", WormConfig {
-                signing_key_path: Some(dir.path().join("absent.pk8")),
-                signing_key_id: Some(KEY_ID.to_string()),
-                write_only: false,
-            }),
-        ] {
-            check!(
-                matches!(
-                    WormArchiver::from_config(&cfg),
-                    Err(WormError::SigningKey(_))
-                ),
-                "{label}"
-            );
-        }
+    #[yare::parameterized(
+        path_without_id = { true, false, true },
+        id_without_path = { false, true, true },
+        missing_key_file = { true, true, false },
+    )]
+    fn from_config_rejects_incomplete_or_missing_signing_keys(
+        has_path: bool,
+        has_id: bool,
+        key_file_exists: bool,
+    ) {
+        let dir = TempDir::new().unwrap();
+        let path = if key_file_exists {
+            key_file(&dir)
+        } else {
+            dir.path().join("absent.pk8")
+        };
+        let cfg = WormConfig {
+            signing_key_path: has_path.then_some(path),
+            signing_key_id: has_id.then(|| KEY_ID.to_string()),
+            write_only: false,
+        };
+        check!(matches!(
+            WormArchiver::from_config(&cfg),
+            Err(WormError::SigningKey(_))
+        ));
     }
 
     #[test]

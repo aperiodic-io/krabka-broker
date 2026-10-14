@@ -179,8 +179,13 @@ mod tests {
     /// `ReplicaManager.getLogEndOffsetLag` for a future log:
     /// `current LEO − future LEO` with no clamp, and `-1` with no local
     /// current log.
-    #[tokio::test]
-    async fn future_offset_lag_matches_kafka() {
+    #[yare::parameterized(
+        no_local_log = { "ghost", 2, INVALID_OFFSET_LAG },
+        three_records_behind = { "t", 2, 3 },
+        future_ahead = { "t", 7, -2 },
+    )]
+    #[test_macro(tokio::test)]
+    async fn future_offset_lag_matches_kafka(topic: &str, future_leo: i32, expected: i64) {
         let cur_dir = tempfile::tempdir().unwrap();
         let reg = PartitionRegistry::new();
         let part = partition_with_leo()
@@ -189,22 +194,16 @@ mod tests {
             .partition(3)
             .count(5)
             .call();
-        assert!(part.log_end_offset() == krabka_log::Offset(5));
+        assert2::assert!(part.log_end_offset() == krabka_log::Offset(5));
         reg.insert("t".into(), krabka_ids::PartitionIndex(3), part);
 
-        for (name, topic, future_leo, expected) in [
-            ("no local current log", "ghost", 2, INVALID_OFFSET_LAG),
-            ("future three records behind", "t", 2, 3),
-            ("future ahead is not clamped", "t", 7, -2),
-        ] {
-            let fut_dir = tempfile::tempdir().unwrap();
-            let future_logs = dashmap::DashMap::new();
-            future_logs.insert(
-                (topic.to_string(), krabka_ids::PartitionIndex(3)),
-                future_state_with_leo(fut_dir.path(), RecordCount(future_leo)),
-            );
-            let lag = future_offset_lag(&reg, &future_logs, topic, krabka_ids::PartitionIndex(3));
-            assert2::check!(lag == expected, "case {name}");
-        }
+        let fut_dir = tempfile::tempdir().unwrap();
+        let future_logs = dashmap::DashMap::new();
+        future_logs.insert(
+            (topic.to_string(), krabka_ids::PartitionIndex(3)),
+            future_state_with_leo(fut_dir.path(), RecordCount(future_leo)),
+        );
+        let lag = future_offset_lag(&reg, &future_logs, topic, krabka_ids::PartitionIndex(3));
+        assert2::check!(lag == expected);
     }
 }

@@ -211,8 +211,14 @@ mod time_tests {
         }
     }
 
-    #[test]
-    fn append_and_choose_scan_start() {
+    #[yare::parameterized(
+        before_first = { "before first", 0, 0 },
+        floor_first = { "floor first", 1_500_000, 0 },
+        exact_middle = { "exact middle", 2_000_000, 0 },
+        floor_middle = { "floor middle", 2_500_000, 100 },
+        past_last = { "past last", 5_000_000, 200 },
+    )]
+    fn append_and_choose_scan_start(name: &str, ts: i64, want: u32) {
         let IndexFixture {
             dir: _dir,
             path: _path,
@@ -231,15 +237,7 @@ mod time_tests {
                 coordinate: 200,
             },
         ]);
-        for (name, ts, want) in [
-            ("before first", 0, 0),
-            ("floor first", 1_500_000, 0),
-            ("exact middle", 2_000_000, 0),
-            ("floor middle", 2_500_000, 100),
-            ("past last", 5_000_000, 200),
-        ] {
-            check!(idx.scan_start(ts) == want, "case {name}: ts={ts}");
-        }
+        check!(idx.scan_start(ts) == want, "case {name}: ts={ts}");
     }
 
     #[test]

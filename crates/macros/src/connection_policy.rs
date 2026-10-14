@@ -61,26 +61,33 @@ mod tests {
             .unwrap();
         let config = configuration(&input).unwrap();
         assert!(config == "config");
-        let emitted = policy(&config).to_string();
-        for field in [
-            "max_retries",
-            "retry_timeout",
-            "allow_http",
-            "request_timeout",
-            "connect_timeout",
-        ] {
-            assert!(emitted.contains(field));
-        }
-        for invalid in [
-            "",
-            "builder",
-            ", config",
-            "builder config",
-            "builder, config.member",
-            "builder, (config)",
-            "builder, config,",
-        ] {
-            assert!(configuration(&invalid.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        max_retries = { "max_retries" },
+        retry_timeout = { "retry_timeout" },
+        allow_http = { "allow_http" },
+        request_timeout = { "request_timeout" },
+        connect_timeout = { "connect_timeout" },
+    )]
+    fn policy_includes_each_supported_field(field: &str) {
+        assert2::assert!(
+            policy(&"config".parse().unwrap())
+                .to_string()
+                .contains(field)
+        );
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        no_config = { "builder" },
+        missing_builder = { ", config" },
+        missing_comma = { "builder config" },
+        member_config = { "builder, config.member" },
+        grouped_config = { "builder, (config)" },
+        trailing_comma = { "builder, config," },
+    )]
+    fn rejects_invalid_builder_and_config_arguments(invalid: &str) {
+        assert2::assert!(configuration(&invalid.parse().unwrap()).is_err());
     }
 }

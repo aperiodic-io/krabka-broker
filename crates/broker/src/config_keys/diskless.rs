@@ -137,57 +137,48 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn resolve_diskless_reads_a_kafka_boolean() {
-        for (label, config, expected) in [
-            ("no override map at all", None, false),
-            ("an override map without the key", Some(map(&[])), false),
-            (
-                "the key set to false",
-                Some(map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "false",
-                }])),
-                false,
-            ),
-            (
-                "the key set in upper case",
-                Some(map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: " TRUE ",
-                }])),
-                true,
-            ),
-            (
-                "the key set to true",
-                Some(map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "true",
-                }])),
-                true,
-            ),
-        ] {
-            check!(resolve_diskless(config.as_ref()) == expected, "{label}");
-        }
+    #[yare::parameterized(
+        no_override_map = { None, false },
+        missing_key = { Some(map(&[])), false },
+        false_value = {
+            Some(map(&[ConfigPair { key: DISKLESS, value: "false" }])),
+            false,
+        },
+        uppercase_true = {
+            Some(map(&[ConfigPair { key: DISKLESS, value: " TRUE " }])),
+            true,
+        },
+        true_value = {
+            Some(map(&[ConfigPair { key: DISKLESS, value: "true" }])),
+            true,
+        },
+    )]
+    fn resolve_diskless_reads_a_kafka_boolean(
+        config: Option<BTreeMap<String, String>>,
+        expected: bool,
+    ) {
+        check!(resolve_diskless(config.as_ref()) == expected);
     }
 
     #[test]
     fn the_key_is_whitelisted_and_takes_only_booleans() {
         assert!(is_recognized(DISKLESS));
-        for (value, want_ok) in [
-            ("true", true),
-            ("false", true),
-            ("TRUE", true),
-            ("1", false),
-            ("", false),
-        ] {
-            check!(
-                validate_topic_config(DISKLESS, value).is_ok() == want_ok,
-                "{DISKLESS}={value}"
-            );
-        }
         let error = validate_topic_config(DISKLESS, "yes").unwrap_err();
         assert!(error.contains(DISKLESS), "got: {error}");
+    }
+
+    #[yare::parameterized(
+        true_value = { "true", true },
+        false_value = { "false", true },
+        uppercase_true = { "TRUE", true },
+        numeric_one = { "1", false },
+        empty = { "", false },
+    )]
+    fn diskless_config_accepts_boolean_values_only(value: &str, want_ok: bool) {
+        check!(
+            validate_topic_config(DISKLESS, value).is_ok() == want_ok,
+            "{DISKLESS}={value}"
+        );
     }
 
     #[derive(Clone, Copy)]
@@ -295,93 +286,58 @@ mod tests {
         assert2::check!(error.contains(key), "got: {error}");
     }
 
-    #[test]
-    fn only_a_change_of_the_resolved_flag_is_refused() {
-        for (label, current, next, want_ok) in [
-            (
-                "the same value restated",
-                Some(map(&[ConfigPair {
+    #[yare::parameterized(
+        same_value = {
+            Some(map(&[ConfigPair { key: DISKLESS, value: "true" }])),
+            map(&[ConfigPair { key: DISKLESS, value: "true" }]),
+            true,
+        },
+        ordinary_key_added = {
+            Some(map(&[ConfigPair { key: DISKLESS, value: "true" }])),
+            map(&[
+                ConfigPair {
                     key: DISKLESS,
                     value: "true",
-                }])),
-                map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "true",
-                }]),
-                true,
-            ),
-            (
-                "an ordinary key added to a diskless topic",
-                Some(map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "true",
-                }])),
-                map(&[
-                    ConfigPair {
-                        key: DISKLESS,
-                        value: "true",
-                    },
-                    ConfigPair {
-                        key: "retention.ms",
-                        value: "60000",
-                    },
-                ]),
-                true,
-            ),
-            (
-                "an explicit false dropped, which resolves the same way",
-                Some(map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "false",
-                }])),
-                map(&[]),
-                true,
-            ),
-            (
-                "turning the flag off on a diskless topic",
-                Some(map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "true",
-                }])),
-                map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "false",
-                }]),
-                false,
-            ),
-            (
-                "dropping the key from a diskless topic, as a replacement does",
-                Some(map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "true",
-                }])),
-                map(&[]),
-                false,
-            ),
-            (
-                "turning the flag on for a local-log topic",
-                Some(map(&[])),
-                map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "true",
-                }]),
-                false,
-            ),
-            (
-                "turning the flag on for a topic with no overrides at all",
-                None,
-                map(&[ConfigPair {
-                    key: DISKLESS,
-                    value: "true",
-                }]),
-                false,
-            ),
-        ] {
-            check!(
-                validate_diskless_unchanged(current.as_ref(), &next).is_ok() == want_ok,
-                "{label}"
-            );
-        }
+                },
+                ConfigPair {
+                    key: "retention.ms",
+                    value: "60000",
+                },
+            ]),
+            true,
+        },
+        explicit_false_removed = {
+            Some(map(&[ConfigPair { key: DISKLESS, value: "false" }])),
+            map(&[]),
+            true,
+        },
+        flag_turned_off = {
+            Some(map(&[ConfigPair { key: DISKLESS, value: "true" }])),
+            map(&[ConfigPair { key: DISKLESS, value: "false" }]),
+            false,
+        },
+        flag_removed = {
+            Some(map(&[ConfigPair { key: DISKLESS, value: "true" }])),
+            map(&[]),
+            false,
+        },
+        flag_added_to_local_topic = {
+            Some(map(&[])),
+            map(&[ConfigPair { key: DISKLESS, value: "true" }]),
+            false,
+        },
+        flag_added_without_overrides = {
+            None,
+            map(&[ConfigPair { key: DISKLESS, value: "true" }]),
+            false,
+        },
+    )]
+    fn only_a_change_of_the_resolved_flag_is_refused(
+        current: Option<BTreeMap<String, String>>,
+        next: BTreeMap<String, String>,
+        want_ok: bool,
+    ) {
+        check!(validate_diskless_unchanged(current.as_ref(), &next).is_ok() == want_ok);
     }
 
     #[test]

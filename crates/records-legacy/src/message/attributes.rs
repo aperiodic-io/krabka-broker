@@ -52,17 +52,15 @@ pub fn attrs_with_compression(byte: i8, codec: CompressionType) -> i8 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn attrs_codec_roundtrip() {
-        for (_name, compression) in [
-            ("none", CompressionType::None),
-            ("gzip", CompressionType::Gzip),
-            ("snappy", CompressionType::Snappy),
-            ("lz4", CompressionType::Lz4),
-        ] {
-            let bits = attrs_with_compression(0, compression);
-            assert2::assert!(compression_from_attrs(bits).unwrap() == compression);
-        }
+    #[yare::parameterized(
+        none = { CompressionType::None },
+        gzip = { CompressionType::Gzip },
+        snappy = { CompressionType::Snappy },
+        lz4 = { CompressionType::Lz4 },
+    )]
+    fn attrs_codec_roundtrip(compression: CompressionType) {
+        let bits = attrs_with_compression(0, compression);
+        assert2::assert!(compression_from_attrs(bits).unwrap() == compression);
     }
 
     // --- mutation-coverage tests --------------------------------------------
@@ -85,39 +83,35 @@ mod tests {
         assert2::assert!(attrs::COMPRESSION_MASK == 0b0000_0111);
     }
 
-    #[test]
-    fn attrs_with_compression_exact_codes() {
-        for (_name, compression, want) in [
-            ("none", CompressionType::None, 0),
-            ("gzip", CompressionType::Gzip, 1),
-            ("snappy", CompressionType::Snappy, 2),
-            ("lz4", CompressionType::Lz4, 3),
-        ] {
-            assert2::assert!(attrs_with_compression(0, compression) == want);
-        }
+    #[yare::parameterized(
+        none = { CompressionType::None, 0 },
+        gzip = { CompressionType::Gzip, 1 },
+        snappy = { CompressionType::Snappy, 2 },
+        lz4 = { CompressionType::Lz4, 3 },
+    )]
+    fn attrs_with_compression_exact_codes(compression: CompressionType, expected: i8) {
+        assert2::assert!(attrs_with_compression(0, compression) == expected);
     }
 
-    #[test]
-    fn attrs_with_compression_replaces_low_bits_keeps_high() {
-        // Overwriting an existing codec replaces (not ORs) the low 3 bits.
-        let ts = attrs::TIMESTAMP_TYPE_BIT;
-        for (_name, initial, compression, expected) in [
-            ("replace lz4 with gzip", 3, CompressionType::Gzip, 1),
-            (
-                "preserve timestamp with gzip",
-                ts,
-                CompressionType::Gzip,
-                ts | 1,
-            ),
-            (
-                "preserve timestamp with none",
-                ts,
-                CompressionType::None,
-                ts,
-            ),
-        ] {
-            assert2::assert!(attrs_with_compression(initial, compression) == expected);
-        }
+    #[yare::parameterized(
+        replace_codec = { 3, CompressionType::Gzip, 1 },
+        preserve_timestamp_with_codec = {
+            attrs::TIMESTAMP_TYPE_BIT,
+            CompressionType::Gzip,
+            attrs::TIMESTAMP_TYPE_BIT | 1,
+        },
+        preserve_timestamp_without_codec = {
+            attrs::TIMESTAMP_TYPE_BIT,
+            CompressionType::None,
+            attrs::TIMESTAMP_TYPE_BIT,
+        },
+    )]
+    fn attrs_with_compression_replaces_low_bits_keeps_high(
+        initial: i8,
+        compression: CompressionType,
+        expected: i8,
+    ) {
+        assert2::assert!(attrs_with_compression(initial, compression) == expected);
     }
 
     #[test]

@@ -121,62 +121,68 @@ mod tests {
         assert2::assert!(parse_acl_spec(s).is_err());
     }
 
-    #[test]
-    fn parse_acl_spec_all_operations() {
-        use krabka_metadata::AclOperation;
-        for (s, op) in [
-            ("All", AclOperation::All),
-            ("Read", AclOperation::Read),
-            ("Write", AclOperation::Write),
-            ("Create", AclOperation::Create),
-            ("Delete", AclOperation::Delete),
-            ("Alter", AclOperation::Alter),
-            ("Describe", AclOperation::Describe),
-            ("ClusterAction", AclOperation::ClusterAction),
-            ("DescribeConfigs", AclOperation::DescribeConfigs),
-            ("AlterConfigs", AclOperation::AlterConfigs),
-            ("IdempotentWrite", AclOperation::IdempotentWrite),
-            ("TwoPhaseCommit", AclOperation::TwoPhaseCommit),
-        ] {
-            let spec =
-                format!("principal=User:u,host=*,operation={s},permission=Allow,resource=Topic:t");
-            assert2::assert!(parse_acl_spec(&spec).unwrap().operation == op);
-        }
+    #[yare::parameterized(
+        all = { "All", krabka_metadata::AclOperation::All },
+        read = { "Read", krabka_metadata::AclOperation::Read },
+        write = { "Write", krabka_metadata::AclOperation::Write },
+        create = { "Create", krabka_metadata::AclOperation::Create },
+        delete = { "Delete", krabka_metadata::AclOperation::Delete },
+        alter = { "Alter", krabka_metadata::AclOperation::Alter },
+        describe = { "Describe", krabka_metadata::AclOperation::Describe },
+        cluster_action = { "ClusterAction", krabka_metadata::AclOperation::ClusterAction },
+        describe_configs = { "DescribeConfigs", krabka_metadata::AclOperation::DescribeConfigs },
+        alter_configs = { "AlterConfigs", krabka_metadata::AclOperation::AlterConfigs },
+        idempotent_write = { "IdempotentWrite", krabka_metadata::AclOperation::IdempotentWrite },
+        two_phase_commit = { "TwoPhaseCommit", krabka_metadata::AclOperation::TwoPhaseCommit },
+    )]
+    fn parse_acl_spec_all_operations(name: &str, expected: krabka_metadata::AclOperation) {
+        let spec =
+            format!("principal=User:u,host=*,operation={name},permission=Allow,resource=Topic:t");
+        assert2::assert!(parse_acl_spec(&spec).unwrap().operation == expected);
     }
 
-    #[test]
-    fn parse_acl_spec_all_resource_types_and_deny() {
-        use krabka_metadata::{PermissionType, ResourceType};
-        for (s, rt) in [
-            ("Topic", ResourceType::Topic),
-            ("Group", ResourceType::Group),
-            ("Cluster", ResourceType::Cluster),
-            ("TransactionalId", ResourceType::TransactionalId),
-        ] {
-            let spec =
-                format!("principal=User:u,host=*,operation=All,permission=Deny,resource={s}:n");
-            let entry = parse_acl_spec(&spec).unwrap();
-            assert2::assert!(entry.resource_type == rt);
-            assert2::assert!(entry.permission_type == PermissionType::Deny);
-        }
+    #[yare::parameterized(
+        topic = { "Topic", krabka_metadata::ResourceType::Topic },
+        group = { "Group", krabka_metadata::ResourceType::Group },
+        cluster = { "Cluster", krabka_metadata::ResourceType::Cluster },
+        transactional_id = { "TransactionalId", krabka_metadata::ResourceType::TransactionalId },
+    )]
+    fn parse_acl_spec_all_resource_types_and_deny(
+        name: &str,
+        expected: krabka_metadata::ResourceType,
+    ) {
+        use krabka_metadata::PermissionType;
+        let spec =
+            format!("principal=User:u,host=*,operation=All,permission=Deny,resource={name}:n");
+        let entry = parse_acl_spec(&spec).unwrap();
+        assert2::assert!(entry.resource_type == expected);
+        assert2::assert!(entry.permission_type == PermissionType::Deny);
     }
 
-    #[test]
-    fn parse_acl_spec_error_branches() {
-        for bad in [
+    #[yare::parameterized(
+        unknown_operation = {
             "principal=User:u,host=*,operation=Bogus,permission=Allow,resource=Topic:t",
+        },
+        unknown_permission = {
             "principal=User:u,host=*,operation=All,permission=Maybe,resource=Topic:t",
+        },
+        bad_pattern_suffix = {
             "principal=User:u,host=*,operation=All,permission=Allow,resource=Topic:t:Weird",
+        },
+        unknown_resource_type = {
             "principal=User:u,host=*,operation=All,permission=Allow,resource=Bogus:t",
+        },
+        missing_resource_name = {
             "principal=User:u,host=*,operation=All,permission=Allow,resource=Topic",
-            "malformedpair",
-            "host=*,operation=All,permission=Allow,resource=Topic:t",
-            "principal=User:u,operation=All,permission=Allow,resource=Topic:t",
-            "principal=User:u,host=*,permission=Allow,resource=Topic:t",
-            "principal=User:u,host=*,operation=All,resource=Topic:t",
-            "principal=User:u,host=*,operation=All,permission=Allow",
-        ] {
-            assert2::assert!(parse_acl_spec(bad).is_err());
-        }
+        },
+        malformed_pair = { "malformedpair" },
+        missing_principal = { "host=*,operation=All,permission=Allow,resource=Topic:t" },
+        missing_host = { "principal=User:u,operation=All,permission=Allow,resource=Topic:t" },
+        missing_operation = { "principal=User:u,host=*,permission=Allow,resource=Topic:t" },
+        missing_permission = { "principal=User:u,host=*,operation=All,resource=Topic:t" },
+        missing_resource = { "principal=User:u,host=*,operation=All,permission=Allow" },
+    )]
+    fn parse_acl_spec_error_branches(bad: &str) {
+        assert2::assert!(parse_acl_spec(bad).is_err());
     }
 }

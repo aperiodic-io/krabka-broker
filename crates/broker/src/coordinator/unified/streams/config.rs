@@ -609,72 +609,45 @@ mod tests {
     /// Kafka trunk's `GroupConfig` parses `streams.rack.aware.assignment.tags`
     /// as a `LIST` and refuses a repeated or an empty tag key, and
     /// `DescribeConfigs` reports the parsed list joined with commas.
-    #[test]
-    fn rack_aware_assignment_tags_parse_as_kafkas_group_config_does() {
-        /// The tag keys that the value parses to, and the value that
-        /// `DescribeConfigs` reports.
-        struct Parsed {
-            tags: Vec<&'static str>,
-            reported: &'static str,
-        }
-
+    #[yare::parameterized(
+        empty = { "", Ok((vec![], "")) },
+        whitespace = { "  ", Ok((vec![], "")) },
+        one_tag = { "zone", Ok((vec!["zone"], "zone")) },
+        trimmed_ordered_tags = { " zone ,\track ", Ok((vec!["zone", "rack"], "zone,rack")) },
+        duplicate_tag = { "rack,zone,rack", Err("duplicate") },
+        duplicate_after_trim = { "zone, zone", Err("duplicate") },
+        empty_entry = { "zone,,rack", Err("empty") },
+        trailing_empty_entry = { "zone,", Err("empty") },
+    )]
+    fn rack_aware_assignment_tags_parse_as_kafkas_group_config_does(
+        value: &str,
+        want: Result<(Vec<&'static str>, &'static str), &'static str>,
+    ) {
         const DUPLICATE: &str =
             "streams.rack.aware.assignment.tags must not contain duplicate tag keys.";
         const EMPTY: &str =
             "Configuration 'streams.rack.aware.assignment.tags' values must not be empty.";
-        for (value, want) in [
-            (
-                "",
-                Ok(Parsed {
-                    tags: vec![],
-                    reported: "",
-                }),
-            ),
-            (
-                "  ",
-                Ok(Parsed {
-                    tags: vec![],
-                    reported: "",
-                }),
-            ),
-            (
-                "zone",
-                Ok(Parsed {
-                    tags: vec!["zone"],
-                    reported: "zone",
-                }),
-            ),
-            (
-                " zone ,\track ",
-                Ok(Parsed {
-                    tags: vec!["zone", "rack"],
-                    reported: "zone,rack",
-                }),
-            ),
-            ("rack,zone,rack", Err(DUPLICATE)),
-            ("zone, zone", Err(DUPLICATE)),
-            ("zone,,rack", Err(EMPTY)),
-            ("zone,", Err(EMPTY)),
-        ] {
-            let overrides =
-                maplit::btreemap! {KEY_RACK_AWARE_ASSIGNMENT_TAGS.into() => value.to_owned()};
-            let got = StreamsGroupConfig::default()
-                .with_group_overrides(&overrides)
-                .map(|config| {
-                    let reported =
-                        config.group_config_values()[KEY_RACK_AWARE_ASSIGNMENT_TAGS].clone();
-                    (config.rack_aware_assignment_tags, reported)
-                });
-            let want = want
-                .map(|Parsed { tags, reported }| {
-                    (
-                        tags.into_iter().map(str::to_owned).collect::<Vec<_>>(),
-                        reported.to_owned(),
-                    )
-                })
-                .map_err(str::to_owned);
-            assert!(got == want, "{value:?}");
-        }
+        let overrides =
+            maplit::btreemap! {KEY_RACK_AWARE_ASSIGNMENT_TAGS.into() => value.to_owned()};
+        let got = StreamsGroupConfig::default()
+            .with_group_overrides(&overrides)
+            .map(|config| {
+                let reported = config.group_config_values()[KEY_RACK_AWARE_ASSIGNMENT_TAGS].clone();
+                (config.rack_aware_assignment_tags, reported)
+            });
+        let want = want
+            .map(|(tags, reported)| {
+                (
+                    tags.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                    reported.to_owned(),
+                )
+            })
+            .map_err(|message| match message {
+                "duplicate" => DUPLICATE.to_owned(),
+                "empty" => EMPTY.to_owned(),
+                _ => unreachable!(),
+            });
+        assert2::assert!(got == want, "{value:?}");
     }
 
     #[test]
@@ -693,58 +666,54 @@ mod tests {
         assert!(got.assignor == StreamsAssignorKind::HighlyAvailable);
     }
 
-    #[test]
-    fn share_auto_offset_reset_parses_the_three_kafka_forms() {
+    #[yare::parameterized(
+        latest = { "latest", Some(ShareAutoOffsetReset::Latest) },
+        earliest = { "earliest", Some(ShareAutoOffsetReset::Earliest) },
+        one_hour = {
+            "by_duration:PT1H",
+            Some(ShareAutoOffsetReset::ByDuration(Duration::from_secs(3_600))),
+        },
+        normalized_duration = {
+            "by_duration:P1DT2H3M4.5S",
+            Some(ShareAutoOffsetReset::ByDuration(Duration::new(93_784, 500_000_000))),
+        },
+        zero_duration = {
+            "by_duration:PT0S",
+            Some(ShareAutoOffsetReset::ByDuration(Duration::ZERO)),
+        },
+        negative_duration = { "by_duration:-PT1H", None },
+        negative_component = { "by_duration:PT-1H", None },
+        missing_time = { "by_duration:PT", None },
+        missing_date = { "by_duration:P", None },
+        empty_duration = { "by_duration:", None },
+        missing_colon = { "by_duration", None },
+        missing_iso_prefix = { "by_duration:1H", None },
+        invalid_component = { "by_duration:PT1X", None },
+        weeks = { "by_duration:P1W", None },
+        out_of_order_components = { "by_duration:PT1M1H", None },
+        case_sensitive = { "Earliest", None },
+        unknown = { "none", None },
+        empty = { "", None },
+    )]
+    fn share_auto_offset_reset_parses_the_three_kafka_forms(
+        value: &str,
+        want: Option<ShareAutoOffsetReset>,
+    ) {
         // Kafka 4.3.1 types this key STRING with
         // `[latest, earliest, by_duration:PnDTnHnMn.nS]`, defaults it to
         // `latest`, and validates it with
         // `ShareGroupAutoOffsetResetStrategy`, which delegates the duration to
         // `java.time.Duration::parse` and rejects only a negative one.
-        for (value, want) in [
-            ("latest", Some(ShareAutoOffsetReset::Latest)),
-            ("earliest", Some(ShareAutoOffsetReset::Earliest)),
-            (
-                "by_duration:PT1H",
-                Some(ShareAutoOffsetReset::ByDuration(Duration::from_secs(3_600))),
-            ),
-            (
-                "by_duration:P1DT2H3M4.5S",
-                Some(ShareAutoOffsetReset::ByDuration(Duration::new(
-                    93_784,
-                    500_000_000,
-                ))),
-            ),
-            (
-                "by_duration:PT0S",
-                Some(ShareAutoOffsetReset::ByDuration(Duration::ZERO)),
-            ),
-            ("by_duration:-PT1H", None),
-            ("by_duration:PT-1H", None),
-            ("by_duration:PT", None),
-            ("by_duration:P", None),
-            ("by_duration:", None),
-            ("by_duration", None),
-            ("by_duration:1H", None),
-            ("by_duration:P1H", None),
-            ("by_duration:PT1X", None),
-            ("by_duration:P1W", None),
-            ("by_duration:PT1M1H", None),
-            ("Earliest", None),
-            ("none", None),
-            ("", None),
-        ] {
-            let overrides =
-                maplit::btreemap! {KEY_SHARE_AUTO_OFFSET_RESET.into() => value.to_owned()};
-            let got = StreamsGroupConfig::default()
-                .with_group_overrides(&overrides)
-                .ok()
-                .map(|config| config.share_auto_offset_reset);
-            assert!(got == want, "{KEY_SHARE_AUTO_OFFSET_RESET}={value}");
-        }
+        let overrides = maplit::btreemap! {KEY_SHARE_AUTO_OFFSET_RESET.into() => value.to_owned()};
+        let got = StreamsGroupConfig::default()
+            .with_group_overrides(&overrides)
+            .ok()
+            .map(|config| config.share_auto_offset_reset);
+        assert2::assert!(got == want, "{KEY_SHARE_AUTO_OFFSET_RESET}={value}");
     }
 
     #[test]
-    fn share_auto_offset_reset_is_echoed_by_describe_configs() {
+    fn share_auto_offset_reset_describe_config_defaults_to_latest() {
         // The default the key reports, and the round trip a configured value
         // takes: `DescribeConfigs` renders the duration the way
         // `java.time.Duration::toString` does, so the value it reports parses
@@ -753,24 +722,28 @@ mod tests {
             StreamsGroupConfig::default().group_config_values()[KEY_SHARE_AUTO_OFFSET_RESET]
                 == "latest"
         );
-        for (value, want) in [
-            ("earliest", "earliest"),
-            ("latest", "latest"),
-            ("by_duration:PT1H", "by_duration:PT1H"),
-            ("by_duration:P1DT2H3M4.5S", "by_duration:PT26H3M4.5S"),
-            ("by_duration:PT0S", "by_duration:PT0S"),
-            ("by_duration:pt90m", "by_duration:PT1H30M"),
-        ] {
-            let overrides =
-                maplit::btreemap! {KEY_SHARE_AUTO_OFFSET_RESET.into() => value.to_owned()};
-            let reported = StreamsGroupConfig::default()
-                .with_group_overrides(&overrides)
-                .expect("valid strategy")
-                .group_config_values()[KEY_SHARE_AUTO_OFFSET_RESET]
-                .clone();
-            assert!(reported == want, "{KEY_SHARE_AUTO_OFFSET_RESET}={value}");
-            assert!(ShareAutoOffsetReset::parse(&reported) == ShareAutoOffsetReset::parse(value));
-        }
+    }
+
+    #[yare::parameterized(
+        earliest = { "earliest", "earliest" },
+        latest = { "latest", "latest" },
+        one_hour = { "by_duration:PT1H", "by_duration:PT1H" },
+        normalized_duration = { "by_duration:P1DT2H3M4.5S", "by_duration:PT26H3M4.5S" },
+        zero_duration = { "by_duration:PT0S", "by_duration:PT0S" },
+        normalized_case_and_units = { "by_duration:pt90m", "by_duration:PT1H30M" },
+    )]
+    fn share_auto_offset_reset_is_echoed_by_describe_configs(value: &str, want: &str) {
+        // DescribeConfigs renders durations the way `java.time.Duration.toString` does.
+        let overrides = maplit::btreemap! {KEY_SHARE_AUTO_OFFSET_RESET.into() => value.to_owned()};
+        let reported = StreamsGroupConfig::default()
+            .with_group_overrides(&overrides)
+            .expect("valid strategy")
+            .group_config_values()[KEY_SHARE_AUTO_OFFSET_RESET]
+            .clone();
+        assert2::assert!(reported == want, "{KEY_SHARE_AUTO_OFFSET_RESET}={value}");
+        assert2::assert!(
+            ShareAutoOffsetReset::parse(&reported) == ShareAutoOffsetReset::parse(value)
+        );
     }
 
     #[test]

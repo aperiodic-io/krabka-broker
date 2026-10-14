@@ -97,14 +97,16 @@ mod tests {
         assert!(is_recognized(UNCLEAN_LEADER_ELECTION_ENABLE));
     }
 
-    #[test]
-    fn recovery_strategy_accepts_valid_values() {
-        for v in ["None", "Balanced", "Aggressive"] {
-            assert!(
-                validate_topic_config(UNCLEAN_RECOVERY_STRATEGY, v).is_ok(),
-                "{v}"
-            );
-        }
+    #[yare::parameterized(
+        none = { "None" },
+        balanced = { "Balanced" },
+        aggressive = { "Aggressive" },
+    )]
+    fn recovery_strategy_accepts_valid_values(value: &str) {
+        assert2::assert!(
+            validate_topic_config(UNCLEAN_RECOVERY_STRATEGY, value).is_ok(),
+            "{value}"
+        );
     }
 
     #[test]
@@ -117,20 +119,15 @@ mod tests {
         assert!(is_recognized(UNCLEAN_RECOVERY_STRATEGY));
     }
 
-    #[test]
-    fn parse_recovery_strategy_maps_values() {
-        let cases = [
-            ("None", Some(RecoveryStrategy::None)),
-            ("Balanced", Some(RecoveryStrategy::Balanced)),
-            ("Aggressive", Some(RecoveryStrategy::Aggressive)),
-            // A broker resource stores the string the client sent, padding
-            // included, which Kafka's `ConfigDef.parse` trims.
-            (" Aggressive\t", Some(RecoveryStrategy::Aggressive)),
-            ("bogus", None),
-        ];
-        for (input, want) in cases {
-            assert!(RecoveryStrategy::parse(input) == want, "input {input:?}");
-        }
+    #[yare::parameterized(
+        none = { "None", Some(RecoveryStrategy::None) },
+        balanced = { "Balanced", Some(RecoveryStrategy::Balanced) },
+        aggressive = { "Aggressive", Some(RecoveryStrategy::Aggressive) },
+        trimmed_aggressive = { " Aggressive\t", Some(RecoveryStrategy::Aggressive) },
+        unknown = { "bogus", None },
+    )]
+    fn parse_recovery_strategy_maps_values(input: &str, want: Option<RecoveryStrategy>) {
+        assert2::assert!(RecoveryStrategy::parse(input) == want, "input {input:?}");
     }
 
     #[test]

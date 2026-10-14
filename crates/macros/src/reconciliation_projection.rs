@@ -1,7 +1,7 @@
 //! Methods for explicitly declared reconciliation projections and action enums.
 
 use {
-    crate::meta::{field_ident, impl_block, named_fields},
+    crate::meta::{field_ident, first_missing_named_field, impl_block, named_fields},
     moxy::{
         ast::{
             Attributed, Field, GenericArgument, ItemEnum, ItemStruct, ParseError, PathArguments,
@@ -40,18 +40,11 @@ fn extra_fields(item: &ItemStruct, common: &[&str]) -> Result<Vec<Field>, ParseE
         ));
     }
     let fields = named_fields(item, "reconciliation projection")?;
-    for name in common {
-        if !fields.iter().any(|field| {
-            field
-                .ident
-                .as_ref()
-                .is_some_and(|ident| ident.text() == *name)
-        }) {
-            return Err(ParseError::new(
-                item.ident.span(),
-                format!("missing reconciliation field `{name}`"),
-            ));
-        }
+    if let Some(name) = first_missing_named_field(fields, common) {
+        return Err(ParseError::new(
+            item.ident.span(),
+            format!("missing reconciliation field `{name}`"),
+        ));
     }
     let mut extra = Vec::new();
     for field in fields {
@@ -272,17 +265,25 @@ mod tests {
         assert2::assert,
     };
 
-    #[test]
-    fn projections_require_common_fields_and_mark_only_extra_fields() {
-        for input in [
-            "struct Member;",
-            "struct Member { id: String }",
+    #[yare::parameterized(
+        unit_struct = { "struct Member;" },
+        missing_required_fields = { "struct Member { id: String }" },
+        generic_member = {
             "struct Member<T> { id: String, member_epoch: i32, assignment_state: State, assigned: Vec<i32>, pending_revocation: Vec<i32>, target: Vec<i32> }",
+        },
+        required_field_marked_extra = {
             "struct Member { #[reconciliation(extra)] id: String, member_epoch: i32, assignment_state: State, assigned: Vec<i32>, pending_revocation: Vec<i32>, target: Vec<i32> }",
+        },
+        unknown_field = {
             "struct Member { id: String, member_epoch: i32, assignment_state: State, assigned: Vec<i32>, pending_revocation: Vec<i32>, target: Vec<i32>, epochs: Vec<i32> }",
-        ] {
-            assert!(member(moxy::parse!({ input }).unwrap()).is_err(), "{input}");
-        }
+        },
+    )]
+    fn projections_require_common_fields_and_mark_only_extra_fields(input: &str) {
+        assert2::assert!(member(moxy::parse!({ input }).unwrap()).is_err(), "{input}");
+    }
+
+    #[test]
+    fn group_projection_requires_a_member_collection() {
         assert!(group(moxy::parse!("struct Group { members: Vec<Member> }").unwrap()).is_err());
     }
 
@@ -301,20 +302,24 @@ mod tests {
     }
 
     #[test]
-    fn epoch_ledger_uses_the_declared_violation_type_and_rejects_wrong_fields() {
+    fn epoch_ledger_uses_the_declared_violation_type() {
         let item =
             moxy::parse!("struct Projection { epoch: i16, violations: BTreeSet<Violation> }")
                 .unwrap();
         let output = compact(&epoch(item).unwrap());
         assert!(output.contains("fnobserve_prior_epoch(&mutself,previous:i16)"));
         assert!(output.contains("Violation::EpochRegressed"));
-        for input in [
-            "struct Projection { epoch: i32, violations: BTreeSet<Violation> }",
+    }
+
+    #[yare::parameterized(
+        wrong_epoch_type = { "struct Projection { epoch: i32, violations: BTreeSet<Violation> }" },
+        wrong_violation_collection = {
             "struct Projection { epoch: i16, violations: Vec<Violation> }",
-            "struct Projection { epoch: i16 }",
-        ] {
-            assert!(epoch(moxy::parse!({ input }).unwrap()).is_err(), "{input}");
-        }
+        },
+        missing_violations = { "struct Projection { epoch: i16 }" },
+    )]
+    fn epoch_ledger_rejects_wrong_fields(input: &str) {
+        assert2::assert!(epoch(moxy::parse!({ input }).unwrap()).is_err(), "{input}");
     }
     #[test]
     fn group_constructors_keep_named_ledgers_and_visible_extra_arguments() {
@@ -341,18 +346,24 @@ mod tests {
     }
 
     #[test]
-    fn field_roles_and_violation_generic_arguments_reject_incompatible_schemas() {
+    fn field_roles_reject_incompatible_schemas() {
         let wrong_role = moxy::parse!("struct Member { id: String, member_epoch: i32, assignment_state: State, assigned: Vec<i32>, pending_revocation: Vec<i32>, target: Vec<i32>, #[reconciliation(unknown)] extra: i32 }").unwrap();
         assert!(member(wrong_role).is_err());
-        for declaration in [
+    }
+
+    #[yare::parameterized(
+        multiple_violation_types = {
             "struct Projection { epoch: i16, violations: BTreeSet<Violation, Other> }",
+        },
+        reference_violation_type = {
             "struct Projection { epoch: i16, violations: BTreeSet<&Violation> }",
-            "struct Projection<T> { epoch: i16, violations: BTreeSet<T> }",
-        ] {
-            assert!(
-                epoch(moxy::parse!({ declaration }).unwrap()).is_err(),
-                "{declaration}"
-            );
-        }
+        },
+        generic_violation_type = { "struct Projection<T> { epoch: i16, violations: BTreeSet<T> }" },
+    )]
+    fn violation_generic_arguments_reject_incompatible_schemas(declaration: &str) {
+        assert2::assert!(
+            epoch(moxy::parse!({ declaration }).unwrap()).is_err(),
+            "{declaration}"
+        );
     }
 }

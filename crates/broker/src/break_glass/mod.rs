@@ -170,12 +170,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn no_action_takes_the_zero_wire_value_that_a_default_request_carries() {
-        check!(action_from_wire(0) == None);
-        for value in [-1_i8, 8, 127, -128] {
-            check!(action_from_wire(value) == None, "value {value}");
-        }
+    #[yare::parameterized(
+        default_request = { 0_i8 },
+        below_range = { -1_i8 },
+        above_actions = { 8_i8 },
+        maximum = { 127_i8 },
+        minimum = { -128_i8 },
+    )]
+    fn no_action_takes_the_zero_wire_value_that_a_default_request_carries(value: i8) {
+        check!(action_from_wire(value) == None, "value {value}");
     }
 
     #[test]
@@ -234,17 +237,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_name_that_spells_no_action_reads_back_as_none() {
-        for (label, name) in [
-            ("a plural misspelling", "delete_topics"),
-            ("a hyphenated spelling", "delete-topic"),
-            ("a capitalised spelling", "Delete_Topic"),
-            ("an empty name", ""),
-            ("a name with trailing space", "delete_topic "),
-            ("an invented action", "reformat_cluster"),
-        ] {
-            check!(action_from_name(name).is_none(), "case {label}");
-        }
+    #[yare::parameterized(
+        plural_misspelling = { "a plural misspelling", "delete_topics" },
+        hyphenated_spelling = { "a hyphenated spelling", "delete-topic" },
+        capitalised_spelling = { "a capitalised spelling", "Delete_Topic" },
+        empty_name = { "an empty name", "" },
+        trailing_space = { "a name with trailing space", "delete_topic " },
+        invented_action = { "an invented action", "reformat_cluster" },
+    )]
+    fn a_name_that_spells_no_action_reads_back_as_none(label: &str, name: &str) {
+        check!(action_from_name(name).is_none(), "case {label}");
     }
 }

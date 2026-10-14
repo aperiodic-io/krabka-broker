@@ -595,21 +595,19 @@ mod tests {
     /// `validateTransactionalOffsetCommit` passes a `StaleMemberEpochException`
     /// through at v6 and turns it into `ILLEGAL_GENERATION` below; every other
     /// code is untouched.
-    #[test]
-    fn member_epoch_refusals_map_by_version() {
-        for (code, version, want) in [
-            (codes::STALE_MEMBER_EPOCH, 5, codes::ILLEGAL_GENERATION),
-            (codes::STALE_MEMBER_EPOCH, 6, codes::STALE_MEMBER_EPOCH),
-            (codes::FENCED_MEMBER_EPOCH, 5, codes::FENCED_MEMBER_EPOCH),
-            (codes::UNKNOWN_MEMBER_ID, 5, codes::UNKNOWN_MEMBER_ID),
-            (codes::UNKNOWN_MEMBER_ID, 6, codes::UNKNOWN_MEMBER_ID),
-            (codes::ILLEGAL_GENERATION, 6, codes::ILLEGAL_GENERATION),
-        ] {
-            check!(
-                fencing_code(code, version) == want,
-                "code {code} at v{version}"
-            );
-        }
+    #[yare::parameterized(
+        stale_before_v6 = { codes::STALE_MEMBER_EPOCH, 5, codes::ILLEGAL_GENERATION },
+        stale_at_v6 = { codes::STALE_MEMBER_EPOCH, 6, codes::STALE_MEMBER_EPOCH },
+        fenced_before_v6 = { codes::FENCED_MEMBER_EPOCH, 5, codes::FENCED_MEMBER_EPOCH },
+        unknown_before_v6 = { codes::UNKNOWN_MEMBER_ID, 5, codes::UNKNOWN_MEMBER_ID },
+        unknown_at_v6 = { codes::UNKNOWN_MEMBER_ID, 6, codes::UNKNOWN_MEMBER_ID },
+        illegal_generation_at_v6 = { codes::ILLEGAL_GENERATION, 6, codes::ILLEGAL_GENERATION },
+    )]
+    fn member_epoch_refusals_map_by_version(code: i16, version: i16, want: i16) {
+        check!(
+            fencing_code(code, version) == want,
+            "code {code} at v{version}"
+        );
     }
 
     /// The mark is what makes a later `require_stable` `OffsetFetch` answer

@@ -410,29 +410,27 @@ async fn follower_fetch_needs_cluster_action() {
             topic,
             ..Default::default()
         };
+        let request_at = |offset| {
+            request()
+                .version(fetch_setup.version)
+                .sender(fetch_setup.sender)
+                .topic(fetch_setup.topic)
+                .offset(offset)
+                .call()
+        };
 
         let from_start = fetch(
             &broker,
             row.case.version,
             row.case.caller,
-            &request()
-                .version(fetch_setup.version)
-                .sender(fetch_setup.sender)
-                .topic(fetch_setup.topic)
-                .offset(fetch_setup.offset)
-                .call(),
+            &request_at(fetch_setup.offset),
         )
         .await;
         let from_log_end = fetch(
             &broker,
             row.case.version,
             row.case.caller,
-            &request()
-                .version(fetch_setup.version)
-                .sender(fetch_setup.sender)
-                .topic(fetch_setup.topic)
-                .offset(LOG_END)
-                .call(),
+            &request_at(Offset(LOG_END)),
         )
         .await;
         CaseOutcomes {

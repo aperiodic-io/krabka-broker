@@ -28,11 +28,6 @@ fn trim_composition_boundaries_expose_inherited_frontier_requirement() {
             assert!(result.0 <= frontier && result.1 <= frontier);
         }
     }
-    for requested in [-2, -1, 0, 3, 5, 6] {
-        trim_witnesses::check_logical(DeleteRecordsTrimFacts { requested, ..facts }, 3, 2, &[
-            0, 3, 5, 10, 11,
-        ]);
-    }
     // Snapshot validity preserves historical producer state, even when
     // its last batch is below the new logical start. It is not a data read.
     let historical = ProducerSnapshotEntryFacts {
@@ -47,9 +42,40 @@ fn trim_composition_boundaries_expose_inherited_frontier_requirement() {
     assert!(crate::producer_snapshot::producer_snapshot_entry_valid(
         10, historical
     ));
-    for lag in [-1, 0, 2, 5, 6, i64::MAX] {
-        trim_witnesses::check_physical(5, i64::MAX, lag, 0, 1, &[false, true, true]);
-    }
+}
+
+#[yare::parameterized(
+    below_zero = { -2 },
+    negative = { -1 },
+    current_start = { 0 },
+    interior = { 3 },
+    requested_frontier = { 5 },
+    above_frontier = { 6 },
+)]
+fn logical_trim_witnesses_cover_request_boundaries(requested: i64) {
+    let facts = DeleteRecordsTrimFacts {
+        requested: 5,
+        current_start: 0,
+        high_watermark: 5,
+        log_end: 10,
+        has_delivery_watermark: true,
+        delivery_watermark: 5,
+    };
+    trim_witnesses::check_logical(DeleteRecordsTrimFacts { requested, ..facts }, 3, 2, &[
+        0, 3, 5, 10, 11,
+    ]);
+}
+
+#[yare::parameterized(
+    negative_lag = { -1 },
+    zero_lag = { 0 },
+    two_offsets = { 2 },
+    exact_frontier = { 5 },
+    beyond_frontier = { 6 },
+    maximum_lag = { i64::MAX },
+)]
+fn physical_trim_witnesses_cover_lag_boundaries(lag: i64) {
+    trim_witnesses::check_physical(5, i64::MAX, lag, 0, 1, &[false, true, true]);
 }
 
 #[test]

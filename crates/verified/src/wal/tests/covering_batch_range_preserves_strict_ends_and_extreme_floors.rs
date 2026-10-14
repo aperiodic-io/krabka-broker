@@ -114,24 +114,28 @@ fn exact_wal_range_rejects_every_discontinuity_and_overflow() {
     assert2::assert!(!exact_wal_batch_range(&[4], &[], 4, 5));
 }
 
-#[test]
-fn wal_fetch_admission_fails_closed_and_classifies_epochs() {
+#[yare::parameterized(
+    unauthenticated = { None, 2, 1, 8, WalFetchAdmission::Denied },
+    authenticated_as_other = { Some(3), 2, 1, 8, WalFetchAdmission::Denied },
+    local_not_first = { Some(2), 2, 9, 8, WalFetchAdmission::Denied },
+    claimed_not_voter = { Some(4), 4, 1, 8, WalFetchAdmission::Denied },
+    unspecified_epoch = { Some(2), 2, 1, -1, WalFetchAdmission::Serve },
+    current_epoch = { Some(2), 2, 1, 8, WalFetchAdmission::Serve },
+    epoch_below_zero = { Some(2), 2, 1, 0, WalFetchAdmission::FencedLeaderEpoch },
+    stale_epoch = { Some(2), 2, 1, 7, WalFetchAdmission::FencedLeaderEpoch },
+    future_epoch = { Some(2), 2, 1, 9, WalFetchAdmission::UnknownLeaderEpoch },
+)]
+fn wal_fetch_admission_fails_closed_and_classifies_epochs(
+    authenticated: Option<u64>,
+    claimed: u64,
+    local: u64,
+    epoch: i32,
+    expected: WalFetchAdmission,
+) {
     let voters = [1, 2, 3];
-    for (authenticated, claimed, local, epoch, expected) in [
-        (None, 2, 1, 8, WalFetchAdmission::Denied),
-        (Some(3), 2, 1, 8, WalFetchAdmission::Denied),
-        (Some(2), 2, 9, 8, WalFetchAdmission::Denied),
-        (Some(4), 4, 1, 8, WalFetchAdmission::Denied),
-        (Some(2), 2, 1, -1, WalFetchAdmission::Serve),
-        (Some(2), 2, 1, 8, WalFetchAdmission::Serve),
-        (Some(2), 2, 1, 0, WalFetchAdmission::FencedLeaderEpoch),
-        (Some(2), 2, 1, 7, WalFetchAdmission::FencedLeaderEpoch),
-        (Some(2), 2, 1, 9, WalFetchAdmission::UnknownLeaderEpoch),
-    ] {
-        assert2::assert!(
-            wal_fetch_admission(authenticated, claimed, local, &voters, epoch, 8) == expected
-        );
-    }
+    assert2::assert!(
+        wal_fetch_admission(authenticated, claimed, local, &voters, epoch, 8) == expected
+    );
 }
 
 #[test]

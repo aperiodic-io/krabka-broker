@@ -243,6 +243,12 @@ mod tests {
         }
     }
 
+    fn reopen_and_recover_checkpoint(dir: &std::path::Path, checkpoint: &std::path::Path) -> Log {
+        let mut reopened = Log::open(dir, LogConfig::default()).unwrap();
+        recover_durable_offset(&mut reopened, checkpoint).unwrap();
+        reopened
+    }
+
     #[test]
     fn durable_offset_checkpoint_matches_the_golden_bytes() {
         let range = DurableRange {
@@ -258,38 +264,23 @@ mod tests {
         assert!(decode_durable_offset(GOLDEN_CHECKPOINT) == Ok(range));
     }
 
-    #[test]
-    fn durable_offset_decode_rejects_a_missing_or_unknown_version() {
-        for (name, text, expected) in [
-            (
-                "pre-1.0 checkpoint, offsets on the first line",
-                "3 7\n",
-                DurableOffsetDecodeError::MissingVersion,
-            ),
-            (
-                "future version",
-                "1\n3 7\n",
-                DurableOffsetDecodeError::UnsupportedVersion {
-                    found: "1".to_owned(),
-                },
-            ),
-            (
-                "version that is not a number",
-                "v0\n3 7\n",
-                DurableOffsetDecodeError::UnsupportedVersion {
-                    found: "v0".to_owned(),
-                },
-            ),
-            (
-                "empty file",
-                "",
-                DurableOffsetDecodeError::UnsupportedVersion {
-                    found: String::new(),
-                },
-            ),
-        ] {
-            assert!(decode_durable_offset(text) == Err(expected), "case {name}");
-        }
+    #[yare::parameterized(
+        pre_1_0_checkpoint = { "3 7\n", DurableOffsetDecodeError::MissingVersion },
+        future_version = {
+            "1\n3 7\n",
+            DurableOffsetDecodeError::UnsupportedVersion { found: "1".to_owned() },
+        },
+        non_numeric_version = {
+            "v0\n3 7\n",
+            DurableOffsetDecodeError::UnsupportedVersion { found: "v0".to_owned() },
+        },
+        empty_file = { "", DurableOffsetDecodeError::UnsupportedVersion { found: String::new() } },
+    )]
+    fn durable_offset_decode_rejects_a_missing_or_unknown_version(
+        text: &str,
+        expected: DurableOffsetDecodeError,
+    ) {
+        assert2::assert!(decode_durable_offset(text) == Err(expected));
     }
 
     #[test]
@@ -358,88 +349,91 @@ mod tests {
         assert2::assert!((log.log_end_offset()) == (Offset(2)));
         drop(log);
 
-        let mut reopened = Log::open(dir.path(), LogConfig::default()).unwrap();
-        recover_durable_offset(&mut reopened, &checkpoint).unwrap();
+        let reopened = reopen_and_recover_checkpoint(dir.path(), &checkpoint);
 
         assert2::assert!((reopened.log_end_offset()) == (Offset(1)));
         assert2::assert!((std::fs::read_to_string(checkpoint).unwrap()) == ("0\n0 1\n"));
     }
 
-    #[test]
-    fn follower_checkpoint_recovery_respects_whole_batches_and_interior_floors() {
-        for (value, accepted, expected_start, expected_end) in [
-            (Some("0\n0 1\n"), false, 0, 3),
-            (Some("0\n1 2\n"), false, 0, 3),
-            (Some("0\n1 3\n"), true, 1, 3),
-            (Some("0\n1 1\n"), true, 1, 1),
-            (None, true, 1, 1),
-        ] {
-            let CheckpointLog {
-                dir,
-                checkpoint,
-                mut log,
-            } = checkpoint_log(RecordCount(3));
-            if let Some(value) = value {
-                std::fs::write(&checkpoint, value).unwrap();
-            } else {
-                log.trim_to_offset(Offset(1)).unwrap();
-            }
-            log.sync().unwrap();
-            let before = log
-                .read_raw(log.log_start_offset(), Offset(3), krabka_units::bytes(1))
-                .unwrap()
-                .bytes;
+    #[yare::parameterized(
+        floor_before_first_whole_batch = { Some("0\n0 1\n"), false, 0, 3 },
+        floor_inside_second_batch = { Some("0\n1 2\n"), false, 0, 3 },
+        floor_at_second_batch = { Some("0\n1 3\n"), true, 1, 3 },
+        checkpoint_end_before_log_end = { Some("0\n1 1\n"), true, 1, 1 },
+        missing_checkpoint_uses_log_start = { None, true, 1, 1 },
+    )]
+    fn follower_checkpoint_recovery_respects_whole_batches_and_interior_floors(
+        value: Option<&str>,
+        accepted: bool,
+        expected_start: i64,
+        expected_end: i64,
+    ) {
+        let CheckpointLog {
+            dir,
+            checkpoint,
+            mut log,
+        } = checkpoint_log(RecordCount(3));
+        if let Some(value) = value {
+            std::fs::write(&checkpoint, value).unwrap();
+        } else {
+            log.trim_to_offset(Offset(1)).unwrap();
+        }
+        log.sync().unwrap();
+        let before = log
+            .read_raw(log.log_start_offset(), Offset(3), krabka_units::bytes(1))
+            .unwrap()
+            .bytes;
 
-            assert!(
-                recover_durable_offset(&mut log, &checkpoint).is_ok() == accepted,
-                "checkpoint {value:?}"
+        assert2::assert!(
+            recover_durable_offset(&mut log, &checkpoint).is_ok() == accepted,
+            "checkpoint {value:?}"
+        );
+        assert2::assert!(log.log_start_offset() == Offset(expected_start));
+        assert2::assert!(log.log_end_offset() == Offset(expected_end));
+        if accepted {
+            drop(log);
+            let reopened = reopen_and_recover_checkpoint(dir.path(), &checkpoint);
+            assert2::assert!(reopened.log_start_offset() == Offset(expected_start));
+            assert2::assert!(reopened.log_end_offset() == Offset(expected_end));
+        } else {
+            assert2::assert!(
+                log.read_raw(Offset(0), Offset(3), krabka_units::bytes(1))
+                    .unwrap()
+                    .bytes
+                    == before
             );
-            assert!(log.log_start_offset() == Offset(expected_start));
-            assert!(log.log_end_offset() == Offset(expected_end));
-            if accepted {
-                drop(log);
-                let mut reopened = Log::open(dir.path(), LogConfig::default()).unwrap();
-                recover_durable_offset(&mut reopened, &checkpoint).unwrap();
-                assert!(reopened.log_start_offset() == Offset(expected_start));
-                assert!(reopened.log_end_offset() == Offset(expected_end));
-            } else {
-                assert!(
-                    log.read_raw(Offset(0), Offset(3), krabka_units::bytes(1))
-                        .unwrap()
-                        .bytes
-                        == before
-                );
-                assert!(std::fs::read_to_string(&checkpoint).unwrap() == value.unwrap());
-            }
+            let actual = std::fs::read_to_string(&checkpoint).unwrap();
+            assert2::assert!(Some(actual.as_str()) == value);
         }
     }
 
-    #[test]
-    fn follower_recovery_rejects_incomplete_and_invalid_durable_ranges() {
-        for (checkpoint_value, expected_error) in [
-            ("0\n1\n", "expected two offsets"),
-            ("0\n-1 0\n", "outside recovered range"),
-            ("0\n1 0\n", "outside recovered range"),
-            ("0\n0 2\n", "outside recovered range"),
-            ("0 1\n", "predates krabka 1.0"),
-            ("1\n0 1\n", "unsupported checkpoint version \"1\""),
-        ] {
-            let CheckpointLog {
-                dir: _dir,
-                checkpoint,
-                mut log,
-            } = checkpoint_log(RecordCount(1));
-            log.sync().unwrap();
-            std::fs::write(&checkpoint, checkpoint_value).unwrap();
+    #[yare::parameterized(
+        incomplete_offsets = { "0\n1\n", "expected two offsets" },
+        negative_start = { "0\n-1 0\n", "outside recovered range" },
+        end_before_start = { "0\n1 0\n", "outside recovered range" },
+        end_after_recovery = { "0\n0 2\n", "outside recovered range" },
+        legacy_one_line = { "0 1\n", "predates krabka 1.0" },
+        unknown_version = { "1\n0 1\n", "unsupported checkpoint version \"1\"" },
+    )]
+    fn follower_recovery_rejects_incomplete_and_invalid_durable_ranges(
+        checkpoint_value: &str,
+        expected_error: &str,
+    ) {
+        let CheckpointLog {
+            dir: _dir,
+            checkpoint,
+            mut log,
+        } = checkpoint_log(RecordCount(1));
+        log.sync().unwrap();
+        std::fs::write(&checkpoint, checkpoint_value).unwrap();
 
-            let error = recover_durable_offset(&mut log, &checkpoint).unwrap_err();
+        let error = recover_durable_offset(&mut log, &checkpoint).unwrap_err();
 
-            assert!(
-                error.to_string().contains(expected_error),
-                "checkpoint {checkpoint_value:?}: {error}"
-            );
-            assert!(log.log_start_offset() == Offset(0));
-            assert!(log.log_end_offset() == Offset(1));
-        }
+        assert2::assert!(
+            error.to_string().contains(expected_error),
+            "checkpoint {checkpoint_value:?}: {error}"
+        );
+        assert2::assert!(log.log_start_offset() == Offset(0));
+        assert2::assert!(log.log_end_offset() == Offset(1));
     }
 }

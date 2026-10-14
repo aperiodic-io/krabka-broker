@@ -361,31 +361,34 @@ mod tests {
         check!(message.contains("error sending request"), "{message}");
     }
 
-    #[tokio::test]
-    async fn control_plane_retries_transient_statuses_only_within_the_attempt_budget() {
-        for (max_retries, statuses, succeeds) in [
-            (0, vec!["503 Service Unavailable"], false),
-            (1, vec!["503 Service Unavailable", "200 OK"], true),
-            (2, vec!["403 Forbidden"], false),
-            (1, vec!["429 Too Many Requests", "200 OK"], true),
-        ] {
-            let pages = statuses
-                .into_iter()
-                .map(|status| HttpPage::new("GET / HTTP/1.1", status, "result"))
-                .collect();
-            let HttpServer { endpoint, server } = serve_http_pages(pages, false).await;
-            let result = read_ok_body(
-                reqwest::Client::new().get(endpoint),
-                "test control-plane",
-                &RetryConfig {
-                    max_retries,
-                    ..RetryConfig::default()
-                },
-            )
-            .await;
-            check!(result.is_ok() == succeeds);
-            server.await.unwrap();
-        }
+    #[yare::parameterized(
+        no_retries = { 0, vec!["503 Service Unavailable"], false },
+        retry_503 = { 1, vec!["503 Service Unavailable", "200 OK"], true },
+        no_retry_forbidden = { 2, vec!["403 Forbidden"], false },
+        retry_rate_limit = { 1, vec!["429 Too Many Requests", "200 OK"], true },
+    )]
+    #[test_macro(tokio::test)]
+    async fn control_plane_retries_transient_statuses_only_within_the_attempt_budget(
+        max_retries: usize,
+        statuses: Vec<&str>,
+        succeeds: bool,
+    ) {
+        let pages = statuses
+            .into_iter()
+            .map(|status| HttpPage::new("GET / HTTP/1.1", status, "result"))
+            .collect();
+        let HttpServer { endpoint, server } = serve_http_pages(pages, false).await;
+        let result = read_ok_body(
+            reqwest::Client::new().get(endpoint),
+            "test control-plane",
+            &RetryConfig {
+                max_retries,
+                ..RetryConfig::default()
+            },
+        )
+        .await;
+        check!(result.is_ok() == succeeds);
+        server.await.unwrap();
     }
 
     #[tokio::test]

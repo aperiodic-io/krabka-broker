@@ -329,29 +329,31 @@ mod tests {
         check!(GroupOffsetsFile::default().version == GROUP_OFFSETS_VERSION);
     }
 
-    #[test]
-    fn an_offsets_file_with_a_missing_or_unknown_version_is_refused() {
-        for (name, json, found) in [
-            ("pre-1.0 offsets file", r#"{"groups":[]}"#, None),
-            ("future version", r#"{"version":1,"groups":[]}"#, Some("1")),
-            (
-                "version that is not a number",
-                r#"{"version":"0","groups":[]}"#,
-                Some("\"0\""),
-            ),
-        ] {
-            let error = GroupOffsetsFile::from_slice(json.as_bytes(), "group-offsets.json")
-                .expect_err(name);
-            assert2::assert!(
-                let BackupError::UnsupportedVersion {
-                    found: actual,
-                    expected: GROUP_OFFSETS_VERSION,
-                    ..
-                } = &error,
-                "case {name}: {error}"
-            );
-            check!(actual.as_deref() == found, "case {name}");
-        }
+    #[yare::parameterized(
+        pre_1_0 = { "pre-1.0 offsets file", r#"{"groups":[]}"#, None },
+        future = { "future version", r#"{"version":1,"groups":[]}"#, Some("1") },
+        non_numeric = {
+            "version that is not a number",
+            r#"{"version":"0","groups":[]}"#,
+            Some("\"0\""),
+        },
+    )]
+    fn an_offsets_file_with_a_missing_or_unknown_version_is_refused(
+        name: &str,
+        json: &str,
+        found: Option<&str>,
+    ) {
+        let error =
+            GroupOffsetsFile::from_slice(json.as_bytes(), "group-offsets.json").expect_err(name);
+        assert2::assert!(
+            let BackupError::UnsupportedVersion {
+                found: actual,
+                expected: GROUP_OFFSETS_VERSION,
+                ..
+            } = &error,
+            "case {name}: {error}"
+        );
+        check!(actual.as_deref() == found, "case {name}");
     }
 
     #[test]

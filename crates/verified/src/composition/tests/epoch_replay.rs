@@ -182,16 +182,6 @@ fn resolved_epoch_replay_covers_gaps_pruned_floors_and_signed_extremes() {
     }
     let cut_below_logical_floor = FetchWatermarks { log_start: 60, ..w };
     check_replay(&rows, 3, 0, cut_below_logical_floor, &[50, 80], 10);
-    for malformed in [
-        std::vec![(5, 10), (2, 20)],
-        std::vec![(2, 10), (2, 20)],
-        std::vec![(2, 10), (5, 10)],
-        std::vec![(-1, 10)],
-        std::vec![(2, -1)],
-        std::vec![(2, 101)],
-    ] {
-        check_replay(&malformed, 2, 0, w, &[50], 0);
-    }
     let maximum = FetchWatermarks {
         log_start: i64::MAX - 1,
         log_end: i64::MAX,
@@ -207,4 +197,23 @@ fn resolved_epoch_replay_covers_gaps_pruned_floors_and_signed_extremes() {
         &[i64::MAX, i64::MAX],
         i64::MAX,
     );
+}
+
+#[yare::parameterized(
+    descending_epochs = { &[(5, 10), (2, 20)][..] },
+    repeated_epoch = { &[(2, 10), (2, 20)][..] },
+    repeated_start = { &[(2, 10), (5, 10)][..] },
+    negative_epoch = { &[(-1, 10)][..] },
+    negative_start = { &[(2, -1)][..] },
+    start_past_end = { &[(2, 101)][..] },
+)]
+fn malformed_epoch_history_is_rejected(rows: &[(i32, i64)]) {
+    let w = FetchWatermarks {
+        log_start: 0,
+        log_end: 100,
+        hw: 99,
+        lso: 98,
+        deliverable: 97,
+    };
+    check_replay(rows, 2, 0, w, &[50], 0);
 }

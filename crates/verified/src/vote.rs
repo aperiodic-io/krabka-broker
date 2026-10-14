@@ -168,66 +168,96 @@ pub fn vote_admission_decision(
 mod tests {
     use {super::*, assert2::check};
 
-    #[test]
-    fn wire_fields_reject_negatives_without_rejecting_zero() {
-        use VoteWireDecision::{Accept, Reject};
-
-        for (voter, candidate, epoch, last_epoch, expected) in [
-            (0, 0, 0, 0, Accept),
-            (-1, 0, 0, 0, Reject),
-            (0, -1, 0, 0, Reject),
-            (0, 0, -1, 0, Reject),
-            (0, 0, 0, -1, Reject),
-        ] {
-            check!(vote_wire_decision(voter, candidate, epoch, last_epoch) == expected);
-        }
+    #[yare::parameterized(
+        zeroes = { 0, 0, 0, 0, VoteWireDecision::Accept },
+        negative_voter = { -1, 0, 0, 0, VoteWireDecision::Reject },
+        negative_candidate = { 0, -1, 0, 0, VoteWireDecision::Reject },
+        negative_epoch = { 0, 0, -1, 0, VoteWireDecision::Reject },
+        negative_last_epoch = { 0, 0, 0, -1, VoteWireDecision::Reject },
+    )]
+    fn wire_fields_reject_negatives_without_rejecting_zero(
+        voter: i32,
+        candidate: i32,
+        epoch: i32,
+        last_epoch: i32,
+        expected: VoteWireDecision,
+    ) {
+        check!(vote_wire_decision(voter, candidate, epoch, last_epoch) == expected);
     }
 
-    #[test]
-    fn encode_fields_reject_values_above_signed_wire_maximum() {
-        use VoteEncodeDecision::{Accept, Reject};
-
-        let max_id = 2_147_483_647_u64;
-        let max_epoch = 2_147_483_647_u32;
-        for (voter, candidate, epoch, last_epoch, expected) in [
-            (max_id, max_id, max_epoch, max_epoch, Accept),
-            (max_id + 1, 0, 0, 0, Reject),
-            (0, max_id + 1, 0, 0, Reject),
-            (0, 0, max_epoch + 1, 0, Reject),
-            (0, 0, 0, max_epoch + 1, Reject),
-        ] {
-            check!(vote_encode_decision(voter, candidate, epoch, last_epoch) == expected);
-        }
+    #[yare::parameterized(
+        signed_maximum = {
+            i32::MAX as u64,
+            i32::MAX as u64,
+            i32::MAX as u32,
+            i32::MAX as u32,
+            VoteEncodeDecision::Accept,
+        },
+        voter_overflow = { i32::MAX as u64 + 1, 0, 0, 0, VoteEncodeDecision::Reject },
+        candidate_overflow = { 0, i32::MAX as u64 + 1, 0, 0, VoteEncodeDecision::Reject },
+        epoch_overflow = { 0, 0, i32::MAX as u32 + 1, 0, VoteEncodeDecision::Reject },
+        last_epoch_overflow = { 0, 0, 0, i32::MAX as u32 + 1, VoteEncodeDecision::Reject },
+    )]
+    fn encode_fields_reject_values_above_signed_wire_maximum(
+        voter: u64,
+        candidate: u64,
+        epoch: u32,
+        last_epoch: u32,
+        expected: VoteEncodeDecision,
+    ) {
+        check!(vote_encode_decision(voter, candidate, epoch, last_epoch) == expected);
     }
 
-    #[test]
-    fn admission_requires_the_exact_target_and_both_memberships() {
-        use VoteAdmissionDecision::{Consider, Deny, IgnoreWrongTarget};
-
-        for (target, local, target_dir, cluster, local_voter, candidate_voter, expected) in [
-            (1, 2, true, true, true, true, IgnoreWrongTarget),
-            (0, 1, true, true, true, true, IgnoreWrongTarget),
-            (1, 1, false, true, true, true, IgnoreWrongTarget),
-            (0, 0, true, true, true, true, Consider),
-            (1, 1, true, false, true, true, Deny),
-            (1, 1, true, true, false, true, Deny),
-            (1, 1, true, true, true, false, Deny),
-            (1, 1, true, true, true, true, Consider),
-        ] {
-            let target = VoteTarget {
-                voter_id: target,
-                local_id: local,
-                directory_matches: target_dir,
-            };
-            let membership = VoteMembership {
-                cluster_matches: cluster,
-                local_is_voter: local_voter,
-                candidate_is_voter: candidate_voter,
-            };
-            check!(
-                vote_admission_decision(target, membership) == expected,
-                "{target:?} {membership:?}"
-            );
-        }
+    #[yare::parameterized(
+        other_voter = {
+            VoteTarget { voter_id: 1, local_id: 2, directory_matches: true },
+            VoteMembership { cluster_matches: true, local_is_voter: true, candidate_is_voter: true },
+            VoteAdmissionDecision::IgnoreWrongTarget,
+        },
+        zero_other_voter = {
+            VoteTarget { voter_id: 0, local_id: 1, directory_matches: true },
+            VoteMembership { cluster_matches: true, local_is_voter: true, candidate_is_voter: true },
+            VoteAdmissionDecision::IgnoreWrongTarget,
+        },
+        directory_mismatch = {
+            VoteTarget { voter_id: 1, local_id: 1, directory_matches: false },
+            VoteMembership { cluster_matches: true, local_is_voter: true, candidate_is_voter: true },
+            VoteAdmissionDecision::IgnoreWrongTarget,
+        },
+        exact_target = {
+            VoteTarget { voter_id: 0, local_id: 0, directory_matches: true },
+            VoteMembership { cluster_matches: true, local_is_voter: true, candidate_is_voter: true },
+            VoteAdmissionDecision::Consider,
+        },
+        cluster_mismatch = {
+            VoteTarget { voter_id: 1, local_id: 1, directory_matches: true },
+            VoteMembership { cluster_matches: false, local_is_voter: true, candidate_is_voter: true },
+            VoteAdmissionDecision::Deny,
+        },
+        local_not_voter = {
+            VoteTarget { voter_id: 1, local_id: 1, directory_matches: true },
+            VoteMembership { cluster_matches: true, local_is_voter: false, candidate_is_voter: true },
+            VoteAdmissionDecision::Deny,
+        },
+        candidate_not_voter = {
+            VoteTarget { voter_id: 1, local_id: 1, directory_matches: true },
+            VoteMembership { cluster_matches: true, local_is_voter: true, candidate_is_voter: false },
+            VoteAdmissionDecision::Deny,
+        },
+        valid_nonzero_target = {
+            VoteTarget { voter_id: 1, local_id: 1, directory_matches: true },
+            VoteMembership { cluster_matches: true, local_is_voter: true, candidate_is_voter: true },
+            VoteAdmissionDecision::Consider,
+        },
+    )]
+    fn admission_requires_the_exact_target_and_both_memberships(
+        target: VoteTarget,
+        membership: VoteMembership,
+        expected: VoteAdmissionDecision,
+    ) {
+        check!(
+            vote_admission_decision(target, membership) == expected,
+            "{target:?} {membership:?}"
+        );
     }
 }

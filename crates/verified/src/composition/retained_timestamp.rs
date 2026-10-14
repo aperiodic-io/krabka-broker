@@ -1,5 +1,3 @@
-#[cfg(creusot)]
-use super::time_index::sparse_timestamp_window_valid;
 use {
     super::{
         ConstructedTimeIndex, SparseTimestampWindow, constructed_time_index_preserves_first,
@@ -12,8 +10,7 @@ use {
 /// Preserve original record indices and exclude every earlier retained match,
 /// even when a pruned record matches first or timestamps regress later.
 /// Complete faithful decoding and coherent retained floors remain external.
-#[requires(sparse_timestamp_window_valid(window.0@, window.1@, window.2@))]
-#[requires(base@ >= 0 && minimum@ >= 0)]
+#[krabka_macros::retained_timestamp_bounds(minimum)]
 #[requires(forall<i: Int> 0 <= i && i < window.0@.len() ==> base@ + window.0@[i]@ <= i64::MAX@)]
 #[ensures(match result {
     None => forall<i: Int> 0 <= i && i < window.0@.len()

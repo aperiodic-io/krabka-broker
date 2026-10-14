@@ -1,8 +1,6 @@
 //! `DescribeClientQuotas` (`api_key` 48, KIP-13/124).
 
 #[cfg(test)]
-use crate::authorizer::SimpleAclAuthorizer;
-#[cfg(test)]
 use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::acl_wire::CLUSTER_RESOURCE_NAME,
@@ -330,9 +328,12 @@ mod tests {
         test_context ["admin-client"];
     }
 
-    use crate::test_support::{
-        describe_configs_acl_cases, grant_optional_cluster_operation,
-        start_broker_with_authorizer_no_audit as start_broker,
+    use crate::{
+        handlers::test_support::start_empty_acl_broker,
+        test_support::{
+            describe_configs_acl_cases, grant_optional_cluster_operation,
+            start_broker_with_authorizer_no_audit as start_broker,
+        },
     };
 
     async fn seed_quota(handle: &BrokerHandle, setup: QuotaRecordSetup<'_>) {
@@ -507,10 +508,7 @@ mod tests {
         let HandlerStartedBroker {
             broker: broker_handle,
             dir: _dir,
-        } = start_broker(Arc::new(SimpleAclAuthorizer::new(
-            std::collections::HashSet::new(),
-        )))
-        .await;
+        } = start_empty_acl_broker().await;
         seed_alice_quota(&broker_handle).await;
         let broker = broker_handle.broker_arc_for_test();
         let allowed = allowed_user_quota_response(Some("alice"), 1024.0);

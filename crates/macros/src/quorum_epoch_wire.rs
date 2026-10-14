@@ -198,18 +198,20 @@ mod tests {
     };
 
     #[test]
-    fn request_list_keeps_order_and_rejects_nonconcrete_or_repeated_types() {
+    fn request_list_keeps_order() {
         let output =
             compact(&requests(&"trait QuorumEpochRequest; Begin, End".parse().unwrap()).unwrap());
         assert!(output.find("forBegin").unwrap() < output.find("forEnd").unwrap());
-        for input in [
-            "trait QuorumEpochRequest;",
-            "trait QuorumEpochRequest; Begin, Begin",
-            "trait QuorumEpochRequest; Begin<T>",
-            "trait QuorumEpochRequest; Begin + End",
-        ] {
-            assert!(requests(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    }
+
+    #[yare::parameterized(
+        no_targets = { "trait QuorumEpochRequest;" },
+        repeated_target = { "trait QuorumEpochRequest; Begin, Begin" },
+        generic_target = { "trait QuorumEpochRequest; Begin<T>" },
+        non_path_target = { "trait QuorumEpochRequest; Begin + End" },
+    )]
+    fn request_list_rejects_nonconcrete_or_repeated_types(input: &str) {
+        assert2::assert!(requests(&input.parse().unwrap()).is_err(), "{input}");
     }
 
     #[test]

@@ -161,8 +161,8 @@ mod tests {
         super::*,
         crate::{
             core::test_support::{
-                FakeLog, MachineAndLog, MachineLogAndActions, check_prevote_started, machine,
-                three_voter_machine, voters,
+                FakeLog, MachineAndLog, MachineLogAndActions, adjacent_voter_machine,
+                check_prevote_started, machine, three_voter_machine, voters,
             },
             event::Event,
         },
@@ -257,8 +257,7 @@ mod tests {
     fn begin_quorum_epoch_from_adjacent_voter_view_is_accepted() {
         // KIP-853: a newly elected leader may be absent from our temporarily
         // stale local voter view. Adopt the higher epoch and fetch its log.
-        let mut m = three_voter_machine();
-        let _ = m.apply_voter_set(voters(&[NodeId(1), NodeId(2), NodeId(99)]), SimInstant(0));
+        let mut m = adjacent_voter_machine();
         let log = FakeLog::new(5, 1);
         let actions = m.on_event(
             Event::ReceiveBeginQuorumEpoch {
@@ -301,29 +300,31 @@ mod tests {
     }
 
     /// Kafka's `strictExponentialElectionBackoffMs` with a 1000 ms maximum.
-    #[test]
-    fn end_epoch_election_backoff_follows_the_candidate_position() {
-        for (position, successors, want) in [
-            (0, 0, 0),
-            (0, 3, 0),
-            (1, 3, 250),
-            (2, 3, 500),
-            (1, 2, 500),
-            (3, 3, 1000),
-            (2, 0, 1000),
-            (1, 11, 0),
-        ] {
-            check!(
-                end_epoch_election_backoff_ms(
-                    SuccessorRank {
-                        position,
-                        successors
-                    },
-                    1000
-                ) == want,
-                "position {position} of {successors}"
-            );
-        }
+    #[yare::parameterized(
+        no_successors = { 0, 0, 0 },
+        first_of_three = { 0, 3, 0 },
+        second_of_three = { 1, 3, 250 },
+        third_of_three = { 2, 3, 500 },
+        second_of_two = { 1, 2, 500 },
+        last_of_three = { 3, 3, 1000 },
+        missing_from_list = { 2, 0, 1000 },
+        beyond_backoff_cap = { 1, 11, 0 },
+    )]
+    fn end_epoch_election_backoff_follows_the_candidate_position(
+        position: u32,
+        successors: u32,
+        want: u64,
+    ) {
+        check!(
+            end_epoch_election_backoff_ms(
+                SuccessorRank {
+                    position,
+                    successors
+                },
+                1000
+            ) == want,
+            "position {position} of {successors}"
+        );
     }
 
     /// A voter that is not the first preferred candidate waits for the backoff

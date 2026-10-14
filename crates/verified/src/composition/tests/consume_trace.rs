@@ -1,4 +1,4 @@
-use {super::*, std::vec};
+use super::*;
 
 fn rational_trace(
     initial: (u64, u64, u64),
@@ -61,65 +61,65 @@ proptest! {
     }
 }
 
-#[test]
-fn trace_conservation_covers_spending_fractional_credit_and_cap_loss() {
-    for (initial, start, steps, rate, burst, units, expected) in [
-        (
-            (0, 0, 0),
-            0,
-            vec![(1, 10), (1, 10), (2, 10)],
-            1_500_000_000,
-            10,
-            1,
-            (3, (0, 0, 0, 2), 0),
+#[yare::parameterized(
+    fractional_credit_and_spending = {
+        (0, 0, 0),
+        0,
+        &[(1, 10), (1, 10), (2, 10)],
+        1_500_000_000,
+        10,
+        1,
+        (3, (0, 0, 0, 2), 0),
+    },
+    cap_loss = {
+        (0, 0, 0),
+        0,
+        &[(1, 10), (2, 10)],
+        1_500_000_000,
+        1,
+        1,
+        (2, (0, 0, 0, 2), 1_000_000_000),
+    },
+    debt_and_repeated_clock = {
+        (0, 7, 0),
+        0,
+        &[(3, 10), (3, 10), (2, 10), (6, 10)],
+        1_500_000_000,
+        10,
+        2,
+        (1, (0, 0, 0, 6), 0),
+    },
+    empty_trace_preserves_initial_fraction = {
+        (5, 0, 500_000_000),
+        7,
+        &[],
+        u64::MAX,
+        10,
+        2,
+        (0, (5, 0, 500_000_000, 7), 0),
+    },
+    saturating_elapsed = {
+        (0, u64::MAX, 0),
+        0,
+        &[(u64::MAX, u64::MAX), (0, u64::MAX)],
+        u64::MAX, u64::MAX, u64::MAX,
+        rational_trace(
+            (0, u64::MAX, 0), 0, &[(u64::MAX, u64::MAX), (0, u64::MAX)],
+            u64::MAX, u64::MAX, u64::MAX,
         ),
-        (
-            (0, 0, 0),
-            0,
-            vec![(1, 10), (2, 10)],
-            1_500_000_000,
-            1,
-            1,
-            (2, (0, 0, 0, 2), 1_000_000_000),
-        ),
-        (
-            (0, 7, 0),
-            0,
-            vec![(3, 10), (3, 10), (2, 10), (6, 10)],
-            1_500_000_000,
-            10,
-            2,
-            (1, (0, 0, 0, 6), 0),
-        ),
-        (
-            (5, 0, 500_000_000),
-            7,
-            vec![],
-            u64::MAX,
-            10,
-            2,
-            (0, (5, 0, 500_000_000, 7), 0),
-        ),
-        (
-            (0, u64::MAX, 0),
-            0,
-            vec![(u64::MAX, u64::MAX), (0, u64::MAX)],
-            u64::MAX,
-            u64::MAX,
-            u64::MAX,
-            rational_trace(
-                (0, u64::MAX, 0),
-                0,
-                &[(u64::MAX, u64::MAX), (0, u64::MAX)],
-                u64::MAX,
-                u64::MAX,
-                u64::MAX,
-            ),
-        ),
-    ] {
-        assert2::assert!(
-            metered_consumes_conserve_elapsed_credit(initial, start, &steps, rate, burst, units)
-                == expected
-        );
-    }
+    },
+)]
+fn trace_conservation_covers_spending_fractional_credit_and_cap_loss(
+    initial: (u64, u64, u64),
+    start: u64,
+    steps: &[(u64, u64)],
+    rate: u64,
+    burst: u64,
+    units: u64,
+    expected: (u128, (u64, u64, u64, u64), u128),
+) {
+    assert2::assert!(
+        metered_consumes_conserve_elapsed_credit(initial, start, steps, rate, burst, units)
+            == expected
+    );
 }

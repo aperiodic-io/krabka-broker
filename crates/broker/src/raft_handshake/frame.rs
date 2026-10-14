@@ -374,28 +374,30 @@ mod tests {
     /// a reader that tried to fill the frame would fail with an I/O error. The
     /// limit is inclusive, and a prefix that reads as a negative Kafka int is
     /// over it.
-    #[tokio::test]
-    async fn read_kafka_request_refuses_a_frame_over_the_sasl_receive_limit() {
-        for (size, refused) in [
-            (4096_u32, false),
-            (4097, true),
-            (u32::MAX, true),
-            (i32::MIN.cast_unsigned(), true),
-        ] {
-            let (mut client, mut server) = tokio::io::duplex(64);
-            client
-                .write_all(&size.to_be_bytes())
-                .await
-                .expect("write the size prefix");
-            // Closing the writer ends the stream, so a reader that goes on to
-            // fill an admitted frame fails at once instead of waiting.
-            drop(client);
-            let got = read_kafka_request(&mut server, 4096).await;
-            assert!(
-                matches!(got, Err(RaftHandshakeError::Sasl(_))) == refused,
-                "a {size}-byte frame: {got:?}"
-            );
-        }
+    #[yare::parameterized(
+        exact_limit = { 4096_u32, false },
+        one_over_limit = { 4097, true },
+        maximum_u32 = { u32::MAX, true },
+        negative_kafka_length = { i32::MIN.cast_unsigned(), true },
+    )]
+    #[test_macro(tokio::test)]
+    async fn read_kafka_request_refuses_a_frame_over_the_sasl_receive_limit(
+        size: u32,
+        refused: bool,
+    ) {
+        let (mut client, mut server) = tokio::io::duplex(64);
+        client
+            .write_all(&size.to_be_bytes())
+            .await
+            .expect("write the size prefix");
+        // Closing the writer ends the stream, so a reader that goes on to
+        // fill an admitted frame fails at once instead of waiting.
+        drop(client);
+        let got = read_kafka_request(&mut server, 4096).await;
+        assert2::assert!(
+            matches!(got, Err(RaftHandshakeError::Sasl(_))) == refused,
+            "a {size}-byte frame: {got:?}"
+        );
     }
 
     #[tokio::test]

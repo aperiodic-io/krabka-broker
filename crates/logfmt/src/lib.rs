@@ -210,8 +210,14 @@ mod tests {
         serde_json::from_str(line).expect("each log line is valid JSON")
     }
 
-    #[test]
-    fn emits_cloud_logging_json() {
+    #[yare::parameterized(
+        severity = { "severity", serde_json::json!("INFO") },
+        message = { "message", serde_json::json!("connection opened") },
+        listener = { "listener", serde_json::json!("PLAIN") },
+        sasl = { "sasl", serde_json::json!(false) },
+        port = { "port", serde_json::json!(9092) },
+    )]
+    fn emits_cloud_logging_json(field: &str, want: serde_json::Value) {
         let v = capture(|| {
             tracing::info!(
                 listener = "PLAIN",
@@ -221,15 +227,7 @@ mod tests {
             );
         });
         // Field types are preserved, not stringified.
-        for (field, want) in [
-            ("severity", serde_json::json!("INFO")),
-            ("message", serde_json::json!("connection opened")),
-            ("listener", serde_json::json!("PLAIN")),
-            ("sasl", serde_json::json!(false)),
-            ("port", serde_json::json!(9092)),
-        ] {
-            assert2::assert!(v[field] == want);
-        }
+        assert2::assert!(v[field] == want);
         check!(v["target"].is_string());
         check!(v["timestamp"].as_str().is_some_and(|t| t.ends_with('Z')));
         // `level` is replaced by Cloud Logging's `severity`.

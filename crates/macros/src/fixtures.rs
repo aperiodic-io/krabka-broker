@@ -302,6 +302,21 @@ pub(crate) fn share_dlq_meters(tokens: TokenStream) -> Result<TokenStream, Parse
     })
 }
 
+pub(crate) fn record_batch_records(
+    count: &TokenStream,
+    fields: &TokenStream,
+    value: &TokenStream,
+) -> TokenStream {
+    moxy::template! {
+        records: (0..{{ count }}).map(|offset_delta| ::krabka_protocol::records::Record {
+            offset_delta,
+            {{ fields }}
+            value: Some({{ value }}),
+            ..Default::default()
+        }).collect(),
+    }
+}
+
 pub(crate) fn record_batch(tokens: TokenStream) -> Result<TokenStream, ParseError> {
     let mut args = arguments(tokens.clone(), 1)
         .or_else(|_| arguments(tokens, 2))?
@@ -315,17 +330,19 @@ pub(crate) fn record_batch(tokens: TokenStream) -> Result<TokenStream, ParseErro
     } else {
         (TokenStream::new(), moxy::template! { (n - 1).max(0) })
     };
+    let records = record_batch_records(
+        &moxy::template! { n },
+        &moxy::template! {
+            key: Some(::bytes::Bytes::from(format!("k{offset_delta:08}"))),
+        },
+        &moxy::template! { ::bytes::Bytes::from(vec![0xABu8; payload_size]) },
+    );
     Ok(moxy::template! {
         fn {{ name }}(n: i32, payload_size: usize) -> ::krabka_protocol::records::RecordBatch {
             ::krabka_protocol::records::RecordBatch {
                 {{ epoch_field }}
                 last_offset_delta: {{ last_offset }},
-                records: (0..n).map(|offset_delta| ::krabka_protocol::records::Record {
-                    offset_delta,
-                    key: Some(::bytes::Bytes::from(format!("k{offset_delta:08}"))),
-                    value: Some(::bytes::Bytes::from(vec![0xABu8; payload_size])),
-                    ..Default::default()
-                }).collect(),
+                {{ records }}
                 ..Default::default()
             }
         }

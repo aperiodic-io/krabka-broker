@@ -118,8 +118,19 @@ async fn api_version_wire(broker: &Broker, context: &RequestContext<'_>) -> ApiV
 /// - `InitProducerId`: v6 is `latestVersionUnstable`, and `ApiVersions` v5 is
 ///   Kafka trunk's, so both are advertised only under
 ///   `unstable.api.versions.enable` (#646, #784).
-#[test]
-fn api_versions_advertises_the_deliberate_ranges() {
+#[yare::parameterized(
+    stable = { false, false, 4, 1, 4, 5 },
+    unstable = { true, false, 4, 1, 5, 6 },
+    legacy = { false, true, 0, 0, 4, 5 },
+)]
+fn api_versions_advertises_the_deliberate_ranges(
+    unstable_enabled: bool,
+    legacy_enabled: bool,
+    api_1_min: i16,
+    api_2_min: i16,
+    api_18_max: i16,
+    api_22_max: i16,
+) {
     use {
         crate::api_catalog::{LegacyRequestVersions, UnstableApiVersions, VersionGates},
         krabka_protocol::owned::api_versions_response::ApiVersion,
@@ -131,55 +142,31 @@ fn api_versions_advertises_the_deliberate_ranges() {
         max_version,
         ..Default::default()
     };
-    let gates = |unstable, legacy| VersionGates { unstable, legacy };
-    for (gates, expected) in [
-        (
-            gates(
-                UnstableApiVersions::Disabled,
-                LegacyRequestVersions::Disabled,
-            ),
-            vec![
-                row(0, 0, 13),
-                row(1, 4, 18),
-                row(2, 1, 11),
-                row(18, 0, 4),
-                row(22, 0, 5),
-            ],
-        ),
-        (
-            gates(
-                UnstableApiVersions::Enabled,
-                LegacyRequestVersions::Disabled,
-            ),
-            vec![
-                row(0, 0, 13),
-                row(1, 4, 18),
-                row(2, 1, 11),
-                row(18, 0, 5),
-                row(22, 0, 6),
-            ],
-        ),
-        (
-            gates(
-                UnstableApiVersions::Disabled,
-                LegacyRequestVersions::Enabled,
-            ),
-            vec![
-                row(0, 0, 13),
-                row(1, 0, 18),
-                row(2, 0, 11),
-                row(18, 0, 4),
-                row(22, 0, 5),
-            ],
-        ),
-    ] {
-        let table = supported_apis(ListenerKind::Client, ClientMetricsReceiver::Absent, gates);
-        let pinned: Vec<ApiVersion> = table
-            .into_iter()
-            .filter(|api| [0, 1, 2, 18, 22].contains(&api.api_key))
-            .collect();
-        check!(pinned == expected, "{gates:?}");
-    }
+    let gates = VersionGates {
+        unstable: if unstable_enabled {
+            UnstableApiVersions::Enabled
+        } else {
+            UnstableApiVersions::Disabled
+        },
+        legacy: if legacy_enabled {
+            LegacyRequestVersions::Enabled
+        } else {
+            LegacyRequestVersions::Disabled
+        },
+    };
+    let expected = vec![
+        row(0, 0, 13),
+        row(1, api_1_min, 18),
+        row(2, api_2_min, 11),
+        row(18, 0, api_18_max),
+        row(22, 0, api_22_max),
+    ];
+    let table = supported_apis(ListenerKind::Client, ClientMetricsReceiver::Absent, gates);
+    let pinned: Vec<ApiVersion> = table
+        .into_iter()
+        .filter(|api| [0, 1, 2, 18, 22].contains(&api.api_key))
+        .collect();
+    check!(pinned == expected, "{gates:?}");
 }
 
 /// Every `ApiVersions` request version on every listener shape, driven
@@ -191,8 +178,17 @@ fn api_versions_advertises_the_deliberate_ranges() {
 /// `ApiKeys.apisForListener`, an `EnumSet` in id order. Table-driven over a
 /// client listener, an inter-broker listener, and both client-telemetry
 /// settings.
-#[tokio::test]
-async fn api_versions_answers_every_version_on_every_listener_shape() {
+#[yare::parameterized(
+    external_without_telemetry = { "EXTERNAL", false },
+    external_with_telemetry = { "EXTERNAL", true },
+    internal_without_telemetry = { "INTERNAL", false },
+    internal_with_telemetry = { "INTERNAL", true },
+)]
+#[test_macro(tokio::test)]
+async fn api_versions_answers_every_version_on_every_listener_shape(
+    listener: &str,
+    telemetry: bool,
+) {
     use krabka_protocol::owned::api_versions_response::ApiVersion;
 
     let unsupported = ApiVersionsResponse {
@@ -205,87 +201,80 @@ async fn api_versions_answers_every_version_on_every_listener_shape() {
         }],
         ..Default::default()
     };
-    for (listener, telemetry) in [
-        ("EXTERNAL", false),
-        ("EXTERNAL", true),
-        ("INTERNAL", false),
-        ("INTERNAL", true),
-    ] {
-        let HandlerStartedBroker {
-            broker: broker_handle,
-            dir: _dir,
-        } = start_broker_with(|cfg| {
-            let external = ListenerSpec {
-                name: "EXTERNAL".to_string(),
-                bind_addr: "127.0.0.1:0".parse().unwrap(),
-                advertised: "127.0.0.1:0".to_string(),
-                protocol: krabka_security::ListenerProtocol::Plaintext,
-                tls_config: None,
-                sasl_mechanisms: None,
-                principal_mapper: SslPrincipalMapper::default(),
-            };
-            let internal = ListenerSpec {
-                name: "INTERNAL".to_string(),
-                bind_addr: "127.0.0.2:0".parse().unwrap(),
-                advertised: "127.0.0.2:0".to_string(),
-                ..external.clone()
-            };
-            cfg.listeners = vec![external, internal];
-            cfg.inter_broker_listener_name = "INTERNAL".to_string();
-            cfg.client_metrics_enable = telemetry;
-        })
-        .await;
-        let broker = broker_handle.broker_arc_for_test();
-        let principal = anonymous_principal();
-        let peer = peer();
-        let context = RequestContext::new(
-            &principal,
-            &peer,
-            "krabka-test",
-            "test-connection",
-            false,
-            listener,
-        );
-        let expected_keys = supported_apis(
-            broker.config.listener_kind(listener),
-            broker.config.client_metrics_receiver(),
-            VersionGates::default(),
-        );
-        check!(
-            expected_keys
-                .windows(2)
-                .all(|pair| pair[0].api_key < pair[1].api_key),
-            "{listener} telemetry={telemetry}"
-        );
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_with(|cfg| {
+        let external = ListenerSpec {
+            name: "EXTERNAL".to_string(),
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            advertised: "127.0.0.1:0".to_string(),
+            protocol: krabka_security::ListenerProtocol::Plaintext,
+            tls_config: None,
+            sasl_mechanisms: None,
+            principal_mapper: SslPrincipalMapper::default(),
+        };
+        let internal = ListenerSpec {
+            name: "INTERNAL".to_string(),
+            bind_addr: "127.0.0.2:0".parse().unwrap(),
+            advertised: "127.0.0.2:0".to_string(),
+            ..external.clone()
+        };
+        cfg.listeners = vec![external, internal];
+        cfg.inter_broker_listener_name = "INTERNAL".to_string();
+        cfg.client_metrics_enable = telemetry;
+    })
+    .await;
+    let broker = broker_handle.broker_arc_for_test();
+    let principal = anonymous_principal();
+    let peer = peer();
+    let context = RequestContext::new(
+        &principal,
+        &peer,
+        "krabka-test",
+        "test-connection",
+        false,
+        listener,
+    );
+    let expected_keys = supported_apis(
+        broker.config.listener_kind(listener),
+        broker.config.client_metrics_receiver(),
+        VersionGates::default(),
+    );
+    check!(
+        expected_keys
+            .windows(2)
+            .all(|pair| pair[0].api_key < pair[1].api_key),
+        "{listener} telemetry={telemetry}"
+    );
 
-        // The dispatch loop answers v5 `UNSUPPORTED_VERSION` before the
-        // handler sees it while unstable api versions are off.
-        for version in 0..=4 {
-            let req = ApiVersionsRequest {
-                client_software_name: "krabka-test".into(),
-                client_software_version: "1.0.0".into(),
-                ..Default::default()
-            };
-            let mut req_bytes = BytesMut::with_capacity(req.encoded_len(version));
-            req.encode(&mut req_bytes, version).expect("encode");
-            let bytes = handle(&broker, version, &req_bytes, &context)
-                .await
-                .expect("ApiVersions handler");
-            let resp = decode_response(version, &bytes);
-            check!(
-                (resp.error_code, &resp.api_keys) == (codes::NONE, &expected_keys),
-                "{listener} telemetry={telemetry} v{version}"
-            );
-        }
-        let body = unsupported_version_response(UnstableApiVersions::Disabled)
-            .expect("unsupported answer");
+    // The dispatch loop answers v5 `UNSUPPORTED_VERSION` before the
+    // handler sees it while unstable api versions are off.
+    for version in 0..=4 {
+        let req = ApiVersionsRequest {
+            client_software_name: "krabka-test".into(),
+            client_software_version: "1.0.0".into(),
+            ..Default::default()
+        };
+        let mut req_bytes = BytesMut::with_capacity(req.encoded_len(version));
+        req.encode(&mut req_bytes, version).expect("encode");
+        let bytes = handle(&broker, version, &req_bytes, &context)
+            .await
+            .expect("ApiVersions handler");
+        let resp = decode_response(version, &bytes);
         check!(
-            decode_response(0, &body) == unsupported,
-            "{listener} telemetry={telemetry} v5"
+            (resp.error_code, &resp.api_keys) == (codes::NONE, &expected_keys),
+            "{listener} telemetry={telemetry} v{version}"
         );
-
-        broker_handle.shutdown().await;
     }
+    let body =
+        unsupported_version_response(UnstableApiVersions::Disabled).expect("unsupported answer");
+    check!(
+        decode_response(0, &body) == unsupported,
+        "{listener} telemetry={telemetry} v5"
+    );
+
+    broker_handle.shutdown().await;
 }
 
 #[test]
@@ -320,19 +309,21 @@ fn api_versions_advertises_kip853_rpcs_and_describe_quorum_v2() {
     assert!(dq.max_version == 2, "DescribeQuorum is v2 after KIP-853");
 }
 
-#[tokio::test]
-async fn handle_rejects_each_invalid_v3_client_info_field() {
+#[yare::parameterized(
+    empty_name = { "", "1.0.0" },
+    empty_version = { "krabka-test", "" },
+)]
+#[test_macro(tokio::test)]
+async fn handle_rejects_each_invalid_v3_client_info_field(name: &str, version: &str) {
     krabka_macros::broker_test_setup! { bind(broker_handle, _dir, broker, principal, peer, context); boot [start_broker_with(|_| {})]; user ["ANONYMOUS"]; client ["krabka-test"]; };
 
-    for (name, version) in [("", "1.0.0"), ("krabka-test", "")] {
-        let req = request(name, version);
-        let bytes = handle(&broker, API_VERSIONS_V3, &req, &context)
-            .await
-            .expect("ApiVersions handler");
-        let resp = decode_response(API_VERSIONS_V3, &bytes);
-        assert!(resp.error_code == codes::INVALID_REQUEST, "{resp:?}");
-        assert!(resp.api_keys.is_empty(), "{resp:?}");
-    }
+    let req = request(name, version);
+    let bytes = handle(&broker, API_VERSIONS_V3, &req, &context)
+        .await
+        .expect("ApiVersions handler");
+    let resp = decode_response(API_VERSIONS_V3, &bytes);
+    assert2::assert!(resp.error_code == codes::INVALID_REQUEST, "{resp:?}");
+    assert2::assert!(resp.api_keys.is_empty(), "{resp:?}");
 
     broker_handle.shutdown().await;
 }

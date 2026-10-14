@@ -200,6 +200,12 @@ mod tests {
         assert2::{assert, check},
     };
 
+    fn configured(configure: impl FnOnce(&mut KafkaMetadataLogConfig)) -> KafkaMetadataLogConfig {
+        let mut cfg = KafkaMetadataLogConfig::new("127.0.0.1:9092");
+        configure(&mut cfg);
+        cfg
+    }
+
     #[test]
     fn config_defaults_match_kafka() {
         let cfg = KafkaMetadataLogConfig::new("127.0.0.1:9092");
@@ -238,113 +244,82 @@ mod tests {
         check!(cfg.event_queue_capacity.capacity() == 2048);
     }
 
-    #[test]
-    fn config_rejects_invalid_transport_policy() {
-        fn configured(
-            configure: impl FnOnce(&mut KafkaMetadataLogConfig),
-        ) -> KafkaMetadataLogConfig {
-            let mut cfg = KafkaMetadataLogConfig::new("127.0.0.1:9092");
-            configure(&mut cfg);
-            cfg
-        }
-
-        let cases = [
-            (
-                "topic_create_timeout",
-                configured(|cfg| cfg.topic_create_timeout = Time::ZERO),
-            ),
-            (
-                "topic_create_timeout",
-                configured(|cfg| cfg.topic_create_timeout = Time::from_micros(500)),
-            ),
-            (
-                "topic_create_timeout",
-                configured(|cfg| {
-                    cfg.topic_create_timeout = Time::from_secs_f64(f64::INFINITY);
-                }),
-            ),
-            (
-                "topic_create_timeout",
-                configured(|cfg| {
-                    cfg.topic_create_timeout = Time::from_millis(i64::from(i32::MAX) + 1);
-                }),
-            ),
-            (
-                "fetch_max_wait",
-                configured(|cfg| cfg.fetch_max_wait = Time::ZERO),
-            ),
-            (
-                "fetch_max_wait",
-                configured(|cfg| cfg.fetch_max_wait = Time::from_micros(500)),
-            ),
-            (
-                "fetch_max_wait",
-                configured(|cfg| cfg.fetch_max_wait = Time::from_secs_f64(f64::INFINITY)),
-            ),
-            (
-                "fetch_max_wait",
-                configured(|cfg| {
-                    cfg.fetch_max_wait = Time::from_millis(i64::from(i32::MAX) + 1);
-                }),
-            ),
-            (
-                "fetch_max_bytes",
-                configured(|cfg| cfg.fetch_max_bytes = ByteSize::ZERO),
-            ),
-            (
-                "fetch_max_bytes",
-                configured(|cfg| cfg.fetch_max_bytes = ByteSize::from_bytes_f64(0.5)),
-            ),
-            (
-                "fetch_max_bytes",
-                configured(|cfg| {
-                    cfg.fetch_max_bytes = ByteSize::from_bytes_f64(f64::INFINITY);
-                }),
-            ),
-            (
-                "fetch_max_bytes",
-                configured(|cfg| {
-                    cfg.fetch_max_bytes = ByteSize::from_bytes_i64(i64::from(i32::MAX) + 1);
-                }),
-            ),
-            (
-                "fetch_retry_backoff",
-                configured(|cfg| cfg.fetch_retry_backoff = Time::ZERO),
-            ),
-            (
-                "fetch_retry_backoff",
-                configured(|cfg| {
-                    cfg.fetch_retry_backoff = Time::from_secs_f64(f64::INFINITY);
-                }),
-            ),
-        ];
-
-        for (field, cfg) in cases {
-            let error = cfg.validate().expect_err("invalid policy must fail");
-            assert!(error.contains(field), "field={field}, error={error}");
-        }
+    #[yare::parameterized(
+        create_timeout_zero = {
+            "topic_create_timeout",
+            configured(|cfg| cfg.topic_create_timeout = Time::ZERO),
+        },
+        create_timeout_submillisecond = {
+            "topic_create_timeout",
+            configured(|cfg| cfg.topic_create_timeout = Time::from_micros(500)),
+        },
+        create_timeout_infinite = {
+            "topic_create_timeout",
+            configured(|cfg| cfg.topic_create_timeout = Time::from_secs_f64(f64::INFINITY)),
+        },
+        create_timeout_too_large = {
+            "topic_create_timeout",
+            configured(|cfg| cfg.topic_create_timeout = Time::from_millis(i64::from(i32::MAX) + 1)),
+        },
+        fetch_wait_zero = { "fetch_max_wait", configured(|cfg| cfg.fetch_max_wait = Time::ZERO) },
+        fetch_wait_submillisecond = {
+            "fetch_max_wait",
+            configured(|cfg| cfg.fetch_max_wait = Time::from_micros(500)),
+        },
+        fetch_wait_infinite = {
+            "fetch_max_wait",
+            configured(|cfg| cfg.fetch_max_wait = Time::from_secs_f64(f64::INFINITY)),
+        },
+        fetch_wait_too_large = {
+            "fetch_max_wait",
+            configured(|cfg| cfg.fetch_max_wait = Time::from_millis(i64::from(i32::MAX) + 1)),
+        },
+        fetch_bytes_zero = {
+            "fetch_max_bytes",
+            configured(|cfg| cfg.fetch_max_bytes = ByteSize::ZERO),
+        },
+        fetch_bytes_fractional = {
+            "fetch_max_bytes",
+            configured(|cfg| cfg.fetch_max_bytes = ByteSize::from_bytes_f64(0.5)),
+        },
+        fetch_bytes_infinite = {
+            "fetch_max_bytes",
+            configured(|cfg| cfg.fetch_max_bytes = ByteSize::from_bytes_f64(f64::INFINITY)),
+        },
+        fetch_bytes_too_large = {
+            "fetch_max_bytes",
+            configured(|cfg| cfg.fetch_max_bytes = ByteSize::from_bytes_i64(i64::from(i32::MAX) + 1)),
+        },
+        retry_backoff_zero = {
+            "fetch_retry_backoff",
+            configured(|cfg| cfg.fetch_retry_backoff = Time::ZERO),
+        },
+        retry_backoff_infinite = {
+            "fetch_retry_backoff",
+            configured(|cfg| cfg.fetch_retry_backoff = Time::from_secs_f64(f64::INFINITY)),
+        },
+    )]
+    fn config_rejects_invalid_transport_policy(field: &str, cfg: KafkaMetadataLogConfig) {
+        let error = cfg.validate().expect_err("invalid policy must fail");
+        assert2::assert!(error.contains(field), "field={field}, error={error}");
     }
 
-    #[test]
-    fn min_isr_must_be_at_least_one() {
-        let cases = [
-            (Some(1), true),
-            (Some(2), true),
-            (Some(0), false),
-            (Some(-1), false),
-            // Unset leaves the cluster default, so nothing to check.
-            (None, true),
-        ];
-        for (min_isr, valid) in cases {
-            let cfg = KafkaMetadataLogConfig {
-                min_isr,
-                ..KafkaMetadataLogConfig::new("127.0.0.1:9092")
-            };
-            let result = cfg.validate();
-            assert!(result.is_ok() == valid, "min_isr={min_isr:?}: {result:?}");
-            if let Err(error) = result {
-                assert!(error.contains("min_isr"), "{error}");
-            }
+    #[yare::parameterized(
+        one = { Some(1), true },
+        two = { Some(2), true },
+        zero = { Some(0), false },
+        negative = { Some(-1), false },
+        unset_uses_cluster_default = { None, true },
+    )]
+    fn min_isr_must_be_at_least_one(min_isr: Option<i32>, valid: bool) {
+        let cfg = KafkaMetadataLogConfig {
+            min_isr,
+            ..KafkaMetadataLogConfig::new("127.0.0.1:9092")
+        };
+        let result = cfg.validate();
+        assert2::assert!(result.is_ok() == valid, "min_isr={min_isr:?}: {result:?}");
+        if let Err(error) = result {
+            assert2::assert!(error.contains("min_isr"), "{error}");
         }
     }
 

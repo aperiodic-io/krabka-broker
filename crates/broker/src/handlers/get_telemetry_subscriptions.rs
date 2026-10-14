@@ -23,41 +23,44 @@ use {
     uuid::Uuid,
 };
 
-#[krabka_macros::decode_dispatch(request = GetTelemetrySubscriptionsRequest, binding(req))]
-pub(crate) fn handle(
-    broker: &Broker,
-    version: ApiVersion,
-    _correlation_id: CorrelationId,
-    req_bytes: &[u8],
-    ctx: &TelemetryContext<'_>,
-) -> DispatchResult {
-    let attrs = ctx.client_attributes(Uuid::from_bytes(req.client_instance_id.0));
-
-    let image = broker.controller.current_image();
-    let resp = match broker
-        .client_metrics
-        .manager
-        .get_subscription(&image, &attrs)
+crate::handlers::raw_request_handler!(
+    GetTelemetrySubscriptionsRequest,
+    req,
+    broker,
+    version,
+    _correlation_id,
+    req_bytes,
+    ctx,
+    TelemetryContext,
     {
-        SubscriptionDecision::Assign(assignment) => GetTelemetrySubscriptionsResponse {
-            client_instance_id: WireUuid(assignment.client_instance_id.into_bytes()),
-            subscription_id: assignment.subscription_id,
-            accepted_compression_types: ACCEPTED_COMPRESSION_TYPES.to_vec(),
-            push_interval_ms: assignment.push_interval_ms,
-            telemetry_max_bytes: broker.client_metrics.manager.telemetry_max_bytes(),
-            delta_temporality: true,
-            requested_metrics: assignment.metrics,
-            ..Default::default()
-        },
-        // Kafka answers a rejected request with `throttle_time_ms` 0; only the
-        // request quota raises it.
-        SubscriptionDecision::Reject { error_code } => GetTelemetrySubscriptionsResponse {
-            error_code,
-            ..Default::default()
-        },
-    };
-    encode_response(&resp, version)
-}
+        let attrs = ctx.client_attributes(Uuid::from_bytes(req.client_instance_id.0));
+
+        let image = broker.controller.current_image();
+        let resp = match broker
+            .client_metrics
+            .manager
+            .get_subscription(&image, &attrs)
+        {
+            SubscriptionDecision::Assign(assignment) => GetTelemetrySubscriptionsResponse {
+                client_instance_id: WireUuid(assignment.client_instance_id.into_bytes()),
+                subscription_id: assignment.subscription_id,
+                accepted_compression_types: ACCEPTED_COMPRESSION_TYPES.to_vec(),
+                push_interval_ms: assignment.push_interval_ms,
+                telemetry_max_bytes: broker.client_metrics.manager.telemetry_max_bytes(),
+                delta_temporality: true,
+                requested_metrics: assignment.metrics,
+                ..Default::default()
+            },
+            // Kafka answers a rejected request with `throttle_time_ms` 0; only the
+            // request quota raises it.
+            SubscriptionDecision::Reject { error_code } => GetTelemetrySubscriptionsResponse {
+                error_code,
+                ..Default::default()
+            },
+        };
+        encode_response(&resp, version)
+    }
+);
 
 #[cfg(test)]
 mod tests {

@@ -192,8 +192,9 @@ mod tests {
     use {
         super::*,
         crate::{
-            leader_epoch_checkpoint::test_support::{
-                TempCheckpoint, check_persisted, checkpoint, entry, fresh,
+            leader_epoch_checkpoint::{
+                EpochEntry,
+                test_support::{TempCheckpoint, check_persisted, checkpoint, entry, fresh},
             },
             test_support::TempPath,
         },
@@ -221,18 +222,19 @@ mod tests {
         assert2::assert!(c.entries() == &[entry(0, 0)]);
     }
 
-    #[test]
-    fn append_rejects_novel_out_of_order_entries_without_mutating() {
+    #[yare::parameterized(
+        epoch_out_of_order = { 2, 150 },
+        offset_not_increasing = { 6, 100 },
+    )]
+    fn append_rejects_novel_out_of_order_entries_without_mutating(epoch: i32, offset: i64) {
         let TempCheckpoint {
             dir: _d,
             checkpoint: mut c,
         } = checkpoint(&[entry(0, 0), entry(5, 100)]);
         let before = std::fs::read(&c.path).unwrap();
 
-        for (epoch, offset) in [(2, 150), (6, 100)] {
-            let error = c.append(LeaderEpoch(epoch), Offset(offset)).unwrap_err();
-            assert2::assert!(matches!(error, LogError::InvalidArgument(_)));
-        }
+        let error = c.append(LeaderEpoch(epoch), Offset(offset)).unwrap_err();
+        assert2::assert!(matches!(error, LogError::InvalidArgument(_)));
 
         assert2::assert!(std::fs::read(&c.path).unwrap() == before);
         assert2::assert!(c.entries() == &[entry(0, 0), entry(5, 100)]);
@@ -255,66 +257,77 @@ mod tests {
 
     /// One row per `LeaderEpochFileCache.assign` outcome, each checked in
     /// memory and after a reopen of the persisted file.
-    #[test]
-    fn assign_follows_kafka_leader_epoch_file_cache_assign() {
-        for (name, recorded, (epoch, start), expected) in [
-            ("first entry", &[][..], (2, 6), vec![entry(2, 6)]),
-            (
-                "new epoch after the log end appends",
-                &[entry(0, 0), entry(2, 6)][..],
-                (3, 9),
-                vec![entry(0, 0), entry(2, 6), entry(3, 9)],
-            ),
-            (
-                "latest epoch at a later offset is a no-op",
-                &[entry(2, 6)][..],
-                (2, 7),
-                vec![entry(2, 6)],
-            ),
-            (
-                "latest epoch at its own offset is a no-op",
-                &[entry(2, 6)][..],
-                (2, 6),
-                vec![entry(2, 6)],
-            ),
-            (
-                "latest epoch at an earlier offset moves its start",
-                &[entry(1, 0), entry(2, 6)][..],
-                (2, 5),
-                vec![entry(1, 0), entry(2, 5)],
-            ),
-            (
-                "newer epoch at the same start replaces an unwritten epoch",
-                &[entry(1, 0), entry(2, 6)][..],
-                (3, 6),
-                vec![entry(1, 0), entry(3, 6)],
-            ),
-            (
-                "older epoch drops every entry it does not strictly follow",
-                &[entry(1, 0), entry(2, 6), entry(3, 8)][..],
-                (2, 7),
-                vec![entry(1, 0), entry(2, 7)],
-            ),
-        ] {
-            let TempCheckpoint {
-                dir: _d,
-                checkpoint: mut c,
-            } = checkpoint(recorded);
-            c.assign(LeaderEpoch(epoch), Offset(start)).unwrap();
-            check_persisted(&c, &expected, name);
-        }
+    #[yare::parameterized(
+        first = { "first entry", &[][..], 2, 6, &[entry(2, 6)][..] },
+        appends = {
+            "new epoch after the log end appends",
+            &[entry(0, 0), entry(2, 6)][..],
+            3,
+            9,
+            &[entry(0, 0), entry(2, 6), entry(3, 9)][..],
+        },
+        later_same_epoch = {
+            "latest epoch at a later offset is a no-op",
+            &[entry(2, 6)][..],
+            2,
+            7,
+            &[entry(2, 6)][..],
+        },
+        same_offset = {
+            "latest epoch at its own offset is a no-op",
+            &[entry(2, 6)][..],
+            2,
+            6,
+            &[entry(2, 6)][..],
+        },
+        earlier_offset = {
+            "latest epoch at an earlier offset moves its start",
+            &[entry(1, 0), entry(2, 6)][..],
+            2,
+            5,
+            &[entry(1, 0), entry(2, 5)][..],
+        },
+        same_start_new_epoch = {
+            "newer epoch at the same start replaces an unwritten epoch",
+            &[entry(1, 0), entry(2, 6)][..],
+            3,
+            6,
+            &[entry(1, 0), entry(3, 6)][..],
+        },
+        older_epoch = {
+            "older epoch drops every entry it does not strictly follow",
+            &[entry(1, 0), entry(2, 6), entry(3, 8)][..],
+            2,
+            7,
+            &[entry(1, 0), entry(2, 7)][..],
+        },
+    )]
+    fn assign_follows_kafka_leader_epoch_file_cache_assign(
+        name: &str,
+        recorded: &[EpochEntry],
+        epoch: i32,
+        start: i64,
+        expected: &[EpochEntry],
+    ) {
+        let TempCheckpoint {
+            dir: _d,
+            checkpoint: mut c,
+        } = checkpoint(recorded);
+        c.assign(LeaderEpoch(epoch), Offset(start)).unwrap();
+        check_persisted(&c, expected, name);
     }
 
-    #[test]
-    fn assign_rejects_negative_entries_without_mutating() {
+    #[yare::parameterized(
+        negative_epoch = { -1, 5 },
+        negative_start = { 2, -1 },
+    )]
+    fn assign_rejects_negative_entries_without_mutating(epoch: i32, start: i64) {
         let TempCheckpoint {
             dir: _d,
             checkpoint: mut c,
         } = checkpoint(&[entry(1, 0)]);
-        for (epoch, start) in [(-1, 5), (2, -1)] {
-            let error = c.assign(LeaderEpoch(epoch), Offset(start)).unwrap_err();
-            assert2::assert!(matches!(error, LogError::InvalidArgument(_)));
-        }
+        let error = c.assign(LeaderEpoch(epoch), Offset(start)).unwrap_err();
+        assert2::assert!(matches!(error, LogError::InvalidArgument(_)));
         assert2::assert!(c.entries() == &[entry(1, 0)]);
     }
 
@@ -336,49 +349,51 @@ mod tests {
     /// One row per `LeaderEpochFileCache.truncateFromStart` outcome, over the
     /// history `(0, 5) (1, 10) (2, 15)`, each checked in memory and after a
     /// reopen of the persisted file.
-    #[test]
-    fn truncate_from_start_follows_kafka_leader_epoch_file_cache() {
-        let history = vec![entry(0, 5), entry(1, 10), entry(2, 15)];
-        for (name, recorded, start, expected) in [
-            ("an empty cache stays empty", vec![], 7, vec![]),
-            (
-                "a start below every entry changes nothing",
-                history.clone(),
-                4,
-                history.clone(),
-            ),
-            (
-                "a start on the first entry keeps it",
-                history.clone(),
-                5,
-                history.clone(),
-            ),
-            (
-                "a start inside the first epoch raises its start",
-                history.clone(),
-                8,
-                vec![entry(0, 8), entry(1, 10), entry(2, 15)],
-            ),
-            (
-                "a start on a later entry drops every earlier one",
-                history.clone(),
-                10,
-                vec![entry(1, 10), entry(2, 15)],
-            ),
-            (
-                "a start past every entry keeps the latest epoch at the start",
-                history.clone(),
-                17,
-                vec![entry(2, 17)],
-            ),
-        ] {
-            let TempCheckpoint {
-                dir: _d,
-                checkpoint: mut c,
-            } = checkpoint(&recorded);
-            c.truncate_from_start(Offset(start)).unwrap();
-            check_persisted(&c, &expected, name);
-        }
+    #[yare::parameterized(
+        empty_cache = { "an empty cache stays empty", &[][..], 7, &[][..] },
+        below = {
+            "a start below every entry changes nothing",
+            &[entry(0, 5), entry(1, 10), entry(2, 15)][..],
+            4,
+            &[entry(0, 5), entry(1, 10), entry(2, 15)][..],
+        },
+        on_first = {
+            "a start on the first entry keeps it",
+            &[entry(0, 5), entry(1, 10), entry(2, 15)][..],
+            5,
+            &[entry(0, 5), entry(1, 10), entry(2, 15)][..],
+        },
+        inside_first = {
+            "a start inside the first epoch raises its start",
+            &[entry(0, 5), entry(1, 10), entry(2, 15)][..],
+            8,
+            &[entry(0, 8), entry(1, 10), entry(2, 15)][..],
+        },
+        on_later = {
+            "a start on a later entry drops every earlier one",
+            &[entry(0, 5), entry(1, 10), entry(2, 15)][..],
+            10,
+            &[entry(1, 10), entry(2, 15)][..],
+        },
+        past_all = {
+            "a start past every entry keeps the latest epoch at the start",
+            &[entry(0, 5), entry(1, 10), entry(2, 15)][..],
+            17,
+            &[entry(2, 17)][..],
+        },
+    )]
+    fn truncate_from_start_follows_kafka_leader_epoch_file_cache(
+        name: &str,
+        recorded: &[EpochEntry],
+        start: i64,
+        expected: &[EpochEntry],
+    ) {
+        let TempCheckpoint {
+            dir: _d,
+            checkpoint: mut c,
+        } = checkpoint(recorded);
+        c.truncate_from_start(Offset(start)).unwrap();
+        check_persisted(&c, expected, name);
     }
 
     #[test]

@@ -1,9 +1,6 @@
 //! The generated timing methods preserve borrowing, bounds and unrelated fields.
 
-use {
-    assert2::assert,
-    std::{borrow::Cow, collections::BTreeMap, time::Duration},
-};
+use std::{borrow::Cow, collections::BTreeMap, time::Duration};
 
 mod coordinator {
     pub(crate) mod unified {
@@ -63,8 +60,8 @@ fn overrides(entries: &[Override<'_>]) -> BTreeMap<String, String> {
         .collect()
 }
 
-#[test]
-fn absent_invalid_and_other_protocol_timings_borrow_the_original() {
+#[yare::parameterized(absent = { "absent" }, empty = { "empty" }, ignored = { "ignored" })]
+fn absent_invalid_and_other_protocol_timings_borrow_the_original(kind: &str) {
     let config = Config::default();
     let ignored = overrides(&[
         Override {
@@ -76,96 +73,66 @@ fn absent_invalid_and_other_protocol_timings_borrow_the_original() {
             value: "invalid",
         },
     ]);
-    for values in [None, Some(&BTreeMap::new()), Some(&ignored)] {
-        let Cow::Borrowed(actual) = config.for_group(values) else {
-            panic!("no valid timing overrides must borrow the broker defaults")
-        };
-        assert!(std::ptr::eq(actual, &raw const config));
-    }
+    let empty = BTreeMap::new();
+    let values = match kind {
+        "absent" => None,
+        "empty" => Some(&empty),
+        "ignored" => Some(&ignored),
+        _ => unreachable!(),
+    };
+    let Cow::Borrowed(actual) = config.for_group(values) else {
+        panic!("no valid timing overrides must borrow the broker defaults")
+    };
+    assert2::assert!(std::ptr::eq(actual, &raw const config));
 }
 
-#[test]
-fn applies_each_timing_and_keeps_unrelated_configuration() {
-    struct Case<'a> {
-        entries: Vec<Override<'a>>,
-        session: u64,
-        heartbeat: u64,
-        assignment: u64,
-    }
-    let config = Config::default();
-    for case in [
-        Case {
-            entries: vec![Override {
+#[yare::parameterized(
+    session_45 = { vec![Override { key: SESSION, value: "45000" }], 45, 5, 1 },
+    session_50 = { vec![Override { key: SESSION, value: "50000" }], 50, 5, 1 },
+    heartbeat = { vec![Override { key: HEARTBEAT, value: "7000" }], 45, 7, 1 },
+    assignment = { vec![Override { key: ASSIGNMENT, value: "0" }], 45, 5, 0 },
+    multiple_clamped = {
+        vec![
+            Override {
                 key: SESSION,
-                value: "45000",
-            }],
-            session: 45,
-            heartbeat: 5,
-            assignment: 1,
-        },
-        Case {
-            entries: vec![Override {
-                key: SESSION,
-                value: "50000",
-            }],
-            session: 50,
-            heartbeat: 5,
-            assignment: 1,
-        },
-        Case {
-            entries: vec![Override {
-                key: HEARTBEAT,
-                value: "7000",
-            }],
-            session: 45,
-            heartbeat: 7,
-            assignment: 1,
-        },
-        Case {
-            entries: vec![Override {
-                key: ASSIGNMENT,
                 value: "0",
-            }],
-            session: 45,
-            heartbeat: 5,
-            assignment: 0,
-        },
-        Case {
-            entries: vec![
-                Override {
-                    key: SESSION,
-                    value: "0",
-                },
-                Override {
-                    key: HEARTBEAT,
-                    value: "20000",
-                },
-                Override {
-                    key: ASSIGNMENT,
-                    value: "20000",
-                },
-            ],
-            session: 45,
-            heartbeat: 15,
-            assignment: 15,
-        },
-    ] {
-        let values = overrides(&case.entries);
-        let Cow::Owned(actual) = config.for_group(Some(&values)) else {
-            panic!("a valid override must create a configuration")
-        };
-        assert!(
-            actual
-                == Config {
-                    session_timeout: Duration::from_secs(case.session),
-                    heartbeat_interval: Duration::from_secs(case.heartbeat),
-                    assignment_interval: Duration::from_secs(case.assignment),
-                    ..config.clone()
-                }
-        );
-    }
-    assert!(config == Config::default());
-    assert!(
+            },
+            Override {
+                key: HEARTBEAT,
+                value: "20000",
+            },
+            Override {
+                key: ASSIGNMENT,
+                value: "20000",
+            },
+        ],
+        45,
+        15,
+        15,
+    },
+)]
+fn applies_each_timing_and_keeps_unrelated_configuration(
+    entries: Vec<Override<'static>>,
+    session: u64,
+    heartbeat: u64,
+    assignment: u64,
+) {
+    let config = Config::default();
+    let values = overrides(&entries);
+    let Cow::Owned(actual) = config.for_group(Some(&values)) else {
+        panic!("a valid override must create a configuration")
+    };
+    assert2::assert!(
+        actual
+            == Config {
+                session_timeout: Duration::from_secs(session),
+                heartbeat_interval: Duration::from_secs(heartbeat),
+                assignment_interval: Duration::from_secs(assignment),
+                ..config.clone()
+            }
+    );
+    assert2::assert!(config == Config::default());
+    assert2::assert!(
         Config::assigning_at_once()
             == Config {
                 assignment_interval: Duration::ZERO,

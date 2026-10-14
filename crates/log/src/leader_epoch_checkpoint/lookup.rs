@@ -94,7 +94,10 @@ mod tests {
     use {
         super::*,
         crate::{
-            leader_epoch_checkpoint::test_support::{TempCheckpoint, checkpoint, entry, fresh},
+            leader_epoch_checkpoint::{
+                EpochEntry,
+                test_support::{TempCheckpoint, checkpoint, entry, fresh},
+            },
             test_support::TempPath,
         },
         assert2::check,
@@ -130,13 +133,14 @@ mod tests {
 
     // ── epoch_for_offset ──────────────────────────────────────────────────────
 
-    #[test]
-    fn epoch_for_offset_empty_returns_none() {
+    #[yare::parameterized(
+        zero = { "zero", 0 },
+        positive = { "positive", 100 },
+    )]
+    fn epoch_for_offset_empty_returns_none(_name: &str, offset: i64) {
         let TempPath { dir: _d, path } = fresh();
         let c = LeaderEpochCheckpoint::open(path).unwrap();
-        for (_name, offset) in [("zero", 0), ("positive", 100)] {
-            assert2::assert!(c.epoch_for_offset(Offset(offset)) == None);
-        }
+        assert2::assert!(c.epoch_for_offset(Offset(offset)) == None);
     }
 
     #[test]
@@ -149,50 +153,38 @@ mod tests {
         assert2::assert!(c.epoch_for_offset(Offset(9)) == None);
     }
 
-    #[test]
-    fn epoch_for_offset_within_epoch_range() {
+    #[yare::parameterized(
+        start_epoch_0 = { 0, Some(LeaderEpoch(0)), "start of epoch 0" },
+        middle_epoch_0 = { 25, Some(LeaderEpoch(0)), "middle of epoch 0" },
+        last_before_epoch_1 = { 49, Some(LeaderEpoch(0)), "last offset before epoch 1" },
+        start_epoch_1 = { 50, Some(LeaderEpoch(1)), "start of epoch 1" },
+        middle_epoch_1 = { 75, Some(LeaderEpoch(1)), "middle of epoch 1" },
+        last_before_epoch_2 = { 99, Some(LeaderEpoch(1)), "last offset before epoch 2" },
+    )]
+    fn epoch_for_offset_within_epoch_range(offset: i64, want: Option<LeaderEpoch>, why: &str) {
         let TempCheckpoint {
             dir: _d,
             checkpoint: c,
         } = checkpoint(&[entry(0, 0), entry(1, 50), entry(2, 100)]);
-        for (offset, want, why) in [
-            // Offsets 0–49 belong to epoch 0.
-            (0, Some(LeaderEpoch(0)), "start of epoch 0"),
-            (25, Some(LeaderEpoch(0)), "middle of epoch 0"),
-            (49, Some(LeaderEpoch(0)), "last offset before epoch 1"),
-            // Offsets 50–99 belong to epoch 1.
-            (50, Some(LeaderEpoch(1)), "start of epoch 1"),
-            (75, Some(LeaderEpoch(1)), "middle of epoch 1"),
-            (99, Some(LeaderEpoch(1)), "last offset before epoch 2"),
-        ] {
-            check!(
-                c.epoch_for_offset(Offset(offset)) == want,
-                "{why} (offset={offset})"
-            );
-        }
+        check!(
+            c.epoch_for_offset(Offset(offset)) == want,
+            "{why} (offset={offset})"
+        );
     }
 
-    #[test]
-    fn epoch_for_offset_at_epoch_boundary() {
+    /// Epoch 1 owns its first offset and all following offsets once it is the
+    /// last recorded epoch.
+    #[yare::parameterized(
+        epoch_boundary = { "epoch 1 start", 50 },
+        past_last = { "past last entry", 100 },
+        far_past_last = { "far past last entry", 999 },
+    )]
+    fn epoch_for_offset_at_or_past_last_entry(_name: &str, offset: i64) {
         let TempCheckpoint {
             dir: _d,
             checkpoint: c,
         } = checkpoint(&[entry(0, 0), entry(1, 50)]);
-        // Offset exactly at epoch 1's start_offset → belongs to epoch 1.
-        assert2::assert!(c.epoch_for_offset(Offset(50)) == Some(LeaderEpoch(1)));
-    }
-
-    #[test]
-    fn epoch_for_offset_past_last_entry() {
-        let TempCheckpoint {
-            dir: _d,
-            checkpoint: c,
-        } = checkpoint(&[entry(0, 0), entry(1, 50)]);
-        // Any offset >= 50 that extends beyond the last known epoch → epoch 1
-        // (the current / latest epoch owns all subsequent offsets).
-        for (_name, offset) in [("past last entry", 100), ("far past last entry", 999)] {
-            assert2::assert!(c.epoch_for_offset(Offset(offset)) == Some(LeaderEpoch(1)));
-        }
+        assert2::assert!(c.epoch_for_offset(Offset(offset)) == Some(LeaderEpoch(1)));
     }
 
     #[test]
@@ -209,69 +201,72 @@ mod tests {
 
     /// One row per branch of Kafka's `endOffsetFor`, over checkpoints built
     /// through `append` as the log builds them.
-    #[test]
-    fn epoch_and_offset_for_follows_kafka_end_offset_for() {
-        const UNDEFINED: (LeaderEpoch, Offset) = (UNDEFINED_EPOCH, UNDEFINED_OFFSET);
-        for (name, recorded, requested, log_end, expected) in [
-            ("empty checkpoint", &[][..], 0, 9, UNDEFINED),
-            (
-                "undefined requested epoch",
-                &[entry(0, 0), entry(1, 50)][..],
-                -1,
-                100,
-                UNDEFINED,
-            ),
-            (
-                "latest recorded epoch keeps the log end",
-                &[entry(0, 0), entry(1, 50)][..],
-                1,
-                100,
-                (LeaderEpoch(1), Offset(100)),
-            ),
-            (
-                "oldest epoch ends at the next start",
-                &[entry(0, 0), entry(1, 50), entry(2, 100)][..],
-                0,
-                200,
-                (LeaderEpoch(0), Offset(50)),
-            ),
-            (
-                "middle epoch ends at the next start",
-                &[entry(0, 0), entry(1, 50), entry(2, 100)][..],
-                1,
-                200,
-                (LeaderEpoch(1), Offset(100)),
-            ),
-            (
-                "gap epoch resolves to the floor epoch",
-                &[entry(0, 0), entry(5, 100)][..],
-                3,
-                200,
-                (LeaderEpoch(0), Offset(100)),
-            ),
-            (
-                "future epoch cannot be placed",
-                &[entry(0, 0), entry(1, 50)][..],
-                7,
-                100,
-                UNDEFINED,
-            ),
-            (
-                "below every recorded epoch keeps the requested epoch",
-                &[entry(3, 30), entry(4, 40)][..],
-                1,
-                100,
-                (LeaderEpoch(1), Offset(30)),
-            ),
-        ] {
-            let TempCheckpoint {
-                dir: _d,
-                checkpoint: c,
-            } = checkpoint(recorded);
-            check!(
-                c.epoch_and_offset_for(LeaderEpoch(requested), Offset(log_end)) == expected,
-                "{name}"
-            );
-        }
+    #[yare::parameterized(
+        empty = { "empty checkpoint", &[][..], 0, 9, (UNDEFINED_EPOCH, UNDEFINED_OFFSET) },
+        undefined = {
+            "undefined requested epoch",
+            &[entry(0, 0), entry(1, 50)][..],
+            -1,
+            100,
+            (UNDEFINED_EPOCH, UNDEFINED_OFFSET),
+        },
+        latest = {
+            "latest recorded epoch keeps the log end",
+            &[entry(0, 0), entry(1, 50)][..],
+            1,
+            100,
+            (LeaderEpoch(1), Offset(100)),
+        },
+        oldest = {
+            "oldest epoch ends at the next start",
+            &[entry(0, 0), entry(1, 50), entry(2, 100)][..],
+            0,
+            200,
+            (LeaderEpoch(0), Offset(50)),
+        },
+        middle = {
+            "middle epoch ends at the next start",
+            &[entry(0, 0), entry(1, 50), entry(2, 100)][..],
+            1,
+            200,
+            (LeaderEpoch(1), Offset(100)),
+        },
+        gap = {
+            "gap epoch resolves to the floor epoch",
+            &[entry(0, 0), entry(5, 100)][..],
+            3,
+            200,
+            (LeaderEpoch(0), Offset(100)),
+        },
+        future = {
+            "future epoch cannot be placed",
+            &[entry(0, 0), entry(1, 50)][..],
+            7,
+            100,
+            (UNDEFINED_EPOCH, UNDEFINED_OFFSET),
+        },
+        below_first = {
+            "below every recorded epoch keeps the requested epoch",
+            &[entry(3, 30), entry(4, 40)][..],
+            1,
+            100,
+            (LeaderEpoch(1), Offset(30)),
+        },
+    )]
+    fn epoch_and_offset_for_follows_kafka_end_offset_for(
+        name: &str,
+        recorded: &[EpochEntry],
+        requested: i32,
+        log_end: i64,
+        expected: (LeaderEpoch, Offset),
+    ) {
+        let TempCheckpoint {
+            dir: _d,
+            checkpoint: c,
+        } = checkpoint(recorded);
+        check!(
+            c.epoch_and_offset_for(LeaderEpoch(requested), Offset(log_end)) == expected,
+            "{name}"
+        );
     }
 }

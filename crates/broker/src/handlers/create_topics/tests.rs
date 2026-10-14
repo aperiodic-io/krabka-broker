@@ -54,6 +54,12 @@ const DYNAMIC_DEFAULT_BROKER_CONFIG: i8 = 3;
 /// `ConfigSource.DEFAULT_CONFIG`, the source an untouched key reports.
 const DEFAULT_CONFIG: i8 = 5;
 
+macro_rules! expected_response {
+    ($topics:expr) => {
+        krabka_macros::unthrottled_wire!(CreateTopicsResponse { topics: $topics })
+    };
+}
+
 /// A topic config key and the value it is set to.
 #[derive(Clone, Copy)]
 struct ConfigPair<'a> {
@@ -314,20 +320,18 @@ async fn handle_falls_back_to_topic_authorization_failed_for_each_topic() {
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
-    let expected = krabka_macros::unthrottled_wire!(CreateTopicsResponse {
-        topics: vec![
-            expected_empty_topic(
-                "orders",
-                codes::TOPIC_AUTHORIZATION_FAILED,
-                Some("Authorization failed.".into())
-            ),
-            expected_empty_topic(
-                "payments",
-                codes::TOPIC_AUTHORIZATION_FAILED,
-                Some("Authorization failed.".into())
-            ),
-        ],
-    });
+    let expected = expected_response!(vec![
+        expected_empty_topic(
+            "orders",
+            codes::TOPIC_AUTHORIZATION_FAILED,
+            Some("Authorization failed.".into())
+        ),
+        expected_empty_topic(
+            "payments",
+            codes::TOPIC_AUTHORIZATION_FAILED,
+            Some("Authorization failed.".into())
+        ),
+    ]);
     assert!(resp == expected);
     assert!(
         broker_handle
@@ -349,20 +353,23 @@ async fn handle_reports_invalid_partition_count_and_replication_factor() {
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
-    let expected =
-        krabka_macros::unthrottled_wire!(CreateTopicsResponse {
-            topics: vec![
-            expected_empty_topic("bad-count", codes::INVALID_PARTITIONS, Some(
-                    "Number of partitions was set to an invalid non-positive value.".into(),
-                )),
-            expected_empty_topic("bad-rf", codes::INVALID_REPLICATION_FACTOR, Some(
-                    "Unable to replicate the partition 2 time(s): The target replication factor \
+    let expected = expected_response!(vec![
+        expected_empty_topic(
+            "bad-count",
+            codes::INVALID_PARTITIONS,
+            Some("Number of partitions was set to an invalid non-positive value.".into(),)
+        ),
+        expected_empty_topic(
+            "bad-rf",
+            codes::INVALID_REPLICATION_FACTOR,
+            Some(
+                "Unable to replicate the partition 2 time(s): The target replication factor \
                      of 2 cannot be reached because only 1 broker(s) are registered or some \
                      brokers have all their log directories cordoned."
-                        .into(),
-                )),
-        ],
-        });
+                    .into(),
+            )
+        ),
+    ]);
     assert!(resp == expected);
     for name in ["bad-count", "bad-rf"] {
         let image = broker_handle.controller_image_for_test();

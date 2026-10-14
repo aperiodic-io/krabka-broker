@@ -341,31 +341,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn dependencies_read_the_proposed_levels() {
+    #[yare::parameterized(
+        absent = {
+            None,
+            Some(
+                "eligible.leader.replicas.version could not be set to 1 because it depends on metadata.version level 23",
+            ),
+        },
+        below = {
+            Some(22),
+            Some(
+                "eligible.leader.replicas.version could not be set to 1 because it depends on metadata.version level 23",
+            ),
+        },
+        minimum = { Some(23), None },
+        above = { Some(30), None },
+    )]
+    fn dependencies_read_the_proposed_levels(mv: Option<i16>, expected: Option<&str>) {
         let deps: &[(&str, i16)] = &[("metadata.version", 23)];
         let proposed = |mv: Option<i16>| -> BTreeMap<String, i16> {
             mv.map(|level| ("metadata.version".to_string(), level))
                 .into_iter()
                 .collect()
         };
-        let want = Some(
-            "eligible.leader.replicas.version could not be set to 1 because it depends on \
-             metadata.version level 23"
-                .to_string(),
+        let expected = expected.map(str::to_owned);
+        assert2::assert!(
+            dependency_error("eligible.leader.replicas.version", 1, deps, &proposed(mv))
+                == expected,
+            "{mv:?}"
         );
-        for (mv, expected) in [
-            (None, want.clone()),
-            (Some(22), want),
-            (Some(23), None),
-            (Some(30), None),
-        ] {
-            assert!(
-                dependency_error("eligible.leader.replicas.version", 1, deps, &proposed(mv))
-                    == expected,
-                "{mv:?}"
-            );
-        }
-        assert!(dependency_error("group.version", 1, &[], &proposed(None)).is_none());
+        assert2::assert!(dependency_error("group.version", 1, &[], &proposed(None)).is_none());
     }
 }

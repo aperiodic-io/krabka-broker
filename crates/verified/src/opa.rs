@@ -90,18 +90,39 @@ mod tests {
         opa_cache_expiry, opa_error_decision,
     };
 
-    #[test]
-    fn cache_requires_strict_freshness() {
-        let allow = OpaAuthorizationDecision::Allow;
-        let deny = OpaAuthorizationDecision::Deny;
-        for (now_ms, expires_at_ms, cached, expected) in [
-            (9, 10, allow, OpaCacheAdmission::Hit(allow)),
-            (9, 10, deny, OpaCacheAdmission::Hit(deny)),
-            (10, 10, allow, OpaCacheAdmission::Miss),
-            (11, 10, deny, OpaCacheAdmission::Miss),
-        ] {
-            assert2::check!(opa_cache_admission(now_ms, expires_at_ms, cached) == expected);
-        }
+    #[yare::parameterized(
+        allow_before_expiry = {
+            9,
+            10,
+            OpaAuthorizationDecision::Allow,
+            OpaCacheAdmission::Hit(OpaAuthorizationDecision::Allow),
+        },
+        deny_before_expiry = {
+            9,
+            10,
+            OpaAuthorizationDecision::Deny,
+            OpaCacheAdmission::Hit(OpaAuthorizationDecision::Deny),
+        },
+        exact_expiry = {
+            10,
+            10,
+            OpaAuthorizationDecision::Allow,
+            OpaCacheAdmission::Miss,
+        },
+        after_expiry = {
+            11,
+            10,
+            OpaAuthorizationDecision::Deny,
+            OpaCacheAdmission::Miss,
+        },
+    )]
+    fn cache_requires_strict_freshness(
+        now_ms: i128,
+        expires_at_ms: i128,
+        cached: OpaAuthorizationDecision,
+        expected: OpaCacheAdmission,
+    ) {
+        assert2::check!(opa_cache_admission(now_ms, expires_at_ms, cached) == expected);
     }
 
     #[test]

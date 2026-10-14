@@ -122,17 +122,17 @@ mod tests {
 
         },
         [
-            ("5m", Some(300_000)),
-            ("1h", Some(3_600_000)),
-            ("2d", Some(172_800_000)),
-            ("250us", Some(0)),
-            ("1 minute", Some(60_000)),
+            five_minutes = { "5m", Some(300_000) },
+            one_hour = { "1h", Some(3_600_000) },
+            two_days = { "2d", Some(172_800_000) },
+            submillisecond = { "250us", Some(0) },
+            one_minute_words = { "1 minute", Some(60_000) },
             // A unit is required, so a number alone cannot be read as the
             // wrong scale. Zero is the one exemption, having no scale.
-            ("90", None),
-            ("0", Some(0)),
-            ("banana", None),
-            ("", None),
+            missing_unit = { "90", None },
+            zero = { "0", Some(0) },
+            invalid_word = { "banana", None },
+            empty = { "", None },
         ]
     );
 

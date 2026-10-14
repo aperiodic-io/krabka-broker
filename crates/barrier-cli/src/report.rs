@@ -29,6 +29,11 @@ pub(crate) fn described_error(code: i16, message: Option<&str>) -> String {
     }
 }
 
+fn report_refused(code: i16, message: Option<&str>) -> i32 {
+    eprintln!("{}", described_error(code, message));
+    EXIT_REFUSED
+}
+
 /// One line per altered group.
 pub(crate) fn report_alter(
     response: &krabka_protocol::krabka::barrier::AlterBarrierGroupsResponse,
@@ -93,11 +98,7 @@ pub(crate) fn report_trigger(
     response: &krabka_protocol::krabka::barrier::TriggerBarrierResponse,
 ) -> i32 {
     if response.error_code != 0 {
-        eprintln!(
-            "{}",
-            described_error(response.error_code, response.error_message.as_deref())
-        );
-        return EXIT_REFUSED;
+        return report_refused(response.error_code, response.error_message.as_deref());
     }
     println!("epoch  {}", response.epoch);
     println!("status {}", status_name(response.status));
@@ -123,11 +124,7 @@ pub(crate) fn report_list(
     response: &krabka_protocol::krabka::barrier::ListBarrierCutsResponse,
 ) -> i32 {
     if response.error_code != 0 {
-        eprintln!(
-            "{}",
-            described_error(response.error_code, response.error_message.as_deref())
-        );
-        return EXIT_REFUSED;
+        return report_refused(response.error_code, response.error_message.as_deref());
     }
     for cut in &response.cuts {
         println!(

@@ -130,90 +130,98 @@ mod tests {
         jwks_on_demand_refresh_decision,
     };
 
-    #[test]
-    fn cache_requires_one_fresh_stable_generation() {
-        let fresh = JwksCacheFacts {
+    fn fresh_cache_facts() -> JwksCacheFacts {
+        JwksCacheFacts {
             generation_before: 2,
             generation_after: 2,
             last_successful_fetch_ms: 100,
             now_ms: 200,
             expiry_enabled: true,
             expiry_ms: 100,
-        };
-        assert2::check!(jwks_cache_admission(fresh) == JwksCacheDecision::Admit);
-        assert2::check!(
-            jwks_cache_admission(JwksCacheFacts {
-                expiry_enabled: false,
-                ..fresh
-            }) == JwksCacheDecision::Admit
-        );
-        assert2::check!(
-            jwks_cache_admission(JwksCacheFacts {
-                now_ms: 100,
-                last_successful_fetch_ms: 100,
-                expiry_ms: 0,
-                ..fresh
-            }) == JwksCacheDecision::Admit
-        );
-        for rejected in [
-            JwksCacheFacts {
-                generation_before: 1,
-                ..fresh
-            },
-            JwksCacheFacts {
-                generation_after: 4,
-                ..fresh
-            },
-            JwksCacheFacts {
-                last_successful_fetch_ms: 0,
-                ..fresh
-            },
-            JwksCacheFacts {
-                now_ms: 0,
-                last_successful_fetch_ms: 0,
-                ..fresh
-            },
-            JwksCacheFacts {
-                now_ms: 99,
-                ..fresh
-            },
-            JwksCacheFacts {
-                now_ms: 201,
-                ..fresh
-            },
-            JwksCacheFacts {
-                expiry_ms: -1,
-                ..fresh
-            },
-        ] {
-            assert2::check!(jwks_cache_admission(rejected) == JwksCacheDecision::Reject);
         }
     }
 
-    #[test]
-    fn on_demand_limit_is_monotonic_and_overflow_safe() {
-        let refresh = |next_refresh_ms| JwksOnDemandDecision::Refresh { next_refresh_ms };
-        let limited = JwksOnDemandDecision::RateLimited;
-        // (now, last refresh, min pause, expected)
-        for (now_ms, last_refresh_ms, min_pause_ms, expected) in [
-            // Never refreshed: the pause does not apply.
-            (0, 0, 0, refresh(0)),
-            (5, 0, 10, refresh(5)),
-            (100, 0, 10, refresh(100)),
-            (i64::MAX, 0, i64::MAX, refresh(i64::MAX)),
-            // The pause boundary is inclusive.
-            (110, 100, 10, refresh(110)),
-            (109, 100, 10, limited),
-            // Negative clock or pause and a backwards clock step fail closed.
-            (-1, 0, 10, limited),
-            (100, 0, -1, limited),
-            (99, 100, 0, limited),
-            // The elapsed-time subtraction cannot overflow.
-            (i64::MAX, 1, i64::MAX, limited),
-        ] {
-            assert2::check!(
-                jwks_on_demand_refresh_decision(now_ms, last_refresh_ms, min_pause_ms) == expected
-            );
-        }
+    #[yare::parameterized(
+        fresh = { "a fresh stable generation", fresh_cache_facts(), JwksCacheDecision::Admit },
+        expiry_disabled = {
+            "a stable generation with expiry disabled",
+            JwksCacheFacts { expiry_enabled: false, ..fresh_cache_facts() },
+            JwksCacheDecision::Admit
+        },
+        exact_expiry_boundary = {
+            "a fetch at the zero-expiry boundary",
+            JwksCacheFacts { now_ms: 100, last_successful_fetch_ms: 100, expiry_ms: 0, ..fresh_cache_facts() },
+            JwksCacheDecision::Admit
+        },
+        changed_before_generation = {
+            "a generation changed before reading the cache",
+            JwksCacheFacts { generation_before: 1, ..fresh_cache_facts() },
+            JwksCacheDecision::Reject
+        },
+        changed_after_generation = {
+            "a generation changed while reading the cache",
+            JwksCacheFacts { generation_after: 4, ..fresh_cache_facts() },
+            JwksCacheDecision::Reject
+        },
+        never_fetched = {
+            "a cache with no successful fetch",
+            JwksCacheFacts { last_successful_fetch_ms: 0, ..fresh_cache_facts() },
+            JwksCacheDecision::Reject
+        },
+        zero_fetch_and_clock = {
+            "a cache whose fetch and current times are both zero",
+            JwksCacheFacts { now_ms: 0, last_successful_fetch_ms: 0, ..fresh_cache_facts() },
+            JwksCacheDecision::Reject
+        },
+        clock_before_fetch = {
+            "a clock before the successful fetch",
+            JwksCacheFacts { now_ms: 99, ..fresh_cache_facts() },
+            JwksCacheDecision::Reject
+        },
+        expired = {
+            "an expired cache",
+            JwksCacheFacts { now_ms: 201, ..fresh_cache_facts() },
+            JwksCacheDecision::Reject
+        },
+        negative_expiry = {
+            "a negative expiry",
+            JwksCacheFacts { expiry_ms: -1, ..fresh_cache_facts() },
+            JwksCacheDecision::Reject
+        },
+    )]
+    fn cache_requires_one_fresh_stable_generation(
+        case: &str,
+        facts: JwksCacheFacts,
+        expected: JwksCacheDecision,
+    ) {
+        assert2::check!(jwks_cache_admission(facts) == expected, "{case}");
+    }
+
+    #[yare::parameterized(
+        unrefreshed_zero = { 0, 0, 0, JwksOnDemandDecision::Refresh { next_refresh_ms: 0 } },
+        unrefreshed_pause = { 5, 0, 10, JwksOnDemandDecision::Refresh { next_refresh_ms: 5 } },
+        first_refresh = { 100, 0, 10, JwksOnDemandDecision::Refresh { next_refresh_ms: 100 } },
+        unrefreshed_max = {
+            i64::MAX,
+            0,
+            i64::MAX,
+            JwksOnDemandDecision::Refresh { next_refresh_ms: i64::MAX },
+        },
+        pause_boundary = { 110, 100, 10, JwksOnDemandDecision::Refresh { next_refresh_ms: 110 } },
+        before_pause_boundary = { 109, 100, 10, JwksOnDemandDecision::RateLimited },
+        negative_clock = { -1, 0, 10, JwksOnDemandDecision::RateLimited },
+        negative_pause = { 100, 0, -1, JwksOnDemandDecision::RateLimited },
+        backwards_clock = { 99, 100, 0, JwksOnDemandDecision::RateLimited },
+        elapsed_subtraction_overflow = { i64::MAX, 1, i64::MAX, JwksOnDemandDecision::RateLimited },
+    )]
+    fn on_demand_limit_is_monotonic_and_overflow_safe(
+        now_ms: i64,
+        last_refresh_ms: i64,
+        min_pause_ms: i64,
+        expected: JwksOnDemandDecision,
+    ) {
+        assert2::check!(
+            jwks_on_demand_refresh_decision(now_ms, last_refresh_ms, min_pause_ms) == expected
+        );
     }
 }

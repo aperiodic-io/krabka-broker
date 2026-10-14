@@ -128,18 +128,16 @@ mod tests {
         assert!(output.matches("..Self::default()").count() == 2);
     }
 
-    #[test]
-    fn target_metadata_requires_distinct_plain_paths_in_parentheses() {
-        for input in [
-            "node_endpoints(targets())",
-            "node_endpoints(targets(wire::Endpoint, wire::Endpoint))",
-            "node_endpoints(targets(Endpoint<T>))",
-            "node_endpoints(targets[wire::Endpoint])",
-            "node_endpoints(targets = wire::Endpoint)",
-        ] {
-            let metadata: Meta = moxy::parse!({ input }).unwrap();
-            assert!(EndpointArgs::from_meta(&metadata).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        empty = { "node_endpoints(targets())" },
+        duplicate_paths = { "node_endpoints(targets(wire::Endpoint, wire::Endpoint))" },
+        generic_path = { "node_endpoints(targets(Endpoint<T>))" },
+        bracketed = { "node_endpoints(targets[wire::Endpoint])" },
+        assignment = { "node_endpoints(targets = wire::Endpoint)" },
+    )]
+    fn target_metadata_requires_distinct_plain_paths_in_parentheses(input: &str) {
+        let metadata: Meta = moxy::parse!({ input }).unwrap();
+        assert2::assert!(EndpointArgs::from_meta(&metadata).is_err(), "{input}");
     }
 
     #[test]

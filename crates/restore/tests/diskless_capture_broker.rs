@@ -148,13 +148,7 @@ async fn produce(bootstrap: &str, topic_id: Uuid) {
         loop {
             // The flusher expires batches older than `retention.ms` out of the
             // object store, so each batch carries the wall clock.
-            let now_ms = i64::try_from(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("the test clock is after the epoch")
-                    .as_millis(),
-            )
-            .expect("the test clock fits an i64");
+            let now_ms = test_wallclock_ms();
             let batch = RecordBatch {
                 base_timestamp: now_ms,
                 max_timestamp: now_ms,
@@ -300,3 +294,9 @@ async fn capture_freezes_a_live_diskless_index_without_producing_to_it() {
 
     broker.handle.shutdown().await;
 }
+
+krabka_macros::unix_millis_fixture!(
+    test_wallclock_ms,
+    "the test clock is after the epoch",
+    "the test clock fits an i64"
+);

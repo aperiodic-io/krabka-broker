@@ -444,19 +444,20 @@ mod tests {
 
     /// A group name and a topic name go into `i16`-length strings of the
     /// state records, so 32767 bytes is the longest that a definition can use.
-    #[test]
-    fn a_group_or_topic_name_is_usable_up_to_32767_bytes() {
-        for (length, ok) in [(MAX_STRING_BYTES, true), (MAX_STRING_BYTES + 1, false)] {
-            let long = "n".repeat(length);
-            check!(
-                validate_group_name(&long).is_ok() == ok,
-                "group of {length} bytes"
-            );
-            check!(
-                validate_spec(&spec().topics(&["orders", long.as_str()]).call()).is_ok() == ok,
-                "topic of {length} bytes"
-            );
-        }
+    #[yare::parameterized(
+        at_limit = { MAX_STRING_BYTES, true },
+        over_limit = { MAX_STRING_BYTES + 1, false },
+    )]
+    fn a_group_or_topic_name_is_usable_up_to_32767_bytes(length: usize, ok: bool) {
+        let long = "n".repeat(length);
+        check!(
+            validate_group_name(&long).is_ok() == ok,
+            "group of {length} bytes"
+        );
+        check!(
+            validate_spec(&spec().topics(&["orders", long.as_str()]).call()).is_ok() == ok,
+            "topic of {length} bytes"
+        );
     }
 
     #[test]

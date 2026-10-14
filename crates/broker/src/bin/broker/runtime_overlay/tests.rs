@@ -270,43 +270,42 @@ fn group_member_limits_and_streams_switch_apply_from_cli() {
 /// `--transaction-partition-verification-enable` is the static layer of a
 /// dynamic Kafka config: absent it leaves Kafka's default, and either value
 /// records that the operator named the key.
-#[test]
-fn partition_verification_switch_applies_from_cli() {
+#[yare::parameterized(
+    default_value = { None, true, false },
+    explicit_false = {
+        Some("--transaction-partition-verification-enable=false"),
+        false,
+        true,
+    },
+    explicit_true = {
+        Some("--transaction-partition-verification-enable=true"),
+        true,
+        true,
+    },
+)]
+fn partition_verification_switch_applies_from_cli(
+    flag: Option<&'static str>,
+    want: bool,
+    named: bool,
+) {
     let _guard = env_guard();
+    let args = Args::try_parse_from(std::iter::once("krabka-broker").chain(flag))
+        .expect("parse the switch");
+    let mut config = BrokerConfig::default();
 
-    // (the flag, the value, whether the operator named the key)
-    let cases = [
-        (None, true, false),
+    args.apply_runtime_to(&mut config, None)
+        .expect("apply the switch");
+
+    assert2::assert!(
         (
-            Some("--transaction-partition-verification-enable=false"),
-            false,
-            true,
-        ),
-        (
-            Some("--transaction-partition-verification-enable=true"),
-            true,
-            true,
-        ),
-    ];
-    for (flag, want, named) in cases {
-        let args = Args::try_parse_from(std::iter::once("krabka-broker").chain(flag))
-            .expect("parse the switch");
-        let mut config = BrokerConfig::default();
-
-        args.apply_runtime_to(&mut config, None)
-            .expect("apply the switch");
-
-        assert!(
-            (
-                config.transaction_partition_verification_enable,
-                config
-                    .static_config_origins
-                    .supplied_kafka_keys
-                    .contains("transaction.partition.verification.enable")
-            ) == (want, named),
-            "{flag:?}"
-        );
-    }
+            config.transaction_partition_verification_enable,
+            config
+                .static_config_origins
+                .supplied_kafka_keys
+                .contains("transaction.partition.verification.enable")
+        ) == (want, named),
+        "{flag:?}"
+    );
 }
 
 fn file_runtime_with_nondefault_values() -> krabka_broker::file_config::FileConfig {

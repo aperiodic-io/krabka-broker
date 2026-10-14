@@ -525,30 +525,27 @@ mod tests {
         assert2::assert!("demo-broker-0-0".starts_with(p));
     }
 
-    #[test]
-    fn acks_map_to_producer_enum() {
-        use krabka_client_producer::Acks as P;
-        for (acks, want) in [
-            (Acks::None, P::Zero),
-            (Acks::Leader, P::One),
-            (Acks::All, P::All),
-        ] {
-            assert2::assert!(acks.into_producer() == want);
-        }
+    #[yare::parameterized(
+        none = { Acks::None, krabka_client_producer::Acks::Zero },
+        leader = { Acks::Leader, krabka_client_producer::Acks::One },
+        all = { Acks::All, krabka_client_producer::Acks::All },
+    )]
+    fn acks_map_to_producer_enum(acks: Acks, want: krabka_client_producer::Acks) {
+        assert2::assert!(acks.into_producer() == want);
     }
 
-    #[test]
-    fn compression_maps_to_producer_enum() {
-        use krabka_client_producer::Compression as PC;
-        for (compression, want) in [
-            (Compression::None, PC::None),
-            (Compression::Gzip, PC::Gzip),
-            (Compression::Snappy, PC::Snappy),
-            (Compression::Lz4, PC::Lz4),
-            (Compression::Zstd, PC::Zstd),
-        ] {
-            assert2::assert!(compression.into_producer() == want);
-        }
+    #[yare::parameterized(
+        none = { Compression::None, krabka_client_producer::Compression::None },
+        gzip = { Compression::Gzip, krabka_client_producer::Compression::Gzip },
+        snappy = { Compression::Snappy, krabka_client_producer::Compression::Snappy },
+        lz4 = { Compression::Lz4, krabka_client_producer::Compression::Lz4 },
+        zstd = { Compression::Zstd, krabka_client_producer::Compression::Zstd },
+    )]
+    fn compression_maps_to_producer_enum(
+        compression: Compression,
+        want: krabka_client_producer::Compression,
+    ) {
+        assert2::assert!(compression.into_producer() == want);
     }
 
     #[test]
@@ -622,39 +619,41 @@ mode:
         serde_saphyr::from_str(&format!("name: bounds\nmode:\n  kind: saturate\n{extra}\n"))
     }
 
-    #[test]
-    fn scenario_yaml_rejects_unrunnable_magnitudes() {
+    #[yare::parameterized(
+        negative_message_size = { "msg_size: -1B", "a positive size" },
+        zero_message_size = { "msg_size: 0", "a positive size" },
+        negative_key_size = { "key_size: -1B", "a size of zero or more" },
+        negative_batch_size = { "batch_size: -16KiB", "a positive size" },
+        zero_batch_size = { "batch_size: 0", "a positive size" },
+        negative_linger = { "linger: -5ms", "an extent of zero or more" },
+        negative_duration = { "duration: -60s", "a positive extent" },
+        zero_duration = { "duration: 0", "a positive extent" },
+        negative_warmup = { "warmup: -10s", "an extent of zero or more" },
+        negative_failover_kill_after = {
+            "failover:\n  kill_after: -4s",
+            "an extent of zero or more",
+        },
+    )]
+    fn scenario_yaml_rejects_unrunnable_magnitudes(field: &str, requirement: &str) {
         // The human forms accept a sign, so every field that used to be an
         // unsigned primitive has to say so itself.
-        for (field, requirement) in [
-            ("msg_size: -1B", "a positive size"),
-            ("msg_size: 0", "a positive size"),
-            ("key_size: -1B", "a size of zero or more"),
-            ("batch_size: -16KiB", "a positive size"),
-            ("batch_size: 0", "a positive size"),
-            ("linger: -5ms", "an extent of zero or more"),
-            ("duration: -60s", "a positive extent"),
-            ("duration: 0", "a positive extent"),
-            ("warmup: -10s", "an extent of zero or more"),
-            ("failover:\n  kill_after: -4s", "an extent of zero or more"),
-        ] {
-            let error = parse_saturate_with(field)
-                .expect_err("an unrunnable magnitude must fail at load, not at run");
-            check!(error.to_string().contains(requirement), "{field:?}");
-        }
+        let error = parse_saturate_with(field)
+            .expect_err("an unrunnable magnitude must fail at load, not at run");
+        check!(error.to_string().contains(requirement), "{field:?}");
     }
 
-    #[test]
-    fn scenario_yaml_rejects_an_unrunnable_fixed_rate() {
+    #[yare::parameterized(
+        negative = { "\"-1/s\"" },
+        zero = { "\"0\"" },
+    )]
+    fn scenario_yaml_rejects_an_unrunnable_fixed_rate(rate: &str) {
         // Quoted because `LoadMode` is internally tagged: serde buffers the
         // variant's fields before handing them on, and a buffered YAML `0` is an
         // integer rather than the scalar text the human form reads.
-        for rate in [r#""-1/s""#, r#""0""#] {
-            let yaml = format!("name: bounds\nmode:\n  kind: fixed_rate\n  rate: {rate}\n");
-            let error = serde_saphyr::from_str::<Scenario>(&yaml)
-                .expect_err("a paced producer needs a positive rate");
-            check!(error.to_string().contains("a positive rate"), "{rate}");
-        }
+        let yaml = format!("name: bounds\nmode:\n  kind: fixed_rate\n  rate: {rate}\n");
+        let error = serde_saphyr::from_str::<Scenario>(&yaml)
+            .expect_err("a paced producer needs a positive rate");
+        check!(error.to_string().contains("a positive rate"), "{rate}");
     }
 
     #[test]

@@ -78,89 +78,63 @@ fn unify_collision_byte(byte: u8) -> u8 { if byte == b'.' { b'_' } else { byte }
 mod tests {
     use {super::*, assert2::check};
 
-    #[test]
-    fn validate_topic_name_matches_kafka() {
-        let long_ok = "a".repeat(MAX_TOPIC_NAME_LENGTH);
-        let too_long = "a".repeat(MAX_TOPIC_NAME_LENGTH + 1);
-        // Each `é` is one UTF-16 unit and two UTF-8 bytes, so the length rule must count units.
-        let non_ascii_short = "é".repeat(200);
-        for (name, expected) in [
-            ("orders", Ok(())),
-            ("a.b_c-D9", Ok(())),
-            (long_ok.as_str(), Ok(())),
-            ("", Err(InvalidTopicName::Empty)),
-            (".", Err(InvalidTopicName::Dot)),
-            ("..", Err(InvalidTopicName::DotDot)),
-            ("...", Ok(())),
-            (
-                too_long.as_str(),
-                Err(InvalidTopicName::TooLong(too_long.clone())),
-            ),
-            (
-                "a/b",
-                Err(InvalidTopicName::IllegalCharacter("a/b".to_owned())),
-            ),
-            (
-                "../x",
-                Err(InvalidTopicName::IllegalCharacter("../x".to_owned())),
-            ),
-            (
-                "/tmp/x",
-                Err(InvalidTopicName::IllegalCharacter("/tmp/x".to_owned())),
-            ),
-            (
-                "a b",
-                Err(InvalidTopicName::IllegalCharacter("a b".to_owned())),
-            ),
-            (
-                non_ascii_short.as_str(),
-                Err(InvalidTopicName::IllegalCharacter(non_ascii_short.clone())),
-            ),
-        ] {
-            check!(validate_topic_name(name) == expected, "{name:?}");
-        }
+    #[yare::parameterized(
+        ordinary = { "orders".to_owned(), Ok(()) },
+        allowed_punctuation = { "a.b_c-D9".to_owned(), Ok(()) },
+        max_utf16_length = { "a".repeat(MAX_TOPIC_NAME_LENGTH), Ok(()) },
+        empty = { String::new(), Err(InvalidTopicName::Empty) },
+        dot = { ".".to_owned(), Err(InvalidTopicName::Dot) },
+        dot_dot = { "..".to_owned(), Err(InvalidTopicName::DotDot) },
+        multiple_dots = { "...".to_owned(), Ok(()) },
+        too_long = {
+            "a".repeat(MAX_TOPIC_NAME_LENGTH + 1),
+            Err(InvalidTopicName::TooLong("a".repeat(MAX_TOPIC_NAME_LENGTH + 1))),
+        },
+        slash = { "a/b".to_owned(), Err(InvalidTopicName::IllegalCharacter("a/b".to_owned())) },
+        parent_path = {
+            "../x".to_owned(),
+            Err(InvalidTopicName::IllegalCharacter("../x".to_owned())),
+        },
+        absolute_path = {
+            "/tmp/x".to_owned(),
+            Err(InvalidTopicName::IllegalCharacter("/tmp/x".to_owned())),
+        },
+        space = { "a b".to_owned(), Err(InvalidTopicName::IllegalCharacter("a b".to_owned())) },
+        non_ascii = { "é".repeat(200), Err(InvalidTopicName::IllegalCharacter("é".repeat(200))) },
+    )]
+    fn validate_topic_name_matches_kafka(name: String, expected: Result<(), InvalidTopicName>) {
+        check!(validate_topic_name(&name) == expected, "{name:?}");
     }
 
-    #[test]
-    fn invalid_topic_name_messages_are_kafka_text() {
-        for (error, message) in [
-            (
-                InvalidTopicName::Empty,
-                "Topic name is invalid: the empty string is not allowed",
-            ),
-            (
-                InvalidTopicName::Dot,
-                "Topic name is invalid: '.' is not allowed",
-            ),
-            (
-                InvalidTopicName::DotDot,
-                "Topic name is invalid: '..' is not allowed",
-            ),
-            (
-                InvalidTopicName::TooLong("x".to_owned()),
-                "Topic name is invalid: the length of 'x' is longer than the max allowed length 249",
-            ),
-            (
-                InvalidTopicName::IllegalCharacter("a/b".to_owned()),
-                "Topic name is invalid: 'a/b' contains one or more characters other than ASCII \
-                 alphanumerics, '.', '_' and '-'",
-            ),
-        ] {
-            check!(error.to_string() == message);
-        }
+    #[yare::parameterized(
+        empty = {
+            InvalidTopicName::Empty,
+            "Topic name is invalid: the empty string is not allowed",
+        },
+        dot = { InvalidTopicName::Dot, "Topic name is invalid: '.' is not allowed" },
+        dot_dot = { InvalidTopicName::DotDot, "Topic name is invalid: '..' is not allowed" },
+        too_long = {
+            InvalidTopicName::TooLong("x".to_owned()),
+            "Topic name is invalid: the length of 'x' is longer than the max allowed length 249",
+        },
+        illegal_character = {
+            InvalidTopicName::IllegalCharacter("a/b".to_owned()),
+            "Topic name is invalid: 'a/b' contains one or more characters other than ASCII alphanumerics, '.', '_' and '-'",
+        },
+    )]
+    fn invalid_topic_name_messages_are_kafka_text(error: InvalidTopicName, message: &str) {
+        check!(error.to_string() == message);
     }
 
-    #[test]
-    fn topic_names_collide_unifies_dot_and_underscore() {
-        for (a, b, expected) in [
-            ("a.b", "a_b", true),
-            ("a_b", "a.b", true),
-            ("a.b", "a.b", true),
-            ("a.b", "a-b", false),
-            ("a.b", "a.bc", false),
-            ("orders", "orders2", false),
-        ] {
-            check!(topic_names_collide(a, b) == expected, "{a} {b}");
-        }
+    #[yare::parameterized(
+        dot_to_underscore = { "a.b", "a_b", true },
+        underscore_to_dot = { "a_b", "a.b", true },
+        equal_dot = { "a.b", "a.b", true },
+        hyphen_differs = { "a.b", "a-b", false },
+        longer_name_differs = { "a.b", "a.bc", false },
+        distinct_names = { "orders", "orders2", false },
+    )]
+    fn topic_names_collide_unifies_dot_and_underscore(a: &str, b: &str, expected: bool) {
+        check!(topic_names_collide(a, b) == expected, "{a} {b}");
     }
 }

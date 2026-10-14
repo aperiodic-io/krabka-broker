@@ -10,7 +10,9 @@ use {
     super::SharePartitionLeaderManager,
     crate::share_partition::{
         group_settings::GroupShareSettings,
-        session::{FetchPartitions, ResponseRow, ShareFetchSessionUpdate, SharePartitionKey},
+        session::{
+            ResponseRow, ShareFetchSessionRequest, ShareFetchSessionUpdate, SharePartitionKey,
+        },
     },
     std::collections::HashSet,
 };
@@ -20,19 +22,9 @@ impl SharePartitionLeaderManager {
     /// [`ShareSessionCache::update_fetch`](crate::share_partition::session::ShareSessionCache::update_fetch).
     pub(crate) fn update_fetch_session(
         &self,
-        (group, member): (&str, &str),
-        connection_id: &str,
-        epoch: i32,
-        partitions: FetchPartitions<'_>,
-        has_acknowledgements: bool,
+        request: ShareFetchSessionRequest<'_>,
     ) -> Result<ShareFetchSessionUpdate, i16> {
-        self.sessions.update_fetch(
-            (group, member),
-            connection_id,
-            epoch,
-            partitions,
-            has_acknowledgements,
-        )
+        self.sessions.update_fetch(request)
     }
 
     /// Which rows an incremental `ShareFetch` response carries: see
@@ -102,7 +94,7 @@ mod tests {
             manager::test_support::{
                 LOCK, SessionCapacity, manager, manager_with_unlimited_fallback,
             },
-            session::FetchPartitions,
+            session::{FetchPartitions, ShareFetchSessionRequest},
             state::AcquisitionState,
         },
         assert2::assert,
@@ -115,44 +107,34 @@ mod tests {
         let manager = manager_with_unlimited_fallback(SessionCapacity(2));
         let partitions = HashSet::new();
 
-        assert!(
-            manager
-                .update_fetch_session(
-                    ("g", "m1"),
-                    "connection-1",
-                    0,
-                    FetchPartitions {
-                        requested: &[],
-                        forgotten: &partitions,
-                    },
-                    false,
-                )
-                .is_ok()
-        );
-        assert!(
-            manager
-                .update_fetch_session(
-                    ("g", "m2"),
-                    "connection-2",
-                    0,
-                    FetchPartitions {
-                        requested: &[],
-                        forgotten: &partitions,
-                    },
-                    false,
-                )
-                .is_ok()
-        );
+        for (member, connection) in [("m1", "connection-1"), ("m2", "connection-2")] {
+            assert!(
+                manager
+                    .update_fetch_session(
+                        ShareFetchSessionRequest::builder()
+                            .identity(("g", member))
+                            .connection_id(connection)
+                            .epoch(0)
+                            .partitions(FetchPartitions {
+                                requested: &[],
+                                forgotten: &partitions,
+                            })
+                            .build()
+                    )
+                    .is_ok()
+            );
+        }
         assert!(
             manager.update_fetch_session(
-                ("g", "m3"),
-                "connection-3",
-                0,
-                FetchPartitions {
-                    requested: &[],
-                    forgotten: &partitions,
-                },
-                false,
+                ShareFetchSessionRequest::builder()
+                    .identity(("g", "m3"))
+                    .connection_id("connection-3")
+                    .epoch(0)
+                    .partitions(FetchPartitions {
+                        requested: &[],
+                        forgotten: &partitions,
+                    })
+                    .build()
             ) == Err(crate::codes::SHARE_SESSION_LIMIT_REACHED)
         );
     }
@@ -176,14 +158,15 @@ mod tests {
             assert!(acquired.len() == 1);
         }
         mgr.update_fetch_session(
-            ("g1", "m1"),
-            "connection-1",
-            0,
-            FetchPartitions {
-                requested: &[(tid, 0)],
-                forgotten: &HashSet::new(),
-            },
-            false,
+            ShareFetchSessionRequest::builder()
+                .identity(("g1", "m1"))
+                .connection_id("connection-1")
+                .epoch(0)
+                .partitions(FetchPartitions {
+                    requested: &[(tid, 0)],
+                    forgotten: &HashSet::new(),
+                })
+                .build(),
         )
         .expect("open session");
 

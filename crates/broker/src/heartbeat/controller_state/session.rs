@@ -235,6 +235,19 @@ mod tests {
         std::time::Duration,
     };
 
+    #[derive(Debug, Clone, Copy)]
+    enum SessionStep {
+        Heartbeat,
+        FencedHeartbeat,
+        Fence,
+        Discover,
+        Seed,
+        SeedFenced,
+        ReplaceIncarnation,
+        Advance(u64),
+        Tick,
+    }
+
     /// krabka-io/krabka-broker#825: a controller that takes over, a restarted
     /// one included, starts every broker from the fence and controlled
     /// shutdown its registration replays to, as
@@ -381,206 +394,192 @@ mod tests {
         assert!(liveness.dead_snapshot().await.is_empty());
     }
 
-    #[tokio::test]
-    async fn normal_seed_gives_new_and_existing_brokers_a_full_timeout_window() {
-        for (timeout_ms, stale_heartbeat_ms) in [(50, None), (10, Some(20))] {
-            let clock = TestClock::new();
-            let liveness = ControllerLivenessState::with_clock(
-                Duration::from_millis(timeout_ms),
-                clock.clock(),
-            );
-            if let Some(age_ms) = stale_heartbeat_ms {
-                liveness.record_heartbeat(7).await;
-                clock.advance(Duration::from_millis(age_ms));
-            }
-            // A re-seed refreshes even a stale entry to a full timeout window.
-            liveness
-                .seed_brokers([ReplicatedRegistration::unfenced(7)])
-                .await;
-            clock.advance(Duration::from_millis(1));
-            let transitions = liveness.tick().await;
-            assert!(transitions.is_empty());
-            assert!(liveness.state(7).await == Some(BrokerLivenessState::Alive));
+    #[yare::parameterized(
+        new_broker = { 50, None },
+        existing_stale_broker = { 10, Some(20) },
+    )]
+    #[test_macro(tokio::test)]
+    async fn normal_seed_gives_new_and_existing_brokers_a_full_timeout_window(
+        timeout_ms: u64,
+        stale_heartbeat_ms: Option<u64>,
+    ) {
+        let clock = TestClock::new();
+        let liveness =
+            ControllerLivenessState::with_clock(Duration::from_millis(timeout_ms), clock.clock());
+        if let Some(age_ms) = stale_heartbeat_ms {
+            liveness.record_heartbeat(7).await;
+            clock.advance(Duration::from_millis(age_ms));
         }
+        // A re-seed refreshes even a stale entry to a full timeout window.
+        liveness
+            .seed_brokers([ReplicatedRegistration::unfenced(7)])
+            .await;
+        clock.advance(Duration::from_millis(1));
+        let transitions = liveness.tick().await;
+        assert2::assert!(transitions.is_empty());
+        assert2::assert!(liveness.state(7).await == Some(BrokerLivenessState::Alive));
     }
 
     /// krabka-io/krabka-broker#822: a broker id is held against a new
     /// incarnation only while the broker is in contact, as Kafka's
     /// `BrokerHeartbeatTracker.hasValidSession` decides.
-    #[tokio::test]
-    async fn a_session_is_valid_only_while_the_broker_is_in_contact() {
+    #[yare::parameterized(
+        never_seen = { "never seen", &[], false },
+        heartbeat = { "a heartbeat", &[SessionStep::Heartbeat], true },
+        heartbeat_at_timeout = {
+            "a heartbeat at the edge of the timeout",
+            &[SessionStep::Heartbeat, SessionStep::Advance(10)],
+            true,
+        },
+        heartbeat_past_timeout_before_tick = {
+            "a heartbeat past the timeout, before the tick",
+            &[SessionStep::Heartbeat, SessionStep::Advance(11)],
+            false,
+        },
+        heartbeat_past_timeout_after_tick = {
+            "a heartbeat past the timeout, after the tick",
+            &[SessionStep::Heartbeat, SessionStep::Advance(11), SessionStep::Tick],
+            false,
+        },
+        fenced_heartbeat = {
+            "a fenced broker that still heartbeats",
+            &[SessionStep::FencedHeartbeat],
+            true,
+        },
+        fenced_by_request = {
+            "a broker fenced on request that still heartbeats",
+            &[SessionStep::Heartbeat, SessionStep::Fence],
+            true,
+        },
+        discovered_in_image = {
+            "a broker only discovered in the image",
+            &[SessionStep::Discover],
+            false,
+        },
+        unfenced_seed = {
+            "an unfenced broker seeded by a new controller",
+            &[SessionStep::Seed],
+            true,
+        },
+        fenced_seed_after_heartbeat = {
+            "a fenced broker seeded by a new controller",
+            &[SessionStep::FencedHeartbeat, SessionStep::Seed],
+            false,
+        },
+        replicated_fenced = {
+            "a broker the image replicates as fenced",
+            &[SessionStep::SeedFenced],
+            false,
+        },
+        heartbeating_replicated_fenced = {
+            "a heartbeating broker the image replicates as fenced",
+            &[SessionStep::Heartbeat, SessionStep::SeedFenced],
+            false,
+        },
+        replaced_incarnation = {
+            "a new incarnation replaced the session",
+            &[SessionStep::Heartbeat, SessionStep::ReplaceIncarnation],
+            false,
+        },
+        replacement_heartbeats = {
+            "the new incarnation heartbeats",
+            &[
+                SessionStep::Heartbeat,
+                SessionStep::ReplaceIncarnation,
+                SessionStep::FencedHeartbeat,
+            ],
+            true,
+        },
+        dead_broker_revived = {
+            "a dead broker revived by a heartbeat",
+            &[
+                SessionStep::Heartbeat,
+                SessionStep::Advance(11),
+                SessionStep::Tick,
+                SessionStep::Heartbeat,
+            ],
+            true,
+        },
+    )]
+    #[test_macro(tokio::test)]
+    async fn a_session_is_valid_only_while_the_broker_is_in_contact(
+        what: &str,
+        steps: &[SessionStep],
+        valid: bool,
+    ) {
         const TIMEOUT: Duration = Duration::from_millis(10);
         const BROKER: u64 = 7;
 
-        /// What the registry saw of the broker, and when.
-        #[derive(Debug, Clone, Copy)]
-        enum Step {
-            Heartbeat,
-            FencedHeartbeat,
-            Fence,
-            Discover,
-            Seed,
-            SeedFenced,
-            ReplaceIncarnation,
-            Advance(u64),
-            Tick,
-        }
-        use Step::{
-            Advance, Discover, Fence, FencedHeartbeat, Heartbeat, ReplaceIncarnation, Seed,
-            SeedFenced, Tick,
-        };
-
-        struct Case {
-            what: &'static str,
-            steps: &'static [Step],
-            valid: bool,
-        }
-        let cases: &[Case] = &[
-            Case {
-                what: "never seen",
-                steps: &[],
-                valid: false,
-            },
-            Case {
-                what: "a heartbeat",
-                steps: &[Heartbeat],
-                valid: true,
-            },
-            Case {
-                what: "a heartbeat at the edge of the timeout",
-                steps: &[Heartbeat, Advance(10)],
-                valid: true,
-            },
-            Case {
-                what: "a heartbeat past the timeout, before the tick",
-                steps: &[Heartbeat, Advance(11)],
-                valid: false,
-            },
-            Case {
-                what: "a heartbeat past the timeout, after the tick",
-                steps: &[Heartbeat, Advance(11), Tick],
-                valid: false,
-            },
-            Case {
-                what: "a fenced broker that still heartbeats",
-                steps: &[FencedHeartbeat],
-                valid: true,
-            },
-            Case {
-                what: "a broker fenced on request that still heartbeats",
-                steps: &[Heartbeat, Fence],
-                valid: true,
-            },
-            Case {
-                what: "a broker only discovered in the image",
-                steps: &[Discover],
-                valid: false,
-            },
-            Case {
-                what: "an unfenced broker seeded by a new controller",
-                steps: &[Seed],
-                valid: true,
-            },
-            Case {
-                what: "a fenced broker seeded by a new controller",
-                steps: &[FencedHeartbeat, Seed],
-                valid: false,
-            },
-            Case {
-                what: "a broker the image replicates as fenced",
-                steps: &[SeedFenced],
-                valid: false,
-            },
-            Case {
-                what: "a heartbeating broker the image replicates as fenced",
-                steps: &[Heartbeat, SeedFenced],
-                valid: false,
-            },
-            Case {
-                what: "a new incarnation replaced the session",
-                steps: &[Heartbeat, ReplaceIncarnation],
-                valid: false,
-            },
-            Case {
-                what: "the new incarnation heartbeats",
-                steps: &[Heartbeat, ReplaceIncarnation, FencedHeartbeat],
-                valid: true,
-            },
-            Case {
-                what: "a dead broker revived by a heartbeat",
-                steps: &[Heartbeat, Advance(11), Tick, Heartbeat],
-                valid: true,
-            },
-        ];
-        for Case { what, steps, valid } in cases {
-            let clock = TestClock::new();
-            let liveness = ControllerLivenessState::with_test_clock(TIMEOUT, &clock);
-            for step in *steps {
-                match step {
-                    Heartbeat => {
-                        liveness.record_heartbeat(BROKER).await;
-                    }
-                    FencedHeartbeat => {
-                        liveness.record_fenced_heartbeat(BROKER).await;
-                    }
-                    Fence => {
-                        liveness.apply_fencing(BROKER, true, true).await;
-                    }
-                    Discover => liveness.track_registered([BROKER]).await,
-                    Seed => {
-                        liveness
-                            .seed_brokers([ReplicatedRegistration::unfenced(BROKER)])
-                            .await;
-                    }
-                    SeedFenced => {
-                        liveness
-                            .seed_brokers([ReplicatedRegistration::fenced(BROKER)])
-                            .await;
-                    }
-                    ReplaceIncarnation => liveness.replace_incarnation(BROKER).await,
-                    Advance(millis) => clock.advance(Duration::from_millis(*millis)),
-                    Tick => {
-                        liveness.tick().await;
-                    }
+        let clock = TestClock::new();
+        let liveness = ControllerLivenessState::with_test_clock(TIMEOUT, &clock);
+        for step in steps {
+            match step {
+                SessionStep::Heartbeat => {
+                    liveness.record_heartbeat(BROKER).await;
+                }
+                SessionStep::FencedHeartbeat => {
+                    liveness.record_fenced_heartbeat(BROKER).await;
+                }
+                SessionStep::Fence => {
+                    liveness.apply_fencing(BROKER, true, true).await;
+                }
+                SessionStep::Discover => liveness.track_registered([BROKER]).await,
+                SessionStep::Seed => {
+                    liveness
+                        .seed_brokers([ReplicatedRegistration::unfenced(BROKER)])
+                        .await;
+                }
+                SessionStep::SeedFenced => {
+                    liveness
+                        .seed_brokers([ReplicatedRegistration::fenced(BROKER)])
+                        .await;
+                }
+                SessionStep::ReplaceIncarnation => liveness.replace_incarnation(BROKER).await,
+                SessionStep::Advance(millis) => clock.advance(Duration::from_millis(*millis)),
+                SessionStep::Tick => {
+                    liveness.tick().await;
                 }
             }
-            assert2::check!(liveness.has_valid_session(BROKER).await == *valid, "{what}");
         }
+        assert2::check!(liveness.has_valid_session(BROKER).await == valid, "{what}");
     }
 
     /// A new incarnation starts alive, fenced and without a session, whatever
     /// its previous incarnation had reached: nothing elects it before it
     /// catches up, and nothing treats it as the dead process it replaced.
-    #[tokio::test]
-    async fn a_new_incarnation_starts_alive_fenced_and_without_a_session() {
+    #[yare::parameterized(
+        alive_and_unfenced = { "alive and unfenced", false },
+        dead = { "dead", true },
+    )]
+    #[test_macro(tokio::test)]
+    async fn a_new_incarnation_starts_alive_fenced_and_without_a_session(
+        what: &str,
+        expired: bool,
+    ) {
         const TIMEOUT: Duration = Duration::from_millis(10);
 
-        // (what the previous incarnation reached, is it past the timeout)
-        let cases = [("alive and unfenced", false), ("dead", true)];
-        for (what, expired) in cases {
-            let clock = TestClock::new();
-            let liveness = ControllerLivenessState::with_test_clock(TIMEOUT, &clock);
-            liveness.record_heartbeat(7).await;
-            if expired {
-                clock.advance(Duration::from_millis(11));
-                liveness.tick().await;
-            }
-
-            liveness.replace_incarnation(7).await;
-
-            assert2::check!(
-                (
-                    liveness.state(7).await,
-                    liveness.is_alive(7).await,
-                    liveness.unavailable_snapshot().await.contains(&7),
-                    liveness.has_valid_session(7).await,
-                ) == (Some(BrokerLivenessState::Alive), false, true, false),
-                "{what}"
-            );
-            // It gets a whole window for its first heartbeat.
-            clock.advance(Duration::from_millis(10));
-            assert2::check!(liveness.tick().await == vec![], "{what}");
+        let clock = TestClock::new();
+        let liveness = ControllerLivenessState::with_test_clock(TIMEOUT, &clock);
+        liveness.record_heartbeat(7).await;
+        if expired {
+            clock.advance(Duration::from_millis(11));
+            liveness.tick().await;
         }
+
+        liveness.replace_incarnation(7).await;
+
+        assert2::check!(
+            (
+                liveness.state(7).await,
+                liveness.is_alive(7).await,
+                liveness.unavailable_snapshot().await.contains(&7),
+                liveness.has_valid_session(7).await,
+            ) == (Some(BrokerLivenessState::Alive), false, true, false),
+            "{what}"
+        );
+        // It gets a whole window for its first heartbeat.
+        clock.advance(Duration::from_millis(10));
+        assert2::check!(liveness.tick().await == vec![], "{what}");
     }
 
     /// A term is seeded once, whichever caller comes first, and a new term is

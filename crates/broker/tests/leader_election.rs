@@ -19,7 +19,7 @@ use {
     std::time::Duration,
     support::{
         cluster_lock,
-        durability::{produce_acks, produce_acks_after_isr_shrink},
+        durability::{produce_acks, time_acks_after_isr_shrink},
     },
     tempfile::TempDir,
 };
@@ -181,13 +181,13 @@ async fn acks_all_completes_after_isr_shrink() {
     // Produce acks=-1. ISR should shrink to {1,2} within
     // replica_lag_time_max (2s on CI) + heartbeat_timeout (2s); produce
     // completes after.
-    let (offset, elapsed) = produce_acks_after_isr_shrink()
-        .bootstrap(&bootstrap_1)
-        .topic("shrink2")
-        .values(&["a", "b", "c"])
-        .timeout(ProduceTimeoutMillis(15_000))
-        .call()
-        .await;
+    let (offset, elapsed) = time_acks_after_isr_shrink(
+        &bootstrap_1,
+        "shrink2",
+        &["a", "b", "c"],
+        ProduceTimeoutMillis(15_000),
+    )
+    .await;
     assert!(offset == 0);
     assert!(
         elapsed < Duration::from_secs(10),

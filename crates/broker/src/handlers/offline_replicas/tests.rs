@@ -60,6 +60,13 @@ impl Registered {
     }
 }
 
+fn two_registered_brokers_on(directory: Uuid) -> [Registered; 2] {
+    [
+        Registered::new(NodeId(1), vec![directory]),
+        Registered::new(NodeId(2), vec![directory]),
+    ]
+}
+
 /// Image with `t-0` on `replicas`/`directories` and a registration for every
 /// broker in `registrations`.
 fn image(registrations: &[Registered], replicas: &[NodeId], directories: &[Uuid]) -> MetadataImage {
@@ -231,26 +238,32 @@ fn offline_replicas_matches_kafka_replica_state_rules() {
 #[test]
 fn a_replica_on_a_dead_log_dir_neither_leads_nor_stays_in_the_isr() {
     let (good, bad) = (dir(0x600d), dir(0xbad));
+    let sole_replica_case =
+        |name: &'static str, directory: Uuid, expected: PartitionAvailability| {
+            replica_case()
+                .expected(expected)
+                .name(name)
+                .registrations(vec![Registered::new(NodeId(1), vec![good])])
+                .replicas(vec![NodeId(1)])
+                .directories(vec![directory])
+                .call()
+        };
     let cases = vec![
-        replica_case()
-            .expected(availability(NO_LEADER_ID, vec![], vec![1]))
-            .name("sole replica on a failed log dir")
-            .registrations(vec![Registered::new(NodeId(1), vec![good])])
-            .replicas(vec![NodeId(1)])
-            .directories(vec![bad])
-            .call(),
+        sole_replica_case(
+            "sole replica on a failed log dir",
+            bad,
+            availability(NO_LEADER_ID, vec![], vec![1]),
+        ),
         replica_case()
             .expected(availability(NO_LEADER_ID, vec![2], vec![1]))
             .name("leader on a failed log dir, follower healthy")
             .directories(vec![bad, good])
             .call(),
-        replica_case()
-            .expected(availability(1, vec![1], vec![]))
-            .name("sole replica on a directory nobody has assigned yet")
-            .registrations(vec![Registered::new(NodeId(1), vec![good])])
-            .replicas(vec![NodeId(1)])
-            .directories(vec![Uuid::nil()])
-            .call(),
+        sole_replica_case(
+            "sole replica on a directory nobody has assigned yet",
+            Uuid::nil(),
+            availability(1, vec![1], vec![]),
+        ),
         replica_case()
             .expected(availability(1, vec![1, 2], vec![2]))
             .name("fenced follower keeps its ISR seat")
@@ -281,10 +294,7 @@ fn a_broker_without_the_request_listener_is_offline_and_cannot_be_the_leader() {
     // Node 1 lists `PLAINTEXT`, node 2 lists only `EXTERNAL`, and node 3 has
     // no registration.
     let mut img = image(
-        &[
-            Registered::new(NodeId(1), vec![good]),
-            Registered::new(NodeId(2), vec![good]),
-        ],
+        &two_registered_brokers_on(good),
         &[NodeId(1), NodeId(2)],
         &[good, good],
     );
@@ -460,10 +470,7 @@ fn a_leaderless_partition_projects_no_leader_and_an_isr_without_its_last_leader(
     } in cases
     {
         let mut img = image(
-            &[
-                Registered::new(NodeId(1), vec![good]),
-                Registered::new(NodeId(2), vec![good]),
-            ],
+            &two_registered_brokers_on(good),
             &replicas.iter().copied().map(NodeId).collect::<Vec<_>>(),
             &vec![good; replicas.len()],
         );

@@ -73,6 +73,13 @@ pub(crate) fn local_host_name() -> Option<String> { None }
 mod tests {
     use {super::*, assert2::assert};
 
+    fn host_port(host: &str, port: u16) -> HostPort {
+        HostPort {
+            host: host.to_owned(),
+            port,
+        }
+    }
+
     /// A concrete bind advertises itself. A wildcard bind, IPv4 or IPv6,
     /// advertises the host name, and loopback only when there is no name.
     #[test]
@@ -107,37 +114,17 @@ mod tests {
         assert!(advertised == expected);
     }
 
-    #[test]
-    fn advertised_listener_parser_preserves_valid_host_ports_and_uses_fallback() {
-        struct Case {
-            input: &'static str,
-            want: HostPort,
-        }
-        let host_port = |host: &str, port| HostPort {
-            host: host.to_owned(),
-            port,
-        };
-        let cases = [
-            Case {
-                input: "broker-1.example:19092",
-                want: host_port("broker-1.example", 19092),
-            },
-            Case {
-                input: "[2001:db8::7]:9094",
-                want: host_port("[2001:db8::7]", 9094),
-            },
-            Case {
-                input: "missing-port",
-                want: host_port("localhost", 9092),
-            },
-            Case {
-                input: "broker:not-a-port",
-                want: host_port("localhost", 9092),
-            },
-        ];
-        for Case { input, want } in cases {
-            let (host, port) = parse_advertised_host_port(input);
-            assert!(HostPort { host, port } == want, "input {input:?}");
-        }
+    #[yare::parameterized(
+        hostname_and_port = { "broker-1.example:19092", host_port("broker-1.example", 19092) },
+        bracketed_ipv6_and_port = { "[2001:db8::7]:9094", host_port("[2001:db8::7]", 9094) },
+        missing_port_falls_back = { "missing-port", host_port("localhost", 9092) },
+        invalid_port_falls_back = { "broker:not-a-port", host_port("localhost", 9092) },
+    )]
+    fn advertised_listener_parser_preserves_valid_host_ports_and_uses_fallback(
+        input: &str,
+        want: HostPort,
+    ) {
+        let (host, port) = parse_advertised_host_port(input);
+        assert2::assert!(HostPort { host, port } == want, "input {input:?}");
     }
 }

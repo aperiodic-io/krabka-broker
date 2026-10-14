@@ -124,18 +124,16 @@ mod tests {
         assert!(!output.contains("named_acl_gates!"));
     }
 
-    #[test]
-    fn rejects_empty_declarations_invalid_resources_and_extra_arguments() {
-        for input in [
-            "",
-            "x: Group(Read)",
-            "x: Cluster(Read, name)",
-            "x: Topic(Read, name)",
-            "x: Group(Read, name, extra)",
-            "x: Group[Read, name]",
-            "x: Cluster(Read) extra",
-        ] {
-            assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        empty = { "" },
+        missing_group_name = { "x: Group(Read)" },
+        cluster_name = { "x: Cluster(Read, name)" },
+        topic_name = { "x: Topic(Read, name)" },
+        extra_argument = { "x: Group(Read, name, extra)" },
+        bracket_group = { "x: Group[Read, name]" },
+        trailing = { "x: Cluster(Read) extra" },
+    )]
+    fn rejects_empty_declarations_invalid_resources_and_extra_arguments(input: &str) {
+        assert2::assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

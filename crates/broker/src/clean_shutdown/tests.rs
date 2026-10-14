@@ -82,72 +82,60 @@ fn the_proof_holds_kafkas_bytes() {
 
 /// Every document the reader meets, and what it makes of it. Kafka's reader
 /// ignores unknown fields, so krabka's does too.
+#[yare::parameterized(
+    golden_document = { GOLDEN, Ok(42) },
+    fields_reordered = { r#"{"brokerEpoch":42,"version":0}"#, Ok(42) },
+    unknown_field_ignored = { r#"{"version":0,"brokerEpoch":42,"extra":true}"#, Ok(42) },
+    unknown_positive_version = {
+        r#"{"version":1,"brokerEpoch":42}"#,
+        Err(ProofError::UnknownVersion { found: 1 }),
+    },
+    unknown_negative_version = {
+        r#"{"version":-1,"brokerEpoch":42}"#,
+        Err(ProofError::UnknownVersion { found: -1 }),
+    },
+)]
+fn decode_reads_only_version_zero_documents(text: &str, want: Result<i64, ProofError>) {
+    assert2::assert!(decode(text) == want, "decode({text})");
+}
+
 #[test]
-fn decode_reads_only_version_zero_documents() {
-    struct Case {
-        text: &'static str,
-        want: Result<i64, ProofError>,
-    }
-    let cases: &[Case] = &[
-        Case {
-            text: GOLDEN,
-            want: Ok(42),
-        },
-        Case {
-            text: r#"{"brokerEpoch":42,"version":0}"#,
-            want: Ok(42),
-        },
-        Case {
-            text: r#"{"version":0,"brokerEpoch":42,"extra":true}"#,
-            want: Ok(42),
-        },
-        Case {
-            text: r#"{"version":1,"brokerEpoch":42}"#,
-            want: Err(ProofError::UnknownVersion { found: 1 }),
-        },
-        Case {
-            text: r#"{"version":-1,"brokerEpoch":42}"#,
-            want: Err(ProofError::UnknownVersion { found: -1 }),
-        },
-    ];
-    for Case { text, want } in cases {
-        assert!(decode(text) == *want, "decode({text})");
-    }
+fn the_format_version_is_zero() {
     assert!(FORMAT_VERSION == 0);
 }
 
 /// Text that is not the document is malformed: the 0.x layout (a bare
 /// decimal epoch), a document with no version, one with no epoch, and junk.
-#[test]
-fn decode_refuses_documents_that_are_not_kafkas() {
-    for text in [
-        "42",
-        r#"{"brokerEpoch":42}"#,
-        r#"{"version":0}"#,
-        r#"{"version":0,"brokerEpoch":null}"#,
-        "not-an-epoch",
-        "",
-    ] {
-        assert!(
-            let Err(ProofError::Malformed(_)) = decode(text),
-            "decode({text:?})"
-        );
-    }
+#[yare::parameterized(
+    bare_epoch = { "42" },
+    missing_version = { r#"{"brokerEpoch":42}"# },
+    missing_epoch = { r#"{"version":0}"# },
+    null_epoch = { r#"{"version":0,"brokerEpoch":null}"# },
+    junk = { "not-an-epoch" },
+    empty = { "" },
+)]
+fn decode_refuses_documents_that_are_not_kafkas(text: &str) {
+    assert2::assert!(
+        let Err(ProofError::Malformed(_)) = decode(text),
+        "decode({text:?})"
+    );
 }
 
 /// A file that is not a proof -- of an unknown version, in the 0.x layout,
 /// or junk -- makes the restart unclean, and does not stay behind for a later
 /// start to retry. Kafka's `CleanShutdownFileHandler.read` answers every such
 /// file the same way.
-#[test]
-fn an_unreadable_proof_is_unproven_and_still_spent() {
-    for text in [r#"{"version":1,"brokerEpoch":42}"#, "42", "not-an-epoch"] {
-        let dir = tempfile::tempdir().expect("temp dir");
-        std::fs::write(dir.path().join(FILE_NAME), text).expect("seed file");
+#[yare::parameterized(
+    unknown_version = { r#"{"version":1,"brokerEpoch":42}"# },
+    legacy_epoch = { "42" },
+    junk = { "not-an-epoch" },
+)]
+fn an_unreadable_proof_is_unproven_and_still_spent(text: &str) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join(FILE_NAME), text).expect("seed file");
 
-        assert!(take(dir.path()) == UNPROVEN, "take over {text:?}");
-        assert!(!dir.path().join(FILE_NAME).exists(), "{text:?} was spent");
-    }
+    assert2::assert!(take(dir.path()) == UNPROVEN, "take over {text:?}");
+    assert2::assert!(!dir.path().join(FILE_NAME).exists(), "{text:?} was spent");
 }
 
 /// The controller's rule: the offered epoch has to be the epoch the cluster

@@ -102,71 +102,53 @@ fn vote_response(
 /// ordinary "you lost the vote" reply -- and only a rejection carrying a
 /// newer epoch means the cluster has moved past us. Stepping down clears
 /// the vote we are holding, so whether the vote survives is the tell.
-#[test]
-fn only_a_rejection_from_a_higher_epoch_steps_us_down() {
+#[yare::parameterized(
+    same_epoch_rejection = { VoteDecision::Rejected, VoteEpoch(3), VoteRetention::Kept },
+    higher_epoch_grant = { VoteDecision::Granted, VoteEpoch(9), VoteRetention::Kept },
+    higher_epoch_rejection = { VoteDecision::Rejected, VoteEpoch(9), VoteRetention::Cleared },
+)]
+fn only_a_rejection_from_a_higher_epoch_steps_us_down(
+    decision: VoteDecision,
+    epoch: VoteEpoch,
+    keeps_vote: VoteRetention,
+) {
     let log = FakeLog::new(5, 1);
-    // (what it is, granted, epoch offered, do we keep the vote we hold?)
-    let cases = [
-        (
-            "a rejection at our own epoch",
-            VoteDecision::Rejected,
-            VoteEpoch(3),
-            VoteRetention::Kept,
-        ),
-        (
-            "a grant from a higher epoch",
-            VoteDecision::Granted,
-            VoteEpoch(9),
-            VoteRetention::Kept,
-        ),
-        (
-            "a rejection from a higher epoch",
-            VoteDecision::Rejected,
-            VoteEpoch(9),
-            VoteRetention::Cleared,
-        ),
-    ];
-    for (what, decision, epoch, keeps_vote) in cases {
-        let mut m = three_voter_machine();
-        // Cast a binding vote at epoch 3, so a step-down has something to
-        // clear and "nothing happened" is distinguishable.
-        m.on_event(
-            Event::ReceiveVoteRequest {
-                from: NodeId(2),
-                cluster_id: None,
-                voter_id: NodeId(1),
-                voter_directory_id: uuid::Uuid::nil(),
-                candidate_epoch: 3,
-                candidate: NodeId(2),
-                candidate_directory_id: uuid::Uuid::nil(),
-                candidate_log_end: LogEnd {
-                    last_epoch: 1,
-                    last_offset: 5,
-                },
-                pre_vote: false,
+    let mut m = three_voter_machine();
+    // Cast a binding vote at epoch 3, so a step-down has something to
+    // clear and "nothing happened" is distinguishable.
+    m.on_event(
+        Event::ReceiveVoteRequest {
+            from: NodeId(2),
+            cluster_id: None,
+            voter_id: NodeId(1),
+            voter_directory_id: uuid::Uuid::nil(),
+            candidate_epoch: 3,
+            candidate: NodeId(2),
+            candidate_directory_id: uuid::Uuid::nil(),
+            candidate_log_end: LogEnd {
+                last_epoch: 1,
+                last_offset: 5,
             },
-            &log,
-            SimInstant(0),
-        );
-        check!(
-            m.quorum_state().voted_key.is_some(),
-            "{what}: setup should vote"
-        );
+            pre_vote: false,
+        },
+        &log,
+        SimInstant(0),
+    );
+    check!(m.quorum_state().voted_key.is_some(), "setup should vote");
 
-        vote_response()
-            .m(&mut m)
-            .log(&log)
-            .epoch(epoch)
-            .decision(decision)
-            .now(0)
-            .call();
-        let kept = if m.quorum_state().voted_key.is_some() {
-            VoteRetention::Kept
-        } else {
-            VoteRetention::Cleared
-        };
-        check!(kept == keeps_vote, "{what}: vote retention = {kept:?}");
-    }
+    vote_response()
+        .m(&mut m)
+        .log(&log)
+        .epoch(epoch)
+        .decision(decision)
+        .now(0)
+        .call();
+    let kept = if m.quorum_state().voted_key.is_some() {
+        VoteRetention::Kept
+    } else {
+        VoteRetention::Cleared
+    };
+    check!(kept == keeps_vote, "vote retention = {kept:?}");
 }
 
 #[test]

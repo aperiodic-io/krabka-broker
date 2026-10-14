@@ -61,20 +61,20 @@ impl PeerApi {
 mod tests {
     use super::*;
 
-    #[test]
-    fn peer_api_round_trips_through_its_api_key() {
-        for api in [
-            PeerApi::Fetch,
-            PeerApi::Vote,
-            PeerApi::BeginQuorumEpoch,
-            PeerApi::EndQuorumEpoch,
-            PeerApi::FetchSnapshot,
-        ] {
-            assert2::assert!(PeerApi::from_api_key(api.api_key()) == Some(api));
+    #[yare::parameterized(
+        fetch = { FETCH, Some(PeerApi::Fetch) },
+        vote = { VOTE, Some(PeerApi::Vote) },
+        begin_quorum_epoch = { BEGIN_QUORUM_EPOCH, Some(PeerApi::BeginQuorumEpoch) },
+        end_quorum_epoch = { END_QUORUM_EPOCH, Some(PeerApi::EndQuorumEpoch) },
+        fetch_snapshot = { FETCH_SNAPSHOT, Some(PeerApi::FetchSnapshot) },
+        non_peer_key_zero = { 0, None },
+        non_peer_key_between_ranges = { 55, None },
+    )]
+    fn peer_api_round_trips_through_its_api_key(key: i16, expected: Option<PeerApi>) {
+        let actual = PeerApi::from_api_key(key);
+        assert2::assert!(actual == expected);
+        if let Some(api) = expected {
+            assert2::assert!(api.api_key() == key);
         }
-        let keys = [1, 52, 53, 54, 59].map(|key| PeerApi::from_api_key(key).map(PeerApi::api_key));
-        assert2::assert!(keys == [Some(1), Some(52), Some(53), Some(54), Some(59)]);
-        assert2::assert!(PeerApi::from_api_key(0).is_none());
-        assert2::assert!(PeerApi::from_api_key(55).is_none());
     }
 }

@@ -149,19 +149,17 @@ mod tests {
         assert!(declarations(&"offsets;".parse().unwrap()).unwrap().len() == 5);
     }
 
-    #[test]
-    fn rejects_non_field_selectors_and_unknown_policies() {
-        for input in [
-            "",
-            "other;",
-            "\"x\" => mutable[x]",
-            "\"x\" => required[]",
-            "\"x\" => required[x()]",
-            "\"x\" => required[x[index]]",
-            "\"x\" => required[x[0u8]]",
-            "\"x\" => required[x] trailing",
-        ] {
-            assert!(declarations(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        empty = { "" },
+        unknown_policy = { "other;" },
+        mutable_policy = { "\"x\" => mutable[x]" },
+        empty_selector = { "\"x\" => required[]" },
+        method_call = { "\"x\" => required[x()]" },
+        nested_index = { "\"x\" => required[x[index]]" },
+        non_usize_index = { "\"x\" => required[x[0u8]]" },
+        trailing_tokens = { "\"x\" => required[x] trailing" },
+    )]
+    fn rejects_non_field_selectors_and_unknown_policies(input: &str) {
+        assert2::assert!(declarations(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

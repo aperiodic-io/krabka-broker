@@ -330,24 +330,25 @@ mod tests {
 
     /// The key writes its group id with an `INT16` length: a group id of 32767
     /// bytes encodes, and one of 32768 bytes is an error, not a panic.
-    #[test]
-    fn a_group_id_over_32767_bytes_does_not_encode() {
-        for (length, encodes) in [(32_767, true), (32_768, false)] {
-            let key = ShareStateKey {
-                record_type: KEY_SHARE_UPDATE,
-                group_id: "g".repeat(length),
-                topic_id: Uuid::from_bytes([7; 16]),
-                partition: 0,
-            };
+    #[yare::parameterized(
+        at_limit = { 32_767, true },
+        over_limit = { 32_768, false },
+    )]
+    fn a_group_id_over_32767_bytes_does_not_encode(length: usize, encodes: bool) {
+        let key = ShareStateKey {
+            record_type: KEY_SHARE_UPDATE,
+            group_id: "g".repeat(length),
+            topic_id: Uuid::from_bytes([7; 16]),
+            partition: 0,
+        };
 
-            let encoded = encode_state_key(&key);
+        let encoded = encode_state_key(&key);
 
-            check!(encoded.is_ok() == encodes, "{length} bytes");
-            if let Ok(bytes) = &encoded {
-                check!(parse_state_key(bytes).unwrap() == key);
-            } else {
-                check!(matches!(encoded, Err(BrokerError::Protocol(_))));
-            }
+        check!(encoded.is_ok() == encodes, "{length} bytes");
+        if let Ok(bytes) = &encoded {
+            check!(parse_state_key(bytes).unwrap() == key);
+        } else {
+            check!(matches!(encoded, Err(BrokerError::Protocol(_))));
         }
     }
 

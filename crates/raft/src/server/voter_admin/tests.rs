@@ -30,6 +30,20 @@ enum ListenerUsability {
     Unusable,
 }
 
+struct TestListener<'a> {
+    name: &'a str,
+    host: &'a str,
+    port: ListenerPort,
+}
+
+fn test_listener(name: &'static str, host: &'static str, port: u16) -> TestListener<'static> {
+    TestListener {
+        name,
+        host,
+        port: ListenerPort(port),
+    }
+}
+
 #[derive(derive_more::From, derive_more::Into, Clone, Copy)]
 struct VoterApiVersion(i16);
 
@@ -81,88 +95,68 @@ async fn add_response_for(
 
 /// A wire listener set is usable only when every entry is named, hosted
 /// and on a real port, no name repeats, and there is at least one.
-#[test]
-fn wire_listeners_must_be_usable_and_uniquely_named() {
-    struct Row<'a> {
-        what: &'a str,
-        listeners: Vec<Listener<'a>>,
-        usable: ListenerUsability,
-    }
-
-    struct Listener<'a> {
-        name: &'a str,
-        host: &'a str,
-        port: ListenerPort,
-    }
-    let listener = |name, host, port| Listener { name, host, port };
-    let cases = vec![
-        Row {
-            what: "one usable listener",
-            listeners: vec![listener("CONTROLLER", "host", ListenerPort(9093))],
-            usable: ListenerUsability::Usable,
-        },
-        Row {
-            what: "two, differently named",
-            listeners: vec![
-                listener("CONTROLLER", "host", ListenerPort(9093)),
-                listener("PLAINTEXT", "host", ListenerPort(9092)),
-            ],
-            usable: ListenerUsability::Usable,
-        },
-        Row {
-            what: "none at all",
-            listeners: vec![],
-            usable: ListenerUsability::Unusable,
-        },
-        Row {
-            what: "a nameless listener",
-            listeners: vec![listener("", "host", ListenerPort(9093))],
-            usable: ListenerUsability::Unusable,
-        },
-        Row {
-            what: "a hostless listener",
-            listeners: vec![listener("CONTROLLER", "", ListenerPort(9093))],
-            usable: ListenerUsability::Unusable,
-        },
-        Row {
-            what: "port zero",
-            listeners: vec![listener("CONTROLLER", "host", ListenerPort(0))],
-            usable: ListenerUsability::Unusable,
-        },
-        Row {
-            what: "a repeated name",
-            listeners: vec![
-                listener("CONTROLLER", "host", ListenerPort(9093)),
-                listener("CONTROLLER", "other", ListenerPort(9094)),
-            ],
-            usable: ListenerUsability::Unusable,
-        },
-        Row {
-            what: "one good listener followed by a bad one",
-            listeners: vec![
-                listener("CONTROLLER", "host", ListenerPort(9093)),
-                listener("", "host", ListenerPort(9094)),
-            ],
-            usable: ListenerUsability::Unusable,
-        },
-    ];
-    for Row {
-        what,
-        listeners,
-        usable,
-    } in cases
-    {
-        let actual = if valid_wire_listeners(listeners.iter().map(|listener| ListenerAddress {
-            name: listener.name,
-            host: listener.host,
-            port: listener.port.0,
-        })) {
-            ListenerUsability::Usable
-        } else {
-            ListenerUsability::Unusable
-        };
-        check!(actual == usable, "{what}");
-    }
+#[yare::parameterized(
+    one_listener = {
+        "one usable listener",
+        vec![test_listener("CONTROLLER", "host", 9093)],
+        ListenerUsability::Usable
+    },
+    distinct_listeners = {
+        "two, differently named",
+        vec![
+            test_listener("CONTROLLER", "host", 9093),
+            test_listener("PLAINTEXT", "host", 9092),
+        ],
+        ListenerUsability::Usable,
+    },
+    empty = { "none at all", vec![], ListenerUsability::Unusable },
+    nameless = {
+        "a nameless listener",
+        vec![test_listener("", "host", 9093)],
+        ListenerUsability::Unusable
+    },
+    hostless = {
+        "a hostless listener",
+        vec![test_listener("CONTROLLER", "", 9093)],
+        ListenerUsability::Unusable
+    },
+    zero_port = {
+        "port zero",
+        vec![test_listener("CONTROLLER", "host", 0)],
+        ListenerUsability::Unusable
+    },
+    duplicate_name = {
+        "a repeated name",
+        vec![
+            test_listener("CONTROLLER", "host", 9093),
+            test_listener("CONTROLLER", "other", 9094),
+        ],
+        ListenerUsability::Unusable,
+    },
+    later_bad_listener = {
+        "one good listener followed by a bad one",
+        vec![
+            test_listener("CONTROLLER", "host", 9093),
+            test_listener("", "host", 9094),
+        ],
+        ListenerUsability::Unusable,
+    },
+)]
+fn wire_listeners_must_be_usable_and_uniquely_named(
+    case: &str,
+    listeners: Vec<TestListener<'static>>,
+    expected: ListenerUsability,
+) {
+    let actual = if valid_wire_listeners(listeners.iter().map(|listener| ListenerAddress {
+        name: listener.name,
+        host: listener.host,
+        port: listener.port.0,
+    })) {
+        ListenerUsability::Usable
+    } else {
+        ListenerUsability::Unusable
+    };
+    check!(actual == expected, "{case}");
 }
 
 #[bon::builder]

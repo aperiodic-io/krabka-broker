@@ -684,37 +684,33 @@ mod tests {
     /// Kafka's `truncateAndReload` deletes every snapshot outside
     /// `(logStartOffset, logEndOffset]` -- the one at the log start included
     /// -- and `loadFromSnapshot` loads the newest one left.
-    #[test]
-    fn reload_deletes_snapshots_outside_the_range_and_loads_the_newest_left() {
-        let on_disk = [100, 101, 102, 103, 104];
-        for (log_start, log_end, loaded, left) in [
-            // Log start below every snapshot, log end inside: 104 is future.
-            (0, 103, Some(103), vec![100, 101, 102, 103]),
-            // A snapshot below the log start is deleted, never loaded.
-            (100, 103, Some(103), vec![101, 102, 103]),
-            // A snapshot at the log start is deleted too.
-            (102, 104, Some(104), vec![103, 104]),
-            // One snapshot between the log start and the log end.
-            (102, 103, Some(103), vec![103]),
-            // Only the snapshot at the log start is in reach: nothing loads.
-            (103, 103, None, vec![]),
-            // Every snapshot is at or below the log start.
-            (104, 110, None, vec![]),
-        ] {
-            let dir = sample_files(on_disk);
+    #[yare::parameterized(
+        end_before_future_snapshot = { 0, 103, Some(103), vec![100, 101, 102, 103] },
+        start_after_first_snapshot = { 100, 103, Some(103), vec![101, 102, 103] },
+        start_snapshot_is_deleted = { 102, 104, Some(104), vec![103, 104] },
+        one_snapshot_in_range = { 102, 103, Some(103), vec![103] },
+        only_start_snapshot_in_range = { 103, 103, None, vec![] },
+        all_snapshots_at_or_below_start = { 104, 110, None, vec![] },
+    )]
+    fn reload_deletes_snapshots_outside_the_range_and_loads_the_newest_left(
+        log_start: i64,
+        log_end: i64,
+        loaded: Option<i64>,
+        left: Vec<i64>,
+    ) {
+        let dir = sample_files([100, 101, 102, 103, 104]);
 
-            let reloaded = reload(dir.path(), range(log_start, log_end)).unwrap();
+        let reloaded = reload(dir.path(), range(log_start, log_end)).unwrap();
 
-            assert2::check!(
-                reloaded
-                    == loaded.map(|offset| LoadedSnapshot {
-                        offset: Offset(offset),
-                        state: sample()
-                    }),
-                "({log_start}, {log_end}]"
-            );
-            assert2::check!(offsets(dir.path()) == left, "({log_start}, {log_end}]");
-        }
+        assert2::check!(
+            reloaded
+                == loaded.map(|offset| LoadedSnapshot {
+                    offset: Offset(offset),
+                    state: sample()
+                }),
+            "({log_start}, {log_end}]"
+        );
+        assert2::check!(offsets(dir.path()) == left, "({log_start}, {log_end}]");
     }
 
     #[test]
@@ -972,20 +968,22 @@ mod tests {
 
     /// Kafka's `removeStraySnapshots`, run at log load with every local
     /// segment's base offset.
-    #[test]
-    fn remove_strays_keeps_segment_bases_and_the_newest_snapshot_above_them() {
-        for (on_disk, bases, left) in [
-            (vec![0, 4, 8], vec![0, 4, 8], vec![0, 4, 8]),
-            (vec![2, 4, 6], vec![0, 4, 8], vec![4]),
-            (vec![4, 9, 11], vec![0, 4, 8], vec![4, 11]),
-            (vec![3, 7], vec![], vec![7]),
-        ] {
-            let dir = sample_files(on_disk.iter().copied());
+    #[yare::parameterized(
+        snapshots_at_every_base = { vec![0, 4, 8], vec![0, 4, 8], vec![0, 4, 8] },
+        only_a_nonnewest_stray = { vec![2, 4, 6], vec![0, 4, 8], vec![4] },
+        preserve_newest_snapshot_above_bases = { vec![4, 9, 11], vec![0, 4, 8], vec![4, 11] },
+        no_segments_keeps_newest_snapshot = { vec![3, 7], vec![], vec![7] },
+    )]
+    fn remove_strays_keeps_segment_bases_and_the_newest_snapshot_above_them(
+        on_disk: Vec<i64>,
+        bases: Vec<i64>,
+        left: Vec<i64>,
+    ) {
+        let dir = sample_files(on_disk.iter().copied());
 
-            remove_strays(dir.path(), &bases).unwrap();
+        remove_strays(dir.path(), &bases).unwrap();
 
-            assert2::check!(offsets(dir.path()) == left, "{on_disk:?} {bases:?}");
-        }
+        assert2::check!(offsets(dir.path()) == left, "{on_disk:?} {bases:?}");
     }
 
     #[test]
@@ -1006,50 +1004,34 @@ mod tests {
         assert2::assert!(list(dir.path()).unwrap().is_empty());
     }
 
-    #[test]
-    fn rejects_each_invalid_entry_field_independently() {
-        for entry in [
-            ProducerSnapshotEntry {
-                producer_id: ProducerId(-2),
-                ..sample_entry()
-            },
-            ProducerSnapshotEntry {
-                producer_id: ProducerId(-1),
-                ..sample_entry()
-            },
-            ProducerSnapshotEntry {
-                producer_epoch: -1,
-                ..sample_entry()
-            },
-            ProducerSnapshotEntry {
-                offset_delta: -1,
-                ..sample_entry()
-            },
-            ProducerSnapshotEntry {
-                current_txn_first_offset: Some(Offset(-2)),
-                ..sample_entry()
-            },
-            ProducerSnapshotEntry {
-                last_offset: Offset(-1),
-                last_sequence: 0,
-                offset_delta: 0,
-                ..sample_entry()
-            },
-            ProducerSnapshotEntry {
-                last_offset: Offset(0),
-                last_sequence: -1,
-                offset_delta: 0,
-                ..sample_entry()
-            },
-            ProducerSnapshotEntry {
-                last_offset: Offset(0),
-                last_sequence: 0,
-                offset_delta: 1,
-                ..sample_entry()
-            },
-        ] {
-            assert_rejected(entry);
-        }
+    #[yare::parameterized(
+        producer_id_below_sentinel = { ProducerSnapshotEntry {
+            producer_id: ProducerId(-2), ..sample_entry()
+        } },
+        negative_sentinel_id = { ProducerSnapshotEntry {
+            producer_id: ProducerId(-1), ..sample_entry()
+        } },
+        negative_epoch = { ProducerSnapshotEntry {
+            producer_epoch: -1, ..sample_entry()
+        } },
+        negative_offset_delta = { ProducerSnapshotEntry {
+            offset_delta: -1, ..sample_entry()
+        } },
+        negative_transaction_start = { ProducerSnapshotEntry {
+            current_txn_first_offset: Some(Offset(-2)), ..sample_entry()
+        } },
+        negative_last_offset = { ProducerSnapshotEntry {
+            last_offset: Offset(-1), last_sequence: 0, offset_delta: 0, ..sample_entry()
+        } },
+        negative_sequence = { ProducerSnapshotEntry {
+            last_offset: Offset(0), last_sequence: -1, offset_delta: 0, ..sample_entry()
+        } },
+        delta_after_last_offset = { ProducerSnapshotEntry {
+            last_offset: Offset(0), last_sequence: 0, offset_delta: 1, ..sample_entry()
+        } },
+    )]
+    fn rejects_each_invalid_entry_field_independently(entry: ProducerSnapshotEntry) {
+        assert_rejected(entry);
     }
 
     #[test]

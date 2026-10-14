@@ -1,4 +1,4 @@
-use {super::*, proptest::prelude::*};
+use {super::*, crate::restore::RestoreContentExclusions, proptest::prelude::*};
 
 mod abort_union;
 mod byte_quorum;
@@ -8,6 +8,14 @@ mod quota_time;
 mod refill;
 mod tiered_timestamp;
 mod typed_timestamp;
+
+fn restore_exclusions(key: bool) -> RestoreExclusions {
+    RestoreExclusions {
+        producer: false,
+        offset: false,
+        content: RestoreContentExclusions { key, header: false },
+    }
+}
 
 /// Full-width available/debt/burst inputs and two whole-token charges.
 fn quota_charge_cases() -> impl Strategy<Value = ((u64, u64), u64, u64, u64)> {

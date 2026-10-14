@@ -186,6 +186,7 @@ impl BrokerProcess {
         }
         #[cfg(not(unix))]
         {
+            let _ = self;
             "0:0".to_string()
         }
     }

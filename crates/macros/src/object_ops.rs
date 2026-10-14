@@ -77,29 +77,29 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
 
 #[cfg(test)]
 mod tests {
-    use {super::expand, crate::meta::compact, assert2::assert};
+    use {super::expand, crate::meta::compact};
 
-    #[test]
-    fn preserves_declaration_docs_and_implementation_body() {
-        for item in [
+    #[yare::parameterized(
+        trait_declaration = {
             "#[async_trait] trait Ops { #[doc = \"Upload\"] put_from_path!(); }",
+        },
+        implementation = {
             "#[async_trait] impl Ops for Client { put_from_path!({ self.upload(key, src, threshold, chunk_size, req).await }); }",
-        ] {
-            let output = expand("".parse().unwrap(), item.parse().unwrap()).unwrap();
-            let output = compact(&output);
-            assert!(output.contains("asyncfnput_from_path(&self,key:&Path,src:&std::path::Path,threshold:u64,chunk_size:usize,req:PutRequest,)"));
-            assert!(!output.contains("put_from_path!"));
-        }
+        },
+    )]
+    fn preserves_declaration_docs_and_implementation_body(item: &str) {
+        let output = expand("".parse().unwrap(), item.parse().unwrap()).unwrap();
+        let output = compact(&output);
+        assert2::assert!(output.contains("asyncfnput_from_path(&self,key:&Path,src:&std::path::Path,threshold:u64,chunk_size:usize,req:PutRequest,)"));
+        assert2::assert!(!output.contains("put_from_path!"));
     }
 
-    #[test]
-    fn rejects_missing_duplicate_or_malformed_methods() {
-        for item in [
-            "trait Ops {}",
-            "trait Ops { put_from_path!(); put_from_path!(); }",
-            "impl Ops for Client { put_from_path!(wrong); }",
-        ] {
-            assert!(expand("".parse().unwrap(), item.parse().unwrap()).is_err());
-        }
+    #[yare::parameterized(
+        missing = { "trait Ops {}" },
+        duplicate = { "trait Ops { put_from_path!(); put_from_path!(); }" },
+        malformed = { "impl Ops for Client { put_from_path!(wrong); }" },
+    )]
+    fn rejects_missing_duplicate_or_malformed_methods(item: &str) {
+        assert2::assert!(expand("".parse().unwrap(), item.parse().unwrap()).is_err());
     }
 }

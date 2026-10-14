@@ -49,8 +49,7 @@ pub(crate) fn recover_from_partition_tail(
             let value: &[u8] = rec
                 .value
                 .as_ref()
-                .map(std::convert::AsRef::as_ref)
-                .unwrap_or_default();
+                .map_or_default(std::convert::AsRef::as_ref);
             if let (Some(seq), Some(prev)) = (seq, prev) {
                 last = Some(ChainResume {
                     next_seq: seq + 1,
@@ -149,15 +148,17 @@ mod tests {
             .expect("append");
     }
 
-    #[test]
-    fn tail_window_start_keeps_configured_offset_count() {
-        let cases = [(0, 0), (4096, 0), (4097, 1), (8192, 4096)];
-        for (log_end_offset, want) in cases {
-            assert!(
-                tail_window_start(Offset(log_end_offset), 4096) == want,
-                "log_end_offset {log_end_offset}"
-            );
-        }
+    #[yare::parameterized(
+        empty_log = { 0, Offset(0) },
+        exactly_one_window = { 4096, Offset(0) },
+        one_past_one_window = { 4097, Offset(1) },
+        two_windows = { 8192, Offset(4096) },
+    )]
+    fn tail_window_start_keeps_configured_offset_count(log_end_offset: i64, want: Offset) {
+        assert2::assert!(
+            tail_window_start(Offset(log_end_offset), 4096) == want,
+            "log_end_offset {log_end_offset}"
+        );
     }
 
     #[tokio::test]
@@ -289,13 +290,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn header_bytes_matches_requested_key_and_preserves_value() {
-        struct Case<'a> {
-            key: &'a str,
-            want: Option<&'a [u8]>,
-        }
-
+    #[yare::parameterized(
+        matching_key = { "target", Some(vec![0xCA, 0xFE]) },
+        missing_key = { "missing", None },
+    )]
+    fn header_bytes_matches_requested_key_and_preserves_value(key: &str, want: Option<Vec<u8>>) {
         let rec = Record {
             headers: vec![
                 header("other", Bytes::from_static(&[0])),
@@ -304,23 +303,18 @@ mod tests {
             ..Default::default()
         };
 
-        let cases = [
-            Case {
-                key: "target",
-                want: Some(&[0xCA, 0xFE]),
-            },
-            Case {
-                key: "missing",
-                want: None,
-            },
-        ];
-        for Case { key, want } in cases {
-            assert!(header_bytes(&rec, key) == want, "key {key:?}");
-        }
+        assert2::assert!(
+            header_bytes(&rec, key).map(<[u8]>::to_vec) == want,
+            "key {key:?}"
+        );
     }
 
-    #[test]
-    fn header_str_decodes_utf8_and_rejects_invalid_bytes() {
+    #[yare::parameterized(
+        text = { "text", Some("audit-seq") },
+        invalid_utf8 = { "binary", None },
+        missing = { "missing", None },
+    )]
+    fn header_str_decodes_utf8_and_rejects_invalid_bytes(key: &str, want: Option<&str>) {
         let rec = Record {
             headers: vec![
                 header("text", "audit-seq"),
@@ -329,13 +323,6 @@ mod tests {
             ..Default::default()
         };
 
-        let cases = [
-            ("text", Some("audit-seq")),
-            ("binary", None), // invalid UTF-8 → rejected
-            ("missing", None),
-        ];
-        for (key, want) in cases {
-            assert!(header_str(&rec, key) == want, "key {key:?}");
-        }
+        assert2::assert!(header_str(&rec, key) == want, "key {key:?}");
     }
 }

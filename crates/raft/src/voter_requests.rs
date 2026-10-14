@@ -316,8 +316,7 @@ pub fn update_voter_current_leader(quorum: &QuorumStateSnapshot) -> CurrentLeade
         leader_epoch: i32::try_from(quorum.leader_epoch).unwrap_or(i32::MAX),
         host: endpoint
             .as_ref()
-            .map(|endpoint| endpoint.host.clone())
-            .unwrap_or_default(),
+            .map_or_default(|endpoint| endpoint.host.clone()),
         port: endpoint.map_or(0, |endpoint| i32::from(endpoint.port)),
         ..Default::default()
     }
@@ -412,6 +411,7 @@ mod tests {
 
     const CLUSTER: &str = "cluster-a";
     const DIRECTORY: WireUuid = WireUuid([9; 16]);
+    const TEST_VOTER_KEY: &str = "ReplicaKey(id=3, directoryId=CQkJCQkJCQkJCQkJCQkJCQ)";
 
     /// Node 1 leading epoch 7 over voters 1 and 2, when `is_leader`, or node 2
     /// following it.
@@ -461,22 +461,72 @@ mod tests {
         )
     }
 
-    #[test]
-    fn a_cluster_id_matches_in_either_form() {
-        let id = uuid::Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
-        let local = id.to_string();
-        for (label, request, names_it) in [
-            ("hyphenated", local.clone(), true),
-            ("Kafka base64", URL_SAFE_NO_PAD.encode(id.as_bytes()), true),
-            (
-                "another cluster",
-                uuid::Uuid::from_u128(7).to_string(),
-                false,
-            ),
-            ("not an id", "cluster-b".to_owned(), false),
-        ] {
-            check!(names_this_cluster(&request, &local) == names_it, "{label}");
+    fn add_voter_request() -> AddRaftVoterRequest {
+        AddRaftVoterRequest {
+            cluster_id: None,
+            voter_id: 3,
+            voter_directory_id: DIRECTORY,
+            listeners: vec![AddListener {
+                name: "controller".into(),
+                host: "host-3".into(),
+                port: 9095,
+                ..Default::default()
+            }],
+            ..Default::default()
         }
+    }
+
+    fn remove_voter_request(
+        cluster_id: Option<&str>,
+        voter_id: i32,
+        voter_directory_id: WireUuid,
+    ) -> RemoveRaftVoterRequest {
+        RemoveRaftVoterRequest {
+            cluster_id: cluster_id.map(str::to_owned),
+            voter_id,
+            voter_directory_id,
+            ..Default::default()
+        }
+    }
+
+    fn update_voter_request() -> UpdateRaftVoterRequest {
+        UpdateRaftVoterRequest {
+            // A request with no cluster id skips Kafka's cluster check.
+            cluster_id: None,
+            voter_id: 2,
+            voter_directory_id: DIRECTORY,
+            current_leader_epoch: 7,
+            k_raft_version_feature: KRaftVersionFeature {
+                min_supported_version: 0,
+                max_supported_version: 1,
+                ..Default::default()
+            },
+            listeners: vec![UpdateListener {
+                name: "CONTROLLER".into(),
+                host: "controller-2".into(),
+                port: 9094,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn test_cluster_uuid() -> uuid::Uuid {
+        uuid::Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10)
+    }
+
+    #[yare::parameterized(
+        hyphenated = { test_cluster_uuid().to_string(), true },
+        kafka_base64 = { URL_SAFE_NO_PAD.encode(test_cluster_uuid().as_bytes()), true },
+        another_cluster = { uuid::Uuid::from_u128(7).to_string(), false },
+        not_an_id = { "cluster-b".to_owned(), false },
+    )]
+    fn a_cluster_id_matches_in_either_form(request: String, names_it: bool) {
+        let local = test_cluster_uuid().to_string();
+        check!(
+            names_this_cluster(&request, &local) == names_it,
+            "{request}"
+        );
     }
 
     #[test]
@@ -485,401 +535,307 @@ mod tests {
         check!(replica_key(3, DIRECTORY) == "ReplicaKey(id=3, directoryId=CQkJCQkJCQkJCQkJCQkJCQ)");
     }
 
-    #[test]
-    fn add_voter_checks_run_in_kafka_order() {
-        struct Row {
-            label: &'static str,
-            request: AddRaftVoterRequest,
-            is_leader: bool,
-            expected: Option<Refusal>,
-        }
-
-        let listener = |name: &str| AddListener {
-            name: name.into(),
-            host: "host-3".into(),
-            port: 9095,
-            ..Default::default()
-        };
-        let request = |edit: fn(&mut AddRaftVoterRequest)| {
-            let mut request = AddRaftVoterRequest {
-                // A request with no cluster id skips Kafka's cluster check.
-                cluster_id: None,
-                voter_id: 3,
-                voter_directory_id: DIRECTORY,
-                listeners: vec![listener("controller")],
-                ..Default::default()
-            };
-            edit(&mut request);
-            request
-        };
-        let invalid_voter = Some((
-            INVALID_REQUEST,
-            Some("Add voter request didn't include a valid voter".into()),
-        ));
-        let rows = vec![
-            Row {
-                label: "foreign cluster id, on a follower",
-                request: request(|r| r.cluster_id = Some("cluster-b".into())),
-                is_leader: false,
-                expected: Some(foreign_cluster_refusal()),
+    #[yare::parameterized(
+        foreign_cluster_follower = {
+            "foreign cluster id, on a follower",
+            AddRaftVoterRequest { cluster_id: Some("cluster-b".into()), ..add_voter_request() },
+            false,
+            Some(foreign_cluster_refusal())
+        },
+        follower = {
+            "a follower",
+            add_voter_request(),
+            false,
+            Some((NOT_LEADER_OR_FOLLOWER, None))
+        },
+        invalid_follower = {
+            "a follower, with an invalid voter",
+            AddRaftVoterRequest { voter_id: -1, ..add_voter_request() },
+            false,
+            Some((NOT_LEADER_OR_FOLLOWER, None))
+        },
+        negative_voter = {
+            "negative voter id",
+            AddRaftVoterRequest { voter_id: -1, ..add_voter_request() },
+            true,
+            Some((INVALID_REQUEST, Some("Add voter request didn't include a valid voter".into())))
+        },
+        zero_directory = {
+            "zero directory id",
+            AddRaftVoterRequest { voter_directory_id: WireUuid::ZERO, ..add_voter_request() },
+            true,
+            Some((INVALID_REQUEST, Some("Add voter request didn't include a valid voter".into())))
+        },
+        no_listeners = {
+            "no listeners",
+            AddRaftVoterRequest { listeners: Vec::new(), ..add_voter_request() },
+            true,
+            Some((INVALID_REQUEST, Some("Add voter request didn't include a valid voter".into())))
+        },
+        no_controller_listener = {
+            "no controller listener",
+            {
+                let mut request = add_voter_request();
+                request.listeners[0].name = "PLAINTEXT".into();
+                request
             },
-            Row {
-                label: "a follower",
-                request: request(|_| {}),
-                is_leader: false,
-                expected: Some((NOT_LEADER_OR_FOLLOWER, None)),
-            },
-            Row {
-                label: "a follower, with an invalid voter",
-                request: request(|r| r.voter_id = -1),
-                is_leader: false,
-                expected: Some((NOT_LEADER_OR_FOLLOWER, None)),
-            },
-            Row {
-                label: "negative voter id",
-                request: request(|r| r.voter_id = -1),
-                is_leader: true,
-                expected: invalid_voter.clone(),
-            },
-            Row {
-                label: "zero directory id",
-                request: request(|r| r.voter_directory_id = WireUuid::ZERO),
-                is_leader: true,
-                expected: invalid_voter.clone(),
-            },
-            Row {
-                label: "no listeners",
-                request: request(|r| r.listeners.clear()),
-                is_leader: true,
-                expected: invalid_voter,
-            },
-            Row {
-                label: "no controller listener",
-                request: request(|r| r.listeners[0].name = "PLAINTEXT".into()),
-                is_leader: true,
-                expected: Some((
-                    INVALID_REQUEST,
-                    Some(
-                        "Add voter request didn't include the endpoint for the default listener \
-                         CONTROLLER"
-                            .into(),
-                    ),
-                )),
-            },
-            Row {
-                label: "this cluster",
-                request: request(|r| r.cluster_id = Some(CLUSTER.into())),
-                is_leader: true,
-                expected: None,
-            },
-            Row {
-                label: "no cluster id",
-                request: request(|_| {}),
-                is_leader: true,
-                expected: None,
-            },
-        ];
-        for Row {
-            label,
-            request,
-            is_leader,
-            expected,
-        } in rows
-        {
-            check!(
-                add_voter_refusal(&request, CLUSTER, &quorum(is_leader)) == expected,
-                "{label}"
-            );
-        }
+            true,
+            Some((
+                INVALID_REQUEST,
+                Some(
+                    "Add voter request didn't include the endpoint for the default listener CONTROLLER"
+                        .into(),
+                ),
+            )),
+        },
+        this_cluster = {
+            "this cluster",
+            AddRaftVoterRequest { cluster_id: Some(CLUSTER.into()), ..add_voter_request() },
+            true,
+            None
+        },
+        no_cluster_id = { "no cluster id", add_voter_request(), true, None },
+    )]
+    fn add_voter_checks_run_in_kafka_order(
+        label: &'static str,
+        request: AddRaftVoterRequest,
+        is_leader: bool,
+        expected: Option<Refusal>,
+    ) {
+        check!(
+            add_voter_refusal(&request, CLUSTER, &quorum(is_leader)) == expected,
+            "{label}"
+        );
     }
 
-    #[test]
-    fn remove_voter_checks_run_in_kafka_order() {
-        let request =
-            |cluster_id: Option<&str>, voter_id, voter_directory_id| RemoveRaftVoterRequest {
-                cluster_id: cluster_id.map(str::to_owned),
-                voter_id,
-                voter_directory_id,
-                ..Default::default()
-            };
-        let invalid_voter = Some((
-            INVALID_REQUEST,
-            Some("Remove voter request didn't include a valid voter".into()),
-        ));
-        let rows = [
-            (
-                "foreign cluster id",
-                request(Some("cluster-b"), 2, DIRECTORY),
-                true,
-                Some(foreign_cluster_refusal()),
-            ),
-            (
-                "a follower",
-                request(None, -1, DIRECTORY),
-                false,
-                Some((NOT_LEADER_OR_FOLLOWER, None)),
-            ),
-            (
-                "negative voter id",
-                request(None, -1, DIRECTORY),
-                true,
-                invalid_voter.clone(),
-            ),
-            (
-                "zero directory id",
-                request(None, 2, WireUuid::ZERO),
-                true,
-                invalid_voter,
-            ),
-            (
-                "a valid voter",
-                request(Some(CLUSTER), 2, DIRECTORY),
-                true,
-                None,
-            ),
-        ];
-        for (label, request, is_leader, expected) in rows {
-            check!(
-                remove_voter_refusal(&request, CLUSTER, &quorum(is_leader)) == expected,
-                "{label}"
-            );
-        }
+    #[yare::parameterized(
+        foreign_cluster = {
+            "foreign cluster id",
+            remove_voter_request(Some("cluster-b"), 2, DIRECTORY),
+            true,
+            Some(foreign_cluster_refusal()),
+        },
+        follower = {
+            "a follower",
+            remove_voter_request(None, -1, DIRECTORY),
+            false,
+            Some((NOT_LEADER_OR_FOLLOWER, None)),
+        },
+        negative_voter = {
+            "negative voter id",
+            remove_voter_request(None, -1, DIRECTORY),
+            true,
+            Some((INVALID_REQUEST, Some("Remove voter request didn't include a valid voter".into()))),
+        },
+        zero_directory = {
+            "zero directory id",
+            remove_voter_request(None, 2, WireUuid::ZERO),
+            true,
+            Some((INVALID_REQUEST, Some("Remove voter request didn't include a valid voter".into()))),
+        },
+        valid_voter = {
+            "a valid voter",
+            remove_voter_request(Some(CLUSTER), 2, DIRECTORY),
+            true,
+            None,
+        },
+    )]
+    fn remove_voter_checks_run_in_kafka_order(
+        label: &'static str,
+        request: RemoveRaftVoterRequest,
+        is_leader: bool,
+        expected: Option<Refusal>,
+    ) {
+        check!(
+            remove_voter_refusal(&request, CLUSTER, &quorum(is_leader)) == expected,
+            "{label}"
+        );
     }
 
-    #[test]
-    fn update_voter_checks_run_in_kafka_order() {
-        struct Row {
-            label: &'static str,
-            request: UpdateRaftVoterRequest,
-            is_leader: bool,
-            expected: Option<i16>,
-        }
-
-        let request = |edit: fn(&mut UpdateRaftVoterRequest)| {
-            let mut request = UpdateRaftVoterRequest {
-                // A request with no cluster id skips Kafka's cluster check.
-                cluster_id: None,
-                voter_id: 2,
-                voter_directory_id: DIRECTORY,
-                current_leader_epoch: 7,
+    #[yare::parameterized(
+        foreign_cluster = {
+            "foreign cluster id",
+            UpdateRaftVoterRequest { cluster_id: Some("cluster-b".into()), ..update_voter_request() },
+            true,
+            Some(INCONSISTENT_CLUSTER_ID),
+        },
+        epoch_below = {
+            "an epoch below the local one",
+            UpdateRaftVoterRequest { current_leader_epoch: 6, ..update_voter_request() },
+            true,
+            Some(FENCED_LEADER_EPOCH),
+        },
+        epoch_above = {
+            "an epoch above the local one",
+            UpdateRaftVoterRequest { current_leader_epoch: 8, ..update_voter_request() },
+            true,
+            Some(UNKNOWN_LEADER_EPOCH),
+        },
+        follower = { "a follower", update_voter_request(), false, Some(NOT_LEADER_OR_FOLLOWER) },
+        zero_directory = {
+            "zero directory id",
+            UpdateRaftVoterRequest { voter_directory_id: WireUuid::ZERO, ..update_voter_request() },
+            true,
+            Some(INVALID_REQUEST),
+        },
+        negative_kraft_version = {
+            "a negative kraft.version",
+            UpdateRaftVoterRequest {
                 k_raft_version_feature: KRaftVersionFeature {
-                    min_supported_version: 0,
-                    max_supported_version: 1,
-                    ..Default::default()
+                    min_supported_version: -1,
+                    ..update_voter_request().k_raft_version_feature
                 },
+                ..update_voter_request()
+            },
+            true,
+            Some(INVALID_REQUEST),
+        },
+        inverted_kraft_version = {
+            "an inverted kraft.version range",
+            UpdateRaftVoterRequest {
+                k_raft_version_feature: KRaftVersionFeature {
+                    min_supported_version: 2,
+                    ..update_voter_request().k_raft_version_feature
+                },
+                ..update_voter_request()
+            },
+            true,
+            Some(INVALID_REQUEST),
+        },
+        no_controller_listener = {
+            "no controller listener",
+            UpdateRaftVoterRequest {
                 listeners: vec![UpdateListener {
-                    name: "CONTROLLER".into(),
-                    host: "controller-2".into(),
-                    port: 9094,
+                    name: "PLAINTEXT".into(),
                     ..Default::default()
                 }],
-                ..Default::default()
-            };
-            edit(&mut request);
-            request
-        };
-        let rows = vec![
-            Row {
-                label: "foreign cluster id",
-                request: request(|r| r.cluster_id = Some("cluster-b".into())),
-                is_leader: true,
-                expected: Some(INCONSISTENT_CLUSTER_ID),
+                ..update_voter_request()
             },
-            Row {
-                label: "an epoch below the local one",
-                request: request(|r| r.current_leader_epoch = 6),
-                is_leader: true,
-                expected: Some(FENCED_LEADER_EPOCH),
-            },
-            Row {
-                label: "an epoch above the local one",
-                request: request(|r| r.current_leader_epoch = 8),
-                is_leader: true,
-                expected: Some(UNKNOWN_LEADER_EPOCH),
-            },
-            Row {
-                label: "a follower",
-                request: request(|_| {}),
-                is_leader: false,
-                expected: Some(NOT_LEADER_OR_FOLLOWER),
-            },
-            Row {
-                label: "zero directory id",
-                request: request(|r| r.voter_directory_id = WireUuid::ZERO),
-                is_leader: true,
-                expected: Some(INVALID_REQUEST),
-            },
-            Row {
-                label: "a negative kraft.version",
-                request: request(|r| r.k_raft_version_feature.min_supported_version = -1),
-                is_leader: true,
-                expected: Some(INVALID_REQUEST),
-            },
-            Row {
-                label: "an inverted kraft.version range",
-                request: request(|r| r.k_raft_version_feature.min_supported_version = 2),
-                is_leader: true,
-                expected: Some(INVALID_REQUEST),
-            },
-            Row {
-                label: "no controller listener",
-                request: request(|r| r.listeners[0].name = "PLAINTEXT".into()),
-                is_leader: true,
-                expected: Some(INVALID_REQUEST),
-            },
-            Row {
-                label: "a valid update",
-                request: request(|_| {}),
-                is_leader: true,
-                expected: None,
-            },
-        ];
-        for Row {
-            label,
-            request,
-            is_leader,
-            expected,
-        } in rows
-        {
-            check!(
-                update_voter_refusal(&request, CLUSTER, &quorum(is_leader)) == expected,
-                "{label}"
-            );
-        }
+            true,
+            Some(INVALID_REQUEST),
+        },
+        valid_update = { "a valid update", update_voter_request(), true, None },
+    )]
+    fn update_voter_checks_run_in_kafka_order(
+        label: &'static str,
+        request: UpdateRaftVoterRequest,
+        is_leader: bool,
+        expected: Option<i16>,
+    ) {
+        check!(
+            update_voter_refusal(&request, CLUSTER, &quorum(is_leader)) == expected,
+            "{label}"
+        );
     }
 
-    #[test]
-    fn update_voter_answers_name_the_leader() {
-        let mut unknown = quorum(false);
-        unknown.leader_id = None;
-        let rows = [
-            ("a known leader", quorum(false), CurrentLeader {
+    #[yare::parameterized(
+        known_leader = {
+            "a known leader",
+            quorum(false),
+            CurrentLeader {
                 leader_id: 1,
                 leader_epoch: 7,
                 host: "controller-1".into(),
                 port: 9093,
                 ..Default::default()
-            }),
-            ("no leader", unknown, CurrentLeader {
-                leader_id: -1,
-                leader_epoch: 7,
-                ..Default::default()
-            }),
-        ];
-        for (label, quorum, expected) in rows {
-            check!(update_voter_current_leader(&quorum) == expected, "{label}");
-        }
+            },
+        },
+        no_leader = {
+            "no leader",
+            QuorumStateSnapshot { leader_id: None, ..quorum(false) },
+            CurrentLeader { leader_id: -1, leader_epoch: 7, ..Default::default() }
+        },
+    )]
+    fn update_voter_answers_name_the_leader(
+        label: &'static str,
+        quorum: QuorumStateSnapshot,
+        expected: CurrentLeader,
+    ) {
+        check!(update_voter_current_leader(&quorum) == expected, "{label}");
     }
 
-    #[test]
-    fn reconfiguration_outcomes_get_kafka_codes() {
-        struct Row {
-            label: &'static str,
-            outcome: Result<ReconfigOutcome, RaftError>,
-            expected: Refusal,
-        }
-
-        let key = "ReplicaKey(id=3, directoryId=CQkJCQkJCQkJCQkJCQkJCQ)";
-        let rows = vec![
-            Row {
-                label: "committed",
-                outcome: Ok(ReconfigOutcome::Committed),
-                expected: (0, None),
-            },
-            Row {
-                label: "not the leader",
-                outcome: Ok(ReconfigOutcome::NotLeader {
-                    leader: Some(NodeId(2)),
-                }),
-                expected: (NOT_LEADER_OR_FOLLOWER, None),
-            },
-            Row {
-                label: "a lagging candidate",
-                outcome: Err(RaftError::VoterNotCaughtUp {
-                    id: NodeId(3),
-                    lag: 10,
-                }),
-                expected: (
-                    REQUEST_TIMED_OUT,
-                    Some(format!(
-                        "Aborted add voter operation for {key} since it is lagging behind"
-                    )),
-                ),
-            },
-            Row {
-                label: "a pending change",
-                outcome: Err(RaftError::ReconfigInProgress),
-                expected: (
-                    REQUEST_TIMED_OUT,
-                    Some(
-                        "Request timed out waiting for leader to handle previous voter change \
-                         request"
-                            .into(),
-                    ),
-                ),
-            },
-            Row {
-                label: "a duplicate voter",
-                outcome: Err(RaftError::DuplicateVoter(NodeId(3))),
-                expected: (
-                    DUPLICATE_VOTER,
-                    Some(format!(
-                        "The voter id for {key} is already part of the set of voters"
-                    )),
-                ),
-            },
-            Row {
-                label: "an unknown voter",
-                outcome: Err(RaftError::VoterNotFound(NodeId(3))),
-                expected: (
-                    VOTER_NOT_FOUND,
-                    Some(format!("Cannot remove voter {key} from the set of voters")),
-                ),
-            },
-            Row {
-                label: "a rejected change",
-                outcome: Err(RaftError::ReconfigRejected("empty voter set".into())),
-                expected: (INVALID_REQUEST, Some("empty voter set".into())),
-            },
-        ];
-        for Row {
-            label,
-            outcome: result,
-            expected,
-        } in rows
-        {
-            check!(
-                reconfiguration_refusal(result, VoterOperation::Add, 3, DIRECTORY) == expected,
-                "{label}"
-            );
-        }
+    #[yare::parameterized(
+        committed = { "committed", Ok(ReconfigOutcome::Committed), (0, None) },
+        not_leader = {
+            "not the leader",
+            Ok(ReconfigOutcome::NotLeader { leader: Some(NodeId(2)) }),
+            (NOT_LEADER_OR_FOLLOWER, None)
+        },
+        lagging = {
+            "a lagging candidate",
+            Err(RaftError::VoterNotCaughtUp { id: NodeId(3), lag: 10 }),
+            (
+                REQUEST_TIMED_OUT,
+                Some(format!(
+                    "Aborted add voter operation for {TEST_VOTER_KEY} since it is lagging behind"
+                )),
+            ),
+        },
+        pending_change = {
+            "a pending change",
+            Err(RaftError::ReconfigInProgress),
+            (
+                REQUEST_TIMED_OUT,
+                Some("Request timed out waiting for leader to handle previous voter change request".into()),
+            ),
+        },
+        duplicate_voter = {
+            "a duplicate voter",
+            Err(RaftError::DuplicateVoter(NodeId(3))),
+            (
+                DUPLICATE_VOTER,
+                Some(format!(
+                    "The voter id for {TEST_VOTER_KEY} is already part of the set of voters"
+                )),
+            ),
+        },
+        unknown_voter = {
+            "an unknown voter",
+            Err(RaftError::VoterNotFound(NodeId(3))),
+            (VOTER_NOT_FOUND, Some(format!("Cannot remove voter {TEST_VOTER_KEY} from the set of voters")))
+        },
+        rejected_change = {
+            "a rejected change",
+            Err(RaftError::ReconfigRejected("empty voter set".into())),
+            (INVALID_REQUEST, Some("empty voter set".into()))
+        },
+    )]
+    fn reconfiguration_outcomes_get_kafka_codes(
+        label: &'static str,
+        result: Result<ReconfigOutcome, RaftError>,
+        expected: Refusal,
+    ) {
+        check!(
+            reconfiguration_refusal(result, VoterOperation::Add, 3, DIRECTORY) == expected,
+            "{label}"
+        );
     }
 
     /// `AddVoterHandler` and `RemoveVoterHandler` name their own operation in
     /// the `UNSUPPORTED_VERSION` message, and the level is the finalized one.
-    #[test]
-    fn unsupported_kraft_version_names_the_operation() {
-        let rows = [
-            (VoterOperation::Add, 0, "adding"),
-            (VoterOperation::Remove, 0, "removing"),
-            (VoterOperation::Add, 2, "adding"),
-        ];
-        for (operation, level, verb) in rows {
-            check!(
-                reconfiguration_refusal(
-                    Err(RaftError::UnsupportedKraftVersion(level)),
-                    operation,
-                    3,
-                    DIRECTORY
-                ) == (
-                    UNSUPPORTED_VERSION,
-                    Some(format!(
-                        "Cluster doesn't support {verb} voter because the kraft.version feature \
-                         is {level}"
-                    ))
-                ),
-                "{operation:?} at {level}"
-            );
-        }
+    #[yare::parameterized(
+        add_v0 = { VoterOperation::Add, 0, "adding" },
+        remove_v0 = { VoterOperation::Remove, 0, "removing" },
+        add_v2 = { VoterOperation::Add, 2, "adding" },
+    )]
+    fn unsupported_kraft_version_names_the_operation(
+        operation: VoterOperation,
+        level: u16,
+        verb: &'static str,
+    ) {
+        check!(
+            reconfiguration_refusal(
+                Err(RaftError::UnsupportedKraftVersion(level)),
+                operation,
+                3,
+                DIRECTORY
+            ) == (
+                UNSUPPORTED_VERSION,
+                Some(format!(
+                    "Cluster doesn't support {verb} voter because the kraft.version feature is {level}"
+                ))
+            ),
+            "{operation:?} at {level}"
+        );
     }
 }

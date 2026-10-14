@@ -348,20 +348,22 @@ mod tests {
     }
 
     #[test]
-    fn wire_state_matches_kafkas_streams_member_state() {
+    fn wire_state_matches_kafkas_stream_member_discriminants() {
         // org.apache.kafka.coordinator.group.streams.MemberState.
         assert!(StreamsMemberWireState::Stable as i8 == 1);
         assert!(StreamsMemberWireState::UnrevokedTasks as i8 == 2);
         assert!(StreamsMemberWireState::UnreleasedTasks as i8 == 3);
         assert!(StreamsMemberWireState::from_i8(0).is_err());
-        for state in [
-            StreamsMemberAssignmentState::Stable,
-            StreamsMemberAssignmentState::UnrevokedTasks,
-            StreamsMemberAssignmentState::UnreleasedTasks,
-        ] {
-            let wire = StreamsMemberWireState::from(state);
-            assert!(StreamsMemberAssignmentState::from(wire) == state);
-        }
+    }
+
+    #[yare::parameterized(
+        stable = { StreamsMemberAssignmentState::Stable },
+        unrevoked_tasks = { StreamsMemberAssignmentState::UnrevokedTasks },
+        unreleased_tasks = { StreamsMemberAssignmentState::UnreleasedTasks },
+    )]
+    fn wire_state_matches_kafkas_streams_member_state(state: StreamsMemberAssignmentState) {
+        let wire = StreamsMemberWireState::from(state);
+        assert2::assert!(StreamsMemberAssignmentState::from(wire) == state);
     }
 
     #[test]

@@ -140,22 +140,24 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_topic_with_no_partition_expands_to_nothing() {
-        for count in [0, -1] {
-            check!(
-                expand_targets(&[target("orders", count)]).is_empty(),
-                "{count}"
-            );
-        }
+    #[yare::parameterized(
+        zero_partitions = { 0 },
+        negative_partitions = { -1 },
+    )]
+    fn a_topic_with_no_partition_expands_to_nothing(count: i32) {
+        check!(
+            expand_targets(&[target("orders", count)]).is_empty(),
+            "{count}"
+        );
     }
 
-    #[test]
-    fn a_malformed_target_cannot_produce_a_complete_cut() {
-        for count in [0, -1] {
-            let cut = build_cut(1, 2, &[target("orders", count)], &BTreeMap::new());
-            check!(cut.status == CutStatus::Partial, "{count}");
-        }
+    #[yare::parameterized(
+        zero_partitions = { 0 },
+        negative_partitions = { -1 },
+    )]
+    fn a_malformed_target_cannot_produce_a_complete_cut(count: i32) {
+        let cut = build_cut(1, 2, &[target("orders", count)], &BTreeMap::new());
+        check!(cut.status == CutStatus::Partial, "{count}");
     }
 
     #[test]

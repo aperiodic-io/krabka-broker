@@ -129,6 +129,13 @@ fn signed(
     }
 }
 
+fn signed_record_with_unknown_key_id(trust: &Trust, good: &TopicFreezeRecord) -> TopicFreezeRecord {
+    TopicFreezeRecord {
+        key_id: "carol-yubi".to_owned(),
+        ..signed(&trust.alice, CLUSTER_ID, good)
+    }
+}
+
 // `good` re-timestamped to `set_at_ms` and signed by `pair` for the test cluster.
 fn signed_at(pair: &Ed25519KeyPair, set_at_ms: i64, good: &TopicFreezeRecord) -> TopicFreezeRecord {
     signed(pair, CLUSTER_ID, &TopicFreezeRecord {

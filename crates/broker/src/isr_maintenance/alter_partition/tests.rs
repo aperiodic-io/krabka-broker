@@ -8,10 +8,8 @@ use {
         codes,
         isr_maintenance::test_support::{fake_source, reg_at, topic},
         metadata_source::MetadataSource,
-        network::{
-            client::InterBrokerClient, request::parse_request, test_support::raw_request_frame,
-        },
-        test_support::start_controller,
+        network::{request::parse_request, test_support::raw_request_frame},
+        test_support::{plaintext_controller_dialer_with_voters, start_controller},
     },
     assert2::assert,
     krabka_client_core::{MockBroker, MockReply},
@@ -40,15 +38,6 @@ const ACTIVE_CONTROLLER: NodeId = NodeId(3001);
 /// The id of the topic `orders`.
 const TOPIC_ID: uuid::Uuid = uuid::Uuid::from_u128(0x000A_11CE);
 
-fn plaintext_dialer(quorum_voters: Vec<(NodeId, String)>) -> ControllerDialer {
-    ControllerDialer {
-        outbound_client: Arc::new(InterBrokerClient::new(None, None)),
-        listener_protocol: krabka_security::ListenerProtocol::Plaintext,
-        server_name: "localhost".to_owned(),
-        quorum_voters,
-    }
-}
-
 /// Broker 1, the leader of `orders-0`, proposes the ISR {1, 2}.
 fn change() -> IsrChange<'static> {
     IsrChange {
@@ -58,6 +47,19 @@ fn change() -> IsrChange<'static> {
         leader_epoch: 7,
         partition_epoch: 4,
     }
+}
+
+async fn send_change(
+    controller: &Arc<dyn MetadataSource>,
+    broker_id: i32,
+    dialer: &super::ControllerDialer,
+) -> Result<(), String> {
+    let link = ControllerLink {
+        controller,
+        broker_id,
+        dialer,
+    };
+    send_alter_partition(&link, &change()).await
 }
 
 /// A KIP-853 voter set with the one voter `id`, whose CONTROLLER endpoint is
@@ -256,40 +258,50 @@ struct RoutingCase {
     want_request: AlterPartitionRequest,
 }
 
+#[bon::builder]
+fn routing_case(
+    name: &'static str,
+    source: EndpointSource,
+    #[builder(default = 3)] max_version: i16,
+    #[builder(default)] answer: AlterPartitionResponse,
+    #[builder(default = Ok(()))] want: Result<(), &'static str>,
+    want_request: AlterPartitionRequest,
+) -> RoutingCase {
+    RoutingCase {
+        name,
+        source,
+        max_version,
+        answer,
+        want,
+        want_request,
+    }
+}
+
 fn routing_cases() -> [RoutingCase; 4] {
     [
-        RoutingCase {
-            name: "voter set, version 3, accepted",
-            source: EndpointSource::VoterSet,
-            max_version: 3,
-            answer: AlterPartitionResponse::default(),
-            want: Ok(()),
-            want_request: expected_request(Vec::new(), isr_with_epochs()),
-        },
-        RoutingCase {
-            name: "voter set, version 2, accepted",
-            source: EndpointSource::VoterSet,
-            max_version: 2,
-            answer: AlterPartitionResponse::default(),
-            want: Ok(()),
-            want_request: expected_request(vec![1, 2], Vec::new()),
-        },
-        RoutingCase {
-            name: "configured quorum, version 3, accepted",
-            source: EndpointSource::ConfiguredQuorum,
-            max_version: 3,
-            answer: AlterPartitionResponse::default(),
-            want: Ok(()),
-            want_request: expected_request(Vec::new(), isr_with_epochs()),
-        },
-        RoutingCase {
-            name: "voter set, version 3, not controller",
-            source: EndpointSource::VoterSet,
-            max_version: 3,
-            answer: not_controller(),
-            want: Err("controller 3001 is not the active controller"),
-            want_request: expected_request(Vec::new(), isr_with_epochs()),
-        },
+        routing_case()
+            .name("voter set, version 3, accepted")
+            .source(EndpointSource::VoterSet)
+            .want_request(expected_request(Vec::new(), isr_with_epochs()))
+            .call(),
+        routing_case()
+            .name("voter set, version 2, accepted")
+            .source(EndpointSource::VoterSet)
+            .max_version(2)
+            .want_request(expected_request(vec![1, 2], Vec::new()))
+            .call(),
+        routing_case()
+            .name("configured quorum, version 3, accepted")
+            .source(EndpointSource::ConfiguredQuorum)
+            .want_request(expected_request(Vec::new(), isr_with_epochs()))
+            .call(),
+        routing_case()
+            .name("voter set, version 3, not controller")
+            .source(EndpointSource::VoterSet)
+            .answer(not_controller())
+            .want(Err("controller 3001 is not the active controller"))
+            .want_request(expected_request(Vec::new(), isr_with_epochs()))
+            .call(),
     ]
 }
 
@@ -320,17 +332,9 @@ async fn send_alter_partition_goes_only_to_the_controller_listener_of_the_active
             cluster_image(brokers.addr(), voter_at),
             Some(ACTIVE_CONTROLLER),
         );
-        let dialer = plaintext_dialer(quorum_voters);
+        let dialer = plaintext_controller_dialer_with_voters(quorum_voters);
 
-        let sent = send_alter_partition(
-            &ControllerLink {
-                controller: &metadata,
-                broker_id: 1,
-                dialer: &dialer,
-            },
-            &change(),
-        )
-        .await;
+        let sent = send_change(&metadata, 1, &dialer).await;
 
         assert!(sent == case.want.map_err(str::to_owned), "{}", case.name);
         assert!(
@@ -368,14 +372,9 @@ async fn send_alter_partition_rejects_bad_controller_leader() {
             ScriptedListener::start(Some(alter_partition_request::MAX_VERSION), not_controller())
                 .await;
         let metadata = source_of(cluster_image(brokers.addr(), None), leader);
-        let dialer = plaintext_dialer(Vec::new());
+        let dialer = plaintext_controller_dialer_with_voters(Vec::new());
 
-        let link = ControllerLink {
-            controller: &metadata,
-            broker_id: 1,
-            dialer: &dialer,
-        };
-        let sent = send_alter_partition(&link, &change()).await;
+        let sent = send_change(&metadata, 1, &dialer).await;
 
         assert!(sent == Err(want.to_owned()), "leader={leader:?}");
         assert!(
@@ -399,17 +398,9 @@ async fn send_alter_partition_sends_nothing_to_a_listener_that_does_not_advertis
         cluster_image(brokers.addr(), Some(addr)),
         Some(ACTIVE_CONTROLLER),
     );
-    let dialer = plaintext_dialer(Vec::new());
+    let dialer = plaintext_controller_dialer_with_voters(Vec::new());
 
-    let sent = send_alter_partition(
-        &ControllerLink {
-            controller: &metadata,
-            broker_id: 1,
-            dialer: &dialer,
-        },
-        &change(),
-    )
-    .await;
+    let sent = send_change(&metadata, 1, &dialer).await;
 
     assert!(
         sent == Err(format!(
@@ -439,18 +430,10 @@ async fn send_alter_partition_dials_with_the_controller_listener_security() {
     .await;
     let addr = active_controller.addr();
     let metadata = source_of(cluster_image(addr, Some(addr)), Some(ACTIVE_CONTROLLER));
-    let mut dialer = plaintext_dialer(Vec::new());
+    let mut dialer = plaintext_controller_dialer_with_voters(Vec::new());
     dialer.listener_protocol = krabka_security::ListenerProtocol::Ssl;
 
-    let sent = send_alter_partition(
-        &ControllerLink {
-            controller: &metadata,
-            broker_id: 1,
-            dialer: &dialer,
-        },
-        &change(),
-    )
-    .await;
+    let sent = send_change(&metadata, 1, &dialer).await;
 
     assert!(
         sent == Err(format!(
@@ -467,7 +450,7 @@ async fn send_alter_partition_to_reports_transport_error_for_closed_port() {
     drop(listener);
 
     let result = send_alter_partition_to(
-        &plaintext_dialer(Vec::new()),
+        &plaintext_controller_dialer_with_voters(Vec::new()),
         1,
         &addr.ip().to_string(),
         addr.port(),
@@ -492,17 +475,9 @@ async fn send_alter_partition_reaches_the_handler_on_a_krabka_controller_listene
     let mut image = MetadataImage::new(uuid::Uuid::nil());
     image.apply(&voters_record(NodeId(1), controller_addr));
     let metadata = source_of(image, Some(NodeId(1)));
-    let dialer = plaintext_dialer(Vec::new());
+    let dialer = plaintext_controller_dialer_with_voters(Vec::new());
 
-    let sent = send_alter_partition(
-        &ControllerLink {
-            controller: &metadata,
-            broker_id: 99,
-            dialer: &dialer,
-        },
-        &change(),
-    )
-    .await;
+    let sent = send_change(&metadata, 99, &dialer).await;
 
     assert!(
         sent == Err(format!(

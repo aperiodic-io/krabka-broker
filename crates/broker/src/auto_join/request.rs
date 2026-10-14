@@ -136,6 +136,80 @@ mod tests {
         krabka_protocol::{Decode, Encode, owned::add_raft_voter_request},
     };
 
+    struct Endpoint {
+        name: &'static str,
+        port: u16,
+    }
+
+    struct Voter {
+        id: u64,
+        endpoints: &'static [Endpoint],
+    }
+
+    fn quorum(leader: Option<u64>, voters: &[Voter]) -> krabka_raft::QuorumState {
+        krabka_raft::QuorumState {
+            current_term: 3,
+            current_leader: leader.map(krabka_raft::NodeId),
+            voters: voters
+                .iter()
+                .map(|voter| krabka_raft::NodeId(voter.id))
+                .collect(),
+            voter_nodes: voters
+                .iter()
+                .map(|Voter { id, endpoints }| {
+                    (krabka_raft::NodeId(*id), krabka_raft::Node {
+                        directory_id: uuid::Uuid::from_u128(u128::from(*id)),
+                        endpoints: endpoints
+                            .iter()
+                            .map(|Endpoint { name, port }| krabka_metadata::VoterEndpoint {
+                                name: (*name).to_owned(),
+                                host: "127.0.0.1".to_owned(),
+                                port: *port,
+                            })
+                            .collect(),
+                        kraft_version: krabka_metadata::KRaftVersionRange::default(),
+                    })
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn two_voter_quorum(leader: Option<u64>) -> krabka_raft::QuorumState {
+        quorum(leader, &[
+            Voter {
+                id: 1,
+                endpoints: &[Endpoint {
+                    name: "CONTROLLER",
+                    port: 9001,
+                }],
+            },
+            Voter {
+                id: 2,
+                endpoints: &[
+                    Endpoint {
+                        name: "REPLICATION",
+                        port: 9102,
+                    },
+                    Endpoint {
+                        name: "CONTROLLER",
+                        port: 9002,
+                    },
+                ],
+            },
+        ])
+    }
+
+    fn leader_without_controller_quorum() -> krabka_raft::QuorumState {
+        quorum(Some(1), &[Voter {
+            id: 1,
+            endpoints: &[Endpoint {
+                name: "REPLICATION",
+                port: 9101,
+            }],
+        }])
+    }
+
     #[test]
     fn controller_listener_uses_bound_controller_endpoint() {
         let listener = controller_listener("192.0.2.10:19093".parse().unwrap());
@@ -195,16 +269,18 @@ mod tests {
     }
 
     /// An endpoint the port cannot be read out of is no better than nothing.
-    #[test]
-    fn an_unparseable_advertised_endpoint_falls_back_to_the_bound_listener() {
+    #[yare::parameterized(
+        missing_port = { "controller.example" },
+        empty_port = { "controller.example:" },
+        missing_host = { ":19093" },
+    )]
+    fn an_unparseable_advertised_endpoint_falls_back_to_the_bound_listener(endpoint: &str) {
         let bound = "0.0.0.0:19093".parse().unwrap();
 
-        for endpoint in ["controller.example", "controller.example:", ":19093"] {
-            assert!(
-                advertised_controller_listener(Some(endpoint), bound) == controller_listener(bound),
-                "{endpoint}"
-            );
-        }
+        assert2::assert!(
+            advertised_controller_listener(Some(endpoint), bound) == controller_listener(bound),
+            "{endpoint}"
+        );
     }
 
     #[test]
@@ -220,110 +296,47 @@ mod tests {
         assert2::assert!((select_bootstrap_server(&servers, 5)) == (servers[2].as_str()));
     }
 
-    #[test]
-    fn a_join_goes_to_the_known_leader_and_to_a_bootstrap_server_otherwise() {
-        struct Endpoint<'a> {
-            name: &'a str,
-            port: u16,
-        }
-        struct Voter<'a> {
-            id: u64,
-            endpoints: &'a [Endpoint<'a>],
-        }
-
-        fn quorum(leader: Option<u64>, voters: &[Voter<'_>]) -> krabka_raft::QuorumState {
-            krabka_raft::QuorumState {
-                current_term: 3,
-                current_leader: leader.map(krabka_raft::NodeId),
-                voters: voters
-                    .iter()
-                    .map(|voter| krabka_raft::NodeId(voter.id))
-                    .collect(),
-                voter_nodes: voters
-                    .iter()
-                    .map(|Voter { id, endpoints }| {
-                        (krabka_raft::NodeId(*id), krabka_raft::Node {
-                            directory_id: uuid::Uuid::from_u128(u128::from(*id)),
-                            endpoints: endpoints
-                                .iter()
-                                .map(|Endpoint { name, port }| krabka_metadata::VoterEndpoint {
-                                    name: (*name).to_owned(),
-                                    host: "127.0.0.1".to_owned(),
-                                    port: *port,
-                                })
-                                .collect(),
-                            kraft_version: krabka_metadata::KRaftVersionRange::default(),
-                        })
-                    })
-                    .collect(),
-                ..Default::default()
-            }
-        }
-
+    #[yare::parameterized(
+        leader_on_second_bootstrap = {
+            "the leader moved off the first bootstrap server",
+            two_voter_quorum(Some(2)),
+            0,
+            ("127.0.0.1:9002", false),
+        },
+        leader_without_controller_endpoint = {
+            "the leader has no CONTROLLER endpoint",
+            leader_without_controller_quorum(),
+            0,
+            ("127.0.0.1:9101", false),
+        },
+        unknown_leader = {
+            "no leader is known",
+            two_voter_quorum(None),
+            1,
+            ("127.0.0.1:9002", true),
+        },
+        leader_not_in_voter_set = {
+            "the leader is not in the voter set this node knows",
+            two_voter_quorum(Some(7)),
+            2,
+            ("127.0.0.1:9001", true),
+        },
+    )]
+    fn a_join_goes_to_the_known_leader_and_to_a_bootstrap_server_otherwise(
+        case: &str,
+        quorum: krabka_raft::QuorumState,
+        attempt: usize,
+        expected: (&str, bool),
+    ) {
         let bootstrap: Vec<String> = ["127.0.0.1:9001", "127.0.0.1:9002"]
             .into_iter()
             .map(str::to_owned)
             .collect();
-        let leader_two_voters = &[
-            Voter {
-                id: 1,
-                endpoints: &[Endpoint {
-                    name: "CONTROLLER",
-                    port: 9001,
-                }],
-            },
-            Voter {
-                id: 2,
-                endpoints: &[
-                    Endpoint {
-                        name: "REPLICATION",
-                        port: 9102,
-                    },
-                    Endpoint {
-                        name: "CONTROLLER",
-                        port: 9002,
-                    },
-                ],
-            },
-        ];
-        for (case, quorum, attempt, expected) in [
-            (
-                "the leader moved off the first bootstrap server",
-                quorum(Some(2), leader_two_voters),
-                0,
-                ("127.0.0.1:9002", false),
-            ),
-            (
-                "the leader has no CONTROLLER endpoint",
-                quorum(Some(1), &[Voter {
-                    id: 1,
-                    endpoints: &[Endpoint {
-                        name: "REPLICATION",
-                        port: 9101,
-                    }],
-                }]),
-                0,
-                ("127.0.0.1:9101", false),
-            ),
-            (
-                "no leader is known",
-                quorum(None, leader_two_voters),
-                1,
-                ("127.0.0.1:9002", true),
-            ),
-            (
-                "the leader is not in the voter set this node knows",
-                quorum(Some(7), leader_two_voters),
-                2,
-                ("127.0.0.1:9001", true),
-            ),
-        ] {
-            let target = join_target(&quorum, &bootstrap, attempt);
-            assert!(
-                (target.server.as_str(), target.from_bootstrap) == expected,
-                "{case}"
-            );
-        }
+        let target = join_target(&quorum, &bootstrap, attempt);
+        assert2::assert!(
+            (target.server.as_str(), target.from_bootstrap) == expected,
+            "{case}"
+        );
     }
 
     #[test]

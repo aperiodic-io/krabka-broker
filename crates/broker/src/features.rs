@@ -165,6 +165,22 @@ pub(crate) fn share_dlq_supported(image: &krabka_metadata::MetadataImage) -> boo
 mod tests {
     use {super::*, crate::codes::UNSUPPORTED_VERSION, assert2::assert};
 
+    fn image_with_finalized_level(
+        feature: &str,
+        finalized: Option<i16>,
+    ) -> krabka_metadata::MetadataImage {
+        let mut image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
+        if let Some(level) = finalized {
+            image.apply(&krabka_metadata::MetadataRecord::V1FeatureLevel(
+                krabka_metadata::FeatureLevelRecord {
+                    name: feature.into(),
+                    level,
+                },
+            ));
+        }
+        image
+    }
+
     #[test]
     fn feature_enabled_treats_absence_as_disabled() {
         use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
@@ -178,49 +194,37 @@ mod tests {
     }
 
     /// Kafka enables share groups at share.version 1 and the DLQ at 2.
-    #[test]
-    fn share_group_and_dlq_gates_follow_the_finalized_share_version() {
-        use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-        for (finalized, groups, dlq) in [
-            (None, false, false),
-            (Some(0), false, false),
-            (Some(1), true, false),
-            (Some(2), true, true),
-        ] {
-            let mut image = MetadataImage::new(uuid::Uuid::nil());
-            if let Some(lvl) = finalized {
-                let rec = MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
-                    name: SHARE_VERSION.into(),
-                    level: lvl,
-                });
-                image.apply(&rec);
-            }
-            assert!(share_groups_enabled(&image) == groups, "{finalized:?}");
-            assert!(share_dlq_supported(&image) == dlq, "{finalized:?}");
-        }
+    #[yare::parameterized(
+        unfinalized = { None, false, false },
+        level_zero = { Some(0), false, false },
+        level_one = { Some(1), true, false },
+        level_two = { Some(2), true, true },
+    )]
+    fn share_group_and_dlq_gates_follow_the_finalized_share_version(
+        finalized: Option<i16>,
+        groups: bool,
+        dlq: bool,
+    ) {
+        let image = image_with_finalized_level(SHARE_VERSION, finalized);
+        assert2::assert!(share_groups_enabled(&image) == groups, "{finalized:?}");
+        assert2::assert!(share_dlq_supported(&image) == dlq, "{finalized:?}");
     }
 
     /// KIP-1276's gate: an image with no `metadata.version` is judged against
     /// the bootstrap level, 4.3-IV0, which refuses CIDR hosts; a finalized
     /// level admits them only from 4.4-IV1.
-    #[test]
-    fn cidr_hosts_supported_follows_the_finalized_metadata_version() {
-        use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-        for (finalized, want) in [
-            (None, false),
-            (Some(LATEST_PRODUCTION_METADATA_VERSION), false),
-            (Some(CIDR_ACL_HOST_MIN_LEVEL - 1), false),
-            (Some(CIDR_ACL_HOST_MIN_LEVEL), true),
-        ] {
-            let mut image = MetadataImage::new(uuid::Uuid::nil());
-            if let Some(level) = finalized {
-                image.apply(&MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
-                    name: METADATA_VERSION.into(),
-                    level,
-                }));
-            }
-            assert!(cidr_hosts_supported(&image) == want, "{finalized:?}");
-        }
+    #[yare::parameterized(
+        unfinalized = { None, false },
+        bootstrap_level = { Some(LATEST_PRODUCTION_METADATA_VERSION), false },
+        below_minimum = { Some(CIDR_ACL_HOST_MIN_LEVEL - 1), false },
+        at_minimum = { Some(CIDR_ACL_HOST_MIN_LEVEL), true },
+    )]
+    fn cidr_hosts_supported_follows_the_finalized_metadata_version(
+        finalized: Option<i16>,
+        want: bool,
+    ) {
+        let image = image_with_finalized_level(METADATA_VERSION, finalized);
+        assert2::assert!(cidr_hosts_supported(&image) == want, "{finalized:?}");
     }
 
     /// Kafka's `checkIfMetadataChanged` walks from the higher level down
@@ -228,39 +232,36 @@ mod tests {
     /// higher level's own flag counts and the lower level's does not. The
     /// broker's `UpdateFeatures` path reads it from `krabka_metadata`, and
     /// these are the cases the broker-local table it replaced was held to.
-    #[test]
-    fn metadata_changed_between_walks_like_kafka() {
+    #[yare::parameterized(
+        same_version = { 25, 25, false },
+        adjacent_downgrade_25_to_24 = { 25, 24, false },
+        adjacent_upgrade_24_to_25 = { 24, 25, false },
+        multi_version_downgrade_without_change_29_to_24 = { 29, 24, false },
+        crossing_change_25_to_22 = { 25, 22, true },
+        lower_change_excluded_25_to_23 = { 25, 23, false },
+        crossing_change_23_to_22 = { 23, 22, true },
+        crossing_change_17_to_15 = { 17, 15, true },
+        lower_change_excluded_16_to_15 = { 16, 15, false },
+        crossing_change_13_to_12 = { 13, 12, true },
+        lower_change_excluded_12_to_11 = { 12, 11, false },
+        crossing_change_30_to_29 = { 30, 29, true },
+        crossing_change_32_to_31 = { 32, 31, true },
+        lower_change_excluded_31_to_30 = { 31, 30, false },
+        crossing_change_8_to_7 = { 8, 7, true },
+        crossing_change_7_to_6 = { 7, 6, true },
+        crossing_change_33_to_32 = { 33, 32, true },
+    )]
+    fn metadata_changed_between_walks_like_kafka(source: i16, target: i16, want: bool) {
         use krabka_metadata::metadata_version::metadata_changed_between;
-
-        for (source, target, want) in [
-            (25, 25, false),
-            (25, 24, false),
-            (24, 25, false),
-            (29, 24, false),
-            (25, 22, true),
-            (25, 23, false),
-            (23, 22, true),
-            (17, 15, true),
-            (16, 15, false),
-            (13, 12, true),
-            (12, 11, false),
-            (30, 29, true),
-            (32, 31, true),
-            (31, 30, false),
-            (8, 7, true),
-            (7, 6, true),
-            (33, 32, true),
-        ] {
-            assert!(
-                metadata_changed_between(source, target) == want,
-                "{source} -> {target}"
-            );
-        }
+        assert2::assert!(
+            metadata_changed_between(source, target) == want,
+            "{source} -> {target}"
+        );
     }
 
     #[test]
     fn self_bootstrap_and_format_default_to_the_same_metadata_version() {
-        assert!(
+        assert2::assert!(
             LATEST_PRODUCTION_METADATA_VERSION == krabka_format::LATEST_PRODUCTION_METADATA_VERSION
         );
     }
@@ -363,19 +364,21 @@ mod tests {
         assert!(require_feature(&image, METADATA_VERSION, 11).is_ok());
     }
 
-    #[test]
-    fn require_feature_gates_below_level() {
+    #[yare::parameterized(
+        above_level = { 11, Err(UNSUPPORTED_VERSION) },
+        at_level = { 10, Ok(()) },
+        below_level = { 7, Ok(()) },
+    )]
+    fn require_feature_gates_below_level(required_level: i16, want: Result<(), i16>) {
         use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
             name: METADATA_VERSION.to_string(),
             level: 10,
         }));
-        for (required_level, want) in [(11, Err(UNSUPPORTED_VERSION)), (10, Ok(())), (7, Ok(()))] {
-            assert!(
-                require_feature(&image, METADATA_VERSION, required_level) == want,
-                "level {required_level}"
-            );
-        }
+        assert2::assert!(
+            require_feature(&image, METADATA_VERSION, required_level) == want,
+            "level {required_level}"
+        );
     }
 }

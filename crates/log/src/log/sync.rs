@@ -132,42 +132,33 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn sync_fsyncs_parent_dir_after_segment_lifecycle_events() {
-        enum Case {
-            InitialCreation,
-            ReopenBeforePriorSync,
-            Rollover,
-        }
+    #[yare::parameterized(
+        initial_creation = { "initial creation" },
+        reopen_before_prior_sync = { "reopen before prior sync" },
+        rollover = { "rollover" },
+    )]
+    fn sync_fsyncs_parent_dir_after_segment_lifecycle_events(case: &str) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = match case {
+            "initial creation" => open_log(dir.path()),
+            "reopen before prior sync" => {
+                drop(open_log(dir.path()));
+                open_log(dir.path())
+            }
+            "rollover" => {
+                let mut log = rolling_test_log(dir.path());
+                log.append(&mut sample_batch(1)).unwrap();
+                log.sync().unwrap();
+                log.append(&mut sample_batch(1)).unwrap();
+                log
+            }
+            _ => unreachable!("known yare case: {case}"),
+        };
+        sync_observer::take_dir_syncs();
 
-        for case in [
-            Case::InitialCreation,
-            Case::ReopenBeforePriorSync,
-            Case::Rollover,
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            let mut log = match case {
-                Case::InitialCreation => open_log(dir.path()),
-                Case::ReopenBeforePriorSync => {
-                    use crate::test_support::open_log;
+        log.sync().unwrap();
 
-                    drop(open_log(dir.path()));
-                    open_log(dir.path())
-                }
-                Case::Rollover => {
-                    let mut log = rolling_test_log(dir.path());
-                    log.append(&mut sample_batch(1)).unwrap();
-                    log.sync().unwrap();
-                    log.append(&mut sample_batch(1)).unwrap();
-                    log
-                }
-            };
-            sync_observer::take_dir_syncs();
-
-            log.sync().unwrap();
-
-            assert2::assert!(sync_observer::take_dir_syncs() == vec![dir.path().to_path_buf()]);
-        }
+        assert2::assert!(sync_observer::take_dir_syncs() == vec![dir.path().to_path_buf()]);
     }
 
     #[test]

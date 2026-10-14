@@ -31,10 +31,12 @@ fn compares_with_the_inner_type_from_either_side() {
     assert!(0_i64 >= EpochMs(-1));
 }
 
-#[test]
-fn ordering_matches_the_inner_types() {
-    for (left, right) in [(1_i64, 2_i64), (2, 2), (3, -3)] {
-        assert!(EpochMs(left).partial_cmp(&right) == left.partial_cmp(&right));
-        assert!(left.partial_cmp(&EpochMs(right)) == left.partial_cmp(&right));
-    }
+#[yare::parameterized(
+    less = { 1_i64, 2_i64 },
+    equal = { 2_i64, 2_i64 },
+    greater = { 3_i64, -3_i64 },
+)]
+fn ordering_matches_the_inner_types(left: i64, right: i64) {
+    assert2::assert!(EpochMs(left).partial_cmp(&right) == left.partial_cmp(&right));
+    assert2::assert!(left.partial_cmp(&EpochMs(right)) == left.partial_cmp(&right));
 }

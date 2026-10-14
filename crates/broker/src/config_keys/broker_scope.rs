@@ -257,26 +257,22 @@ mod tests {
         }
     }
 
-    #[test]
-    fn resolve_broker_witness_reads_only_an_exact_true() {
+    #[yare::parameterized(
+        unset = { None, false },
+        exact_true = { Some(WITNESS_TRUE), true },
+        false_value = { Some("false"), false },
+        uppercase_true = { Some("TRUE"), false },
+        empty = { Some(""), false },
+        yes = { Some("yes"), false },
+    )]
+    fn resolve_broker_witness_reads_only_an_exact_true(value: Option<&str>, want: bool) {
         use krabka_metadata::NodeId;
-        // (published value, expected role)
-        let cases = [
-            (None, false),
-            (Some(WITNESS_TRUE), true),
-            (Some("false"), false),
-            (Some("TRUE"), false),
-            (Some(""), false),
-            (Some("yes"), false),
-        ];
-        for (value, want) in cases {
-            let mut img = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-            register_node(&mut img, 1, value);
-            assert!(
-                resolve_broker_witness(&img, NodeId(1)) == want,
-                "broker.witness={value:?}"
-            );
-        }
+        let mut img = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
+        register_node(&mut img, 1, value);
+        assert2::assert!(
+            resolve_broker_witness(&img, NodeId(1)) == want,
+            "broker.witness={value:?}"
+        );
     }
 
     #[test]

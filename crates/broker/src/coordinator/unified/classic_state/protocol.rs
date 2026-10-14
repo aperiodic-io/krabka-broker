@@ -198,8 +198,9 @@ mod tests {
     }
 
     /// #788: Kafka's `ClassicGroup.supportsProtocols`.
-    #[test]
-    fn supports_protocols_matches_kafka() {
+    fn empty_protocol_group() -> ClassicGroup { ClassicGroup::new("g") }
+
+    fn stable_protocol_group() -> ClassicGroup {
         let mut stable = ClassicGroup::new("g");
         stable.add_member(member_with_protocols("m1", vec![
             ("range", b""),
@@ -208,37 +209,44 @@ mod tests {
         stable.add_member(member_with_protocols("m2", vec![("sticky", b"")]));
         stable.protocol_type = Some("consumer".into());
         stable.state = GroupState::Stable;
-        let empty = ClassicGroup::new("g");
-        for (name, group, protocol_type, names, want) in [
-            ("empty, empty type", &empty, "", &["range"][..], false),
-            ("empty, no protocols", &empty, "consumer", &[][..], false),
-            ("empty, anything else", &empty, "connect", &["x"][..], true),
-            (
-                "stable, other type",
-                &stable,
-                "connect",
-                &["sticky"][..],
-                false,
-            ),
-            (
-                "stable, protocol one member lacks",
-                &stable,
-                "consumer",
-                &["range"][..],
-                false,
-            ),
-            (
-                "stable, shared protocol",
-                &stable,
-                "consumer",
-                &["x", "sticky"][..],
-                true,
-            ),
-        ] {
-            assert!(
-                group.supports_protocols(protocol_type, names.iter().copied()) == want,
-                "{name}"
-            );
-        }
+        stable
+    }
+
+    #[yare::parameterized(
+        empty_empty_type = { "empty, empty type", false, "", &["range"][..], false },
+        empty_no_protocols = { "empty, no protocols", false, "consumer", &[][..], false },
+        empty_other_type = { "empty, anything else", false, "connect", &["x"][..], true },
+        stable_other_type = { "stable, other type", true, "connect", &["sticky"][..], false },
+        stable_missing_protocol = {
+            "stable, protocol one member lacks",
+            true,
+            "consumer",
+            &["range"][..],
+            false,
+        },
+        stable_shared_protocol = {
+            "stable, shared protocol",
+            true,
+            "consumer",
+            &["x", "sticky"][..],
+            true,
+        },
+    )]
+    fn supports_protocols_matches_kafka(
+        name: &str,
+        stable: bool,
+        protocol_type: &str,
+        names: &[&str],
+        want: bool,
+    ) {
+        let group = if stable {
+            stable_protocol_group()
+        } else {
+            empty_protocol_group()
+        };
+        assert2::assert!(
+            group.supports_protocols(protocol_type, names.iter().copied()) == want,
+            "{name}"
+        );
     }
 }

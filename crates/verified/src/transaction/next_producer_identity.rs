@@ -133,21 +133,23 @@ pub fn should_abort_idle_transaction(
         && now_ms.saturating_sub(start_ms) > i64::from(txn_timeout_ms)
 }
 
+#[logic(open)]
+fn identity_after_increment(result: Option<(i64, i16)>, pid: i64, epoch: i16) -> bool {
+    pearlite! { match result {
+        Some((result_pid, result_epoch)) => result_pid == pid && result_epoch@ == epoch@ + 1,
+        None => false,
+    }}
+}
+
 /// Choose the producer identity exposed after transaction completion.
 ///
 /// Verified normal completion reserves `i16::MAX` for the transaction marker,
 /// while a staged recovery identity may use that epoch once before rotating.
 #[ensures(!verified ==> result == Some((pid, epoch)))]
 #[ensures(verified && !recovery && epoch@ < i16::MAX@ - 1 ==>
-    match result {
-        Some((result_pid, result_epoch)) => result_pid == pid && result_epoch@ == epoch@ + 1,
-        None => false,
-    })]
+    identity_after_increment(result, pid, epoch))]
 #[ensures(verified && recovery && epoch@ < i16::MAX@ ==>
-    match result {
-        Some((result_pid, result_epoch)) => result_pid == pid && result_epoch@ == epoch@ + 1,
-        None => false,
-    })]
+    identity_after_increment(result, pid, epoch))]
 #[ensures(verified
     && ((!recovery && epoch@ >= i16::MAX@ - 1) || (recovery && epoch@ >= i16::MAX@)) ==>
     match (result, fresh) {

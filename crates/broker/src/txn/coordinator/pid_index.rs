@@ -167,10 +167,17 @@ mod tests {
 
     fn rolled_entry() -> TxnEntry { entry().producer(2000).previous(1000).call() }
 
+    fn pid_map(entries: &[(i64, &str)]) -> DashMap<ProducerId, String> {
+        let map = DashMap::new();
+        for &(pid, tid) in entries {
+            map.insert(ProducerId(pid), tid.into());
+        }
+        map
+    }
+
     #[test]
     fn evict_rolled_pid_drops_only_the_prior_id_on_a_roll() {
-        let map: DashMap<ProducerId, String> = DashMap::new();
-        map.insert(ProducerId(1000), "tid-a".into()); // the pre-roll mapping
+        let map = pid_map(&[(1000, "tid-a")]); // the pre-roll mapping
 
         // A roll: new pid 2000, prev = 1000. The stale 1000 mapping is evicted;
         // put then inserts 2000 (mirrored here).
@@ -186,8 +193,7 @@ mod tests {
 
     #[test]
     fn evict_rolled_pid_is_noop_without_a_roll() {
-        let map: DashMap<ProducerId, String> = DashMap::new();
-        map.insert(ProducerId(1000), "tid-a".into());
+        let map = pid_map(&[(1000, "tid-a")]);
         // Never rolled: prev == -1 → nothing evicted.
         TxnCoordinator::evict_superseded_pids(&map, &entry().call());
         assert!(map.get(&ProducerId(1000)).is_some());
@@ -198,8 +204,7 @@ mod tests {
 
     #[test]
     fn evict_rolled_pid_is_idempotent_after_the_id_is_gone() {
-        let map: DashMap<ProducerId, String> = DashMap::new();
-        map.insert(ProducerId(2000), "tid-a".into());
+        let map = pid_map(&[(2000, "tid-a")]);
         // prev=1000 already absent → repeated evictions are harmless no-ops.
         TxnCoordinator::evict_superseded_pids(&map, &rolled_entry());
         TxnCoordinator::evict_superseded_pids(&map, &rolled_entry());
@@ -209,9 +214,7 @@ mod tests {
 
     #[test]
     fn evict_superseded_pids_removes_a_rotated_recovery_identity() {
-        let map: DashMap<ProducerId, String> = DashMap::new();
-        map.insert(ProducerId(1000), "tid-a".into());
-        map.insert(ProducerId(2000), "tid-a".into());
+        let map = pid_map(&[(1000, "tid-a"), (2000, "tid-a")]);
 
         let mut current = entry().call();
         current.next_producer_id = ProducerId(3000);

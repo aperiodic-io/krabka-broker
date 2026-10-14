@@ -63,8 +63,7 @@ pub(super) async fn current(broker: &Broker, part: &Partition) -> Offset {
     // followers.
     let replicas = image
         .partition(&part.topic, part.index.get())
-        .map(|record| record.replicas.clone())
-        .unwrap_or_default();
+        .map_or_default(|record| record.replicas.clone());
     let leader_log_start = part.log_start_offset();
     part.replica_state.lock().await.low_watermark(
         broker.config.node_id,

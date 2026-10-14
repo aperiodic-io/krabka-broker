@@ -193,22 +193,22 @@ async fn process_topics(context: &AcknowledgeContext<'_>) -> Vec<ShareAcknowledg
                 partition_index: ap.partition_index,
                 ..Default::default()
             };
-
-            // Kafka's `KafkaApis.handleAcknowledgements` validates the batches
-            // first, then checks the topic `Read`, then asks the metadata
-            // cache for the partition. A partition with no batch then answers
-            // NONE without reaching the share partition.
-            let batches_are_valid = acknowledgement_batches_are_valid(
+            let batches = || {
                 ap.acknowledgement_batches.iter().map(|batch| {
                     (
                         batch.first_offset,
                         batch.last_offset,
                         batch.acknowledge_types.as_slice(),
                     )
-                }),
-                version >= 2,
-                req.is_renew_ack,
-            );
+                })
+            };
+
+            // Kafka's `KafkaApis.handleAcknowledgements` validates the batches
+            // first, then checks the topic `Read`, then asks the metadata
+            // cache for the partition. A partition with no batch then answers
+            // NONE without reaching the share partition.
+            let batches_are_valid =
+                acknowledgement_batches_are_valid(batches(), version >= 2, req.is_renew_ack);
             let error = if !batches_are_valid {
                 Some(codes::INVALID_REQUEST)
             } else if denied {
@@ -253,16 +253,9 @@ async fn process_topics(context: &AcknowledgeContext<'_>) -> Vec<ShareAcknowledg
                 renewal,
                 max_attempts: settings.delivery_count_limit,
             };
-            let batches = ap.acknowledgement_batches.iter().map(|batch| {
-                (
-                    batch.first_offset,
-                    batch.last_offset,
-                    batch.acknowledge_types.as_slice(),
-                )
-            });
             out.error_code = mgr
                 .apply_durably(group, topic_id, ap.partition_index, &cell, &mut st, |st| {
-                    apply_acknowledgements(st, &application, batches)
+                    apply_acknowledgements(st, &application, batches())
                 })
                 .await;
             parts.push(out);
@@ -289,7 +282,7 @@ mod tests {
                 InitializedShareTopic, StartedBroker,
                 create_topic as create_topic_from_test_support, initialized_share_topic,
             },
-            share_partition::session::FetchPartitions,
+            share_partition::session::{FetchPartitions, ShareFetchSessionRequest},
             test_support::{ShareApiSupport, dispatch_wire, start_broker_with, start_share_broker},
         },
         assert2::assert,
@@ -389,14 +382,15 @@ mod tests {
         shared
             .share_partition_leaders
             .update_fetch_session(
-                ("g1", member),
-                ctx.connection_id,
-                0,
-                FetchPartitions {
-                    requested: &[(id, 0)],
-                    forgotten: &std::collections::HashSet::new(),
-                },
-                false,
+                ShareFetchSessionRequest::builder()
+                    .identity(("g1", member))
+                    .connection_id(ctx.connection_id)
+                    .epoch(0)
+                    .partitions(FetchPartitions {
+                        requested: &[(id, 0)],
+                        forgotten: &std::collections::HashSet::new(),
+                    })
+                    .build(),
             )
             .expect("open share session");
         let mut request = request(topic_id, &[0]);

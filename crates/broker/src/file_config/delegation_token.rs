@@ -80,15 +80,15 @@ mod tests {
     /// and `set_var`/`remove_var` are global side-effects.
     static ENV_LOCK_CELL: OnceLock<Mutex<()>> = OnceLock::new();
     fn env_lock() -> &'static Mutex<()> { ENV_LOCK_CELL.get_or_init(|| Mutex::new(())) }
+
+    fn without_runtime_secret_key<T>(f: impl FnOnce() -> T) -> T {
+        let _g = env_lock().lock().unwrap();
+        temp_env::with_var_unset("KRABKA_DELEGATION_TOKEN_SECRET_KEY", f)
+    }
+
     #[test]
     fn delegation_token_section_parses_secret_key_and_defaults() {
-        // Hold the lock so a concurrently-running env-var test can't
-        // leak KRABKA_DELEGATION_TOKEN_SECRET_KEY into this assertion.
-        // `temp_env::with_var_unset` removes the var for the duration
-        // of the closure and restores the prior value on return —
-        // safe against the workspace `forbid(unsafe_code)` lint.
-        let _g = env_lock().lock().unwrap();
-        temp_env::with_var_unset("KRABKA_DELEGATION_TOKEN_SECRET_KEY", || {
+        without_runtime_secret_key(|| {
             let toml = r#"
 [delegation_token]
 secret_key = "abcdef"
@@ -111,8 +111,7 @@ secret_key = "abcdef"
 
     #[test]
     fn delegation_token_default_renew_period_ms_default_and_override() {
-        let _g = env_lock().lock().unwrap();
-        temp_env::with_var_unset("KRABKA_DELEGATION_TOKEN_SECRET_KEY", || {
+        without_runtime_secret_key(|| {
             // (1) When the TOML omits `default_renew_period_ms`, the config
             //     stays at the 24h KIP-48 default.
             let toml = r#"
@@ -166,8 +165,7 @@ secret_key = "toml-loses"
 
     #[test]
     fn delegation_token_absent_when_unset_anywhere() {
-        let _g = env_lock().lock().unwrap();
-        temp_env::with_var_unset("KRABKA_DELEGATION_TOKEN_SECRET_KEY", || {
+        without_runtime_secret_key(|| {
             let cfg = configured_unwrap_parse("").unwrap();
 
             // No secret key anywhere; lifetime knobs stay at their defaults

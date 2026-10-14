@@ -538,99 +538,101 @@ mod tests {
     /// records is written with an `INT16` length. A string of 32767 bytes
     /// encodes, and one of 32768 bytes makes the whole batch an error, not a
     /// panic in the actor that writes it.
-    #[test]
-    fn a_record_string_over_32767_bytes_does_not_encode() {
-        struct Field {
-            what: &'static str,
-            set: fn(&mut PendingRecords, String),
-        }
-        let fields: [Field; 11] = [
-            Field {
-                what: "member id of a member record",
-                set: |p, s| {
-                    p.member_metadata[0].0 = s;
-                },
-            },
-            Field {
-                what: "member id of a target assignment",
-                set: |p, s| {
-                    p.target_per_member[0].0 = s;
-                },
-            },
-            Field {
-                what: "member id of a current assignment",
-                set: |p, s| {
-                    p.current_per_member[0].0 = s;
-                },
-            },
-            Field {
-                what: "regular expression",
-                set: |p, s| p.resolved_regexes[0].0 = s,
-            },
-            Field {
-                what: "classic protocol type",
-                set: |p, s| {
-                    p.classic_group_metadata.as_mut().unwrap().protocol_type = s;
-                },
-            },
-            Field {
-                what: "classic protocol name",
-                set: |p, s| {
-                    p.classic_group_metadata.as_mut().unwrap().protocol_name = Some(s);
-                },
-            },
-            Field {
-                what: "classic leader",
-                set: |p, s| {
-                    p.classic_group_metadata.as_mut().unwrap().leader = Some(s);
-                },
-            },
-            Field {
-                what: "classic member id",
-                set: |p, s| {
-                    p.classic_group_metadata.as_mut().unwrap().members[0].member_id = s;
-                },
-            },
-            Field {
-                what: "classic instance id",
-                set: |p, s| {
-                    p.classic_group_metadata.as_mut().unwrap().members[0].group_instance_id =
-                        Some(s);
-                },
-            },
-            Field {
-                what: "classic client id",
-                set: |p, s| {
-                    p.classic_group_metadata.as_mut().unwrap().members[0].client_id = s;
-                },
-            },
-            Field {
-                what: "classic client host",
-                set: |p, s| {
-                    p.classic_group_metadata.as_mut().unwrap().members[0].client_host = s;
-                },
-            },
-        ];
-        let limit = MAX_STRING_BYTES;
-        for Field { what: name, set } in fields {
-            for (length, encodes) in [(limit, true), (limit + 1, false)] {
-                let mut pending = every_record();
-                set(&mut pending, "a".repeat(length));
-
-                let outcome = pending.to_batch("g", 0);
-
-                assert!(outcome.is_ok() == encodes, "{name} of {length} bytes");
-                assert!(
-                    encodes || matches!(outcome, Err(BrokerError::Protocol(_))),
-                    "{name} of {length} bytes is a protocol error"
-                );
+    #[yare::parameterized(
+        member_record_at_limit = { "member id of a member record", MAX_STRING_BYTES, true },
+        member_record_over_limit = { "member id of a member record", MAX_STRING_BYTES + 1, false },
+        target_assignment_at_limit = { "member id of a target assignment", MAX_STRING_BYTES, true },
+        target_assignment_over_limit = {
+            "member id of a target assignment",
+            MAX_STRING_BYTES + 1,
+            false,
+        },
+        current_assignment_at_limit = {
+            "member id of a current assignment",
+            MAX_STRING_BYTES,
+            true,
+        },
+        current_assignment_over_limit = {
+            "member id of a current assignment",
+            MAX_STRING_BYTES + 1,
+            false,
+        },
+        regex_at_limit = { "regular expression", MAX_STRING_BYTES, true },
+        regex_over_limit = { "regular expression", MAX_STRING_BYTES + 1, false },
+        protocol_type_at_limit = { "classic protocol type", MAX_STRING_BYTES, true },
+        protocol_type_over_limit = { "classic protocol type", MAX_STRING_BYTES + 1, false },
+        protocol_name_at_limit = { "classic protocol name", MAX_STRING_BYTES, true },
+        protocol_name_over_limit = { "classic protocol name", MAX_STRING_BYTES + 1, false },
+        leader_at_limit = { "classic leader", MAX_STRING_BYTES, true },
+        leader_over_limit = { "classic leader", MAX_STRING_BYTES + 1, false },
+        classic_member_at_limit = { "classic member id", MAX_STRING_BYTES, true },
+        classic_member_over_limit = { "classic member id", MAX_STRING_BYTES + 1, false },
+        instance_at_limit = { "classic instance id", MAX_STRING_BYTES, true },
+        instance_over_limit = { "classic instance id", MAX_STRING_BYTES + 1, false },
+        client_id_at_limit = { "classic client id", MAX_STRING_BYTES, true },
+        client_id_over_limit = { "classic client id", MAX_STRING_BYTES + 1, false },
+        client_host_at_limit = { "classic client host", MAX_STRING_BYTES, true },
+        client_host_over_limit = { "classic client host", MAX_STRING_BYTES + 1, false },
+        group_id_at_limit = { "group id", MAX_STRING_BYTES, true },
+        group_id_over_limit = { "group id", MAX_STRING_BYTES + 1, false },
+    )]
+    fn a_record_string_over_32767_bytes_does_not_encode(field: &str, length: usize, encodes: bool) {
+        let mut pending = every_record();
+        let value = "a".repeat(length);
+        match field {
+            "member id of a member record" => pending.member_metadata[0].0 = value.clone(),
+            "member id of a target assignment" => pending.target_per_member[0].0 = value.clone(),
+            "member id of a current assignment" => pending.current_per_member[0].0 = value.clone(),
+            "regular expression" => pending.resolved_regexes[0].0 = value.clone(),
+            "classic protocol type" => {
+                pending
+                    .classic_group_metadata
+                    .as_mut()
+                    .unwrap()
+                    .protocol_type = value.clone();
             }
+            "classic protocol name" => {
+                pending
+                    .classic_group_metadata
+                    .as_mut()
+                    .unwrap()
+                    .protocol_name = Some(value.clone());
+            }
+            "classic leader" => {
+                pending.classic_group_metadata.as_mut().unwrap().leader = Some(value.clone());
+            }
+            "classic member id" => {
+                pending.classic_group_metadata.as_mut().unwrap().members[0].member_id =
+                    value.clone();
+            }
+            "classic instance id" => {
+                pending.classic_group_metadata.as_mut().unwrap().members[0].group_instance_id =
+                    Some(value.clone());
+            }
+            "classic client id" => {
+                pending.classic_group_metadata.as_mut().unwrap().members[0].client_id =
+                    value.clone();
+            }
+            "classic client host" => {
+                pending.classic_group_metadata.as_mut().unwrap().members[0].client_host =
+                    value.clone();
+            }
+            "group id" => {}
+            _ => unreachable!(),
         }
-        for (length, encodes) in [(limit, true), (limit + 1, false)] {
-            let outcome = every_record().to_batch(&"g".repeat(length), 0);
+        let group_id = if field == "group id" {
+            value
+        } else {
+            "g".into()
+        };
 
-            assert!(outcome.is_ok() == encodes, "group id of {length} bytes");
-        }
+        let outcome = pending.to_batch(&group_id, 0);
+
+        assert2::assert!(outcome.is_ok() == encodes, "{field} of {length} bytes");
+        assert2::assert!(
+            encodes || matches!(outcome, Err(BrokerError::Protocol(_))),
+            "{field} of {length} bytes is a protocol error"
+        );
     }
 
     #[test]

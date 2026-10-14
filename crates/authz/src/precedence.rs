@@ -18,7 +18,10 @@
 //! paths agree, with no drift.
 
 use {
-    crate::{AclCache, AuthorizationRequest, AuthorizationResult, Authorizer, SimpleAclAuthorizer},
+    crate::{
+        AclCache, AuthorizationRequest, AuthorizationResult, Authorizer, SimpleAclAuthorizer,
+        test_support::acl,
+    },
     krabka_metadata::{
         AclEntry, AclOperation, MetadataImage, MetadataRecord, PatternType, PermissionType,
         ResourceType,
@@ -130,15 +133,15 @@ fn entry(
     op: AclOperation,
     perm: PermissionType,
 ) -> AclEntry {
-    AclEntry {
-        resource_type: rt,
-        resource_name: name.into(),
-        pattern_type: pattern,
-        principal: principal.into(),
-        host: host.into(),
-        operation: op,
-        permission_type: perm,
-    }
+    acl()
+        .rt(rt)
+        .pattern(pattern)
+        .name(name)
+        .principal(principal)
+        .host(host)
+        .op(op)
+        .permission(perm)
+        .call()
 }
 
 fn principal(name: &str) -> Principal {
@@ -315,15 +318,15 @@ mod fuzz {
             perm in any::<bool>(), op in 0u8..11, rt in 0u8..5, name in 0u8..6,
             princ in 0u8..3, host in 0u8..3, pat in any::<bool>(),
         ) -> AclEntry {
-            AclEntry {
-                resource_type: rt_of(rt),
-                resource_name: name_of(name).into(),
-                pattern_type: if pat { PatternType::Prefixed } else { PatternType::Literal },
-                principal: princ_of(princ).into(),
-                host: host_of(host).into(),
-                operation: op_of(op),
-                permission_type: if perm { PermissionType::Deny } else { PermissionType::Allow },
-            }
+            crate::test_support::acl()
+                .rt(rt_of(rt))
+                .name(name_of(name))
+                .pattern(if pat { PatternType::Prefixed } else { PatternType::Literal })
+                .principal(princ_of(princ))
+                .host(host_of(host))
+                .op(op_of(op))
+                .permission(if perm { PermissionType::Deny } else { PermissionType::Allow })
+                .call()
         }
     }
 

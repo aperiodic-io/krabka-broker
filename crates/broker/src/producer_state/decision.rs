@@ -205,7 +205,7 @@ mod fuzz {
         /// monotonic prefix. A lower epoch is fenced. A higher epoch starts a
         /// new prefix at sequence 0 and rejects any other sequence. This test complements the exhaustive
         /// `producer_state_model` at a scale the BFS cannot reach: epoch 0..6,
-        /// base_seq 0..200, and up to 400 ops.
+        /// `base_seq` 0..200, and up to 400 ops.
         #[test]
         fn idempotent_log_invariants(
             ops in proptest::collection::vec(

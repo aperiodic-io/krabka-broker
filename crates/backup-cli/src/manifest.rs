@@ -229,32 +229,34 @@ mod tests {
         check!(decoded.artifact("group-offsets.json").is_none());
     }
 
-    #[test]
-    fn a_manifest_with_a_missing_or_unknown_version_is_refused() {
-        for (name, json, found) in [
-            (
-                "pre-1.0 manifest",
-                r#"{"capture_id":"1","captured_at_ms":1,"log_dir":null,"bootstrap_server":null,"artifacts":[]}"#,
-                None,
-            ),
-            (
-                "future version",
-                r#"{"version":1,"capture_id":"1","captured_at_ms":1,"log_dir":null,"bootstrap_server":null,"artifacts":[]}"#,
-                Some("1"),
-            ),
-        ] {
-            let error = Manifest::from_slice(json.as_bytes(), "restore-inputs/1/manifest.json")
-                .expect_err(name);
-            assert2::assert!(
-                let BackupError::UnsupportedVersion {
-                    context,
-                    found: actual,
-                    expected: MANIFEST_VERSION
-                } = &error,
-                "case {name}: {error}"
-            );
-            check!(context == "restore-inputs/1/manifest.json", "case {name}");
-            check!(actual.as_deref() == found, "case {name}");
-        }
+    #[yare::parameterized(
+        pre_1_0 = {
+            "pre-1.0 manifest",
+            r#"{"capture_id":"1","captured_at_ms":1,"log_dir":null,"bootstrap_server":null,"artifacts":[]}"#,
+            None,
+        },
+        future = {
+            "future version",
+            r#"{"version":1,"capture_id":"1","captured_at_ms":1,"log_dir":null,"bootstrap_server":null,"artifacts":[]}"#,
+            Some("1"),
+        },
+    )]
+    fn a_manifest_with_a_missing_or_unknown_version_is_refused(
+        name: &str,
+        json: &str,
+        found: Option<&str>,
+    ) {
+        let error = Manifest::from_slice(json.as_bytes(), "restore-inputs/1/manifest.json")
+            .expect_err(name);
+        assert2::assert!(
+            let BackupError::UnsupportedVersion {
+                context,
+                found: actual,
+                expected: MANIFEST_VERSION
+            } = &error,
+            "case {name}: {error}"
+        );
+        check!(context == "restore-inputs/1/manifest.json", "case {name}");
+        check!(actual.as_deref() == found, "case {name}");
     }
 }

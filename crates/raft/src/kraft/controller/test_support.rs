@@ -60,17 +60,7 @@ pub fn voter_set(ids: &[NodeId]) -> krabka_metadata::voters::VoterSet {
 }
 
 /// Number of metadata records between count-triggered snapshots; zero disables the trigger.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
+#[krabka_macros::test_scalar]
 pub struct SnapshotRecordCount(pub u64);
 
 #[derive(Clone, Copy)]

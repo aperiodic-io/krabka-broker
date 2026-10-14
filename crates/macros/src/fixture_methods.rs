@@ -159,22 +159,33 @@ mod tests {
         );
     }
 
-    #[test]
-    fn missing_reads_keep_segment_identity_and_only_requested_delete_success() {
+    #[yare::parameterized(
+        default = { "" },
+        delete_ok = { "delete_ok" },
+    )]
+    fn missing_reads_keep_segment_identity_and_only_requested_delete_success(policy: &str) {
         let item = "impl RemoteStorageManager for Backend {}".parse().unwrap();
-        for policy in ["", "delete_ok"] {
-            let output = compact(&remote_methods(&policy.parse().unwrap(), &item).unwrap());
-            assert!(
-                output
-                    .matches("SegmentNotFound(metadata.remote_log_segment_id().clone())")
-                    .count()
-                    == 2
-            );
-            assert!(output.contains("fndelete_log_segment_data") == !policy.is_empty());
-        }
-        for policy in ["allow", "delete_ok, extra"] {
-            assert!(remote_methods(&policy.parse().unwrap(), &item).is_err());
-        }
+        let output = compact(&remote_methods(&policy.parse().unwrap(), &item).unwrap());
+        assert2::assert!(
+            output
+                .matches("SegmentNotFound(metadata.remote_log_segment_id().clone())")
+                .count()
+                == 2
+        );
+        assert2::assert!(output.contains("fndelete_log_segment_data") == !policy.is_empty());
+    }
+
+    #[yare::parameterized(
+        unsupported = { "allow" },
+        extra_tokens = { "delete_ok, extra" },
+    )]
+    fn refuses_unsupported_remote_method_policies(policy: &str) {
+        let item = "impl RemoteStorageManager for Backend {}".parse().unwrap();
+        assert2::assert!(remote_methods(&policy.parse().unwrap(), &item).is_err());
+    }
+
+    #[test]
+    fn refuses_an_unrelated_trait() {
         assert!(
             remote_methods(
                 &"".parse().unwrap(),

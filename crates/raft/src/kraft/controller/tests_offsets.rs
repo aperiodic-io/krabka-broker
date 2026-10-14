@@ -12,176 +12,242 @@ use {
         snapshot_bytes_reached, snapshot_interval_reached, snapshot_time_reached,
         submit_waiter_need_offset, validate_append_result,
     },
-    assert2::assert,
 };
 
-#[test]
-fn submit_offset_helpers_use_base_plus_blob_count() {
-    for (_case, base, count, want) in [
-        ("empty submission", 9, 0, 9),
-        ("three-record submission", 9, 3, 12),
-    ] {
-        assert2::assert!(assigned_record_offset(Offset(base), count) == want);
-        assert2::assert!(
-            submit_waiter_need_offset(Offset(base), usize::try_from(count).unwrap()) == want
-        );
-    }
+#[yare::parameterized(empty_submission = { 9, 0, 9 }, three_record_submission = { 9, 3, 12 })]
+fn submit_offset_helpers_use_base_plus_blob_count(base: i64, count: i64, want: i64) {
+    assert2::assert!(assigned_record_offset(Offset(base), count) == want);
+    assert2::assert!(
+        submit_waiter_need_offset(Offset(base), usize::try_from(count).unwrap()) == Offset(want)
+    );
 }
 
-#[test]
-fn append_result_must_match_previous_log_end_and_advance_log() {
-    for (_case, expected_base, returned_base, log_end_after, want) in [
-        ("matching advancing append", 4, 4, 5, true),
-        ("negative returned base", 4, -1, 5, false),
-        ("mismatched returned base", 4, 5, 5, false),
-        ("log did not advance", 4, 4, 4, false),
-    ] {
-        assert2::assert!(
-            append_result_is_consistent(
-                Offset(expected_base),
-                Offset(returned_base),
-                Offset(log_end_after)
-            ) == want
-        );
-    }
-    assert2::assert!(validate_append_result("test", Offset(4), Offset(4), Offset(5)).is_ok());
-    assert2::assert!(validate_append_result("test", Offset(4), Offset(-1), Offset(4)).is_err());
+#[yare::parameterized(
+    matching_advancing_append = { 4, 4, 5, true },
+    negative_returned_base = { 4, -1, 5, false },
+    mismatched_returned_base = { 4, 5, 5, false },
+    log_did_not_advance = { 4, 4, 4, false },
+)]
+fn append_result_must_match_previous_log_end_and_advance_log(
+    expected_base: i64,
+    returned_base: i64,
+    log_end_after: i64,
+    want: bool,
+) {
+    assert2::assert!(
+        append_result_is_consistent(
+            Offset(expected_base),
+            Offset(returned_base),
+            Offset(log_end_after)
+        ) == want
+    );
+    assert2::assert!(
+        validate_append_result(
+            "test",
+            Offset(expected_base),
+            Offset(returned_base),
+            Offset(log_end_after)
+        )
+        .is_ok()
+            == want
+    );
 }
 
 /// Only a leader that is itself the one voter commits its own append. A leader
 /// that its own uncommitted `VotersRecord` removed, leaving one other voter,
 /// waits for that voter's fetch.
-#[test]
-fn only_a_sole_voter_leader_commits_alone() {
-    // (majority, leader is a voter, commits alone)
-    let cases = [
-        (1, true, true),
-        (1, false, false),
-        (0, true, false),
-        (2, true, false),
-        (2, false, false),
-    ];
-    let decided: Vec<bool> = cases
-        .iter()
-        .map(|&(majority, voter, _)| leader_alone_is_majority(majority, voter))
-        .collect();
-    let expected: Vec<bool> = cases.iter().map(|&(.., want)| want).collect();
-    assert!(decided == expected);
+#[yare::parameterized(
+    sole_voter_is_leader = { 1,
+    true,
+    true },
+    sole_voter_is_elsewhere = { 1,
+    false,
+    false },
+    zero_majority = { 0,
+    true,
+    false },
+    multi_voter_leader_is_voter = { 2,
+    true,
+    false },
+    multi_voter_leader_is_not_voter = { 2,
+    false,
+    false }
+)]
+fn only_a_sole_voter_leader_commits_alone(majority: usize, voter: bool, want: bool) {
+    assert2::assert!(leader_alone_is_majority(majority, voter) == want);
 }
 
-#[test]
-fn apply_window_includes_only_newly_committed_batch_bases() {
-    for (_case, base_offset, prev_hwm, applied_hwm, want) in [
-        ("first newly committed batch", 5, 5, 6, true),
-        ("interior newly committed batch", 6, 5, 8, true),
-        ("already applied batch", 4, 5, 8, false),
-        ("exclusive applied boundary", 8, 5, 8, false),
-    ] {
-        assert2::assert!(
-            batch_base_in_apply_window(base_offset, Offset(prev_hwm), Offset(applied_hwm)) == want
-        );
-    }
+#[yare::parameterized(
+    first_newly_committed_batch = { 5,
+    5,
+    6,
+    true },
+    interior_newly_committed_batch = { 6,
+    5,
+    8,
+    true },
+    already_applied_batch = { 4,
+    5,
+    8,
+    false },
+    exclusive_applied_boundary = { 8,
+    5,
+    8,
+    false }
+)]
+fn apply_window_includes_only_newly_committed_batch_bases(
+    base_offset: i64,
+    prev_hwm: i64,
+    applied_hwm: i64,
+    want: bool,
+) {
+    assert2::assert!(
+        batch_base_in_apply_window(base_offset, Offset(prev_hwm), Offset(applied_hwm)) == want
+    );
 }
 
-#[test]
-fn snapshot_threshold_uses_positive_hwm_delta_from_last_snapshot() {
-    for (_case, hwm, last_snapshot_end, want) in [
-        ("positive committed delta", 10, 4, 6),
-        ("snapshot ahead of HWM", 4, 10, 0),
-    ] {
-        assert2::assert!(
-            committed_records_since_snapshot(Offset(hwm), Offset(last_snapshot_end)) == want
-        );
-    }
-    for (_case, advanced, interval, want) in [
-        ("exact threshold", 3, 3, true),
-        ("above threshold", 4, 3, true),
-        ("below threshold", 2, 3, false),
-        ("disabled cap never reached", 5, 0, false),
-    ] {
-        assert2::assert!(snapshot_interval_reached(advanced, interval) == want);
-    }
+#[yare::parameterized(positive_committed_delta = { 10, 4, 6 }, snapshot_ahead_of_hwm = { 4, 10, 0 })]
+fn snapshot_threshold_uses_positive_hwm_delta_from_last_snapshot(
+    hwm: i64,
+    last_snapshot_end: i64,
+    want: u64,
+) {
+    assert2::assert!(
+        committed_records_since_snapshot(Offset(hwm), Offset(last_snapshot_end)) == want
+    );
 }
 
-#[test]
-fn snapshot_bytes_and_time_caps_disable_at_zero_and_trigger_at_or_past_threshold() {
-    for (_case, bytes_since_snapshot, max_bytes_between_snapshots, want) in [
-        ("exact threshold", 20, 20, true),
-        ("above threshold", 21, 20, true),
-        ("below threshold", 19, 20, false),
-        ("disabled cap never reached", u64::MAX, 0, false),
-    ] {
-        assert2::assert!(
-            snapshot_bytes_reached(bytes_since_snapshot, max_bytes_between_snapshots) == want
-        );
-    }
-    for (_case, elapsed_ms, max_snapshot_interval_ms, want) in [
-        ("exact threshold", 3_600_000, 3_600_000, true),
-        ("above threshold", 3_600_001, 3_600_000, true),
-        ("below threshold", 3_599_999, 3_600_000, false),
-        ("disabled cap never reached", u64::MAX, 0, false),
-    ] {
-        assert2::assert!(snapshot_time_reached(elapsed_ms, max_snapshot_interval_ms) == want);
-    }
+#[yare::parameterized(
+    interval_exact_threshold = { 3,
+    3,
+    true },
+    interval_above_threshold = { 4,
+    3,
+    true },
+    interval_below_threshold = { 2,
+    3,
+    false },
+    interval_disabled_cap = { 5,
+    0,
+    false }
+)]
+fn snapshot_interval_cap_uses_at_or_past_threshold(advanced: u64, interval: u64, want: bool) {
+    assert2::assert!(snapshot_interval_reached(advanced, interval) == want);
 }
 
-#[test]
-fn expected_hwm_after_advance_is_monotonic_and_clamped_to_log_end() {
-    for (_case, prev_hwm, new_hwm, log_end, want) in [
-        ("clamp above log end", 2, 5, 4, 4),
-        ("prevent regression", 2, 1, 4, 2),
-        ("ordinary advance", 2, 3, 4, 3),
-    ] {
-        assert2::assert!(
-            expected_hwm_after_advance(Offset(prev_hwm), Offset(new_hwm), Offset(log_end)) == want
-        );
-    }
-    for (_case, applied_hwm, expected_hwm, want) in [
-        ("exact expected HWM", 4, 4, true),
-        ("beyond expected HWM", 5, 4, true),
-        ("below expected HWM", 3, 4, false),
-    ] {
-        assert2::assert!(
-            hwm_advanced_as_expected(Offset(applied_hwm), Offset(expected_hwm)) == want
-        );
-    }
+#[yare::parameterized(
+    bytes_exact_threshold = { 20, 20, true },
+    bytes_above_threshold = { 21, 20, true },
+    bytes_below_threshold = { 19, 20, false },
+    bytes_disabled_cap = { u64::MAX, 0, false },
+)]
+fn snapshot_bytes_cap_disables_at_zero_and_triggers_at_threshold(
+    bytes_since_snapshot: u64,
+    max_bytes_between_snapshots: u64,
+    want: bool,
+) {
+    assert2::assert!(
+        snapshot_bytes_reached(bytes_since_snapshot, max_bytes_between_snapshots) == want
+    );
 }
 
-#[test]
-fn waiter_resolution_requires_hwm_to_reach_need_offset() {
-    for (_case, hwm, need_offset, want) in [
-        ("HWM reaches waiter", 5, 5, true),
-        ("HWM passes waiter", 6, 5, true),
-        ("HWM below waiter", 4, 5, false),
-    ] {
-        assert2::assert!(hwm_reaches_waiter(Offset(hwm), Offset(need_offset)) == want);
-    }
+#[yare::parameterized(
+    time_exact_threshold = { 3_600_000, 3_600_000, true },
+    time_above_threshold = { 3_600_001, 3_600_000, true },
+    time_below_threshold = { 3_599_999, 3_600_000, false },
+    time_disabled_cap = { u64::MAX, 0, false },
+)]
+fn snapshot_time_cap_disables_at_zero_and_triggers_at_threshold(
+    elapsed_ms: u64,
+    max_snapshot_interval_ms: u64,
+    want: bool,
+) {
+    assert2::assert!(snapshot_time_reached(elapsed_ms, max_snapshot_interval_ms) == want);
 }
 
-#[test]
-fn metadata_fetch_window_is_committed_half_open_range() {
-    for (_case, fetch_offset, hwm, want) in [
-        ("first committed offset", 0, 1, true),
-        ("last committed offset", 4, 5, true),
-        ("negative offset", -1, 5, false),
-        ("exclusive HWM boundary", 5, 5, false),
-    ] {
-        assert2::assert!(
-            metadata_fetch_offset_in_committed_window(Offset(fetch_offset), Offset(hwm)) == want
-        );
-    }
-    assert2::assert!(fetch_batch_committed_before_hwm(4, Offset(5)));
-    assert2::assert!(!fetch_batch_committed_before_hwm(5, Offset(5)));
+#[yare::parameterized(
+    clamp_above_log_end = { 2,
+    5,
+    4,
+    Offset(4) },
+    prevent_regression = { 2,
+    1,
+    4,
+    Offset(2) },
+    ordinary_advance = { 2,
+    3,
+    4,
+    Offset(3) }
+)]
+fn expected_hwm_after_advance_is_monotonic_and_clamped_to_log_end(
+    prev_hwm: i64,
+    new_hwm: i64,
+    log_end: i64,
+    want: Offset,
+) {
+    assert2::assert!(
+        expected_hwm_after_advance(Offset(prev_hwm), Offset(new_hwm), Offset(log_end)) == want
+    );
 }
 
-#[test]
-fn fetch_record_offsets_are_inside_log_window_only() {
-    for (_case, fetch_offset, log_end, want) in [
-        ("first available record", 0, 1, true),
-        ("last available record", 4, 5, true),
-        ("negative offset", -1, 5, false),
-        ("exclusive log-end boundary", 5, 5, false),
-    ] {
-        assert2::assert!(fetch_offset_has_records(Offset(fetch_offset), Offset(log_end)) == want);
-    }
+#[yare::parameterized(
+    exact_expected_hwm = { 4,
+    4,
+    true },
+    beyond_expected_hwm = { 5,
+    4,
+    true },
+    below_expected_hwm = { 3,
+    4,
+    false }
+)]
+fn applied_hwm_is_checked_against_expected_frontier(
+    applied_hwm: i64,
+    expected_hwm: i64,
+    want: bool,
+) {
+    assert2::assert!(hwm_advanced_as_expected(Offset(applied_hwm), Offset(expected_hwm)) == want);
+}
+
+#[yare::parameterized(
+    waiter_at_hwm = { 5,
+    5,
+    true },
+    waiter_below_hwm = { 6,
+    5,
+    true },
+    waiter_above_hwm = { 4,
+    5,
+    false }
+)]
+fn waiter_resolution_requires_hwm_to_reach_need_offset(hwm: i64, need_offset: i64, want: bool) {
+    assert2::assert!(hwm_reaches_waiter(Offset(hwm), Offset(need_offset)) == want);
+}
+
+#[yare::parameterized(
+    first_committed_offset = { 0, 1, true, true },
+    last_committed_offset = { 4, 5, true, true },
+    negative_offset = { -1, 5, false, true },
+    exclusive_hwm_boundary = { 5, 5, false, false },
+)]
+fn metadata_fetch_window_is_committed_half_open_range(
+    fetch_offset: i64,
+    hwm: i64,
+    want_window: bool,
+    want_batch: bool,
+) {
+    assert2::assert!(
+        metadata_fetch_offset_in_committed_window(Offset(fetch_offset), Offset(hwm)) == want_window
+    );
+    assert2::assert!(fetch_batch_committed_before_hwm(fetch_offset, Offset(hwm)) == want_batch);
+}
+
+#[yare::parameterized(
+    first_available_record = { 0, 1, true },
+    last_available_record = { 4, 5, true },
+    negative_offset = { -1, 5, false },
+    exclusive_log_end_boundary = { 5, 5, false },
+)]
+fn fetch_record_offsets_are_inside_log_window_only(fetch_offset: i64, log_end: i64, want: bool) {
+    assert2::assert!(fetch_offset_has_records(Offset(fetch_offset), Offset(log_end)) == want);
 }

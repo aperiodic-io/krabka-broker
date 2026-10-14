@@ -105,34 +105,18 @@ mod tests {
         assert2::check,
     };
 
-    #[test]
-    fn every_variant_maps_onto_its_documented_exit_code() {
-        let cases = [
-            (
-                BackupError::InvalidArgument("bad".to_owned()),
-                EXIT_BAD_ARGUMENT,
-            ),
-            (
-                BackupError::Io(std::io::Error::other("disk")),
-                EXIT_UNREADABLE,
-            ),
-            (
-                BackupError::NoSuchCapture("none".to_owned()),
-                EXIT_UNREADABLE,
-            ),
-            (
-                BackupError::UnsupportedVersion {
-                    context: "manifest.json".to_owned(),
-                    found: None,
-                    expected: 0,
-                },
-                EXIT_UNREADABLE,
-            ),
-            (BackupError::Integrity("digest".to_owned()), EXIT_INTEGRITY),
-            (BackupError::Cluster("refused".to_owned()), EXIT_CLUSTER),
-        ];
-        for (error, expected) in cases {
-            check!(error.exit_code() == expected, "for {error}");
-        }
+    #[yare::parameterized(
+        invalid_argument = { BackupError::InvalidArgument("bad".to_owned()), EXIT_BAD_ARGUMENT },
+        io = { BackupError::Io(std::io::Error::other("disk")), EXIT_UNREADABLE },
+        no_such_capture = { BackupError::NoSuchCapture("none".to_owned()), EXIT_UNREADABLE },
+        unsupported_version = {
+            BackupError::UnsupportedVersion { context: "manifest.json".to_owned(), found: None, expected: 0 },
+            EXIT_UNREADABLE,
+        },
+        integrity = { BackupError::Integrity("digest".to_owned()), EXIT_INTEGRITY },
+        cluster = { BackupError::Cluster("refused".to_owned()), EXIT_CLUSTER },
+    )]
+    fn every_variant_maps_onto_its_documented_exit_code(error: BackupError, expected: i32) {
+        check!(error.exit_code() == expected, "for {error}");
     }
 }

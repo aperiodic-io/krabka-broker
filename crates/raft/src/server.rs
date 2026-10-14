@@ -53,10 +53,7 @@ use {
             API_KEY_DESCRIBE_CLUSTER, CONTROLLER_LISTENER_NAME, describe_cluster_response_body,
         },
         dispatch::{dispatch_with_router, is_native_raft_api},
-        framing::{
-            RequestFrame, is_eof, read_one_request, write_response, write_response_frame,
-            write_response_no_tagged_fields,
-        },
+        framing::{RequestFrame, is_eof, read_one_request, write_response},
         kip853::{
             API_KEY_ADD_RAFT_VOTER, API_KEY_DESCRIBE_QUORUM, API_KEY_REMOVE_RAFT_VOTER,
             API_KEY_UPDATE_RAFT_VOTER, kip853_admin_response,
@@ -345,7 +342,7 @@ where
                         api_version.get(),
                         &body,
                     )?;
-                    write_response_no_tagged_fields(&mut stream, correlation_id, resp).await?;
+                    write_response(&mut stream, correlation_id, resp).include_tagged_fields(false).call().await?;
                     continue;
                 }
                 // Kafka's `Processor.parseRequestHeader` refuses a
@@ -382,7 +379,7 @@ where
                         "controller-listener request denied"
                     );
                     let resp = authorization::refusal(api_key_n.0, api_version.get(), &body)?;
-                    write_response_frame(&mut stream, correlation_id, resp, response_flexible)
+                    write_response(&mut stream, correlation_id, resp).include_tagged_fields(response_flexible).call()
                         .await?;
                     continue;
                 }
@@ -399,7 +396,7 @@ where
                         CONTROLLER_LISTENER_NAME,
                     )
                     .await?;
-                    write_response(&mut stream, correlation_id, resp).await?;
+                    write_response(&mut stream, correlation_id, resp).call().await?;
                     continue;
                 }
                 if matches!(
@@ -416,12 +413,12 @@ where
                         &engine,
                     )
                     .await?;
-                    write_response(&mut stream, correlation_id, resp).await?;
+                    write_response(&mut stream, correlation_id, resp).call().await?;
                     continue;
                 }
                 if sasl::is_sasl_api(api_key_n.0) {
                     let resp = sasl::sasl_response(api_key_n.0, api_version.get(), &body)?;
-                    write_response_frame(&mut stream, correlation_id, resp, response_flexible)
+                    write_response(&mut stream, correlation_id, resp).include_tagged_fields(response_flexible).call()
                         .await?;
                     continue;
                 }
@@ -433,7 +430,7 @@ where
                         &engine,
                     )
                     .await?;
-                    write_response(&mut stream, correlation_id, resp).await?;
+                    write_response(&mut stream, correlation_id, resp).call().await?;
                     continue;
                 }
                 if !is_native_raft_api(api_key_n.0)
@@ -451,12 +448,7 @@ where
                         })
                         .await?
                 {
-                    write_response_frame(
-                        &mut stream,
-                        correlation_id,
-                        response.body,
-                        response.flexible,
-                    )
+                    write_response(&mut stream, correlation_id, response.body).include_tagged_fields(response.flexible).call()
                     .await?;
                     continue;
                 }
@@ -468,7 +460,7 @@ where
                     shard_router.as_deref(),
                     context.principal.as_ref(),
                 ).await?;
-                write_response_frame(&mut stream, correlation_id, resp, response_flexible).await?;
+                write_response(&mut stream, correlation_id, resp).include_tagged_fields(response_flexible).call().await?;
             }
         }
     }

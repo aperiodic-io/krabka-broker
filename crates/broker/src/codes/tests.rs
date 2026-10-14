@@ -136,97 +136,65 @@ fn krabka_private_codes_sit_above_the_whole_kafka_table() {
     }
 }
 
-#[test]
-fn from_broker_error_maps_variants_to_wire_codes() {
-    let cases = [
-        (
-            BrokerError::UnsupportedApi {
-                api_key: 0,
-                version: 99,
-            },
-            UNSUPPORTED_VERSION, // 35
-        ),
-        (
-            BrokerError::PartitionWriterDied {
-                topic: "t".into(),
-                partition: 0,
-            },
-            NOT_LEADER_OR_FOLLOWER, // 6
-        ),
-        (
-            BrokerError::GroupInvalidState {
-                group_id: "g".into(),
-                state: "PreparingRebalance".into(),
-            },
-            REBALANCE_IN_PROGRESS, // 27
-        ),
-        (
-            BrokerError::UnknownMember {
-                group_id: "g".into(),
-                member_id: "m".into(),
-            },
-            UNKNOWN_MEMBER_ID, // 25
-        ),
-        (
-            BrokerError::GenerationMismatch {
-                group_id: "g".into(),
-                current: 5,
-                requested: 4,
-            },
-            ILLEGAL_GENERATION, // 22
-        ),
-        (
-            BrokerError::ProducerEpochFenced {
-                producer_id: 1000,
-                current: 2,
-                requested: 1,
-            },
-            INVALID_PRODUCER_EPOCH, // 47
-        ),
-        (
-            BrokerError::FencedLeaderEpoch {
-                have: 0,
-                current: 1,
-            },
-            FENCED_LEADER_EPOCH, // 74
-        ),
-        (BrokerError::UnknownLeaderEpoch(2), UNKNOWN_LEADER_EPOCH), // 75
-        // A coordinator write carries the code Kafka's
-        // `CoordinatorOperationExceptionHelper` answers for it.
-        (
-            BrokerError::CoordinatorWriteUncommitted {
-                partition: 0,
-                code: NOT_COORDINATOR,
-            },
-            NOT_COORDINATOR, // 16
-        ),
-        (
-            BrokerError::CoordinatorWriteUncommitted {
-                partition: 0,
-                code: COORDINATOR_NOT_AVAILABLE,
-            },
-            COORDINATOR_NOT_AVAILABLE, // 15
-        ),
-        // So does a `__transaction_state` write, with the code Kafka's
-        // `TransactionStateManager.appendTransactionToLog` answers.
-        (
-            BrokerError::TransactionStateWriteUncommitted {
-                partition: 0,
-                code: COORDINATOR_LOAD_IN_PROGRESS,
-            },
-            COORDINATOR_LOAD_IN_PROGRESS, // 14
-        ),
-        // `LocalLog.maybeHandleIOException`: a disk fault is a storage error.
-        (
-            BrokerError::Log(krabka_log::LogError::Io(std::io::Error::other("EIO"))),
-            KAFKA_STORAGE_ERROR, // 56
-        ),
-        // Catch-all arm: internal variants map to the generic code.
-        (BrokerError::Txn("test".into()), UNKNOWN_SERVER_ERROR), // -1
-    ];
-    for (err, want) in cases {
-        assert!(from_broker_error(&err) == want, "{err:?}");
-    }
+#[yare::parameterized(
+    unsupported_api = {
+        BrokerError::UnsupportedApi { api_key: 0, version: 99 },
+        UNSUPPORTED_VERSION,
+    },
+    partition_writer_died = {
+        BrokerError::PartitionWriterDied { topic: "t".into(), partition: 0 },
+        NOT_LEADER_OR_FOLLOWER,
+    },
+    invalid_group_state = {
+        BrokerError::GroupInvalidState {
+            group_id: "g".into(),
+            state: "PreparingRebalance".into(),
+        },
+        REBALANCE_IN_PROGRESS,
+    },
+    unknown_member = {
+        BrokerError::UnknownMember { group_id: "g".into(), member_id: "m".into() },
+        UNKNOWN_MEMBER_ID,
+    },
+    generation_mismatch = {
+        BrokerError::GenerationMismatch { group_id: "g".into(), current: 5, requested: 4 },
+        ILLEGAL_GENERATION,
+    },
+    producer_epoch_fenced = {
+        BrokerError::ProducerEpochFenced { producer_id: 1000, current: 2, requested: 1 },
+        INVALID_PRODUCER_EPOCH,
+    },
+    fenced_leader_epoch = {
+        BrokerError::FencedLeaderEpoch { have: 0, current: 1 },
+        FENCED_LEADER_EPOCH,
+    },
+    unknown_leader_epoch = { BrokerError::UnknownLeaderEpoch(2), UNKNOWN_LEADER_EPOCH },
+    coordinator_write_not_coordinator = {
+        BrokerError::CoordinatorWriteUncommitted { partition: 0, code: NOT_COORDINATOR },
+        NOT_COORDINATOR,
+    },
+    coordinator_write_unavailable = {
+        BrokerError::CoordinatorWriteUncommitted {
+            partition: 0,
+            code: COORDINATOR_NOT_AVAILABLE,
+        },
+        COORDINATOR_NOT_AVAILABLE,
+    },
+    transaction_state_write_uncommitted = {
+        BrokerError::TransactionStateWriteUncommitted {
+            partition: 0,
+            code: COORDINATOR_LOAD_IN_PROGRESS,
+        },
+        COORDINATOR_LOAD_IN_PROGRESS,
+    },
+    log_io_error = {
+        BrokerError::Log(krabka_log::LogError::Io(std::io::Error::other("EIO"))),
+        KAFKA_STORAGE_ERROR,
+    },
+    catch_all = { BrokerError::Txn("test".into()), UNKNOWN_SERVER_ERROR },
+)]
+fn from_broker_error_maps_variants_to_wire_codes(err: BrokerError, want: i16) {
+    assert2::assert!(from_broker_error(&err) == want, "{err:?}");
 }
 
 #[test]

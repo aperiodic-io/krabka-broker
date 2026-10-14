@@ -208,39 +208,47 @@ mod tests {
 
     /// A `kraft.version` level the feature does not define gets Kafka's
     /// `Feature.fromFeatureLevel` text.
-    #[test]
-    fn a_kraft_version_level_out_of_range_is_kafkas_no_feature_error() {
+    #[yare::parameterized(
+        below_range = { "-1" },
+        unsupported_in_range = { "2" },
+        above_range = { "9" },
+    )]
+    fn a_kraft_version_level_out_of_range_is_kafkas_no_feature_error(level: &str) {
         use clap::Parser as _;
 
-        for level in ["2", "-1", "9"] {
-            let cli = Cli::try_parse_from([
-                "krabka-format",
-                "--log-dir",
-                "/data",
-                "--node-id",
-                "1",
-                "--no-initial-controllers",
-                "--feature",
-                &format!("kraft.version={level}"),
-            ])
-            .expect("parse");
-            assert2::assert!(
-                is_dynamic_format(&cli.args)
-                    == Err(format!(
-                        "No feature:kraft.version with feature level {level}"
-                    ))
-            );
-        }
+        let cli = Cli::try_parse_from([
+            "krabka-format",
+            "--log-dir",
+            "/data",
+            "--node-id",
+            "1",
+            "--no-initial-controllers",
+            "--feature",
+            &format!("kraft.version={level}"),
+        ])
+        .expect("parse");
+        assert2::assert!(
+            is_dynamic_format(&cli.args)
+                == Err(format!(
+                    "No feature:kraft.version with feature level {level}"
+                ))
+        );
     }
 
     /// The voter endpoints carry the controller listener name, as
     /// `kafka-storage format` takes it from `controller.listener.names`, in
     /// Kafka's upper-case form. Without the flag the name is `CONTROLLER`.
-    #[test]
-    fn the_voter_endpoints_carry_the_controller_listener_name() {
+    #[yare::parameterized(
+        default_listener_name = { "default" },
+        explicit_uppercase_listener_name = { "uppercase" },
+        normalized_lowercase_listener_name = { "normalized" },
+        explicit_quorum_default_name = { "explicit-default" },
+    )]
+    fn the_voter_endpoints_carry_the_controller_listener_name(scenario: &str) {
         /// The quorum flags, the listener name flag, and the endpoint name
         /// written.
         struct Case<'a> {
+            what: &'a str,
             quorum: &'a [&'a str],
             name: &'a [&'a str],
             written: &'a str,
@@ -251,59 +259,61 @@ mod tests {
         let controllers = "3@host:9093:00000000-0000-0000-0000-000000000003";
         let cases = [
             Case {
+                what: "default",
                 quorum: &["--standalone", "--controller-listener", "host:9093"],
                 name: &[],
                 written: "CONTROLLER",
             },
             Case {
+                what: "uppercase",
                 quorum: &["--standalone", "--controller-listener", "host:9093"],
                 name: &["--controller-listener-name", "CONTROLLER_PLAINTEXT"],
                 written: "CONTROLLER_PLAINTEXT",
             },
             Case {
+                what: "normalized",
                 quorum: &["--initial-controllers", controllers],
                 name: &["--controller-listener-name", "controller_plaintext"],
                 written: "CONTROLLER_PLAINTEXT",
             },
             Case {
+                what: "explicit-default",
                 quorum: &["--initial-controllers", controllers],
                 name: &[],
                 written: "CONTROLLER",
             },
         ];
-        let named: Vec<Vec<String>> = cases
+        let Case {
+            quorum,
+            name,
+            written,
+            ..
+        } = cases
             .iter()
-            .map(|Case { quorum, name, .. }| {
-                let cli = Cli::try_parse_from(
-                    ["krabka-format", "--log-dir", "/data", "--node-id", "3"]
-                        .into_iter()
-                        .chain(quorum.iter().copied())
-                        .chain(name.iter().copied()),
-                )
-                .expect("parse");
-                build_initial_voters(&cli.args, directory)
-                    .expect("voters")
-                    .iter()
-                    .flat_map(|voter| voter.endpoints.iter().map(|endpoint| endpoint.name.clone()))
-                    .collect()
-            })
-            .collect();
-        let expected: Vec<Vec<String>> = cases
+            .find(|case| case.what == scenario)
+            .expect("named yare case exists");
+        let cli = Cli::try_parse_from(
+            ["krabka-format", "--log-dir", "/data", "--node-id", "3"]
+                .into_iter()
+                .chain(quorum.iter().copied())
+                .chain(name.iter().copied()),
+        )
+        .expect("parse");
+        let named: Vec<String> = build_initial_voters(&cli.args, directory)
+            .expect("voters")
             .iter()
-            .map(|Case { written, .. }| vec![(*written).to_owned()])
+            .flat_map(|voter| voter.endpoints.iter().map(|endpoint| endpoint.name.clone()))
             .collect();
-        assert2::assert!(named == expected);
+        assert2::assert!(named == vec![(*written).to_owned()]);
     }
 
-    #[test]
-    fn parse_initial_controller_error_branches() {
-        for bad in [
-            "notanum@host:9093:00000000-0000-0000-0000-000000000003", // bad id
-            "3@host9093",                                             // missing directory uuid
-            "3@host:notaport:00000000-0000-0000-0000-000000000003",   // bad port
-            "3@hostonly:00000000-0000-0000-0000-000000000003",        // missing host:port
-        ] {
-            assert2::assert!(parse_initial_controller(bad, "CONTROLLER").is_err());
-        }
+    #[yare::parameterized(
+        invalid_id = { "notanum@host:9093:00000000-0000-0000-0000-000000000003" },
+        missing_port_and_id = { "3@host9093" },
+        invalid_port = { "3@host:notaport:00000000-0000-0000-0000-000000000003" },
+        missing_host_port = { "3@hostonly:00000000-0000-0000-0000-000000000003" },
+    )]
+    fn parse_initial_controller_error_branches(bad: &str) {
+        assert2::assert!(parse_initial_controller(bad, "CONTROLLER").is_err());
     }
 }

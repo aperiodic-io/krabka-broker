@@ -211,13 +211,12 @@ mod tests {
                             let auth_header = req
                                 .lines()
                                 .find(|l| l.to_ascii_lowercase().starts_with("authorization:"))
-                                .map(|l| {
+                                .map_or_default(|l| {
                                     l.trim_start_matches(|c: char| c != ':')
                                         .trim_start_matches(':')
                                         .trim()
                                         .to_string()
-                                })
-                                .unwrap_or_default();
+                                });
                             let (status, body_out) = if req.starts_with("POST /introspect") {
                                 observed
                                     .introspect_bodies

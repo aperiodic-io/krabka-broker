@@ -126,8 +126,11 @@ fn catch_up(leader: &Log, follower: &mut Log, verbatim: bool) {
 /// leader's batches across a hole at the start (offset 0), between batches
 /// (offset 4) and inside a batch (offset 2), by either append path, and ends
 /// with the log the leader has.
-#[test]
-fn a_follower_catches_up_from_a_compacted_leader() {
+#[yare::parameterized(
+    verbatim = { "verbatim", true },
+    owned = { "owned", false },
+)]
+fn a_follower_catches_up_from_a_compacted_leader(label: &'static str, verbatim: bool) {
     let leader_dir = tempdir().unwrap();
     let leader = compacted_leader(leader_dir.path());
     let leader_batches = batches_from(&leader, Offset(0));
@@ -140,23 +143,21 @@ fn a_follower_catches_up_from_a_compacted_leader() {
         "the leader's log is not shaped as the test expects"
     );
 
-    for (label, verbatim) in [("verbatim", true), ("owned", false)] {
-        let TempLog {
-            dir: _follower_dir,
-            log: mut follower,
-        } = test_log();
+    let TempLog {
+        dir: _follower_dir,
+        log: mut follower,
+    } = test_log();
 
-        catch_up(&leader, &mut follower, verbatim);
+    catch_up(&leader, &mut follower, verbatim);
 
-        assert2::assert!(
-            follower.log_end_offset() == leader.log_end_offset(),
-            "{label}"
-        );
-        assert2::assert!(
-            batches_from(&follower, Offset(0)) == leader_batches,
-            "{label}"
-        );
-    }
+    assert2::assert!(
+        follower.log_end_offset() == leader.log_end_offset(),
+        "{label}"
+    );
+    assert2::assert!(
+        batches_from(&follower, Offset(0)) == leader_batches,
+        "{label}"
+    );
 }
 
 /// The follower's log end offset is still the floor: a batch that starts

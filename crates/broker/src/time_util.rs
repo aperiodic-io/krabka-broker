@@ -178,25 +178,20 @@ mod tests {
 
     const TASK: &str = "a test loop";
 
+    #[yare::parameterized(
+        epoch = { UNIX_EPOCH, 0 },
+        millisecond_precision = {
+            UNIX_EPOCH + Duration::from_millis(1_700_000_000_123),
+            1_700_000_000_123,
+        },
+        before_epoch_saturates_to_zero = { UNIX_EPOCH - Duration::from_millis(1), 0 },
+    )]
+    fn epoch_millis_reads_an_instant(instant: SystemTime, want: i64) {
+        check!(epoch_millis(instant) == want, "{instant:?}");
+    }
+
     #[test]
-    fn epoch_millis_reads_an_instant_and_saturates_outside_the_range() {
-        let cases = [
-            (UNIX_EPOCH, 0),
-            // A sub-second remainder, so a conversion that truncated to whole
-            // seconds would fail here rather than pass.
-            (
-                UNIX_EPOCH + Duration::from_millis(1_700_000_000_123),
-                1_700_000_000_123,
-            ),
-            // Before the epoch: a backwards clock reads as the epoch itself
-            // rather than as a negative timestamp.
-            (UNIX_EPOCH - Duration::from_millis(1), 0),
-        ];
-
-        for (instant, want) in cases {
-            check!(epoch_millis(instant) == want, "{instant:?}");
-        }
-
+    fn duration_millis_saturates_above_the_range() {
         // Some platforms cannot construct a `SystemTime` far enough from the
         // epoch to exceed `i64::MAX` milliseconds. Exercise the narrowing step
         // directly so the saturation check stays portable.

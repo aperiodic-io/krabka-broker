@@ -127,79 +127,78 @@ mod tests {
         share_prune_frontier,
     };
 
-    #[test]
-    fn offset_mutation_fails_closed_and_advances_exactly_once() {
-        use ShareOffsetMutationDecision::{
-            Apply, ExactRetry, FencedLeaderEpoch, NonEmptyGroup, NotCoordinator,
-            StateEpochOverflow, Unrequested,
-        };
-
-        for (facts, expected) in [
-            (
-                (ShareOffsetMutationGate::NotCoordinator, 3, 3, 7),
-                NotCoordinator,
-            ),
-            (
-                (ShareOffsetMutationGate::NonEmptyGroup, 3, 3, 7),
-                NonEmptyGroup,
-            ),
-            ((ShareOffsetMutationGate::Unrequested, 3, 3, 7), Unrequested),
-            (
-                (
-                    ShareOffsetMutationGate::Admissible { exact_retry: false },
-                    2,
-                    3,
-                    7,
-                ),
-                FencedLeaderEpoch,
-            ),
-            (
-                (
-                    ShareOffsetMutationGate::Admissible { exact_retry: false },
-                    3,
-                    3,
-                    i32::MAX,
-                ),
-                StateEpochOverflow,
-            ),
-            (
-                (
-                    ShareOffsetMutationGate::Admissible { exact_retry: true },
-                    3,
-                    3,
-                    7,
-                ),
-                ExactRetry,
-            ),
-            (
-                (
-                    ShareOffsetMutationGate::Admissible { exact_retry: false },
-                    3,
-                    3,
-                    7,
-                ),
-                Apply {
-                    next_state_epoch: 8,
-                },
-            ),
-        ] {
-            let (gate, observed, current, state) = facts;
-            assert2::check!(
-                share_offset_mutation_decision(gate, observed, current, state) == expected
-            );
-        }
+    #[yare::parameterized(
+        not_coordinator = {
+            ShareOffsetMutationGate::NotCoordinator,
+            3,
+            3,
+            7,
+            ShareOffsetMutationDecision::NotCoordinator,
+        },
+        nonempty_group = {
+            ShareOffsetMutationGate::NonEmptyGroup,
+            3,
+            3,
+            7,
+            ShareOffsetMutationDecision::NonEmptyGroup,
+        },
+        unrequested = {
+            ShareOffsetMutationGate::Unrequested,
+            3,
+            3,
+            7,
+            ShareOffsetMutationDecision::Unrequested,
+        },
+        fenced_epoch = {
+            ShareOffsetMutationGate::Admissible { exact_retry: false },
+            2,
+            3,
+            7,
+            ShareOffsetMutationDecision::FencedLeaderEpoch,
+        },
+        state_epoch_overflow = {
+            ShareOffsetMutationGate::Admissible { exact_retry: false },
+            3,
+            3,
+            i32::MAX,
+            ShareOffsetMutationDecision::StateEpochOverflow,
+        },
+        exact_retry = {
+            ShareOffsetMutationGate::Admissible { exact_retry: true },
+            3,
+            3,
+            7,
+            ShareOffsetMutationDecision::ExactRetry,
+        },
+        apply = {
+            ShareOffsetMutationGate::Admissible { exact_retry: false },
+            3,
+            3,
+            7,
+            ShareOffsetMutationDecision::Apply { next_state_epoch: 8 },
+        },
+    )]
+    fn offset_mutation_fails_closed_and_advances_exactly_once(
+        gate: ShareOffsetMutationGate,
+        observed: i32,
+        current: i32,
+        state: i32,
+        expected: ShareOffsetMutationDecision,
+    ) {
+        assert2::check!(share_offset_mutation_decision(gate, observed, current, state) == expected);
     }
 
-    #[test]
-    fn prune_frontier_covers_empty_single_ties_and_missing_snapshots() {
-        for (offsets, expected) in [
-            (&[][..], None),
-            (&[42][..], Some(42)),
-            (&[100, 30, 75, 30, 200][..], Some(30)),
-            (&[0, 5, 9][..], Some(0)),
-            (&[i64::MAX, i64::MIN, 0][..], Some(i64::MIN)),
-        ] {
-            assert2::check!(share_prune_frontier(offsets) == expected);
-        }
+    #[yare::parameterized(
+        empty = { &[][..], None },
+        single = { &[42][..], Some(42) },
+        duplicate_minimum = { &[100, 30, 75, 30, 200][..], Some(30) },
+        minimum_at_start = { &[0, 5, 9][..], Some(0) },
+        minimum_integer = { &[i64::MAX, i64::MIN, 0][..], Some(i64::MIN) },
+    )]
+    fn prune_frontier_covers_empty_single_ties_and_missing_snapshots(
+        offsets: &[i64],
+        expected: Option<i64>,
+    ) {
+        assert2::check!(share_prune_frontier(offsets) == expected);
     }
 }

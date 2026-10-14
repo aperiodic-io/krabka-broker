@@ -33,3 +33,4 @@ krabka-macros = { version = "1.0.5", path = "../macros" }
 bon = { workspace = true }
 proptest = { workspace = true }
 mutants = { workspace = true }
+yare = { workspace = true }

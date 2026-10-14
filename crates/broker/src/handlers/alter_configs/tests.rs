@@ -39,6 +39,22 @@ use {
     std::sync::Arc,
 };
 
+fn expected_resource_response(
+    resource_type: i8,
+    resource_name: &str,
+    error_code: i16,
+    error_message: Option<&str>,
+) -> AlterConfigsResponse {
+    krabka_macros::unthrottled_wire!(AlterConfigsResponse {
+        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
+            resource_type,
+            resource_name: resource_name.into(),
+            error_code,
+            error_message: error_message.map(str::to_owned),
+        })],
+    })
+}
+
 /// Local preprocessing errors retain their positions among controller results,
 /// including both occurrences of a duplicate resource.
 #[tokio::test]
@@ -124,14 +140,12 @@ async fn handle_preserves_resource_identity_for_unsupported_type() {
     ))
     .await;
 
-    let expected = krabka_macros::unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
-            error_code: codes::INVALID_REQUEST,
-            error_message: Some("Unknown resource type 77".to_string()),
-            resource_type: 77,
-            resource_name: "mystery".to_string(),
-        })],
-    });
+    let expected = expected_resource_response(
+        77,
+        "mystery",
+        codes::INVALID_REQUEST,
+        Some("Unknown resource type 77"),
+    );
     assert!(resp == expected);
 }
 
@@ -206,14 +220,8 @@ async fn authorized_group_resource_is_applied() {
     ))
     .await;
 
-    let expected = krabka_macros::unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
-            error_code: codes::NONE,
-            error_message: None,
-            resource_type: RESOURCE_TYPE_GROUP,
-            resource_name: "streams-app".to_string(),
-        })],
-    });
+    let expected =
+        expected_resource_response(RESOURCE_TYPE_GROUP, "streams-app", codes::NONE, None);
     assert!(resp == expected);
 }
 
@@ -225,14 +233,8 @@ async fn authorized_client_metrics_resource_is_applied() {
     ))
     .await;
 
-    let expected = krabka_macros::unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
-            error_code: codes::NONE,
-            error_message: None,
-            resource_type: RESOURCE_TYPE_CLIENT_METRICS,
-            resource_name: "sub-a".to_string(),
-        })],
-    });
+    let expected =
+        expected_resource_response(RESOURCE_TYPE_CLIENT_METRICS, "sub-a", codes::NONE, None);
     assert!(resp == expected);
 }
 
@@ -296,34 +298,37 @@ async fn null_config_value_is_a_validation_error_even_when_unauthorized() {
 /// A valid, uniquely-named resource with well-formed configs still gets an
 /// authorization check: the validate-first ordering does not skip
 /// authorization for a resource that passes validation.
-#[tokio::test]
-async fn valid_resource_still_gets_an_authorization_check() {
-    for (label, req_resource, want_code) in [
-        (
-            "topic",
-            resource(RESOURCE_TYPE_TOPIC, "orders"),
-            codes::TOPIC_AUTHORIZATION_FAILED,
-        ),
-        (
-            "group",
-            group_resource("streams-app", &[]),
-            codes::GROUP_AUTHORIZATION_FAILED,
-        ),
-        (
-            "client-metrics",
-            client_metrics_resource("sub-a", &[]),
-            codes::CLUSTER_AUTHORIZATION_FAILED,
-        ),
-        (
-            "broker",
-            resource(RESOURCE_TYPE_BROKER, "1"),
-            codes::CLUSTER_AUTHORIZATION_FAILED,
-        ),
-    ] {
-        let resp = Box::pin(drive_one(Arc::new(DenyAll), req_resource)).await;
-        assert!(resp.responses.len() == 1);
-        check!(resp.responses[0].error_code == want_code, "{label}");
-    }
+#[yare::parameterized(
+    topic = {
+        "topic",
+        resource(RESOURCE_TYPE_TOPIC, "orders"),
+        codes::TOPIC_AUTHORIZATION_FAILED,
+    },
+    group = {
+        "group",
+        group_resource("streams-app", &[]),
+        codes::GROUP_AUTHORIZATION_FAILED,
+    },
+    client_metrics = {
+        "client-metrics",
+        client_metrics_resource("sub-a", &[]),
+        codes::CLUSTER_AUTHORIZATION_FAILED,
+    },
+    broker = {
+        "broker",
+        resource(RESOURCE_TYPE_BROKER, "1"),
+        codes::CLUSTER_AUTHORIZATION_FAILED,
+    },
+)]
+#[test_macro(tokio::test)]
+async fn valid_resource_still_gets_an_authorization_check(
+    label: &str,
+    req_resource: AlterConfigsResource,
+    want_code: i16,
+) {
+    let resp = Box::pin(drive_one(Arc::new(DenyAll), req_resource)).await;
+    assert2::assert!(resp.responses.len() == 1);
+    check!(resp.responses[0].error_code == want_code, "{label}");
 }
 
 #[tokio::test]
@@ -334,14 +339,7 @@ async fn authorized_broker_resource_is_applied() {
     ))
     .await;
 
-    let expected = krabka_macros::unthrottled_wire!(AlterConfigsResponse {
-        responses: vec![krabka_macros::tagged_wire!(AlterConfigsResourceResponse {
-            error_code: codes::NONE,
-            error_message: None,
-            resource_type: RESOURCE_TYPE_BROKER,
-            resource_name: "1".to_string(),
-        })],
-    });
+    let expected = expected_resource_response(RESOURCE_TYPE_BROKER, "1", codes::NONE, None);
     assert!(resp == expected);
 }
 

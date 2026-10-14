@@ -149,19 +149,17 @@ mod tests {
         assert!(partition == 7);
     }
 
-    #[test]
-    fn share_key_parser_rejects_noncanonical_and_invalid_fields() {
-        for key in [
-            format!(":{TOPIC_ID}:0"),
-            format!("   :{TOPIC_ID}:0"),
-            format!("group:{TOPIC_ID}:-1"),
-            format!("group:{TOPIC_ID}:not-an-int"),
-            format!("group:{TOPIC_ID}:2147483648"),
-            "group:05050505-0505-0505-0505-050505050505:0".into(),
-            format!("group:{TOPIC_ID}=:0"),
-            "group:not-base64-not-uuid:0".into(),
-        ] {
-            assert!(parse_share_key(&key).is_none(), "accepted {key:?}");
-        }
+    #[yare::parameterized(
+        empty_group = { format!(":{TOPIC_ID}:0") },
+        whitespace_group = { format!("   :{TOPIC_ID}:0") },
+        negative_partition = { format!("group:{TOPIC_ID}:-1") },
+        non_integer_partition = { format!("group:{TOPIC_ID}:not-an-int") },
+        overflowing_partition = { format!("group:{TOPIC_ID}:2147483648") },
+        noncanonical_topic_id = { "group:05050505-0505-0505-0505-050505050505:0".into() },
+        padded_topic_id = { format!("group:{TOPIC_ID}=:0") },
+        invalid_topic_id = { "group:not-base64-not-uuid:0".into() },
+    )]
+    fn share_key_parser_rejects_noncanonical_and_invalid_fields(key: String) {
+        assert2::assert!(parse_share_key(&key).is_none(), "accepted {key:?}");
     }
 }

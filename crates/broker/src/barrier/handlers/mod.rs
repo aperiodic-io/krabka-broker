@@ -43,7 +43,7 @@ pub(crate) mod write_markers;
 // break-glass control planes read the cluster through the same gates. Kafka
 // applies `ClusterAction` to `WriteTxnMarkers`, and `WriteBarrierMarkers` is
 // the same kind of inter-broker traffic.
-pub(crate) use crate::handlers::{cluster_action_denied, cluster_describe_denied};
+pub(crate) use crate::handlers::{cluster_action_denied, cluster_describe_image};
 use {
     crate::{
         barrier::{error::BarrierError, persistence::CutValue},

@@ -144,19 +144,19 @@ mod tests {
         check!(c.head() == chain_hash(&head, 5, b"r5"));
     }
 
-    #[test]
-    fn hex_round_trips() {
-        let h = chain_hash(&GENESIS_HEAD, 7, b"x");
-        let s = to_hex(&h);
-        check!(s.len() == 64);
-        let upper = s.to_uppercase();
-        for (name, input, expected) in [
-            ("round trip", s.as_str(), Some(h)),
-            ("non-hex input", "zz", None),
-            ("odd-length input", "abc", None),
-            ("uppercase input", upper.as_str(), Some(h)),
-        ] {
-            check!(from_hex32(input) == expected, "case {name}");
-        }
+    #[yare::parameterized(
+        round_trip = {
+            to_hex(&chain_hash(&GENESIS_HEAD, 7, b"x")),
+            Some(chain_hash(&GENESIS_HEAD, 7, b"x")),
+        },
+        non_hex = { "zz".to_owned(), None },
+        odd_length = { "abc".to_owned(), None },
+        uppercase = {
+            to_hex(&chain_hash(&GENESIS_HEAD, 7, b"x")).to_uppercase(),
+            Some(chain_hash(&GENESIS_HEAD, 7, b"x")),
+        },
+    )]
+    fn hex_round_trips(input: String, expected: Option<[u8; 32]>) {
+        check!(from_hex32(&input) == expected);
     }
 }

@@ -685,8 +685,15 @@ async fn a_generated_member_id_over_32767_bytes_fails_the_join() {
 /// keys, so its group id is the string of a `__share_group_state` record key.
 /// Kafka's reader closes the connection on a group id of 32768 bytes, and a
 /// group id of 32767 bytes is taken.
-#[tokio::test]
-async fn initialize_share_group_state_takes_a_32767_byte_group_id_and_refuses_32768() {
+#[yare::parameterized(
+    at_limit = { LIMIT, true },
+    over_limit = { LIMIT + 1, false },
+)]
+#[test_macro(tokio::test)]
+async fn initialize_share_group_state_takes_a_32767_byte_group_id_and_refuses_32768(
+    length: usize,
+    accepted: bool,
+) {
     const VERSION: i16 = initialize_share_group_state_request::MAX_VERSION;
     let env = Env::start().await;
     env.handle.wait_until_share_coordinator_ready().await;
@@ -697,47 +704,46 @@ async fn initialize_share_group_state_takes_a_32767_byte_group_id_and_refuses_32
         .topic("in")
         .expect("the source topic")
         .topic_id;
-    for length in [LIMIT, LIMIT + 1] {
-        let label = format!("group id of {length} bytes");
-        let request = InitializeShareGroupStateRequest {
-            group_id: "a".repeat(length),
-            topics: vec![InitializeStateData {
-                topic_id: krabka_protocol::primitives::uuid::Uuid(topic_id.into_bytes()),
-                partitions: vec![PartitionData {
-                    partition: 0,
-                    state_epoch: 1,
-                    start_offset: -1,
-                    ..Default::default()
-                }],
+    let label = format!("group id of {length} bytes");
+    let request = InitializeShareGroupStateRequest {
+        group_id: "a".repeat(length),
+        topics: vec![InitializeStateData {
+            topic_id: krabka_protocol::primitives::uuid::Uuid(topic_id.into_bytes()),
+            partitions: vec![PartitionData {
+                partition: 0,
+                state_epoch: 1,
+                start_offset: -1,
                 ..Default::default()
             }],
             ..Default::default()
-        };
+        }],
+        ..Default::default()
+    };
 
-        let result = env
-            .dispatch(
-                initialize_share_group_state_request::API_KEY,
-                VERSION,
-                &request,
-                "record-strings-test",
-            )
-            .await;
+    let result = env
+        .dispatch(
+            initialize_share_group_state_request::API_KEY,
+            VERSION,
+            &request,
+            "record-strings-test",
+        )
+        .await;
 
-        check(&label, &result, length);
-        if let Ok(bytes) = result {
-            let response = decode_response::<InitializeShareGroupStateResponse>(&bytes, VERSION);
-            let error_codes: Vec<i16> = response
-                .results
-                .iter()
-                .flat_map(|topic| {
-                    topic
-                        .partitions
-                        .iter()
-                        .map(|partition| partition.error_code)
-                })
-                .collect();
-            assert!(error_codes == vec![codes::NONE], "{label}: {response:?}");
-        }
+    check(&label, &result, length);
+    assert2::assert!(result.is_ok() == accepted, "{label}");
+    if let Ok(bytes) = result {
+        let response = decode_response::<InitializeShareGroupStateResponse>(&bytes, VERSION);
+        let error_codes: Vec<i16> = response
+            .results
+            .iter()
+            .flat_map(|topic| {
+                topic
+                    .partitions
+                    .iter()
+                    .map(|partition| partition.error_code)
+            })
+            .collect();
+        assert2::assert!(error_codes == vec![codes::NONE], "{label}: {response:?}");
     }
     env.stop().await;
 }

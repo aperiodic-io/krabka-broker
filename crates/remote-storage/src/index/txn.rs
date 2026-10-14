@@ -161,8 +161,11 @@ mod tests {
         buf
     }
 
-    #[test]
-    fn parse_txn_index_round_trips_known_entries() {
+    #[yare::parameterized(
+        one_entry = { vec![(0_i64, 4_i64, 1000_i64)] },
+        two_entries = { vec![(0_i64, 4_i64, 1000_i64), (10, 14, 2000)] },
+    )]
+    fn parse_txn_index_round_trips_known_entries(specs: Vec<(i64, i64, i64)>) {
         /// The decoded fields of one aborted-transaction entry.
         #[derive(Debug, PartialEq, Eq)]
         struct DecodedTxn {
@@ -174,13 +177,13 @@ mod tests {
         // Mirror TxnIndex::append: 2B version, 8B producer_id, 8B
         // start_offset, 8B last_offset, 8B last_stable_offset, all BE.
         let mut buf = Vec::new();
-        for (start, last, pid) in [(0_i64, 4_i64, 1000_i64), (10, 14, 2000)] {
+        for (start, last, pid) in &specs {
             buf.extend(
                 entry_bytes()
-                    .producer_id(pid)
-                    .start(start)
-                    .last(last)
-                    .lso(last + 1)
+                    .producer_id(*pid)
+                    .start(*start)
+                    .last(*last)
+                    .lso(*last + 1)
                     .call(),
             );
         }
@@ -194,22 +197,17 @@ mod tests {
                 last_stable_offset: e.last_stable_offset.get(),
             })
             .collect();
-        assert!(
+        assert2::assert!(
             decoded
-                == vec![
-                    DecodedTxn {
-                        start_offset: 0,
-                        last_offset: 4,
-                        producer_id: 1000,
-                        last_stable_offset: 5,
-                    },
-                    DecodedTxn {
-                        start_offset: 10,
-                        last_offset: 14,
-                        producer_id: 2000,
-                        last_stable_offset: 15,
-                    },
-                ]
+                == specs
+                    .iter()
+                    .map(|(start, last, producer_id)| DecodedTxn {
+                        start_offset: *start,
+                        last_offset: *last,
+                        producer_id: *producer_id,
+                        last_stable_offset: *last + 1,
+                    })
+                    .collect::<Vec<_>>()
         );
     }
 
@@ -245,29 +243,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn txn_overlaps_boundaries() {
+    #[yare::parameterized(
+        before_entry = { 0, 9, false },
+        touches_first_offset = { 0, 10, true },
+        inside_entry = { 11, 13, true },
+        touches_last_offset = { 14, 100, true },
+        after_entry = { 15, 100, false },
+        covers_entry = { 0, 100, true },
+    )]
+    fn txn_overlaps_boundaries(start: i64, end: i64, want: bool) {
         let e = sample_aborted_txn_entry(10, 14, 15);
-        let cases = [
-            // Range fully before the entry → excluded.
-            (0, 9, false),
-            // Range touching the entry's first offset → included.
-            (0, 10, true),
-            // Range fully inside the entry → included.
-            (11, 13, true),
-            // Range touching the entry's last offset → included.
-            (14, 100, true),
-            // Range fully after the entry → excluded.
-            (15, 100, false),
-            // Range fully covering the entry → included.
-            (0, 100, true),
-        ];
-        for (start, end, want) in cases {
-            assert!(
-                txn_overlaps(&e, start, end) == want,
-                "range [{start},{end}]"
-            );
-        }
+        assert2::assert!(txn_overlaps(&e, start, end) == want);
     }
 
     #[test]

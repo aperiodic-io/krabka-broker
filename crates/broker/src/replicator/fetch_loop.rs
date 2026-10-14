@@ -602,9 +602,8 @@ mod tests {
         let (cfg, _log_dir) = test_config(image_with_leader(NODE_ID));
         let followed = followed_partition(cfg);
 
-        let round = plan_round(&followed, &DelayedUntil::new());
+        let round = empty_round(&followed, &DelayedUntil::new());
 
-        check!(round.entries.is_empty());
         check!(round.wanted.is_empty());
         check!(!round.all_throttled);
     }
@@ -617,9 +616,8 @@ mod tests {
         let ConfigWithDir { cfg, dir: _log_dir } = throttled_out();
         let followed = followed_partition(cfg);
 
-        let round = plan_round(&followed, &DelayedUntil::new());
+        let round = empty_round(&followed, &DelayedUntil::new());
 
-        check!(round.entries.is_empty());
         check!(round.all_throttled);
     }
 
@@ -640,10 +638,15 @@ mod tests {
             tokio::time::Instant::now() + std::time::Duration::from_secs(30),
         );
 
-        let round = plan_round(&followed, &delayed);
+        let round = empty_round(&followed, &delayed);
 
-        check!(round.entries.is_empty());
         check!(!round.all_throttled);
+    }
+
+    fn empty_round(followed: &BTreeMap<FollowedKey, Arc<Config>>, delayed: &DelayedUntil) -> Round {
+        let round = plan_round(followed, delayed);
+        check!(round.entries.is_empty());
+        round
     }
 
     /// A partition with no local runtime yet contributes no row rather than

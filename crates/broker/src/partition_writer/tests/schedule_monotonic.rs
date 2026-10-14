@@ -88,17 +88,13 @@ async fn a_backwards_delivery_time_in_one_writer_group_is_refused() {
         Log::open(dir.path(), monotonic_config()).expect("open the scheduled log"),
     ));
 
-    let QueuedScenario {
-        tx,
-        later,
-        earlier,
-        writer,
-    } = queued_scenario_writer(dir.path(), &log).await;
+    let scenario = queued_scenario_writer(dir.path(), &log).await;
 
-    let later = later.await.expect("ack the later batch");
+    let later = scenario.later.await.expect("ack the later batch");
     check!(later.expect("the later batch is admitted").base_offset == Offset(0));
 
-    let earlier = earlier
+    let earlier = scenario
+        .earlier
         .await
         .expect("ack the earlier batch")
         .expect_err("a batch that runs the schedule backwards is refused");
@@ -113,8 +109,8 @@ async fn a_backwards_delivery_time_in_one_writer_group_is_refused() {
     // The refusal appended nothing: the log holds the admitted batch alone.
     check!(log.lock().unwrap().log_end_offset() == Offset(2));
 
-    drop(tx);
-    writer.await.expect("writer join");
+    drop(scenario.tx);
+    scenario.writer.await.expect("writer join");
 }
 
 /// The same two produces on a scheduled topic that did not ask for the
@@ -131,15 +127,11 @@ async fn a_backwards_delivery_time_is_admitted_without_the_setting() {
         .expect("open the scheduled log"),
     ));
 
-    let QueuedScenario {
-        tx,
-        later,
-        earlier,
-        writer,
-    } = queued_scenario_writer(dir.path(), &log).await;
+    let scenario = queued_scenario_writer(dir.path(), &log).await;
 
     check!(
-        later
+        scenario
+            .later
             .await
             .expect("ack the later batch")
             .expect("the later batch is admitted")
@@ -147,7 +139,8 @@ async fn a_backwards_delivery_time_is_admitted_without_the_setting() {
             == Offset(0)
     );
     check!(
-        earlier
+        scenario
+            .earlier
             .await
             .expect("ack the earlier batch")
             .expect("the earlier batch is admitted too")
@@ -156,6 +149,6 @@ async fn a_backwards_delivery_time_is_admitted_without_the_setting() {
     );
     check!(log.lock().unwrap().log_end_offset() == Offset(4));
 
-    drop(tx);
-    writer.await.expect("writer join");
+    drop(scenario.tx);
+    scenario.writer.await.expect("writer join");
 }

@@ -1165,51 +1165,40 @@ mod tests {
         bytes
     }
 
-    #[test]
-    fn index_values_of_another_version_are_refused() {
-        let pre_1_0 = " A record written before krabka 1.0 has no version prefix and is not \
-                       readable; reformat the cluster";
-        for (name, decoded, expected) in [
-            (
-                "flush record of version 3",
-                WalFlushRecord::from_bytes(&with_version(GOLDEN_FLUSH_RECORD, 3)).map(|_| ()),
-                format!(
-                    "unsupported diskless WAL index format version 3: this build reads \
-                     version 2.{pre_1_0}"
-                ),
+    const PRE_1_0_NOTE: &str = " A record written before krabka 1.0 has no version prefix and is not readable; reformat the cluster";
+
+    #[yare::parameterized(
+        flush_future_version = {
+            WalFlushRecord::from_bytes(&with_version(GOLDEN_FLUSH_RECORD, 3)).map(|_| ()),
+            format!(
+                "unsupported diskless WAL index format version 3: this build reads version 2.{PRE_1_0_NOTE}"
             ),
-            (
-                "flush record in the pre-1.0 layout, version inside the body",
-                WalFlushRecord::from_bytes(&GOLDEN_FLUSH_RECORD[2..]).map(|_| ()),
-                format!(
-                    "unsupported diskless WAL index format version 1280: this build reads \
-                     version 2.{pre_1_0}"
-                ),
+        },
+        flush_pre_1_0_layout = {
+            WalFlushRecord::from_bytes(&GOLDEN_FLUSH_RECORD[2..]).map(|_| ()),
+            format!(
+                "unsupported diskless WAL index format version 1280: this build reads version 2.{PRE_1_0_NOTE}"
             ),
-            (
-                "delete floor of version 1",
-                WalDeleteFloorRecord::from_bytes(&with_version(GOLDEN_FLOOR_RECORD, 1)).map(|_| ()),
-                format!(
-                    "unsupported diskless WAL delete-floor record version 1: this build reads \
-                     version 0.{pre_1_0}"
-                ),
+        },
+        floor_future_version = {
+            WalDeleteFloorRecord::from_bytes(&with_version(GOLDEN_FLOOR_RECORD, 1)).map(|_| ()),
+            format!(
+                "unsupported diskless WAL delete-floor record version 1: this build reads version 0.{PRE_1_0_NOTE}"
             ),
-            (
-                "delete floor in the pre-1.0 layout, no version",
-                WalDeleteFloorRecord::from_bytes(&GOLDEN_FLOOR_RECORD[2..]).map(|_| ()),
-                format!(
-                    "unsupported diskless WAL delete-floor record version 4096: this build \
-                     reads version 0.{pre_1_0}"
-                ),
+        },
+        floor_pre_1_0_layout = {
+            WalDeleteFloorRecord::from_bytes(&GOLDEN_FLOOR_RECORD[2..]).map(|_| ()),
+            format!(
+                "unsupported diskless WAL delete-floor record version 4096: this build reads version 0.{PRE_1_0_NOTE}"
             ),
-            (
-                "empty value",
-                WalDeleteFloorRecord::from_bytes(&[]).map(|_| ()),
-                "truncated diskless WAL delete-floor record: 0 bytes hold no version".to_owned(),
-            ),
-        ] {
-            check!(decoded == Err(expected), "case {name}");
-        }
+        },
+        empty_value = {
+            WalDeleteFloorRecord::from_bytes(&[]).map(|_| ()),
+            "truncated diskless WAL delete-floor record: 0 bytes hold no version".to_owned(),
+        },
+    )]
+    fn index_values_of_another_version_are_refused(decoded: Result<(), String>, expected: String) {
+        check!(decoded == Err(expected));
     }
 
     fn capture() -> DisklessWalCapture {
@@ -1252,63 +1241,50 @@ mod tests {
         check!(DisklessWalCapture::from_slice(GOLDEN_CAPTURE.as_bytes()) == Ok(capture()));
     }
 
-    #[test]
-    fn capture_of_a_missing_or_unknown_version_is_refused() {
-        let golden: serde_json::Value = serde_json::from_str(GOLDEN_CAPTURE).unwrap();
-        let mut future = golden.clone();
-        future["format_version"] = serde_json::json!(2);
-        let mut pre_1_0 = golden;
-        pre_1_0.as_object_mut().unwrap().remove("format_version");
-        for (name, json, expected) in [
-            (
-                "future version",
-                future,
-                "unsupported diskless WAL capture format version 2: this build reads version 1",
-            ),
-            (
-                "pre-1.0 capture with no version",
-                pre_1_0,
-                "diskless WAL capture has no format_version: it predates krabka 1.0, which this \
-                 build does not read",
-            ),
-        ] {
-            check!(
-                DisklessWalCapture::from_slice(&serde_json::to_vec(&json).unwrap())
-                    == Err(expected.to_owned()),
-                "case {name}"
-            );
+    fn capture_with_version(version: Option<u64>) -> serde_json::Value {
+        let mut value: serde_json::Value = serde_json::from_str(GOLDEN_CAPTURE).unwrap();
+        if let Some(version) = version {
+            value["format_version"] = serde_json::json!(version);
+        } else {
+            value.as_object_mut().unwrap().remove("format_version");
         }
+        value
     }
 
-    #[test]
-    fn index_keys_of_another_version_are_refused() {
-        for (name, key, expected) in [
-            (
-                "unknown key version",
-                with_version(GOLDEN_RANGE_KEY, 7),
-                "unknown diskless WAL index key version 7",
-            ),
-            (
-                "pre-1.0 range key, no version",
-                GOLDEN_RANGE_KEY[2..].to_vec(),
-                "unknown diskless WAL index key version 17",
-            ),
-            (
-                "pre-1.0 delete-floor key, one-byte tag",
-                [&[0xf0], &GOLDEN_FLOOR_KEY[2..]].concat(),
-                "unknown diskless WAL index key version -4096",
-            ),
-            (
-                "range key of the wrong length",
-                GOLDEN_RANGE_KEY[..29].to_vec(),
-                "invalid diskless WAL index key",
-            ),
-        ] {
-            let mut projection = WalCaptureProjection::default();
-            check!(
-                projection.apply(Some(&key), Some(GOLDEN_FLUSH_RECORD)) == Err(expected.to_owned()),
-                "case {name}"
-            );
-        }
+    #[yare::parameterized(
+        future_version = {
+            capture_with_version(Some(2)),
+            "unsupported diskless WAL capture format version 2: this build reads version 1",
+        },
+        missing_pre_1_0_version = {
+            capture_with_version(None),
+            "diskless WAL capture has no format_version: it predates krabka 1.0, which this build does not read",
+        },
+    )]
+    fn capture_of_a_missing_or_unknown_version_is_refused(json: serde_json::Value, expected: &str) {
+        check!(
+            DisklessWalCapture::from_slice(&serde_json::to_vec(&json).unwrap())
+                == Err(expected.to_owned())
+        );
+    }
+
+    #[yare::parameterized(
+        unknown_version = {
+            with_version(GOLDEN_RANGE_KEY, 7),
+            "unknown diskless WAL index key version 7",
+        },
+        missing_pre_1_0_version = {
+            GOLDEN_RANGE_KEY[2..].to_vec(),
+            "unknown diskless WAL index key version 17",
+        },
+        one_byte_delete_floor_tag = {
+            [&[0xf0], &GOLDEN_FLOOR_KEY[2..]].concat(),
+            "unknown diskless WAL index key version -4096",
+        },
+        wrong_length = { GOLDEN_RANGE_KEY[..29].to_vec(), "invalid diskless WAL index key" },
+    )]
+    fn index_keys_of_another_version_are_refused(key: Vec<u8>, expected: &str) {
+        let mut projection = WalCaptureProjection::default();
+        check!(projection.apply(Some(&key), Some(GOLDEN_FLUSH_RECORD)) == Err(expected.to_owned()));
     }
 }

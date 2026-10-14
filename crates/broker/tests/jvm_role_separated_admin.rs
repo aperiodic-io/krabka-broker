@@ -61,8 +61,7 @@ struct Ports {
 }
 
 fn ports() -> &'static Ports {
-    static PORTS: std::sync::OnceLock<Ports> = std::sync::OnceLock::new();
-    PORTS.get_or_init(|| {
+    crate::once_value!(Ports, {
         let (_, client_listen, client_advertised) = support::jvm_client_ports::<3>();
         Ports {
             client_listen,

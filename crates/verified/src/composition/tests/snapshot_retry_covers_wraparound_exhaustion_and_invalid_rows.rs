@@ -1,8 +1,7 @@
 use {super::*, assert2::assert};
 
-#[test]
-fn snapshot_retry_covers_wraparound_exhaustion_and_invalid_rows() {
-    let entry = ProducerSnapshotEntryFacts {
+fn snapshot_entry() -> ProducerSnapshotEntryFacts {
+    ProducerSnapshotEntryFacts {
         producer_id: 42,
         producer_epoch: 7,
         last_sequence: 0,
@@ -10,9 +9,53 @@ fn snapshot_retry_covers_wraparound_exhaustion_and_invalid_rows() {
         offset_delta: 2,
         coordinator_epoch: -1,
         current_txn_first_offset: -1,
-    };
-    assert!(
-        reloaded_snapshot_preserves_last_batch_retry(i64::MAX, entry, 7)
+    }
+}
+
+#[yare::parameterized(
+    snapshot_matches_row = { i64::MAX - 1, snapshot_entry() },
+    negative_delta = {
+        i64::MAX,
+        ProducerSnapshotEntryFacts { offset_delta: -1, ..snapshot_entry() },
+    },
+    offset_before_base = {
+        i64::MAX,
+        ProducerSnapshotEntryFacts { last_offset: 1, ..snapshot_entry() },
+    },
+    negative_epoch = {
+        i64::MAX,
+        ProducerSnapshotEntryFacts { producer_epoch: -1, ..snapshot_entry() },
+    },
+    negative_producer = {
+        i64::MAX,
+        ProducerSnapshotEntryFacts { producer_id: -1, ..snapshot_entry() },
+    },
+    invalid_coordinator_epoch = {
+        i64::MAX,
+        ProducerSnapshotEntryFacts { coordinator_epoch: -2, ..snapshot_entry() },
+    },
+    future_transaction_start = {
+        i64::MAX,
+        ProducerSnapshotEntryFacts { current_txn_first_offset: i64::MAX, ..snapshot_entry() },
+    },
+    negative_offset_and_sequence = {
+        i64::MAX,
+        ProducerSnapshotEntryFacts {
+            last_offset: -1,
+            last_sequence: -1,
+            offset_delta: 0,
+            ..snapshot_entry()
+        },
+    },
+)]
+fn snapshot_retry_rejects_invalid_rows(snapshot: i64, row: ProducerSnapshotEntryFacts) {
+    assert2::assert!(reloaded_snapshot_preserves_last_batch_retry(snapshot, row, 7) == None);
+}
+
+#[test]
+fn snapshot_retry_covers_wraparound_exhaustion() {
+    assert2::assert!(
+        reloaded_snapshot_preserves_last_batch_retry(i64::MAX, snapshot_entry(), 7)
             == Some((
                 i64::MAX - 3,
                 i32::MAX - 1,
@@ -21,41 +64,6 @@ fn snapshot_retry_covers_wraparound_exhaustion_and_invalid_rows() {
                 ProducerDecision::Append
             ))
     );
-    for (snapshot, row) in [
-        (entry.last_offset, entry),
-        (i64::MAX, ProducerSnapshotEntryFacts {
-            offset_delta: -1,
-            ..entry
-        }),
-        (i64::MAX, ProducerSnapshotEntryFacts {
-            last_offset: 1,
-            ..entry
-        }),
-        (i64::MAX, ProducerSnapshotEntryFacts {
-            producer_epoch: -1,
-            ..entry
-        }),
-        (i64::MAX, ProducerSnapshotEntryFacts {
-            producer_id: -1,
-            ..entry
-        }),
-        (i64::MAX, ProducerSnapshotEntryFacts {
-            coordinator_epoch: -2,
-            ..entry
-        }),
-        (i64::MAX, ProducerSnapshotEntryFacts {
-            current_txn_first_offset: i64::MAX,
-            ..entry
-        }),
-        (i64::MAX, ProducerSnapshotEntryFacts {
-            last_offset: -1,
-            last_sequence: -1,
-            offset_delta: 0,
-            ..entry
-        }),
-    ] {
-        assert!(reloaded_snapshot_preserves_last_batch_retry(snapshot, row, 7) == None);
-    }
 }
 
 proptest! {

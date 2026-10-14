@@ -128,6 +128,7 @@ mod tests {
                 handlers::tests::{audit_channel, context, peer, principal},
             },
             broker::Broker,
+            test_support::gated_break_glass_config as gated_config,
         },
         assert2::{assert, check},
         krabka_audit::{
@@ -139,13 +140,6 @@ mod tests {
     };
 
     const PROPOSAL: Uuid = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
-
-    fn gated_config() -> BreakGlassConfig {
-        BreakGlassConfig {
-            approvers: ["User:alice", "User:bob"].map(str::to_owned).to_vec(),
-            ..BreakGlassConfig::default()
-        }
-    }
 
     fn trim() -> GatedTransition<'static> {
         GatedTransition {

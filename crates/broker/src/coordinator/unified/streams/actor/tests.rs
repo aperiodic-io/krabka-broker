@@ -31,6 +31,15 @@ use {
     assert2::{assert, check},
 };
 
+fn partition_indices(partitions: Option<Vec<i32>>) -> Option<Vec<krabka_ids::PartitionIndex>> {
+    partitions.map(|partitions| {
+        partitions
+            .into_iter()
+            .map(krabka_ids::PartitionIndex)
+            .collect()
+    })
+}
+
 krabka_macros::single_replica_partition_fixture!(partition_record);
 
 fn epoch_five_member() -> StreamsMemberState {
@@ -770,12 +779,7 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
         let expected = super::test_support::expected_active_response()
             .epoch(row.epoch)
             .maybe_status(row.status)
-            .maybe_active(row.active.map(|partitions| {
-                partitions
-                    .into_iter()
-                    .map(krabka_ids::PartitionIndex)
-                    .collect()
-            }))
+            .maybe_active(partition_indices(row.active))
             .call();
         check!(resp == expected, "{}", row.name);
     }
@@ -1332,12 +1336,7 @@ async fn the_heartbeat_status_list_follows_kafka() {
                     })
                     .collect(),
             ))
-            .maybe_active(row.active.map(|partitions| {
-                partitions
-                    .into_iter()
-                    .map(krabka_ids::PartitionIndex)
-                    .collect()
-            }))
+            .maybe_active(partition_indices(row.active))
             .call();
         check!(last == Some(expected), "{}", row.name);
     }
@@ -1481,15 +1480,7 @@ async fn the_heartbeat_response_carries_what_kafka_sends() {
     ];
 
     for (name, max_size, partitions, beats, expected) in rows {
-        let source = Arc::new(
-            FakeMetadataSource::builder()
-                .image(image_of(None, &[ImageTopic {
-                    name: "in",
-                    id: 1,
-                    partitions,
-                }]))
-                .build(),
-        );
+        let source = input_topic_source(partitions);
         let coord = coordinator_with_source(source, Some(max_size));
         let handle = coord.get_or_create_streams("g");
         let mut epochs: HashMap<&str, i32> = HashMap::new();
@@ -2537,6 +2528,13 @@ async fn assignment_waits_for_the_initial_delay_and_the_interval() {
         steps: Vec<DelayStep>,
     }
 
+    let initial_assignment = || DelayStep {
+        member_id: "m1",
+        member_epoch: 0,
+        advance_ms: 0,
+        want_epoch: 2,
+        want_delay: None,
+    };
     let rows: [DelayRow; 3] = [
         // Three members join within one second: one assignment, after
         // the delay, for the group epoch of the third join.
@@ -2588,13 +2586,7 @@ async fn assignment_waits_for_the_initial_delay_and_the_interval() {
             delay_ms: 0,
             interval_ms: 1_000,
             steps: vec![
-                DelayStep {
-                    member_id: "m1",
-                    member_epoch: 0,
-                    advance_ms: 0,
-                    want_epoch: 2,
-                    want_delay: None,
-                },
+                initial_assignment(),
                 DelayStep {
                     member_id: "m2",
                     member_epoch: 0,
@@ -2615,22 +2607,13 @@ async fn assignment_waits_for_the_initial_delay_and_the_interval() {
             name: "no delay assigns at once",
             delay_ms: 0,
             interval_ms: 0,
-            steps: vec![
-                DelayStep {
-                    member_id: "m1",
-                    member_epoch: 0,
-                    advance_ms: 0,
-                    want_epoch: 2,
-                    want_delay: None,
-                },
-                DelayStep {
-                    member_id: "m2",
-                    member_epoch: 0,
-                    advance_ms: 200,
-                    want_epoch: 3,
-                    want_delay: None,
-                },
-            ],
+            steps: vec![initial_assignment(), DelayStep {
+                member_id: "m2",
+                member_epoch: 0,
+                advance_ms: 200,
+                want_epoch: 3,
+                want_delay: None,
+            }],
         },
     ];
 

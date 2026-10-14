@@ -131,122 +131,96 @@ mod tests {
         break_glass_consumption_decision, break_glass_local_action_decision,
     };
 
-    #[test]
-    fn consumption_requires_the_exact_current_proposal_and_no_uncommitted_tail() {
-        let valid = BreakGlassConsumptionFacts {
+    fn exact_pending() -> BreakGlassConsumptionFacts {
+        BreakGlassConsumptionFacts {
             proposal: BreakGlassProposalState::ExactPending,
             consumed_at_ms: i64::MAX,
             uncommitted_tail: false,
-        };
-        assert2::check!(
-            break_glass_consumption_decision(valid) == BreakGlassConsumptionDecision::Append
-        );
-        for (facts, expected) in [
-            (
-                BreakGlassConsumptionFacts {
-                    proposal: BreakGlassProposalState::Missing,
-                    ..valid
-                },
-                BreakGlassConsumptionDecision::Missing,
-            ),
-            (
-                BreakGlassConsumptionFacts {
-                    consumed_at_ms: 0,
-                    ..valid
-                },
-                BreakGlassConsumptionDecision::Malformed,
-            ),
-            (
-                BreakGlassConsumptionFacts {
-                    proposal: BreakGlassProposalState::Missing,
-                    consumed_at_ms: 0,
-                    uncommitted_tail: true,
-                },
-                BreakGlassConsumptionDecision::Missing,
-            ),
-            (
-                BreakGlassConsumptionFacts {
-                    consumed_at_ms: -1,
-                    uncommitted_tail: true,
-                    ..valid
-                },
-                BreakGlassConsumptionDecision::Malformed,
-            ),
-            (
-                BreakGlassConsumptionFacts {
-                    proposal: BreakGlassProposalState::Stale,
-                    consumed_at_ms: 0,
-                    ..valid
-                },
-                BreakGlassConsumptionDecision::Malformed,
-            ),
-            (
-                BreakGlassConsumptionFacts {
-                    proposal: BreakGlassProposalState::Stale,
-                    ..valid
-                },
-                BreakGlassConsumptionDecision::Stale,
-            ),
-            (
-                BreakGlassConsumptionFacts {
-                    proposal: BreakGlassProposalState::Stale,
-                    uncommitted_tail: true,
-                    ..valid
-                },
-                BreakGlassConsumptionDecision::Stale,
-            ),
-            (
-                BreakGlassConsumptionFacts {
-                    uncommitted_tail: true,
-                    ..valid
-                },
-                BreakGlassConsumptionDecision::InFlight,
-            ),
-        ] {
-            assert2::check!(break_glass_consumption_decision(facts) == expected);
         }
     }
 
-    #[test]
-    fn local_actions_run_only_after_a_matching_durable_spend() {
-        for (facts, expected) in [
-            (
-                BreakGlassLocalActionFacts {
-                    spend: BreakGlassLocalSpendState::Ungated,
-                    commit_succeeded: false,
-                },
-                BreakGlassLocalActionDecision::Apply,
-            ),
-            (
-                BreakGlassLocalActionFacts {
-                    spend: BreakGlassLocalSpendState::Pending,
-                    commit_succeeded: true,
-                },
-                BreakGlassLocalActionDecision::Apply,
-            ),
-            (
-                BreakGlassLocalActionFacts {
-                    spend: BreakGlassLocalSpendState::Committed,
-                    commit_succeeded: false,
-                },
-                BreakGlassLocalActionDecision::Apply,
-            ),
-            (
-                BreakGlassLocalActionFacts {
-                    spend: BreakGlassLocalSpendState::Pending,
-                    commit_succeeded: false,
-                },
-                BreakGlassLocalActionDecision::Reject,
-            ),
-            (
-                BreakGlassLocalActionFacts {
-                    spend: BreakGlassLocalSpendState::MissingOrMismatched,
-                    commit_succeeded: true,
-                },
-                BreakGlassLocalActionDecision::Reject,
-            ),
-        ] {
-            assert2::check!(break_glass_local_action_decision(facts) == expected);
-        }
+    #[yare::parameterized(
+        missing = {
+            BreakGlassConsumptionFacts { proposal: BreakGlassProposalState::Missing, ..exact_pending() },
+            BreakGlassConsumptionDecision::Missing,
+        },
+        zero_timestamp = {
+            BreakGlassConsumptionFacts { consumed_at_ms: 0, ..exact_pending() },
+            BreakGlassConsumptionDecision::Malformed,
+        },
+        missing_precedes_tail = {
+            BreakGlassConsumptionFacts {
+                proposal: BreakGlassProposalState::Missing,
+                consumed_at_ms: 0,
+                uncommitted_tail: true,
+            },
+            BreakGlassConsumptionDecision::Missing,
+        },
+        negative_timestamp = {
+            BreakGlassConsumptionFacts { consumed_at_ms: -1, uncommitted_tail: true, ..exact_pending() },
+            BreakGlassConsumptionDecision::Malformed,
+        },
+        stale_zero_timestamp = {
+            BreakGlassConsumptionFacts {
+                proposal: BreakGlassProposalState::Stale,
+                consumed_at_ms: 0,
+                ..exact_pending()
+            },
+            BreakGlassConsumptionDecision::Malformed,
+        },
+        stale = {
+            BreakGlassConsumptionFacts { proposal: BreakGlassProposalState::Stale, ..exact_pending() },
+            BreakGlassConsumptionDecision::Stale,
+        },
+        stale_with_tail = {
+            BreakGlassConsumptionFacts {
+                proposal: BreakGlassProposalState::Stale,
+                uncommitted_tail: true,
+                ..exact_pending()
+            },
+            BreakGlassConsumptionDecision::Stale,
+        },
+        in_flight = {
+            BreakGlassConsumptionFacts { uncommitted_tail: true, ..exact_pending() },
+            BreakGlassConsumptionDecision::InFlight,
+        },
+    )]
+    fn consumption_requires_the_exact_current_proposal_and_no_uncommitted_tail(
+        facts: BreakGlassConsumptionFacts,
+        expected: BreakGlassConsumptionDecision,
+    ) {
+        assert2::check!(break_glass_consumption_decision(facts) == expected);
+    }
+
+    #[yare::parameterized(
+        ungated = {
+            BreakGlassLocalActionFacts { spend: BreakGlassLocalSpendState::Ungated, commit_succeeded: false },
+            BreakGlassLocalActionDecision::Apply,
+        },
+        pending_commit = {
+            BreakGlassLocalActionFacts { spend: BreakGlassLocalSpendState::Pending, commit_succeeded: true },
+            BreakGlassLocalActionDecision::Apply,
+        },
+        committed = {
+            BreakGlassLocalActionFacts { spend: BreakGlassLocalSpendState::Committed, commit_succeeded: false },
+            BreakGlassLocalActionDecision::Apply,
+        },
+        pending_uncommitted = {
+            BreakGlassLocalActionFacts { spend: BreakGlassLocalSpendState::Pending, commit_succeeded: false },
+            BreakGlassLocalActionDecision::Reject,
+        },
+        mismatched = {
+            BreakGlassLocalActionFacts {
+                spend: BreakGlassLocalSpendState::MissingOrMismatched,
+                commit_succeeded: true,
+            },
+            BreakGlassLocalActionDecision::Reject,
+        },
+    )]
+    fn local_actions_run_only_after_a_matching_durable_spend(
+        facts: BreakGlassLocalActionFacts,
+        expected: BreakGlassLocalActionDecision,
+    ) {
+        assert2::check!(break_glass_local_action_decision(facts) == expected);
     }
 }

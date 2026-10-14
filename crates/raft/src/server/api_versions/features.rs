@@ -115,101 +115,114 @@ mod tests {
     /// level. #784: `metadata.version` tops out at 4.3.1's latest production
     /// level, 30, unless `unstable.feature.versions.enable` is set, as
     /// `BrokerFeatures.defaultSupportedFeatures` caps it.
-    #[test]
-    fn supported_features_follow_kafkas_minimums_and_alter_level_zero() {
-        use crate::UnstableFeatureVersions;
-        let modern = |metadata_max, share_max| {
-            modern_supported(
-                supported("metadata.version", METADATA_VERSION_MIN, metadata_max),
-                share_max,
-            )
-        };
-        let legacy = |metadata_max| {
-            vec![supported(
-                "metadata.version",
-                METADATA_VERSION_MIN,
-                metadata_max,
-            )]
-        };
+    #[yare::parameterized(
+        stable_v0 = {
+            0,
+            crate::UnstableFeatureVersions::Disabled,
+            vec![supported("metadata.version", METADATA_VERSION_MIN, 30)],
+        },
+        stable_v3 = {
+            3,
+            crate::UnstableFeatureVersions::Disabled,
+            vec![supported("metadata.version", METADATA_VERSION_MIN, 30)],
+        },
+        stable_v4 = {
+            4,
+            crate::UnstableFeatureVersions::Disabled,
+            modern_supported(supported("metadata.version", METADATA_VERSION_MIN, 30), 1),
+        },
+        stable_v5 = {
+            5,
+            crate::UnstableFeatureVersions::Disabled,
+            modern_supported(supported("metadata.version", METADATA_VERSION_MIN, 30), 1),
+        },
+        unstable_v0 = {
+            0,
+            crate::UnstableFeatureVersions::Enabled,
+            vec![supported("metadata.version", METADATA_VERSION_MIN, METADATA_VERSION_MAX)],
+        },
+        unstable_v3 = {
+            3,
+            crate::UnstableFeatureVersions::Enabled,
+            vec![supported("metadata.version", METADATA_VERSION_MIN, METADATA_VERSION_MAX)],
+        },
+        unstable_v4 = {
+            4,
+            crate::UnstableFeatureVersions::Enabled,
+            modern_supported(supported("metadata.version", METADATA_VERSION_MIN, METADATA_VERSION_MAX), 2),
+        },
+        unstable_v5 = {
+            5,
+            crate::UnstableFeatureVersions::Enabled,
+            modern_supported(supported("metadata.version", METADATA_VERSION_MIN, METADATA_VERSION_MAX), 2),
+        },
+    )]
+    fn supported_features_follow_kafkas_minimums_and_alter_level_zero(
+        api_version: i16,
+        unstable: UnstableFeatureVersions,
+        expected: Vec<SupportedFeatureKey>,
+    ) {
         // `share.version` 2 (KIP-1191) is trunk's, so only the flag advertises it.
-        for (unstable, metadata_max, share_max) in [
-            (UnstableFeatureVersions::Disabled, 30, 1),
-            (UnstableFeatureVersions::Enabled, METADATA_VERSION_MAX, 2),
-        ] {
-            for (api_version, expected) in [
-                (0, legacy(metadata_max)),
-                (3, legacy(metadata_max)),
-                (4, modern(metadata_max, share_max)),
-                (5, modern(metadata_max, share_max)),
-            ] {
-                check!(
-                    supported_feature_keys(api_version, unstable) == expected,
-                    "v{api_version} {unstable:?}"
-                );
-            }
-        }
+        check!(
+            supported_feature_keys(api_version, unstable) == expected,
+            "v{api_version} {unstable:?}"
+        );
     }
 
     /// A feature whose maximum is 0 cannot be finalized above 0, and Kafka
     /// does not advertise it at any version.
-    #[test]
-    fn a_feature_with_maximum_zero_is_never_advertised() {
-        for api_version in [0, 3, 4, 5] {
-            check!(supported_feature_key("x.version", 0, 0, api_version) == None);
-        }
+    #[yare::parameterized(
+        v0 = { 0 },
+        v3 = { 3 },
+        v4 = { 4 },
+        v5 = { 5 },
+    )]
+    fn a_feature_with_maximum_zero_is_never_advertised(api_version: i16) {
+        check!(supported_feature_key("x.version", 0, 0, api_version) == None);
         check!(supported_feature_key("x.version", 1, 2, 3) == Some(supported("x.version", 1, 2)));
     }
 
     /// Level-0 rows are never finalized rows, `kraft.version` included.
-    #[test]
-    fn finalized_features_omit_level_zero() {
-        for (kraft_version, levels, expected) in [
-            (0, vec![], vec![finalized(
-                "metadata.version",
-                METADATA_VERSION_MIN,
-            )]),
-            (
-                0,
-                vec![("metadata.version", 25), ("group.version", 1)],
-                vec![
-                    finalized("group.version", 1),
-                    finalized("metadata.version", 25),
-                ],
-            ),
-            (1, vec![("metadata.version", 25)], vec![
+    #[yare::parameterized(
+        empty_levels = { 0, &[][..], vec![finalized("metadata.version", METADATA_VERSION_MIN)] },
+        group_level = {
+            0,
+            &[("metadata.version", 25), ("group.version", 1)][..],
+            vec![finalized("group.version", 1), finalized("metadata.version", 25)],
+        },
+        kraft_level = {
+            1,
+            &[("metadata.version", 25)][..],
+            vec![finalized("kraft.version", 1), finalized("metadata.version", 25)],
+        },
+        zero_group_ignored = {
+            0,
+            &[("metadata.version", 25), ("group.version", 1), ("group.version", 0)][..],
+            vec![finalized("metadata.version", 25)],
+        },
+        krabka_version = {
+            1,
+            &[("metadata.version", 30), ("krabka.version", 1)][..],
+            vec![
+                finalized("krabka.version", 1),
                 finalized("kraft.version", 1),
-                finalized("metadata.version", 25),
-            ]),
-            (
-                0,
-                vec![
-                    ("metadata.version", 25),
-                    ("group.version", 1),
-                    ("group.version", 0),
-                ],
-                vec![finalized("metadata.version", 25)],
-            ),
-            // The krabka-owned `krabka.version` is finalized like any other
-            // feature, and in name order.
-            (
-                1,
-                vec![("metadata.version", 30), ("krabka.version", 1)],
-                vec![
-                    finalized("krabka.version", 1),
-                    finalized("kraft.version", 1),
-                    finalized("metadata.version", 30),
-                ],
-            ),
-            (
-                0,
-                vec![("metadata.version", 30), ("krabka.version", 0)],
-                vec![finalized("metadata.version", 30)],
-            ),
-        ] {
-            check!(
-                finalized_feature_keys(&image(kraft_version, &levels)) == expected,
-                "kraft.version {kraft_version}, {levels:?}"
-            );
-        }
+                finalized("metadata.version", 30),
+            ],
+        },
+        zero_krabka_ignored = {
+            0,
+            &[("metadata.version", 30), ("krabka.version", 0)][..],
+            vec![finalized("metadata.version", 30)],
+        },
+    )]
+    fn finalized_features_omit_level_zero(
+        kraft_version: u16,
+        levels: &[(&str, i16)],
+        expected: Vec<FinalizedFeatureKey>,
+    ) {
+        check!(
+            finalized_feature_keys(&image(kraft_version, levels)) == expected,
+            "kraft.version {kraft_version}, {levels:?}"
+        );
     }
 }

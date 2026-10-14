@@ -168,8 +168,7 @@ fn classify_produce(response: &ProduceResponse, target: &Target) -> Attempt<()> 
             target.partition,
             row.error_message
                 .as_deref()
-                .map(|message| format!(", {message}"))
-                .unwrap_or_default()
+                .map_or_default(|message| format!(", {message}"))
         ))),
     }
 }

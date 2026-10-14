@@ -127,17 +127,20 @@ fn equal_membership_values_do_not_commit_the_final_voters_record() {
     assert!(frontier == Some((7, 6, 1, false, 1)));
 }
 
-#[test]
-fn later_appends_and_repeated_advances_preserve_whole_batch_readiness() {
-    for (previous, requested, expected_hwm, ready) in [
-        (5, 6, 6, false),
-        (6, 7, 7, true),
-        (6, 8, 8, true),
-        (8, 5, 8, true),
-        (8, i64::MAX, 10, true),
-    ] {
-        let (_, _, rows, frontier) = finalized_control((5, previous, requested, 10)).unwrap();
-        assert!(rows == [(5, true, true), (6, false, ready)]);
-        assert!(frontier == Some((7, expected_hwm, if ready { 2 } else { 1 }, ready, 1)));
-    }
+#[yare::parameterized(
+    request_crosses_second_record = { 5, 6, 6, false },
+    request_reaches_second_record = { 6, 7, 7, true },
+    request_advances_past_second_record = { 6, 8, 8, true },
+    previous_frontier_wins = { 8, 5, 8, true },
+    request_saturates_at_log_end = { 8, i64::MAX, 10, true },
+)]
+fn later_appends_and_repeated_advances_preserve_whole_batch_readiness(
+    previous: i64,
+    requested: i64,
+    expected_hwm: i64,
+    ready: bool,
+) {
+    let (_, _, rows, frontier) = finalized_control((5, previous, requested, 10)).unwrap();
+    assert2::assert!(rows == [(5, true, true), (6, false, ready)]);
+    assert2::assert!(frontier == Some((7, expected_hwm, if ready { 2 } else { 1 }, ready, 1)));
 }

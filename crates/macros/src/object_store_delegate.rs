@@ -152,25 +152,36 @@ mod tests {
         .to_string();
         assert!(output.contains("Wrapper < T >"));
         assert!(output.contains("async fn put_opts"));
-        for method in ["get_opts", "delete_stream", "copy_opts"] {
-            assert!(output.contains(&format!("fn {method}")), "{method}");
-        }
     }
 
-    #[test]
-    fn rejects_unsupported_duplicate_and_existing_methods() {
+    #[yare::parameterized(
+        get_options = { "get_opts" },
+        delete_stream = { "delete_stream" },
+        copy_options = { "copy_opts" },
+    )]
+    fn delegates_each_selected_method(method: &str) {
+        let item = "#[async_trait::async_trait] impl<T: ObjectStore> ObjectStore for Wrapper<T> { async fn put_opts(&self) {} }";
+        let output = expand(
+            "get_opts, delete_stream, copy_opts,".parse().unwrap(),
+            item.parse().unwrap(),
+        )
+        .unwrap()
+        .to_string();
+        assert2::assert!(output.contains(&format!("fn {method}")), "{method}");
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        unknown = { "unknown" },
+        duplicate_without_comma = { "get_opts get_opts" },
+        duplicate = { "get_opts, get_opts" },
+        existing_method = { "list" },
+    )]
+    fn rejects_unsupported_duplicate_and_existing_methods(meta: &str) {
         let item = "impl ObjectStore for Wrapper { fn list(&self) {} }";
-        for meta in [
-            "",
-            "unknown",
-            "get_opts get_opts",
-            "get_opts, get_opts",
-            "list",
-        ] {
-            assert!(
-                expand(meta.parse().unwrap(), item.parse().unwrap()).is_err(),
-                "{meta}"
-            );
-        }
+        assert2::assert!(
+            expand(meta.parse().unwrap(), item.parse().unwrap()).is_err(),
+            "{meta}"
+        );
     }
 }

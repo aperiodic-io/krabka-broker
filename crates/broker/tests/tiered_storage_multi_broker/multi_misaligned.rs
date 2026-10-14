@@ -19,7 +19,9 @@
 use {
     crate::{
         multi_client::topic_id_for,
-        multi_cluster::{ready_admin, start_three_tiered_brokers_with_segment_sizes},
+        multi_cluster::{
+            await_pair_leader, ready_admin, start_three_tiered_brokers_with_segment_sizes,
+        },
         multi_workload::local_segment_bases,
         support::{
             client::connect_owned, storage::topic_remote_log_files, topics::AssignedTopicSetup,
@@ -209,12 +211,7 @@ async fn a_new_leader_resumes_the_copy_from_the_tiers_coverage() {
 
     // With 3 registered brokers and rf=2 the partition sits on brokers 1 and
     // 2; wait until the image names one of them and read which.
-    let (b1_id, b2_id) = (b1.node_id(), b2.node_id());
-    b1.wait_for_image(|img| {
-        img.partition(TOPIC, 0)
-            .is_some_and(|p| p.leader == b1_id || p.leader == b2_id)
-    })
-    .await;
+    let (b1_id, b2_id) = await_pair_leader(&b1, &b2, TOPIC, 0).await;
     let leader_is_b1 = b1.partition_leader_for_test(TOPIC, 0) == Some(b1_id);
     assert!(
         !leader_is_b1,

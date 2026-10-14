@@ -232,10 +232,7 @@ pub(crate) fn privileged_event(
         phase: event.phase,
         action: event.action.to_owned(),
         target: event.target.to_owned(),
-        proposal_id: event
-            .proposal_id
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        proposal_id: event.proposal_id.map_or_default(|id| id.to_string()),
         principal: AuditPrincipal {
             name: principal_name(ctx),
             auth_method: format!("{:?}", ctx.principal.auth_method),

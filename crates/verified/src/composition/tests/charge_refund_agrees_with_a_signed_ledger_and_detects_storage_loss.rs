@@ -34,35 +34,44 @@ proptest! {
     }
 }
 
+#[yare::parameterized(
+    available_exceeds_charge = { 5, 0, 0, 20, 12, Some((5, 0, 5)) },
+    debt_is_partially_repaid = { 0, 7, 3, 20, 12, Some((0, 4, 0)) },
+    unrepresentable_debt = { 0, u64::MAX, 0, 20, 1, None },
+    maximum_debt_decreases = { 0, u64::MAX, 1, 20, 1, Some((0, u64::MAX - 1, 0)) },
+    refill_releases_all_debt = { 0, u64::MAX, u64::MAX, 20, u64::MAX, Some((0, 0, 0)) },
+    maximum_available_and_burst = {
+        u64::MAX,
+        0,
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+        Some((u64::MAX, 0, u64::MAX)),
+    },
+    zero_burst = { 0, 0, 0, 0, u64::MAX, Some((0, 0, 0)) },
+)]
+fn quota_round_trip_requires_representable_debt_and_bounded_debt_releases_consumers(
+    available: u64,
+    debt: u64,
+    refill: u64,
+    burst: u64,
+    charge: u64,
+    expected: Option<(u64, u64, u64)>,
+) {
+    assert2::assert!(
+        quota_charge_refund_restores_consume_budget(
+            available,
+            debt,
+            refill,
+            burst,
+            charge,
+            u64::MAX
+        ) == expected
+    );
+}
+
 #[test]
-fn quota_round_trip_requires_representable_debt_and_bounded_debt_releases_consumers() {
-    for (available, debt, refill, burst, charge, expected) in [
-        (5, 0, 0, 20, 12, Some((5, 0, 5))),
-        (0, 7, 3, 20, 12, Some((0, 4, 0))),
-        (0, u64::MAX, 0, 20, 1, None),
-        (0, u64::MAX, 1, 20, 1, Some((0, u64::MAX - 1, 0))),
-        (0, u64::MAX, u64::MAX, 20, u64::MAX, Some((0, 0, 0))),
-        (
-            u64::MAX,
-            0,
-            u64::MAX,
-            u64::MAX,
-            u64::MAX,
-            Some((u64::MAX, 0, u64::MAX)),
-        ),
-        (0, 0, 0, 0, u64::MAX, Some((0, 0, 0))),
-    ] {
-        assert!(
-            quota_charge_refund_restores_consume_budget(
-                available,
-                debt,
-                refill,
-                burst,
-                charge,
-                u64::MAX
-            ) == expected
-        );
-    }
+fn bounded_charge_and_repayment_restores_consume_budget() {
     assert!(
         bounded_quota_debt_cannot_outlast_repayment((0, u64::MAX), 0, 20, u64::MAX, 7, 12, 20)
             == (5, 0, 5)

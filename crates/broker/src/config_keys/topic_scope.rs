@@ -62,29 +62,16 @@ mod tests {
         assert2::check,
     };
 
-    #[test]
-    fn a_controller_managed_topic_config_is_named_as_one() {
-        for (label, key, expected) in [
-            ("the write-freeze key", WRITE_FREEZE, true),
-            (
-                "the removed ELR config key",
-                ELIGIBLE_LEADER_REPLICAS,
-                false,
-            ),
-            ("an ordinary topic key", RETENTION_MS, false),
-            (
-                "a broker-scoped controller-managed key",
-                BROKER_WITNESS,
-                false,
-            ),
-            ("an unknown key", "not.a.topic.config", false),
-            ("an empty key", "", false),
-        ] {
-            check!(
-                is_controller_managed_topic_config(key) == expected,
-                "{label}"
-            );
-        }
+    #[yare::parameterized(
+        write_freeze = { WRITE_FREEZE, true },
+        removed_elr = { ELIGIBLE_LEADER_REPLICAS, false },
+        ordinary_topic_key = { RETENTION_MS, false },
+        broker_scoped_key = { BROKER_WITNESS, false },
+        unknown = { "not.a.topic.config", false },
+        empty = { "", false },
+    )]
+    fn a_controller_managed_topic_config_is_named_as_one(key: &str, expected: bool) {
+        check!(is_controller_managed_topic_config(key) == expected);
     }
 
     #[test]

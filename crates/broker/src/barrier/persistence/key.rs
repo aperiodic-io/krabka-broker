@@ -148,15 +148,19 @@ mod tests {
     /// The group name is a string with an `i16` length. The encoder writes one
     /// of 32767 bytes and refuses a longer one with an error, because a panic
     /// here would take down the request that named the group.
-    #[test]
-    fn a_group_name_of_32767_bytes_encodes_and_one_of_32768_is_refused() {
-        for (length, encodes) in [(MAX_STRING_BYTES, true), (MAX_STRING_BYTES + 1, false)] {
-            let key = RecordKey::cut("g".repeat(length), 7);
-            let encoded = encode_key(&key);
-            assert!(encoded.is_ok() == encodes, "{length} bytes");
-            if let Ok(bytes) = encoded {
-                assert!(decode_key(&bytes).ok() == Some(key), "{length} bytes");
-            }
+    #[yare::parameterized(
+        maximum_length = { MAX_STRING_BYTES, true },
+        one_byte_over = { MAX_STRING_BYTES + 1, false },
+    )]
+    fn a_group_name_of_32767_bytes_encodes_and_one_of_32768_is_refused(
+        length: usize,
+        encodes: bool,
+    ) {
+        let key = RecordKey::cut("g".repeat(length), 7);
+        let encoded = encode_key(&key);
+        assert2::assert!(encoded.is_ok() == encodes, "{length} bytes");
+        if let Ok(bytes) = encoded {
+            assert2::assert!(decode_key(&bytes).ok() == Some(key), "{length} bytes");
         }
     }
 

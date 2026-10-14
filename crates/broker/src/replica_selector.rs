@@ -152,18 +152,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parse_known_values() {
-        for (input, want) in [
-            ("leader", ReplicaSelectorKind::Leader),
-            ("rack-aware", ReplicaSelectorKind::RackAware),
-        ] {
-            assert!(
-                ReplicaSelectorKind::from_config_str(input) == Ok(want),
-                "{input}"
-            );
-        }
-        assert!(ReplicaSelectorKind::from_config_str("bogus").is_err());
+    #[yare::parameterized(
+        leader = { "leader", Some(ReplicaSelectorKind::Leader) },
+        rack_aware = { "rack-aware", Some(ReplicaSelectorKind::RackAware) },
+        unknown = { "bogus", None },
+    )]
+    fn parse_known_values(input: &str, want: Option<ReplicaSelectorKind>) {
+        assert2::assert!(
+            ReplicaSelectorKind::from_config_str(input).ok() == want,
+            "{input}"
+        );
     }
 
     #[test]
@@ -200,113 +198,102 @@ mod tests {
         assert!(ReplicaSelectorKind::RackAware.select(Some("b"), 1, &replicas) == -1);
     }
 
-    #[test]
-    fn rack_aware_never_redirects_a_consumer_to_a_witness() {
+    #[yare::parameterized(
+        witness_is_only_same_rack_isr_member = {
+            vec![view(1, "a", true), witness(2, "b", true)],
+            -1,
+        },
+        same_rack_non_witness_beats_more_caught_up_witness = {
+            vec![
+                view(1, "a", true),
+                witness(2, "b", true),
+                behind(view(3, "b", true), 50, 9_000),
+            ],
+            3,
+        },
+    )]
+    fn rack_aware_never_redirects_a_consumer_to_a_witness(replicas: Vec<ReplicaView>, want: i32) {
         // Node 1 leads in rack "a". The client rack is "b", the witness site,
         // so the witness there is an in-ISR same-rack replica and looks like
         // the best pick.
-        for (name, replicas, want) in [
-            (
-                "witness is the only same-rack ISR member",
-                vec![view(1, "a", true), witness(2, "b", true)],
-                -1,
-            ),
-            (
-                "a same-rack non-witness wins over a witness that is more caught up",
-                vec![
-                    view(1, "a", true),
-                    witness(2, "b", true),
-                    behind(view(3, "b", true), 50, 9_000),
-                ],
-                3,
-            ),
-        ] {
-            let got = ReplicaSelectorKind::RackAware.select(Some("b"), 1, &replicas);
-            assert!(got == want, "{name}: got {got}, want {want}");
-        }
+        let got = ReplicaSelectorKind::RackAware.select(Some("b"), 1, &replicas);
+        assert2::assert!(got == want, "got {got}, want {want}");
     }
 
     /// Kafka's `RackAwareReplicaSelector` answers the leader when it is in the
     /// client's rack, and `findPreferredReadReplica` drops a selected leader:
     /// a same-rack follower never outranks it, whatever its id or progress.
-    #[test]
-    fn rack_aware_keeps_the_read_on_a_leader_in_the_clients_rack() {
-        for (name, replicas, leader_id) in [
-            (
-                "a lower-id same-rack follower",
-                vec![view(1, "b", true), view(2, "b", true)],
-                2,
-            ),
-            (
-                "a same-rack follower that is further ahead",
-                vec![behind(view(1, "b", true), 500, 0), view(2, "b", true)],
-                2,
-            ),
-            (
-                "the only same-rack replica",
-                vec![view(1, "b", true), view(2, "a", true)],
-                1,
-            ),
-        ] {
-            let got = ReplicaSelectorKind::RackAware.select(Some("b"), leader_id, &replicas);
-            assert!(got == -1, "{name}: got {got}");
-        }
+    #[yare::parameterized(
+        lower_id_same_rack_follower = {
+            vec![view(1, "b", true), view(2, "b", true)],
+            2,
+        },
+        further_ahead_same_rack_follower = {
+            vec![behind(view(1, "b", true), 500, 0), view(2, "b", true)],
+            2,
+        },
+        only_same_rack_replica = {
+            vec![view(1, "b", true), view(2, "a", true)],
+            1,
+        },
+    )]
+    fn rack_aware_keeps_the_read_on_a_leader_in_the_clients_rack(
+        replicas: Vec<ReplicaView>,
+        leader_id: i32,
+    ) {
+        let got = ReplicaSelectorKind::RackAware.select(Some("b"), leader_id, &replicas);
+        assert2::assert!(got == -1, "got {got}");
     }
 
     /// Among several same-rack followers Kafka picks the most caught up: the
     /// highest log end offset, then the shortest time since it last caught up,
     /// then the highest node id.
-    #[test]
-    fn rack_aware_picks_the_most_caught_up_same_rack_follower() {
+    #[yare::parameterized(
+        higher_log_end_offset_beats_lower_id = {
+            vec![behind(view(2, "b", true), 90, 0), view(3, "b", true)],
+            3,
+        },
+        higher_log_end_offset_beats_lower_lag_time = {
+            vec![
+                behind(view(2, "b", true), 95, 5_000),
+                behind(view(3, "b", true), 90, 0),
+            ],
+            2,
+        },
+        shorter_caught_up_time_breaks_log_end_tie = {
+            vec![
+                behind(view(2, "b", true), 100, 5_000),
+                behind(view(3, "b", true), 100, 100),
+            ],
+            3,
+        },
+        never_caught_up_loses_log_end_tie = {
+            vec![
+                ReplicaView {
+                    time_since_caught_up: Duration::MAX,
+                    ..view(2, "b", true)
+                },
+                behind(view(3, "b", true), 100, 60_000),
+            ],
+            3,
+        },
+        higher_id_breaks_full_tie = {
+            vec![view(2, "b", true), view(4, "b", true), view(3, "b", true)],
+            4,
+        },
+        out_of_sync_follower_is_not_a_candidate = {
+            vec![behind(view(2, "b", false), 999, 0), view(3, "b", true)],
+            3,
+        },
+    )]
+    fn rack_aware_picks_the_most_caught_up_same_rack_follower(
+        followers: Vec<ReplicaView>,
+        want: i32,
+    ) {
         // Node 1 leads in rack "a"; the client is in rack "b".
-        for (name, followers, want) in [
-            (
-                "the higher log end offset wins over a lower id",
-                vec![behind(view(2, "b", true), 90, 0), view(3, "b", true)],
-                3,
-            ),
-            (
-                "the higher log end offset wins over a lower lag time",
-                vec![
-                    behind(view(2, "b", true), 95, 5_000),
-                    behind(view(3, "b", true), 90, 0),
-                ],
-                2,
-            ),
-            (
-                "the shorter time since caught up breaks a tie in log end offset",
-                vec![
-                    behind(view(2, "b", true), 100, 5_000),
-                    behind(view(3, "b", true), 100, 100),
-                ],
-                3,
-            ),
-            (
-                "a follower that never caught up loses a tie in log end offset",
-                vec![
-                    ReplicaView {
-                        time_since_caught_up: Duration::MAX,
-                        ..view(2, "b", true)
-                    },
-                    behind(view(3, "b", true), 100, 60_000),
-                ],
-                3,
-            ),
-            (
-                "the higher id breaks a full tie",
-                vec![view(2, "b", true), view(4, "b", true), view(3, "b", true)],
-                4,
-            ),
-            (
-                "an out-of-sync follower is not a candidate however far ahead",
-                vec![behind(view(2, "b", false), 999, 0), view(3, "b", true)],
-                3,
-            ),
-        ] {
-            let mut replicas = vec![view(1, "a", true)];
-            replicas.extend(followers);
-            let got = ReplicaSelectorKind::RackAware.select(Some("b"), 1, &replicas);
-            assert!(got == want, "{name}: got {got}, want {want}");
-        }
+        let mut replicas = vec![view(1, "a", true)];
+        replicas.extend(followers);
+        let got = ReplicaSelectorKind::RackAware.select(Some("b"), 1, &replicas);
+        assert2::assert!(got == want, "got {got}, want {want}");
     }
 }

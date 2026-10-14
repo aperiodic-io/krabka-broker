@@ -631,22 +631,27 @@ mod tests {
         assert!(error.to_string().contains("topic_create_timeout"));
     }
 
-    #[tokio::test]
-    async fn bootstrap_resolution_names_the_address_it_could_not_use() {
+    #[yare::parameterized(
+        empty = { "", "bootstrap \"\" resolved to no address" },
+        separators_only = { " , ", "bootstrap \" , \" resolved to no address" },
+        missing_port = { "no-port", "DNS lookup of no-port failed" },
+    )]
+    #[test_macro(tokio::test)]
+    async fn bootstrap_resolution_names_the_address_it_could_not_use(
+        bootstrap: &str,
+        expected: &str,
+    ) {
         let options = ConnectionOptions::default();
-        let cases = [
-            ("", "bootstrap \"\" resolved to no address"),
-            (" , ", "bootstrap \" , \" resolved to no address"),
-            ("no-port", "DNS lookup of no-port failed"),
-        ];
-        for (bootstrap, expected) in cases {
-            let error = resolve_bootstrap(bootstrap, &options).await.unwrap_err();
-            check!(
-                error.to_string().contains(expected),
-                "{bootstrap:?}: {error}"
-            );
-        }
+        let error = resolve_bootstrap(bootstrap, &options).await.unwrap_err();
+        check!(
+            error.to_string().contains(expected),
+            "{bootstrap:?}: {error}"
+        );
+    }
 
+    #[tokio::test]
+    async fn bootstrap_resolution_keeps_valid_addresses_in_order() {
+        let options = ConnectionOptions::default();
         let resolved = resolve_bootstrap(" 127.0.0.1:9092, ,localhost:9093", &options)
             .await
             .unwrap();
@@ -691,17 +696,18 @@ mod tests {
         assert!(record.value.is_none());
     }
 
-    #[test]
-    fn keyed_record_rejects_out_of_range_partitions() {
-        for partition in [-1, 3] {
-            let error = producer_record("index", 3, partition, None, None).unwrap_err();
-            assert!(matches!(
-                error,
-                MetadataLogError::PartitionOutOfRange {
-                    partition: got,
-                    count: 3
-                } if got == partition
-            ));
-        }
+    #[yare::parameterized(
+        negative = { -1 },
+        upper_bound = { 3 },
+    )]
+    fn keyed_record_rejects_out_of_range_partitions(partition: i32) {
+        let error = producer_record("index", 3, partition, None, None).unwrap_err();
+        assert2::assert!(matches!(
+            error,
+            MetadataLogError::PartitionOutOfRange {
+                partition: got,
+                count: 3
+            } if got == partition
+        ));
     }
 }

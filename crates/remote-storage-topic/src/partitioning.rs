@@ -64,11 +64,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn matches_jvm_remote_metadata_partitioner_goldens() {
-        for (partition, expected) in [(0, 6), (1, 36), (3, 2), (7, 26)] {
-            assert!(metadata_partition_for(&tp("orders", partition), 50) == expected);
-        }
+    #[yare::parameterized(
+        first = { 0, 6 },
+        second = { 1, 36 },
+        fourth = { 3, 2 },
+        eighth = { 7, 26 },
+    )]
+    fn matches_jvm_remote_metadata_partitioner_goldens(partition: i32, expected: i32) {
+        assert2::assert!(metadata_partition_for(&tp("orders", partition), 50) == expected);
     }
 
     #[test]
@@ -133,12 +136,13 @@ mod tests {
         assert!(metadata_partitions_for(none.iter(), 50).is_empty());
     }
 
-    #[test]
-    fn metadata_partitions_for_empty_rejects_nonpositive_count() {
+    #[yare::parameterized(
+        zero = { 0 },
+        negative = { -1 },
+    )]
+    fn metadata_partitions_for_empty_rejects_nonpositive_count(count: i32) {
         let none: [TopicIdPartition; 0] = [];
-        for count in [0, -1] {
-            let result = std::panic::catch_unwind(|| metadata_partitions_for(none.iter(), count));
-            assert!(result.is_err(), "count {count} must panic before iteration");
-        }
+        let result = std::panic::catch_unwind(|| metadata_partitions_for(none.iter(), count));
+        assert2::assert!(result.is_err(), "count {count} must panic before iteration");
     }
 }

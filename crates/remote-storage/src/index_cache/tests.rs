@@ -94,52 +94,41 @@ fn test_cache(budget: u64) -> TestCache {
     TestCache { dir, cache }
 }
 
-#[test]
-fn second_lookup_of_the_same_index_is_served_without_a_fetch() {
+#[yare::parameterized(
+    repeated_index = { IndexType::Offset, 32, IndexCacheOutcome::Hit, 1 },
+    different_index_types = { IndexType::Timestamp, 16, IndexCacheOutcome::Miss, 2 },
+)]
+fn lookups_are_keyed_by_segment_and_index_type(
+    second_type: IndexType,
+    length: usize,
+    second_expected: IndexCacheOutcome,
+    entries: u64,
+) {
     let TestCache { dir: _dir, cache } = test_cache(1 << 20);
     let segment = Uuid::new_v4();
     let calls = Arc::new(AtomicUsize::new(0));
-
     let (first, first_outcome) = cache
-        .get_or_fetch(segment, IndexType::Offset, counting_fetch(&calls, 32))
+        .get_or_fetch(segment, IndexType::Offset, counting_fetch(&calls, length))
         .expect("first lookup");
     let (second, second_outcome) = cache
-        .get_or_fetch(segment, IndexType::Offset, counting_fetch(&calls, 32))
+        .get_or_fetch(segment, second_type, counting_fetch(&calls, length))
         .expect("second lookup");
 
     check!(first == second);
     check!(first_outcome == IndexCacheOutcome::Miss);
-    check!(second_outcome == IndexCacheOutcome::Hit);
-    check!(calls.load(Ordering::Relaxed) == 1);
+    check!(second_outcome == second_expected);
+    check!(calls.load(Ordering::Relaxed) == usize::try_from(entries).unwrap());
     check!(
         cache.stats()
             == IndexCacheStats {
-                hits: 1,
-                misses: 1,
+                hits: 2 - entries,
+                misses: entries,
                 evictions: 0,
-                entries: 1,
+                entries,
                 bytes: 32,
             }
     );
 }
-
-#[test]
-fn the_two_index_types_of_one_segment_are_separate_entries() {
-    let TestCache { dir: _dir, cache } = test_cache(1 << 20);
-    let segment = Uuid::new_v4();
-    let calls = Arc::new(AtomicUsize::new(0));
-
-    for index_type in [IndexType::Offset, IndexType::Timestamp] {
-        cache
-            .get_or_fetch(segment, index_type, counting_fetch(&calls, 16))
-            .expect("lookup");
-    }
-
-    check!(calls.load(Ordering::Relaxed) == 2);
-    check!(cache.stats().entries == 2);
-    check!(cache.stats().bytes == 32);
-}
-
 #[test]
 fn the_byte_budget_evicts_the_least_recently_used_entry() {
     // Room for exactly two 40-byte entries.

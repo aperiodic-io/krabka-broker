@@ -198,19 +198,20 @@ mod tests {
 
     /// The header timestamp reads from the first batch alone, and anything
     /// that does not open with a snapshot header is refused.
-    #[test]
-    fn the_header_timestamp_reads_from_the_first_batch() {
+    #[yare::parameterized(
+        empty = { "empty", &b""[..] },
+        garbage = { "garbage", &b"\x00\x01\x02"[..] },
+    )]
+    fn the_header_timestamp_reads_from_the_first_batch(what: &str, bytes: &[u8]) {
         let image = MetadataImage::new(Uuid::nil());
         let snapshot = SnapshotWriter::serialize(&image, 1_700_000_123_456).unwrap();
         assert2::check!(
             SnapshotReader::last_contained_log_timestamp(&snapshot).ok() == Some(1_700_000_123_456)
         );
-        for (what, bytes) in [("empty", &b""[..]), ("garbage", &b"\x00\x01\x02"[..])] {
-            assert2::check!(
-                SnapshotReader::last_contained_log_timestamp(bytes).is_err(),
-                "{what}"
-            );
-        }
+        assert2::check!(
+            SnapshotReader::last_contained_log_timestamp(bytes).is_err(),
+            "{what}"
+        );
     }
 
     #[test]

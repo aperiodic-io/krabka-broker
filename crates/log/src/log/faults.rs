@@ -195,39 +195,44 @@ fn durable_sample_log(config: &LogConfig) -> DurableLog {
 
 /// A sparse-index write that fails is reported, and the batch it indexed is
 /// rolled back rather than left half-indexed for the next open to find.
-#[test]
-fn a_disk_full_sparse_index_write_is_reported_and_rolled_back() {
-    for target in [IoTarget::OffsetIndex, IoTarget::TimeIndex] {
-        for FailureShape { label, prefix } in PREFIXES {
-            // One index entry per batch, so the very next append writes one.
-            let config = LogConfig {
-                index_interval: bytes(1),
-                ..LogConfig::default()
-            };
-            let DurableLog {
-                dir,
-                mut log,
-                durable,
-            } = durable_sample_log(&config);
+#[yare::parameterized(
+    offset_index_immediate_failure = { IoTarget::OffsetIndex, 0, "outright StorageFull" },
+    offset_index_short_write = { IoTarget::OffsetIndex, 6, "after a short write" },
+    time_index_immediate_failure = { IoTarget::TimeIndex, 0, "outright StorageFull" },
+    time_index_short_write = { IoTarget::TimeIndex, 6, "after a short write" },
+)]
+fn a_disk_full_sparse_index_write_is_reported_and_rolled_back(
+    target: IoTarget,
+    prefix: usize,
+    label: &str,
+) {
+    // One index entry per batch, so the very next append writes one.
+    let config = LogConfig {
+        index_interval: bytes(1),
+        ..LogConfig::default()
+    };
+    let DurableLog {
+        dir,
+        mut log,
+        durable,
+    } = durable_sample_log(&config);
 
-            log.test_set_io(DiskFull::new(target, prefix));
-            // A newer timestamp, because the time index only takes an entry
-            // that is newer than its last one.
-            let mut newer = sample_batch(2);
-            newer.max_timestamp = 1;
-            let error = log
-                .append(&mut newer)
-                .expect_err("the index write must fail the append");
-            check!(is_storage_full(&error), "{target:?}, {label}: {error:?}");
-            drop(log);
+    log.test_set_io(DiskFull::new(target, prefix));
+    // A newer timestamp, because the time index only takes an entry
+    // that is newer than its last one.
+    let mut newer = sample_batch(2);
+    newer.max_timestamp = 1;
+    let error = log
+        .append(&mut newer)
+        .expect_err("the index write must fail the append");
+    check!(is_storage_full(&error), "{target:?}, {label}: {error:?}");
+    drop(log);
 
-            let reopened = Log::open(dir.path(), config).unwrap();
-            check!(
-                reopened.log_end_offset() == durable,
-                "{target:?}, {label}: the failed append must not survive the reopen"
-            );
-        }
-    }
+    let reopened = Log::open(dir.path(), config).unwrap();
+    check!(
+        reopened.log_end_offset() == durable,
+        "{target:?}, {label}: the failed append must not survive the reopen"
+    );
 }
 
 /// A producer snapshot that cannot be written fails the roll that publishes
@@ -389,53 +394,54 @@ fn a_failed_compaction_directory_fsync_is_reported_and_the_reopened_log_is_whole
 /// Both halves of the deletion are driven -- the rename to the tombstone and
 /// the unlink of it -- because a partial failure of either has to leave the
 /// same consistent picture.
-#[test]
-fn a_failed_segment_deletion_keeps_the_bytes_accounted_for_and_the_next_tick_retries() {
-    for on_rename in [true, false] {
-        let dir = tempdir().unwrap();
-        let config = LogConfig {
-            retention_size: Some(ByteSize::ZERO),
-            file_delete_delay: krabka_units::millis(0),
-            ..tiny_segments()
-        };
-        let mut log = synced_sample_log(dir.path(), config, 4, 2);
+#[yare::parameterized(
+    rename_fails = { true },
+    unlink_fails = { false },
+)]
+fn a_failed_segment_deletion_keeps_the_bytes_accounted_for_and_the_next_tick_retries(
+    on_rename: bool,
+) {
+    let dir = tempdir().unwrap();
+    let config = LogConfig {
+        retention_size: Some(ByteSize::ZERO),
+        file_delete_delay: krabka_units::millis(0),
+        ..tiny_segments()
+    };
+    let mut log = synced_sample_log(dir.path(), config, 4, 2);
 
-        let fault = FailSegmentDeletionOnce::new(
-            &format!("{}.log", name::format_base_offset(0)),
-            on_rename,
-        );
-        log.test_set_io(fault);
-        let error = log
-            .tick(SystemTime::now(), krabka_ids::Offset(i64::MAX))
-            .expect_err("a failed unlink must be reported, not discarded");
-        check!(
-            matches!(&error, LogError::Io(io) if io.kind() == std::io::ErrorKind::PermissionDenied),
-            "on_rename={on_rename}: {error:?}"
-        );
-        check!(
-            log.size().bytes_u64() == on_disk_log_bytes(dir.path()),
-            "on_rename={on_rename}: the log must still report the bytes that are really there"
-        );
+    let fault =
+        FailSegmentDeletionOnce::new(&format!("{}.log", name::format_base_offset(0)), on_rename);
+    log.test_set_io(fault);
+    let error = log
+        .tick(SystemTime::now(), krabka_ids::Offset(i64::MAX))
+        .expect_err("a failed unlink must be reported, not discarded");
+    check!(
+        matches!(&error, LogError::Io(io) if io.kind() == std::io::ErrorKind::PermissionDenied),
+        "on_rename={on_rename}: {error:?}"
+    );
+    check!(
+        log.size().bytes_u64() == on_disk_log_bytes(dir.path()),
+        "on_rename={on_rename}: the log must still report the bytes that are really there"
+    );
 
-        // The fault fires once, so the retry is what a healthy disk gives.
-        log.test_set_io(file_io());
-        log.tick(SystemTime::now(), krabka_ids::Offset(i64::MAX))
-            .expect("the retry finishes the deletion");
-        check!(
-            log.size().bytes_u64() == on_disk_log_bytes(dir.path()),
-            "on_rename={on_rename}: the retry leaves the accounting consistent"
-        );
-        check!(
-            !name::log_path(dir.path(), 0).exists(),
-            "on_rename={on_rename}: the segment is gone"
-        );
-        check!(
-            !dir.path()
-                .join(format!("{}.log.deleted", name::format_base_offset(0)))
-                .exists(),
-            "on_rename={on_rename}: no tombstone is left behind"
-        );
-    }
+    // The fault fires once, so the retry is what a healthy disk gives.
+    log.test_set_io(file_io());
+    log.tick(SystemTime::now(), krabka_ids::Offset(i64::MAX))
+        .expect("the retry finishes the deletion");
+    check!(
+        log.size().bytes_u64() == on_disk_log_bytes(dir.path()),
+        "on_rename={on_rename}: the retry leaves the accounting consistent"
+    );
+    check!(
+        !name::log_path(dir.path(), 0).exists(),
+        "on_rename={on_rename}: the segment is gone"
+    );
+    check!(
+        !dir.path()
+            .join(format!("{}.log.deleted", name::format_base_offset(0)))
+            .exists(),
+        "on_rename={on_rename}: no tombstone is left behind"
+    );
 }
 
 /// A deletion interrupted between the rename and the unlink leaves tombstones

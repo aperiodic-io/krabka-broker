@@ -279,148 +279,99 @@ mod tests {
     /// Every accepted input renders as the string that
     /// `org.apache.kafka.common.Uuid` in `kafka-clients-4.3.1.jar` prints for
     /// it, and every input Kafka refuses is refused.
-    #[test]
-    fn parse_and_render_match_kafka_uuid() {
-        /// An input, and Kafka's rendering of it or the error this parser gives.
-        struct Case {
-            input: String,
-            want: Result<&'static str, &'static str>,
-        }
-        let a20 = "A".repeat(20);
-        let a21 = "A".repeat(21);
-        let a22 = "A".repeat(22);
-        let cases: Vec<Case> = vec![
-            Case {
-                input: "AQIDBAUGBwgJCgsMDQ4PEA".into(),
-                want: Ok("AQIDBAUGBwgJCgsMDQ4PEA"),
-            },
-            Case {
-                input: "U-hCdTzaSPyFB3swwc7Qdw".into(),
-                want: Ok("U-hCdTzaSPyFB3swwc7Qdw"),
-            },
-            // The reserved ids parse, as they do in Kafka.
-            Case {
-                input: a22.clone(),
-                want: Ok("AAAAAAAAAAAAAAAAAAAAAA"),
-            },
-            Case {
-                input: "AAAAAAAAAAAAAAAAAAAAAQ".into(),
-                want: Ok("AAAAAAAAAAAAAAAAAAAAAQ"),
-            },
-            // Kafka ignores the four unused bits of the last character.
-            Case {
-                input: "_____________________x".into(),
-                want: Ok("_____________________w"),
-            },
-            Case {
-                input: "AAAAAAAAAAAAAAAAAAAAAB".into(),
-                want: Ok("AAAAAAAAAAAAAAAAAAAAAA"),
-            },
-            // And it accepts canonical padding.
-            Case {
-                input: format!("{a22}=="),
-                want: Ok("AAAAAAAAAAAAAAAAAAAAAA"),
-            },
-            Case {
-                input: "01020304-0506-0708-090a-0b0c0d0e0f10".into(),
-                want: Err(
-                    "Input string with prefix `01020304-0506-0708-090a-` is too long to be \
-                     decoded as a base64 UUID",
-                ),
-            },
-            Case {
-                input: format!("{}\u{1f600}", "A".repeat(23)),
-                want: Err(
-                    "Input string with prefix `AAAAAAAAAAAAAAAAAAAAAAA?` is too long to be \
-                     decoded as a base64 UUID",
-                ),
-            },
-            Case {
-                input: "A".repeat(24),
-                want: Err(
-                    "Input string `AAAAAAAAAAAAAAAAAAAAAAAA` decoded as 18 bytes, which is not \
-                     equal to the expected 16 bytes of a base64-encoded UUID",
-                ),
-            },
-            Case {
-                input: String::new(),
-                want: Err(
-                    "Input string `` decoded as 0 bytes, which is not equal to the expected 16 \
-                     bytes of a base64-encoded UUID",
-                ),
-            },
-            Case {
-                input: "AAAAAA".into(),
-                want: Err(
-                    "Input string `AAAAAA` decoded as 4 bytes, which is not equal to the \
-                     expected 16 bytes of a base64-encoded UUID",
-                ),
-            },
-            Case {
-                input: format!("{a20}=="),
-                want: Err(
-                    "Input string `AAAAAAAAAAAAAAAAAAAA==` decoded as 15 bytes, which is not \
-                     equal to the expected 16 bytes of a base64-encoded UUID",
-                ),
-            },
-            Case {
-                input: a21.clone(),
-                want: Err(
-                    "Input string `AAAAAAAAAAAAAAAAAAAAA` is not base64url: Invalid input length: 21",
-                ),
-            },
-            Case {
-                input: format!("{a20}+A"),
-                want: Err(
-                    "Input string `AAAAAAAAAAAAAAAAAAAA+A` is not base64url: Invalid symbol 43, \
-                     offset 20.",
-                ),
-            },
-            Case {
-                input: format!("{a22}="),
-                want: Err(
-                    "Input string `AAAAAAAAAAAAAAAAAAAAAA=` is not base64url: Invalid padding",
-                ),
-            },
-            Case {
-                input: format!("{a21}\u{e9}"),
-                want: Err(
-                    "Input string `AAAAAAAAAAAAAAAAAAAAAé` is not base64url: Invalid symbol \
-                     195, offset 21.",
-                ),
-            },
-        ];
-        for Case { input, want } in cases {
-            let want = want.map(str::to_owned).map_err(str::to_owned);
-            let as_cluster = input
-                .parse::<ClusterId>()
-                .map(|id| id.to_string())
-                .map_err(|e| e.to_string());
-            check!(as_cluster == want, "{input:?}");
-            let as_directory = input
-                .parse::<DirectoryId>()
-                .map(|id| id.to_string())
-                .map_err(|e| e.to_string());
-            check!(as_directory == want, "{input:?} as a directory id");
-        }
+    #[yare::parameterized(
+        kafka_cluster = { "AQIDBAUGBwgJCgsMDQ4PEA", Ok("AQIDBAUGBwgJCgsMDQ4PEA") },
+        kafka_directory = { "U-hCdTzaSPyFB3swwc7Qdw", Ok("U-hCdTzaSPyFB3swwc7Qdw") },
+        reserved_zero = { "AAAAAAAAAAAAAAAAAAAAAA", Ok("AAAAAAAAAAAAAAAAAAAAAA") },
+        reserved_one = { "AAAAAAAAAAAAAAAAAAAAAQ", Ok("AAAAAAAAAAAAAAAAAAAAAQ") },
+        ignored_low_bits = { "_____________________x", Ok("_____________________w") },
+        rounded_low_bits = { "AAAAAAAAAAAAAAAAAAAAAB", Ok("AAAAAAAAAAAAAAAAAAAAAA") },
+        padded = { "AAAAAAAAAAAAAAAAAAAAAA==", Ok("AAAAAAAAAAAAAAAAAAAAAA") },
+        hyphenated_is_too_long = {
+            "01020304-0506-0708-090a-0b0c0d0e0f10",
+            Err(
+                "Input string with prefix `01020304-0506-0708-090a-` is too long to be decoded as a base64 UUID",
+            ),
+        },
+        unicode_too_long = {
+            "AAAAAAAAAAAAAAAAAAAAAAA😀",
+            Err(
+                "Input string with prefix `AAAAAAAAAAAAAAAAAAAAAAA?` is too long to be decoded as a base64 UUID",
+            ),
+        },
+        twenty_four_chars = {
+            "AAAAAAAAAAAAAAAAAAAAAAAA",
+            Err(
+                "Input string `AAAAAAAAAAAAAAAAAAAAAAAA` decoded as 18 bytes, which is not equal to the expected 16 bytes of a base64-encoded UUID",
+            ),
+        },
+        empty = {
+            "",
+            Err(
+                "Input string `` decoded as 0 bytes, which is not equal to the expected 16 bytes of a base64-encoded UUID",
+            ),
+        },
+        short = {
+            "AAAAAA",
+            Err(
+                "Input string `AAAAAA` decoded as 4 bytes, which is not equal to the expected 16 bytes of a base64-encoded UUID",
+            ),
+        },
+        bad_padding_length = {
+            "AAAAAAAAAAAAAAAAAAAA==",
+            Err(
+                "Input string `AAAAAAAAAAAAAAAAAAAA==` decoded as 15 bytes, which is not equal to the expected 16 bytes of a base64-encoded UUID",
+            ),
+        },
+        twenty_one_chars = {
+            "AAAAAAAAAAAAAAAAAAAAA",
+            Err("Input string `AAAAAAAAAAAAAAAAAAAAA` is not base64url: Invalid input length: 21"),
+        },
+        invalid_plus = {
+            "AAAAAAAAAAAAAAAAAAAA+A",
+            Err("Input string `AAAAAAAAAAAAAAAAAAAA+A` is not base64url: Invalid symbol 43, offset 20."),
+        },
+        bad_padding = {
+            "AAAAAAAAAAAAAAAAAAAAAA=",
+            Err("Input string `AAAAAAAAAAAAAAAAAAAAAA=` is not base64url: Invalid padding"),
+        },
+        non_ascii = {
+            "AAAAAAAAAAAAAAAAAAAAAé",
+            Err("Input string `AAAAAAAAAAAAAAAAAAAAAé` is not base64url: Invalid symbol 195, offset 21."),
+        },
+    )]
+    fn parse_and_render_match_kafka_uuid(input: &str, want: Result<&str, &str>) {
+        let want = want.map(str::to_owned).map_err(str::to_owned);
+        let as_cluster = input
+            .parse::<ClusterId>()
+            .map(|id| id.to_string())
+            .map_err(|e| e.to_string());
+        assert2::check!(as_cluster == want, "{input:?}");
+        let as_directory = input
+            .parse::<DirectoryId>()
+            .map(|id| id.to_string())
+            .map_err(|e| e.to_string());
+        assert2::check!(as_directory == want, "{input:?} as a directory id");
     }
 
     /// The command line also takes the hyphenated form, and only a string of
     /// exactly that shape is read as hex.
-    #[test]
-    fn the_command_line_accepts_both_forms() {
+    #[yare::parameterized(
+        kafka_form = { "AQIDBAUGBwgJCgsMDQ4PEA" },
+        lowercase_hex = { "01020304-0506-0708-090a-0b0c0d0e0f10" },
+        uppercase_hex = { "01020304-0506-0708-090A-0B0C0D0E0F10" },
+    )]
+    fn the_command_line_accepts_both_forms(input: &str) {
         let id = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
-        for input in [
-            "AQIDBAUGBwgJCgsMDQ4PEA",
-            "01020304-0506-0708-090a-0b0c0d0e0f10",
-            "01020304-0506-0708-090A-0B0C0D0E0F10",
-        ] {
-            check!(ClusterId::parse_cli(input) == Ok(ClusterId(id)), "{input}");
-            check!(
-                DirectoryId::parse_cli(input) == Ok(DirectoryId(id)),
-                "{input}"
-            );
-        }
+        assert2::check!(ClusterId::parse_cli(input) == Ok(ClusterId(id)), "{input}");
+        assert2::check!(
+            DirectoryId::parse_cli(input) == Ok(DirectoryId(id)),
+            "{input}"
+        );
+    }
+
+    #[test]
+    fn the_command_line_refuses_malformed_hex_and_other_uuid_spellings() {
         let not_hex = "01020304-0506-0708-090a-0b0c0d0e0f1g";
         check!(matches!(
             ClusterId::parse_cli(not_hex),
@@ -467,25 +418,27 @@ mod tests {
     }
 
     /// The reservation and dash predicates agree with Kafka's definitions.
+    #[yare::parameterized(
+        zero = { Uuid::from_u64_pair(0, 0), true, true },
+        one = { Uuid::from_u64_pair(0, 1), true, true },
+        two = { Uuid::from_u64_pair(0, 2), false, true },
+        ninety_nine = { Uuid::from_u64_pair(0, 99), false, true },
+        one_hundred = { Uuid::from_u64_pair(0, 100), false, false },
+        low_bits_max = { Uuid::from_u64_pair(0, u64::MAX), false, true },
+        high_bits_one = { Uuid::from_u64_pair(1, 0), false, false },
+        high_and_low_one = { Uuid::from_u64_pair(1, 1), false, false },
+    )]
+    fn reservations_match_kafka(id: Uuid, reserved: bool, reserved_directory: bool) {
+        assert2::check!(
+            (is_reserved(id), is_reserved_directory_id(id)) == (reserved, reserved_directory),
+            "{id}"
+        );
+    }
+
+    /// Exhaustively checks each possible leading byte; this is a property
+    /// sweep over the byte domain, rather than a finite set of independent ids.
     #[test]
-    fn reservations_and_the_dash_check_match_kafka() {
-        // (id, Uuid.RESERVED.contains, DirectoryId.reserved)
-        let cases = [
-            (Uuid::from_u64_pair(0, 0), true, true),
-            (Uuid::from_u64_pair(0, 1), true, true),
-            (Uuid::from_u64_pair(0, 2), false, true),
-            (Uuid::from_u64_pair(0, 99), false, true),
-            (Uuid::from_u64_pair(0, 100), false, false),
-            (Uuid::from_u64_pair(0, u64::MAX), false, true),
-            (Uuid::from_u64_pair(1, 0), false, false),
-            (Uuid::from_u64_pair(1, 1), false, false),
-        ];
-        for (id, reserved, reserved_directory) in cases {
-            check!(
-                (is_reserved(id), is_reserved_directory_id(id)) == (reserved, reserved_directory),
-                "{id}"
-            );
-        }
+    fn dash_check_matches_kafka_for_every_first_byte() {
         for first_byte in 0..=u8::MAX {
             let mut bytes = [0u8; 16];
             bytes[0] = first_byte;

@@ -93,8 +93,7 @@ fn respond(
 ) -> Result<Bytes, BrokerError> {
     let mut cur: &[u8] = req_bytes;
     let topic_partitions = GetReplicaLogInfoRequest::decode(&mut cur, version)
-        .map(|req| req.topic_partitions)
-        .unwrap_or_default();
+        .map_or_default(|req| req.topic_partitions);
     let topic_partition_log_info_list = topic_partitions
         .into_iter()
         .map(|tp| TopicPartitionLogInfo {
@@ -250,12 +249,7 @@ mod tests {
     #[test]
     fn cluster_action_denied_yields_cluster_authorization_failed() {
         let EmptyAclImage { authorizer, image } = empty_acl_image();
-        krabka_macros::request_test_identity! {
-            bind(principal, peer, ctx);
-            user ["ANONYMOUS"];
-            client ["client-a"];
-            connection ["connection-a"];
-        };
+        anonymous_request_identity!(principal, peer, ctx, "client-a", "connection-a",);
 
         assert!(cluster_action_denied(&authorizer, &image, &ctx));
 

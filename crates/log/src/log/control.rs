@@ -256,6 +256,7 @@ mod tests {
             producer_snapshot::ProducerSnapshotEntry,
             segment::Segment,
             test_support::open_log,
+            txn_index::AbortedTxn,
         },
         assert2::check,
         bytes::Bytes,
@@ -599,33 +600,39 @@ mod tests {
     /// The log routes a control batch by its control-record type, not by its
     /// producer id, so the second case carries the open transaction's
     /// producer id and still closes nothing.
+    #[yare::parameterized(
+        no_producer_id = { "no producer id", barrier_marker().epoch(7).call() },
+        with_producer_id = {
+            "with a producer id",
+            barrier_marker_from_producer()
+                .marker(BarrierMarkerSetup {
+                    epoch: BarrierEpoch(7),
+                    ..Default::default()
+                })
+                .call(),
+        },
+    )]
+    fn a_barrier_marker_leaves_an_open_transaction_untouched(
+        name: &'static str,
+        barrier: RecordBatch,
+    ) {
+        let mut barrier = barrier;
+        let TempLog { dir: _dir, mut log } = stamped_test_log(40, 1);
+
+        append_open_barrier_transaction(&mut log);
+        let before = partition_state(&log, &[1000, -1]);
+
+        log.append(&mut barrier).unwrap(); // offset 2
+
+        check!(partition_state(&log, &[1000, -1]) == before, "case {name}");
+        // The marker still takes an offset of its own, and it carries no
+        // stamp, because a control batch is never stamped.
+        check!(log.log_end_offset() == Offset(3), "case {name}");
+        check!(log.stamp_for_offset(Offset(2)) == None, "case {name}");
+    }
+
     #[test]
-    fn a_barrier_marker_leaves_an_open_transaction_untouched() {
-        for (name, mut barrier) in [
-            ("no producer id", barrier_marker().epoch(7).call()),
-            (
-                "with a producer id",
-                barrier_marker_from_producer()
-                    .marker(BarrierMarkerSetup {
-                        epoch: BarrierEpoch(7),
-                        ..Default::default()
-                    })
-                    .call(),
-            ),
-        ] {
-            let TempLog { dir: _dir, mut log } = stamped_test_log(40, 1);
-
-            append_open_barrier_transaction(&mut log);
-            let before = partition_state(&log, &[1000, -1]);
-
-            log.append(&mut barrier).unwrap(); // offset 2
-
-            check!(partition_state(&log, &[1000, -1]) == before, "case {name}");
-            // The marker still takes an offset of its own, and it carries no
-            // stamp, because a control batch is never stamped.
-            check!(log.log_end_offset() == Offset(3), "case {name}");
-            check!(log.stamp_for_offset(Offset(2)) == None, "case {name}");
-        }
+    fn barrier_marker_identity_fields_write_no_producer_tail() {
         // The marker's identity fields give no producer tail, so the append
         // writes no producer entry for it.
         check!(Log::data_producer_tail(ProducerId(-1), -1, 0, Offset(2)).unwrap() == None);
@@ -661,8 +668,27 @@ mod tests {
 
     /// A barrier marker between a transaction's data and its end marker does
     /// not disturb what the end marker does.
-    #[test]
-    fn a_barrier_marker_does_not_disturb_a_following_end_marker() {
+    #[yare::parameterized(
+        commit = {
+            "commit",
+            commit_marker(1000, 2),
+            Vec::new(),
+            vec![Some(40), Some(40), None, None]
+        },
+        abort = {
+            "abort",
+            abort_marker(1000, 2),
+            vec![crate::test_support::aborted_txn().call()],
+            vec![None, None, None, None]
+        },
+    )]
+    fn a_barrier_marker_does_not_disturb_a_following_end_marker(
+        name: &'static str,
+        marker: RecordBatch,
+        want_aborted: Vec<AbortedTxn>,
+        want_stamps: Vec<Option<u64>>,
+    ) {
+        let mut marker = marker;
         let committed = ProducerSnapshotEntry {
             producer_id: ProducerId(1000),
             producer_epoch: 2,
@@ -673,52 +699,36 @@ mod tests {
             coordinator_epoch: 17,
             current_txn_first_offset: None,
         };
-        for (name, mut marker, want_aborted, want_stamps) in [
-            ("commit", commit_marker(1000, 2), Vec::new(), vec![
-                Some(40),
-                Some(40),
-                None,
-                None,
-            ]),
-            (
-                "abort",
-                abort_marker(1000, 2),
-                vec![crate::test_support::aborted_txn().call()],
-                vec![None, None, None, None],
-            ),
-        ] {
-            let TempLog { dir: _dir, mut log } = stamped_test_log(40, 1);
+        let TempLog { dir: _dir, mut log } = stamped_test_log(40, 1);
 
-            append_open_barrier_transaction(&mut log);
-            log.append(&mut barrier_marker().epoch(9).call()).unwrap(); // offset 2
-            check!(
-                log.lso() == Offset(0),
-                "case {name}: the barrier holds the LSO"
-            );
-            log.append(&mut marker).unwrap(); // offset 3
-            // A high watermark past the marker releases the transaction.
-            log.release_replicated_transactions(Offset(4));
+        append_open_barrier_transaction(&mut log);
+        log.append(&mut barrier_marker().epoch(9).call()).unwrap(); // offset 2
+        check!(
+            log.lso() == Offset(0),
+            "case {name}: the barrier holds the LSO"
+        );
+        log.append(&mut marker).unwrap(); // offset 3
+        // A high watermark past the marker releases the transaction.
+        log.release_replicated_transactions(Offset(4));
 
-            check!(
-                partition_state(&log, &[1000])
-                    == PartitionState {
-                        lso: Offset(4),
-                        transactions: vec![ProducerTransaction {
-                            producer_id: 1000,
-                            fields: TransactionFields {
-                                coordinator_epoch: 17,
-                                first_offset: None,
-                            },
-                        }],
-                        aborted: want_aborted,
-                        producers: vec![committed],
-                    },
-                "case {name}"
-            );
-            let stamps: Vec<Option<u64>> =
-                (0..4).map(|o| log.stamp_for_offset(Offset(o))).collect();
-            check!(stamps == want_stamps, "case {name}");
-        }
+        check!(
+            partition_state(&log, &[1000])
+                == PartitionState {
+                    lso: Offset(4),
+                    transactions: vec![ProducerTransaction {
+                        producer_id: 1000,
+                        fields: TransactionFields {
+                            coordinator_epoch: 17,
+                            first_offset: None,
+                        },
+                    }],
+                    aborted: want_aborted,
+                    producers: vec![committed],
+                },
+            "case {name}"
+        );
+        let stamps: Vec<Option<u64>> = (0..4).map(|o| log.stamp_for_offset(Offset(o))).collect();
+        check!(stamps == want_stamps, "case {name}");
     }
 
     /// Recovery mirrors the append path. A reopened log rebuilds the same

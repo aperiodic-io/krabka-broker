@@ -7,21 +7,15 @@
 //! live here so each scenario module holds only its own assertions.
 
 use {
-    krabka_broker::{Broker, BrokerConfig},
+    crate::support::share::broker_config,
+    assert2::assert,
+    krabka_broker::Broker,
     krabka_client_core::Client,
     krabka_protocol::owned::{
         share_group_describe_request::ShareGroupDescribeRequest,
         share_group_heartbeat_request::ShareGroupHeartbeatRequest,
     },
 };
-
-const SHARE_STATE_PARTITIONS: i32 = 1;
-
-pub fn broker_config(log_dir: std::path::PathBuf) -> BrokerConfig {
-    let mut config = BrokerConfig::for_tests(log_dir);
-    config.share_coordinator.state_topic_num_partitions = SHARE_STATE_PARTITIONS;
-    config
-}
 
 /// Starts a broker on `log_dir` whose group and share coordinators serve
 /// requests.
@@ -65,6 +59,25 @@ pub fn heartbeat(group: &str, member_id: &str, epoch: i32) -> ShareGroupHeartbea
         member_epoch: epoch,
         ..Default::default()
     }
+}
+
+pub async fn join_share_group(
+    client: &Client,
+    group: &str,
+    member_id: &str,
+    topic: &str,
+) -> String {
+    let mut request = heartbeat(group, member_id, 0);
+    request.subscribed_topic_names = Some(vec![topic.into()]);
+    let response = client.send(request).await.unwrap();
+    assert!(
+        response.error_code == 0,
+        "join failed: {:?}",
+        response.error_code
+    );
+    response
+        .member_id
+        .expect("join response includes a member id")
 }
 
 pub fn total_assigned(

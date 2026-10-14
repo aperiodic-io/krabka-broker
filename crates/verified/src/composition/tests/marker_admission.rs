@@ -16,7 +16,7 @@ fn check(
     span: (i64, i32),
     others: &[i64],
     caps: (i64, i64),
-) {
+) -> (i64, i64) {
     let admitted = request.producer_id >= 0
         && request.producer_epoch >= current.producer_epoch
         && request.coordinator_epoch >= current.coordinator_epoch
@@ -54,6 +54,7 @@ fn check(
         (actual.0 == Decision::AppendAndPublishOffsets)
             == (admitted && request.is_commit && request.is_offsets_partition)
     );
+    (actual.1, actual.2)
 }
 
 #[test]
@@ -103,7 +104,7 @@ fn final_epoch_exception_and_maximum_offset_preserve_progress() {
         is_commit: false,
         is_offsets_partition: true,
     };
-    check(
+    let (before, after) = check(
         2,
         request,
         current,
@@ -112,16 +113,7 @@ fn final_epoch_exception_and_maximum_offset_preserve_progress() {
         &[],
         (i64::MAX, i64::MAX),
     );
-    let result = admitted_marker_bounds_committed_fetch(
-        2,
-        request,
-        current,
-        i64::MAX - 2,
-        (i64::MAX - 1, 0),
-        &[],
-        (i64::MAX, i64::MAX),
-    );
-    assert!(result.2 == i64::MAX && result.2 > result.1);
+    assert!(after == i64::MAX && after > before);
 }
 
 proptest! {

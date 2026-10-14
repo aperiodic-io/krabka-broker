@@ -62,8 +62,20 @@ proptest! {
     }
 }
 
-#[test]
-fn visibility_is_exclusive_and_does_not_assume_monotone_timestamps() {
+#[yare::parameterized(
+    lower_start_visible = { &[15][..], (-1, 1, 250), Some((12, 300)) },
+    start_at_first_match = { &[12][..], (-1, 1, 250), None },
+    timestamp_too_high = { &[15][..], (-1, 1, 350), None },
+    read_uncommitted_uses_hwm = { &[15][..], (-1, 0, 350), Some((17, 400)) },
+    follower_uses_hwm = { &[15][..], (-2, 1, 350), Some((17, 400)) },
+    no_pending_start = { &[][..], (-1, 1, 350), Some((17, 400)) },
+    no_matching_timestamp = { &[][..], (-1, 1, 500), None },
+)]
+fn visibility_is_exclusive_and_does_not_assume_monotone_timestamps(
+    starts: &[i64],
+    request: (i32, i8, i64),
+    expected: Option<(i64, i64)>,
+) {
     let offsets = [0, 2, 5, 7, 9];
     let timestamps = [100, 300, 200, 400, 300];
     let entries = [
@@ -74,71 +86,63 @@ fn visibility_is_exclusive_and_does_not_assume_monotone_timestamps() {
         IndexEntry::new(400, 9),
     ];
     let frontiers = (10, 20, 20);
-    for (starts, request, expected) in [
-        (&[15][..], (-1, 1, 250), Some((12, 300))),
-        (&[12][..], (-1, 1, 250), None),
-        (&[15][..], (-1, 1, 350), None),
-        (&[15][..], (-1, 0, 350), Some((17, 400))),
-        (&[15][..], (-2, 1, 350), Some((17, 400))),
-        (&[][..], (-1, 1, 350), Some((17, 400))),
-        (&[][..], (-1, 1, 500), None),
-    ] {
-        let result = timestamp_list_offsets_finds_first_visible(
-            &entries,
+    let result = timestamp_list_offsets_finds_first_visible(
+        &entries,
+        &offsets,
+        &timestamps,
+        starts,
+        frontiers,
+        request,
+        -1,
+    );
+    let expected = expected.map_or(
+        ListOffsetsSelectionDecision::Unknown,
+        |(offset, timestamp)| ListOffsetsSelectionDecision::Resolved {
+            offset,
+            timestamp,
+            leader_epoch: -1,
+        },
+    );
+    assert2::assert!(result == expected);
+    assert2::assert!(
+        result == visible_oracle(&offsets, &timestamps, starts, frontiers, request, -1)
+    );
+}
+
+#[yare::parameterized(
+    empty = { 0, vec![], vec![], vec![], 0, 0, ListOffsetsSelectionDecision::Unknown },
+    max_offset = {
+        i64::MAX - 1,
+        vec![0],
+        vec![i64::MAX],
+        vec![],
+        i64::MAX,
+        i64::MAX,
+        ListOffsetsSelectionDecision::Resolved {
+            offset: i64::MAX - 1,
+            timestamp: i64::MAX,
+            leader_epoch: -1,
+        },
+    },
+)]
+fn empty_indexes_and_maximum_offsets_keep_exclusive_visibility(
+    base: i64,
+    offsets: Vec<u32>,
+    timestamps: Vec<i64>,
+    starts: Vec<i64>,
+    end: i64,
+    hw: i64,
+    expected: ListOffsetsSelectionDecision,
+) {
+    assert2::assert!(
+        timestamp_list_offsets_finds_first_visible(
+            &[],
             &offsets,
             &timestamps,
-            starts,
-            frontiers,
-            request,
+            &starts,
+            (base, end, hw),
+            (-1, 1, i64::MAX),
             -1,
-        );
-        let expected = expected.map_or(
-            ListOffsetsSelectionDecision::Unknown,
-            |(offset, timestamp)| ListOffsetsSelectionDecision::Resolved {
-                offset,
-                timestamp,
-                leader_epoch: -1,
-            },
-        );
-        assert2::assert!(result == expected);
-        assert2::assert!(
-            result == visible_oracle(&offsets, &timestamps, starts, frontiers, request, -1)
-        );
-    }
-    for (base, offsets, timestamps, starts, end, hw, expected) in [
-        (
-            0,
-            vec![],
-            vec![],
-            vec![],
-            0,
-            0,
-            ListOffsetsSelectionDecision::Unknown,
-        ),
-        (
-            i64::MAX - 1,
-            vec![0],
-            vec![i64::MAX],
-            vec![],
-            i64::MAX,
-            i64::MAX,
-            ListOffsetsSelectionDecision::Resolved {
-                offset: i64::MAX - 1,
-                timestamp: i64::MAX,
-                leader_epoch: -1,
-            },
-        ),
-    ] {
-        assert2::assert!(
-            timestamp_list_offsets_finds_first_visible(
-                &[],
-                &offsets,
-                &timestamps,
-                &starts,
-                (base, end, hw),
-                (-1, 1, i64::MAX),
-                -1
-            ) == expected
-        );
-    }
+        ) == expected
+    );
 }

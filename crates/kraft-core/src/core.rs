@@ -294,58 +294,56 @@ mod tests {
         krabka_units::prelude::{millis, secs},
     };
 
-    #[test]
-    fn election_deadline_is_the_configured_extent_plus_integer_jitter() {
+    #[yare::parameterized(
+        whole_seconds = { secs(1), 1000u64 },
+        subsecond = { millis(250), 250 },
+    )]
+    fn election_deadline_is_the_configured_extent_plus_integer_jitter(timeout: Time, base_ms: u64) {
         // The constructor takes an extent, but the armed deadline must land on
         // exactly `now + base_ms + jitter_ms` — the same integer timeline the
         // verified jitter kernel and `SimInstant` are defined over. A rounding
         // shift here would change which node wins a deterministic election.
-        for (name, timeout, base_ms) in [
-            ("whole seconds", secs(1), 1000u64),
-            ("sub-second extent", millis(250), 250),
-        ] {
-            let mut m = QuorumStateMachine::new(
-                NodeId(1),
-                QuorumState::bootstrap(
-                    uuid::Uuid::nil(),
-                    voters(&[NodeId(1), NodeId(2), NodeId(3)]),
-                ),
-                timeout,
-            );
-            let log = FakeLog {
-                end: 5,
-                last_epoch: 1,
-            };
-            let actions = m.on_event(Event::ElectionTimeout, &log, SimInstant(2000));
-            let armed = actions.iter().find_map(|a| match a {
-                Action::ResetTimer {
-                    kind: TimerKind::Election,
-                    deadline,
-                } => Some(*deadline),
-                _ => None,
-            });
-            let expected = SimInstant(2000 + base_ms + election_jitter_ms(NodeId(1), 0, base_ms));
-            check!(armed == Some(expected), "case {name}");
-        }
+        let mut m = QuorumStateMachine::new(
+            NodeId(1),
+            QuorumState::bootstrap(
+                uuid::Uuid::nil(),
+                voters(&[NodeId(1), NodeId(2), NodeId(3)]),
+            ),
+            timeout,
+        );
+        let log = FakeLog {
+            end: 5,
+            last_epoch: 1,
+        };
+        let actions = m.on_event(Event::ElectionTimeout, &log, SimInstant(2000));
+        let armed = actions.iter().find_map(|a| match a {
+            Action::ResetTimer {
+                kind: TimerKind::Election,
+                deadline,
+            } => Some(*deadline),
+            _ => None,
+        });
+        let expected = SimInstant(2000 + base_ms + election_jitter_ms(NodeId(1), 0, base_ms));
+        check!(armed == Some(expected));
     }
 
-    #[test]
-    fn election_jitter_is_deterministic_hash_in_range() {
+    #[yare::parameterized(
+        first_node = { NodeId(1), 0, 1000, 485 },
+        different_node = { NodeId(2), 0, 1000, 354 },
+        next_epoch = { NodeId(1), 1, 1000, 446 },
+        zero_base = { NodeId(1), 0, 0, 0 },
+    )]
+    fn election_jitter_is_deterministic_hash_in_range(
+        node: NodeId,
+        epoch: Epoch,
+        base_ms: u64,
+        expected: u64,
+    ) {
         // Pin the exact deterministic jitter so a constant-return regression
         // (no jitter at all → split-vote livelock) is caught. The values are the
         // integer hash of (node, epoch) mod base_ms; they are non-zero and
         // node-dependent, so both "always 0" and "always 1" are distinguished.
-        for (name, node, epoch, base_ms, expected) in [
-            ("first node", NodeId(1), 0, 1000, 485),
-            ("different node", NodeId(2), 0, 1000, 354),
-            ("next epoch", NodeId(1), 1, 1000, 446),
-            ("zero base", NodeId(1), 0, 0, 0),
-        ] {
-            check!(
-                election_jitter_ms(node, epoch, base_ms) == expected,
-                "case {name}"
-            );
-        }
+        check!(election_jitter_ms(node, epoch, base_ms) == expected);
     }
 
     #[test]

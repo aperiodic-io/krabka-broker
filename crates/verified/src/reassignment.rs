@@ -123,41 +123,52 @@ mod tests {
         assert2::assert!(reassignment_action(true, true, &[false]) == WaitForLeader);
     }
 
-    #[test]
-    fn planning_kernels_cover_set_algebra_and_fences() {
-        assert2::assert!(
-            reassignment_set_membership(false, false)
-                == ReassignmentSetMembership {
-                    in_union: false,
-                    adding: false,
-                    removing: false,
-                }
-        );
-        assert2::assert!(reassignment_set_membership(true, false).removing);
-        assert2::assert!(reassignment_set_membership(true, false).in_union);
-        assert2::assert!(reassignment_set_membership(false, true).adding);
-        assert2::assert!(reassignment_set_membership(false, true).in_union);
-        assert2::assert!(reassignment_set_membership(true, true).in_union);
+    #[yare::parameterized(
+        neither = {
+            false,
+            false,
+            ReassignmentSetMembership { in_union: false, adding: false, removing: false }
+        },
+        current_only = {
+            true,
+            false,
+            ReassignmentSetMembership { in_union: true, adding: false, removing: true }
+        },
+        target_only = {
+            false,
+            true,
+            ReassignmentSetMembership { in_union: true, adding: true, removing: false }
+        },
+        both = {
+            true,
+            true,
+            ReassignmentSetMembership { in_union: true, adding: false, removing: false }
+        },
+    )]
+    fn planning_kernels_cover_set_algebra_and_fences(
+        in_current: bool,
+        in_target: bool,
+        expected: ReassignmentSetMembership,
+    ) {
+        assert2::assert!(reassignment_set_membership(in_current, in_target) == expected);
+    }
 
-        assert2::assert!(reassignment_plan_admission(
-            (false, false, false),
-            (true, true),
-            (true, true),
-        ));
-        assert2::assert!(reassignment_plan_admission(
-            (true, true, true),
-            (false, false),
-            (true, true),
-        ));
-        for denied in [
-            reassignment_plan_admission((false, false, false), (false, true), (true, true)),
-            reassignment_plan_admission((false, false, false), (true, false), (true, true)),
-            reassignment_plan_admission((true, false, true), (false, false), (true, true)),
-            reassignment_plan_admission((true, true, false), (false, false), (true, true)),
-            reassignment_plan_admission((false, false, false), (true, true), (false, true)),
-            reassignment_plan_admission((false, false, false), (true, true), (true, false)),
-        ] {
-            assert2::assert!(!denied);
-        }
+    #[yare::parameterized(
+        start_admitted = { (false, false, false), (true, true), (true, true), true },
+        cancel_admitted = { (true, true, true), (false, false), (true, true), true },
+        missing_target = { (false, false, false), (false, true), (true, true), false },
+        invalid_replication_factor = { (false, false, false), (true, false), (true, true), false },
+        cancel_not_approved = { (true, false, true), (false, false), (true, true), false },
+        cancel_not_in_progress = { (true, true, false), (false, false), (true, true), false },
+        ineligible_leader = { (false, false, false), (true, true), (false, true), false },
+        unavailable_epoch = { (false, false, false), (true, true), (true, false), false },
+    )]
+    fn planning_admission_requires_every_fence(
+        mode: (bool, bool, bool),
+        start: (bool, bool),
+        readiness: (bool, bool),
+        expected: bool,
+    ) {
+        assert2::assert!(reassignment_plan_admission(mode, start, readiness) == expected);
     }
 }

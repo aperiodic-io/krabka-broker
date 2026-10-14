@@ -291,8 +291,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn write_all_and_vectored_handle_interrupted() {
+    #[yare::parameterized(
+        interrupted = { std::io::ErrorKind::Interrupted, true },
+        permission_denied = { std::io::ErrorKind::PermissionDenied, false },
+    )]
+    fn write_all_and_vectored_handle_interrupted(error_kind: std::io::ErrorKind, succeeds: bool) {
         use std::io::ErrorKind;
 
         #[derive(Debug)]
@@ -331,18 +334,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let file = File::create(temp.path().join("test")).unwrap();
 
-        for (error, succeeds) in [
-            (ErrorKind::Interrupted, true),       // Interrupted is retried.
-            (ErrorKind::PermissionDenied, false), // Other errors propagate.
-        ] {
-            let io = MockIo::new(error);
-            assert2::check!(write_all(&io, &file, b"hello").is_ok() == succeeds);
+        let io = MockIo::new(error_kind);
+        assert2::check!(write_all(&io, &file, b"hello").is_ok() == succeeds);
 
-            let io = MockIo::new(error);
-            let slice = *b"hi";
-            let mut slices = [IoSlice::new(&slice)];
-            assert2::check!(write_all_vectored(&io, &file, &mut slices).is_ok() == succeeds);
-        }
+        let io = MockIo::new(error_kind);
+        let slice = *b"hi";
+        let mut slices = [IoSlice::new(&slice)];
+        assert2::check!(write_all_vectored(&io, &file, &mut slices).is_ok() == succeeds);
     }
 
     /// The readahead span is the read's window and up to one more window

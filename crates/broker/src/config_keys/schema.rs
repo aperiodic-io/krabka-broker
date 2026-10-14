@@ -60,76 +60,61 @@ mod tests {
         super::{
             super::{
                 log_config::apply_to_log_config,
+                test_support::{TopicOverride, topic_config_record},
                 validation::{is_recognized, validate_topic_config},
             },
             *,
         },
         assert2::{assert, check},
         krabka_log::LogConfig,
+        krabka_metadata::{MetadataImage, MetadataRecord},
+        uuid::Uuid,
     };
 
-    /// A config override of a topic.
-    #[derive(Debug)]
-    struct TopicOverride<'a> {
-        key: &'a str,
-        value: &'a str,
-    }
-
     /// A metadata image whose topic `t` carries exactly `overrides`.
-    fn image_with_topic_config(overrides: &[TopicOverride<'_>]) -> krabka_metadata::MetadataImage {
-        use {
-            krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
-            uuid::Uuid,
-        };
-
+    fn image_with_topic_config(overrides: &[TopicOverride<'_>]) -> MetadataImage {
         let mut image = MetadataImage::new(Uuid::nil());
-        image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
-            topic: "t".into(),
-            overrides: overrides
-                .iter()
-                .map(|TopicOverride { key, value }| ((*key).to_string(), (*value).to_string()))
-                .collect(),
-        }));
+        image.apply(&MetadataRecord::V1TopicConfig(topic_config_record(
+            overrides,
+        )));
         image
     }
 
-    #[test]
-    fn validate_schema_validation_booleans_accept_bools_only() {
-        let cases = [
-            (SCHEMA_VALIDATION_KEY, "true", true),
-            (SCHEMA_VALIDATION_KEY, "false", true),
-            (SCHEMA_VALIDATION_KEY, "yes", false),
-            (SCHEMA_VALIDATION_KEY, "True", true),
-            (SCHEMA_VALIDATION_KEY, "", false),
-            (SCHEMA_VALIDATION_VALUE, "true", true),
-            (SCHEMA_VALIDATION_VALUE, "false", true),
-            (SCHEMA_VALIDATION_VALUE, "1", false),
-            (SCHEMA_VALIDATION_VALUE, "", false),
-        ];
-        for (key, value, want_ok) in cases {
-            check!(
-                validate_topic_config(key, value).is_ok() == want_ok,
-                "{key}={value}"
-            );
-        }
+    #[yare::parameterized(
+        key_true = { SCHEMA_VALIDATION_KEY, "true", true },
+        key_false = { SCHEMA_VALIDATION_KEY, "false", true },
+        key_yes = { SCHEMA_VALIDATION_KEY, "yes", false },
+        key_uppercase_true = { SCHEMA_VALIDATION_KEY, "True", true },
+        key_empty = { SCHEMA_VALIDATION_KEY, "", false },
+        value_true = { SCHEMA_VALIDATION_VALUE, "true", true },
+        value_false = { SCHEMA_VALIDATION_VALUE, "false", true },
+        value_numeric_one = { SCHEMA_VALIDATION_VALUE, "1", false },
+        value_empty = { SCHEMA_VALIDATION_VALUE, "", false },
+    )]
+    fn validate_schema_validation_booleans_accept_bools_only(
+        key: &str,
+        value: &str,
+        want_ok: bool,
+    ) {
+        check!(
+            validate_topic_config(key, value).is_ok() == want_ok,
+            "{key}={value}"
+        );
     }
 
-    #[test]
-    fn validate_schema_validation_mode_accepts_the_two_modes_only() {
-        let cases = [
-            (SCHEMA_VALIDATION_MODE_ID, true),
-            (SCHEMA_VALIDATION_MODE_FULL, true),
-            ("Full", false),
-            (" full ", true),
-            ("body", false),
-            ("", false),
-        ];
-        for (value, want_ok) in cases {
-            check!(
-                validate_topic_config(SCHEMA_VALIDATION_MODE, value).is_ok() == want_ok,
-                "schema.validation.mode={value}"
-            );
-        }
+    #[yare::parameterized(
+        id = { SCHEMA_VALIDATION_MODE_ID, true },
+        full = { SCHEMA_VALIDATION_MODE_FULL, true },
+        uppercase = { "Full", false },
+        trimmed_full = { " full ", true },
+        body = { "body", false },
+        empty = { "", false },
+    )]
+    fn validate_schema_validation_mode_accepts_the_two_modes_only(value: &str, want_ok: bool) {
+        check!(
+            validate_topic_config(SCHEMA_VALIDATION_MODE, value).is_ok() == want_ok,
+            "schema.validation.mode={value}"
+        );
     }
 
     #[test]
@@ -299,49 +284,56 @@ mod tests {
         assert!(resolve_schema_validation(&image, "t").is_none());
     }
 
-    #[test]
-    fn corrupt_schema_validation_settings_resolve_to_their_defaults() {
+    /// A corrupt boolean resolves to `false`, which leaves no gate.
+    #[yare::parameterized(
+        yes = { "yes" },
+        numeric_one = { "1" },
+        empty = { "" },
+    )]
+    fn corrupt_schema_validation_boolean_resolves_to_false(value: &str) {
+        let image = image_with_topic_config(&[
+            TopicOverride {
+                key: SCHEMA_VALIDATION_KEY,
+                value,
+            },
+            TopicOverride {
+                key: SCHEMA_VALIDATION_VALUE,
+                value,
+            },
+        ]);
+        check!(
+            resolve_schema_validation(&image, "t").is_none(),
+            "schema.validation.key=schema.validation.value={value}"
+        );
+    }
+
+    /// A corrupt mode resolves to `id`, and the gate stays on.
+    #[yare::parameterized(
+        uppercase_full = { "Full" },
+        body = { "body" },
+        empty = { "" },
+    )]
+    fn corrupt_schema_validation_mode_resolves_to_id(value: &str) {
         use crate::schema_validation::{SchemaGate, ValidationMode};
 
-        // A corrupt boolean resolves to `false`, which leaves no gate.
-        for value in ["yes", "1", ""] {
-            let image = image_with_topic_config(&[
-                TopicOverride {
-                    key: SCHEMA_VALIDATION_KEY,
-                    value,
-                },
-                TopicOverride {
-                    key: SCHEMA_VALIDATION_VALUE,
-                    value,
-                },
-            ]);
-            check!(
-                resolve_schema_validation(&image, "t").is_none(),
-                "schema.validation.key=schema.validation.value={value}"
-            );
-        }
-
-        // A corrupt mode resolves to `id`, and the gate stays on.
-        for value in ["Full", "body", ""] {
-            let image = image_with_topic_config(&[
-                TopicOverride {
-                    key: SCHEMA_VALIDATION_VALUE,
-                    value: "true",
-                },
-                TopicOverride {
-                    key: SCHEMA_VALIDATION_MODE,
-                    value,
-                },
-            ]);
-            check!(
-                resolve_schema_validation(&image, "t")
-                    == Some(SchemaGate {
-                        key: false,
-                        value: true,
-                        mode: ValidationMode::Id,
-                    }),
-                "schema.validation.mode={value}"
-            );
-        }
+        let image = image_with_topic_config(&[
+            TopicOverride {
+                key: SCHEMA_VALIDATION_VALUE,
+                value: "true",
+            },
+            TopicOverride {
+                key: SCHEMA_VALIDATION_MODE,
+                value,
+            },
+        ]);
+        check!(
+            resolve_schema_validation(&image, "t")
+                == Some(SchemaGate {
+                    key: false,
+                    value: true,
+                    mode: ValidationMode::Id,
+                }),
+            "schema.validation.mode={value}"
+        );
     }
 }

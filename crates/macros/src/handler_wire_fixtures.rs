@@ -65,64 +65,56 @@ mod tests {
     use {
         super::{empty_match_acl_filter, token_refusal_result},
         crate::meta::compact,
-        assert2::assert,
     };
 
-    #[test]
-    fn constructs_complete_pinned_refusals_for_both_token_responses() {
-        for target in [
-            "RenewDelegationTokenResponse",
-            "wire::ExpireDelegationTokenResponse",
-        ] {
-            let output =
-                token_refusal_result(&format!("{target}, case, response").parse().unwrap())
-                    .unwrap();
-            let rendered = compact(&output);
-            assert!(rendered.contains(&format!("expected:{target}{{error_code:case.error.0,expiry_timestamp_ms:case.expiry.0,..Default::default()}}")));
-            assert!(rendered.contains("actual:response"));
-            assert!(rendered.contains("case:case.name"));
-        }
-        for invalid in [
-            "",
-            "OtherResponse, case, response",
-            "RenewDelegationTokenResponse<u8>, case, response",
-            "RenewDelegationTokenResponse case, response",
-            "RenewDelegationTokenResponse, next(), response",
-            "RenewDelegationTokenResponse, case, response.field",
-            "RenewDelegationTokenResponse, case, response, extra",
-        ] {
-            assert!(
-                token_refusal_result(&invalid.parse().unwrap()).is_err(),
-                "{invalid}"
-            );
-        }
+    #[yare::parameterized(
+        renew = { "RenewDelegationTokenResponse" },
+        expire = { "wire::ExpireDelegationTokenResponse" },
+    )]
+    fn constructs_complete_pinned_refusals_for_both_token_responses(target: &str) {
+        let output =
+            token_refusal_result(&format!("{target}, case, response").parse().unwrap()).unwrap();
+        let rendered = compact(&output);
+        assert2::assert!(rendered.contains(&format!("expected:{target}{{error_code:case.error.0,expiry_timestamp_ms:case.expiry.0,..Default::default()}}")));
+        assert2::assert!(rendered.contains("actual:response"));
+        assert2::assert!(rendered.contains("case:case.name"));
     }
 
-    #[test]
-    fn generates_the_same_explicit_empty_axes_for_both_wire_shapes() {
-        for target in ["DescribeAclsRequest", "DeleteAclsFilter"] {
-            let output = empty_match_acl_filter(&target.parse().unwrap()).unwrap();
-            let rendered = compact(&output);
-            assert!(rendered.starts_with(target));
-            for axis in [
-                "resource_type_filter:crate::handlers::acl_test_support::RESOURCE_TYPE_TOPIC",
-                "resource_name_filter:Some(String::new())",
-                "pattern_type_filter:crate::handlers::acl_test_support::PATTERN_TYPE_MATCH",
-                "principal_filter:Some(String::new())",
-                "host_filter:None",
-                "operation:crate::handlers::acl_test_support::OPERATION_ANY",
-                "permission_type:crate::handlers::acl_test_support::PERMISSION_ANY",
-                "..Default::default()",
-            ] {
-                assert!(rendered.contains(axis), "{axis}");
-            }
-        }
+    #[yare::parameterized(
+        request = { "DescribeAclsRequest" },
+        filter = { "DeleteAclsFilter" },
+    )]
+    fn generates_the_same_explicit_empty_axes_for_both_wire_shapes(target: &str) {
+        let output = empty_match_acl_filter(&target.parse().unwrap()).unwrap();
+        let rendered = compact(&output);
+        assert2::assert!(rendered.starts_with(target));
+        assert2::assert!(rendered.contains(
+            "resource_type_filter:crate::handlers::acl_test_support::RESOURCE_TYPE_TOPIC"
+        ));
+        assert2::assert!(rendered.contains("resource_name_filter:Some(String::new())"));
+        assert2::assert!(
+            rendered.contains(
+                "pattern_type_filter:crate::handlers::acl_test_support::PATTERN_TYPE_MATCH"
+            )
+        );
+        assert2::assert!(rendered.contains("principal_filter:Some(String::new())"));
+        assert2::assert!(rendered.contains("host_filter:None"));
+        assert2::assert!(
+            rendered.contains("operation:crate::handlers::acl_test_support::OPERATION_ANY")
+        );
+        assert2::assert!(
+            rendered.contains("permission_type:crate::handlers::acl_test_support::PERMISSION_ANY")
+        );
+        assert2::assert!(rendered.contains("..Default::default()"));
     }
 
-    #[test]
-    fn refuses_an_empty_target_or_extra_items() {
-        for invalid in ["", "{}", "Filter; second", "Filter, Other"] {
-            assert!(empty_match_acl_filter(&invalid.parse().unwrap()).is_err());
-        }
+    #[yare::parameterized(
+        empty = { "" },
+        empty_group = { "{}" },
+        trailing_item = { "Filter; second" },
+        extra_argument = { "Filter, Other" },
+    )]
+    fn refuses_an_empty_target_or_extra_items(invalid: &str) {
+        assert2::assert!(empty_match_acl_filter(&invalid.parse().unwrap()).is_err());
     }
 }

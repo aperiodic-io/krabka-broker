@@ -47,19 +47,21 @@ mod tests {
         std::sync::Arc,
     };
 
-    #[test]
-    fn remote_timeout_uses_v10_positive_value_or_server_default() {
-        let server_timeout = Duration::from_millis(123);
-        let cases = [
-            (9, 7, server_timeout),
-            (10, -1, server_timeout),
-            (10, 0, server_timeout),
-            (10, 7, Duration::from_millis(7)),
-            (11, 19, Duration::from_millis(19)),
-        ];
-        for (version, timeout_ms, expected) in cases {
-            assert!(remote_timeout(version, timeout_ms, server_timeout) == expected);
-        }
+    #[yare::parameterized(
+        older_version = { 9, 7, Duration::from_millis(123) },
+        negative = { 10, -1, Duration::from_millis(123) },
+        zero = { 10, 0, Duration::from_millis(123) },
+        positive = { 10, 7, Duration::from_millis(7) },
+        newer_version = { 11, 19, Duration::from_millis(19) },
+    )]
+    fn remote_timeout_uses_v10_positive_value_or_server_default(
+        version: i16,
+        timeout_ms: i32,
+        expected: Duration,
+    ) {
+        assert2::assert!(
+            remote_timeout(version, timeout_ms, Duration::from_millis(123)) == expected
+        );
     }
 
     #[test]

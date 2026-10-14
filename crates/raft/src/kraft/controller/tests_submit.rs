@@ -11,7 +11,8 @@ use {
             KraftController,
             controller::test_support::{
                 EngineInDir, await_leader, build, build_engine_only, commit_pending,
-                one_offset_batch, submit_change_with_timeout, topic_record, topic_record_named,
+                one_offset_batch, single_voter_leader_engine, submit_change_with_timeout,
+                submit_on_engine, topic_record, topic_record_named,
             },
             event::Event,
             types::NodeId,
@@ -51,9 +52,9 @@ struct TopicSubmitFixture {
 }
 
 fn topic_submit_fixture(records: &[MetadataRecord]) -> TopicSubmitFixture {
-    let (mut engine, directory) = super::test_support::single_voter_leader_engine();
+    let (mut engine, directory) = single_voter_leader_engine();
     let images = engine.image_tx.subscribe();
-    let mut created = super::test_support::submit_on_engine(&mut engine, records);
+    let mut created = submit_on_engine(&mut engine, records);
     assert!(matches!(created.try_recv(), Ok(Ok(_))));
     let expected_image = engine.image_tx.borrow().clone();
     TopicSubmitFixture {
@@ -119,10 +120,10 @@ async fn assert_rejected_change_and_shutdown(
 
 #[test]
 fn direct_single_voter_submit_applies_image_and_resolves_waiter() {
-    let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
+    let (mut engine, _dir) = single_voter_leader_engine();
     assert2::assert!(engine.image.topic("direct").is_none());
 
-    let mut rx = super::test_support::submit_on_engine(&mut engine, &topic_record("direct"));
+    let mut rx = submit_on_engine(&mut engine, &topic_record("direct"));
 
     assert!(matches!(rx.try_recv(), Ok(Ok(_))));
     check!(engine.image.topic("direct").is_some());
@@ -142,7 +143,7 @@ fn guarded_delete_rejects_a_recreated_topic() {
     let delete = MetadataRecord::V1DeleteTopic(DeleteTopicRecord {
         name: "orders".into(),
     });
-    let mut replaced = super::test_support::submit_on_engine(
+    let mut replaced = submit_on_engine(
         &mut engine,
         &[vec![delete.clone()], topic_record_named("orders", 2)].concat(),
     );
@@ -187,10 +188,8 @@ fn guarded_config_rejects_stale_maps_and_accepts_a_fresh_merge() {
                 .collect(),
         })
     };
-    let mut updated = super::test_support::submit_on_engine(&mut engine, &[config(&[over(
-        "cleanup.policy",
-        "compact",
-    )])]);
+    let mut updated =
+        submit_on_engine(&mut engine, &[config(&[over("cleanup.policy", "compact")])]);
     assert!(matches!(updated.try_recv(), Ok(Ok(_))));
     assert_stale_submit()
         .engine(&mut engine)
@@ -288,11 +287,11 @@ async fn guarded_change_waits_for_no_uncommitted_mutations() {
 
 #[test]
 fn offset_advance_submit_returns_actor_ordered_base() {
-    let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
-    let mut rx = super::test_support::submit_on_engine(&mut engine, &topic_record("topic"));
+    let (mut engine, _dir) = single_voter_leader_engine();
+    let mut rx = submit_on_engine(&mut engine, &topic_record("topic"));
     assert!(matches!(rx.try_recv(), Ok(Ok(_))));
 
-    let mut rx = super::test_support::submit_on_engine(&mut engine, &offset_advance("topic", 3));
+    let mut rx = submit_on_engine(&mut engine, &offset_advance("topic", 3));
     let first = rx.try_recv().expect("first reply").expect("first ok");
     let mut rx = super::test_support::submit_on_engine(&mut engine, &offset_advance("topic", 5));
     let second = rx.try_recv().expect("second reply").expect("second ok");
@@ -304,27 +303,28 @@ fn offset_advance_submit_returns_actor_ordered_base() {
     assert!(engine.image.partition_next_offset("topic", 0) == Some(8));
 }
 
-#[test]
-fn offset_advance_submit_rejects_counts_outside_verified_domain() {
-    let (mut engine, _dir) = super::test_support::single_voter_leader_engine();
+#[yare::parameterized(
+    negative_count = { -1 },
+    zero_count = { 0 },
+    maximum_count = { i64::MAX },
+)]
+fn offset_advance_submit_rejects_counts_outside_verified_domain(count: i64) {
+    let (mut engine, _dir) = single_voter_leader_engine();
 
     for records in [topic_record("topic"), offset_advance("topic", 1)] {
-        let mut rx = super::test_support::submit_on_engine(&mut engine, &records);
-        assert!(matches!(rx.try_recv(), Ok(Ok(_))));
+        let mut rx = submit_on_engine(&mut engine, &records);
+        assert2::assert!(matches!(rx.try_recv(), Ok(Ok(_))));
     }
     let log_end = engine.log.log_end_offset();
 
-    for count in [-1, 0, i64::MAX] {
-        let mut rx =
-            super::test_support::submit_on_engine(&mut engine, &offset_advance("topic", count));
+    let mut rx = submit_on_engine(&mut engine, &offset_advance("topic", count));
 
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(Err(RaftError::ChangeRejected(_)))
-        ));
-        assert!(engine.image.partition_next_offset("topic", 0) == Some(1));
-        assert!(engine.log.log_end_offset() == log_end);
-    }
+    assert2::assert!(matches!(
+        rx.try_recv(),
+        Ok(Err(RaftError::ChangeRejected(_)))
+    ));
+    assert2::assert!(engine.image.partition_next_offset("topic", 0) == Some(1));
+    assert2::assert!(engine.log.log_end_offset() == log_end);
 }
 
 #[tokio::test]

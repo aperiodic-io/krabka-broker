@@ -1,5 +1,25 @@
 //! Shared live-broker and local-partition fixtures for handler tests.
 
+macro_rules! empty_share_offsets_response {
+    ($response:ident, $error_code:expr, $error_message:expr) => {
+        krabka_macros::unthrottled_wire!($response {
+            error_code: $error_code,
+            error_message: $error_message,
+            responses: Vec::new(),
+        })
+    };
+}
+
+macro_rules! anonymous_request_identity {
+    ($principal:ident, $peer:ident, $ctx:ident, $client:expr $(, $connection:expr)? $(,)?) => {
+        krabka_macros::request_test_identity! {
+            bind($principal, $peer, $ctx);
+            user ["ANONYMOUS"];
+            client [$client];
+            $(connection [$connection];)?
+        };
+    };
+}
 use {
     crate::{
         api_catalog::UnstableApiVersions,
@@ -471,6 +491,13 @@ pub(crate) async fn start_allow_all_no_audit() -> StartedBroker {
     .await
 }
 
+pub(crate) async fn start_empty_acl_broker() -> StartedBroker {
+    start_broker_no_audit_with(|config| {
+        config.authorizer = Arc::new(SimpleAclAuthorizer::new(std::collections::HashSet::new()));
+    })
+    .await
+}
+
 /// The policy is independent of whether the caller's starter enables audit.
 pub(crate) fn allow_all_authorizer() -> Arc<dyn Authorizer> { Arc::new(AllowAllAuthorizer) }
 
@@ -785,17 +812,7 @@ pub(crate) enum AcknowledgementMode {
 /// A partition index and its ordered acknowledgement ranges, with independent
 /// lifetimes for the range list and its acknowledgement-type slices.
 /// Wire acknowledgement codes include malformed values in validation cases.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
+#[krabka_macros::test_scalar]
 pub(crate) struct AcknowledgementCode(pub i8);
 
 #[derive(Clone, Default)]
@@ -945,8 +962,7 @@ pub(crate) fn share_fetch_partition_rows(
         .responses
         .into_iter()
         .next()
-        .map(|topic| topic.partitions)
-        .unwrap_or_default()
+        .map_or_default(|topic| topic.partitions)
 }
 
 #[bon::builder]
@@ -1160,17 +1176,7 @@ pub(crate) async fn create_topic(
     )
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
+#[krabka_macros::test_scalar]
 pub(crate) struct RecordCount(pub i32);
 
 /// Appends one v2 batch of `count` records through the v12 Produce handler.

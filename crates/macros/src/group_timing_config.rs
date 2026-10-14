@@ -145,31 +145,29 @@ mod tests {
         assert!(methods == ["assigning_at_once", "for_group"]);
     }
 
-    #[test]
-    fn reports_each_missing_timing_field_instead_of_accepting_a_partial_config() {
-        for missing in [
-            "session_timeout",
-            "heartbeat_interval",
-            "assignment_interval",
-            "min_session_timeout",
-            "max_session_timeout",
-            "min_heartbeat_interval",
-            "max_heartbeat_interval",
-        ] {
-            let mut item = complete_config();
-            let Fields::Named(fields) = &mut item.fields else {
-                panic!("named config fixture")
-            };
-            fields.fields.inner = fields
-                .fields
-                .inner
-                .iter()
-                .filter(|field| field.ident.as_ref().is_none_or(|ident| ident != missing))
-                .cloned()
-                .collect();
-            let error = expand(item).expect_err("missing timing field");
-            assert!(error.to_string().contains(&format!("a `{missing}` field")));
-        }
+    #[yare::parameterized(
+        session_timeout = { "session_timeout" },
+        heartbeat_interval = { "heartbeat_interval" },
+        assignment_interval = { "assignment_interval" },
+        min_session_timeout = { "min_session_timeout" },
+        max_session_timeout = { "max_session_timeout" },
+        min_heartbeat_interval = { "min_heartbeat_interval" },
+        max_heartbeat_interval = { "max_heartbeat_interval" },
+    )]
+    fn reports_each_missing_timing_field_instead_of_accepting_a_partial_config(missing: &str) {
+        let mut item = complete_config();
+        let Fields::Named(fields) = &mut item.fields else {
+            panic!("named config fixture")
+        };
+        fields.fields.inner = fields
+            .fields
+            .inner
+            .iter()
+            .filter(|field| field.ident.as_ref().is_none_or(|ident| ident != missing))
+            .cloned()
+            .collect();
+        let error = expand(item).expect_err("missing timing field");
+        assert2::assert!(error.to_string().contains(&format!("a `{missing}` field")));
     }
 
     #[test]

@@ -56,32 +56,32 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use {super::expand, crate::meta::compact, assert2::assert};
+    use {super::expand, crate::meta::compact};
 
-    #[test]
-    fn indexes_keep_both_key_types_and_flush_before_reopening() {
-        for declaration in ["OffsetIndex, u32", "TimeIndex, i64"] {
-            let output = compact(&expand(&declaration.parse().unwrap()).unwrap());
-            assert!(output.contains("index.append(key,coordinate).unwrap()"));
-            assert!(
-                output.find("append_entries(&mutindex,entries)").unwrap()
-                    < output.find("index.flush().unwrap()").unwrap()
-            );
-            assert!(
-                output.contains("TempPath{dir,path}")
-                    && output.contains("IndexFixture{dir,path,index}")
-            );
-        }
-        for declaration in [
-            "OffsetIndex<u32>, u32",
-            "TimeIndex, String",
-            "OffsetIndex + Other, u32",
-            "TimeIndex, i64, extra",
-        ] {
-            assert!(
-                expand(&declaration.parse().unwrap()).is_err(),
-                "{declaration}"
-            );
-        }
+    #[yare::parameterized(offset = { "OffsetIndex, u32" }, time = { "TimeIndex, i64" })]
+    fn indexes_keep_both_key_types_and_flush_before_reopening(declaration: &str) {
+        let output = compact(&expand(&declaration.parse().unwrap()).unwrap());
+        assert2::assert!(output.contains("index.append(key,coordinate).unwrap()"));
+        assert2::assert!(
+            output.find("append_entries(&mutindex,entries)").unwrap()
+                < output.find("index.flush().unwrap()").unwrap()
+        );
+        assert2::assert!(
+            output.contains("TempPath{dir,path}")
+                && output.contains("IndexFixture{dir,path,index}")
+        );
+    }
+
+    #[yare::parameterized(
+        generic_index = { "OffsetIndex<u32>, u32" },
+        wrong_key_type = { "TimeIndex, String" },
+        non_path = { "OffsetIndex + Other, u32" },
+        extra_argument = { "TimeIndex, i64, extra" },
+    )]
+    fn indexes_reject_invalid_declarations(declaration: &str) {
+        assert2::assert!(
+            expand(&declaration.parse().unwrap()).is_err(),
+            "{declaration}"
+        );
     }
 }

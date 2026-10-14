@@ -1,6 +1,6 @@
 use {
     super::{
-        completed_batches_preserve_first_retry, completed_eviction_bounds_waiters,
+        completed_batches_preserve_first_retry, completed_eviction_bounds_waiters, epoch_rows,
         recovered_window_row,
     },
     assert2::assert,
@@ -9,7 +9,7 @@ use {
 
 #[test]
 fn an_evicted_source_can_still_have_a_later_unready_sequence_alias() {
-    let old = super::epoch_rows(5, 7, 0);
+    let old = epoch_rows(5, 7, 0);
     let incoming = recovered_window_row(20, 2, 0);
     let (evicted, frontier, ready, retained) =
         completed_eviction_bounds_waiters(23, 3, 7, &old, incoming, 0);
@@ -26,29 +26,35 @@ fn an_evicted_source_can_still_have_a_later_unready_sequence_alias() {
     assert!(witness == Some((1, 4, 7, false)));
 }
 
-#[test]
-fn a_newer_waiter_cannot_ack_before_an_evicted_batch() {
+#[yare::parameterized(
+    below_frontier = { 0, false },
+    before_frontier = { 2, false },
+    at_frontier = { 3, true },
+    above_frontier = { 6, true },
+    later_batch = { 7, true },
+    before_new_batch = { 22, true },
+    at_log_end = { 23, true },
+)]
+fn a_newer_waiter_cannot_ack_before_an_evicted_batch(hwm: i64, ready: bool) {
     let old = super::epoch_rows(5, 7, 0);
     let incoming = recovered_window_row(20, 2, 0);
-    for hwm in [0, 2, 3, 6, 7, 22, 23] {
-        let (evicted, frontier, ready, retained) =
-            completed_eviction_bounds_waiters(23, hwm, 7, &old, incoming, 0);
-        assert!(evicted && frontier == 3 && ready == (hwm >= 3));
-        assert!(
-            retained
-                == (1..=5)
-                    .map(|source| {
-                        let target = 4 * i64::try_from(source).unwrap() + 3;
-                        (source, target, hwm >= target)
-                    })
-                    .collect::<Vec<_>>()
-        );
-        assert!(
-            retained
-                .iter()
-                .all(|(_, later, ack)| *later > frontier && (!*ack || ready))
-        );
-    }
+    let (evicted, frontier, actual_ready, retained) =
+        completed_eviction_bounds_waiters(23, hwm, 7, &old, incoming, 0);
+    assert2::assert!(evicted && frontier == 3 && actual_ready == ready);
+    assert2::assert!(
+        retained
+            == (1..=5)
+                .map(|source| {
+                    let target = 4 * i64::try_from(source).unwrap() + 3;
+                    (source, target, hwm >= target)
+                })
+                .collect::<Vec<_>>()
+    );
+    assert2::assert!(
+        retained
+            .iter()
+            .all(|(_, later, ack)| *later > frontier && (!*ack || actual_ready))
+    );
 }
 
 #[test]
@@ -70,23 +76,26 @@ fn repeated_offsets_earlier_completions_and_lower_epochs_do_not_evict() {
     }
 }
 
-#[test]
-fn maximum_frontiers_preserve_the_strict_ack_boundary() {
+#[yare::parameterized(
+    below_frontier = { i64::MAX - 6, false },
+    at_frontier = { i64::MAX - 5, true },
+    below_end = { i64::MAX - 1, true },
+    at_end = { i64::MAX, true },
+)]
+fn maximum_frontiers_preserve_the_strict_ack_boundary(hwm: i64, expected_ready: bool) {
     let old: Vec<_> = (1..=5)
         .map(|i| recovered_window_row(i64::MAX - 7 + i, 0, 0))
         .collect();
     let incoming = recovered_window_row(i64::MAX - 1, 0, 0);
-    for hwm in [i64::MAX - 6, i64::MAX - 5, i64::MAX - 1, i64::MAX] {
-        let (evicted, frontier, ready, retained) =
-            completed_eviction_bounds_waiters(i64::MAX, hwm, 7, &old, incoming, 0);
-        assert!(evicted && frontier == i64::MAX - 5 && ready == (hwm >= frontier));
-        assert!(retained.last().unwrap().1 == i64::MAX);
-        assert!(
-            retained
-                .iter()
-                .all(|(_, later, ack)| *later > frontier && (!*ack || ready))
-        );
-    }
+    let (evicted, frontier, ready, retained) =
+        completed_eviction_bounds_waiters(i64::MAX, hwm, 7, &old, incoming, 0);
+    assert2::assert!(evicted && frontier == i64::MAX - 5 && ready == expected_ready);
+    assert2::assert!(retained.last().unwrap().1 == i64::MAX);
+    assert2::assert!(
+        retained
+            .iter()
+            .all(|(_, later, ack)| *later > frontier && (!*ack || ready))
+    );
 }
 
 proptest! {

@@ -31,20 +31,54 @@ use {
     std::time::Duration as StdDuration,
 };
 
-#[test]
-fn snapshot_install_admission_rejects_malformed_stale_and_pending_cases() {
-    use krabka_verified::{SnapshotInstallDecision, snapshot_install_decision};
-
-    for (pending, end, epoch, log_end, expected) in [
-        (false, 11, 3, 10, SnapshotInstallDecision::Install),
-        (false, 10, 3, 10, SnapshotInstallDecision::Stale),
-        (false, 9, 3, 10, SnapshotInstallDecision::Stale),
-        (true, 11, 3, 10, SnapshotInstallDecision::Reject),
-        (false, -1, 3, 10, SnapshotInstallDecision::Reject),
-        (false, 11, -1, 10, SnapshotInstallDecision::Reject),
-    ] {
-        assert2::assert!(snapshot_install_decision(pending, end, epoch, log_end) == expected);
-    }
+#[yare::parameterized(
+    future_snapshot_installs = {
+        false,
+        11,
+        3,
+        10,
+        krabka_verified::SnapshotInstallDecision::Install,
+    },
+    snapshot_at_log_end_is_stale = {
+        false,
+        10,
+        3,
+        10,
+        krabka_verified::SnapshotInstallDecision::Stale,
+    },
+    older_snapshot_is_stale = { false, 9, 3, 10, krabka_verified::SnapshotInstallDecision::Stale },
+    pending_install_is_rejected = {
+        true,
+        11,
+        3,
+        10,
+        krabka_verified::SnapshotInstallDecision::Reject,
+    },
+    negative_end_is_rejected = {
+        false,
+        -1,
+        3,
+        10,
+        krabka_verified::SnapshotInstallDecision::Reject,
+    },
+    negative_epoch_is_rejected = {
+        false,
+        11,
+        -1,
+        10,
+        krabka_verified::SnapshotInstallDecision::Reject,
+    },
+)]
+fn snapshot_install_admission_rejects_malformed_stale_and_pending_cases(
+    pending: bool,
+    end: i64,
+    epoch: i32,
+    log_end: i64,
+    expected: krabka_verified::SnapshotInstallDecision,
+) {
+    assert2::assert!(
+        krabka_verified::snapshot_install_decision(pending, end, epoch, log_end) == expected
+    );
 }
 
 fn become_follower(engine: &mut Engine, leader_id: NodeId, leader_epoch: Epoch) {
@@ -112,6 +146,13 @@ struct LearnedEndpoint {
     address: String,
 }
 
+#[derive(Clone, Copy)]
+enum EndpointRequestCase {
+    Begin,
+    End,
+    BeginWithoutEndpoints,
+}
+
 #[async_trait::async_trait]
 impl PeerSender for EndpointRecorder {
     async fn send(
@@ -133,86 +174,112 @@ impl PeerSender for EndpointRecorder {
     }
 }
 
-#[test]
-fn fetch_records_are_served_only_by_clean_leader_fetches() {
-    for (_case, has_snapshot, has_divergence, is_leader, want) in [
-        ("clean leader", false, false, true, true),
-        ("snapshot response", true, false, true, false),
-        ("divergence response", false, true, true, false),
-        ("clean follower", false, false, false, false),
-    ] {
-        assert2::assert!(
-            should_serve_fetch_records(has_snapshot, has_divergence, is_leader) == want
-        );
-    }
+#[yare::parameterized(
+    clean_leader = { false,
+    false,
+    true,
+    true },
+    snapshot_response = { true,
+    false,
+    true,
+    false },
+    divergence_response = { false,
+    true,
+    true,
+    false },
+    clean_follower = { false,
+    false,
+    false,
+    false }
+)]
+fn fetch_records_are_served_only_by_clean_leader_fetches(
+    has_snapshot: bool,
+    has_divergence: bool,
+    is_leader: bool,
+    want: bool,
+) {
+    assert2::assert!(should_serve_fetch_records(has_snapshot, has_divergence, is_leader) == want);
 }
 
-#[test]
-fn fetch_epoch_uses_installed_snapshot_epoch_only_at_empty_boundary() {
-    for (_case, installed, log_start, log_end, last_epoch, want) in [
-        ("empty log with installed snapshot", Some(7), 10, 10, 3, 7),
-        ("non-empty log with snapshot", Some(7), 10, 11, 3, 3),
-        ("empty log without snapshot", None, 10, 10, 3, 3),
-    ] {
-        assert2::assert!(
-            fetch_epoch_for_request(installed, Offset(log_start), Offset(log_end), last_epoch)
-                == want
-        );
-    }
+#[yare::parameterized(
+    empty_log_with_installed_snapshot = { Some(7), 10, 10, 3, 7 },
+    non_empty_log_with_snapshot = { Some(7), 10, 11, 3, 3 },
+    empty_log_without_snapshot = { None, 10, 10, 3, 3 },
+)]
+fn fetch_epoch_uses_installed_snapshot_epoch_only_at_empty_boundary(
+    installed: Option<Epoch>,
+    log_start: i64,
+    log_end: i64,
+    last_epoch: Epoch,
+    want: Epoch,
+) {
+    assert2::assert!(
+        fetch_epoch_for_request(installed, Offset(log_start), Offset(log_end), last_epoch) == want
+    );
 }
 
-#[test]
-fn fetch_batch_classifier_separates_duplicate_append_and_gap() {
-    for (_case, base_offset, log_end, want) in [
-        (
-            "duplicate batch",
-            4,
-            5,
-            FetchBatchDisposition::AlreadyPresent,
-        ),
-        ("contiguous append", 5, 5, FetchBatchDisposition::Append),
-        ("offset gap", 6, 5, FetchBatchDisposition::Gap),
-    ] {
-        assert2::assert!(classify_fetch_batch(Offset(base_offset), Offset(log_end)) == want);
-    }
+#[yare::parameterized(
+    duplicate_batch = { 4,
+    5,
+    FetchBatchDisposition::AlreadyPresent },
+    contiguous_append = { 5,
+    5,
+    FetchBatchDisposition::Append },
+    offset_gap = { 6,
+    5,
+    FetchBatchDisposition::Gap }
+)]
+fn fetch_batch_classifier_separates_duplicate_append_and_gap(
+    base_offset: i64,
+    log_end: i64,
+    want: FetchBatchDisposition,
+) {
+    assert2::assert!(classify_fetch_batch(Offset(base_offset), Offset(log_end)) == want);
 }
 
-#[test]
-fn snapshot_fetch_hint_starts_only_for_future_non_duplicate_snapshots() {
-    for (_case, snapshot_id, log_end, in_flight, want) in [
-        ("future snapshot", (11, 2), 10, None, true),
-        ("snapshot at log end", (10, 2), 10, None, false),
-        (
-            "duplicate in-flight snapshot",
-            (11, 2),
-            10,
-            Some((11, 2)),
-            false,
-        ),
-        ("newer in-flight snapshot", (12, 2), 10, Some((11, 2)), true),
-    ] {
-        assert2::assert!(
-            should_start_snapshot_fetch(snapshot_id, Offset(log_end), in_flight) == want
-        );
-    }
+#[yare::parameterized(
+    future_snapshot = { (11, 2), 10, None, true },
+    snapshot_at_log_end = { (10, 2), 10, None, false },
+    duplicate_in_flight_snapshot = { (11, 2), 10, Some((11, 2)), false },
+    newer_in_flight_snapshot = { (12, 2), 10, Some((11, 2)), true },
+)]
+fn snapshot_fetch_hint_starts_only_for_future_non_duplicate_snapshots(
+    snapshot_id: (i64, i32),
+    log_end: i64,
+    in_flight: Option<(i64, i32)>,
+    want: bool,
+) {
+    assert2::assert!(should_start_snapshot_fetch(snapshot_id, Offset(log_end), in_flight) == want);
 }
 
-#[test]
-fn snapshot_fetch_response_is_invalid_unless_success_from_active_leader() {
-    for (_case, error_code, response_epoch, current_epoch, want) in [
-        ("successful active leader", 0, 2, 2, false),
-        ("error from active leader", 1, 2, 2, true),
-        ("success from wrong epoch", 0, 3, 2, true),
-        ("error from wrong epoch", 1, 3, 2, true),
-    ] {
-        assert2::assert!(
-            snapshot_fetch_response_invalid(
-                error_code,
-                NodeId(response_epoch),
-                NodeId(current_epoch)
-            ) == want
-        );
-    }
+#[yare::parameterized(
+    successful_active_leader = { 0,
+    2,
+    2,
+    false },
+    error_from_active_leader = { 1,
+    2,
+    2,
+    true },
+    success_from_wrong_epoch = { 0,
+    3,
+    2,
+    true },
+    error_from_wrong_epoch = { 1,
+    3,
+    2,
+    true }
+)]
+fn snapshot_fetch_response_is_invalid_unless_success_from_active_leader(
+    error_code: i16,
+    response_epoch: u64,
+    current_epoch: u64,
+    want: bool,
+) {
+    assert2::assert!(
+        snapshot_fetch_response_invalid(error_code, NodeId(response_epoch), NodeId(current_epoch))
+            == want
+    );
 }
 
 fn elect_with_peer(engine: &mut super::Engine, peer: NodeId) {
@@ -295,60 +362,62 @@ fn two_voter_engine(role: TwoVoterRole) -> EngineInDir {
     EngineInDir { engine, dir }
 }
 
-#[tokio::test]
-async fn a_fetch_response_from_a_newer_epoch_moves_the_node_to_that_leader() {
-    for (case, me) in [
-        ("an observer that joins later", NodeId(4)),
-        ("a voter that follows", NodeId(2)),
-    ] {
-        let (mut engine, _dir) = build_engine_only().me(me).call();
-        engine.on_event(Event::ReceiveBeginQuorumEpoch {
-            leader_id: NodeId(1),
-            leader_epoch: 1,
-        });
+#[yare::parameterized(
+    observer_that_joins_later = { NodeId(4) },
+    voter_that_follows = { NodeId(2) },
+)]
+#[test_macro(tokio::test)]
+async fn a_fetch_response_from_a_newer_epoch_moves_the_node_to_that_leader(me: NodeId) {
+    let (mut engine, _dir) = build_engine_only().me(me).call();
+    engine.on_event(Event::ReceiveBeginQuorumEpoch {
+        leader_id: NodeId(1),
+        leader_epoch: 1,
+    });
 
-        engine.on_fetch_response(
-            NodeId(1),
-            &wire::PeerResponse::Fetch(wire::FetchAnswer {
-                diverging: None,
-                snapshot_id: None,
-                hwm: 0,
-                records: bytes::Bytes::new(),
-                ..leader_answer(NodeId(3), 7)
-            })
-            .encode(),
-        );
+    engine.on_fetch_response(
+        NodeId(1),
+        &wire::PeerResponse::Fetch(wire::FetchAnswer {
+            diverging: None,
+            snapshot_id: None,
+            hwm: 0,
+            records: bytes::Bytes::new(),
+            ..leader_answer(NodeId(3), 7)
+        })
+        .encode(),
+    );
 
-        let state = engine.core.quorum_state();
-        assert!(
-            (state.leader_id, state.leader_epoch) == (Some(NodeId(3)), 7),
-            "{case}"
-        );
-        assert!(
-            matches!(
-                engine.core.role(),
-                Role::Follower {
-                    leader_id: NodeId(3),
-                    ..
-                } | Role::Observer {
-                    leader_id: Some(NodeId(3)),
-                    ..
-                }
-            ),
-            "{case}"
-        );
-    }
+    let state = engine.core.quorum_state();
+    assert2::assert!((state.leader_id, state.leader_epoch) == (Some(NodeId(3)), 7));
+    assert2::assert!(matches!(
+        engine.core.role(),
+        Role::Follower {
+            leader_id: NodeId(3),
+            ..
+        } | Role::Observer {
+            leader_id: Some(NodeId(3)),
+            ..
+        }
+    ));
 }
 
 /// A replica answers a Fetch as Kafka's `tryCompleteFetchRequest` does:
 /// `validateLeaderOnlyRequest` refuses another epoch, and a replica that is
 /// not the leader, with `buildEmptyFetchResponse`, which names the leader
 /// this replica knows, its epoch, and the leader's endpoint.
-#[tokio::test]
-async fn a_replica_that_cannot_serve_a_fetch_names_the_leader_it_knows() {
-    const NOT_LEADER_OR_FOLLOWER: i16 = 6;
-    const FENCED_LEADER_EPOCH: i16 = 74;
-    const UNKNOWN_LEADER_EPOCH: i16 = 75;
+#[yare::parameterized(
+    matching_epoch_from_known_leader = { Some(NodeId(2)), 1, 6, Some(NodeId(2)), 1 },
+    older_fetcher_epoch = { Some(NodeId(2)), 0, 74, Some(NodeId(2)), 1 },
+    newer_fetcher_epoch = { Some(NodeId(2)), 2, 75, Some(NodeId(2)), 1 },
+    no_known_leader = { None, 0, 6, None, 0 },
+)]
+#[test_macro(tokio::test)]
+async fn a_replica_that_cannot_serve_a_fetch_names_the_leader_it_knows(
+    leader: Option<NodeId>,
+    request_epoch: i32,
+    expected_error_code: i16,
+    expected_leader: Option<NodeId>,
+    expected_epoch: u32,
+) {
     let refusal = |error_code, leader_id: Option<NodeId>, epoch| wire::FetchAnswer {
         error_code,
         leader: wire::QuorumLeader {
@@ -359,53 +428,23 @@ async fn a_replica_that_cannot_serve_a_fetch_names_the_leader_it_knows() {
         hwm: -1,
         ..leader_answer(NodeId(0), epoch)
     };
-    for (case, leader, request_epoch, expected) in [
-        // KafkaRaftClient: "non-leaders do not expect to receive requests
-        // matching their own epoch, but it is possible when observers are
-        // using the Fetch API to find the result of an election."
-        (
-            "follower of leader 2",
-            Some(NodeId(2)),
-            1,
-            refusal(NOT_LEADER_OR_FOLLOWER, Some(NodeId(2)), 1),
-        ),
-        (
-            "fetcher in an older epoch",
-            Some(NodeId(2)),
-            0,
-            refusal(FENCED_LEADER_EPOCH, Some(NodeId(2)), 1),
-        ),
-        (
-            "fetcher in a newer epoch",
-            Some(NodeId(2)),
-            2,
-            refusal(UNKNOWN_LEADER_EPOCH, Some(NodeId(2)), 1),
-        ),
-        (
-            "no known leader",
-            None,
-            0,
-            refusal(NOT_LEADER_OR_FOLLOWER, None, 0),
-        ),
-    ] {
-        let (mut replica, _dir) = build_engine_only().call();
-        if let Some(leader_id) = leader {
-            become_follower(&mut replica, leader_id, 1);
-        }
-        let (reply, mut response) = oneshot::channel();
-
-        replica.on_inbound(Inbound::Fetch {
-            version: FETCH_VERSION,
-            req: fetch_request(NodeId(3), request_epoch),
-            reply,
-        });
-
-        let body = response.try_recv().expect("the replica answered the Fetch");
-        assert!(
-            wire::PeerResponse::decode_fetch(&body) == Some(wire::PeerResponse::Fetch(expected)),
-            "{case}"
-        );
+    let expected = refusal(expected_error_code, expected_leader, expected_epoch);
+    let (mut replica, _dir) = build_engine_only().call();
+    if let Some(leader_id) = leader {
+        become_follower(&mut replica, leader_id, 1);
     }
+    let (reply, mut response) = oneshot::channel();
+
+    replica.on_inbound(Inbound::Fetch {
+        version: FETCH_VERSION,
+        req: fetch_request(NodeId(3), request_epoch),
+        reply,
+    });
+
+    let body = response.try_recv().expect("the replica answered the Fetch");
+    assert2::assert!(
+        wire::PeerResponse::decode_fetch(&body) == Some(wire::PeerResponse::Fetch(expected))
+    );
 }
 
 /// The leader refuses a fetcher from another epoch too, naming itself, so
@@ -545,8 +584,13 @@ async fn broadcast_begin_quorum_epoch_names_each_recipient_and_the_leader_endpoi
 /// take the leader's address from `LeaderEndpoints` when the request carries
 /// them: a replica whose voter set does not name the leader, as during an
 /// uncommitted KIP-853 voter change, still learns where to fetch from.
-#[tokio::test]
-async fn quorum_epoch_requests_teach_the_leader_endpoints() {
+#[yare::parameterized(
+    begin_quorum_epoch = { EndpointRequestCase::Begin },
+    end_quorum_epoch = { EndpointRequestCase::End },
+    begin_without_endpoints = { EndpointRequestCase::BeginWithoutEndpoints },
+)]
+#[test_macro(tokio::test)]
+async fn quorum_epoch_requests_teach_the_leader_endpoints(case: EndpointRequestCase) {
     use krabka_protocol::{
         Encode,
         owned::{
@@ -620,49 +664,32 @@ async fn quorum_epoch_requests_teach_the_leader_endpoints() {
         leader: NodeId(4),
         address: "c4.example:9093".to_string(),
     }];
-    for (name, api, body, remembered) in [
-        (
-            "BeginQuorumEpoch",
-            api_key::BEGIN_QUORUM_EPOCH,
-            begin_body,
-            learned.clone(),
-        ),
-        (
-            "EndQuorumEpoch",
-            api_key::END_QUORUM_EPOCH,
-            end_body,
-            learned,
-        ),
-        (
-            "BeginQuorumEpoch without endpoints",
-            api_key::BEGIN_QUORUM_EPOCH,
-            bare_begin_body,
-            Vec::new(),
-        ),
-    ] {
-        let (mut replica, _dir) = build_engine_only().call();
-        let recorder = std::sync::Arc::new(EndpointRecorder::default());
-        replica.peers = recorder.clone();
-        let (reply, mut answer) = oneshot::channel();
-        replica.on_inbound(if api == api_key::BEGIN_QUORUM_EPOCH {
-            Inbound::BeginQuorumEpoch {
-                req: body,
-                version: 1,
-                reply,
-            }
-        } else {
-            Inbound::EndQuorumEpoch {
-                req: body,
-                version: 1,
-                reply,
-            }
-        });
-        assert2::assert!(answer.try_recv().is_ok(), "{name}");
-        assert2::assert!(
-            *recorder.endpoints.lock().expect("endpoint lock") == remembered,
-            "{name}"
-        );
-    }
+    let (api, body, remembered) = match case {
+        EndpointRequestCase::Begin => (api_key::BEGIN_QUORUM_EPOCH, begin_body, learned.clone()),
+        EndpointRequestCase::End => (api_key::END_QUORUM_EPOCH, end_body, learned),
+        EndpointRequestCase::BeginWithoutEndpoints => {
+            (api_key::BEGIN_QUORUM_EPOCH, bare_begin_body, Vec::new())
+        }
+    };
+    let (mut replica, _dir) = build_engine_only().call();
+    let recorder = std::sync::Arc::new(EndpointRecorder::default());
+    replica.peers = recorder.clone();
+    let (reply, mut answer) = oneshot::channel();
+    replica.on_inbound(if api == api_key::BEGIN_QUORUM_EPOCH {
+        Inbound::BeginQuorumEpoch {
+            req: body,
+            version: 1,
+            reply,
+        }
+    } else {
+        Inbound::EndQuorumEpoch {
+            req: body,
+            version: 1,
+            reply,
+        }
+    });
+    assert2::assert!(answer.try_recv().is_ok());
+    assert2::assert!(*recorder.endpoints.lock().expect("endpoint lock") == remembered);
 }
 
 /// The position a Fetch request is sent at.
@@ -899,8 +926,19 @@ async fn leaderless_observer_discovers_the_leader_through_a_follower_redirect() 
     assert2::assert!(observer.log.hwm() == Offset(1));
 }
 
-#[tokio::test]
-async fn rejected_fetch_responses_leave_log_watermark_and_snapshot_unchanged() {
+#[yare::parameterized(
+    stale_epoch = { 0u8,
+    NodeId(2) },
+    wrong_sender = { 1,
+    NodeId(3) },
+    changed_role = { 2,
+    NodeId(2) }
+)]
+#[test_macro(tokio::test)]
+async fn rejected_fetch_responses_leave_log_watermark_and_snapshot_unchanged(
+    setup: u8,
+    from: NodeId,
+) {
     let body = wire::PeerResponse::Fetch(wire::FetchAnswer {
         diverging: None,
         snapshot_id: Some((11, 3)),
@@ -910,28 +948,22 @@ async fn rejected_fetch_responses_leave_log_watermark_and_snapshot_unchanged() {
     })
     .encode();
 
-    for (case, setup, from) in [
-        ("stale epoch", 0u8, NodeId(2)),
-        ("wrong sender", 1, NodeId(3)),
-        ("changed role", 2, NodeId(2)),
-    ] {
-        let (mut engine, _dir) = build_engine_only().call();
-        become_follower(&mut engine, NodeId(2), if setup == 0 { 4 } else { 3 });
-        if setup == 2 {
-            engine.on_event(Event::ReceiveEndQuorumEpoch {
-                leader_id: NodeId(2),
-                leader_epoch: 3,
-                successor_rank: SuccessorRank::default(),
-            });
-            assert2::assert!(matches!(engine.core.role(), Role::Prospective { .. }));
-        }
-
-        engine.on_fetch_response(from, &body);
-
-        assert2::assert!(engine.log.log_end_offset() == Offset(0), "{case}");
-        assert2::assert!(engine.log.hwm() == Offset(0), "{case}");
-        assert2::assert!(engine.snapshot_fetch.is_none(), "{case}");
+    let (mut engine, _dir) = build_engine_only().call();
+    become_follower(&mut engine, NodeId(2), if setup == 0 { 4 } else { 3 });
+    if setup == 2 {
+        engine.on_event(Event::ReceiveEndQuorumEpoch {
+            leader_id: NodeId(2),
+            leader_epoch: 3,
+            successor_rank: SuccessorRank::default(),
+        });
+        assert2::assert!(matches!(engine.core.role(), Role::Prospective { .. }));
     }
+
+    engine.on_fetch_response(from, &body);
+
+    assert2::assert!(engine.log.log_end_offset() == Offset(0));
+    assert2::assert!(engine.log.hwm() == Offset(0));
+    assert2::assert!(engine.snapshot_fetch.is_none());
 }
 
 #[tokio::test]
@@ -1133,24 +1165,26 @@ async fn a_lagging_follower_serves_the_quorums_committed_offset() {
     assert!(slice.quorum_high_watermark == 10_000);
 }
 
-#[test]
-fn a_metadata_fetch_needs_a_snapshot_only_below_the_retained_log() {
+#[yare::parameterized(
+    pruned_away = { 0, 4_096, true },
+    one_below_start = { 4_095, 4_096, true },
+    at_start = { 4_096, 4_096, false },
+    past_start = { 4_097, 4_096, false },
+    never_pruned = { 0, 0, false },
+    negative_offset = { -1, 4_096, false },
+)]
+fn a_metadata_fetch_needs_a_snapshot_only_below_the_retained_log(
+    fetch_offset: i64,
+    log_start: i64,
+    want: bool,
+) {
     // Half-open: a fetch *at* the log start still reads from the log, and a
     // node that has never pruned (log start 0) never redirects. Widening this
     // to `<=` would answer a caught-up observer with a snapshot on every poll.
-    for (_case, fetch_offset, log_start, want) in [
-        ("pruned away", 0, 4_096, true),
-        ("one below the start", 4_095, 4_096, true),
-        ("at the start", 4_096, 4_096, false),
-        ("past the start", 4_097, 4_096, false),
-        ("never pruned", 0, 0, false),
-        ("negative offset", -1, 4_096, false),
-    ] {
-        assert!(
-            metadata_fetch_offset_below_log_start(Offset(fetch_offset), Offset(log_start)) == want,
-            "fetch {fetch_offset} against log start {log_start}"
-        );
-    }
+    assert2::assert!(
+        metadata_fetch_offset_below_log_start(Offset(fetch_offset), Offset(log_start)) == want,
+        "fetch {fetch_offset} against log start {log_start}"
+    );
 }
 
 /// An observer that asks for an offset the controller has already pruned is

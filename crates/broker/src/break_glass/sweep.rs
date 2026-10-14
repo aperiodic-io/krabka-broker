@@ -240,54 +240,47 @@ mod tests {
         check!(controller.tombstoned().is_empty());
     }
 
-    #[test]
-    fn a_proposal_is_reapable_one_retention_after_it_expires() {
+    #[yare::parameterized(
+        at_expiry = { 1_000_i64, false },
+        one_before_retention_ends = {
+            1_000 + PROPOSAL_RETENTION.millis_i64() - 1,
+            false,
+        },
+        at_retention_end = { 1_000 + PROPOSAL_RETENTION.millis_i64(), true },
+        well_after_retention = { 1_000 + PROPOSAL_RETENTION.millis_i64() * 2, true },
+    )]
+    fn a_proposal_is_reapable_one_retention_after_it_expires(now_ms: i64, expected: bool) {
         let image = image_of(&[BreakGlassProposalRecord {
             expires_at_ms: 1_000,
             ..proposal(1, BreakGlassAction::DeleteTopic, "doomed")
         }]);
-        let retention = PROPOSAL_RETENTION.millis_i64();
-        let cases = [
-            ("at the expiry", 1_000_i64, false),
-            (
-                "one millisecond before the retention runs out",
-                1_000 + retention - 1,
-                false,
-            ),
-            (
-                "exactly at the end of the retention",
-                1_000 + retention,
-                true,
-            ),
-            ("well after the retention", 1_000 + retention * 2, true),
-        ];
-        for (label, now_ms, expected) in cases {
-            check!(
-                (reapable_ids(&image, PROPOSAL_RETENTION, now_ms) == vec![Uuid::from_u128(1)])
-                    == expected,
-                "case {label}"
-            );
-        }
+
+        check!(
+            (reapable_ids(&image, PROPOSAL_RETENTION, now_ms) == vec![Uuid::from_u128(1)])
+                == expected,
+            "now_ms={now_ms}"
+        );
     }
 
-    #[test]
-    fn an_expiry_at_the_end_of_time_saturates_instead_of_wrapping() {
+    #[yare::parameterized(
+        clock_before_i64_max = { i64::MAX - 1, false },
+        clock_at_i64_max = { i64::MAX, true },
+    )]
+    fn an_expiry_at_the_end_of_time_saturates_instead_of_wrapping(
+        now_ms: i64,
+        expected_reapable: bool,
+    ) {
         let image = image_of(&[BreakGlassProposalRecord {
             expires_at_ms: i64::MAX,
             ..proposal(1, BreakGlassAction::DeleteTopic, "doomed")
         }]);
         // Without the saturating add the sum wraps negative, and every clock
         // reading is then past it, so the sweep reaps a live proposal at once.
-        let cases = [
-            ("a clock below the end of time", i64::MAX - 1, false),
-            ("a clock at the end of time", i64::MAX, true),
-        ];
-        for (label, now_ms, expected) in cases {
-            check!(
-                !reapable_ids(&image, PROPOSAL_RETENTION, now_ms).is_empty() == expected,
-                "case {label}"
-            );
-        }
+
+        check!(
+            !reapable_ids(&image, PROPOSAL_RETENTION, now_ms).is_empty() == expected_reapable,
+            "now_ms={now_ms}"
+        );
     }
 
     #[test]

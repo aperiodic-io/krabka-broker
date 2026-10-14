@@ -30,7 +30,7 @@
 
 use {
     std::{future::Future, time::Duration},
-    support::cluster_lock,
+    support::{SITE_A, SITE_B, SITE_C, SITES, cluster_lock},
 };
 
 mod support;
@@ -49,15 +49,6 @@ mod witness_config_surface;
 mod witness_isr_membership;
 #[path = "witness_role/witness_wire.rs"]
 mod witness_wire;
-
-/// The preferred leader site: a data site that serves clients.
-const SITE_A: &str = "site-a";
-/// The second data site.
-const SITE_B: &str = "site-b";
-/// The witness site. Node 3 lives here and carries [`NodeRole::Witness`].
-const SITE_C: &str = "site-c";
-/// `SITES[i]` is the rack of broker `i + 1`.
-const SITES: [&str; 3] = [SITE_A, SITE_B, SITE_C];
 
 /// The witness's broker id, which is also its `KRaft` node id.
 const WITNESS_ID: i32 = 3;

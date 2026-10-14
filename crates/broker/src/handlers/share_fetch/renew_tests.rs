@@ -372,7 +372,7 @@ async fn renew_acknowledgements_renew_only_the_renew_offsets() {
                 Outcome {
                     error: response.error_code,
                     acknowledge_error: row.map(|row| row.acknowledge_error_code),
-                    acquired: row.map(acquired_share_records).unwrap_or_default(),
+                    acquired: row.map_or_default(acquired_share_records),
                     states: Vec::new(),
                 }
             }

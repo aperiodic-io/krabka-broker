@@ -2,7 +2,7 @@
 
 `aspect check-cpd` runs jscpd 5.4.1 with a zero-duplicate gate over Rust sources.
 The `cpd` CI job remains required by the merge gate. The minimum clone size is
-48 tokens and 5 lines, in weak mode (whitespace and comments are ignored).
+47 tokens and 5 lines, in weak mode (whitespace and comments are ignored).
 
 The AXL task copies Git's tracked and non-ignored untracked Rust inventory to a
 temporary directory, including tests, benchmarks and hidden paths. Deleted

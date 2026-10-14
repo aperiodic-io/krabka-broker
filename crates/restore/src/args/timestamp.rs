@@ -225,88 +225,80 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 mod tests {
     use {super::*, assert2::check};
 
-    #[test]
-    fn timestamps_accept_bare_epoch_milliseconds() {
-        for (input, expected) in [
-            ("0", 0),
-            ("1", 1),
-            ("+1", 1),
-            ("-1", -1),
-            ("1713000000000", 1_713_000_000_000),
-            (" 1713000000000 ", 1_713_000_000_000),
-        ] {
-            check!(parse_timestamp(input) == Ok(expected), "{input:?}");
-        }
+    #[yare::parameterized(
+        zero = { "0", 0 },
+        one = { "1", 1 },
+        explicit_plus = { "+1", 1 },
+        negative = { "-1", -1 },
+        large_millis = { "1713000000000", 1_713_000_000_000 },
+        surrounding_whitespace = { " 1713000000000 ", 1_713_000_000_000 },
+    )]
+    fn timestamps_accept_bare_epoch_milliseconds(input: &str, expected: i64) {
+        check!(parse_timestamp(input) == Ok(expected), "{input:?}");
     }
 
-    #[test]
-    fn timestamps_accept_rfc3339_instants() {
-        for (input, expected) in [
-            ("1970-01-01T00:00:00Z", 0),
-            ("1970-01-01T00:00:00.001Z", 1),
-            ("1970-01-01T00:00:00.000999999Z", 0),
-            ("1969-12-31T23:59:59Z", -1_000),
-            ("2026-08-24T12:00:00Z", 1_787_572_800_000),
-            ("2026-08-24t12:00:00z", 1_787_572_800_000),
-            ("2026-08-24 12:00:00Z", 1_787_572_800_000),
-            ("2026-08-24T12:00:00+00:00", 1_787_572_800_000),
-            ("2026-08-24T14:00:00+02:00", 1_787_572_800_000),
-            ("2026-08-24T07:00:00-05:00", 1_787_572_800_000),
-            ("2026-08-24T12:00:00.250Z", 1_787_572_800_250),
-            ("2026-08-24T12:00:00.2Z", 1_787_572_800_200),
-            ("2024-02-29T00:00:00Z", 1_709_164_800_000),
-            ("2000-02-29T00:00:00Z", 951_782_400_000),
-        ] {
-            check!(parse_timestamp(input) == Ok(expected), "{input:?}");
-        }
+    #[yare::parameterized(
+        epoch = { "1970-01-01T00:00:00Z", 0 },
+        epoch_millisecond = { "1970-01-01T00:00:00.001Z", 1 },
+        submillisecond_truncates = { "1970-01-01T00:00:00.000999999Z", 0 },
+        before_epoch = { "1969-12-31T23:59:59Z", -1_000 },
+        utc = { "2026-08-24T12:00:00Z", 1_787_572_800_000 },
+        lowercase = { "2026-08-24t12:00:00z", 1_787_572_800_000 },
+        date_time_separator = { "2026-08-24 12:00:00Z", 1_787_572_800_000 },
+        zero_offset = { "2026-08-24T12:00:00+00:00", 1_787_572_800_000 },
+        positive_offset = { "2026-08-24T14:00:00+02:00", 1_787_572_800_000 },
+        negative_offset = { "2026-08-24T07:00:00-05:00", 1_787_572_800_000 },
+        fractional_250ms = { "2026-08-24T12:00:00.250Z", 1_787_572_800_250 },
+        fractional_200ms = { "2026-08-24T12:00:00.2Z", 1_787_572_800_200 },
+        leap_day_2024 = { "2024-02-29T00:00:00Z", 1_709_164_800_000 },
+        leap_day_2000 = { "2000-02-29T00:00:00Z", 951_782_400_000 },
+    )]
+    fn timestamps_accept_rfc3339_instants(input: &str, expected: i64) {
+        check!(parse_timestamp(input) == Ok(expected), "{input:?}");
     }
 
-    #[test]
-    fn timestamps_reject_impossible_and_zoneless_input() {
-        for bad in [
-            "",
-            "   ",
-            "not-a-time",
-            "2026-08-24",
-            "2026-08-24T12:00:00",
-            "2026-08-24X12:00:00Z",
-            "2026-13-01T00:00:00Z",
-            "2026-00-01T00:00:00Z",
-            "2026-08-32T00:00:00Z",
-            "2026-08-00T00:00:00Z",
-            "2023-02-29T00:00:00Z",
-            "1900-02-29T00:00:00Z",
-            "0000-01-01T00:00:00Z",
-            "2026-08-24T24:00:00Z",
-            "2026-08-24T12:60:00Z",
-            "2026-08-24T12:00:60Z",
-            "2026-08-24T12:00:00.Z",
-            "2026-08-24T12:00:00.0000000000Z",
-            "2026-08-24T12:00:00+0200",
-            "2026-08-24T12:00:00+24:00",
-            "2026-08-24T12:00:00+02:60",
-            "2026-08-24T12:00:00*02:00",
-            "2026/08/24T12:00:00Z",
-            "26-08-24T12:00:00Z",
-        ] {
-            check!(parse_timestamp(bad).is_err(), "{bad:?}");
-        }
+    #[yare::parameterized(
+        empty = { "" },
+        whitespace = { "   " },
+        invalid_text = { "not-a-time" },
+        date_only = { "2026-08-24" },
+        zoneless = { "2026-08-24T12:00:00" },
+        bad_separator = { "2026-08-24X12:00:00Z" },
+        month_too_large = { "2026-13-01T00:00:00Z" },
+        month_zero = { "2026-00-01T00:00:00Z" },
+        day_too_large = { "2026-08-32T00:00:00Z" },
+        day_zero = { "2026-08-00T00:00:00Z" },
+        non_leap_february = { "2023-02-29T00:00:00Z" },
+        century_not_leap = { "1900-02-29T00:00:00Z" },
+        year_zero = { "0000-01-01T00:00:00Z" },
+        hour_too_large = { "2026-08-24T24:00:00Z" },
+        minute_too_large = { "2026-08-24T12:60:00Z" },
+        second_too_large = { "2026-08-24T12:00:60Z" },
+        empty_fraction = { "2026-08-24T12:00:00.Z" },
+        fraction_too_long = { "2026-08-24T12:00:00.0000000000Z" },
+        offset_missing_colon = { "2026-08-24T12:00:00+0200" },
+        offset_hour_too_large = { "2026-08-24T12:00:00+24:00" },
+        offset_minute_too_large = { "2026-08-24T12:00:00+02:60" },
+        invalid_offset_sign = { "2026-08-24T12:00:00*02:00" },
+        slash_date = { "2026/08/24T12:00:00Z" },
+        short_year = { "26-08-24T12:00:00Z" },
+    )]
+    fn timestamps_reject_impossible_and_zoneless_input(bad: &str) {
+        check!(parse_timestamp(bad).is_err(), "{bad:?}");
     }
 
-    #[test]
-    fn civil_days_match_known_epochs() {
-        for (year, month, day, expected) in [
-            (1970, 1, 1, 0),
-            (1970, 1, 2, 1),
-            (1969, 12, 31, -1),
-            (2000, 3, 1, 11_017),
-            (2026, 8, 24, 20_689),
-            (1600, 1, 1, -135_140),
-        ] {
-            check!(
-                days_from_civil(year, month, day) == expected,
-                "{year}-{month}-{day}"
-            );
-        }
+    #[yare::parameterized(
+        epoch = { 1970, 1, 1, 0 },
+        following_day = { 1970, 1, 2, 1 },
+        day_before_epoch = { 1969, 12, 31, -1 },
+        y2k_march = { 2000, 3, 1, 11_017 },
+        reference_date = { 2026, 8, 24, 20_689 },
+        year_1600 = { 1600, 1, 1, -135_140 },
+    )]
+    fn civil_days_match_known_epochs(year: i64, month: i64, day: i64, expected: i64) {
+        check!(
+            days_from_civil(year, month, day) == expected,
+            "{year}-{month}-{day}"
+        );
     }
 }

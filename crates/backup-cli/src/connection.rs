@@ -203,8 +203,7 @@ fn sasl_credentials(properties: &BTreeMap<String, String>) -> Result<SaslCredent
     let mechanism = required(properties, "sasl.mechanism")?;
     let options = properties
         .get("sasl.jaas.config")
-        .map(|value| jaas_options(value))
-        .unwrap_or_default();
+        .map_or_default(|value| jaas_options(value));
     match mechanism.as_str() {
         "PLAIN" => Ok(SaslCredentials::Plain {
             username: required(&options, "username")?,
@@ -348,34 +347,29 @@ mod tests {
 
     /// `tokenauth` marks a delegation-token SCRAM login, read the way Kafka's
     /// `ScramLoginModule` reads it.
-    #[test]
-    fn tokenauth_marks_a_delegation_token_login() {
-        for (jaas, expected) in [
-            ("x required username=id password=hmac;", false),
-            ("x required username=id password=hmac tokenauth=true;", true),
-            ("x required username=id password=hmac tokenauth=TRUE;", true),
-            (
-                "x required username=id password=hmac tokenauth=false;",
-                false,
-            ),
-        ] {
-            let properties = parse_properties(&format!(
-                "security.protocol=SASL_PLAINTEXT\n\
-                 sasl.mechanism=SCRAM-SHA-256\n\
-                 sasl.jaas.config={jaas}\n"
-            ))
-            .expect("valid properties");
-            let policy = security(&properties)
-                .expect("valid policy")
-                .expect("secured policy");
-            assert!(
-                let Some(SaslCredentials::Scram {
-                    delegation_token, ..
-                }) = policy.sasl,
-                "{jaas}"
-            );
-            check!(delegation_token == expected, "{jaas}");
-        }
+    #[yare::parameterized(
+        absent = { "x required username=id password=hmac;", false },
+        true_lowercase = { "x required username=id password=hmac tokenauth=true;", true },
+        true_uppercase = { "x required username=id password=hmac tokenauth=TRUE;", true },
+        false_value = { "x required username=id password=hmac tokenauth=false;", false },
+    )]
+    fn tokenauth_marks_a_delegation_token_login(jaas: &str, expected: bool) {
+        let properties = parse_properties(&format!(
+            "security.protocol=SASL_PLAINTEXT\n\
+             sasl.mechanism=SCRAM-SHA-256\n\
+             sasl.jaas.config={jaas}\n"
+        ))
+        .expect("valid properties");
+        let policy = security(&properties)
+            .expect("valid policy")
+            .expect("secured policy");
+        assert2::assert!(
+            let Some(SaslCredentials::Scram {
+                delegation_token, ..
+            }) = policy.sasl,
+            "{jaas}"
+        );
+        check!(delegation_token == expected, "{jaas}");
     }
 
     #[test]
@@ -405,18 +399,16 @@ mod tests {
         check!(error.contains("expected PEM"), "got: {error}");
     }
 
-    #[test]
-    fn security_properties_cannot_be_silently_ignored() {
-        for (property, value) in [
-            ("sasl.mechanism", "SCRAM-SHA-512"),
-            ("ssl.truststore.location", "/etc/krabka/ca.pem"),
-        ] {
-            let properties = BTreeMap::from([(property.into(), value.into())]);
-            let error = security(&properties)
-                .expect_err("PLAINTEXT must reject secured-client properties")
-                .to_string();
-            check!(error.contains(property), "got: {error}");
-        }
+    #[yare::parameterized(
+        sasl_mechanism = { "sasl.mechanism", "SCRAM-SHA-512" },
+        tls_location = { "ssl.truststore.location", "/etc/krabka/ca.pem" },
+    )]
+    fn security_properties_cannot_be_silently_ignored(property: &str, value: &str) {
+        let properties = BTreeMap::from([(property.into(), value.into())]);
+        let error = security(&properties)
+            .expect_err("PLAINTEXT must reject secured-client properties")
+            .to_string();
+        check!(error.contains(property), "got: {error}");
     }
 
     #[test]

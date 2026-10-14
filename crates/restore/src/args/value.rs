@@ -242,30 +242,30 @@ mod tests {
         check!(parse_cluster_id("not-a-cluster-id").is_err());
     }
 
-    #[test]
-    fn topic_names_follow_kafka_rules() {
-        for good in [
-            "orders",
-            "a",
-            "a.b_c-d",
-            "0",
-            &"x".repeat(MAX_TOPIC_NAME_LEN),
-        ] {
-            check!(parse_topic_name(good) == Ok(good.to_owned()), "{good:?}");
-        }
-        for bad in [
-            "",
-            ".",
-            "..",
-            "has space",
-            "has/slash",
-            "has:colon",
-            "has=equals",
-            "café",
-            &"x".repeat(MAX_TOPIC_NAME_LEN + 1),
-        ] {
-            check!(parse_topic_name(bad).is_err(), "{bad:?}");
-        }
+    #[yare::parameterized(
+        common = { "orders".to_owned() },
+        one_character = { "a".to_owned() },
+        punctuation = { "a.b_c-d".to_owned() },
+        digit = { "0".to_owned() },
+        maximum_length = { "x".repeat(MAX_TOPIC_NAME_LEN) },
+    )]
+    fn topic_names_accept_kafka_names(good: String) {
+        check!(parse_topic_name(&good) == Ok(good.clone()), "{good:?}");
+    }
+
+    #[yare::parameterized(
+        empty = { String::new() },
+        dot = { ".".to_owned() },
+        double_dot = { "..".to_owned() },
+        whitespace = { "has space".to_owned() },
+        slash = { "has/slash".to_owned() },
+        colon = { "has:colon".to_owned() },
+        equals = { "has=equals".to_owned() },
+        non_ascii = { "café".to_owned() },
+        over_limit = { "x".repeat(MAX_TOPIC_NAME_LEN + 1) },
+    )]
+    fn topic_names_reject_invalid_kafka_names(bad: String) {
+        check!(parse_topic_name(&bad).is_err(), "{bad:?}");
     }
 
     #[test]
@@ -274,20 +274,18 @@ mod tests {
         check!(parse_partition_ref("a.b-c:12") == Ok(partition("a.b-c", 12)));
     }
 
-    #[test]
-    fn partition_refs_reject_malformed_input() {
-        for bad in [
-            "orders",
-            "orders:",
-            ":0",
-            "orders:-1",
-            "orders:x",
-            "orders:0:1",
-            "or ders:0",
-            "orders:99999999999",
-        ] {
-            check!(parse_partition_ref(bad).is_err(), "{bad:?}");
-        }
+    #[yare::parameterized(
+        missing_colon = { "orders" },
+        missing_partition = { "orders:" },
+        missing_topic = { ":0" },
+        negative_partition = { "orders:-1" },
+        non_numeric_partition = { "orders:x" },
+        extra_colon = { "orders:0:1" },
+        invalid_topic = { "or ders:0" },
+        overflowing_partition = { "orders:99999999999" },
+    )]
+    fn partition_refs_reject_malformed_input(bad: &str) {
+        check!(parse_partition_ref(bad).is_err(), "{bad:?}");
     }
 
     #[test]
@@ -313,19 +311,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn offset_bounds_reject_malformed_input() {
-        for bad in [
-            "orders:0",
-            "orders=1000",
-            "orders:0=",
-            "orders:0=-1",
-            "orders:0=x",
-            "=1000",
-            "orders:0=1000=2000",
-        ] {
-            check!(parse_offset_bound(bad).is_err(), "{bad:?}");
-        }
+    #[yare::parameterized(
+        missing_equals = { "orders:0" },
+        wrong_separator = { "orders=1000" },
+        missing_offset = { "orders:0=" },
+        negative_offset = { "orders:0=-1" },
+        non_numeric_offset = { "orders:0=x" },
+        missing_partition = { "=1000" },
+        repeated_equals = { "orders:0=1000=2000" },
+    )]
+    fn offset_bounds_reject_malformed_input(bad: &str) {
+        check!(parse_offset_bound(bad).is_err(), "{bad:?}");
     }
 
     #[test]
@@ -356,23 +352,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn offset_ranges_reject_empty_inverted_and_malformed_input() {
-        for bad in [
-            "orders:0=100..100",
-            "orders:0=200..100",
-            "orders:0=100..=99",
-            "orders:0=100",
-            "orders:0=..200",
-            "orders:0=100..",
-            "orders:0=-1..5",
-            "orders:0=1..-5",
-            "orders:0",
-            "orders:0=a..b",
-            &format!("orders:0=0..={}", i64::MAX),
-        ] {
-            check!(parse_offset_range(bad).is_err(), "{bad:?}");
-        }
+    #[yare::parameterized(
+        empty = { "orders:0=100..100".to_owned() },
+        inverted = { "orders:0=200..100".to_owned() },
+        inclusive_inverted = { "orders:0=100..=99".to_owned() },
+        missing_range = { "orders:0=100".to_owned() },
+        missing_start = { "orders:0=..200".to_owned() },
+        missing_end = { "orders:0=100..".to_owned() },
+        negative_start = { "orders:0=-1..5".to_owned() },
+        negative_end = { "orders:0=1..-5".to_owned() },
+        missing_offset = { "orders:0".to_owned() },
+        non_numeric = { "orders:0=a..b".to_owned() },
+        inclusive_end_overflow = { format!("orders:0=0..={}", i64::MAX) },
+    )]
+    fn offset_ranges_reject_empty_inverted_and_malformed_input(bad: String) {
+        check!(parse_offset_range(&bad).is_err(), "{bad:?}");
     }
 
     #[test]
@@ -390,29 +384,45 @@ mod tests {
         check!(with_equals.pattern.as_str() == "a=b");
     }
 
-    #[test]
-    fn header_patterns_reject_malformed_input() {
-        for bad in ["trace-id", "=^abc$", "trace-id=[unclosed"] {
-            check!(parse_header_pattern(bad).is_err(), "{bad:?}");
-        }
+    #[yare::parameterized(
+        missing_equals = { "trace-id" },
+        missing_name = { "=^abc$" },
+        invalid_regex = { "trace-id=[unclosed" },
+    )]
+    fn header_patterns_reject_malformed_input(bad: &str) {
+        check!(parse_header_pattern(bad).is_err(), "{bad:?}");
+    }
+
+    #[yare::parameterized(
+        negative_sentinel = { "-1" },
+        text = { "x" },
+        empty = { "" },
+        fractional = { "1.5" },
+    )]
+    fn producer_ids_reject_malformed_values(bad: &str) {
+        check!(parse_producer_id(bad).is_err(), "{bad:?}");
     }
 
     #[test]
-    fn producer_ids_reject_the_no_producer_sentinel() {
+    fn producer_ids_accept_nonnegative_values() {
         check!(parse_producer_id("42") == Ok(ProducerId(42)));
         check!(parse_producer_id(" 7 ") == Ok(ProducerId(7)));
-        for bad in ["-1", "x", "", "1.5"] {
-            check!(parse_producer_id(bad).is_err(), "{bad:?}");
-        }
+    }
+
+    #[yare::parameterized(
+        negative = { "-1" },
+        text = { "x" },
+        empty = { "" },
+        overflow = { "2147483648" },
+    )]
+    fn node_ids_reject_values_outside_kafkas_node_id_range(bad: &str) {
+        check!(parse_node_id(bad).is_err(), "{bad:?}");
     }
 
     #[test]
-    fn node_ids_take_kafkas_node_id_range() {
+    fn node_ids_accept_kafkas_node_id_range() {
         check!(parse_node_id("3") == Ok(NodeId(3)));
         check!(parse_node_id("2147483647") == Ok(NodeId(2_147_483_647)));
-        for bad in ["-1", "x", "", "2147483648"] {
-            check!(parse_node_id(bad).is_err(), "{bad:?}");
-        }
     }
 
     #[test]

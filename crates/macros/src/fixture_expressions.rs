@@ -113,23 +113,28 @@ mod tests {
         assert!(guard_response(&"client(), request".parse().unwrap()).is_err());
     }
 
+    #[yare::parameterized(
+        hard_assert = { "assert" },
+        soft_check = { "check" },
+    )]
+    fn eviction_assertions_keep_first_check_before_lock_and_soft_check_policy(assertion: &str) {
+        let output = compact(
+            &evicted_segments(
+                &format!("{assertion}, removed, exports, &partition")
+                    .parse()
+                    .unwrap(),
+            )
+            .unwrap(),
+        );
+        assert2::assert!(
+            output.find("removed==exports.len()").unwrap()
+                < output.find("partition_log_guard(&partition)").unwrap()
+        );
+        assert2::assert!(output.matches(&format!("{assertion}!")).count() == 3);
+    }
+
     #[test]
-    fn eviction_assertions_keep_first_check_before_lock_and_soft_check_policy() {
-        for assertion in ["assert", "check"] {
-            let output = compact(
-                &evicted_segments(
-                    &format!("{assertion}, removed, exports, &partition")
-                        .parse()
-                        .unwrap(),
-                )
-                .unwrap(),
-            );
-            assert!(
-                output.find("removed==exports.len()").unwrap()
-                    < output.find("partition_log_guard(&partition)").unwrap()
-            );
-            assert!(output.matches(&format!("{assertion}!")).count() == 3);
-        }
+    fn eviction_assertions_reject_an_unknown_policy() {
         assert!(evicted_segments(&"panic, removed, exports, &partition".parse().unwrap()).is_err());
     }
 
@@ -143,13 +148,15 @@ mod tests {
             )
             .is_ok()
         );
-        for input in [
-            "builder { make() } assignment { assignment }",
-            "assignment {} builder { make() }",
-            "assignment { value } builder (make())",
-            "assignment { value } builder { make() } extra",
-        ] {
-            assert!(check_sources(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    }
+
+    #[yare::parameterized(
+        reversed = { "builder { make() } assignment { assignment }" },
+        empty_assignment = { "assignment {} builder { make() }" },
+        nonblock_builder = { "assignment { value } builder (make())" },
+        trailing_tokens = { "assignment { value } builder { make() } extra" },
+    )]
+    fn reassignment_sources_reject_invalid_layouts(input: &str) {
+        assert2::assert!(check_sources(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

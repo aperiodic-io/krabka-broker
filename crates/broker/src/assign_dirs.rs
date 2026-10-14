@@ -256,17 +256,18 @@ mod tests {
         check!(req.directories.is_empty());
     }
 
-    #[test]
-    fn build_request_round_trips_known_and_unknown_broker_epochs() {
-        for epoch in [9, UNKNOWN_BROKER_EPOCH] {
-            let req = build_request(3, epoch, &[]);
-            let mut bytes = bytes::BytesMut::new();
-            req.encode(&mut bytes, 0).expect("encode request");
-            let decoded = AssignReplicasToDirsRequest::decode(&mut bytes.freeze(), 0)
-                .expect("decode request");
-            assert!(decoded.broker_id == 3);
-            assert!(decoded.broker_epoch == epoch, "{epoch}");
-        }
+    #[yare::parameterized(
+        known_epoch = { 9 },
+        unknown_epoch = { UNKNOWN_BROKER_EPOCH },
+    )]
+    fn build_request_round_trips_known_and_unknown_broker_epochs(epoch: i64) {
+        let req = build_request(3, epoch, &[]);
+        let mut bytes = bytes::BytesMut::new();
+        req.encode(&mut bytes, 0).expect("encode request");
+        let decoded =
+            AssignReplicasToDirsRequest::decode(&mut bytes.freeze(), 0).expect("decode request");
+        assert2::assert!(decoded.broker_id == 3);
+        assert2::assert!(decoded.broker_epoch == epoch, "{epoch}");
     }
 
     use crate::test_support::{

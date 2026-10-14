@@ -204,7 +204,6 @@ mod tests {
         token_fixtures::check_refusals()
             .cases(|live, expired| {
                 mutation_credential_refusals(&live.hmac)
-                    .into_iter()
                     .chain([
                         TokenMutationRefusalSetup {
                             name: "expired token, foreign caller",
@@ -221,6 +220,7 @@ mod tests {
                         },
                     ])
                     .chain(ordinary_ownership_refusals(&live.hmac))
+                    .collect::<Vec<_>>()
             })
             .mutation(async |controller, secret, case| {
                 let resp = handle(

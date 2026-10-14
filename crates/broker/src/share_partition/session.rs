@@ -43,6 +43,17 @@ const INITIAL_EPOCH: i32 = 0;
 /// One share partition of a session: `(topic_id, partition)`.
 pub(crate) type SharePartitionKey = (uuid::Uuid, i32);
 
+/// Inputs to one share-fetch session transition.
+#[derive(Clone, Copy, bon::Builder)]
+pub(crate) struct ShareFetchSessionRequest<'a> {
+    identity: (&'a str, &'a str),
+    connection_id: &'a str,
+    epoch: i32,
+    partitions: FetchPartitions<'a>,
+    #[builder(default)]
+    has_acknowledgements: bool,
+}
+
 /// One partition of a live session, Kafka's `CachedSharePartition`.
 #[derive(Debug, Clone, Copy)]
 struct CachedPartition {
@@ -151,12 +162,15 @@ impl ShareSessionCache {
     /// session does not hold yet and removes the forgotten ones.
     pub(crate) fn update_fetch(
         &self,
-        (group, member): (&str, &str),
-        connection_id: &str,
-        epoch: i32,
-        partitions: FetchPartitions<'_>,
-        has_acknowledgements: bool,
+        request: ShareFetchSessionRequest<'_>,
     ) -> Result<ShareFetchSessionUpdate, i16> {
+        let ShareFetchSessionRequest {
+            identity: (group, member),
+            connection_id,
+            epoch,
+            partitions,
+            has_acknowledgements,
+        } = request;
         let key = SessionKey::new(group, member);
         let mut inner = self.inner.lock().expect("share-session mutex poisoned");
 
@@ -365,14 +379,15 @@ mod tests {
         forgotten: &[SharePartitionKey],
     ) -> Result<ShareFetchSessionUpdate, i16> {
         cache.update_fetch(
-            ("g", member),
-            connection,
-            epoch,
-            FetchPartitions {
-                requested,
-                forgotten: &set(forgotten),
-            },
-            false,
+            ShareFetchSessionRequest::builder()
+                .identity(("g", member))
+                .connection_id(connection)
+                .epoch(epoch)
+                .partitions(FetchPartitions {
+                    requested,
+                    forgotten: &set(forgotten),
+                })
+                .build(),
         )
     }
 
@@ -447,14 +462,16 @@ mod tests {
         let cache = ShareSessionCache::new(8);
         let p = partition(1, 0);
         let acknowledging = cache.update_fetch(
-            ("g", "m"),
-            "connection-a",
-            0,
-            FetchPartitions {
-                requested: &[p],
-                forgotten: &HashSet::new(),
-            },
-            true,
+            ShareFetchSessionRequest::builder()
+                .identity(("g", "m"))
+                .connection_id("connection-a")
+                .epoch(0)
+                .partitions(FetchPartitions {
+                    requested: &[p],
+                    forgotten: &HashSet::new(),
+                })
+                .has_acknowledgements(true)
+                .build(),
         );
         assert!(acknowledging == Err(codes::INVALID_REQUEST));
         let forgetting = fetch(&cache, "m", 0, &[p], &[p]).expect("open");

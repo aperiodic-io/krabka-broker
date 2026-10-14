@@ -147,60 +147,19 @@ fn fetch_answer(error_code: i16, leader: QuorumLeader) -> FetchAnswer {
     }
 }
 
-#[test]
-fn fetch_response_round_trips() {
-    let served = fetch_answer(
-        0,
-        leader(Some(2), 5, Some(leader_endpoint("controller-2", 9093))),
-    );
-    for (case, answer) in [
-        ("served", served.clone()),
-        ("records", FetchAnswer {
-            records: Bytes::from_static(b"\x01\x02\x03"),
-            ..served.clone()
-        }),
-        ("diverged", FetchAnswer {
-            diverging: Some(LogOffsetMetadata {
-                offset: 5,
-                epoch: 1,
-            }),
-            ..served.clone()
-        }),
-        ("snapshot", FetchAnswer {
-            snapshot_id: Some((42, 3)),
-            ..served.clone()
-        }),
-        (
-            "leader without an endpoint",
-            fetch_answer(0, leader(Some(2), 5, None)),
-        ),
-        (
-            "follower redirect to leader 0",
-            fetch_answer(
-                NOT_LEADER_OR_FOLLOWER,
-                leader(Some(0), 5, Some(leader_endpoint("controller-0", 9093))),
-            ),
-        ),
-        (
-            "unknown leader",
-            fetch_answer(NOT_LEADER_OR_FOLLOWER, leader(None, 5, None)),
-        ),
-    ] {
-        let response = PeerResponse::Fetch(answer);
-        check!(
-            PeerResponse::decode_fetch(&response.encode()) == Some(response),
-            "{case}"
-        );
-    }
+fn refused_fetch_answer(leader: QuorumLeader) -> PeerResponse {
+    PeerResponse::Fetch(FetchAnswer {
+        hwm: -1,
+        ..fetch_answer(NOT_LEADER_OR_FOLLOWER, leader)
+    })
 }
 
-/// The bytes are those of Kafka's `KafkaRaftClient.buildEmptyFetchResponse`
-/// on a follower of leader 2: the error, the leader and epoch, no high
-/// watermark, the log start, empty non-null records and aborted
-/// transactions, and the leader's `NodeEndpoints` entry.
-#[test]
-fn a_refused_fetch_is_kafkas_empty_fetch_response() {
-    let kafka = |leader_id: i32, node_endpoints: Vec<fetch_resp::NodeEndpoint>| FetchResponse {
+fn kafka_empty_fetch_response(
+    leader_id: i32,
+    leader_epoch: i32,
+    node_endpoints: Vec<fetch_resp::NodeEndpoint>,
+) -> FetchResponse {
+    FetchResponse {
         responses: vec![fetch_resp::FetchableTopicResponse {
             topic: METADATA_TOPIC.to_string(),
             topic_id: METADATA_TOPIC_ID,
@@ -213,7 +172,7 @@ fn a_refused_fetch_is_kafkas_empty_fetch_response() {
                 records: Some(RecordsPayload::Raw(Bytes::new())),
                 current_leader: fetch_resp::LeaderIdAndEpoch {
                     leader_id,
-                    leader_epoch: 5,
+                    leader_epoch,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -222,40 +181,78 @@ fn a_refused_fetch_is_kafkas_empty_fetch_response() {
         }],
         node_endpoints,
         ..Default::default()
-    };
-    let refused = |leader| {
-        PeerResponse::Fetch(FetchAnswer {
-            hwm: -1,
-            ..fetch_answer(NOT_LEADER_OR_FOLLOWER, leader)
-        })
-    };
-    for (case, answer, expected) in [
-        (
+    }
+}
+
+#[yare::parameterized(
+    served = {
+        "served",
+        fetch_answer(0, leader(Some(2), 5, Some(leader_endpoint("controller-2", 9093)))),
+    },
+    records = { "records", FetchAnswer {
+        records: Bytes::from_static(b"\x01\x02\x03"),
+        ..fetch_answer(0, leader(Some(2), 5, Some(leader_endpoint("controller-2", 9093))))
+    } },
+    diverged = { "diverged", FetchAnswer {
+        diverging: Some(LogOffsetMetadata { offset: 5, epoch: 1 }),
+        ..fetch_answer(0, leader(Some(2), 5, Some(leader_endpoint("controller-2", 9093))))
+    } },
+    snapshot = { "snapshot", FetchAnswer {
+        snapshot_id: Some((42, 3)),
+        ..fetch_answer(0, leader(Some(2), 5, Some(leader_endpoint("controller-2", 9093))))
+    } },
+    leader_without_an_endpoint = {
+        "leader without an endpoint",
+        fetch_answer(0, leader(Some(2), 5, None)),
+    },
+    follower_redirect_to_leader_zero = { "follower redirect to leader 0", fetch_answer(
+        NOT_LEADER_OR_FOLLOWER,
+        leader(Some(0), 5, Some(leader_endpoint("controller-0", 9093))),
+    ) },
+    unknown_leader = {
+        "unknown leader",
+        fetch_answer(NOT_LEADER_OR_FOLLOWER, leader(None, 5, None)),
+    },
+)]
+fn fetch_response_round_trips(case: &'static str, answer: FetchAnswer) {
+    let response = PeerResponse::Fetch(answer);
+    check!(
+        PeerResponse::decode_fetch(&response.encode()) == Some(response),
+        "{case}"
+    );
+}
+
+/// The bytes are those of Kafka's `KafkaRaftClient.buildEmptyFetchResponse`
+/// on a follower of leader 2: the error, the leader and epoch, no high
+/// watermark, the log start, empty non-null records and aborted
+/// transactions, and the leader's `NodeEndpoints` entry.
+#[yare::parameterized(
+        known_leader = {
             "known leader",
-            refused(leader(
-                Some(2),
-                5,
-                Some(leader_endpoint("controller-2", 9093)),
-            )),
-            kafka(2, vec![fetch_resp::NodeEndpoint {
+            refused_fetch_answer(leader(Some(2), 5, Some(leader_endpoint("controller-2", 9093)))),
+            kafka_empty_fetch_response(2, 5, vec![fetch_resp::NodeEndpoint {
                 node_id: 2,
                 host: "controller-2".into(),
                 port: 9093,
                 ..Default::default()
             }]),
-        ),
+        },
         // `singletonFetchResponse` adds no entry without a leader id.
-        (
+        unknown_leader = {
             "unknown leader",
-            refused(leader(None, 5, Some(leader_endpoint("controller-2", 9093)))),
-            kafka(-1, Vec::new()),
-        ),
-    ] {
-        check!(
-            answer.encode() == encode_body(&expected, FETCH_VERSION),
-            "{case}"
-        );
-    }
+            refused_fetch_answer(leader(None, 5, Some(leader_endpoint("controller-2", 9093)))),
+            kafka_empty_fetch_response(-1, 5, Vec::new())
+        },
+)]
+fn a_refused_fetch_is_kafkas_empty_fetch_response(
+    case: &'static str,
+    answer: PeerResponse,
+    expected: FetchResponse,
+) {
+    check!(
+        answer.encode() == encode_body(&expected, FETCH_VERSION),
+        "{case}"
+    );
 }
 
 /// Kafka's `Endpoints.fromFetchResponse` keeps only the entry for

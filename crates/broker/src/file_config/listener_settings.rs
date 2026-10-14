@@ -361,7 +361,12 @@ pub(super) fn apply_listener_settings(
 mod tests {
     use {
         crate::{
-            config::BrokerConfig,
+            api_catalog::UnstableApiVersions,
+            config::{BrokerConfig, TopicCreationOrigins},
+            coordinator::unified::{
+                config::ConsumerGroupMigrationPolicy,
+                streams::description::TopologyDescriptionPlugin,
+            },
             file_config::{
                 FileConfig, FileConfigError,
                 test_support::{configured, configured_feature, configured_unwrap_parse},
@@ -385,29 +390,36 @@ mod tests {
         supplied: bool,
     }
 
-    /// One file-loading case: a label, the file, and the outcome it loads to.
-    struct ConfigCase<S, T> {
-        label: &'static str,
-        source: S,
-        want: Result<T, String>,
+    fn check_config_case<T: std::fmt::Debug + PartialEq, E: AsRef<str>>(
+        label: &str,
+        result: &Result<T, String>,
+        expected: &Result<T, E>,
+    ) {
+        let expected_error = expected.as_ref().err().map_or("-", |error| error.as_ref());
+        let actual = result
+            .as_ref()
+            .map_err(|message| message.contains(expected_error));
+        assert2::assert!(
+            actual == expected.as_ref().map_err(|_| true),
+            "{label}: {result:?}"
+        );
     }
 
-    fn check_config_cases<const N: usize, S: AsRef<str>, T: std::fmt::Debug + PartialEq>(
-        cases: [ConfigCase<S, T>; N],
-        read: impl Fn(&BrokerConfig) -> T,
-    ) {
-        let mut actual = Vec::with_capacity(N);
-        let mut expected = Vec::with_capacity(N);
-        for ConfigCase {
-            label,
-            source,
-            want,
-        } in cases
-        {
-            actual.push((label, file_outcome(source.as_ref(), &read)));
-            expected.push((label, want));
+    fn delete_topic_enable(config: &BrokerConfig) -> Supplied<bool> {
+        Supplied {
+            value: config.delete_topic_enable,
+            supplied: config.static_config_origins.topic_admin.delete_topic_enable,
         }
-        assert!(actual == expected);
+    }
+
+    fn auto_create_topics_enable(config: &BrokerConfig) -> Supplied<bool> {
+        Supplied {
+            value: config.auto_create_topics_enable,
+            supplied: config
+                .static_config_origins
+                .topic_admin
+                .auto_create_topics_enable,
+        }
     }
 
     #[test]
@@ -497,164 +509,110 @@ connections_max_idle = "5s"
     /// Kafka names in `[server_properties]`. A dedicated `[runtime]` key wins
     /// over the property, and a value that is not a positive integer refuses
     /// the file.
-    #[test]
-    fn apply_to_reads_the_topic_creation_defaults_from_server_properties() {
-        use crate::config::{BrokerConfig, TopicCreationOrigins};
-
-        for (label, src, expected) in [
-            (
-                "neither named",
-                "broker_id = 0\n",
-                Ok((1, 1, TopicCreationOrigins::default())),
-            ),
-            (
-                "both as properties",
-                "[server_properties]\n\"num.partitions\" = \"6\"\n\
-                 \"default.replication.factor\" = \"3\"\n",
-                Ok((6, 3, TopicCreationOrigins {
-                    num_partitions: true,
-                    default_replication_factor: true,
-                })),
-            ),
-            (
-                "a dedicated key wins over the property",
-                "[runtime]\nnum_partitions = 4\n\
-                 [server_properties]\n\"num.partitions\" = \"6\"\n",
-                Ok((4, 1, TopicCreationOrigins {
-                    num_partitions: true,
-                    default_replication_factor: false,
-                })),
-            ),
-            (
-                "a zero is refused",
-                "[server_properties]\n\"default.replication.factor\" = \"0\"\n",
-                Err(
-                    "server_properties `default.replication.factor` must be a positive integer, got `0`",
-                ),
-            ),
-            (
-                "a word is refused",
-                "[server_properties]\n\"num.partitions\" = \"many\"\n",
-                Err("server_properties `num.partitions` must be a positive integer, got `many`"),
-            ),
-        ] {
-            let file: FileConfig = toml::from_str(src).expect("parse");
-            let mut cfg = BrokerConfig::default();
-            let result = file.apply_to(&mut cfg).map(|()| {
+    #[yare::parameterized(
+        neither_named = {
+            "neither named",
+            "broker_id = 0\n",
+            Ok((1, 1, TopicCreationOrigins::default())),
+        },
+        both_as_properties = {
+            "both as properties",
+            "[server_properties]\n\"num.partitions\" = \"6\"\n\
+                     \"default.replication.factor\" = \"3\"\n",
+            Ok((6, 3, TopicCreationOrigins {
+                num_partitions: true,
+                default_replication_factor: true,
+            })),
+        },
+        dedicated_key_wins_over_property = {
+            "a dedicated key wins over the property",
+            "[runtime]\nnum_partitions = 4\n\
+                         [server_properties]\n\"num.partitions\" = \"6\"\n",
+            Ok((4, 1, TopicCreationOrigins {
+                num_partitions: true,
+                default_replication_factor: false,
+            })),
+        },
+        zero_refused = {
+            "a zero is refused",
+            "[server_properties]\n\"default.replication.factor\" = \"0\"\n",
+            Err("server_properties `default.replication.factor` must be a positive integer, got `0`"),
+        },
+        word_refused = {
+            "a word is refused",
+            "[server_properties]\n\"num.partitions\" = \"many\"\n",
+            Err("server_properties `num.partitions` must be a positive integer, got `many`"),
+        },
+    )]
+    fn apply_to_reads_the_topic_creation_defaults_from_server_properties(
+        label: &str,
+        source: &str,
+        expected: Result<(i32, i16, TopicCreationOrigins), &str>,
+    ) {
+        let file: FileConfig = toml::from_str(source).expect("parse");
+        let mut config = BrokerConfig::default();
+        let result = file
+            .apply_to(&mut config)
+            .map(|()| {
                 (
-                    cfg.num_partitions,
-                    cfg.default_replication_factor,
-                    cfg.static_config_origins.topic_creation,
+                    config.num_partitions,
+                    config.default_replication_factor,
+                    config.static_config_origins.topic_creation,
                 )
-            });
-            let result = result.map_err(|error| error.to_string());
-
-            check!(
-                result
-                    .as_ref()
-                    .map_err(|message| message.contains(expected.err().unwrap_or("-")))
-                    == expected.as_ref().map_err(|_| true),
-                "{label}: {result:?}"
-            );
-        }
+            })
+            .map_err(|error| error.to_string());
+        check_config_case(label, &result, &expected);
     }
 
     /// `delete.topic.enable` and `auto.create.topics.enable` under their Kafka
     /// names: booleans Kafka reads case-insensitively, default `true`, and a
     /// value that is neither word refuses the configuration.
-    #[test]
-    fn boolean_keys_are_read_from_server_properties() {
-        /// The value and the operator-supplied flag of one key.
-        type Read = fn(&BrokerConfig) -> Supplied<bool>;
-        /// A label, the key it reads, the file, and the value, flag or error.
-        struct Case {
-            label: &'static str,
-            read: Read,
-            source: &'static str,
-            want: Result<Supplied<bool>, String>,
-        }
-        let delete: Read = |cfg| Supplied {
-            value: cfg.delete_topic_enable,
-            supplied: cfg.static_config_origins.topic_admin.delete_topic_enable,
-        };
-        let auto_create: Read = |cfg| Supplied {
-            value: cfg.auto_create_topics_enable,
-            supplied: cfg
-                .static_config_origins
-                .topic_admin
-                .auto_create_topics_enable,
-        };
-        let cases: [Case; 6] = [
-            Case {
-                label: "delete not named",
-                read: delete,
-                source: "broker_id = 0\n",
-                want: Ok(Supplied {
-                    value: true,
-                    supplied: false,
-                }),
-            },
-            Case {
-                label: "delete false",
-                read: delete,
-                source: "[server_properties]\n\"delete.topic.enable\" = \"false\"\n",
-                want: Ok(Supplied {
-                    value: false,
-                    supplied: true,
-                }),
-            },
-            Case {
-                label: "delete upper case",
-                read: delete,
-                source: "[server_properties]\n\"delete.topic.enable\" = \"TRUE\"\n",
-                want: Ok(Supplied {
-                    value: true,
-                    supplied: true,
-                }),
-            },
-            Case {
-                label: "delete a word",
-                read: delete,
-                source: "[server_properties]\n\"delete.topic.enable\" = \"maybe\"\n",
-                want: Err(
-                    "invalid config: server_properties `delete.topic.enable` must be `true` or \
-                     `false`, got `maybe`"
-                        .to_owned(),
-                ),
-            },
-            Case {
-                label: "auto-create not named",
-                read: auto_create,
-                source: "broker_id = 0\n",
-                want: Ok(Supplied {
-                    value: true,
-                    supplied: false,
-                }),
-            },
-            Case {
-                label: "auto-create false",
-                read: auto_create,
-                source: "[server_properties]\n\"auto.create.topics.enable\" = \"False\"\n",
-                want: Ok(Supplied {
-                    value: false,
-                    supplied: true,
-                }),
-            },
-        ];
-        let mut actual = Vec::with_capacity(cases.len());
-        let mut expected = Vec::with_capacity(cases.len());
-        for Case {
-            label,
-            read,
-            source,
-            want,
-        } in cases
-        {
-            let result = file_outcome(source, read);
-            actual.push((label, result));
-            expected.push((label, want));
-        }
-        assert!(actual == expected);
+    #[yare::parameterized(
+        delete_not_named = {
+            "delete not named",
+            delete_topic_enable,
+            "broker_id = 0\n",
+            Ok(Supplied { value: true, supplied: false }),
+        },
+        delete_false = {
+            "delete false",
+            delete_topic_enable,
+            "[server_properties]\n\"delete.topic.enable\" = \"false\"\n",
+            Ok(Supplied { value: false, supplied: true }),
+        },
+        delete_upper_case = {
+            "delete upper case",
+            delete_topic_enable,
+            "[server_properties]\n\"delete.topic.enable\" = \"TRUE\"\n",
+            Ok(Supplied { value: true, supplied: true }),
+        },
+        delete_a_word = {
+            "delete a word",
+            delete_topic_enable,
+            "[server_properties]\n\"delete.topic.enable\" = \"maybe\"\n",
+            Err("invalid config: server_properties `delete.topic.enable` must be `true` or `false`, got `maybe`".to_owned()),
+        },
+        auto_create_not_named = {
+            "auto-create not named",
+            auto_create_topics_enable,
+            "broker_id = 0\n",
+            Ok(Supplied { value: true, supplied: false }),
+        },
+        auto_create_false = {
+            "auto-create false",
+            auto_create_topics_enable,
+            "[server_properties]\n\"auto.create.topics.enable\" = \"False\"\n",
+            Ok(Supplied { value: false, supplied: true }),
+        },
+    )]
+    fn boolean_keys_are_read_from_server_properties(
+        label: &str,
+        read: fn(&BrokerConfig) -> Supplied<bool>,
+        source: &str,
+        expected: Result<Supplied<bool>, String>,
+    ) {
+        let actual = file_outcome(source, read);
+        assert2::assert!(actual == expected, "{label}: {actual:?}");
     }
 
     /// Kafka's `log.roll.ms` sets the roll interval of every log whose topic
@@ -662,205 +620,169 @@ connections_max_idle = "5s"
     /// under 1 refuses the configuration, as `KafkaConfig` refuses it. Kafka's
     /// `LogDirFailureTest` sets it to make a broker write into a failed log
     /// directory within seconds.
-    #[test]
-    fn log_roll_ms_is_read_from_server_properties() {
+    #[yare::parameterized(
+        not_named = {
+            "not named",
+            "broker_id = 0\n",
+            Ok(Supplied { value: 604_800_000, supplied: false }),
+        },
+        named = {
+            "named",
+            "[server_properties]\n\"log.roll.ms\" = \"3000\"\n",
+            Ok(Supplied { value: 3000, supplied: true }),
+        },
+        named_at_segment_default = {
+            "named at the segment.ms default",
+            "[server_properties]\n\"log.roll.ms\" = \"604800000\"\n",
+            Ok(Supplied { value: 604_800_000, supplied: true }),
+        },
+        zero = {
+            "zero",
+            "[server_properties]\n\"log.roll.ms\" = \"0\"\n",
+            Err(
+                "invalid config: server_properties `log.roll.ms` must be a positive integer, got `0`"
+                    .to_owned(),
+            ),
+        },
+        a_word = {
+            "a word",
+            "[server_properties]\n\"log.roll.ms\" = \"soon\"\n",
+            Err(
+                "invalid config: server_properties `log.roll.ms` must be a positive integer, got `soon`"
+                    .to_owned(),
+            ),
+        },
+    )]
+    fn log_roll_ms_is_read_from_server_properties(
+        label: &str,
+        source: &str,
+        expected: Result<Supplied<i64>, String>,
+    ) {
         use krabka_units::convert::TimeExt as _;
 
-        let property =
-            |value: &str| format!("[server_properties]\n\"log.roll.ms\" = \"{value}\"\n");
-        let cases: [ConfigCase<String, Supplied<i64>>; 5] = [
-            ConfigCase {
-                label: "not named",
-                source: "broker_id = 0\n".to_owned(),
-                want: Ok(Supplied {
-                    value: 604_800_000,
-                    supplied: false,
-                }),
-            },
-            ConfigCase {
-                label: "named",
-                source: property("3000"),
-                want: Ok(Supplied {
-                    value: 3000,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "named at the segment.ms default",
-                source: property("604800000"),
-                want: Ok(Supplied {
-                    value: 604_800_000,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "zero",
-                source: property("0"),
-                want: Err(
-                    "invalid config: server_properties `log.roll.ms` must be a positive integer, \
-                     got `0`"
-                        .to_owned(),
-                ),
-            },
-            ConfigCase {
-                label: "a word",
-                source: property("soon"),
-                want: Err(
-                    "invalid config: server_properties `log.roll.ms` must be a positive integer, \
-                     got `soon`"
-                        .to_owned(),
-                ),
-            },
-        ];
-        check_config_cases(cases, |cfg| Supplied {
+        let result = file_outcome(source, |cfg| Supplied {
             value: cfg.log_config.segment_roll_interval.millis_i64(),
             supplied: cfg
                 .static_config_origins
                 .supplied_kafka_keys
                 .contains("log.roll.ms"),
         });
+        check_config_case(label, &result, &expected);
     }
 
-    #[test]
-    fn the_consumer_group_migration_policy_is_read_from_server_properties() {
-        use crate::coordinator::unified::config::ConsumerGroupMigrationPolicy as Policy;
-
-        let property = |value: &str| {
-            format!("[server_properties]\n\"group.consumer.migration.policy\" = \"{value}\"\n")
-        };
-        let cases: [ConfigCase<String, Supplied<Policy>>; 5] = [
-            ConfigCase {
-                label: "not named",
-                source: "broker_id = 0\n".to_owned(),
-                want: Ok(Supplied {
-                    value: Policy::Bidirectional,
-                    supplied: false,
-                }),
-            },
-            ConfigCase {
-                label: "disabled",
-                source: property("disabled"),
-                want: Ok(Supplied {
-                    value: Policy::Disabled,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "upper case",
-                source: property("DOWNGRADE"),
-                want: Ok(Supplied {
-                    value: Policy::Downgrade,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "mixed case",
-                source: property("Upgrade"),
-                want: Ok(Supplied {
-                    value: Policy::Upgrade,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "not a policy",
-                source: property("sideways"),
-                want: Err(
-                    "invalid config: server_properties `group.consumer.migration.policy` must be \
-                     one of `disabled`, `upgrade`, `downgrade` or `bidirectional`, got `sideways`"
-                        .to_owned(),
-                ),
-            },
-        ];
-        check_config_cases(cases, |cfg| Supplied {
+    #[yare::parameterized(
+        not_named = {
+            "not named",
+            "broker_id = 0\n",
+            Ok(Supplied {
+                value: ConsumerGroupMigrationPolicy::Bidirectional,
+                supplied: false,
+            }),
+        },
+        disabled = {
+            "disabled",
+            "[server_properties]\n\"group.consumer.migration.policy\" = \"disabled\"\n",
+            Ok(Supplied {
+                value: ConsumerGroupMigrationPolicy::Disabled,
+                supplied: true,
+            }),
+        },
+        upper_case = {
+            "upper case",
+            "[server_properties]\n\"group.consumer.migration.policy\" = \"DOWNGRADE\"\n",
+            Ok(Supplied {
+                value: ConsumerGroupMigrationPolicy::Downgrade,
+                supplied: true,
+            }),
+        },
+        mixed_case = {
+            "mixed case",
+            "[server_properties]\n\"group.consumer.migration.policy\" = \"Upgrade\"\n",
+            Ok(Supplied {
+                value: ConsumerGroupMigrationPolicy::Upgrade,
+                supplied: true,
+            }),
+        },
+        not_a_policy = {
+            "not a policy",
+            "[server_properties]\n\"group.consumer.migration.policy\" = \"sideways\"\n",
+            Err("invalid config: server_properties `group.consumer.migration.policy` must be one of `disabled`, `upgrade`, `downgrade` or `bidirectional`, got `sideways`".to_owned()),
+        },
+    )]
+    fn the_consumer_group_migration_policy_is_read_from_server_properties(
+        label: &str,
+        source: &str,
+        expected: Result<Supplied<ConsumerGroupMigrationPolicy>, String>,
+    ) {
+        let result = file_outcome(source, |cfg| Supplied {
             value: cfg.next_gen_consumer_group.migration_policy,
             supplied: cfg
                 .static_config_origins
                 .supplied_kafka_keys
                 .contains("group.consumer.migration.policy"),
         });
+        check_config_case(label, &result, &expected);
     }
 
     /// `transaction.partition.verification.enable`, the static layer of a
     /// dynamic config, comes from the `[runtime]` table or from
     /// `server_properties`. The dedicated `[runtime]` key wins over the
     /// property, and either source records that the operator named the key.
-    #[test]
-    fn partition_verification_is_read_from_the_runtime_table_and_server_properties() {
+    #[yare::parameterized(
+        not_named = {
+            "not named",
+            "broker_id = 0\n",
+            Ok(Supplied { value: true, supplied: false }),
+        },
+        property_false = {
+            "property false",
+            "[server_properties]\n\"transaction.partition.verification.enable\" = \"false\"\n",
+            Ok(Supplied { value: false, supplied: true }),
+        },
+        property_upper_case = {
+            "property upper case",
+            "[server_properties]\n\"transaction.partition.verification.enable\" = \"TRUE\"\n",
+            Ok(Supplied { value: true, supplied: true }),
+        },
+        property_a_word = {
+            "property a word",
+            "[server_properties]\n\"transaction.partition.verification.enable\" = \"maybe\"\n",
+            Err("invalid config: server_properties `transaction.partition.verification.enable` must be `true` or `false`, got `maybe`".to_owned()),
+        },
+        runtime_false = {
+            "runtime false",
+            "[runtime]\ntransaction_partition_verification_enable = false\n",
+            Ok(Supplied { value: false, supplied: true }),
+        },
+        runtime_at_default = {
+            "runtime at the default",
+            "[runtime]\ntransaction_partition_verification_enable = true\n",
+            Ok(Supplied { value: true, supplied: true }),
+        },
+        runtime_true_over_false_property = {
+            "runtime true over a false property",
+            "[runtime]\ntransaction_partition_verification_enable = true\n\
+             [server_properties]\n\"transaction.partition.verification.enable\" = \"false\"\n",
+            Ok(Supplied { value: true, supplied: true }),
+        },
+        runtime_false_over_true_property = {
+            "runtime false over a true property",
+            "[runtime]\ntransaction_partition_verification_enable = false\n\
+             [server_properties]\n\"transaction.partition.verification.enable\" = \"true\"\n",
+            Ok(Supplied { value: false, supplied: true }),
+        },
+    )]
+    fn partition_verification_is_read_from_the_runtime_table_and_server_properties(
+        label: &str,
+        source: &str,
+        expected: Result<Supplied<bool>, String>,
+    ) {
         const KEY: &str = "transaction.partition.verification.enable";
-        let property = |value: &str| format!("[server_properties]\n\"{KEY}\" = \"{value}\"\n");
-        let runtime = |value: &str| {
-            format!("[runtime]\ntransaction_partition_verification_enable = {value}\n")
-        };
-        let cases: [ConfigCase<String, Supplied<bool>>; 8] = [
-            ConfigCase {
-                label: "not named",
-                source: "broker_id = 0\n".to_owned(),
-                want: Ok(Supplied {
-                    value: true,
-                    supplied: false,
-                }),
-            },
-            ConfigCase {
-                label: "property false",
-                source: property("false"),
-                want: Ok(Supplied {
-                    value: false,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "property upper case",
-                source: property("TRUE"),
-                want: Ok(Supplied {
-                    value: true,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "property a word",
-                source: property("maybe"),
-                want: Err(format!(
-                    "invalid config: server_properties `{KEY}` must be `true` or `false`, got \
-                     `maybe`"
-                )),
-            },
-            ConfigCase {
-                label: "runtime false",
-                source: runtime("false"),
-                want: Ok(Supplied {
-                    value: false,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "runtime at the default",
-                source: runtime("true"),
-                want: Ok(Supplied {
-                    value: true,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "runtime true over a false property",
-                source: format!("{}{}", runtime("true"), property("false")),
-                want: Ok(Supplied {
-                    value: true,
-                    supplied: true,
-                }),
-            },
-            ConfigCase {
-                label: "runtime false over a true property",
-                source: format!("{}{}", runtime("false"), property("true")),
-                want: Ok(Supplied {
-                    value: false,
-                    supplied: true,
-                }),
-            },
-        ];
-        check_config_cases(cases, |cfg| Supplied {
+        let result = file_outcome(source, |cfg| Supplied {
             value: cfg.transaction_partition_verification_enable,
             supplied: cfg.static_config_origins.supplied_kafka_keys.contains(KEY),
         });
+        check_config_case(label, &result, &expected);
     }
 
     /// Omitted everywhere, the broker keeps Kafka's 600000 default and no
@@ -905,105 +827,94 @@ connections_max_idle = "5s"
 
     /// #646: Kafka's internal `unstable.api.versions.enable` under its own
     /// name, off by default, refused unless it is a boolean.
-    #[test]
-    fn apply_to_reads_unstable_api_versions_enable_from_server_properties() {
-        use crate::api_catalog::UnstableApiVersions;
-
-        for (toml, expected) in [
-            ("broker_id = 0", Ok(UnstableApiVersions::Disabled)),
-            (
-                "[server_properties]\n\"unstable.api.versions.enable\" = \"true\"\n",
-                Ok(UnstableApiVersions::Enabled),
+    #[yare::parameterized(
+        default_disabled = {
+            "broker_id = 0",
+            Ok(UnstableApiVersions::Disabled),
+        },
+        enabled = {
+            "[server_properties]\n\"unstable.api.versions.enable\" = \"true\"\n",
+            Ok(UnstableApiVersions::Enabled),
+        },
+        uppercase_false = {
+            "[server_properties]\n\"unstable.api.versions.enable\" = \"FALSE\"\n",
+            Ok(UnstableApiVersions::Disabled),
+        },
+        invalid_yes = {
+            "[server_properties]\n\"unstable.api.versions.enable\" = \"yes\"\n",
+            Err(
+                "server_properties `unstable.api.versions.enable` must be `true` or `false`, got `yes`"
+                    .to_owned(),
             ),
-            (
-                "[server_properties]\n\"unstable.api.versions.enable\" = \"FALSE\"\n",
-                Ok(UnstableApiVersions::Disabled),
-            ),
-            (
-                "[server_properties]\n\"unstable.api.versions.enable\" = \"yes\"\n",
-                Err(
-                    "server_properties `unstable.api.versions.enable` must be `true` or \
-                     `false`, got `yes`"
-                        .to_string(),
-                ),
-            ),
-        ] {
-            let applied = configured_feature(toml, |cfg| cfg.features.unstable_api_versions);
-            assert!(applied == expected, "{toml}");
-        }
+        },
+    )]
+    fn apply_to_reads_unstable_api_versions_enable_from_server_properties(
+        source: &str,
+        expected: Result<UnstableApiVersions, String>,
+    ) {
+        let applied = configured_feature(source, |cfg| cfg.features.unstable_api_versions);
+        assert2::assert!(applied == expected, "{source}");
     }
 
     /// #784: Kafka's internal `unstable.feature.versions.enable` under its own
     /// name, off by default, refused unless it is a boolean.
-    #[test]
-    fn apply_to_reads_unstable_feature_versions_enable_from_server_properties() {
-        use krabka_raft::UnstableFeatureVersions;
-
-        for (toml, expected) in [
-            ("broker_id = 0", Ok(UnstableFeatureVersions::Disabled)),
-            (
-                "[server_properties]\n\"unstable.feature.versions.enable\" = \"true\"\n",
-                Ok(UnstableFeatureVersions::Enabled),
+    #[yare::parameterized(
+        default_disabled = {
+            "broker_id = 0",
+            Ok(krabka_raft::UnstableFeatureVersions::Disabled),
+        },
+        enabled = {
+            "[server_properties]\n\"unstable.feature.versions.enable\" = \"true\"\n",
+            Ok(krabka_raft::UnstableFeatureVersions::Enabled),
+        },
+        disabled = {
+            "[server_properties]\n\"unstable.feature.versions.enable\" = \"false\"\n",
+            Ok(krabka_raft::UnstableFeatureVersions::Disabled),
+        },
+        invalid_one = {
+            "[server_properties]\n\"unstable.feature.versions.enable\" = \"1\"\n",
+            Err(
+                "server_properties `unstable.feature.versions.enable` must be `true` or `false`, got `1`"
+                    .to_owned(),
             ),
-            (
-                "[server_properties]\n\"unstable.feature.versions.enable\" = \"false\"\n",
-                Ok(UnstableFeatureVersions::Disabled),
-            ),
-            (
-                "[server_properties]\n\"unstable.feature.versions.enable\" = \"1\"\n",
-                Err(
-                    "server_properties `unstable.feature.versions.enable` must be `true` or \
-                     `false`, got `1`"
-                        .to_string(),
-                ),
-            ),
-        ] {
-            let applied = configured_feature(toml, |cfg| cfg.features.unstable_feature_versions);
-            assert!(applied == expected, "{toml}");
-        }
+        },
+    )]
+    fn apply_to_reads_unstable_feature_versions_enable_from_server_properties(
+        source: &str,
+        expected: Result<krabka_raft::UnstableFeatureVersions, String>,
+    ) {
+        let applied = configured_feature(source, |cfg| cfg.features.unstable_feature_versions);
+        assert2::assert!(applied == expected, "{source}");
     }
 
     /// KIP-1331's `group.streams.topology.description.plugin.class`: unset
     /// by default, Kafka's in-memory plugin when it names that class, and
     /// refused for any class krabka cannot load.
-    #[test]
-    fn apply_to_reads_the_topology_description_plugin_from_server_properties() {
-        use crate::{
-            config::BrokerConfig,
-            coordinator::unified::streams::description::TopologyDescriptionPlugin,
-        };
-
-        const KEY: &str = "group.streams.topology.description.plugin.class";
-        let property = |value: &str| format!("[server_properties]\n\"{KEY}\" = \"{value}\"\n");
-        for (toml, expected) in [
-            (
-                "broker_id = 0".to_owned(),
-                Ok(TopologyDescriptionPlugin::None),
-            ),
-            (
-                property("org.apache.kafka.server.streams.InMemoryTopologyDescriptionPlugin"),
-                Ok(TopologyDescriptionPlugin::InMemory),
-            ),
-            (
-                property("com.example.JdbcTopologyStore"),
-                Err(format!(
-                    "server_properties `{KEY}` names `com.example.JdbcTopologyStore`, which krabka \
-                     cannot load: the only topology description plugin it builds in is \
-                     `org.apache.kafka.server.streams.InMemoryTopologyDescriptionPlugin`"
-                )),
-            ),
-        ] {
-            let file: FileConfig = toml::from_str(&toml).unwrap();
-            let mut cfg = BrokerConfig::default();
-            let applied = file
-                .apply_to(&mut cfg)
-                .map(|()| cfg.streams_group.topology_description_plugin)
-                .map_err(|error| match error {
-                    FileConfigError::InvalidConfig(message) => message,
-                    other => other.to_string(),
-                });
-            assert!(applied == expected, "{toml}");
-        }
+    #[yare::parameterized(
+        default = { "broker_id = 0", Ok(TopologyDescriptionPlugin::None) },
+        in_memory = {
+            "[server_properties]\n\"group.streams.topology.description.plugin.class\" = \"org.apache.kafka.server.streams.InMemoryTopologyDescriptionPlugin\"\n",
+            Ok(TopologyDescriptionPlugin::InMemory),
+        },
+        unsupported_plugin = {
+            "[server_properties]\n\"group.streams.topology.description.plugin.class\" = \"com.example.JdbcTopologyStore\"\n",
+            Err("server_properties `group.streams.topology.description.plugin.class` names `com.example.JdbcTopologyStore`, which krabka cannot load: the only topology description plugin it builds in is `org.apache.kafka.server.streams.InMemoryTopologyDescriptionPlugin`".to_owned()),
+        },
+    )]
+    fn apply_to_reads_the_topology_description_plugin_from_server_properties(
+        source: &str,
+        expected: Result<TopologyDescriptionPlugin, String>,
+    ) {
+        let file: FileConfig = toml::from_str(source).unwrap();
+        let mut config = BrokerConfig::default();
+        let actual = file
+            .apply_to(&mut config)
+            .map(|()| config.streams_group.topology_description_plugin)
+            .map_err(|error| match error {
+                FileConfigError::InvalidConfig(message) => message,
+                other => other.to_string(),
+            });
+        assert2::assert!(actual == expected, "{source}");
     }
 
     #[test]
@@ -1063,34 +974,35 @@ client_auth = "Required"
     }
     /// The top-level `[tls_config]` carries the KIP-371 principal mapping
     /// rules that the controller listener applies to a peer certificate.
-    #[test]
-    fn apply_to_parses_top_level_principal_mapping_rules() {
+    #[yare::parameterized(
+        no_rules = { "no rules", "", Some("CN=node-1,OU=brokers,O=krabka") },
+        rule = {
+            "a rule",
+            "principal_mapping_rules = [\"RULE:^CN=(.*?),.*$/$1/\"]\n",
+            Some("node-1"),
+        },
+        rule_matches_nothing = {
+            "a rule that matches nothing",
+            "principal_mapping_rules = [\"RULE:^OU=(.*?)$/$1/\"]\n",
+            None,
+        },
+    )]
+    fn apply_to_parses_top_level_principal_mapping_rules(
+        name: &str,
+        rules: &str,
+        expected: Option<&'static str>,
+    ) {
         let base = r#"
 [tls_config]
 cert_path = "/etc/krabka/tls/node.crt"
 key_path = "/etc/krabka/tls/node.key"
 "#;
         let dn = "CN=node-1,OU=brokers,O=krabka";
-        let cases = [
-            ("no rules", String::new(), Some(dn)),
-            (
-                "a rule",
-                "principal_mapping_rules = [\"RULE:^CN=(.*?),.*$/$1/\"]\n".to_owned(),
-                Some("node-1"),
-            ),
-            (
-                "a rule that matches nothing",
-                "principal_mapping_rules = [\"RULE:^OU=(.*?)$/$1/\"]\n".to_owned(),
-                None,
-            ),
-        ];
-        for (name, rules, expected) in cases {
-            let cfg = configured(&format!("{base}{rules}"), "parse").unwrap();
-            check!(
-                cfg.tls_principal_mapper.apply(dn).as_deref() == expected,
-                "{name}"
-            );
-        }
+        let cfg = configured(&format!("{base}{rules}"), "parse").unwrap();
+        assert2::check!(
+            cfg.tls_principal_mapper.apply(dn).as_deref() == expected,
+            "{name}"
+        );
     }
 
     #[test]

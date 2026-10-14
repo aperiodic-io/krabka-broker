@@ -331,18 +331,24 @@ mod tests {
         check!(check_batch(Some(&batch), "orders-cut", 7, 42).is_ok());
     }
 
+    enum RejectedBatchCase {
+        Missing,
+        Data,
+        EmptyControl,
+        OtherGroup,
+        OtherEpoch,
+    }
+
     /// Every one of these would make a published cut a lie, so each has to be
     /// reported rather than passed over.
-    #[test]
-    fn a_cut_that_the_log_does_not_back_is_reported() {
-        struct RejectedCase<'a> {
-            case: &'a str,
-            batch: Option<&'a RecordBatch>,
-            expected: &'a str,
-        }
-        let good = marker_batch("orders-cut", 7, 42);
-        let other_group = marker_batch("payments-cut", 7, 42);
-        let other_epoch = marker_batch("orders-cut", 8, 42);
+    #[yare::parameterized(
+        missing_batch = { RejectedBatchCase::Missing, "holds no batch" },
+        data_batch = { RejectedBatchCase::Data, "not a control batch" },
+        empty_control_batch = { RejectedBatchCase::EmptyControl, "holds no record" },
+        another_group = { RejectedBatchCase::OtherGroup, "belongs to group" },
+        another_epoch = { RejectedBatchCase::OtherEpoch, "carries epoch" },
+    )]
+    fn a_cut_that_the_log_does_not_back_is_reported(case: RejectedBatchCase, expected: &str) {
         let data = RecordBatch {
             base_offset: 42,
             records: vec![Record::default()],
@@ -353,46 +359,22 @@ mod tests {
             attributes: Attributes::default().with_control(true),
             ..RecordBatch::default()
         };
+        let other_group = marker_batch("payments-cut", 7, 42);
+        let other_epoch = marker_batch("orders-cut", 8, 42);
+        let batch = match case {
+            RejectedBatchCase::Missing => None,
+            RejectedBatchCase::Data => Some(&data),
+            RejectedBatchCase::EmptyControl => Some(&empty_control),
+            RejectedBatchCase::OtherGroup => Some(&other_group),
+            RejectedBatchCase::OtherEpoch => Some(&other_epoch),
+        };
+        let reason = check_batch(batch, "orders-cut", 7, 42).expect_err("rejects this batch");
+        check!(reason.contains(expected), "got {reason}");
+    }
 
-        let cases = [
-            RejectedCase {
-                case: "no batch at the offset",
-                batch: None,
-                expected: "holds no batch",
-            },
-            RejectedCase {
-                case: "a data batch",
-                batch: Some(&data),
-                expected: "not a control batch",
-            },
-            RejectedCase {
-                case: "a control batch with no record",
-                batch: Some(&empty_control),
-                expected: "holds no record",
-            },
-            RejectedCase {
-                case: "another group's marker",
-                batch: Some(&other_group),
-                expected: "belongs to group",
-            },
-            RejectedCase {
-                case: "another epoch's marker",
-                batch: Some(&other_epoch),
-                expected: "carries epoch",
-            },
-        ];
-        for RejectedCase {
-            case,
-            batch,
-            expected,
-        } in cases
-        {
-            let reason = check_batch(batch, "orders-cut", 7, 42).expect_err(case);
-            check!(reason.contains(expected), "{case}: got {reason}");
-        }
-
-        // The good batch is the control: the table above must be rejecting for
-        // real reasons, not because check_batch rejects everything.
+    #[test]
+    fn the_matching_marker_is_accepted() {
+        let good = marker_batch("orders-cut", 7, 42);
         check!(check_batch(Some(&good), "orders-cut", 7, 42).is_ok());
     }
 

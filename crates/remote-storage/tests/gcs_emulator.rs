@@ -244,15 +244,12 @@ impl FakeGcs {
             .expect("read the object listing");
         let listing: serde_json::Value =
             serde_json::from_slice(&body).expect("parse the object listing");
-        listing["items"]
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .map(|item| item["name"].as_str().unwrap_or_default().to_owned())
-                    .collect()
-            })
-            .unwrap_or_default()
+        listing["items"].as_array().map_or_default(|items| {
+            items
+                .iter()
+                .map(|item| item["name"].as_str().unwrap_or_default().to_owned())
+                .collect()
+        })
     }
 }
 
@@ -358,9 +355,19 @@ async fn seeded_segment(index: i32) -> SeededSegment {
 /// Multi-thread on purpose: `S3RemoteStorage`'s sync trait methods bridge to
 /// the async store with `block_in_place`, which a current-thread runtime
 /// cannot do.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[yare::parameterized(
+    offset_index = { "offset", IndexType::Offset, OFFSET_INDEX_BODY },
+    timestamp_index = { "timestamp", IndexType::Timestamp, TIME_INDEX_BODY },
+    producer_snapshot = { "producer snapshot", IndexType::ProducerSnapshot, SNAPSHOT_BODY },
+    leader_epoch = { "leader epoch", IndexType::LeaderEpoch, EPOCH_BODY },
+)]
+#[test_macro(tokio::test(flavor = "multi_thread", worker_threads = 2))]
 #[ignore = "requires Docker"]
-async fn a_segment_seeded_in_the_emulator_fetches_back_byte_for_byte() {
+async fn a_segment_seeded_in_the_emulator_fetches_back_byte_for_byte(
+    case: &'static str,
+    index_type: IndexType,
+    expected_index: &'static [u8],
+) {
     let SeededSegment {
         server: _server,
         bucket: _bucket,
@@ -381,20 +388,13 @@ async fn a_segment_seeded_in_the_emulator_fetches_back_byte_for_byte() {
                 .expect("fetch a byte range of the segment")
                 == &LOG_BODY[4..=7]
         );
-        for (index_type, expected) in [
-            (IndexType::Offset, OFFSET_INDEX_BODY),
-            (IndexType::Timestamp, TIME_INDEX_BODY),
-            (IndexType::ProducerSnapshot, SNAPSHOT_BODY),
-            (IndexType::LeaderEpoch, EPOCH_BODY),
-        ] {
-            check!(
-                storage
-                    .fetch_index(&metadata, index_type)
-                    .expect("fetch an index")
-                    == expected,
-                "{index_type:?}",
-            );
-        }
+        check!(
+            storage
+                .fetch_index(&metadata, index_type)
+                .expect("fetch an index")
+                == expected_index,
+            "{case}",
+        );
     })
     .await
     .expect("the blocking half of the test");

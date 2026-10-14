@@ -380,63 +380,68 @@ mod tests {
         image
     }
 
-    #[test]
-    fn the_gate_reads_this_nodes_own_dynamic_min_isr() {
+    #[yare::parameterized(
+        node_value_beats_broker_default = {
+            "this node's value beats the broker's own default",
+            None,
+            None,
+            Some(3),
+            None,
+            3,
+        },
+        node_value_beats_cluster_default = {
+            "this node's value beats the cluster default",
+            None,
+            Some(2),
+            Some(3),
+            None,
+            3,
+        },
+        topic_override_beats_node_value = {
+            "the topic override beats this node's value",
+            Some(1),
+            Some(2),
+            Some(3),
+            None,
+            1,
+        },
+        other_node_value_does_not_apply_with_cluster_default = {
+            "another node's value is not this node's",
+            None,
+            Some(2),
+            None,
+            Some(3),
+            2,
+        },
+        other_node_value_does_not_apply_without_cluster_default = {
+            "another node's value is not this node's either",
+            None,
+            None,
+            None,
+            Some(3),
+            1,
+        },
+    )]
+    fn the_gate_reads_this_nodes_own_dynamic_min_isr(
+        label: &str,
+        topic_override: Option<i32>,
+        cluster_default: Option<i32>,
+        node_value: Option<i32>,
+        other_value: Option<i32>,
+        expected: i32,
+    ) {
         let other = krabka_metadata::NodeId(2);
-        for (label, topic_override, cluster_default, node_value, other_value, expected) in [
-            (
-                "this node's value beats the broker's own default",
-                None,
-                None,
-                Some(3),
-                None,
-                3,
-            ),
-            (
-                "this node's value beats the cluster default",
-                None,
-                Some(2),
-                Some(3),
-                None,
-                3,
-            ),
-            (
-                "the topic override beats this node's value",
-                Some(1),
-                Some(2),
-                Some(3),
-                None,
-                1,
-            ),
-            (
-                "another node's value is not this node's",
-                None,
-                Some(2),
-                None,
-                Some(3),
-                2,
-            ),
-            (
-                "another node's value is not this node's either",
-                None,
-                None,
-                None,
-                Some(3),
-                1,
-            ),
-        ] {
-            let mut img = min_isr_image(topic_override, cluster_default);
-            if let Some(value) = node_value {
-                set_node_min_isr(&mut img, NODE, value);
-            }
-            if let Some(value) = other_value {
-                set_node_min_isr(&mut img, other, value);
-            }
-
-            let got = topic_min_insync_replicas(&img, NODE, "t", 1);
-
-            assert!(got == expected, "{label}: got {got}");
+        let mut img = min_isr_image(topic_override, cluster_default);
+        if let Some(value) = node_value {
+            set_node_min_isr(&mut img, NODE, value);
         }
+        if let Some(value) = other_value {
+            set_node_min_isr(&mut img, other, value);
+        }
+
+        let got = topic_min_insync_replicas(&img, NODE, "t", 1);
+
+        assert2::assert!(got == expected, "{label}: got {got}");
     }
 
     /// Seed a cluster-wide dynamic `min.insync.replicas` default, the layer
@@ -463,36 +468,46 @@ mod tests {
     /// was accepted at an ISR the controller still called below-min -- and
     /// the replicas the controller was holding in the ELR fell behind that
     /// write while it went on calling them eligible to lead.
-    #[test]
-    fn the_gate_resolves_the_threshold_the_controller_maintains_the_elr_against() {
-        for (label, topic_override, cluster_default, broker_default, expected) in [
-            (
-                "nothing published, so the broker's own default stands alone",
-                None,
-                None,
-                2,
-                2,
-            ),
-            (
-                "a cluster-wide default outranks the broker's own",
-                None,
-                Some(3),
-                1,
-                3,
-            ),
-            ("a topic override outranks both", Some(3), Some(2), 1, 3),
-        ] {
-            let img = min_isr_image(topic_override, cluster_default);
+    #[yare::parameterized(
+        broker_default_stands_alone = {
+            "nothing published, so the broker's own default stands alone",
+            None,
+            None,
+            2,
+            2,
+        },
+        cluster_default_over_broker_default = {
+            "a cluster-wide default outranks the broker's own",
+            None,
+            Some(3),
+            1,
+            3,
+        },
+        topic_override_over_both = {
+            "a topic override outranks both",
+            Some(3),
+            Some(2),
+            1,
+            3,
+        },
+    )]
+    fn the_gate_resolves_the_threshold_the_controller_maintains_the_elr_against(
+        label: &str,
+        topic_override: Option<i32>,
+        cluster_default: Option<i32>,
+        broker_default: i32,
+        expected: i32,
+    ) {
+        let img = min_isr_image(topic_override, cluster_default);
 
-            let gate = topic_min_insync_replicas(&img, NODE, "t", broker_default);
-            let controller = effective_min_insync_replicas(&img, "t", 3);
+        let gate = topic_min_insync_replicas(&img, NODE, "t", broker_default);
+        let controller = effective_min_insync_replicas(&img, "t", 3);
 
-            assert!(gate == expected, "{label}: got {gate}");
-            assert!(
-                i32::try_from(controller).expect("a min ISR fits in i32") <= gate,
-                "{label}: the controller resolved {controller} against the gate's {gate}"
-            );
-        }
+        assert2::assert!(gate == expected, "{label}: got {gate}");
+        assert2::assert!(
+            i32::try_from(controller).expect("a min ISR fits in i32") <= gate,
+            "{label}: the controller resolved {controller} against the gate's {gate}"
+        );
     }
 
     #[test]
@@ -508,18 +523,20 @@ mod tests {
         assert!(topic_min_insync_replicas(&img, NODE, "t", 1) == 3);
     }
 
-    #[test]
-    fn topic_min_isr_uses_broker_fallback_unless_valid_override_exists() {
-        let cases = [(None, 2), (Some(3), 3)];
-
-        for (override_value, expected) in cases {
-            let mut img = image_with_topic("t", &[1, 2, 3]);
-            if let Some(value) = override_value {
-                set_min_isr(&mut img, "t", value);
-            }
-
-            assert!(topic_min_insync_replicas(&img, NODE, "t", 2) == expected);
+    #[yare::parameterized(
+        broker_default = { None, 2 },
+        valid_topic_override = { Some(3), 3 },
+    )]
+    fn topic_min_isr_uses_broker_fallback_unless_valid_override_exists(
+        override_value: Option<i32>,
+        expected: i32,
+    ) {
+        let mut img = image_with_topic("t", &[1, 2, 3]);
+        if let Some(value) = override_value {
+            set_min_isr(&mut img, "t", value);
         }
+
+        assert2::assert!(topic_min_insync_replicas(&img, NODE, "t", 2) == expected);
     }
 
     #[test]

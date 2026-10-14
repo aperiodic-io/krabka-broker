@@ -49,15 +49,11 @@ mod tests {
     #[test]
     fn retains_enum_attributes_identity_and_variant_order() {
         let output = super::expand("".parse().unwrap(), "#[derive(Debug, Error)] pub enum ClientError { /// Caller detail\n #[error(\"codec: {0}\")] Codec(String), }".parse().unwrap()).unwrap().to_string();
-        for expected in [
-            "derive (Debug , Error)",
-            "pub enum ClientError",
-            "# [from]",
-            "Caller detail",
-            "codec: {0}",
-        ] {
-            assert!(output.contains(expected), "{expected}: {output}");
-        }
+        assert!(output.contains("derive (Debug , Error)"));
+        assert!(output.contains("pub enum ClientError"));
+        assert!(output.contains("# [from]"));
+        assert!(output.contains("Caller detail"));
+        assert!(output.contains("codec: {0}"));
         let variants = ["Io (", "Tls (", "Sasl (", "Codec ("]
             .map(|name| output.find(name).expect("transport variant present"));
         assert!(variants.windows(2).all(|pair| pair[0] < pair[1]));

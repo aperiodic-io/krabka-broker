@@ -742,14 +742,12 @@ async fn unregister_broker_sent_to_a_broker_only_node_reaches_the_controller() {
 
 /// The names of the entries directly in `dir`, sorted.
 fn entries(dir: &std::path::Path) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter_map(|entry| entry.file_name().into_string().ok())
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut names: Vec<String> = std::fs::read_dir(dir).map_or_default(|entries| {
+        entries
+            .flatten()
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .collect()
+    });
     names.sort();
     names
 }

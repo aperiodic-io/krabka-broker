@@ -107,48 +107,49 @@ impl MetadataEventLog for SilentLog {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn shutdown_stream_close_and_unassignment_release_pending_mutations() {
-    for cause in ["shutdown", "stream close", "unassignment"] {
-        let log = Arc::new(SilentLog {
-            inner: InProcessMetadataEventLog::new(2),
-            close: CancellationToken::new(),
-        });
-        let manager = start_manager_all(log.clone()).await;
-        let m = manager.clone();
-        let mutation = tokio::task::spawn_blocking(move || {
-            m.add_remote_log_segment_metadata(started(10, 0, 99))
-        });
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while manager.mutation_waiters.lock().await.is_empty() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("mutation registered");
-        match cause {
-            "shutdown" => manager.shutdown(),
-            "stream close" => log.close.cancel(),
-            "unassignment" => manager.reconcile_assignment(&[]).await,
-            _ => unreachable!(),
+#[yare::parameterized(
+    shutdown = { "shutdown" },
+    stream_close = { "stream close" },
+    unassignment = { "unassignment" }
+)]
+#[test_macro(tokio::test(flavor = "multi_thread"))]
+async fn shutdown_stream_close_and_unassignment_release_pending_mutations(cause: &str) {
+    let log = Arc::new(SilentLog {
+        inner: InProcessMetadataEventLog::new(2),
+        close: CancellationToken::new(),
+    });
+    let manager = start_manager_all(log.clone()).await;
+    let m = manager.clone();
+    let mutation =
+        tokio::task::spawn_blocking(move || m.add_remote_log_segment_metadata(started(10, 0, 99)));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while manager.mutation_waiters.lock().await.is_empty() {
+            tokio::task::yield_now().await;
         }
-        let error = tokio::time::timeout(Duration::from_secs(2), mutation)
-            .await
-            .expect("pending mutation released")
-            .unwrap()
-            .unwrap_err();
-        if cause == "unassignment" {
-            assert!(matches!(error, RemoteStorageError::NotReady { .. }));
-        } else {
-            assert!(error.to_string() == MetadataLogError::Closed.into_storage().to_string());
-            let m = manager.clone();
-            let error =
-                on_blocking(move || m.add_remote_log_segment_metadata(started(11, 100, 199)))
-                    .await
-                    .unwrap_err();
-            assert!(error.to_string() == MetadataLogError::Closed.into_storage().to_string());
-        }
-        assert!(manager.mutation_waiters.lock().await.is_empty());
-        manager.shutdown();
+    })
+    .await
+    .expect("mutation registered");
+    match cause {
+        "shutdown" => manager.shutdown(),
+        "stream close" => log.close.cancel(),
+        "unassignment" => manager.reconcile_assignment(&[]).await,
+        _ => unreachable!(),
     }
+    let error = tokio::time::timeout(Duration::from_secs(2), mutation)
+        .await
+        .expect("pending mutation released")
+        .unwrap()
+        .unwrap_err();
+    if cause == "unassignment" {
+        assert2::assert!(matches!(error, RemoteStorageError::NotReady { .. }));
+    } else {
+        assert2::assert!(error.to_string() == MetadataLogError::Closed.into_storage().to_string());
+        let m = manager.clone();
+        let error = on_blocking(move || m.add_remote_log_segment_metadata(started(11, 100, 199)))
+            .await
+            .unwrap_err();
+        assert2::assert!(error.to_string() == MetadataLogError::Closed.into_storage().to_string());
+    }
+    assert2::assert!(manager.mutation_waiters.lock().await.is_empty());
+    manager.shutdown();
 }

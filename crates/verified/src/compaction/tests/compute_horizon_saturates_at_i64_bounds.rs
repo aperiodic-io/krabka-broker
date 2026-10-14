@@ -1,14 +1,12 @@
 use super::*;
 
-#[test]
-fn compute_horizon_saturates_at_i64_bounds() {
-    for (_name, timestamp, lag, expected) in [
-        ("ordinary addition", 100, 50, 150),
-        ("upper saturation", i64::MAX - 1, 50, i64::MAX),
-        ("lower saturation", i64::MIN + 1, -50, i64::MIN),
-    ] {
-        assert2::assert!(compute_horizon(timestamp, lag) == expected);
-    }
+#[yare::parameterized(
+    ordinary = { 100, 50, 150 },
+    upper_saturation = { i64::MAX - 1, 50, i64::MAX },
+    lower_saturation = { i64::MIN + 1, -50, i64::MIN },
+)]
+fn compute_horizon_saturates_at_i64_bounds(timestamp: i64, lag: i64, expected: i64) {
+    assert2::assert!(compute_horizon(timestamp, lag) == expected);
 }
 
 #[test]

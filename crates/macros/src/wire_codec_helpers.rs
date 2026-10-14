@@ -213,39 +213,50 @@ mod tests {
     };
 
     #[test]
-    fn parses_flat_typed_helpers_and_both_version_signatures() {
+    fn parses_flat_typed_helpers_and_versions() {
         let declarations = declarations(&"pub(super) encode_request(Request); decode_response(Response); test_context [opaque::<1, 2>()]; version [chosen_version()];".parse().unwrap()).unwrap();
         assert!(declarations.len() == 4);
-        for declaration in declarations
+    }
+
+    #[yare::parameterized(
+        encode_unpinned = { Kind::Encode, false },
+        encode_pinned = { Kind::Encode, true },
+        decode_unpinned = { Kind::Decode, false },
+        decode_pinned = { Kind::Decode, true },
+        context_unpinned = { Kind::Context, false },
+        context_pinned = { Kind::Context, true },
+    )]
+    fn each_helper_emits_its_selected_version_signature(kind: Kind, pinned: bool) {
+        let declarations = declarations(&"pub(super) encode_request(Request); decode_response(Response); test_context [opaque::<1, 2>()]; version [chosen_version()];".parse().unwrap()).unwrap();
+        let declaration = declarations
             .iter()
-            .filter(|declaration| declaration.kind != Kind::Version)
-        {
-            for pinned in [false, true] {
-                let body = function(declaration, pinned).to_string();
-                if declaration.kind != Kind::Context {
-                    assert!(body.contains("version : i16") == !pinned);
-                }
-                assert!(body.contains("__wire_codec_value"));
-            }
+            .find(|declaration| declaration.kind == kind)
+            .unwrap();
+        let body = function(declaration, pinned).to_string();
+        if kind != Kind::Context {
+            assert2::assert!(body.contains("version : i16") == !pinned);
         }
-        for invalid in [
-            "",
-            "version [1];",
-            "test_context [\"client\"]; version [1];",
-            "unknown [1];",
-            "decode_response();",
-            "decode_response [Response];",
-            "decode_response(Response); decode_response(Response);",
-            "test_context [];",
-            "test_context(\"client\");",
-            "decode_response(Response)",
-            "pub version [1]; encode_request(Request);",
-            "encode_request(Request) extra;",
-        ] {
-            assert!(
-                super::declarations(&invalid.parse::<TokenStream>().unwrap()).is_err(),
-                "{invalid}"
-            );
-        }
+        assert2::assert!(body.contains("__wire_codec_value"));
+    }
+
+    #[yare::parameterized(
+        empty_input = { "" },
+        version_without_helper = { "version [1];" },
+        context_with_version_only = { "test_context [\"client\"]; version [1];" },
+        unknown_helper = { "unknown [1];" },
+        missing_decode_type = { "decode_response();" },
+        bracketed_decode_type = { "decode_response [Response];" },
+        duplicate_decode = { "decode_response(Response); decode_response(Response);" },
+        empty_context = { "test_context [];" },
+        parenthesized_context = { "test_context(\"client\");" },
+        missing_semicolon = { "decode_response(Response)" },
+        visible_version = { "pub version [1]; encode_request(Request);" },
+        trailing_tokens = { "encode_request(Request) extra;" },
+    )]
+    fn rejects_invalid_helper_declarations(invalid: &str) {
+        assert2::assert!(
+            super::declarations(&invalid.parse::<TokenStream>().unwrap()).is_err(),
+            "{invalid}"
+        );
     }
 }

@@ -193,22 +193,20 @@ mod tests {
         moxy::token::TokenStream,
     };
 
-    #[test]
-    fn option_unit_matches_the_last_segment() {
-        for (ty, unit) in [
-            ("Option<Time>", Some(Unit::Time)),
-            ("Option<krabka_units::Time>", Some(Unit::Time)),
-            ("::std::option::Option<ByteSize>", Some(Unit::ByteSize)),
-            ("Option<Ratio>", Some(Unit::Ratio)),
-            ("Time", None),
-            ("Vec<Time>", None),
-            ("Option<String>", None),
-            ("Option<Time<u8>>", None),
-            ("Option<Vec<Time>>", None),
-            ("HashMap<String,Time>", None),
-        ] {
-            assert!(option_unit(ty) == unit, "{ty}");
-        }
+    #[yare::parameterized(
+        direct_time = { "Option<Time>", Some(Unit::Time) },
+        qualified_time = { "Option<krabka_units::Time>", Some(Unit::Time) },
+        qualified_byte_size = { "::std::option::Option<ByteSize>", Some(Unit::ByteSize) },
+        ratio = { "Option<Ratio>", Some(Unit::Ratio) },
+        non_option = { "Time", None },
+        vector = { "Vec<Time>", None },
+        unrelated_option = { "Option<String>", None },
+        generic_time = { "Option<Time<u8>>", None },
+        nested_option = { "Option<Vec<Time>>", None },
+        map = { "HashMap<String,Time>", None },
+    )]
+    fn option_unit_matches_the_last_segment(ty: &str, unit: Option<Unit>) {
+        assert2::assert!(option_unit(ty) == unit, "{ty}");
     }
 
     fn expanded(item: &str) -> String {
@@ -244,24 +242,24 @@ mod tests {
         assert!(out.contains("option_ratio"));
     }
 
-    #[test]
-    fn own_codec_is_left_alone() {
-        for codec in ["with", "deserialize_with", "serialize_with"] {
-            let source = format!("struct S {{ #[serde({codec} = \"m\")] a: Option<Time> }}");
-            assert!(!expanded(&source).contains("schemars"), "{codec}");
-        }
+    #[yare::parameterized(
+        serialize_codec = { "with" },
+        deserialize_codec = { "deserialize_with" },
+        serialize_with_codec = { "serialize_with" },
+    )]
+    fn own_codec_is_left_alone(codec: &str) {
+        let source = format!("struct S {{ #[serde({codec} = \"m\")] a: Option<Time> }}");
+        assert2::assert!(!expanded(&source).contains("schemars"), "{codec}");
     }
 
-    #[test]
-    fn arguments_tuple_structs_and_enums_are_rejected() {
-        for (meta, source) in [
-            ("", "struct S(Option<Time>);"),
-            ("", "enum E { A }"),
-            ("x", "struct S {}"),
-        ] {
-            let meta: TokenStream = meta.parse().expect("meta tokenizes");
-            let item: TokenStream = source.parse().expect("item tokenizes");
-            assert!(expand(meta, item).is_err(), "{source}");
-        }
+    #[yare::parameterized(
+        tuple = { "", "struct S(Option<Time>);" },
+        enum_item = { "", "enum E { A }" },
+        extra_argument = { "x", "struct S {}" },
+    )]
+    fn arguments_tuple_structs_and_enums_are_rejected(meta: &str, source: &str) {
+        let meta: TokenStream = meta.parse().expect("meta tokenizes");
+        let item: TokenStream = source.parse().expect("item tokenizes");
+        assert2::assert!(expand(meta, item).is_err(), "{source}");
     }
 }

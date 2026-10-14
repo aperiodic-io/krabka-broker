@@ -58,31 +58,27 @@ pub(crate) fn expand(
 
 #[cfg(test)]
 mod tests {
-    use {super::body, crate::meta::compact, assert2::assert};
+    use {super::body, crate::meta::compact};
 
-    #[test]
-    fn preserves_parameter_order_and_selects_the_requested_decision() {
+    #[yare::parameterized(allow = { "Allow" }, deny = { "Deny" })]
+    fn preserves_parameter_order_and_selects_the_requested_decision(decision: &str) {
         let item = "fn filter<'a>(auth: &A, image: &I, context: &C, operation: O, topics: impl IntoIterator<Item = &'a str>) -> Set {}".parse().unwrap();
-        for decision in ["Allow", "Deny"] {
-            assert!(
-                compact(&body(&item, decision).unwrap())
-                    == format!(
-                        "topics_decided(auth,image,context,operation,topics,AuthorizationResult::{decision})"
-                    )
-            );
-        }
+        assert2::assert!(
+            compact(&body(&item, decision).unwrap())
+                == format!(
+                    "topics_decided(auth,image,context,operation,topics,AuthorizationResult::{decision})"
+                )
+        );
     }
 
-    #[test]
-    fn rejects_operation_bodies_wrong_arity_and_destructured_parameters() {
-        for item in [
-            "fn filter(a: A, b: B, c: C, d: D, e: E) -> Set { todo!() }",
-            "async fn filter(a: A, b: B, c: C, d: D, e: E) -> Set {}",
-            "fn filter(a: A) -> Set {}",
-            "fn filter<T>(a: A, b: B, c: C, d: D, e: E) -> Set {}",
-            "fn filter((a, b): A, c: C, d: D, e: E, f: F) -> Set {}",
-        ] {
-            assert!(body(&item.parse().unwrap(), "Deny").is_err(), "{item}");
-        }
+    #[yare::parameterized(
+        function_body = { "fn filter(a: A, b: B, c: C, d: D, e: E) -> Set { todo!() }" },
+        async_signature = { "async fn filter(a: A, b: B, c: C, d: D, e: E) -> Set {}" },
+        wrong_arity = { "fn filter(a: A) -> Set {}" },
+        generic = { "fn filter<T>(a: A, b: B, c: C, d: D, e: E) -> Set {}" },
+        destructured = { "fn filter((a, b): A, c: C, d: D, e: E, f: F) -> Set {}" },
+    )]
+    fn rejects_operation_bodies_wrong_arity_and_destructured_parameters(item: &str) {
+        assert2::assert!(body(&item.parse().unwrap(), "Deny").is_err(), "{item}");
     }
 }

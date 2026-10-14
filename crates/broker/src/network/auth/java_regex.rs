@@ -1343,66 +1343,71 @@ mod tests {
             row("(?x)[a-[b]]", "c", false),
         ];
         check_matches(cases, true);
-        // The range ends at the `]` or the `[` past the white space, which
-        // Java refuses as a reversed range or an unclosed class.
-        for source in [
-            "(?x)[.- ]",
-            "(?x)[a- ]",
-            "(?x)[a-\n]",
-            "(?x)[.-\n]",
-            "(?x)[_- [b]]",
-            "(?x)[a-#c\n]]",
-        ] {
-            check!(JavaPattern::compile(source).is_err(), "{source:?}");
-        }
+    }
+
+    /// The range ends at the `]` or the `[` past the white space, which Java
+    /// refuses as a reversed range or an unclosed class.
+    #[yare::parameterized(
+        range_ends_at_space = { "(?x)[.- ]" },
+        range_ends_at_space_after_letter = { "(?x)[a- ]" },
+        range_ends_at_newline = { "(?x)[a-\n]" },
+        range_ends_at_newline_after_dot = { "(?x)[.-\n]" },
+        nested_class_range_ends_at_space = { "(?x)[_- [b]]" },
+        comment_then_range_ends_at_close = { "(?x)[a-#c\n]]" },
+    )]
+    fn extended_class_ranges_ending_after_whitespace_are_refused(source: &str) {
+        check!(JavaPattern::compile(source).is_err(), "{source:?}");
     }
 
     /// A `)` with no `(` before it is `Unmatched closing ')'` in Java, which
     /// the `\A(?:...)\z` wrapper would otherwise read as the end of a group,
     /// and a range that ends in `\w`, `\s` or `\p{..}` is `Illegal character
     /// range` there. Each row is refused by `Pattern.compile` on JDK 17.
-    #[test]
-    fn a_stray_closing_paren_or_a_range_to_a_shorthand_does_not_compile() {
-        for source in [
-            "a)|(b",
-            "a)",
-            "(a))",
-            "a(?i))",
-            ")",
-            "(?x)a )",
-            "(?:a))",
-            "(?=a))",
-            "(?i:a))",
-            "[a--b]",
-            "[a-\\w]",
-            "[a-\\d]",
-            "[!-\\d]",
-            "[+-\\w]",
-            "[a-\\p{L}]",
-            "[a-\\s]",
-            "[!-\\W]",
-            "[--\\w]",
-            "(?i)[a-\\w]",
-            "(?x)[a- \\w]",
-        ] {
-            check!(JavaPattern::compile(source).is_err(), "{source:?}");
-        }
+    #[yare::parameterized(
+        alternation_with_stray_close = { "a)|(b" },
+        simple_stray_close = { "a)" },
+        double_stray_close = { "(a))" },
+        flag_group_then_stray_close = { "a(?i))" },
+        lone_close = { ")" },
+        extended_mode_stray_close = { "(?x)a )" },
+        noncapturing_group_then_stray_close = { "(?:a))" },
+        lookahead_then_stray_close = { "(?=a))" },
+        scoped_flag_group_then_stray_close = { "(?i:a))" },
+        reversed_character_range = { "[a--b]" },
+        range_to_word = { "[a-\\w]" },
+        range_to_digit = { "[a-\\d]" },
+        range_to_digit_from_bang = { "[!-\\d]" },
+        range_to_word_from_plus = { "[+-\\w]" },
+        range_to_unicode_property = { "[a-\\p{L}]" },
+        range_to_space = { "[a-\\s]" },
+        range_to_nonword = { "[!-\\W]" },
+        range_from_hyphen_to_word = { "[--\\w]" },
+        case_insensitive_range_to_word = { "(?i)[a-\\w]" },
+        extended_mode_range_to_word = { "(?x)[a- \\w]" },
+    )]
+    fn a_stray_closing_paren_or_a_range_to_a_shorthand_does_not_compile(source: &str) {
+        check!(JavaPattern::compile(source).is_err(), "{source:?}");
     }
 
     /// A `)` that Java reads as a member, or as part of a comment, is not
     /// stray. Each row is `Pattern.matches` on JDK 17.
-    #[test]
-    fn a_closing_paren_that_closes_no_group_is_still_a_character_where_java_reads_one() {
-        // (pattern, input, whole input matches)
-        let cases = [
-            row("[)]", ")", true),
-            row("\\)", ")", true),
-            row("\\Q)\\E", ")", true),
-            row("(?x)a #c)\n", "a", true),
-            row("(a)|(b)", "b", true),
-            row("(?i)(a)|b", "B", true),
-        ];
-        check_matches(cases, true);
+    #[yare::parameterized(
+        close_inside_class = { "[)]", ")", true },
+        escaped_close = { "\\)", ")", true },
+        quoted_close = { "\\Q)\\E", ")", true },
+        close_inside_comment = { "(?x)a #c)\n", "a", true },
+        close_in_alternative = { "(a)|(b)", "b", true },
+        close_in_case_insensitive_alternative = { "(?i)(a)|b", "B", true },
+    )]
+    fn a_closing_paren_that_closes_no_group_is_still_a_character_where_java_reads_one(
+        source: &str,
+        input: &str,
+        expected: bool,
+    ) {
+        check!(
+            pattern(source).matches(input).ok() == Some(expected),
+            "{source:?} against {input:?}"
+        );
     }
 
     /// A backreference under an ASCII fold is written `(?i:\1)`, and
@@ -1411,19 +1416,20 @@ mod tests {
     /// Java's `CIBackRef` does not, and the two agree on every ASCII text. The
     /// divergence is documented in `java_fold`; this test pins its extent, so
     /// that a change to it is noticed.
-    #[test]
-    fn a_backreference_under_an_ascii_fold_is_unicode_insensitive_for_non_ascii_text() {
-        // (pattern, input, whole input matches here)
-        for (source, input, expected) in [
-            ("(?i)(\u{e9})\\1", "\u{e9}\u{c9}", true),
-            ("(?i)(\u{e9})\\1", "\u{e9}\u{e9}", true),
-            ("(?i)(\u{3c3})\\1", "\u{3c3}\u{3c2}", true),
-        ] {
-            check!(
-                pattern(source).matches(input).ok() == Some(expected),
-                "{source:?} against {input:?}"
-            );
-        }
+    #[yare::parameterized(
+        accented_uppercase = { "(?i)(\u{e9})\\1", "\u{e9}\u{c9}", true },
+        accented_same_case = { "(?i)(\u{e9})\\1", "\u{e9}\u{e9}", true },
+        greek_final_sigma = { "(?i)(\u{3c3})\\1", "\u{3c3}\u{3c2}", true },
+    )]
+    fn a_backreference_under_an_ascii_fold_is_unicode_insensitive_for_non_ascii_text(
+        source: &str,
+        input: &str,
+        expected: bool,
+    ) {
+        check!(
+            pattern(source).matches(input).ok() == Some(expected),
+            "{source:?} against {input:?}"
+        );
     }
 
     /// Under `(?iu)` Java's `CIBackRef` compares the keys of the chars, and
@@ -1474,28 +1480,27 @@ mod tests {
     /// dangling quantifier. A flag group that leaves no text in the rewrite
     /// would hand its quantifier to the text before it, or make the braces
     /// text, so a quantifier after one is refused.
-    #[test]
-    fn a_quantifier_after_a_flag_that_leaves_no_text_is_refused() {
-        for source in [
-            "(?i){2}",
-            "(?iu){2}a",
-            "(?iu)*",
-            "(?i)+a",
-            "(?d)?",
-            "(?ix) {2}a",
-            "(?ix) *",
-        ] {
-            check!(JavaPattern::compile(source).is_err(), "{source:?}");
-        }
+    #[yare::parameterized(
+        repeat_after_case_flag = { "(?i){2}" },
+        repeat_before_literal_after_unicode_flags = { "(?iu){2}a" },
+        star_after_unicode_flags = { "(?iu)*" },
+        plus_after_case_flag = { "(?i)+a" },
+        optional_after_dotall_flag = { "(?d)?" },
+        repeat_after_extended_flags = { "(?ix) {2}a" },
+        star_after_extended_flags = { "(?ix) *" },
+    )]
+    fn a_quantifier_after_a_flag_that_leaves_no_text_is_refused(source: &str) {
+        check!(JavaPattern::compile(source).is_err(), "{source:?}");
     }
 
     /// `\N{name}` is a character in Java, which `fancy_regex` reads as `\N` and
     /// the text of the name, so a rule that has one is refused and not misread.
-    #[test]
-    fn a_named_character_is_refused() {
-        for source in ["\\N{LATIN SMALL LETTER A}", "(?i)\\N{LATIN SMALL LETTER A}"] {
-            check!(JavaPattern::compile(source).is_err(), "{source:?}");
-        }
+    #[yare::parameterized(
+        named_character = { "\\N{LATIN SMALL LETTER A}" },
+        case_insensitive_named_character = { "(?i)\\N{LATIN SMALL LETTER A}" },
+    )]
+    fn a_named_character_is_refused(source: &str) {
+        check!(JavaPattern::compile(source).is_err(), "{source:?}");
     }
 
     /// `Matcher.appendReplacement` semantics for `replaceAll`.
@@ -1522,23 +1527,21 @@ mod tests {
     }
 
     /// The replacements Java throws on.
-    #[test]
-    fn replace_all_refuses_what_java_throws_on() {
-        for (source, input, replacement) in [
-            ("(a)", "a", "$2"),
-            ("a", "a", "$1"),
-            ("(a)", "a", "$"),
-            ("(a)", "a", "$x"),
-            ("(a)", "a", "\\"),
-            ("(a)", "a", "${who}"),
-            ("(a)", "a", "${}"),
-            ("(a)", "a", "${who"),
-        ] {
-            check!(
-                pattern(source).replace(input, replacement, true).is_err(),
-                "{source} on {input} with {replacement}"
-            );
-        }
+    #[yare::parameterized(
+        group_number_out_of_range = { "(a)", "a", "$2" },
+        group_number_without_groups = { "a", "a", "$1" },
+        trailing_dollar = { "(a)", "a", "$" },
+        nonnumeric_group_reference = { "(a)", "a", "$x" },
+        trailing_backslash = { "(a)", "a", "\\" },
+        unknown_named_group = { "(a)", "a", "${who}" },
+        empty_named_group = { "(a)", "a", "${}" },
+        unclosed_named_group = { "(a)", "a", "${who" },
+    )]
+    fn replace_all_refuses_what_java_throws_on(source: &str, input: &str, replacement: &str) {
+        check!(
+            pattern(source).replace(input, replacement, true).is_err(),
+            "{source} on {input} with {replacement}"
+        );
     }
 
     #[test]
@@ -1547,10 +1550,12 @@ mod tests {
         assert!(result.ok().as_deref() == Some("baa"));
     }
 
-    #[test]
-    fn a_pattern_java_refuses_does_not_compile() {
-        for source in ["(?P<x>a)", "[a-", "(a"] {
-            check!(JavaPattern::compile(source).is_err(), "{source}");
-        }
+    #[yare::parameterized(
+        python_named_group = { "(?P<x>a)" },
+        unclosed_character_class = { "[a-" },
+        unclosed_group = { "(a" },
+    )]
+    fn a_pattern_java_refuses_does_not_compile(source: &str) {
+        check!(JavaPattern::compile(source).is_err(), "{source}");
     }
 }

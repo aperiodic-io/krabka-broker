@@ -44,7 +44,11 @@ mod tests;
 pub(crate) use self::reconcile::{load_snapshot, reconcile_authenticated_snapshot};
 use {
     self::reconcile::reconcile_with_snapshot,
-    crate::{args::RestoreArgs, backend::ArchiveStore, error::RestoreError},
+    crate::{
+        args::{RestoreArgs, offset_partitions},
+        backend::ArchiveStore,
+        error::RestoreError,
+    },
 };
 
 /// One artifact of one archived segment, as the scan found it.
@@ -377,12 +381,7 @@ pub async fn inventory(
     // capture is present, `diskless::add_partitions` performs this check after
     // merging its partitions with this inventory.
     if args.archive.diskless_wal_capture.is_none() {
-        for partition in args
-            .to_offset
-            .iter()
-            .map(|bound| &bound.partition)
-            .chain(args.exclude_offset.iter().map(|range| &range.partition))
-        {
+        for partition in offset_partitions(args) {
             if !holds_partition(&partitions, &partition.topic, partition.partition) {
                 return Err(RestoreError::UnknownPartition {
                     topic: partition.topic.clone(),

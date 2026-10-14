@@ -493,37 +493,41 @@ mod tests {
     /// A group whose member id has 32768 bytes cannot write it: the flush is an
     /// error that appends nothing, and the actor that flushes does not panic. A
     /// member id of 32767 bytes is written.
-    #[tokio::test]
-    async fn a_classic_group_with_an_unencodable_member_id_appends_nothing() {
+    #[yare::parameterized(
+        at_limit = { 32_767, true },
+        over_limit = { 32_768, false },
+    )]
+    #[test_macro(tokio::test)]
+    async fn a_classic_group_with_an_unencodable_member_id_appends_nothing(
+        length: usize,
+        written: bool,
+    ) {
         use crate::coordinator::unified::{
             classic_state::Member, offsets_log::fake::InMemoryOffsetsLog,
-            persistence::MAX_STRING_BYTES,
         };
 
         let log = InMemoryOffsetsLog::default();
-        for (length, written) in [(MAX_STRING_BYTES, true), (MAX_STRING_BYTES + 1, false)] {
-            let mut state = ClassicGroup::new("g");
-            state.insert_joining_member(
-                Member::new(
-                    "m".repeat(length),
-                    "client",
-                    "host",
-                    std::time::Duration::from_secs(10),
-                    std::time::Duration::from_secs(10),
-                    vec![("range".into(), bytes::Bytes::new())],
-                ),
-                "consumer",
-            );
+        let mut state = ClassicGroup::new("g");
+        state.insert_joining_member(
+            Member::new(
+                "m".repeat(length),
+                "client",
+                "host",
+                std::time::Duration::from_secs(10),
+                std::time::Duration::from_secs(10),
+                vec![("range".into(), bytes::Bytes::new())],
+            ),
+            "consumer",
+        );
 
-            let result = flush_classic_metadata(&state, &log).await;
+        let result = flush_classic_metadata(&state, &log).await;
 
-            check!(result.is_ok() == written, "member id of {length} bytes");
-            check!(
-                written || matches!(result, Err(crate::error::BrokerError::Protocol(_))),
-                "member id of {length} bytes is a protocol error"
-            );
-        }
-        check!(log.batches().await.len() == 1);
+        check!(result.is_ok() == written, "member id of {length} bytes");
+        check!(
+            written || matches!(result, Err(crate::error::BrokerError::Protocol(_))),
+            "member id of {length} bytes is a protocol error"
+        );
+        check!(log.batches().await.len() == usize::from(written));
     }
 
     #[test]

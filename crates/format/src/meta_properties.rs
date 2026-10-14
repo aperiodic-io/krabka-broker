@@ -512,7 +512,7 @@ fn java_date(now: SystemTime) -> String {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, assert2::check, std::time::Duration, uuid::Uuid};
+    use {super::*, std::time::Duration, uuid::Uuid};
 
     const CLUSTER: &str = "AQIDBAUGBwgJCgsMDQ4PEA";
     const DIRECTORY: &str = "U-hCdTzaSPyFB3swwc7Qdw";
@@ -548,218 +548,169 @@ mod tests {
     }
 
     /// `Date.toString` in UTC, checked against `date -u` for each instant.
+    #[yare::parameterized(
+        epoch = { 0, "Thu Jan 01 00:00:00 UTC 1970" },
+        leap_day_2000 = { 951_782_400, "Tue Feb 29 00:00:00 UTC 2000" },
+        kafka_epoch_example = { 1_000_000_000, "Sun Sep 09 01:46:40 UTC 2001" },
+        leap_day_2024 = { 1_709_210_096, "Thu Feb 29 12:34:56 UTC 2024" },
+        year_2099_end = { 4_102_444_799, "Thu Dec 31 23:59:59 UTC 2099" },
+        zero_padded = { 1_767_596_889, "Mon Jan 05 07:08:09 UTC 2026" },
+    )]
+    fn the_date_comment_is_java_date_to_string(seconds: u64, want: &str) {
+        assert2::check!(java_date(at(seconds)) == want, "{seconds}");
+    }
+
     #[test]
-    fn the_date_comment_is_java_date_to_string() {
-        let cases = [
-            (0, "Thu Jan 01 00:00:00 UTC 1970"),
-            (951_782_400, "Tue Feb 29 00:00:00 UTC 2000"),
-            (1_000_000_000, "Sun Sep 09 01:46:40 UTC 2001"),
-            (1_709_210_096, "Thu Feb 29 12:34:56 UTC 2024"),
-            (4_102_444_799, "Thu Dec 31 23:59:59 UTC 2099"),
-            // `dd` and `HH` are zero padded.
-            (1_767_596_889, "Mon Jan 05 07:08:09 UTC 2026"),
-        ];
-        for (seconds, want) in cases {
-            check!(java_date(at(seconds)) == want, "{seconds}");
-        }
-        check!(java_date(UNIX_EPOCH - Duration::from_secs(1)) == "Thu Jan 01 00:00:00 UTC 1970");
+    fn pre_epoch_date_clamps_to_epoch() {
+        assert2::check!(
+            java_date(UNIX_EPOCH - Duration::from_secs(1)) == "Thu Jan 01 00:00:00 UTC 1970"
+        );
     }
 
     /// The bytes are the bytes Kafka's `PropertiesUtils.writePropertiesFile`
     /// writes for the same ids at the same time on a UTC host:
     /// `Properties.store(writer, "")` puts the empty comment, the date
     /// comment, and the entries in key order, each line ended by `\n`.
-    #[test]
-    fn the_file_is_the_one_kafka_writes() {
-        let cases = [
-            (
-                "a formatted directory",
-                meta(1, Some(DIRECTORY)),
-                "#\n#Thu Feb 29 12:34:56 UTC 2024\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n\
-                 directory.id=U-hCdTzaSPyFB3swwc7Qdw\nnode.id=1\nversion=1\n",
-            ),
-            (
-                "no directory id",
-                meta(2_147_483_647, None),
-                "#\n#Thu Feb 29 12:34:56 UTC 2024\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n\
-                 node.id=2147483647\nversion=1\n",
-            ),
-        ];
-        for (what, meta, want) in cases {
-            check!(meta.to_file_text(at(1_709_210_096)) == want, "{what}");
-        }
+    #[yare::parameterized(
+        with_directory_id = {
+            "a formatted directory",
+            meta(1, Some(DIRECTORY)),
+            "#\n#Thu Feb 29 12:34:56 UTC 2024\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n\
+             directory.id=U-hCdTzaSPyFB3swwc7Qdw\nnode.id=1\nversion=1\n"
+        },
+        without_directory_id = {
+            "no directory id",
+            meta(2_147_483_647, None),
+            "#\n#Thu Feb 29 12:34:56 UTC 2024\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n\
+             node.id=2147483647\nversion=1\n"
+        },
+    )]
+    fn the_file_is_the_one_kafka_writes(what: &str, meta: MetaProperties, want: &str) {
+        assert2::check!(meta.to_file_text(at(1_709_210_096)) == want, "{what}");
     }
 
     /// Every file krabka writes reads back as the same ids.
-    #[test]
-    fn the_written_file_parses_back_to_the_same_ids() {
-        let cases = [
-            meta(0, Some(DIRECTORY)),
-            meta(1, Some("AAAAAAAAAAAAAAAAAAAAZA")),
-            meta(2_147_483_647, Some("_____________________w")),
-            meta(7, None),
-            MetaProperties {
+    #[yare::parameterized(
+        ordinary = { meta(0, Some(DIRECTORY)) },
+        reserved_directory_id = { meta(1, Some("AAAAAAAAAAAAAAAAAAAAZA")) },
+        high_bit_directory_id = { meta(2_147_483_647, Some("_____________________w")) },
+        no_directory_id = { meta(7, None) },
+        random_directory_id = { MetaProperties {
                 cluster_id: ClusterId(Uuid::from_u128(0)),
                 node_id: 3,
                 directory_id: Some(DirectoryId::random()),
-            },
-        ];
-        for written in cases {
-            let tmp = tempfile::tempdir().expect("tempdir");
-            written.write(tmp.path()).expect("write");
-            check!(MetaProperties::read(tmp.path()).expect("read") == Some(written));
-            check!(!tmp.path().join(META_PROPERTIES_TMP).exists());
-        }
+            } },
+    )]
+    fn the_written_file_parses_back_to_the_same_ids(written: MetaProperties) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        written.write(tmp.path()).expect("write");
+        assert2::check!(MetaProperties::read(tmp.path()).expect("read") == Some(written));
+        assert2::check!(!tmp.path().join(META_PROPERTIES_TMP).exists());
+    }
+
+    #[test]
+    fn an_empty_directory_has_no_meta_properties() {
         let empty = tempfile::tempdir().expect("tempdir");
-        check!(MetaProperties::read(empty.path()).expect("read").is_none());
+        assert2::check!(MetaProperties::read(empty.path()).expect("read").is_none());
     }
 
     /// `Properties.load` reads more than `store` writes: the file of an
     /// older Java, `:` and white space as separators, comments, line
     /// continuations, escapes, and `\r\n`. A key given twice keeps its last
     /// value.
-    #[test]
-    fn the_reader_accepts_what_properties_load_accepts() {
+    #[yare::parameterized(
+        kafka_hash_order = { "#\n#Thu Feb 29 12:34:56 UTC 2024\nnode.id=1\nversion=1\n\
+             directory.id=U-hCdTzaSPyFB3swwc7Qdw\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n" },
+        no_comments = { "version=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\nnode.id=1\n\
+             directory.id=U-hCdTzaSPyFB3swwc7Qdw\n" },
+        colon_and_whitespace_separators = { "version : 1\n  cluster.id:AQIDBAUGBwgJCgsMDQ4PEA\nnode.id 1\n\
+             \tdirectory.id \t= U-hCdTzaSPyFB3swwc7Qdw" },
+        comments_and_blank_lines = { "! a comment\n\n   # another\nversion=1\n\n\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n\
+             node.id=1\ndirectory.id=U-hCdTzaSPyFB3swwc7Qdw\n" },
+        crlf_and_cr_endings = { "#\r\nversion=1\r\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\rnode.id=1\r\n\
+             directory.id=U-hCdTzaSPyFB3swwc7Qdw\r\n" },
+        continued_line = { "version=1\ncluster.id=AQIDBAUGBwgJ\\\n    CgsMDQ4PEA\nnode.id=1\n\
+             directory.id=U-hCdTzaSPyFB3swwc7Qdw\\\r\n" },
+        escaped_key_and_value = { "vers\\ion=\\u0031\ncluster\\.id=AQIDBAUGBwgJCgsMDQ4PEA\nnode.id=1\n\
+             directory.id=U-hCdTzaSPyF\\B3swwc7Qdw\n" },
+        duplicate_key_keeps_last = { "version=1\nnode.id=9\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\nnode.id=1\n\
+             directory.id=U-hCdTzaSPyFB3swwc7Qdw\n" },
+        unknown_key_is_ignored = { "version=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\nnode.id=1\nbroker.id=4\n\
+             directory.id=U-hCdTzaSPyFB3swwc7Qdw\n" },
+    )]
+    fn the_reader_accepts_what_properties_load_accepts(text: &str) {
         let want = meta(1, Some(DIRECTORY));
-        let files = [
-            (
-                "Kafka on Java 17, in hash order",
-                "#\n#Thu Feb 29 12:34:56 UTC 2024\nnode.id=1\nversion=1\n\
-                 directory.id=U-hCdTzaSPyFB3swwc7Qdw\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
-            ),
-            (
-                "no comments",
-                "version=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\nnode.id=1\n\
-                 directory.id=U-hCdTzaSPyFB3swwc7Qdw\n",
-            ),
-            (
-                "colons and white space",
-                "version : 1\n  cluster.id:AQIDBAUGBwgJCgsMDQ4PEA\nnode.id 1\n\
-                 \tdirectory.id \t= U-hCdTzaSPyFB3swwc7Qdw",
-            ),
-            (
-                "both comment characters and blank lines",
-                "! a comment\n\n   # another\nversion=1\n\n\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n\
-                 node.id=1\ndirectory.id=U-hCdTzaSPyFB3swwc7Qdw\n",
-            ),
-            (
-                "CRLF and CR line ends",
-                "#\r\nversion=1\r\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\rnode.id=1\r\n\
-                 directory.id=U-hCdTzaSPyFB3swwc7Qdw\r\n",
-            ),
-            (
-                "a continued line",
-                "version=1\ncluster.id=AQIDBAUGBwgJ\\\n    CgsMDQ4PEA\nnode.id=1\n\
-                 directory.id=U-hCdTzaSPyFB3swwc7Qdw\\\r\n",
-            ),
-            (
-                "escapes",
-                "vers\\ion=\\u0031\ncluster\\.id=AQIDBAUGBwgJCgsMDQ4PEA\nnode.id=1\n\
-                 directory.id=U-hCdTzaSPyF\\B3swwc7Qdw\n",
-            ),
-            (
-                "a key given twice",
-                "version=1\nnode.id=9\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\nnode.id=1\n\
-                 directory.id=U-hCdTzaSPyFB3swwc7Qdw\n",
-            ),
-            (
-                "unknown keys",
-                "version=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\nnode.id=1\nbroker.id=4\n\
-                 directory.id=U-hCdTzaSPyFB3swwc7Qdw\n",
-            ),
-        ];
-        for (what, text) in files {
-            check!(
-                MetaProperties::parse(text.as_bytes()).map_err(|e| e.to_string()) == Ok(want),
-                "{what}"
-            );
-        }
+        assert2::check!(
+            MetaProperties::parse(text.as_bytes()).map_err(|e| e.to_string()) == Ok(want),
+            "{text:?}"
+        );
     }
 
     /// A file that does not read gets the message of the exception Kafka
     /// throws for it, and the first fault in Kafka's order wins.
-    #[test]
-    fn a_bad_file_gets_kafkas_message() {
-        let cases = [
-            (
-                "a version that is not a number",
-                "version=one\n",
-                "Invalid meta.properties version string 'one'",
-            ),
-            (
-                "a version Kafka does not define",
-                "version=2\nnode.id=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
-                "Unknown meta.properties version number 2",
-            ),
-            (
-                "version 0",
-                "version=0\nbroker.id=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
-                "Unsupported meta.properties version 0: krabka reads version 1, which a KRaft \
-                 node writes",
-            ),
-            (
-                "no version is version 0",
-                "node.id=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
-                "Unsupported meta.properties version 0: krabka reads version 1, which a KRaft \
-                 node writes",
-            ),
-            (
-                "the JSON file of an earlier krabka",
-                "{\n  \"cluster_id\": \"AQIDBAUGBwgJCgsMDQ4PEA\",\n  \"version\": 3\n}\n",
-                "Unsupported meta.properties version 0: krabka reads version 1, which a KRaft \
-                 node writes",
-            ),
-            (
-                "no node id, and no cluster id",
-                "version=1\n",
-                "Failed to find node.id",
-            ),
-            (
-                "a node id with trailing space",
-                "version=1\nnode.id=1 \ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
-                "Unable to read node.id as a base-10 number.",
-            ),
-            (
-                "a node id past Kafka's int",
-                "version=1\nnode.id=2147483648\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
-                "Unable to read node.id as a base-10 number.",
-            ),
-            (
-                "a bad directory id is found before a missing cluster id",
-                "version=1\nnode.id=1\ndirectory.id=nope\n",
-                "Unable to read directory.id as a Uuid: Input string `nope` decoded as 3 bytes, \
-                 which is not equal to the expected 16 bytes of a base64-encoded UUID",
-            ),
-            (
-                "no cluster id",
-                "version=1\nnode.id=1\n",
-                "cluster.id was not found.",
-            ),
-            (
-                "a cluster id that is not a Uuid",
-                "version=1\nnode.id=1\ncluster.id=AAAAAA\n",
-                "Unable to read cluster.id as a Uuid: Input string `AAAAAA` decoded as 4 \
-                 bytes, which is not equal to the expected 16 bytes of a base64-encoded UUID",
-            ),
-            (
-                "a malformed escape",
-                "version=1\nnode.id=1\ncluster.id=\\u00zz\n",
-                "Malformed \\uxxxx encoding.",
-            ),
-        ];
-        for (what, text, want) in cases {
-            check!(
-                MetaProperties::parse(text.as_bytes()).map_err(|e| e.to_string())
-                    == Err(want.to_owned()),
-                "{what}"
-            );
-        }
+    #[yare::parameterized(
+        bad_version = { "version=one\n", "Invalid meta.properties version string 'one'" },
+        unknown_version = {
+            "version=2\nnode.id=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
+            "Unknown meta.properties version number 2",
+        },
+        unsupported_zero = {
+            "version=0\nbroker.id=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
+            "Unsupported meta.properties version 0: krabka reads version 1, which a KRaft node writes",
+        },
+        missing_version = {
+            "node.id=1\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
+            "Unsupported meta.properties version 0: krabka reads version 1, which a KRaft node writes",
+        },
+        old_json = {
+            "{\n  \"cluster_id\": \"AQIDBAUGBwgJCgsMDQ4PEA\",\n  \"version\": 3\n}\n",
+            "Unsupported meta.properties version 0: krabka reads version 1, which a KRaft node writes",
+        },
+        no_node_or_cluster = { "version=1\n", "Failed to find node.id" },
+        node_trailing_space = {
+            "version=1\nnode.id=1 \ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
+            "Unable to read node.id as a base-10 number.",
+        },
+        node_overflow = {
+            "version=1\nnode.id=2147483648\ncluster.id=AQIDBAUGBwgJCgsMDQ4PEA\n",
+            "Unable to read node.id as a base-10 number.",
+        },
+        bad_directory_precedes_cluster_missing = {
+            "version=1\nnode.id=1\ndirectory.id=nope\n",
+            "Unable to read directory.id as a Uuid: Input string `nope` decoded as 3 bytes, which is not equal to the expected 16 bytes of a base64-encoded UUID",
+        },
+        no_cluster = { "version=1\nnode.id=1\n", "cluster.id was not found." },
+        invalid_cluster = {
+            "version=1\nnode.id=1\ncluster.id=AAAAAA\n",
+            "Unable to read cluster.id as a Uuid: Input string `AAAAAA` decoded as 4 bytes, which is not equal to the expected 16 bytes of a base64-encoded UUID",
+        },
+        malformed_escape = {
+            "version=1\nnode.id=1\ncluster.id=\\u00zz\n",
+            "Malformed \\uxxxx encoding.",
+        },
+    )]
+    fn a_bad_file_gets_kafkas_message(text: &str, want: &str) {
+        assert2::check!(
+            MetaProperties::parse(text.as_bytes()).map_err(|e| e.to_string())
+                == Err(want.to_owned()),
+            "{text:?}"
+        );
     }
 
     /// `verify_ensemble` agrees with Kafka's `MetaPropertiesEnsemble.verify`
     /// for each way a set can disagree.
-    #[test]
-    fn verify_ensemble_matches_kafka() {
+    #[yare::parameterized(
+        nothing_formatted = { "nothing formatted" },
+        one_cluster_and_node = { "one cluster, one node" },
+        set_supplies_node_id = { "the set supplies the node id" },
+        cluster_id_disagrees = { "the given cluster id disagrees" },
+        node_id_disagrees = { "the configured node id disagrees" },
+        directory_node_ids_disagree = { "two directories disagree on the node id" },
+        reserved_directory_id = { "a reserved directory id" },
+        shared_directory_id = { "a shared directory id" },
+        missing_directory_ids = { "no directory id is no conflict" },
+    )]
+    fn verify_ensemble_matches_kafka(scenario: &str) {
         let c1 = ClusterId(Uuid::from_u128(0xc1));
         let c2 = ClusterId(Uuid::from_u128(0xc2));
         let file = |cluster_id, node_id, directory: u128| MetaProperties {
@@ -801,7 +752,8 @@ mod tests {
                 cluster_id: Some(c2),
                 node_id: Some(1),
                 want: Err(format!(
-                    "Invalid cluster.id in: /a/meta.properties. Expected {c2}, but read {c1}"
+                    "Invalid cluster.id in: {}. Expected {c2}, but read {c1}",
+                    Path::new("/a").join(META_PROPERTIES).display()
                 )),
             },
             EnsembleCase {
@@ -812,7 +764,7 @@ mod tests {
                 want: Err(node_id_mismatch_message()
                     .stored(2)
                     .previous(1)
-                    .path(Path::new("/a/meta.properties"))
+                    .path(&Path::new("/a").join(META_PROPERTIES))
                     .call()),
             },
             EnsembleCase {
@@ -823,13 +775,12 @@ mod tests {
                 ],
                 cluster_id: None,
                 node_id: None,
-                want: Err(
-                    "Stored node id 4 doesn't match previous node id 3 in /b/meta.properties. \
-                     If you moved your data, make sure your configured node id matches. If you \
-                     intend to create a new node, you should remove all data in your data \
-                     directories."
-                        .to_owned(),
-                ),
+                want: Err(format!(
+                    "Stored node id 4 doesn't match previous node id 3 in {}. If you moved \
+                         your data, make sure your configured node id matches. If you intend to \
+                         create a new node, you should remove all data in your data directories.",
+                    Path::new("/b").join(META_PROPERTIES).display()
+                )),
             },
             EnsembleCase {
                 what: "a reserved directory id",
@@ -871,20 +822,21 @@ mod tests {
                 want: Ok(Some(c1)),
             },
         ];
-        for EnsembleCase {
+        let EnsembleCase {
             what,
             set,
             cluster_id,
             node_id,
             want,
-        } in cases
-        {
-            let got = verify_ensemble(
-                set.iter().map(|file| (Path::new(file.dir), &file.meta)),
-                cluster_id,
-                node_id,
-            );
-            check!(got == want, "{what}");
-        }
+        } = cases
+            .into_iter()
+            .find(|case| case.what == scenario)
+            .expect("named yare case exists");
+        let got = verify_ensemble(
+            set.iter().map(|file| (Path::new(file.dir), &file.meta)),
+            cluster_id,
+            node_id,
+        );
+        assert2::check!(got == want, "{what}");
     }
 }

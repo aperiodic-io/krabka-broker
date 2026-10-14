@@ -338,18 +338,20 @@ mod tests {
     /// `max_timestamp` and leaves the producer's deltas untouched, so a
     /// producer clock ahead of the broker is legal there and a contradiction
     /// under `CreateTime`.
-    #[test]
-    fn owned_rewrite_checks_timestamps_by_kafka_timestamp_type() {
-        for (name, timestamp_type, admitted) in [
-            ("log append time", TimestampType::LogAppendTime, true),
-            ("create time", TimestampType::CreateTime, false),
-        ] {
-            let mut batch = rewrite(vec![record(0, 0), record(3, 50)]);
-            batch.attributes = batch.attributes.with_timestamp_type(timestamp_type);
-            batch.base_timestamp = 2_000;
-            batch.max_timestamp = 1_000;
-            check!(prepare_owned_batch(batch).is_ok() == admitted, "{name}");
-        }
+    #[yare::parameterized(
+        log_append_time = { "log append time", TimestampType::LogAppendTime, true },
+        create_time = { "create time", TimestampType::CreateTime, false },
+    )]
+    fn owned_rewrite_checks_timestamps_by_kafka_timestamp_type(
+        name: &str,
+        timestamp_type: TimestampType,
+        admitted: bool,
+    ) {
+        let mut batch = rewrite(vec![record(0, 0), record(3, 50)]);
+        batch.attributes = batch.attributes.with_timestamp_type(timestamp_type);
+        batch.base_timestamp = 2_000;
+        batch.max_timestamp = 1_000;
+        check!(prepare_owned_batch(batch).is_ok() == admitted, "{name}");
     }
 
     #[test]

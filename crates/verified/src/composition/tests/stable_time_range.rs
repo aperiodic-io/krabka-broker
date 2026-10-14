@@ -1,5 +1,19 @@
 use {super::*, assert2::assert};
 
+fn maximum_offset_watermarks() -> FetchWatermarks {
+    FetchWatermarks {
+        log_start: 0,
+        log_end: i64::MAX,
+        hw: i64::MAX,
+        lso: i64::MIN,
+        deliverable: i64::MAX,
+    }
+}
+
+fn signed_extreme_window() -> SparseTimestampWindow<'static> {
+    (&[0, 1], &[i64::MIN, i64::MAX], &[(0, 0), (1, 1)])
+}
+
 fn check(
     window: SparseTimestampWindow<'_>,
     starts: &[i64],
@@ -138,42 +152,47 @@ fn derived_offset_caps_preserve_regressions_and_override_stale_lso() {
     );
 }
 
-#[test]
-fn stable_interval_checks_complete_admission_and_exclusive_maximum_offset() {
-    let w = FetchWatermarks {
-        log_start: 0,
-        log_end: i64::MAX,
-        hw: i64::MAX,
-        lso: i64::MIN,
-        deliverable: i64::MAX,
-    };
-    for span in [(0, -1), (0, i64::MAX), (i64::MAX, i64::MAX)] {
-        check((&[], &[], &[]), &[], span, w, (i64::MIN, i64::MAX));
-    }
-    let window = (
-        &[0, 1][..],
-        &[i64::MIN, i64::MAX][..],
-        &[(0, 0), (1, 1)][..],
+#[yare::parameterized(
+    negative_width = { (0, -1) },
+    excessive_width = { (0, i64::MAX) },
+    maximum_zero_width = { (i64::MAX, i64::MAX) },
+)]
+fn stable_interval_checks_complete_admission_and_exclusive_maximum_offset(span: (i64, i64)) {
+    let w = maximum_offset_watermarks();
+    check((&[], &[], &[]), &[], span, w, (i64::MIN, i64::MAX));
+}
+
+#[yare::parameterized(
+    no_start = { &[][..] },
+    minimum_start = { &[i64::MIN][..] },
+    maximum_start = { &[i64::MAX][..] },
+)]
+fn stable_interval_handles_signed_start_frontiers(starts: &[i64]) {
+    let w = maximum_offset_watermarks();
+    let window = signed_extreme_window();
+    check(
+        window,
+        starts,
+        (i64::MAX - 1, i64::MAX),
+        FetchWatermarks {
+            log_start: i64::MAX - 1,
+            ..w
+        },
+        (i64::MIN, i64::MAX),
     );
-    for starts in [&[][..], &[i64::MIN], &[i64::MAX]] {
-        check(
-            window,
-            starts,
-            (i64::MAX - 1, i64::MAX),
-            FetchWatermarks {
-                log_start: i64::MAX - 1,
-                ..w
-            },
-            (i64::MIN, i64::MAX),
-        );
-        check(
-            window,
-            starts,
-            (i64::MAX - 1, i64::MAX),
-            w,
-            (i64::MAX, i64::MAX),
-        );
-    }
+    check(
+        window,
+        starts,
+        (i64::MAX - 1, i64::MAX),
+        w,
+        (i64::MAX, i64::MAX),
+    );
+}
+
+#[test]
+fn stable_interval_keeps_exclusive_maximum_offset() {
+    let w = maximum_offset_watermarks();
+    let window = signed_extreme_window();
     assert!(
         stable_time_range_preserves_first(
             window,

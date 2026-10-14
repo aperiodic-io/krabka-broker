@@ -167,32 +167,37 @@ fn validation_completion_checks_both_snapshot_times_and_exact_session() {
     );
 }
 
-#[test]
-fn completion_guard_uses_finish_time_even_if_the_supplied_clock_is_old() {
+#[yare::parameterized(
+    valid_interval = { 100, 120 },
+    completion_at_expiry = { 100, 121 },
+    finish_before_start = { 100, 99 },
+    negative_start = { -1, 120 },
+    maximum_finish = { 100, i64::MAX },
+)]
+fn completion_guard_uses_finish_time_even_if_the_supplied_clock_is_old(start: i64, finish: i64) {
     let c = cache(100);
-    for (start, finish) in [
-        (100, 120),
-        (100, 121),
-        (100, 99),
-        (-1, 120),
-        (100, i64::MAX),
-    ] {
-        assert2::assert!(
-            oauth_validation_admission(start, finish, Some(c))
-                == completion_ok(start, finish, Some(c))
-        );
-    }
-    for generation in [0, 2, 3, u64::MAX - 1, u64::MAX] {
-        let c = JwksCacheFacts {
-            generation_before: generation,
-            generation_after: generation,
-            expiry_enabled: false,
-            ..c
-        };
-        assert2::assert!(
-            oauth_validation_admission(100, 100, Some(c)) == completion_ok(100, 100, Some(c))
-        );
-    }
+    assert2::assert!(
+        oauth_validation_admission(start, finish, Some(c)) == completion_ok(start, finish, Some(c))
+    );
+}
+
+#[yare::parameterized(
+    initial = { 0 },
+    stable_even = { 2 },
+    unstable_generation = { 3 },
+    maximum_even = { u64::MAX - 1 },
+    maximum_odd = { u64::MAX },
+)]
+fn completion_admission_matches_each_cache_generation(generation: u64) {
+    let c = JwksCacheFacts {
+        generation_before: generation,
+        generation_after: generation,
+        expiry_enabled: false,
+        ..cache(100)
+    };
+    assert2::assert!(
+        oauth_validation_admission(100, 100, Some(c)) == completion_ok(100, 100, Some(c))
+    );
 }
 
 proptest! {

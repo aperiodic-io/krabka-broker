@@ -184,50 +184,53 @@ mod tests {
     /// The four durability knobs must default to the values documented in
     /// `docs/config-reference.md`, on both backends: an operator who sets
     /// none of them gets exactly this.
-    #[test]
-    fn backend_defaults_carry_the_documented_bounds() {
-        let s3 = S3Config::default();
-        let gcs = GcsConfig::default();
-        let cases = [
+    #[yare::parameterized(
+        s3 = { "s3", false },
+        gcs = { "gcs", true },
+    )]
+    fn backend_defaults_carry_the_documented_bounds(name: &str, gcs: bool) {
+        let (retries, retry, request, connect) = if gcs {
+            let cfg = GcsConfig::default();
             (
-                "s3",
-                s3.max_retries,
-                s3.retry_timeout,
-                s3.request_timeout,
-                s3.connect_timeout,
-            ),
+                cfg.max_retries,
+                cfg.retry_timeout,
+                cfg.request_timeout,
+                cfg.connect_timeout,
+            )
+        } else {
+            let cfg = S3Config::default();
             (
-                "gcs",
-                gcs.max_retries,
-                gcs.retry_timeout,
-                gcs.request_timeout,
-                gcs.connect_timeout,
-            ),
-        ];
-        for (name, retries, retry, request, connect) in cases {
-            check!(retries == 10, "{name}");
-            check!(retry == Duration::from_secs(180), "{name}");
-            check!(request == Duration::from_secs(30), "{name}");
-            check!(connect == Duration::from_secs(5), "{name}");
-        }
+                cfg.max_retries,
+                cfg.retry_timeout,
+                cfg.request_timeout,
+                cfg.connect_timeout,
+            )
+        };
+        check!(retries == 10, "{name}");
+        check!(retry == Duration::from_secs(180), "{name}");
+        check!(request == Duration::from_secs(30), "{name}");
+        check!(connect == Duration::from_secs(5), "{name}");
     }
 
     /// The bounds are not credential material, so a redacting `Debug` must
     /// still print them: an operator reading a startup log is looking for the
     /// value that is timing their store out.
-    #[test]
-    fn debug_prints_the_bounds_on_both_backends() {
-        let s3 = format!("{:?}", S3Config::default());
-        let gcs = format!("{:?}", GcsConfig::default());
-        for dbg in [&s3, &gcs] {
-            for field in [
-                "max_retries: 10",
-                "retry_timeout: 180s",
-                "request_timeout: 30s",
-                "connect_timeout: 5s",
-            ] {
-                check!(dbg.contains(field), "{field} missing from {dbg}");
-            }
-        }
+    #[yare::parameterized(
+        s3_retries = { false, "max_retries: 10" },
+        s3_retry_timeout = { false, "retry_timeout: 180s" },
+        s3_request_timeout = { false, "request_timeout: 30s" },
+        s3_connect_timeout = { false, "connect_timeout: 5s" },
+        gcs_retries = { true, "max_retries: 10" },
+        gcs_retry_timeout = { true, "retry_timeout: 180s" },
+        gcs_request_timeout = { true, "request_timeout: 30s" },
+        gcs_connect_timeout = { true, "connect_timeout: 5s" },
+    )]
+    fn debug_prints_the_bounds_on_both_backends(gcs: bool, field: &str) {
+        let dbg = if gcs {
+            format!("{:?}", GcsConfig::default())
+        } else {
+            format!("{:?}", S3Config::default())
+        };
+        check!(dbg.contains(field), "{field} missing from {dbg}");
     }
 }

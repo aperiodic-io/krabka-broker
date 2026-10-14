@@ -160,20 +160,22 @@ mod tests {
             .unwrap();
         let types = header(&rows).unwrap();
         assert!(compact(&scaffold(&types)).contains("partitions:__share_partitions"));
-        for invalid in [
-            "",
-            "Request; group [g];",
-            "Request<T>, Topic; group [g]; topic [id]; partitions [rows];",
-            "Request, Topic; wrong [g]; topic [id]; partitions [rows];",
-            "Request, Topic; group g; topic [id]; partitions [rows];",
-            "Request, Topic; group (g); topic [id]; partitions [rows];",
-            "Request, Topic; group [g]; topic []; partitions [rows];",
-            "Request, Topic; group [g]; topic [id]; partitions [];",
-            "Request, Topic, Partition; group []; topic [id]; fields {};",
-            "Request, Topic, Partition; group [g]; topic [id]; fields [];",
-            "Request, Topic, Partition; group [g]; topic [id]; fields {}; extra",
-        ] {
-            assert!(header(&invalid.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        missing_topic = { "Request; group [g];" },
+        generic_request = { "Request<T>, Topic; group [g]; topic [id]; partitions [rows];" },
+        wrong_clause = { "Request, Topic; wrong [g]; topic [id]; partitions [rows];" },
+        ungrouped = { "Request, Topic; group g; topic [id]; partitions [rows];" },
+        parenthesized = { "Request, Topic; group (g); topic [id]; partitions [rows];" },
+        empty_topic = { "Request, Topic; group [g]; topic []; partitions [rows];" },
+        empty_partitions = { "Request, Topic; group [g]; topic [id]; partitions [];" },
+        empty_group = { "Request, Topic, Partition; group []; topic [id]; fields {};" },
+        empty_fields = { "Request, Topic, Partition; group [g]; topic [id]; fields [];" },
+        trailing = { "Request, Topic, Partition; group [g]; topic [id]; fields {}; extra" },
+    )]
+    fn rejects_malformed_constructor_headers(invalid: &str) {
+        assert2::assert!(header(&invalid.parse().unwrap()).is_err());
     }
 }

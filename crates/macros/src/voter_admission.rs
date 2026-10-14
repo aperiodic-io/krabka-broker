@@ -1,10 +1,10 @@
 //! One admission step before an ordinary voter handler's operation body.
 
 use {
-    crate::meta::{ItemBody, Tokens, compact, edit_native_body, item_body},
+    crate::meta::{Tokens, compact, edit_native_body, function_header},
     moxy::{
-        ast::{FnParam, FromMeta, ItemFn, Meta, ParseError},
-        token::{TokenStream, TokenTree},
+        ast::{FnParam, FromMeta, Meta, ParseError},
+        token::TokenStream,
     },
     proc_macro::TokenStream as NativeTokenStream,
 };
@@ -27,21 +27,11 @@ fn prefix(meta: &TokenStream, item: &TokenStream) -> Result<TokenStream, ParseEr
         gate,
         refusals,
     } = Admission::from_meta(&options)?;
-    let ItemBody {
-        tokens: mut header,
-        body_index: body,
-    } = item_body(item.clone(), "voter_admission", TokenTree::is_keyword_fn)?;
-    if body + 1 != header.len() {
-        return Err(ParseError::new(
-            item.span(),
-            "expected one async voter handler",
-        ));
-    }
-    let TokenTree::Group(group) = &mut header[body] else {
-        unreachable!()
-    };
-    group.tokens = TokenStream::new();
-    let function: ItemFn = moxy::parse!({ TokenStream::from(header) })?;
+    let function = function_header(
+        item.clone(),
+        "voter_admission",
+        "expected one async voter handler",
+    )?;
     let inputs = &function.sig.params.inner.inputs;
     if function.sig.ident != "handle"
         || function.sig.asyncness.is_none()
@@ -103,15 +93,26 @@ mod tests {
             .is_err()
         );
         assert!(prefix(&meta, &valid).is_ok());
-        for invalid in [
-            "fn handle(broker: &Broker, version: i16, req_bytes: &[u8], ctx: &Context) {}",
-            "async fn handle(broker: &Broker) {}",
+    }
+
+    #[yare::parameterized(
+        sync = { "fn handle(broker: &Broker, version: i16, req_bytes: &[u8], ctx: &Context) {}" },
+        missing_arguments = { "async fn handle(broker: &Broker) {}" },
+        wrong_body_name = {
             "async fn handle(broker: &Broker, version: i16, body: &[u8], ctx: &Context) {}",
+        },
+        wrong_method = {
             "async fn other(broker: &Broker, version: i16, req_bytes: &[u8], ctx: &Context) {}",
-            "struct Config {}",
+        },
+        non_function = { "struct Config {}" },
+        extra_item = {
             "async fn handle(broker: &Broker, version: i16, req_bytes: &[u8], ctx: &Context) {} fn extra() {}",
-        ] {
-            assert!(prefix(&meta, &invalid.parse().unwrap()).is_err());
-        }
+        },
+    )]
+    fn rejects_incorrect_handler_shapes(invalid: &str) {
+        let meta = "request = Request, api = 80, gate = gate, refusals = refusals"
+            .parse()
+            .unwrap();
+        assert2::assert!(prefix(&meta, &invalid.parse().unwrap()).is_err());
     }
 }

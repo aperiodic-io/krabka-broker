@@ -3132,6 +3132,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "yare",
 ]
 
 [[package]]
@@ -3178,6 +3179,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "yare",
 ]
 
 [[package]]
@@ -3197,6 +3199,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "yare",
 ]
 
 [[package]]
@@ -3237,6 +3240,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "yare",
 ]
 
 [[package]]
@@ -3475,6 +3479,7 @@ dependencies = [
  "krabka-raft",
  "serde_json",
  "tempfile",
+ "yare",
 ]
 
 [[package]]
@@ -3504,6 +3509,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wincode",
+ "yare",
 ]
 
 [[package]]
@@ -3527,6 +3533,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "yare",
 ]
 
 [[package]]
@@ -3616,6 +3623,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
+ "yare",
 ]
 
 [[package]]
@@ -3625,6 +3633,7 @@ dependencies = [
  "assert2",
  "bytes",
  "clap",
+ "derive_more",
  "futures-util",
  "krabka-protocol",
  "krabka-units",
@@ -3684,6 +3693,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "yare",
 ]
 
 [[package]]
@@ -3698,6 +3708,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "time",
+ "yare",
 ]
 
 [[package]]
@@ -3754,6 +3765,7 @@ dependencies = [
  "tracing",
  "uuid",
  "wincode",
+ "yare",
 ]
 
 [[package]]
@@ -3770,6 +3782,7 @@ dependencies = [
  "krabka-units",
  "proptest",
  "thiserror 2.0.21",
+ "yare",
 ]
 
 [[package]]
@@ -3842,6 +3855,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "yare",
 ]
 
 [[package]]
@@ -4022,6 +4036,7 @@ dependencies = [
  "tracing-core",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "yare",
 ]
 
 [[package]]
@@ -4036,6 +4051,7 @@ dependencies = [
  "num-traits",
  "qubit-clock",
  "stateright",
+ "yare",
 ]
 
 [[package]]
@@ -4073,6 +4089,7 @@ dependencies = [
  "krabka-macros",
  "mutants",
  "proptest",
+ "yare",
 ]
 
 [[package]]

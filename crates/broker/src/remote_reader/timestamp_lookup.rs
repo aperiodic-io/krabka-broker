@@ -95,8 +95,16 @@ mod tests {
         assert2::assert,
     };
 
-    #[tokio::test]
-    async fn timestamp_lookup_excludes_records_before_the_logical_floor() {
+    #[yare::parameterized(
+        start = { 0 },
+        second_record = { 1 },
+        later_record = { 3 },
+        before_end = { 23 },
+        at_end = { 24 },
+        beyond_end = { i64::MAX },
+    )]
+    #[test_macro(tokio::test)]
+    async fn timestamp_lookup_excludes_records_before_the_logical_floor(minimum: i64) {
         let ReaderFixture {
             local: _log_dir,
             remote: _remote_dir,
@@ -104,37 +112,33 @@ mod tests {
             log,
         } = reader_fixture();
         let end = log.tierable_segments().last().unwrap().last_offset.0 + 1;
-        for minimum in [0, 1, 3, end - 1, end, i64::MAX] {
-            let expected = (minimum < end).then_some((minimum, 0));
-            assert!(
-                reader
-                    .offset_for_timestamp(&tp(), 0, minimum, None)
-                    .await
-                    .unwrap()
-                    == expected
-            );
-        }
+        let expected = (minimum < end).then_some((minimum, 0));
+        let actual = reader
+            .offset_for_timestamp(&tp(), 0, minimum, None)
+            .await
+            .unwrap();
+        assert2::assert!(actual == expected, "minimum {minimum}, end {end}");
     }
 
-    #[tokio::test]
-    async fn timestamp_lookup_answers_in_append_time() {
+    #[yare::parameterized(
+        earlier_record = { 0, 1_500, Some((10, 1_700)) },
+        exact_floor = { 11, 1_500, Some((11, 1_700)) },
+        later_timestamp = { 0, 1_800, Some((14, 2_400)) },
+        floor_at_match = { 15, 2_400, Some((15, 2_400)) },
+        after_last_timestamp = { 0, 2_401, None },
+    )]
+    #[test_macro(tokio::test)]
+    async fn timestamp_lookup_answers_in_append_time(
+        floor: i64,
+        target: i64,
+        expected: Option<(i64, i64)>,
+    ) {
         let ReaderWithDir { reader, dir: _dir } = append_time_remote_segment_reader();
-        for (floor, target, expected) in [
-            (0, 1_500, Some((10, 1_700))),
-            (11, 1_500, Some((11, 1_700))),
-            (0, 1_800, Some((14, 2_400))),
-            (15, 2_400, Some((15, 2_400))),
-            (0, 2_401, None),
-        ] {
-            assert!(
-                reader
-                    .offset_for_timestamp(&tp(), target, floor, None)
-                    .await
-                    .unwrap()
-                    == expected,
-                "floor {floor} target {target}"
-            );
-        }
+        let actual = reader
+            .offset_for_timestamp(&tp(), target, floor, None)
+            .await
+            .unwrap();
+        assert2::assert!(actual == expected, "floor {floor} target {target}");
     }
 
     #[tokio::test]
@@ -249,42 +253,32 @@ mod tests {
     /// timestamp reaches the target, and fails on a record above the limit
     /// rather than moving on to another segment. A record of the second batch
     /// is a `1_007`-byte body, and one of the first is a few dozen.
-    #[tokio::test]
-    async fn offset_for_timestamp_refuses_a_record_above_the_limit_that_it_reads() {
+    #[yare::parameterized(
+        found_before_oversized_batch = { 1_500, Some(100), Ok(Some((12, 1_600))) },
+        matching_record_is_oversized = { 1_800, Some(100), Err(1_007) },
+        no_limit = { 1_800, None, Ok(Some((14, 2_000))) },
+        limit_above_record = { 1_800, Some(1_007), Ok(Some((14, 2_000))) },
+    )]
+    #[test_macro(tokio::test)]
+    async fn offset_for_timestamp_refuses_a_record_above_the_limit_that_it_reads(
+        target: i64,
+        limit: Option<usize>,
+        expected: Result<Option<(i64, i64)>, usize>,
+    ) {
         use krabka_remote_storage::RemoteStorageError;
 
         let ReaderWithDir {
             reader,
             dir: _remote_dir,
         } = compressed_remote_segment_reader(1_000);
-        for (name, target, limit, want) in [
-            // The match is in the first batch, so the second is never read.
-            (
-                "found before the oversized batch",
-                1_500,
-                Some(100),
-                Ok(Some((12, 1_600))),
-            ),
-            // The first batch tops out at 1_700, so it is skipped undecompressed
-            // and the second batch's first record is the oversized match.
-            ("the match is oversized", 1_800, Some(100), Err(1_007)),
-            ("no limit", 1_800, None, Ok(Some((14, 2_000)))),
-            (
-                "a limit above the record",
-                1_800,
-                Some(1_007),
-                Ok(Some((14, 2_000))),
-            ),
-        ] {
-            let got = match reader.offset_for_timestamp(&tp(), target, 0, limit).await {
-                Ok(found) => Ok(found),
-                Err(RemoteStorageError::RecordTooLarge { size, limit: seen }) => {
-                    assert!(Some(seen) == limit, "{name}");
-                    Err(size)
-                }
-                Err(other) => panic!("{name}: unexpected error: {other}"),
-            };
-            assert!(got == want, "{name}");
-        }
+        let actual = match reader.offset_for_timestamp(&tp(), target, 0, limit).await {
+            Ok(found) => Ok(found),
+            Err(RemoteStorageError::RecordTooLarge { size, limit: seen }) => {
+                assert2::assert!(Some(seen) == limit);
+                Err(size)
+            }
+            Err(other) => panic!("unexpected error: {other}"),
+        };
+        assert2::assert!(actual == expected);
     }
 }

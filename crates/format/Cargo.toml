@@ -52,3 +52,4 @@ assert2 = { workspace = true }
 krabka-ids = { version = "0.6.0" }
 krabka-broker = { version = "1.0.5", path = "../broker" }
 tempfile = { workspace = true }
+yare = { workspace = true }

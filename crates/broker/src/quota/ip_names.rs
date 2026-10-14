@@ -157,8 +157,7 @@ impl IpNames {
         self.lock()
             .names
             .get(&peer)
-            .map(|names| names.iter().cloned().collect())
-            .unwrap_or_default()
+            .map_or_default(|names| names.iter().cloned().collect())
     }
 
     /// Rebuilds the address index from `image`'s `ip` entities, and forgets
@@ -490,31 +489,32 @@ mod tests {
     /// The wait after a failed lookup doubles with each failure, from
     /// [`RETRY_BASE`] up to [`RETRY_MAX`], and a count that overflows the
     /// shift stays at the cap.
-    #[test]
-    fn the_wait_after_a_failure_doubles_up_to_the_cap() {
+    #[yare::parameterized(
+        first_failure = { None, 1, 1 },
+        second_failure = { Some(1), 2, 2 },
+        third_failure = { Some(2), 3, 4 },
+        capped_shift = { Some(8), 9, 256 },
+        capped = { Some(9), 10, 300 },
+        many_failures = { Some(100), 101, 300 },
+        saturated_count = { Some(u32::MAX), u32::MAX, 300 },
+    )]
+    fn the_wait_after_a_failure_doubles_up_to_the_cap(
+        before: Option<u32>,
+        attempts: u32,
+        wait_secs: u64,
+    ) {
         let t = Instant::now();
-        // (attempts already failed, attempts after, wait after)
-        for (before, attempts, wait_secs) in [
-            (None, 1, 1),
-            (Some(1), 2, 2),
-            (Some(2), 3, 4),
-            (Some(8), 9, 256),
-            (Some(9), 10, 300),
-            (Some(100), 101, 300),
-            (Some(u32::MAX), u32::MAX, 300),
-        ] {
-            let previous = before.map(|attempts| Failure {
-                attempts,
-                retry_at: t,
-            });
+        let previous = before.map(|attempts| Failure {
+            attempts,
+            retry_at: t,
+        });
 
-            let next = Failure::after(previous, t);
+        let next = Failure::after(previous, t);
 
-            check!(
-                (next.attempts, next.retry_at - t) == (attempts, Duration::from_secs(wait_secs)),
-                "after {before:?}"
-            );
-        }
+        check!(
+            (next.attempts, next.retry_at - t) == (attempts, Duration::from_secs(wait_secs)),
+            "after {before:?}"
+        );
     }
 
     /// A lookup that answers records the address and clears the name's

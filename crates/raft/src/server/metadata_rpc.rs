@@ -395,46 +395,47 @@ mod tests {
         assert2::assert!(duplicate.leader_hint == -1);
     }
 
-    #[test]
-    fn a_failed_submit_encodes_the_code_the_forwarding_node_translates() {
-        for (case, error, error_code, leader_hint) in [
-            (
-                "metadata rejection",
-                RaftError::Metadata(krabka_metadata::MetadataError::TopicExists("t".into())),
-                SUBMIT_CHANGE_REJECTED,
-                LEADER_HINT_UNKNOWN,
-            ),
-            (
-                "not the leader",
-                RaftError::NotLeader {
-                    current_leader: Some(NodeId(3)),
+    #[yare::parameterized(
+        metadata_rejection = {
+            "metadata rejection",
+            RaftError::Metadata(krabka_metadata::MetadataError::TopicExists("t".into())),
+            SUBMIT_CHANGE_REJECTED,
+            LEADER_HINT_UNKNOWN,
+        },
+        not_leader = {
+            "not the leader",
+            RaftError::NotLeader { current_leader: Some(NodeId(3)) },
+            SUBMIT_CHANGE_NOT_LEADER,
+            3,
+        },
+        uncommitted_tail = {
+            "uncommitted tail",
+            RaftError::UncommittedTail,
+            SUBMIT_CHANGE_UNCOMMITTED_TAIL,
+            LEADER_HINT_UNKNOWN,
+        },
+        other_failure = {
+            "other failure",
+            RaftError::ChangeRejected("no".into()),
+            SUBMIT_CHANGE_FAILED,
+            LEADER_HINT_UNKNOWN,
+        },
+    )]
+    fn a_failed_submit_encodes_the_code_the_forwarding_node_translates(
+        case: &str,
+        error: RaftError,
+        error_code: i16,
+        leader_hint: i64,
+    ) {
+        check!(
+            submit_change_failure(&error)
+                == KrabkaSubmitChangeResponse {
+                    error_code,
+                    leader_hint,
+                    result: Bytes::new(),
                 },
-                SUBMIT_CHANGE_NOT_LEADER,
-                3,
-            ),
-            (
-                "uncommitted tail",
-                RaftError::UncommittedTail,
-                SUBMIT_CHANGE_UNCOMMITTED_TAIL,
-                LEADER_HINT_UNKNOWN,
-            ),
-            (
-                "other failure",
-                RaftError::ChangeRejected("no".into()),
-                SUBMIT_CHANGE_FAILED,
-                LEADER_HINT_UNKNOWN,
-            ),
-        ] {
-            check!(
-                submit_change_failure(&error)
-                    == KrabkaSubmitChangeResponse {
-                        error_code,
-                        leader_hint,
-                        result: Bytes::new(),
-                    },
-                "{case}"
-            );
-        }
+            "{case}"
+        );
     }
 
     #[tokio::test]
@@ -537,21 +538,29 @@ mod tests {
         assert2::assert!(resp.error_code == SUBMIT_CHANGE_APPLIED);
     }
 
-    #[test]
-    fn quorum_metadata_leader_defaults_on_missing_or_overflow_quorum() {
-        let claim = |id, epoch| Some(LeaderClaim { id, epoch });
-        let leader = |hint, epoch| MetadataLeader { hint, epoch };
-        for (what, quorum, want) in [
-            ("no quorum state", None, leader(-1, -1)),
-            ("a leader", claim(Some(NodeId(42)), 5), leader(42, 5)),
-            ("no leader", claim(None, 0), leader(-1, 0)),
-            (
-                "an epoch past i32",
-                claim(Some(NodeId(1)), u32::MAX),
-                leader(1, i32::MAX),
-            ),
-        ] {
-            check!(quorum_metadata_leader(quorum) == want, "{what}");
-        }
+    #[yare::parameterized(
+        no_quorum = { "no quorum state", None, MetadataLeader { hint: -1, epoch: -1 } },
+        leader = {
+            "a leader",
+            Some(LeaderClaim { id: Some(NodeId(42)), epoch: 5 }),
+            MetadataLeader { hint: 42, epoch: 5 },
+        },
+        no_leader = {
+            "no leader",
+            Some(LeaderClaim { id: None, epoch: 0 }),
+            MetadataLeader { hint: -1, epoch: 0 },
+        },
+        epoch_overflow = {
+            "an epoch past i32",
+            Some(LeaderClaim { id: Some(NodeId(1)), epoch: u32::MAX }),
+            MetadataLeader { hint: 1, epoch: i32::MAX },
+        },
+    )]
+    fn quorum_metadata_leader_defaults_on_missing_or_overflow_quorum(
+        what: &str,
+        quorum: Option<LeaderClaim>,
+        want: MetadataLeader,
+    ) {
+        check!(quorum_metadata_leader(quorum) == want, "{what}");
     }
 }

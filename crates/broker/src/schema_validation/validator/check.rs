@@ -570,17 +570,21 @@ mod tests {
         check!(reason.label() == "unknown_id", "{reason}");
     }
 
-    #[tokio::test]
-    async fn fail_open_rejects_permanent_registry_errors() {
-        for status in [400, 401, 403, 600] {
-            let server = status_registry(status).await;
+    #[yare::parameterized(
+        bad_request = { 400 },
+        unauthorized = { 401 },
+        forbidden = { 403 },
+        invalid_status = { 600 },
+    )]
+    #[test_macro(tokio::test)]
+    async fn fail_open_rejects_permanent_registry_errors(status: u16) {
+        let server = status_registry(status).await;
 
-            let reason = fail_open_rejection(server.uri(), &format!("status {status}")).await;
-            check!(
-                reason.label() == "registry_unavailable",
-                "status {status}: {reason}"
-            );
-        }
+        let reason = fail_open_rejection(server.uri(), &format!("status {status}")).await;
+        check!(
+            reason.label() == "registry_unavailable",
+            "status {status}: {reason}"
+        );
     }
 
     #[tokio::test]
@@ -595,18 +599,20 @@ mod tests {
         check!(reason.label() == "registry_unavailable", "{reason}");
     }
 
-    #[tokio::test]
-    async fn fail_open_admits_retryable_registry_statuses() {
-        for status in [408, 429] {
-            let server = status_registry(status).await;
+    #[yare::parameterized(
+        request_timeout = { 408 },
+        too_many_requests = { 429 },
+    )]
+    #[test_macro(tokio::test)]
+    async fn fail_open_admits_retryable_registry_statuses(status: u16) {
+        let server = status_registry(status).await;
 
-            let v = configured_validator(server.uri(), true).unwrap();
-            check!(
-                value_check(&v, ValidationMode::Id, &framed(KNOWN_ID, b"x"))
-                    .await
-                    .is_ok(),
-                "status {status}"
-            );
-        }
+        let v = configured_validator(server.uri(), true).unwrap();
+        check!(
+            value_check(&v, ValidationMode::Id, &framed(KNOWN_ID, b"x"))
+                .await
+                .is_ok(),
+            "status {status}"
+        );
     }
 }

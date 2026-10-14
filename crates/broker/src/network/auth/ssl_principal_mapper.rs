@@ -449,25 +449,27 @@ mod tests {
 
         check!(mapper.apply("CN=alice,OU=ServiceUsers") == Some("alice".to_owned()));
         check!(mapper.apply("CN=alice,OU=\u{17f}erviceUsers").is_none());
-
-        for rule in ["RULE:^(?i)(a),\\1$/$1/", "RULE:^(?iu)(a),\\1$/$1/"] {
-            let mapper = SslPrincipalMapper::parse(&[rule]).expect("the rule parses");
-            check!(mapper.apply("A,a") == Some("A".to_owned()), "{rule}");
-            check!(mapper.apply("A,b").is_none(), "{rule}");
-        }
     }
 
-    #[test]
-    fn malformed_specs_are_rejected() {
-        for spec in [
-            "NOT_A_RULE:::",
-            "RULE:^CN=(.*?)$",
-            "RULE:^CN=(.*?)$/$1",
-            "RULE:^CN=(.*?)$/$1/X",
-            "RULE:^CN=([a-z$/$1/",
-            "default",
-        ] {
-            check!(SslPrincipalMapper::parse(&[spec]).is_err(), "{spec}");
-        }
+    #[yare::parameterized(
+        ascii_case_flag = { "RULE:^(?i)(a),\\1$/$1/" },
+        unicode_case_flag = { "RULE:^(?iu)(a),\\1$/$1/" },
+    )]
+    fn a_rule_compares_backreferences_ascii_insensitively(rule: &str) {
+        let mapper = SslPrincipalMapper::parse(&[rule]).expect("the rule parses");
+        check!(mapper.apply("A,a") == Some("A".to_owned()), "{rule}");
+        check!(mapper.apply("A,b").is_none(), "{rule}");
+    }
+
+    #[yare::parameterized(
+        not_a_rule = { "NOT_A_RULE:::" },
+        missing_slash = { "RULE:^CN=(.*?)$" },
+        unterminated_replacement = { "RULE:^CN=(.*?)$/$1" },
+        invalid_flag = { "RULE:^CN=(.*?)$/$1/X" },
+        malformed_pattern = { "RULE:^CN=([a-z$/$1/" },
+        lowercase_default = { "default" },
+    )]
+    fn malformed_specs_are_rejected(spec: &str) {
+        check!(SslPrincipalMapper::parse(&[spec]).is_err(), "{spec}");
     }
 }

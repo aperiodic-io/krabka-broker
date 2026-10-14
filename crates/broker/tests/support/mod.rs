@@ -36,6 +36,23 @@
 
 #![allow(dead_code)]
 
+#[macro_export]
+macro_rules! once_value {
+    ($value_type:ty, $initialize:block) => {{
+        static VALUE: std::sync::OnceLock<$value_type> = std::sync::OnceLock::new();
+        VALUE.get_or_init(|| $initialize)
+    }};
+}
+
+/// The preferred leader site in the three-site KFC-2 cluster.
+pub(crate) const SITE_A: &str = "site-a";
+/// The second data site.
+pub(crate) const SITE_B: &str = "site-b";
+/// The witness site.
+pub(crate) const SITE_C: &str = "site-c";
+/// `SITES[i]` is the rack of broker `i + 1`.
+pub(crate) const SITES: [&str; 3] = [SITE_A, SITE_B, SITE_C];
+
 use {
     crate::support::{discovery::topic_metadata_request, topics::metadata_topic},
     assert2::assert,
@@ -60,6 +77,7 @@ pub mod discovery;
 pub mod diskless;
 pub mod durability;
 pub mod fetch;
+pub mod gssapi;
 pub mod listeners;
 pub mod load_test;
 pub mod offsets;
@@ -266,8 +284,7 @@ pub async fn topic_id_for(
     resp.topics
         .iter()
         .find(|t| t.name.as_deref() == Some(name))
-        .map(|t| t.topic_id)
-        .unwrap_or_default()
+        .map_or_default(|t| t.topic_id)
 }
 
 pub fn lazy_mutex(lock: &std::sync::OnceLock<tokio::sync::Mutex<()>>) -> &tokio::sync::Mutex<()> {

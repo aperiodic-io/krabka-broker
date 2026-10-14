@@ -75,24 +75,18 @@ pub fn api_name(api_key: i16) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::test_support::peer,
-        assert2::{assert, check},
-    };
+    use {super::*, crate::test_support::peer, assert2::check};
 
-    #[test]
-    fn api_name_known_and_unknown() {
-        for (api_key, want) in [
-            (0, "Produce"),
-            (1, "Fetch"),
-            (18, "ApiVersions"),
-            (51, "AlterUserScramCredentials"),
-            (30, "CreateAcls"),
-            (9999, "Unknown"),
-        ] {
-            assert!(api_name(api_key) == want, "api key {api_key}");
-        }
+    #[yare::parameterized(
+        produce = { 0, "Produce" },
+        fetch = { 1, "Fetch" },
+        api_versions = { 18, "ApiVersions" },
+        alter_user_scram_credentials = { 51, "AlterUserScramCredentials" },
+        create_acls = { 30, "CreateAcls" },
+        unknown = { 9999, "Unknown" },
+    )]
+    fn api_name_known_and_unknown(api_key: i16, want: &str) {
+        assert2::assert!(api_name(api_key) == want, "api key {api_key}");
     }
 
     #[test]

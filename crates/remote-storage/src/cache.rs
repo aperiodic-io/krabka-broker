@@ -377,24 +377,21 @@ mod tests {
         c
     }
 
-    #[test]
-    fn offset_lookup_across_segments_one_epoch() {
+    #[yare::parameterized(
+        first_start = { 0, Some(Uuid::from_u128(10)) },
+        first_end = { 99, Some(Uuid::from_u128(10)) },
+        second_start = { 100, Some(Uuid::from_u128(11)) },
+        second_end = { 199, Some(Uuid::from_u128(11)) },
+        past_end = { 200, None },
+    )]
+    fn offset_lookup_across_segments_one_epoch(offset: i64, want: Option<Uuid>) {
         let c = two_finished_segments();
-        for (offset, want) in [
-            (0, Some(Uuid::from_u128(10))),
-            (99, Some(Uuid::from_u128(10))),
-            (100, Some(Uuid::from_u128(11))),
-            (199, Some(Uuid::from_u128(11))),
-            // past the end
-            (200, None),
-        ] {
-            check!(
-                c.segment_for(LeaderEpoch(0), offset)
-                    .map(|s| s.remote_log_segment_id().id)
-                    == want,
-                "offset={offset}"
-            );
-        }
+        check!(
+            c.segment_for(LeaderEpoch(0), offset)
+                .map(|s| s.remote_log_segment_id().id)
+                == want,
+            "offset={offset}"
+        );
     }
 
     #[test]
@@ -462,8 +459,17 @@ mod tests {
         assert!(c.highest_offset_for_epoch(LeaderEpoch(0)).is_none());
     }
 
-    #[test]
-    fn offset_lookup_respects_epoch() {
+    #[yare::parameterized(
+        epoch_zero_inside = { LeaderEpoch(0), 10, Some(Uuid::from_u128(10)) },
+        epoch_zero_end = { LeaderEpoch(0), 49, Some(Uuid::from_u128(10)) },
+        epoch_zero_after = { LeaderEpoch(0), 50, None },
+        epoch_one_before_start = { LeaderEpoch(1), 49, None },
+        epoch_one_at_start = { LeaderEpoch(1), 50, Some(Uuid::from_u128(10)) },
+        epoch_zero_missing_segment = { LeaderEpoch(0), 150, None },
+        epoch_one_first_segment = { LeaderEpoch(1), 60, Some(Uuid::from_u128(10)) },
+        epoch_one_second_segment = { LeaderEpoch(1), 150, Some(Uuid::from_u128(11)) },
+    )]
+    fn offset_lookup_respects_epoch(epoch: LeaderEpoch, offset: i64, want: Option<Uuid>) {
         let mut c = RemoteLogMetadataCache::default();
         // One segment spanning two epochs: epoch 0 owns [0,49], epoch 1 owns [50,99].
         c.add(
@@ -484,27 +490,12 @@ mod tests {
         .unwrap();
         c.update(&finish(Uuid::from_u128(11))).unwrap();
 
-        for (epoch, offset, want) in [
-            // Exact subrange boundary: epoch 0 owns through 49, epoch 1 starts
-            // at 50 even though both occur in the same remote segment.
-            (LeaderEpoch(0), 10, Some(Uuid::from_u128(10))),
-            (LeaderEpoch(0), 49, Some(Uuid::from_u128(10))),
-            (LeaderEpoch(0), 50, None),
-            (LeaderEpoch(1), 49, None),
-            (LeaderEpoch(1), 50, Some(Uuid::from_u128(10))),
-            // Epoch 0 has no segment at 150.
-            (LeaderEpoch(0), 150, None),
-            // Epoch 1 floor lookup picks the right segment.
-            (LeaderEpoch(1), 60, Some(Uuid::from_u128(10))),
-            (LeaderEpoch(1), 150, Some(Uuid::from_u128(11))),
-        ] {
-            check!(
-                c.segment_for(epoch, offset)
-                    .map(|s| s.remote_log_segment_id().id)
-                    == want,
-                "epoch={epoch:?} offset={offset}"
-            );
-        }
+        check!(
+            c.segment_for(epoch, offset)
+                .map(|s| s.remote_log_segment_id().id)
+                == want,
+            "epoch={epoch:?} offset={offset}"
+        );
     }
 
     #[test]

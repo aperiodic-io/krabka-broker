@@ -269,15 +269,10 @@ pub(crate) fn upsert_classic_member(
         member_epoch: existing.map_or(0, |m| m.member_epoch),
         previous_member_epoch: existing.map_or(0, |m| m.previous_member_epoch),
         assignment_state: existing.map_or(MemberAssignmentState::Stable, |m| m.assignment_state),
-        assigned_partitions: existing
-            .map(|m| m.assigned_partitions.clone())
-            .unwrap_or_default(),
+        assigned_partitions: existing.map_or_default(|m| m.assigned_partitions.clone()),
         partitions_pending_revocation: existing
-            .map(|m| m.partitions_pending_revocation.clone())
-            .unwrap_or_default(),
-        assignment_epochs: existing
-            .map(|m| m.assignment_epochs.clone())
-            .unwrap_or_default(),
+            .map_or_default(|m| m.partitions_pending_revocation.clone()),
+        assignment_epochs: existing.map_or_default(|m| m.assignment_epochs.clone()),
         last_seen: Instant::now(),
         classic: Some(ClassicMemberFacade {
             supported_protocols: protocols,

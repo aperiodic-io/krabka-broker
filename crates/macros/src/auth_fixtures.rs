@@ -1,7 +1,7 @@
 //! SCRAM expression fixtures whose inferred phase type is private upstream.
 
 use {
-    crate::fixtures::name,
+    crate::{fixtures::name, meta::parse_skip},
     moxy::{
         ast::{Cursor, Expr, List, Parse, ParseError, Parser, Token},
         token::TokenStream,
@@ -15,11 +15,7 @@ impl Parse for Arguments {
 
     fn parse(parser: &Parser) -> Result<Self, ParseError> { List::parse_all(parser).map(Self) }
 
-    fn skip(cursor: Cursor<'_>) -> Option<Cursor<'_>> {
-        let parser = Parser::from_cursor(cursor);
-        Self::parse(&parser).ok()?;
-        Some(parser.cursor())
-    }
+    fn skip(cursor: Cursor<'_>) -> Option<Cursor<'_>> { parse_skip::<Self>(cursor) }
 }
 
 pub(crate) fn scram_client_first(input: TokenStream) -> Result<TokenStream, ParseError> {

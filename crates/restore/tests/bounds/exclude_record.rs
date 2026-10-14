@@ -130,8 +130,12 @@ async fn exclude_header_matches_on_name_and_value_not_name_alone() {
 // exclude the same offsets, over the same archived data.
 // ---------------------------------------------------------------------
 
-#[tokio::test]
-async fn exclude_offset_half_open_and_inclusive_spellings_agree() {
+#[yare::parameterized(
+    half_open = { "orders:0=1..3" },
+    inclusive = { "orders:0=1..=2" },
+)]
+#[test_macro(tokio::test)]
+async fn exclude_offset_half_open_and_inclusive_spellings_agree(spelling: &str) {
     let mut fixture = vec![plain_batch(vec![
         value_record(0, "keep-0"),
         value_record(1, "drop-1"),
@@ -144,15 +148,12 @@ async fn exclude_offset_half_open_and_inclusive_spellings_agree() {
         ..fixture[0].clone()
     }];
 
-    for spelling in ["orders:0=1..3", "orders:0=1..=2"] {
-        let (_target, target_dir) =
-            run_restore(archive.path(), &["--exclude-offset", spelling]).await;
+    let (_target, target_dir) = run_restore(archive.path(), &["--exclude-offset", spelling]).await;
 
-        let log = reopen(&target_dir, "orders", 0);
-        check!(log.log_end_offset() == Offset(4), "{spelling}");
-        let read = log
-            .read(Offset(0), LogConfig::default().segment_size)
-            .expect("read back");
-        check!(read.batches == expected, "{spelling}");
-    }
+    let log = reopen(&target_dir, "orders", 0);
+    check!(log.log_end_offset() == Offset(4), "{spelling}");
+    let read = log
+        .read(Offset(0), LogConfig::default().segment_size)
+        .expect("read back");
+    check!(read.batches == expected, "{spelling}");
 }

@@ -25,15 +25,12 @@ use {
 
 fn epochs_of(map: &HashMap<Uuid, HashMap<i32, i32>>) -> Vec<AssignmentEpoch> {
     // The runtime map exposes std key/value pairs; model coordinates are named.
-    let mut result: Vec<_> = map
-        .get(&TOPIC)
-        .map(|epochs| {
-            epochs
-                .iter()
-                .map(|(&partition, &epoch)| AssignmentEpoch { partition, epoch })
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut result: Vec<_> = map.get(&TOPIC).map_or_default(|epochs| {
+        epochs
+            .iter()
+            .map(|(&partition, &epoch)| AssignmentEpoch { partition, epoch })
+            .collect()
+    });
     result.sort_unstable_by_key(|row| row.partition);
     result
 }

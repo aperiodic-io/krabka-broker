@@ -203,18 +203,16 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn a_cluster_with_no_freeze_resolves_nothing() {
+    #[yare::parameterized(
+        ordinary_topic = { "an ordinary topic", "orders" },
+        internal_topic = { "an internal topic", "__consumer_offsets" },
+        empty_name = { "an empty name", "" },
+    )]
+    fn a_cluster_with_no_freeze_resolves_nothing(label: &str, topic: &str) {
         let image = image();
 
-        for (label, topic) in [
-            ("an ordinary topic", "orders"),
-            ("an internal topic", "__consumer_offsets"),
-            ("an empty name", ""),
-        ] {
-            check!(resolve_topic_freeze(&image, topic).is_none(), "{label}");
-            check!(resolve_freeze_verdict(&image, topic).is_none(), "{label}");
-        }
+        check!(resolve_topic_freeze(&image, topic).is_none(), "{label}");
+        check!(resolve_freeze_verdict(&image, topic).is_none(), "{label}");
     }
 
     #[test]
@@ -236,8 +234,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_literal_scope_beats_a_prefix_and_the_longest_prefix_wins() {
+    #[yare::parameterized(
+        literal_beats_prefix = {
+            "a literal entry beats every prefix entry",
+            "tenant-a.orders.eu",
+            Some("tenant-a.orders.eu"),
+        },
+        longest_prefix_wins = {
+            "the longest matching prefix wins",
+            "tenant-a.orders.us",
+            Some("tenant-a.orders."),
+        },
+        shorter_prefix_covers_namespace = {
+            "a shorter prefix still covers its namespace",
+            "tenant-a.billing",
+            Some("tenant-a."),
+        },
+        no_matching_scope = { "a topic that no scope covers", "tenant-b.orders", None },
+    )]
+    fn a_literal_scope_beats_a_prefix_and_the_longest_prefix_wins(
+        label: &str,
+        topic: &str,
+        expected: Option<&str>,
+    ) {
         let mut image = image();
         frozen(&mut image, FreezeSetup {
             scope: "tenant-a.",
@@ -257,87 +276,61 @@ mod tests {
             ..Default::default()
         });
 
-        for (label, topic, expected) in [
-            (
-                "a literal entry beats every prefix entry",
-                "tenant-a.orders.eu",
-                Some("tenant-a.orders.eu"),
-            ),
-            (
-                "the longest matching prefix wins",
-                "tenant-a.orders.us",
-                Some("tenant-a.orders."),
-            ),
-            (
-                "a shorter prefix still covers its namespace",
-                "tenant-a.billing",
-                Some("tenant-a."),
-            ),
-            (
-                "a topic that no scope covers",
-                "tenant-b.orders",
-                None::<&str>,
-            ),
-        ] {
-            check!(
-                resolve_topic_freeze(&image, topic).map(|f| f.scope.as_str()) == expected,
-                "{label}"
-            );
-            check!(
-                resolve_topic_freeze(&image, topic) == image.topic_freeze(topic),
-                "{label}"
-            );
-            check!(
-                resolve_freeze_verdict(&image, topic).map(|v| v.scope)
-                    == expected.map(str::to_owned),
-                "{label}"
-            );
-        }
+        check!(
+            resolve_topic_freeze(&image, topic).map(|f| f.scope.as_str()) == expected,
+            "{label}"
+        );
+        check!(
+            resolve_topic_freeze(&image, topic) == image.topic_freeze(topic),
+            "{label}"
+        );
+        check!(
+            resolve_freeze_verdict(&image, topic).map(|v| v.scope) == expected.map(str::to_owned),
+            "{label}"
+        );
     }
 
-    #[test]
-    fn an_internal_topic_resolves_no_freeze_even_under_a_live_registry() {
-        for (label, scope, pattern_type, covered) in [
-            (
-                "an empty prefix scope",
-                "",
-                PatternType::Prefixed,
-                Some("orders"),
-            ),
-            (
-                "a one-underscore prefix scope",
-                "_",
-                PatternType::Prefixed,
-                Some("_metrics"),
-            ),
-            (
-                "a literal internal name",
-                "__consumer_offsets",
-                PatternType::Literal,
-                None,
-            ),
-        ] {
-            let mut image = image();
-            frozen(&mut image, FreezeSetup {
-                scope,
-                pattern_type,
-                reason: "incident",
-                ..Default::default()
-            });
+    #[yare::parameterized(
+        empty_prefix = { "an empty prefix scope", "", PatternType::Prefixed, Some("orders") },
+        one_underscore_prefix = {
+            "a one-underscore prefix scope",
+            "_",
+            PatternType::Prefixed,
+            Some("_metrics"),
+        },
+        literal_internal_name = {
+            "a literal internal name",
+            "__consumer_offsets",
+            PatternType::Literal,
+            None,
+        },
+    )]
+    fn an_internal_topic_resolves_no_freeze_even_under_a_live_registry(
+        label: &str,
+        scope: &str,
+        pattern_type: PatternType,
+        covered: Option<&str>,
+    ) {
+        let mut image = image();
+        frozen(&mut image, FreezeSetup {
+            scope,
+            pattern_type,
+            reason: "incident",
+            ..Default::default()
+        });
 
-            check!(
-                resolve_topic_freeze(&image, "__consumer_offsets").is_none(),
-                "{label}"
-            );
-            check!(
-                resolve_topic_freeze(&image, "__transaction_state").is_none(),
-                "{label}"
-            );
-            if let Some(topic) = covered {
-                // The registry is live, so the exemption comes from the name
-                // and not from an empty registry.
-                check!(resolve_topic_freeze(&image, topic).is_some(), "{label}");
-            }
+        check!(
+            resolve_topic_freeze(&image, "__consumer_offsets").is_none(),
+            "{label}"
+        );
+        check!(
+            resolve_topic_freeze(&image, "__transaction_state").is_none(),
+            "{label}"
+        );
+        if let Some(topic) = covered {
+            // The registry is live, so the exemption comes from the name
+            // and not from an empty registry.
+            check!(resolve_topic_freeze(&image, topic).is_some(), "{label}");
         }
     }
 
@@ -358,67 +351,73 @@ mod tests {
         check!(resolve_freeze_verdict(&image, "tenant-a.orders") == Some(expected));
     }
 
-    #[test]
-    fn a_verdict_message_names_the_freeze_and_the_scope_that_matched() {
-        for (label, scope, pattern_type, reason, expected) in [
-            (
-                "a literal scope with a reason",
-                "orders",
-                PatternType::Literal,
-                "DR cutover",
-                "a write freeze on the literal scope \"orders\" refuses this write: DR cutover",
-            ),
-            (
-                "a prefixed scope with a reason",
-                "tenant-a.",
-                PatternType::Prefixed,
-                "tenant offboarding",
-                "a write freeze on the prefixed scope \"tenant-a.\" refuses this write: tenant offboarding",
-            ),
-            (
-                "a scope with no reason",
-                "orders",
-                PatternType::Literal,
-                "",
-                "a write freeze on the literal scope \"orders\" refuses this write",
-            ),
-        ] {
-            let verdict = FreezeVerdict {
-                scope: scope.to_owned(),
-                pattern_type,
-                reason: reason.to_owned(),
-            };
-            check!(verdict.error_message() == expected, "{label}");
-        }
+    #[yare::parameterized(
+        literal_with_reason = {
+            "a literal scope with a reason",
+            "orders",
+            PatternType::Literal,
+            "DR cutover",
+            "a write freeze on the literal scope \"orders\" refuses this write: DR cutover",
+        },
+        prefixed_with_reason = {
+            "a prefixed scope with a reason",
+            "tenant-a.",
+            PatternType::Prefixed,
+            "tenant offboarding",
+            "a write freeze on the prefixed scope \"tenant-a.\" refuses this write: tenant offboarding",
+        },
+        without_reason = {
+            "a scope with no reason",
+            "orders",
+            PatternType::Literal,
+            "",
+            "a write freeze on the literal scope \"orders\" refuses this write",
+        },
+    )]
+    fn a_verdict_message_names_the_freeze_and_the_scope_that_matched(
+        label: &str,
+        scope: &str,
+        pattern_type: PatternType,
+        reason: &str,
+        expected: &str,
+    ) {
+        let verdict = FreezeVerdict {
+            scope: scope.to_owned(),
+            pattern_type,
+            reason: reason.to_owned(),
+        };
+        check!(verdict.error_message() == expected, "{label}");
     }
 
-    #[test]
-    fn a_removal_message_says_deletion_rather_than_write() {
-        for (label, reason, expected) in [
-            (
-                "with a reason",
-                "DR cutover",
-                "a write freeze on the literal scope \"orders\" refuses this deletion: DR cutover",
-            ),
-            (
-                "with no reason",
-                "",
-                "a write freeze on the literal scope \"orders\" refuses this deletion",
-            ),
-        ] {
-            let verdict = FreezeVerdict {
-                scope: "orders".to_owned(),
-                pattern_type: PatternType::Literal,
-                reason: reason.to_owned(),
-            };
-            check!(verdict.removal_message() == expected, "{label}");
-            // The two messages differ only in what they name as refused. A
-            // `DeleteTopics` caller told their *write* was refused goes looking
-            // for a producer that is not there.
-            check!(
-                verdict.removal_message() != verdict.error_message(),
-                "{label}"
-            );
-        }
+    #[yare::parameterized(
+        with_reason = {
+            "with a reason",
+            "DR cutover",
+            "a write freeze on the literal scope \"orders\" refuses this deletion: DR cutover",
+        },
+        without_reason = {
+            "with no reason",
+            "",
+            "a write freeze on the literal scope \"orders\" refuses this deletion",
+        },
+    )]
+    fn a_removal_message_says_deletion_rather_than_write(
+        label: &str,
+        reason: &str,
+        expected: &str,
+    ) {
+        let verdict = FreezeVerdict {
+            scope: "orders".to_owned(),
+            pattern_type: PatternType::Literal,
+            reason: reason.to_owned(),
+        };
+        check!(verdict.removal_message() == expected, "{label}");
+        // The two messages differ only in what they name as refused. A
+        // `DeleteTopics` caller told their *write* was refused goes looking
+        // for a producer that is not there.
+        check!(
+            verdict.removal_message() != verdict.error_message(),
+            "{label}"
+        );
     }
 }

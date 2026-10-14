@@ -52,24 +52,21 @@ mod tests {
         std::net::{IpAddr, Ipv4Addr, Ipv6Addr},
     };
 
-    #[test]
-    fn matches_jdk_text_form() {
-        let cases = [
-            (IpAddr::V4(Ipv4Addr::LOCALHOST), "127.0.0.1"),
-            (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), "10.0.0.5"),
-            (IpAddr::V6(Ipv6Addr::LOCALHOST), "0:0:0:0:0:0:0:1"),
-            (IpAddr::V6(Ipv6Addr::UNSPECIFIED), "0:0:0:0:0:0:0:0"),
-            (
-                IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 5)),
-                "2001:db8:0:0:0:0:0:5",
-            ),
-            (
-                IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x0a00, 0x0005)),
-                "10.0.0.5",
-            ),
-        ];
-        for (ip, expected) in cases {
-            assert2::assert!(jdk_host_address(ip) == expected);
-        }
+    #[yare::parameterized(
+        ipv4_localhost = { IpAddr::V4(Ipv4Addr::LOCALHOST), "127.0.0.1" },
+        ipv4_other = { IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), "10.0.0.5" },
+        ipv6_localhost_expanded = { IpAddr::V6(Ipv6Addr::LOCALHOST), "0:0:0:0:0:0:0:1" },
+        ipv6_unspecified_expanded = { IpAddr::V6(Ipv6Addr::UNSPECIFIED), "0:0:0:0:0:0:0:0" },
+        ipv6_groups_expanded = {
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 5)),
+            "2001:db8:0:0:0:0:0:5",
+        },
+        ipv4_mapped_ipv6 = {
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x0a00, 0x0005)),
+            "10.0.0.5",
+        },
+    )]
+    fn matches_jdk_text_form(ip: IpAddr, expected: &str) {
+        assert2::assert!(jdk_host_address(ip) == expected);
     }
 }

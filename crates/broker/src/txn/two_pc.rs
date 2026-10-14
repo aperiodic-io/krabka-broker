@@ -117,36 +117,39 @@ pub(crate) fn should_abort_idle_txn(
 mod tests {
     use {super::*, crate::codes::INVALID_TRANSACTION_TIMEOUT, assert2::assert};
 
-    #[test]
-    fn resolve_timeout_2pc_is_sentinel_regardless_of_request() {
+    #[yare::parameterized(
+        normal = { 30_000, Ok(NO_TIMEOUT_MS) },
+        zero = { 0, Ok(NO_TIMEOUT_MS) },
+        max = { i32::MAX, Ok(NO_TIMEOUT_MS) },
+        negative = { -5, Ok(NO_TIMEOUT_MS) },
+    )]
+    fn resolve_timeout_2pc_is_sentinel_regardless_of_request(
+        requested: i32,
+        want: Result<i32, i16>,
+    ) {
         // Even an out-of-range request (-5) is ignored under 2PC.
-        for requested in [30_000, 0, i32::MAX, -5] {
-            assert!(
-                resolve_txn_timeout(true, requested, 8_000) == Ok(NO_TIMEOUT_MS),
-                "{requested}"
-            );
-        }
+        assert2::assert!(
+            resolve_txn_timeout(true, requested, 8_000) == want,
+            "{requested}"
+        );
     }
 
     /// Kafka `validateTransactionTimeoutMs`.
-    #[test]
-    fn resolve_timeout_refuses_what_kafka_refuses() {
-        let refused = Err(INVALID_TRANSACTION_TIMEOUT);
-        for (requested, want) in [
-            (1, Ok(1)),
-            (5_000, Ok(5_000)),
-            (8_000, Ok(8_000)),
-            (8_001, refused),
-            (0, refused),
-            (-1, refused),
-            (i32::MIN, refused),
-            (i32::MAX, refused),
-        ] {
-            assert!(
-                resolve_txn_timeout(false, requested, 8_000) == want,
-                "{requested}"
-            );
-        }
+    #[yare::parameterized(
+        one = { 1, Ok(1) },
+        ordinary = { 5_000, Ok(5_000) },
+        at_maximum = { 8_000, Ok(8_000) },
+        above_maximum = { 8_001, Err(INVALID_TRANSACTION_TIMEOUT) },
+        zero = { 0, Err(INVALID_TRANSACTION_TIMEOUT) },
+        negative = { -1, Err(INVALID_TRANSACTION_TIMEOUT) },
+        minimum = { i32::MIN, Err(INVALID_TRANSACTION_TIMEOUT) },
+        maximum_i32 = { i32::MAX, Err(INVALID_TRANSACTION_TIMEOUT) },
+    )]
+    fn resolve_timeout_refuses_what_kafka_refuses(requested: i32, want: Result<i32, i16>) {
+        assert2::assert!(
+            resolve_txn_timeout(false, requested, 8_000) == want,
+            "{requested}"
+        );
     }
 
     #[test]

@@ -15,7 +15,11 @@ use {
     krabka_broker::{BrokerConfig, BrokerHandle},
     krabka_client_core::{Client, Connection, ConnectionOptions},
     krabka_protocol::{
-        owned::produce_response::PartitionProduceResponse, primitives::uuid::Uuid as WireUuid,
+        owned::{
+            list_groups_request::ListGroupsRequest, list_groups_response::ListGroupsResponse,
+            produce_response::PartitionProduceResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
         records::RecordBatch,
     },
     krabka_raft::{KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse},
@@ -28,6 +32,22 @@ use {
 };
 pub async fn connect(bootstrap: &str, client_id: &str) -> Arc<Client> {
     Arc::new(connect_client(bootstrap, Some(client_id)).await)
+}
+
+pub async fn list_groups_by_type(client: &Client, group_type: &str) -> ListGroupsResponse {
+    let response = client
+        .send(ListGroupsRequest {
+            types_filter: vec![group_type.into()],
+            ..Default::default()
+        })
+        .await
+        .unwrap_or_else(|_| panic!("ListGroups[{group_type}]"));
+    assert!(
+        response.error_code == 0,
+        "list error: {:?}",
+        response.error_code
+    );
+    response
 }
 
 /// Connect using an explicit ID, or keep the builder's default ID.

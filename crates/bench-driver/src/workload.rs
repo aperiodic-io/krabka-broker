@@ -224,15 +224,17 @@ impl Grid {
     /// into `[0, n-1]`. Callers check [`Self::sent_in_measurement`] first.
     fn idx_for_send_ns(&self, send_ns: u64) -> usize {
         let elapsed_ms = send_ns.saturating_sub(self.meas_start_ns) / 1_000_000;
-        usize::try_from(elapsed_ms / self.interval_ms)
-            .unwrap_or(usize::MAX)
-            .min(self.n.saturating_sub(1))
+        self.idx_for_elapsed_ms(elapsed_ms)
     }
 
     /// Slice index for an event observed at `now`, clamped into `[0, n-1]`.
     fn idx(&self, now: Instant) -> usize {
         let elapsed_ms =
             saturating_u128_to_u64(now.saturating_duration_since(self.meas_start).as_millis());
+        self.idx_for_elapsed_ms(elapsed_ms)
+    }
+
+    fn idx_for_elapsed_ms(&self, elapsed_ms: u64) -> usize {
         usize::try_from(elapsed_ms / self.interval_ms)
             .unwrap_or(usize::MAX)
             .min(self.n.saturating_sub(1))
@@ -527,11 +529,7 @@ pub async fn run(scenario: Scenario, cfg: DriverConfig) -> Result<RunOutput> {
     Ok(RunOutput {
         scenario: scenario.clone(),
         stack: cfg.stack,
-        topology: Topology {
-            partitions: scenario.partitions,
-            replication_factor: scenario.replication_factor,
-            broker_count: cfg.broker_count,
-        },
+        topology: output_topology(&scenario, &cfg),
         wallclock_start_unix_ms: WallclockMs(wallclock_start),
         wallclock_end_unix_ms: WallclockMs(wallclock_end),
         throughput: Throughput {
@@ -979,11 +977,7 @@ fn empty_output(
     RunOutput {
         scenario: scenario.clone(),
         stack: cfg.stack,
-        topology: Topology {
-            partitions: scenario.partitions,
-            replication_factor: scenario.replication_factor,
-            broker_count: cfg.broker_count,
-        },
+        topology: output_topology(scenario, cfg),
         wallclock_start_unix_ms: WallclockMs(start),
         wallclock_end_unix_ms: WallclockMs(start),
         throughput: Throughput::default(),
@@ -997,6 +991,14 @@ fn empty_output(
         notes,
         samples: Vec::new(),
         broker_samples: Vec::new(),
+    }
+}
+
+fn output_topology(scenario: &Scenario, cfg: &DriverConfig) -> Topology {
+    Topology {
+        partitions: scenario.partitions,
+        replication_factor: scenario.replication_factor,
+        broker_count: cfg.broker_count,
     }
 }
 
@@ -1846,90 +1848,98 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn producer_pipeline_counts_delivery_and_admission_outcomes() {
-        for (metadata_error, delivery_error) in [(0, 0), (0, 29), (29, 0)] {
-            let ProducerBrokerFixture {
-                broker,
-                started,
-                largest_batch,
-            } = producer_broker(metadata_error, delivery_error).await;
-            let mut scenario = scenario(1);
-            scenario.linger = millis(20);
-            let stop = Arc::new(AtomicU8::new(STATE_MEASURING));
-            let first_ack = Arc::new(AtomicU64::new(0));
-            let kill_at = Arc::new(AtomicU64::new(0));
-            let cfg = DriverConfig {
-                bootstrap: broker.addr.to_string(),
-                producer_request_timeout: secs(1),
-                producer_final_drain_timeout: secs(1),
-                ..cfg(1)
-            };
-            let grid = Grid::new(Instant::now(), 0, &scenario, cfg.sample_interval);
-            let mut producers = JoinSet::new();
-            spawn_producers(
-                &mut producers,
-                &scenario,
-                &cfg,
-                None,
-                grid,
-                &SharedHandles {
-                    stop: &stop,
-                    first_ack: &first_ack,
-                    kill_at: &kill_at,
-                },
-            );
-            assert!(producers.len() == scenario.producers);
-            tokio::time::timeout(secs(10).to_std(), started)
-                .await
-                .unwrap()
-                .expect("producer reaches topic admission");
-            // A short measurement window exercises the bounded pipeline and its
-            // final drain, using the same phase signal as a benchmark run. When
-            // delivery succeeds the window opens at the first ack, so a slow
-            // runner still measures something.
-            if metadata_error == 0 && delivery_error == 0 {
-                tokio::time::timeout(secs(10).to_std(), async {
-                    while first_ack.load(Ordering::SeqCst) == 0 {
-                        tokio::time::sleep(millis(10).to_std()).await;
-                    }
-                })
-                .await
-                .expect("the first record is acknowledged");
-            }
-            tokio::time::sleep(millis(200).to_std()).await;
-            stop.store(STATE_STOP, Ordering::SeqCst);
-            let output = tokio::time::timeout(secs(10).to_std(), producers.join_next())
-                .await
-                .unwrap()
-                .expect("one producer task")
-                .unwrap();
-            assert!(producers.is_empty());
-            broker.stop();
+    #[yare::parameterized(
+        success = { 0, 0 },
+        delivery_rejected = { 0, 29 },
+        metadata_rejected = { 29, 0 },
+    )]
+    #[test_macro(tokio::test(flavor = "multi_thread", worker_threads = 2))]
+    async fn producer_pipeline_counts_delivery_and_admission_outcomes(
+        metadata_error: i16,
+        delivery_error: i16,
+    ) {
+        let ProducerBrokerFixture {
+            broker,
+            started,
+            largest_batch,
+        } = producer_broker(metadata_error, delivery_error).await;
+        let mut scenario = scenario(1);
+        scenario.linger = millis(20);
+        let stop = Arc::new(AtomicU8::new(STATE_MEASURING));
+        let first_ack = Arc::new(AtomicU64::new(0));
+        let kill_at = Arc::new(AtomicU64::new(0));
+        let cfg = DriverConfig {
+            bootstrap: broker.addr.to_string(),
+            producer_request_timeout: secs(1),
+            producer_final_drain_timeout: secs(1),
+            ..cfg(1)
+        };
+        let grid = Grid::new(Instant::now(), 0, &scenario, cfg.sample_interval);
+        let mut producers = JoinSet::new();
+        spawn_producers(
+            &mut producers,
+            &scenario,
+            &cfg,
+            None,
+            grid,
+            &SharedHandles {
+                stop: &stop,
+                first_ack: &first_ack,
+                kill_at: &kill_at,
+            },
+        );
+        assert2::assert!(producers.len() == scenario.producers);
+        tokio::time::timeout(secs(10).to_std(), started)
+            .await
+            .unwrap()
+            .expect("producer reaches topic admission");
+        // A short measurement window exercises the bounded pipeline and its
+        // final drain, using the same phase signal as a benchmark run. When
+        // delivery succeeds the window opens at the first ack, so a slow
+        // runner still measures something.
+        if metadata_error == 0 && delivery_error == 0 {
+            tokio::time::timeout(secs(10).to_std(), async {
+                while first_ack.load(Ordering::SeqCst) == 0 {
+                    tokio::time::sleep(millis(10).to_std()).await;
+                }
+            })
+            .await
+            .expect("the first record is acknowledged");
+        }
+        tokio::time::sleep(millis(200).to_std()).await;
+        stop.store(STATE_STOP, Ordering::SeqCst);
+        let output = tokio::time::timeout(secs(10).to_std(), producers.join_next())
+            .await
+            .unwrap()
+            .expect("one producer task")
+            .unwrap();
+        assert2::assert!(producers.is_empty());
+        broker.stop();
 
-            assert!(output.interval_msgs.iter().sum::<u64>() == output.msgs);
-            assert!(output.latency.len() == output.msgs);
-            assert!(output.bytes == output.msgs * 100);
-            if metadata_error == 0 && delivery_error == 0 {
-                assert!(output.msgs > 0);
-                assert!((output.dropped, output.error.as_str()) == (0, ""));
-                assert!(first_ack.load(Ordering::SeqCst) > 0);
-            } else {
-                assert!((output.msgs, output.bytes, first_ack.load(Ordering::SeqCst)) == (0, 0, 0));
-                assert!(output.dropped > 0);
-                assert!(output.error == "producer-0-err: broker error_code 29");
-            }
-            if metadata_error == 0 {
-                assert!(
-                    largest_batch.load(Ordering::SeqCst) > 1,
-                    "records are queued before awaiting delivery"
-                );
-            } else {
-                assert!(
-                    largest_batch.load(Ordering::SeqCst) == 0,
-                    "admission failures never reach Produce"
-                );
-            }
+        assert2::assert!(output.interval_msgs.iter().sum::<u64>() == output.msgs);
+        assert2::assert!(output.latency.len() == output.msgs);
+        assert2::assert!(output.bytes == output.msgs * 100);
+        if metadata_error == 0 && delivery_error == 0 {
+            assert2::assert!(output.msgs > 0);
+            assert2::assert!((output.dropped, output.error.as_str()) == (0, ""));
+            assert2::assert!(first_ack.load(Ordering::SeqCst) > 0);
+        } else {
+            assert2::assert!(
+                (output.msgs, output.bytes, first_ack.load(Ordering::SeqCst)) == (0, 0, 0)
+            );
+            assert2::assert!(output.dropped > 0);
+            assert2::assert!(output.error == "producer-0-err: broker error_code 29");
+        }
+        if metadata_error == 0 {
+            assert2::assert!(
+                largest_batch.load(Ordering::SeqCst) > 1,
+                "records are queued before awaiting delivery"
+            );
+        } else {
+            assert2::assert!(
+                largest_batch.load(Ordering::SeqCst) == 0,
+                "admission failures never reach Produce"
+            );
         }
     }
 
@@ -2004,14 +2014,17 @@ mod tests {
         check!(policy.max_backoff() == millis(1));
     }
 
-    #[test]
-    fn consumer_build_retry_rejects_invalid_primitive_values() {
-        for invalid in ["0", "not-a-number", "-1", "4294967296"] {
-            check!(
-                invalid.parse::<ConsumerBuildAttempts>().is_err(),
-                "attempts {invalid:?} must be rejected"
-            );
-        }
+    #[yare::parameterized(
+        zero = { "0" },
+        text = { "not-a-number" },
+        negative = { "-1" },
+        overflow = { "4294967296" },
+    )]
+    fn consumer_build_retry_rejects_invalid_primitive_values(invalid: &str) {
+        check!(
+            invalid.parse::<ConsumerBuildAttempts>().is_err(),
+            "attempts {invalid:?} must be rejected"
+        );
     }
 
     #[test]
@@ -2118,41 +2131,26 @@ mod tests {
         check!(grid.idx_for_send_ns(last_slice) == grid.n - 1);
     }
 
-    /// A failover run whose pod delete failed leaves the shared marker at
-    /// zero. No marker means no measured kill, so the run carries no
-    /// disturbance and the gate treats it as missing evidence.
-    #[test]
-    fn finalize_timing_records_no_disturbance_without_a_kill() {
-        let RunTiming { disturbance, .. } = finalize_timing(
-            true,
+    #[yare::parameterized(
+        no_kill_marker = {
             FailoverStamps {
                 kill_at_ms: 0,
                 recovery_at_ms: 5_000,
                 dropped: 3,
                 latency_spike_max: millis(9),
             },
-            1_000,
-            0,
-        );
-        check!(disturbance.is_none());
-    }
-
-    /// An ack before the marker is not a recovery. The producer only stamps a
-    /// recovery at or after the marker, so a zero here means no ack followed
-    /// the kill at all.
-    #[test]
-    fn finalize_timing_records_no_disturbance_without_an_ack_after_the_kill() {
-        let RunTiming { disturbance, .. } = finalize_timing(
-            true,
+        },
+        no_ack_after_kill = {
             FailoverStamps {
                 kill_at_ms: 5_000,
                 recovery_at_ms: 0,
                 dropped: 3,
                 latency_spike_max: millis(9),
             },
-            1_000,
-            0,
-        );
+        },
+    )]
+    fn finalize_timing_records_no_disturbance(failover: FailoverStamps) {
+        let RunTiming { disturbance, .. } = finalize_timing(true, failover, 1_000, 0);
         check!(disturbance.is_none());
     }
 

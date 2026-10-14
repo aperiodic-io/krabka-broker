@@ -93,6 +93,16 @@ struct EncodedRequest {
     body: Bytes,
 }
 
+macro_rules! encoded_request {
+    ($api_key:expr, $version:ident, $request:ident) => {
+        EncodedRequest {
+            api_key: $api_key,
+            version: $version,
+            body: encode_request(&$request, $version),
+        }
+    };
+}
+
 impl Request {
     /// The api key, the version and the encoded body.
     fn encode(&self) -> EncodedRequest {
@@ -119,11 +129,11 @@ impl Request {
                         .to_vec(),
                     ..Default::default()
                 };
-                EncodedRequest {
-                    api_key: initialize_share_group_state_request::API_KEY,
+                encoded_request!(
+                    initialize_share_group_state_request::API_KEY,
                     version,
-                    body: encode_request(&request, version),
-                }
+                    request
+                )
             }
             Self::Read => {
                 let version = read_share_group_state_request::MAX_VERSION;
@@ -143,11 +153,7 @@ impl Request {
                         .to_vec(),
                     ..Default::default()
                 };
-                EncodedRequest {
-                    api_key: read_share_group_state_request::API_KEY,
-                    version,
-                    body: encode_request(&request, version),
-                }
+                encoded_request!(read_share_group_state_request::API_KEY, version, request)
             }
             Self::Write => {
                 let version = write_share_group_state_request::MAX_VERSION;
@@ -170,11 +176,7 @@ impl Request {
                         .to_vec(),
                     ..Default::default()
                 };
-                EncodedRequest {
-                    api_key: write_share_group_state_request::API_KEY,
-                    version,
-                    body: encode_request(&request, version),
-                }
+                encoded_request!(write_share_group_state_request::API_KEY, version, request)
             }
             Self::Delete => {
                 let version = delete_share_group_state_request::MAX_VERSION;
@@ -196,11 +198,7 @@ impl Request {
                         .to_vec(),
                     ..Default::default()
                 };
-                EncodedRequest {
-                    api_key: delete_share_group_state_request::API_KEY,
-                    version,
-                    body: encode_request(&request, version),
-                }
+                encoded_request!(delete_share_group_state_request::API_KEY, version, request)
             }
             Self::ReadSummary => {
                 let version = read_share_group_state_summary_request::MAX_VERSION;
@@ -222,11 +220,11 @@ impl Request {
                         .to_vec(),
                     ..Default::default()
                 };
-                EncodedRequest {
-                    api_key: read_share_group_state_summary_request::API_KEY,
+                encoded_request!(
+                    read_share_group_state_summary_request::API_KEY,
                     version,
-                    body: encode_request(&request, version),
-                }
+                    request
+                )
             }
         }
     }

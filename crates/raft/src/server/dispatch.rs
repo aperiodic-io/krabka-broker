@@ -115,19 +115,21 @@ mod tests {
         },
     };
 
+    #[yare::parameterized(
+        fetch = { api_key::FETCH },
+        vote = { api_key::VOTE },
+        begin_quorum_epoch = { api_key::BEGIN_QUORUM_EPOCH },
+        end_quorum_epoch = { api_key::END_QUORUM_EPOCH },
+        fetch_snapshot = { api_key::FETCH_SNAPSHOT },
+        submit_change = { API_KEY_SUBMIT_CHANGE },
+        metadata_fetch = { API_KEY_METADATA_FETCH },
+    )]
+    fn private_startup_apis_bypass_the_admin_extension(api_key: i16) {
+        assert2::assert!(is_native_raft_api(api_key));
+    }
+
     #[test]
-    fn private_startup_apis_bypass_the_admin_extension() {
-        for api_key in [
-            api_key::FETCH,
-            api_key::VOTE,
-            api_key::BEGIN_QUORUM_EPOCH,
-            api_key::END_QUORUM_EPOCH,
-            api_key::FETCH_SNAPSHOT,
-            API_KEY_SUBMIT_CHANGE,
-            API_KEY_METADATA_FETCH,
-        ] {
-            assert2::assert!(is_native_raft_api(api_key));
-        }
+    fn admin_apis_do_not_bypass_the_admin_extension() {
         assert2::assert!(!is_native_raft_api(
             krabka_protocol::owned::create_topics_request::API_KEY
         ));

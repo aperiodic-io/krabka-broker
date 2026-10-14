@@ -48,25 +48,21 @@ fn operation_error_code(code: i16) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::test_support::COORDINATOR_WRITE_ERROR_CASES, assert2::check};
+    use {super::*, assert2::check};
 
-    #[test]
-    fn write_errors_map_as_kafka_handle_operation_exception() {
-        for (write, want) in [
-            (
-                codes::NETWORK_EXCEPTION,
-                codes::COORDINATOR_LOAD_IN_PROGRESS,
-            ),
-            (
-                codes::UNKNOWN_TOPIC_OR_PARTITION,
-                codes::COORDINATOR_NOT_AVAILABLE,
-            ),
-            (codes::CORRUPT_MESSAGE, codes::CORRUPT_MESSAGE),
-        ]
-        .into_iter()
-        .chain(COORDINATOR_WRITE_ERROR_CASES)
-        {
-            check!(operation_error_code(write) == want, "{write}");
-        }
+    #[yare::parameterized(
+        network_exception = { codes::NETWORK_EXCEPTION, codes::COORDINATOR_LOAD_IN_PROGRESS },
+        unknown_topic = { codes::UNKNOWN_TOPIC_OR_PARTITION, codes::COORDINATOR_NOT_AVAILABLE },
+        corrupt_message = { codes::CORRUPT_MESSAGE, codes::CORRUPT_MESSAGE },
+        not_enough_replicas = { codes::NOT_ENOUGH_REPLICAS, codes::COORDINATOR_NOT_AVAILABLE },
+        request_timed_out = { codes::REQUEST_TIMED_OUT, codes::COORDINATOR_NOT_AVAILABLE },
+        not_leader = { codes::NOT_LEADER_OR_FOLLOWER, codes::NOT_COORDINATOR },
+        kafka_storage_error = { codes::KAFKA_STORAGE_ERROR, codes::NOT_COORDINATOR },
+        message_too_large = { codes::MESSAGE_TOO_LARGE, codes::UNKNOWN_SERVER_ERROR },
+        record_list_too_large = { codes::RECORD_LIST_TOO_LARGE, codes::UNKNOWN_SERVER_ERROR },
+        unknown_server_error = { codes::UNKNOWN_SERVER_ERROR, codes::UNKNOWN_SERVER_ERROR },
+    )]
+    fn write_errors_map_as_kafka_handle_operation_exception(write: i16, want: i16) {
+        check!(operation_error_code(write) == want, "{write}");
     }
 }

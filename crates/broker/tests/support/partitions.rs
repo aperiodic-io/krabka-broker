@@ -1,13 +1,25 @@
 //! Waits for exact partition state in the local registry or committed image.
 
 use {
+    crate::support::{
+        client::{connect_client, create_topic_with},
+        registered_cluster,
+        topics::{CreateTopicSetup, TopicPartitionCount},
+    },
     assert2::assert,
-    krabka_broker::BrokerHandle,
+    krabka_broker::{BrokerConfig, BrokerHandle},
+    krabka_protocol::primitives::uuid::Uuid,
     std::{
         collections::HashSet,
         time::{Duration, Instant},
     },
+    tempfile::TempDir,
 };
+
+/// Waits until `handle` sees `(topic, partition)` in its image.
+pub async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition: i32) {
+    handle.wait_until_partition_present(topic, partition).await;
+}
 
 /// Wait until every listed broker has materialized the partition in its image.
 pub async fn wait_for_partition_on_all<'a>(
@@ -65,6 +77,18 @@ pub async fn wait_partition_leader(
         .wait_for_image(|img| {
             img.partition(topic, partition)
                 .is_some_and(|p| p.leader.0 == leader)
+        })
+        .await;
+}
+
+/// Waits until the image knows a leader for every partition in `0..n_partitions`.
+pub async fn wait_for_partition_leaders(handle: &BrokerHandle, topic: &str, n_partitions: i32) {
+    handle
+        .wait_for_image(|img| {
+            (0..n_partitions).all(|p| {
+                img.partition(topic, p)
+                    .is_some_and(|partition| partition.leader != 0)
+            })
         })
         .await;
 }
@@ -141,4 +165,27 @@ pub fn require_non_bootstrap_partitions(
          (bootstrap = node {bootstrap_node})"
     );
     non_bootstrap_partitions
+}
+
+/// Starts the rf=1 cluster used by native per-leader routing tests.
+pub async fn start_leader_routing_cluster(
+    topic: &str,
+) -> (
+    Vec<(BrokerHandle, BrokerConfig, TempDir)>,
+    String,
+    Uuid,
+    i32,
+) {
+    let cluster = registered_cluster(3).await;
+    let bootstrap = cluster[0].1.listen_addr.to_string();
+    let admin = connect_client(bootstrap.clone(), None).await;
+    let n_partitions = 6;
+    let topic_id = create_topic_with(&admin, CreateTopicSetup {
+        topic,
+        num_partitions: TopicPartitionCount(n_partitions),
+        ..Default::default()
+    })
+    .await;
+    wait_for_partition_leaders(&cluster[0].0, topic, n_partitions).await;
+    (cluster, bootstrap, topic_id, n_partitions)
 }

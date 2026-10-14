@@ -172,42 +172,41 @@ mod tests {
 
     /// Zero is a value here, not a disabled key: it limits the read-ahead
     /// hint to the fetch's own range. A fractional byte count is refused.
-    #[test]
-    fn log_read_ahead_max_round_trips_into_the_log_config() {
-        for (value, expected) in [
-            ("8MiB", Some(8 * 1024 * 1024)),
-            ("0B", Some(0)),
-            ("1.5B", None),
-        ] {
-            let applied = optional_configured_feature(
-                &format!("[runtime]\nlog_read_ahead_max = \"{value}\"\n"),
-                |config| config.log_config.read_ahead_max.bytes_u64(),
-            );
-            assert!(applied == expected, "log_read_ahead_max={value}");
-        }
+    #[yare::parameterized(
+        mebibytes = { "8MiB", Some(8 * 1024 * 1024) },
+        zero = { "0B", Some(0) },
+        fractional_byte = { "1.5B", None },
+    )]
+    fn log_read_ahead_max_round_trips_into_the_log_config(value: &str, expected: Option<u64>) {
+        let applied = optional_configured_feature(
+            &format!("[runtime]\nlog_read_ahead_max = \"{value}\"\n"),
+            |config| config.log_config.read_ahead_max.bytes_u64(),
+        );
+        assert2::assert!(applied == expected, "log_read_ahead_max={value}");
     }
 
     /// Zero is a value here too: a partition keeps only its newest batch in
     /// memory. A fractional byte count is refused, and an omitted key keeps
     /// the log's default.
-    #[test]
-    fn log_tail_cache_size_round_trips_into_the_log_config() {
-        for (line, expected) in [
-            ("log_tail_cache_size = \"4MiB\"\n", Some(mebibytes(4))),
-            ("log_tail_cache_size = \"0B\"\n", Some(bytes(0))),
-            ("log_tail_cache_size = \"1.5B\"\n", None),
-            ("", Some(krabka_log::DEFAULT_TAIL_CACHE_SIZE)),
-        ] {
-            let applied = toml::from_str::<FileConfig>(&format!("[runtime]\n{line}"))
-                .ok()
-                .and_then(|file| {
-                    let mut cfg = BrokerConfig::default();
-                    file.apply_to(&mut cfg)
-                        .ok()
-                        .map(|()| cfg.log_config.tail_cache_size)
-                });
-            assert!(applied == expected, "{line}");
-        }
+    #[yare::parameterized(
+        four_mebibytes = { "log_tail_cache_size = \"4MiB\"\n", Some(mebibytes(4)) },
+        zero = { "log_tail_cache_size = \"0B\"\n", Some(bytes(0)) },
+        fractional_byte = { "log_tail_cache_size = \"1.5B\"\n", None },
+        default = { "", Some(krabka_log::DEFAULT_TAIL_CACHE_SIZE) },
+    )]
+    fn log_tail_cache_size_round_trips_into_the_log_config(
+        line: &str,
+        expected: Option<krabka_units::ByteSize>,
+    ) {
+        let applied = toml::from_str::<FileConfig>(&format!("[runtime]\n{line}"))
+            .ok()
+            .and_then(|file| {
+                let mut cfg = BrokerConfig::default();
+                file.apply_to(&mut cfg)
+                    .ok()
+                    .map(|()| cfg.log_config.tail_cache_size)
+            });
+        assert2::assert!(applied == expected, "{line}");
     }
 
     #[test]
@@ -227,23 +226,21 @@ mod tests {
     /// 2 GiB here would hand a topic an effective cap `kafka-configs` could
     /// not represent, and one that refused 0 would refuse a value Kafka boots
     /// on.
-    #[test]
-    fn message_max_bytes_takes_kafkas_int_at_least_zero() {
-        for (value, expected) in [
-            ("0B", Some(0)),
-            ("2KiB", Some(2048)),
-            ("2147483647B", Some(2_147_483_647)),
-            ("-1B", None),
-            ("2147483648B", None),
-            ("2GiB", None),
-            ("1.5B", None),
-        ] {
-            let applied = optional_configured_feature(
-                &format!("[runtime]\nmessage_max_bytes = \"{value}\"\n"),
-                |config| config.log_config.max_message_size.bytes_u64(),
-            );
-            assert!(applied == expected, "message_max_bytes={value}");
-        }
+    #[yare::parameterized(
+        zero = { "0B", Some(0) },
+        kibibytes = { "2KiB", Some(2048) },
+        max_i32 = { "2147483647B", Some(2_147_483_647) },
+        negative = { "-1B", None },
+        above_i32 = { "2147483648B", None },
+        gibibytes = { "2GiB", None },
+        fractional_byte = { "1.5B", None },
+    )]
+    fn message_max_bytes_takes_kafkas_int_at_least_zero(value: &str, expected: Option<u64>) {
+        let applied = optional_configured_feature(
+            &format!("[runtime]\nmessage_max_bytes = \"{value}\"\n"),
+            |config| config.log_config.max_message_size.bytes_u64(),
+        );
+        assert2::assert!(applied == expected, "message_max_bytes={value}");
     }
 
     #[test]
@@ -291,21 +288,21 @@ record_decompression_output_ceiling = "512MiB"
         assert!(policy.output_floor() == krabka_units::mebibytes(8));
         assert!(policy.output_ceiling() == krabka_units::mebibytes(512));
     }
-    #[test]
-    fn runtime_file_config_rejects_invalid_record_decompression_relations() {
-        for body in [
-            "record_decompression_max_ratio = \"101\"\n",
+    #[yare::parameterized(
+        ratio_over_limit = { "record_decompression_max_ratio = \"101\"\n" },
+        floor_over_ceiling = {
             concat!(
                 "record_decompression_output_floor = \"1GiB\"\n",
                 "record_decompression_output_ceiling = \"16MiB\"\n",
             ),
-        ] {
-            let source = format!("[runtime]\n{body}");
-            let file: FileConfig = toml::from_str(&source).expect("parse runtime config");
-            let error = file
-                .apply_to(&mut BrokerConfig::default())
-                .expect_err("invalid record decompression policy must fail");
-            assert!(error.to_string().contains("record_decompression"));
-        }
+        },
+    )]
+    fn runtime_file_config_rejects_invalid_record_decompression_relations(body: &str) {
+        let source = format!("[runtime]\n{body}");
+        let file: FileConfig = toml::from_str(&source).expect("parse runtime config");
+        let error = file
+            .apply_to(&mut BrokerConfig::default())
+            .expect_err("invalid record decompression policy must fail");
+        assert2::assert!(error.to_string().contains("record_decompression"));
     }
 }

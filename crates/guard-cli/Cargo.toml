@@ -54,3 +54,4 @@ krabka-broker = { version = "1.0.5", path = "../broker", features = ["test-helpe
 # PKCS#8 key pair that a signature case hands to `--sign-with`.
 ring = { workspace = true }
 tempfile = { workspace = true }
+yare = { workspace = true }

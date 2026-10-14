@@ -242,62 +242,47 @@ fn local_retention_target_returns_none_when_no_finished_segments() {
 /// Each case is `(name, newest timestamp, file last modified, whether the
 /// segments expire in the default mode, whether they expire under the
 /// unstable flag)`.
-#[test]
-fn a_future_timestamp_is_aged_by_the_file_only_under_the_unstable_flag() {
-    for (name, max_timestamp, last_modified_ms, default_expires, unstable_expires) in [
-        (
-            "a past timestamp ages the segment either way",
-            100,
-            100,
-            true,
-            true,
-        ),
-        (
-            "a future timestamp with an old file",
-            20_000,
-            100,
-            false,
-            true,
-        ),
-        (
-            "a future timestamp with a young file",
-            20_000,
-            9_999,
-            false,
-            false,
-        ),
-    ] {
-        let exports = vec![SegmentExport {
+#[yare::parameterized(
+    past_timestamp = { 100, 100, true, true },
+    future_timestamp_old_file = { 20_000, 100, false, true },
+    future_timestamp_young_file = { 20_000, 9_999, false, false },
+)]
+fn a_future_timestamp_is_aged_by_the_file_only_under_the_unstable_flag(
+    max_timestamp: i64,
+    last_modified_ms: i64,
+    default_expires: bool,
+    unstable_expires: bool,
+) {
+    let exports = vec![SegmentExport {
+        last_modified_ms,
+        ..synth_export()
+            .timestamp(max_timestamp)
+            .size(bytes(100))
+            .call()
+    }];
+    let local = LocalSegments {
+        delivery_watermark: None,
+        sealed: &exports,
+        active: Some(ActiveSegmentExport {
+            base_offset: Offset(10),
+            max_timestamp,
             last_modified_ms,
-            ..synth_export()
-                .timestamp(max_timestamp)
-                .size(bytes(100))
-                .call()
-        }];
-        let local = LocalSegments {
-            delivery_watermark: None,
-            sealed: &exports,
-            active: Some(ActiveSegmentExport {
-                base_offset: Offset(10),
-                max_timestamp,
-                last_modified_ms,
-                size: bytes(50),
-            }),
-            size: bytes(150),
-        };
-        for (unstable, expires) in [
-            (UnstableApiVersions::Disabled, default_expires),
-            (UnstableApiVersions::Enabled, unstable_expires),
-        ] {
-            check!(
-                local_retention_decision(unstable, &local, Some(9), Some(millis(1)), None, 10_000)
-                    == LocalRetentionDecision {
-                        delete_through: expires.then_some(10),
-                        roll_active: expires,
-                    },
-                "{name}: {unstable:?}"
-            );
-        }
+            size: bytes(50),
+        }),
+        size: bytes(150),
+    };
+    for (unstable, expires) in [
+        (UnstableApiVersions::Disabled, default_expires),
+        (UnstableApiVersions::Enabled, unstable_expires),
+    ] {
+        check!(
+            local_retention_decision(unstable, &local, Some(9), Some(millis(1)), None, 10_000)
+                == LocalRetentionDecision {
+                    delete_through: expires.then_some(10),
+                    roll_active: expires,
+                },
+            "{max_timestamp} {last_modified_ms}: {unstable:?}"
+        );
     }
 }
 
@@ -682,62 +667,61 @@ async fn local_retention_still_evicts_under_a_write_once_archive() {
 ///
 /// Each case is `(name, unstable flag, remote.log.copy.disable, whether the
 /// copied segments are evicted)`.
-#[tokio::test]
-async fn future_stamped_segments_leave_the_disk_only_under_trunks_rule() {
-    for (name, unstable, copy_disable, evicted) in [
-        (
-            "4.3.1 keeps them",
-            UnstableApiVersions::Disabled,
-            false,
-            false,
-        ),
-        (
-            "trunk ages them by their file",
-            UnstableApiVersions::Enabled,
-            false,
-            true,
-        ),
-        (
-            "trunk keeps them when the tier takes no copies",
-            UnstableApiVersions::Enabled,
-            true,
-            false,
-        ),
-    ] {
-        let fixtures::PartitionLogFixture {
-            local: log_dir,
-            remote: remote_dir,
-            mut log,
-        } = fixtures::partition_log_fixture(|| LogConfig {
-            segment_size: bytes(256),
-            remote_storage_enable: true,
-            local_retention: Some(millis(1)),
-            remote_tier: krabka_log::RemoteTierFlags {
-                copy_disable,
-                ..krabka_log::RemoteTierFlags::DEFAULT
-            },
-            ..LogConfig::default()
-        });
-        // Every record claims a timestamp a million seconds ahead.
-        let future = now_ms() + 1_000_000_000;
-        for _ in 0..12 {
-            let mut future_batch = batch(2);
-            future_batch.base_timestamp = future;
-            future_batch.max_timestamp = future;
-            log.append(&mut future_batch).unwrap();
-        }
-        log.sync().unwrap();
-        let partition = leading_partition_over(PartitionIndex(0), log_dir.path(), log);
-        let ArchivedRetention {
-            exports, removed, ..
-        } = fixtures::archived_local_retention(&partition, remote_dir.path(), unstable).await;
-
-        check!(
-            removed == if evicted { exports.len() } else { 0 },
-            "{name}: removed {removed} of {}",
-            exports.len()
-        );
+#[yare::parameterized(
+    stable_release = { "4.3.1 keeps them", UnstableApiVersions::Disabled, false, false },
+    unstable_ages_file = {
+        "trunk ages them by their file",
+        UnstableApiVersions::Enabled,
+        false,
+        true,
+    },
+    unstable_without_copy = {
+        "trunk keeps them when the tier takes no copies",
+        UnstableApiVersions::Enabled,
+        true,
+        false,
+    },
+)]
+#[test_macro(tokio::test)]
+async fn future_stamped_segments_leave_the_disk_only_under_trunks_rule(
+    name: &str,
+    unstable: UnstableApiVersions,
+    copy_disable: bool,
+    evicted: bool,
+) {
+    let fixtures::PartitionLogFixture {
+        local: log_dir,
+        remote: remote_dir,
+        mut log,
+    } = fixtures::partition_log_fixture(|| LogConfig {
+        segment_size: bytes(256),
+        remote_storage_enable: true,
+        local_retention: Some(millis(1)),
+        remote_tier: krabka_log::RemoteTierFlags {
+            copy_disable,
+            ..krabka_log::RemoteTierFlags::DEFAULT
+        },
+        ..LogConfig::default()
+    });
+    // Every record claims a timestamp a million seconds ahead.
+    let future = now_ms() + 1_000_000_000;
+    for _ in 0..12 {
+        let mut future_batch = batch(2);
+        future_batch.base_timestamp = future;
+        future_batch.max_timestamp = future;
+        log.append(&mut future_batch).unwrap();
     }
+    log.sync().unwrap();
+    let partition = leading_partition_over(PartitionIndex(0), log_dir.path(), log);
+    let ArchivedRetention {
+        exports, removed, ..
+    } = fixtures::archived_local_retention(&partition, remote_dir.path(), unstable).await;
+
+    check!(
+        removed == if evicted { exports.len() } else { 0 },
+        "{name}: removed {removed} of {}",
+        exports.len()
+    );
 }
 
 #[tokio::test]
@@ -902,74 +886,73 @@ async fn a_breached_active_segment_rolls_then_tiers_then_leaves_the_disk() {
 //
 // Each case is `(name, high watermark one short of the log end, a roll
 // since the sweep read the log, whether the pass rolls)`.
-#[tokio::test]
-async fn the_roll_waits_for_the_high_watermark_and_for_the_walk_to_reach_it() {
-    for (name, unreplicated, rolled_since, rolls) in [
-        ("replicated and next in the walk", false, false, true),
-        ("a record above the high watermark", true, false, false),
-        (
-            "a segment sealed since the sweep read the log",
-            false,
-            true,
-            false,
-        ),
-    ] {
-        let TempDirs {
-            local: log_dir,
-            remote: remote_dir,
-        } = fixtures::temporary_dirs();
-        let partition = rolled_tiered_partition_with_config(log_dir.path(), LogConfig {
-            segment_size: bytes(256),
-            remote_storage_enable: true,
-            local_retention: Some(millis(1)),
-            retention: None,
-            ..LogConfig::default()
-        });
-        let PartitionSnapshot {
-            exports,
-            config: log_config,
-        } = partition_snapshot(&partition);
-        let Backends { rsm: _rsm, rlmm } = archived_backends(remote_dir.path(), &exports).await;
-        let active_before = {
-            let mut log = fixtures::partition_log_guard(&partition);
-            if rolled_since {
-                assert!(log.roll().unwrap());
-                log.append(&mut batch(2)).unwrap();
-            }
-            log.active_segment_export().map(|active| active.base_offset)
-        };
-        let log_end = partition
-            .log
-            .lock()
-            .expect("partition log mutex poisoned")
-            .log_end_offset();
-        partition.replica_state.lock().await.hw = if unreplicated { log_end - 1 } else { log_end };
+#[yare::parameterized(
+    replicated_next_in_walk = { "replicated and next in the walk", false, false, true },
+    record_above_high_watermark = { "a record above the high watermark", true, false, false },
+    newly_sealed_segment = { "a segment sealed since the sweep read the log", false, true, false },
+)]
+#[test_macro(tokio::test)]
+async fn the_roll_waits_for_the_high_watermark_and_for_the_walk_to_reach_it(
+    name: &str,
+    unreplicated: bool,
+    rolled_since: bool,
+    rolls: bool,
+) {
+    let TempDirs {
+        local: log_dir,
+        remote: remote_dir,
+    } = fixtures::temporary_dirs();
+    let partition = rolled_tiered_partition_with_config(log_dir.path(), LogConfig {
+        segment_size: bytes(256),
+        remote_storage_enable: true,
+        local_retention: Some(millis(1)),
+        retention: None,
+        ..LogConfig::default()
+    });
+    let PartitionSnapshot {
+        exports,
+        config: log_config,
+    } = partition_snapshot(&partition);
+    let Backends { rsm: _rsm, rlmm } = archived_backends(remote_dir.path(), &exports).await;
+    let active_before = {
+        let mut log = fixtures::partition_log_guard(&partition);
+        if rolled_since {
+            assert2::assert!(log.roll().unwrap());
+            log.append(&mut batch(2)).unwrap();
+        }
+        log.active_segment_export().map(|active| active.base_offset)
+    };
+    let log_end = partition
+        .log
+        .lock()
+        .expect("partition log mutex poisoned")
+        .log_end_offset();
+    partition.replica_state.lock().await.hw = if unreplicated { log_end - 1 } else { log_end };
 
-        let removed = local_retention_pass(
-            &tp(),
-            &partition,
-            &exports,
-            &log_config,
-            &rlmm,
-            LocalRetentionBounds {
-                now_ms: now_ms(),
-                high_watermark: partition.high_watermark().await,
-            },
-            UnstableApiVersions::Disabled,
-        );
+    let removed = local_retention_pass(
+        &tp(),
+        &partition,
+        &exports,
+        &log_config,
+        &rlmm,
+        LocalRetentionBounds {
+            now_ms: now_ms(),
+            high_watermark: partition.high_watermark().await,
+        },
+        UnstableApiVersions::Disabled,
+    );
 
-        let active_after = partition
-            .log
-            .lock()
-            .expect("partition log mutex poisoned")
-            .active_segment_export()
-            .map(|active| active.base_offset);
-        check!(removed == exports.len(), "{name}: the copied segments go");
-        check!(
-            (active_after != active_before) == rolls,
-            "{name}: active segment {active_before:?} -> {active_after:?}"
-        );
-    }
+    let active_after = partition
+        .log
+        .lock()
+        .expect("partition log mutex poisoned")
+        .active_segment_export()
+        .map(|active| active.base_offset);
+    check!(removed == exports.len(), "{name}: the copied segments go");
+    check!(
+        (active_after != active_before) == rolls,
+        "{name}: active segment {active_before:?} -> {active_after:?}"
+    );
 }
 
 fn timed_active_case(

@@ -462,19 +462,16 @@ mod tests {
     /// A rate is a schedule, not a coin flip: the same rate must fail the same
     /// call numbers every run, or a suite that asserts on which call failed is
     /// asserting on luck.
-    #[test]
-    fn fail_rates_pick_the_same_calls_every_run() {
-        let cases = [
-            (0, [false, false, false, false]),
-            (250, [false, false, false, true]),
-            (500, [false, true, false, true]),
-            (1_000, [true, true, true, true]),
-        ];
-        for (rate, want) in cases {
-            let fault = OpFault::rate(FaultKind::Throttled, rate);
-            let got: [bool; 4] = std::array::from_fn(|n| fault.fails_call(n as u64));
-            check!(got == want, "rate {rate}");
-        }
+    #[yare::parameterized(
+        never = { 0, [false, false, false, false] },
+        one_in_four = { 250, [false, false, false, true] },
+        every_other = { 500, [false, true, false, true] },
+        always = { 1_000, [true, true, true, true] },
+    )]
+    fn fail_rates_pick_the_same_calls_every_run(rate: u32, want: [bool; 4]) {
+        let fault = OpFault::rate(FaultKind::Throttled, rate);
+        let got: [bool; 4] = std::array::from_fn(|n| fault.fails_call(n as u64));
+        check!(got == want, "rate {rate}");
     }
 
     /// A `503 SlowDown` on `Put` must reach the caller as an error, and the

@@ -127,13 +127,13 @@ fn changed_topics_are_the_created_changed_and_deleted_topics() {
     ];
     let mut found = Vec::new();
     let mut expected = Vec::new();
+    let previous = image(&base);
     for Row {
         name,
         changes,
         topics,
     } in rows
     {
-        let previous = image(&base);
         let next = image(&[base.as_slice(), changes.as_slice()].concat());
         found.push((name, changed_topics(&previous, &next)));
         expected.push((name, topics.into_iter().map(str::to_owned).collect()));
@@ -231,13 +231,13 @@ fn a_new_topic_or_a_changed_acl_can_change_a_resolution() {
     ];
     let mut found = Vec::new();
     let mut expected = Vec::new();
+    let previous = image(&base);
     for Row {
         name,
         changes,
         may_change,
     } in rows
     {
-        let previous = image(&base);
         let next = image(&[base.as_slice(), changes.as_slice()].concat());
         found.push((name, regex_resolution_may_change(&previous, &next)));
         expected.push((name, may_change));

@@ -30,13 +30,13 @@ use {
 
 mod sweep;
 
+/// Tunables for [`run`], shared with the other local log-maintenance sweep.
+pub(crate) use crate::time_util::MetadataSweepConfig as CleanerConfig;
+
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;
-
-/// Tunables for [`run`], shared with the other local log-maintenance sweep.
-pub(crate) use crate::time_util::MetadataSweepConfig as CleanerConfig;
 
 /// Spawned task entry point.
 pub(crate) async fn run(

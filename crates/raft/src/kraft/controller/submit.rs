@@ -941,6 +941,18 @@ mod tests {
         }
     }
 
+    fn delegation_token(renewers: Vec<KafkaPrincipal>) -> DelegationTokenRecord {
+        DelegationTokenRecord {
+            token_id: "tok1".into(),
+            owner: principal("alice"),
+            requester: principal("alice"),
+            issue_timestamp_ms: 100,
+            max_timestamp_ms: 200,
+            expiry_timestamp_ms: 150,
+            renewers,
+        }
+    }
+
     #[test]
     fn wall_clock_ms_is_real_timestamp() {
         assert2::check!(KraftController::wall_clock_ms() > 1_700_000_000_000);
@@ -948,15 +960,7 @@ mod tests {
 
     #[test]
     fn token_generation_matches_checks_all_fields() {
-        let t1 = DelegationTokenRecord {
-            token_id: "tok1".into(),
-            owner: principal("alice"),
-            requester: principal("alice"),
-            issue_timestamp_ms: 100,
-            max_timestamp_ms: 200,
-            expiry_timestamp_ms: 150,
-            renewers: vec![principal("bob")],
-        };
+        let t1 = delegation_token(vec![principal("bob")]);
         let mut t2 = t1.clone();
         assert2::check!(Engine::token_generation_matches(&t1, &t2));
 
@@ -1100,15 +1104,7 @@ mod tests {
         };
 
         let (mut engine, _dir) = build_engine_only().ids(&[NodeId(1)]).call();
-        let t1 = DelegationTokenRecord {
-            token_id: "tok1".into(),
-            owner: principal("alice"),
-            requester: principal("alice"),
-            issue_timestamp_ms: 100,
-            max_timestamp_ms: 200,
-            expiry_timestamp_ms: 150,
-            renewers: vec![],
-        };
+        let t1 = delegation_token(vec![]);
         let tok = MetadataRecord::V1DelegationToken(t1);
 
         // Unguarded delete is always rejected

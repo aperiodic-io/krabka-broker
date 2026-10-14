@@ -26,19 +26,21 @@ fn positive_and_nonnegative_boundaries_preserve_human_values_and_diagnostics() {
     let encoded = serde_json::to_string(&valid).unwrap();
     let restored: Sizes = serde_json::from_str(&encoded).unwrap();
     assert!(restored.record == valid.record && restored.key == valid.key);
-    for invalid in [
-        r#"{"record":"0B","key":"0B"}"#,
-        r#"{"record":"-1B","key":"0B"}"#,
-    ] {
-        let error = serde_json::from_str::<Sizes>(invalid)
-            .err()
-            .unwrap()
-            .to_string();
-        assert!(error.contains("must be a positive size"));
-    }
     let error = serde_json::from_str::<Sizes>(r#"{"record":"1B","key":"-1B"}"#)
         .err()
         .unwrap()
         .to_string();
     assert!(error.contains("must be a size of zero or more"));
+}
+
+#[yare::parameterized(
+    zero = { r#"{"record":"0B","key":"0B"}"# },
+    negative = { r#"{"record":"-1B","key":"0B"}"# },
+)]
+fn positive_size_rejects_nonpositive_values(invalid: &str) {
+    let error = serde_json::from_str::<Sizes>(invalid)
+        .err()
+        .unwrap()
+        .to_string();
+    assert2::assert!(error.contains("must be a positive size"));
 }

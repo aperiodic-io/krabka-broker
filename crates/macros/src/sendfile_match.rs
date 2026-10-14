@@ -278,56 +278,50 @@ pub(crate) fn platform_cfg() -> TokenStream {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
+    use super::expand;
 
-    #[test]
-    fn preserves_guards_attributes_and_async_arm_bodies() {
-        let output = super::expand("match operation { #[cfg(feature = \"inline\")] WriteOp::Inline(bytes) if bytes.is_empty() => write(bytes).await?, WriteOp::File(region) => drain(region).await?, }".parse().unwrap()).unwrap().to_string();
-        for retained in [
-            "feature = \"inline\"",
-            "if bytes . is_empty",
-            "write (bytes) . await ?",
-            "drain (region) . await ?",
-            "target_os = \"dragonfly\"",
-        ] {
-            assert!(output.contains(retained), "{retained}: {output}");
-        }
+    #[yare::parameterized(
+        cfg_attribute = { "feature = \"inline\"" },
+        guard = { "if bytes . is_empty" },
+        inline_async_body = { "write (bytes) . await ?" },
+        file_async_body = { "drain (region) . await ?" },
+        platform_gate = { "target_os = \"dragonfly\"" },
+    )]
+    fn preserves_guards_attributes_and_async_arm_bodies(retained: &str) {
+        let output = expand("match operation { #[cfg(feature = \"inline\")] WriteOp::Inline(bytes) if bytes.is_empty() => write(bytes).await?, WriteOp::File(region) => drain(region).await?, }".parse().unwrap()).unwrap().to_string();
+        assert2::assert!(output.contains(retained), "{retained}: {output}");
     }
 
-    #[test]
-    fn requires_an_exhaustive_write_op_match() {
-        for input in [
-            "value",
-            "match value { _ => () }",
-            "match value { WriteOp::Inline(b) => b }",
-            "match value { Other::Inline(b) => b, Other::File(f) => f }",
-        ] {
-            assert!(super::expand(input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        non_match_expression = { "value" },
+        wildcard_match = { "match value { _ => () }" },
+        missing_file_arm = { "match value { WriteOp::Inline(b) => b }" },
+        wrong_variant_owner = { "match value { Other::Inline(b) => b, Other::File(f) => f }" },
+    )]
+    fn requires_an_exhaustive_write_op_match(input: &str) {
+        assert2::assert!(expand(input.parse().unwrap()).is_err(), "{input}");
     }
 }
 
 #[cfg(test)]
 mod records_tests {
-    use assert2::assert;
+    use super::records_payload;
 
-    #[test]
-    fn retains_result_errors_guards_and_portable_alternatives() {
-        let output = super::records_payload("match payload { Ok(RecordsPayload::Raw(b) | RecordsPayload::Legacy(b)) | Err(b) => portable(b), #[cfg(feature = \"files\")] Ok(RecordsPayload::FileRegions(r)) if !r.is_empty() => files(r).await, Ok(RecordsPayload::V2(b)) => batches(b), }".parse().unwrap()).unwrap().to_string();
-        for retained in [
-            "Err (b)",
-            "feature = \"files\"",
-            "if ! r . is_empty",
-            "files (r) . await",
-            "target_os = \"dragonfly\"",
-        ] {
-            assert!(output.contains(retained), "{retained}: {output}");
-        }
-        assert!(output.matches("target_os = \"linux\"").count() == 1);
+    #[yare::parameterized(
+        result_error_arm = { "Err (b)" },
+        cfg_attribute = { "feature = \"files\"" },
+        guard = { "if ! r . is_empty" },
+        async_file_body = { "files (r) . await" },
+        platform_gate = { "target_os = \"dragonfly\"" },
+    )]
+    fn retains_result_errors_guards_and_portable_alternatives(retained: &str) {
+        let output = records_payload("match payload { Ok(RecordsPayload::Raw(b) | RecordsPayload::Legacy(b)) | Err(b) => portable(b), #[cfg(feature = \"files\")] Ok(RecordsPayload::FileRegions(r)) if !r.is_empty() => files(r).await, Ok(RecordsPayload::V2(b)) => batches(b), }".parse().unwrap()).unwrap().to_string();
+        assert2::assert!(output.contains(retained), "{retained}: {output}");
+        assert2::assert!(output.matches("target_os = \"linux\"").count() == 1);
     }
 
     #[test]
     fn rejects_an_arm_that_would_hide_a_portable_alternative() {
-        assert!(super::records_payload("match payload { RecordsPayload::FileRegions(_) | RecordsPayload::Raw(_) => (), _ => (), }".parse().unwrap()).is_err());
+        assert2::assert!(super::records_payload("match payload { RecordsPayload::FileRegions(_) | RecordsPayload::Raw(_) => (), _ => (), }".parse().unwrap()).is_err());
     }
 }

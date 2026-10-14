@@ -5,10 +5,13 @@
 
 use {
     super::{
-        ConnectionContext, ListenerApiVersions, handle_conn,
+        ConnectionContext, ListenerApiVersions, Unstable, handle_conn,
         test_support::{read_frame, single_voter_engine},
     },
-    crate::{AllowAllGrants, ControllerApiVersions as _, ListenerLimits, kraft::KraftController},
+    crate::{
+        AllowAllGrants, ControllerApiVersions as _, ListenerLimits, UnstableApiVersions,
+        kraft::KraftController,
+    },
     assert2::check,
     krabka_protocol::{
         Decode, Encode,
@@ -84,89 +87,100 @@ fn api_version_cases(version_five: ApiVersionCase) -> [ApiVersionCase; 7] {
 /// One row per request, all on one connection, in order. Each row checks the
 /// error code and the table size of the answer, and that the answer is the
 /// one the handshake gives before authentication.
-#[tokio::test]
-async fn controller_listener_answers_api_versions_refusals_and_keeps_the_connection() {
-    use crate::UnstableApiVersions::{Disabled, Enabled};
+#[yare::parameterized(
+    stable = {
+        UnstableApiVersions::Disabled,
+        4,
+        api_version_case(5, request_body(5, "krabka"), 0, 35, false)
+    },
+    unstable = {
+        UnstableApiVersions::Enabled,
+        5,
+        api_version_case(5, request_body(5, "krabka"), 5, 0, true)
+    },
+)]
+#[test_macro(tokio::test)]
+async fn controller_listener_answers_api_versions_refusals_and_keeps_the_connection(
+    api_versions: UnstableApiVersions,
+    served_max: i16,
+    version_five: ApiVersionCase,
+) {
     // With unstable api versions disabled the listener serves Kafka 4.3.1's
     // v0-v4, so v5 is answered the way that release answers it.
-    let strict_rows =
-        api_version_cases(api_version_case(5, request_body(5, "krabka"), 0, 35, false));
-    let trunk_rows = api_version_cases(api_version_case(5, request_body(5, "krabka"), 5, 0, true));
-    for (api_versions, served_max, rows) in [(Disabled, 4, strict_rows), (Enabled, 5, trunk_rows)] {
-        let unstable = super::Unstable { api_versions };
-        let (engine, _dir) = single_voter_engine();
-        let listener_api_versions = ListenerApiVersions {
-            engine: engine.clone(),
-            admin_router: None,
+    let rows = api_version_cases(version_five);
+    let unstable = Unstable { api_versions };
+    let (engine, _dir) = single_voter_engine();
+    let listener_api_versions = ListenerApiVersions {
+        engine: engine.clone(),
+        admin_router: None,
+        unstable,
+    };
+    let (mut client, server) = tokio::io::duplex(1 << 16);
+    let shutdown = CancellationToken::new();
+    let conn = tokio::spawn(handle_conn(
+        server,
+        engine,
+        shutdown.clone(),
+        None,
+        None,
+        ConnectionContext {
+            peer: "127.0.0.1:9093".parse().unwrap(),
+            principal: None,
+            authenticated_via_token: false,
+            expires_at_ms: None,
+            grants: Arc::new(AllowAllGrants),
             unstable,
-        };
-        let (mut client, server) = tokio::io::duplex(1 << 16);
-        let shutdown = CancellationToken::new();
-        let conn = tokio::spawn(handle_conn(
-            server,
-            engine,
-            shutdown.clone(),
-            None,
-            None,
-            ConnectionContext {
-                peer: "127.0.0.1:9093".parse().unwrap(),
-                principal: None,
-                authenticated_via_token: false,
-                expires_at_ms: None,
-                grants: Arc::new(AllowAllGrants),
-                unstable,
-                limits: ListenerLimits::default(),
-            },
-            KraftController::wall_clock_ms,
-        ));
+            limits: ListenerLimits::default(),
+        },
+        KraftController::wall_clock_ms,
+    ));
 
-        for (
-            correlation_id,
-            ApiVersionCase {
-                version,
-                body,
-                body_version,
-                error_code,
-                full,
-            },
-        ) in (1..).zip(rows)
-        {
-            let label = format!("{api_versions:?} v{version}");
-            client
-                .write_all(&api_versions_frame(version, correlation_id, &body))
-                .await
-                .expect("write request");
-            let frame = read_frame(&mut client).await;
-            check!(frame[..4] == correlation_id.to_be_bytes(), "{label}");
-            let expected = listener_api_versions
-                .respond(version, &body)
-                .expect("handshake answer");
+    for (
+        correlation_id,
+        ApiVersionCase {
+            version,
+            body,
+            body_version,
+            error_code,
+            full,
+        },
+    ) in (1..).zip(rows)
+    {
+        let label = format!("{api_versions:?} v{version}");
+        client
+            .write_all(&api_versions_frame(version, correlation_id, &body))
+            .await
+            .expect("write request");
+        let frame = read_frame(&mut client).await;
+        check!(frame[..4] == correlation_id.to_be_bytes(), "{label}");
+        let expected = listener_api_versions
+            .respond(version, &body)
+            .expect("handshake answer");
+        check!(
+            frame[4..] == expected[..],
+            "{label}: pre-auth answer differs"
+        );
+
+        let response =
+            ApiVersionsResponse::decode(&mut &frame[4..], body_version).expect("decode answer");
+        check!(response.error_code == error_code, "{label}");
+        if full {
+            check!(response.api_keys.len() > 1, "{label}");
+        } else if error_code == 35 {
             check!(
-                frame[4..] == expected[..],
-                "{label}: pre-auth answer differs"
+                response
+                    .api_keys
+                    .iter()
+                    .map(|key| (key.api_key, key.min_version, key.max_version))
+                    .collect::<Vec<_>>()
+                    == vec![(18, 0, served_max)],
+                "{label}"
             );
-
-            let response =
-                ApiVersionsResponse::decode(&mut &frame[4..], body_version).expect("decode answer");
-            check!(response.error_code == error_code, "{label}");
-            if full {
-                check!(response.api_keys.len() > 1, "{label}");
-            } else if error_code == 35 {
-                check!(
-                    response
-                        .api_keys
-                        .iter()
-                        .map(|key| (key.api_key, key.min_version, key.max_version))
-                        .collect::<Vec<_>>()
-                        == vec![(18, 0, served_max)],
-                    "{label}"
-                );
-            } else {
-                check!(response.api_keys.is_empty(), "{label}");
-            }
+        } else {
+            check!(response.api_keys.is_empty(), "{label}");
         }
-
-        shutdown.cancel();
-        assert2::assert!(conn.await.expect("connection task").is_ok());
     }
+
+    shutdown.cancel();
+    assert2::assert!(conn.await.expect("connection task").is_ok());
 }

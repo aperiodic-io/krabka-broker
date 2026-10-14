@@ -8,7 +8,7 @@
 
 use {
     crate::share_group_harness::{
-        boot, connect, create_topic, describe, heartbeat, rejoin, start, topic_id,
+        boot, connect, create_topic, describe, heartbeat, rejoin, topic_id,
     },
     assert2::assert,
 };
@@ -101,16 +101,11 @@ async fn lifecycle_initializes_share_state() {
 /// partitions on the post-restart heartbeat.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lifecycle_metadata_survives_restart() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let log_dir = dir.path().to_path_buf();
-
-    let tid;
-    {
-        let broker = start(log_dir.clone()).await;
-        let bootstrap = broker.listen_addr().to_string();
+    let (tid, dir) = {
+        let (broker, bootstrap, dir) = boot().await;
         let client = connect(&bootstrap).await;
         create_topic(&client, "t6", 2).await;
-        tid = topic_id(&broker, "t6");
+        let tid = topic_id(&broker, "t6");
 
         initialize_share_partitions(&broker, &client, "g6", "t6", 2).await;
         // Both partitions are initialized before restart.
@@ -124,7 +119,9 @@ async fn lifecycle_metadata_survives_restart() {
             );
         }
         broker.shutdown().await;
-    }
+        (tid, dir)
+    };
+    let log_dir = dir.path().to_path_buf();
 
     {
         let (broker, client) = rejoin(log_dir).await;

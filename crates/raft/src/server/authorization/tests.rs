@@ -46,51 +46,33 @@ const MESSAGE: &str = "Cluster authorization failed.";
 /// Kafka's `ControllerApis` operation for each api that the controller
 /// listener answers itself, and no operation for the apis that a broker
 /// handler authorizes.
-#[test]
-fn each_controller_api_needs_the_kafka_operation() {
-    use ClusterOperation::{Alter, ClusterAction, Describe};
-
-    let cases = [
-        ("Fetch", api_key::FETCH, Some(ClusterAction)),
-        ("Vote", api_key::VOTE, Some(ClusterAction)),
-        (
-            "BeginQuorumEpoch",
-            api_key::BEGIN_QUORUM_EPOCH,
-            Some(ClusterAction),
-        ),
-        (
-            "EndQuorumEpoch",
-            api_key::END_QUORUM_EPOCH,
-            Some(ClusterAction),
-        ),
-        (
-            "FetchSnapshot",
-            api_key::FETCH_SNAPSHOT,
-            Some(ClusterAction),
-        ),
-        ("ControllerRegistration", 70, Some(ClusterAction)),
-        ("UpdateRaftVoter", 82, Some(ClusterAction)),
-        ("AssignReplicasToDirs", 73, Some(ClusterAction)),
-        ("SubmitChange", API_KEY_SUBMIT_CHANGE, Some(ClusterAction)),
-        ("MetadataFetch", API_KEY_METADATA_FETCH, Some(ClusterAction)),
-        (
-            "DelegationTokenMutation",
-            API_KEY_DELEGATION_TOKEN_MUTATION,
-            Some(ClusterAction),
-        ),
-        ("AddRaftVoter", 80, Some(Alter)),
-        ("RemoveRaftVoter", 81, Some(Alter)),
-        ("DescribeCluster", 60, Some(Alter)),
-        ("DescribeQuorum", 55, Some(Describe)),
-        ("ApiVersions", 18, None),
-        ("CreateTopics", 19, None),
-        ("Envelope", 58, None),
-        ("BrokerRegistration", 62, None),
-        ("BrokerHeartbeat", 63, None),
-    ];
-    for (name, key, operation) in cases {
-        check!(required_operation(key) == operation, "{name}");
-    }
+#[yare::parameterized(
+    fetch = { api_key::FETCH, Some(ClusterOperation::ClusterAction) },
+    vote = { api_key::VOTE, Some(ClusterOperation::ClusterAction) },
+    begin_quorum_epoch = { api_key::BEGIN_QUORUM_EPOCH, Some(ClusterOperation::ClusterAction) },
+    end_quorum_epoch = { api_key::END_QUORUM_EPOCH, Some(ClusterOperation::ClusterAction) },
+    fetch_snapshot = { api_key::FETCH_SNAPSHOT, Some(ClusterOperation::ClusterAction) },
+    controller_registration = { 70, Some(ClusterOperation::ClusterAction) },
+    update_raft_voter = { 82, Some(ClusterOperation::ClusterAction) },
+    assign_replicas_to_dirs = { 73, Some(ClusterOperation::ClusterAction) },
+    submit_change = { API_KEY_SUBMIT_CHANGE, Some(ClusterOperation::ClusterAction) },
+    metadata_fetch = { API_KEY_METADATA_FETCH, Some(ClusterOperation::ClusterAction) },
+    delegation_token_mutation = {
+        API_KEY_DELEGATION_TOKEN_MUTATION,
+        Some(ClusterOperation::ClusterAction),
+    },
+    add_raft_voter = { 80, Some(ClusterOperation::Alter) },
+    remove_raft_voter = { 81, Some(ClusterOperation::Alter) },
+    describe_cluster = { 60, Some(ClusterOperation::Alter) },
+    describe_quorum = { 55, Some(ClusterOperation::Describe) },
+    api_versions = { 18, None },
+    create_topics = { 19, None },
+    envelope = { 58, None },
+    broker_registration = { 62, None },
+    broker_heartbeat = { 63, None },
+)]
+fn each_controller_api_needs_the_kafka_operation(key: i16, operation: Option<ClusterOperation>) {
+    check!(required_operation(key) == operation);
 }
 
 /// The refusal of a `SubmitChange` without `ClusterAction`.

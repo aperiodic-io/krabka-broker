@@ -62,11 +62,7 @@ impl ClassicView {
                     member_id: m.member_id.clone(),
                     client_id: m.client_id.clone(),
                     client_host: m.host.clone(),
-                    assignment: m
-                        .assignment
-                        .as_ref()
-                        .map(|b| b.to_vec())
-                        .unwrap_or_default(),
+                    assignment: m.assignment.as_ref().map_or_default(|b| b.to_vec()),
                     protocol_metadata: m.protocol_metadata.to_vec(),
                 })
                 .collect(),

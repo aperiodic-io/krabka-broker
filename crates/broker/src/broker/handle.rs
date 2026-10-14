@@ -177,8 +177,7 @@ impl BrokerHandle {
             .controller
             .current_image()
             .broker(node_id)
-            .map(|b| b.endpoints.clone())
-            .unwrap_or_default()
+            .map_or_default(|b| b.endpoints.clone())
     }
 
     /// Manually mutate the controller voter set on this broker.

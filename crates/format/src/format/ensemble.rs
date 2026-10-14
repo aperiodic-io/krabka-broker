@@ -178,7 +178,6 @@ mod tests {
     use {
         super::*,
         crate::{ids::DirectoryId, meta_properties::node_id_mismatch_message},
-        assert2::check,
         uuid::Uuid,
     };
 
@@ -206,153 +205,84 @@ mod tests {
 
     type Verdict = Result<Option<ClusterId>, String>;
 
-    /// A `verify` case: what it is, the formatted set, `--cluster-id`, and the
-    /// expected result.
-    struct Case {
-        what: &'static str,
-        ensemble: Ensemble,
-        expected: Option<ClusterId>,
-        want: Verdict,
-    }
-
     /// The formatted set agrees with `--cluster-id` and `--node-id`, with
     /// Kafka's message for each way it can fail. `verify_ensemble` has the
     /// full table of Kafka's checks; these cases pin what `format` passes
     /// to it.
-    #[test]
-    fn verify_matches_kafka_meta_properties_ensemble() {
-        let c1 = ClusterId(Uuid::from_u128(0xc1));
-        let c2 = ClusterId(Uuid::from_u128(0xc2));
-        // With --node-id 1.
-        let cases: Vec<Case> = vec![
-            Case {
-                what: "nothing formatted",
-                ensemble: formatted(vec![]),
-                expected: None,
-                want: Ok(None),
-            },
-            Case {
-                what: "nothing formatted, id given",
-                ensemble: formatted(vec![]),
-                expected: Some(c1),
-                want: Ok(Some(c1)),
-            },
-            Case {
-                what: "the set supplies the id",
-                ensemble: formatted(vec![
-                    directory("/a", meta(0xc1, 1, 0x1000)),
-                    directory("/b", meta(0xc1, 1, 0x2000)),
-                ]),
-                expected: None,
-                want: Ok(Some(c1)),
-            },
-            Case {
-                what: "the given id disagrees",
-                ensemble: formatted(vec![directory("/a", meta(0xc1, 1, 0x1000))]),
-                expected: Some(c2),
-                want: Err(format!(
-                    "Invalid cluster.id in: /a/meta.properties. Expected {c2}, but read {c1}"
-                )),
-            },
-            Case {
-                what: "another node's directory",
-                ensemble: formatted(vec![directory("/a", meta(0xc1, 2, 0x1000))]),
-                expected: Some(c1),
-                want: Err(node_id_mismatch_message()
-                    .stored(2)
-                    .previous(1)
-                    .path(Path::new("/a/meta.properties"))
-                    .call()),
-            },
-        ];
-        for Case {
-            what,
-            ensemble,
-            expected,
-            want,
-        } in cases
-        {
-            check!(ensemble.verify(expected, 1) == want, "{what}");
-        }
+    #[yare::parameterized(
+        nothing_formatted = { formatted(vec![]), None, Ok(None) },
+        no_records_given_id = {
+            formatted(vec![]),
+            Some(ClusterId(Uuid::from_u128(0xc1))),
+            Ok(Some(ClusterId(Uuid::from_u128(0xc1)))),
+        },
+        set_supplies_id = {
+            formatted(vec![directory("/a", meta(0xc1, 1, 0x1000)), directory("/b", meta(0xc1, 1, 0x2000))]),
+            None,
+            Ok(Some(ClusterId(Uuid::from_u128(0xc1)))),
+        },
+        given_id_disagrees = {
+            formatted(vec![directory("/a", meta(0xc1, 1, 0x1000))]),
+            Some(ClusterId(Uuid::from_u128(0xc2))),
+            Err(format!(
+                "Invalid cluster.id in: {}. Expected {}, but read {}",
+                Path::new("/a").join(META_PROPERTIES).display(),
+                ClusterId(Uuid::from_u128(0xc2)),
+                ClusterId(Uuid::from_u128(0xc1))
+            )),
+        },
+        another_nodes_directory = {
+            formatted(vec![directory("/a", meta(0xc1, 2, 0x1000))]),
+            Some(ClusterId(Uuid::from_u128(0xc1))),
+            Err(node_id_mismatch_message()
+                .stored(2)
+                .previous(1)
+                .path(&Path::new("/a").join(META_PROPERTIES))
+                .call()),
+        },
+    )]
+    fn verify_matches_kafka_meta_properties_ensemble(
+        ensemble: Ensemble,
+        expected: Option<ClusterId>,
+        want: Verdict,
+    ) {
+        assert2::check!(ensemble.verify(expected, 1) == want);
     }
 
     /// Only what a run writes before `meta.properties` makes a directory with
     /// no marker count as empty.
+    #[yare::parameterized(
+        nothing = { &[][..], true },
+        bootstrap_files = { &["bootstrap.json", "bootstrap.records.bin"][..], true },
+        half_written_marker = { &[META_PROPERTIES_TMP][..], true },
+        checkpoint = {
+            &["__cluster_metadata-0/00000000000000000000-0000000000.checkpoint"][..],
+            true,
+        },
+        user_data = { &["orders-0/0.log"][..], false },
+        metadata_log = { &["__cluster_metadata-0/00000000000000000000.log"][..], false },
+        stray_file = { &["notes.txt"][..], false },
+    )]
+    fn a_directory_is_empty_only_when_it_holds_partial_output(files: &[&str], empty: bool) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("data");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        for file in files {
+            let file = dir.join(file);
+            std::fs::create_dir_all(file.parent().expect("parent")).expect("mkdir");
+            std::fs::write(&file, b"x").expect("write");
+        }
+        assert2::check!(holds_only_partial_output(&dir).expect("survey") == empty);
+        if empty {
+            remove_partial_output(&dir).expect("remove");
+            assert2::check!(std::fs::read_dir(&dir).expect("list").next().is_none());
+        }
+    }
+
     #[test]
-    fn a_directory_is_empty_only_when_it_holds_partial_output() {
-        fn checkpoint(root: &Path) -> PathBuf {
-            root.join(CLUSTER_METADATA).join(ZERO_CHECKPOINT_NAME)
-        }
-        type Layout = fn(&Path) -> Vec<PathBuf>;
-        /// What it is, the files to create relative to the directory, and
-        /// whether the directory counts as empty.
-        struct LayoutCase {
-            what: &'static str,
-            layout: Layout,
-            empty: bool,
-        }
-        let cases = [
-            LayoutCase {
-                what: "nothing",
-                layout: |_| vec![],
-                empty: true,
-            },
-            LayoutCase {
-                what: "the bootstrap files",
-                layout: |d| vec![d.join("bootstrap.json"), d.join("bootstrap.records.bin")],
-                empty: true,
-            },
-            LayoutCase {
-                what: "a half-written marker",
-                layout: |d| vec![d.join(META_PROPERTIES_TMP)],
-                empty: true,
-            },
-            LayoutCase {
-                what: "the offset-zero checkpoint",
-                layout: |d| vec![checkpoint(d)],
-                empty: true,
-            },
-            LayoutCase {
-                what: "someone else's file",
-                layout: |d| vec![d.join("orders-0").join("0.log")],
-                empty: false,
-            },
-            LayoutCase {
-                what: "a metadata log",
-                layout: |d| vec![d.join(CLUSTER_METADATA).join("00000000000000000000.log")],
-                empty: false,
-            },
-            LayoutCase {
-                what: "a stray top-level file",
-                layout: |d| vec![d.join("notes.txt")],
-                empty: false,
-            },
-        ];
-        for LayoutCase {
-            what,
-            layout,
-            empty,
-        } in cases
-        {
-            let tmp = tempfile::tempdir().expect("tempdir");
-            let dir = tmp.path().join("data");
-            std::fs::create_dir_all(&dir).expect("mkdir");
-            for file in layout(&dir) {
-                std::fs::create_dir_all(file.parent().expect("parent")).expect("mkdir");
-                std::fs::write(&file, b"x").expect("write");
-            }
-            check!(
-                holds_only_partial_output(&dir).expect("survey") == empty,
-                "{what}"
-            );
-            if empty {
-                remove_partial_output(&dir).expect("remove");
-                check!(
-                    std::fs::read_dir(&dir).expect("list").next().is_none(),
-                    "{what}: the partial output is gone"
-                );
-            }
-        }
-        check!(holds_only_partial_output(Path::new("/nonexistent/krabka-format")).expect("survey"));
+    fn nonexistent_directory_is_empty() {
+        assert2::check!(
+            holds_only_partial_output(Path::new("/nonexistent/krabka-format")).expect("survey")
+        );
     }
 }

@@ -241,7 +241,7 @@ pub(super) fn is_disabled_version(
 /// `api_keys` compact-array of `{api_key(i16), min(i16), max(i16), tagged(0)}`,
 /// `throttle_time_ms(i32)`, response-level `tagged(0)`. Per the documented Kafka
 /// asymmetry, the *response header* stays v0 (no leading tagged-fields byte) —
-/// so this is written via [`super::framing::write_response_no_tagged_fields`].
+/// so this is written via [`super::framing::write_response`].
 pub(super) fn api_versions_response_body(req_version: i16, view: ApiVersionsView<'_>) -> Bytes {
     let resp = ApiVersionsResponse {
         api_keys: advertised_api_keys(view.admin_router, view.unstable),
@@ -256,7 +256,7 @@ pub(super) fn api_versions_response_body(req_version: i16, view: ApiVersionsView
     // JVM dials at v4 (flexible); Krabka's own client at v0 (non-flexible). The
     // codec emits the correct body shape per version: req v<=2 → non-flexible
     // v0-shaped body, req v>=3 → flexible (compact) body. The v0 ApiVersions
-    // response HEADER asymmetry lives in the framing (`write_response_no_tagged_fields`),
+    // response HEADER asymmetry lives in the framing (`write_response` with tagged fields disabled),
     // not here.
     encode_body(
         &resp,
@@ -288,51 +288,52 @@ mod tests {
         }
     }
 
-    #[test]
-    fn api_versions_body_advertises_kip595_set_both_shapes() {
+    #[yare::parameterized(
+        legacy_shape = { 0i16 },
+        flexible_shape = { 4i16 },
+    )]
+    fn api_versions_body_advertises_kip595_set_both_shapes(req_v: i16) {
         use krabka_protocol::{Decode, owned::api_versions_response::ApiVersionsResponse};
         let mut image = krabka_metadata::MetadataImage::new(Uuid::nil());
         image.apply(&MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
             name: krabka_metadata::metadata_version::METADATA_VERSION_FEATURE.into(),
             level: 24,
         }));
-        for req_v in [0i16, 4i16] {
-            let body = super::api_versions_response_body(req_v, view(&image, 41));
-            let v = req_v.clamp(0, 4);
-            let mut cur = &body[..];
-            let resp = ApiVersionsResponse::decode(&mut cur, v).expect("decode body");
-            assert2::assert!(cur.is_empty());
-            assert2::assert!(resp.error_code == 0);
-            let keys: std::collections::BTreeSet<i16> =
-                resp.api_keys.iter().map(|k| k.api_key).collect();
-            for want in [1i16, 18, 52, 53, 54, 59, 70] {
-                assert2::assert!(keys.contains(&want));
-            }
-            // `BrokerRegistration` and `BrokerHeartbeat` reach the controller
-            // listener through the Admin router, so the native table must not
-            // advertise them on its own.
-            // `an_admin_router_contributes_its_own_api_versions` covers the
-            // other half: with a router bound, a key is advertised.
-            assert2::assert!(!keys.contains(&62i16));
-            assert2::assert!(!keys.contains(&63i16));
-            // Vote is advertised over its whole schema range, as Kafka's
-            // `ApiKeys` does.
-            let vote = resp.api_keys.iter().find(|k| k.api_key == 52).unwrap();
-            assert2::assert!(vote.min_version == 0 && vote.max_version == 2);
-            if req_v >= 3 {
-                let finalized_metadata = resp
-                    .finalized_features
-                    .iter()
-                    .find(|feature| feature.name == "metadata.version")
-                    .expect("metadata.version finalized");
-                assert2::assert!(
-                    (
-                        finalized_metadata.min_version_level,
-                        finalized_metadata.max_version_level
-                    ) == (24, 24)
-                );
-                assert2::assert!(resp.finalized_features_epoch == 41);
-            }
+        let body = super::api_versions_response_body(req_v, view(&image, 41));
+        let v = req_v.clamp(0, 4);
+        let mut cur = &body[..];
+        let resp = ApiVersionsResponse::decode(&mut cur, v).expect("decode body");
+        assert2::assert!(cur.is_empty());
+        assert2::assert!(resp.error_code == 0);
+        let keys: std::collections::BTreeSet<i16> =
+            resp.api_keys.iter().map(|k| k.api_key).collect();
+        for want in [1i16, 18, 52, 53, 54, 59, 70] {
+            assert2::assert!(keys.contains(&want));
+        }
+        // `BrokerRegistration` and `BrokerHeartbeat` reach the controller
+        // listener through the Admin router, so the native table must not
+        // advertise them on its own.
+        // `an_admin_router_contributes_its_own_api_versions` covers the
+        // other half: with a router bound, a key is advertised.
+        assert2::assert!(!keys.contains(&62i16));
+        assert2::assert!(!keys.contains(&63i16));
+        // Vote is advertised over its whole schema range, as Kafka's
+        // `ApiKeys` does.
+        let vote = resp.api_keys.iter().find(|k| k.api_key == 52).unwrap();
+        assert2::assert!(vote.min_version == 0 && vote.max_version == 2);
+        if req_v >= 3 {
+            let finalized_metadata = resp
+                .finalized_features
+                .iter()
+                .find(|feature| feature.name == "metadata.version")
+                .expect("metadata.version finalized");
+            assert2::assert!(
+                (
+                    finalized_metadata.min_version_level,
+                    finalized_metadata.max_version_level
+                ) == (24, 24)
+            );
+            assert2::assert!(resp.finalized_features_epoch == 41);
         }
     }
 
@@ -405,41 +406,50 @@ mod tests {
     /// #646: an unstable last version is advertised, and accepted, only under
     /// `unstable.api.versions.enable`, as Kafka's `ApiKeys.toApiVersion` and
     /// `ApiKeys.isVersionEnabled` gate it.
-    #[test]
-    fn unstable_last_versions_follow_unstable_api_versions_enable() {
-        for (unstable, advertised_max, v6_disabled) in [
-            (UnstableApiVersions::Disabled, 5, true),
-            (UnstableApiVersions::Enabled, 6, false),
-        ] {
-            let api_keys = advertised_api_keys(Some(&UnstableRouter), unstable);
-            let row = api_keys
-                .iter()
-                .find(|key| key.api_key == 22)
-                .expect("router api advertised");
-            assert2::check!(
-                (row.min_version, row.max_version) == (0, advertised_max),
-                "{unstable:?}"
-            );
-            assert2::check!(
-                is_disabled_version(22, 6, Some(&UnstableRouter), unstable) == v6_disabled,
-                "{unstable:?}"
-            );
-            assert2::check!(
-                !is_disabled_version(22, 5, Some(&UnstableRouter), unstable),
-                "{unstable:?}"
-            );
-            // An out-of-range version is the decoder's business, not this
-            // gate's; an api the listener does not know is not disabled.
-            assert2::check!(!is_disabled_version(22, 7, Some(&UnstableRouter), unstable));
-            assert2::check!(!is_disabled_version(22, 6, None, unstable));
-        }
+    #[yare::parameterized(
+        disabled = { UnstableApiVersions::Disabled, 5, true },
+        enabled = { UnstableApiVersions::Enabled, 6, false },
+    )]
+    fn unstable_last_versions_follow_unstable_api_versions_enable(
+        unstable: UnstableApiVersions,
+        advertised_max: i16,
+        v6_disabled: bool,
+    ) {
+        let api_keys = advertised_api_keys(Some(&UnstableRouter), unstable);
+        let row = api_keys
+            .iter()
+            .find(|key| key.api_key == 22)
+            .expect("router api advertised");
+        assert2::check!(
+            (row.min_version, row.max_version) == (0, advertised_max),
+            "{unstable:?}"
+        );
+        assert2::check!(
+            is_disabled_version(22, 6, Some(&UnstableRouter), unstable) == v6_disabled,
+            "{unstable:?}"
+        );
+        assert2::check!(
+            !is_disabled_version(22, 5, Some(&UnstableRouter), unstable),
+            "{unstable:?}"
+        );
+        // An out-of-range version is the decoder's business, not this
+        // gate's; an api the listener does not know is not disabled.
+        assert2::check!(!is_disabled_version(22, 7, Some(&UnstableRouter), unstable));
+        assert2::check!(!is_disabled_version(22, 6, None, unstable));
     }
 
     /// A router api Kafka 4.3.1 does not have -- `UnregisterController` (94),
     /// a trunk key -- is neither advertised nor accepted while unstable api
     /// versions are disabled, and is served whole when they are enabled.
-    #[test]
-    fn an_api_kafka_4_3_1_lacks_follows_unstable_api_versions_enable() {
+    #[yare::parameterized(
+        disabled = { UnstableApiVersions::Disabled, None, true },
+        enabled = { UnstableApiVersions::Enabled, Some((0, 0)), false },
+    )]
+    fn an_api_kafka_4_3_1_lacks_follows_unstable_api_versions_enable(
+        unstable: UnstableApiVersions,
+        advertised: Option<(i16, i16)>,
+        disabled: bool,
+    ) {
         struct TrunkRouter;
         impl ControllerAdminRouter for TrunkRouter {
             fn api_versions(&self) -> &[ControllerApiVersion] {
@@ -457,20 +467,15 @@ mod tests {
             }
         }
 
-        for (unstable, advertised, disabled) in [
-            (UnstableApiVersions::Disabled, None, true),
-            (UnstableApiVersions::Enabled, Some((0, 0)), false),
-        ] {
-            let row = advertised_api_keys(Some(&TrunkRouter), unstable)
-                .into_iter()
-                .find(|key| key.api_key == 94)
-                .map(|key| (key.min_version, key.max_version));
-            assert2::check!(row == advertised, "{unstable:?}");
-            assert2::check!(
-                is_disabled_version(94, 0, Some(&TrunkRouter), unstable) == disabled,
-                "{unstable:?}"
-            );
-        }
+        let row = advertised_api_keys(Some(&TrunkRouter), unstable)
+            .into_iter()
+            .find(|key| key.api_key == 94)
+            .map(|key| (key.min_version, key.max_version));
+        assert2::check!(row == advertised, "{unstable:?}");
+        assert2::check!(
+            is_disabled_version(94, 0, Some(&TrunkRouter), unstable) == disabled,
+            "{unstable:?}"
+        );
     }
 
     /// The controller listener's table is strictly ascending by api key, the
@@ -783,33 +788,32 @@ mod tests {
     /// production level, and with only the API flag set it advertises the
     /// highest level krabka knows. The listener takes no feature flag at all:
     /// its view has none.
-    #[test]
-    fn the_controller_listener_caps_supported_features_with_the_api_flag() {
-        use krabka_metadata::metadata_version::METADATA_VERSION_MAX;
-
+    #[yare::parameterized(
+        disabled = { UnstableApiVersions::Disabled, LATEST_PRODUCTION_METADATA_VERSION },
+        enabled = {
+            UnstableApiVersions::Enabled,
+            krabka_metadata::metadata_version::METADATA_VERSION_MAX,
+        },
+    )]
+    fn the_controller_listener_caps_supported_features_with_the_api_flag(
+        unstable: UnstableApiVersions,
+        want_max: i16,
+    ) {
         let image = krabka_metadata::MetadataImage::new(Uuid::nil());
-        for (unstable, want_max) in [
-            (
-                UnstableApiVersions::Disabled,
-                LATEST_PRODUCTION_METADATA_VERSION,
-            ),
-            (UnstableApiVersions::Enabled, METADATA_VERSION_MAX),
-        ] {
-            let view = ApiVersionsView {
-                unstable,
-                ..view(&image, 0)
-            };
-            let body = super::api_versions_response_body(4, view);
-            let resp = ApiVersionsResponse::decode(&mut &body[..], 4).expect("decode");
-            let metadata_version = resp
-                .supported_features
-                .iter()
-                .find(|feature| feature.name == "metadata.version")
-                .expect("metadata.version is supported");
-            assert2::check!(
-                metadata_version.max_version == want_max,
-                "unstable.api.versions.enable {unstable:?}"
-            );
-        }
+        let view = ApiVersionsView {
+            unstable,
+            ..view(&image, 0)
+        };
+        let body = super::api_versions_response_body(4, view);
+        let resp = ApiVersionsResponse::decode(&mut &body[..], 4).expect("decode");
+        let metadata_version = resp
+            .supported_features
+            .iter()
+            .find(|feature| feature.name == "metadata.version")
+            .expect("metadata.version is supported");
+        assert2::check!(
+            metadata_version.max_version == want_max,
+            "unstable.api.versions.enable {unstable:?}"
+        );
     }
 }

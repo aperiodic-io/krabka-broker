@@ -2,7 +2,8 @@ use {
     super::*,
     crate::{
         core::test_support::{
-            FakeLog, TEST_ELECTION_TIMEOUT, machine, three_voter_machine, voters,
+            FakeLog, TEST_ELECTION_TIMEOUT, adjacent_voter_machine, machine, three_voter_machine,
+            voters,
         },
         event::{Event, SuccessorRank},
         types::{NodeId, QuorumState},
@@ -96,17 +97,18 @@ fn a_candidate_at_our_own_epoch_is_not_fenced() {
 
 /// A vote or a pre-vote from a higher epoch moves us to that epoch before the
 /// grant is decided, as `KafkaRaftClient.handleVoteRequest` does for both.
-#[test]
-fn a_vote_or_pre_vote_from_a_higher_epoch_advances_our_epoch() {
-    for (pre_vote, want_epoch) in [(false, 7), (true, 7)] {
-        let mut m = three_voter_machine();
-        receive_vote(&mut m, vote_event(NodeId(2), 7, pre_vote, 1, 5));
-        check!(
-            m.quorum_state().leader_epoch == want_epoch,
-            "pre_vote={pre_vote}: epoch {}",
-            m.quorum_state().leader_epoch
-        );
-    }
+#[yare::parameterized(
+    vote = { false },
+    pre_vote = { true },
+)]
+fn a_vote_or_pre_vote_from_a_higher_epoch_advances_our_epoch(pre_vote: bool) {
+    let mut m = three_voter_machine();
+    receive_vote(&mut m, vote_event(NodeId(2), 7, pre_vote, 1, 5));
+    check!(
+        m.quorum_state().leader_epoch == 7,
+        "pre_vote={pre_vote}: epoch {}",
+        m.quorum_state().leader_epoch
+    );
 }
 
 #[test]
@@ -697,8 +699,7 @@ fn fenced_when_candidate_epoch_below_current() {
 fn vote_from_adjacent_voter_view_is_granted_when_up_to_date() {
     // KIP-853 permits an up-to-date candidate from an adjacent voter view;
     // only the local latest set determines whether this replica may vote.
-    let mut m = three_voter_machine();
-    let _ = m.apply_voter_set(voters(&[NodeId(1), NodeId(2), NodeId(99)]), SimInstant(0));
+    let mut m = adjacent_voter_machine();
     let actions = receive_vote(&mut m, vote_event(NodeId(99), 1, false, 1, 5));
     assert2::assert!(
         m.quorum_state()

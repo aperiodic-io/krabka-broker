@@ -168,6 +168,17 @@ impl Harness {
 
     fn spawn(&self) -> tokio::task::JoinHandle<()> { self.spawn_on(self.timeline.new_timer()) }
 
+    async fn spawn_and_wait_parked(&self) -> tokio::task::JoinHandle<()> {
+        let task = self.spawn();
+        check!(wait_parked(&self.timeline, 1).await);
+        task
+    }
+
+    async fn stop(&self, task: tokio::task::JoinHandle<()>) {
+        self.shutdown.cancel();
+        task.await.expect("the scheduler task exits");
+    }
+
     /// Spawns the scheduler on `timer` rather than on the harness timeline, so
     /// that a test can hand the loop a ticker that gives out.
     fn spawn_on(&self, timer: Arc<dyn Timer>) -> tokio::task::JoinHandle<()> {
@@ -203,8 +214,7 @@ async fn a_batch_that_is_not_due_holds_the_watermark_and_then_releases_it() {
         ..Default::default()
     });
 
-    let task = harness.spawn();
-    check!(wait_parked(&harness.timeline, 1).await);
+    let task = harness.spawn_and_wait_parked().await;
 
     // The first two records are visible; the pending batch holds the rest.
     check!(partition.delivery_watermark() == Offset(2));
@@ -239,8 +249,7 @@ async fn a_batch_that_is_not_due_holds_the_watermark_and_then_releases_it() {
         "the manual timeline lands exactly on the deadline"
     );
 
-    harness.shutdown.cancel();
-    task.await.expect("the scheduler task exits");
+    harness.stop(task).await;
 }
 
 #[tokio::test]
@@ -256,16 +265,14 @@ async fn a_topic_that_delivers_immediately_reports_nothing() {
         ..Default::default()
     });
 
-    let task = harness.spawn();
-    check!(wait_parked(&harness.timeline, 1).await);
+    let task = harness.spawn_and_wait_parked().await;
 
     // Everything durable is visible, and the partition creates no series.
     check!(immediate.delivery_watermark() == Offset(2));
     check!(harness.metrics.watermarks().is_empty());
     check!(harness.metrics.wakeups() >= 1);
 
-    harness.shutdown.cancel();
-    task.await.expect("the scheduler task exits");
+    harness.stop(task).await;
 }
 
 #[tokio::test]
@@ -281,16 +288,14 @@ async fn a_partition_this_broker_does_not_lead_is_left_alone() {
         ..Default::default()
     });
 
-    let task = harness.spawn();
-    check!(wait_parked(&harness.timeline, 1).await);
+    let task = harness.spawn_and_wait_parked().await;
 
     check!(harness.metrics.watermarks().is_empty());
     // The scheduler never adopts a partition it does not lead, so an append
     // there cannot re-arm it.
     check!(!followed.delivery.wake_scheduler(NOW_MS));
 
-    harness.shutdown.cancel();
-    task.await.expect("the scheduler task exits");
+    harness.stop(task).await;
 }
 
 #[tokio::test]
@@ -305,8 +310,7 @@ async fn the_scheduler_adopts_a_leader_partition_so_a_produce_can_rearm_it() {
         ..Default::default()
     });
 
-    let task = harness.spawn();
-    check!(wait_parked(&harness.timeline, 1).await);
+    let task = harness.spawn_and_wait_parked().await;
 
     // Nothing waits, so the task sleeps on its idle bound and any nearer
     // deadline re-arms it.
@@ -318,8 +322,7 @@ async fn the_scheduler_adopts_a_leader_partition_so_a_produce_can_rearm_it() {
     let metrics = Arc::clone(&harness.metrics);
     check!(wait_until(move || metrics.watermarks().len() > swept).await);
 
-    harness.shutdown.cancel();
-    task.await.expect("the scheduler task exits");
+    harness.stop(task).await;
 }
 
 /// The heap a sweep left, and the waker it was given.

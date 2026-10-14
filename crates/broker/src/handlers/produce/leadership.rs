@@ -578,42 +578,47 @@ mod tests {
     /// replication factor 1 on a cluster whose default asks for 2 must still
     /// accept `acks=all`, because the clamp brings the effective threshold
     /// down to 1.
-    #[tokio::test]
-    async fn acks_all_clamps_min_isr_to_the_replica_count() {
-        for (name, replicas, isr_len, cluster_min_isr, want_refused) in [
-            ("rf1 clamps below the cluster default", 1, 1, 2, false),
-            ("rf1 with an empty isr still refuses", 1, 0, 2, true),
-            ("rf3 below the cluster default refuses", 3, 1, 2, true),
-            ("rf3 at the cluster default admits", 3, 2, 2, false),
-        ] {
-            let replica_ids: Vec<krabka_audit::NodeId> =
-                (1..=replicas).map(krabka_audit::NodeId).collect();
-            let mut image = image_with_topic(
-                "orders",
-                &replica_ids.iter().map(|n| n.0).collect::<Vec<_>>(),
-            );
-            image.apply(&MetadataRecord::V1Partition(
-                krabka_metadata::PartitionRecord {
-                    topic: "orders".into(),
-                    partition: 0,
-                    leader: krabka_audit::NodeId(1),
-                    replicas: replica_ids.clone(),
-                    isr: replica_ids.into_iter().take(isr_len).collect(),
-                    leader_epoch: krabka_metadata::LeaderEpoch(0),
-                    adding_replicas: vec![],
-                    removing_replicas: vec![],
-                    directories: vec![],
-                    partition_epoch: 1,
-                },
-            ));
-            image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
-                node_id: krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID,
-                config_name: MIN_INSYNC_REPLICAS.into(),
-                config_value: Some(cluster_min_isr.to_string()),
-            }));
+    #[yare::parameterized(
+        rf1_clamps = { "rf1 clamps below the cluster default", 1, 1, 2, false },
+        rf1_empty_isr = { "rf1 with an empty isr still refuses", 1, 0, 2, true },
+        rf3_below_default = { "rf3 below the cluster default refuses", 3, 1, 2, true },
+        rf3_at_default = { "rf3 at the cluster default admits", 3, 2, 2, false },
+    )]
+    #[test_macro(tokio::test)]
+    async fn acks_all_clamps_min_isr_to_the_replica_count(
+        name: &str,
+        replicas: u64,
+        isr_len: usize,
+        cluster_min_isr: i32,
+        want_refused: bool,
+    ) {
+        let replica_ids: Vec<krabka_audit::NodeId> =
+            (1..=replicas).map(krabka_audit::NodeId).collect();
+        let mut image = image_with_topic(
+            "orders",
+            &replica_ids.iter().map(|n| n.0).collect::<Vec<_>>(),
+        );
+        image.apply(&MetadataRecord::V1Partition(
+            krabka_metadata::PartitionRecord {
+                topic: "orders".into(),
+                partition: 0,
+                leader: krabka_audit::NodeId(1),
+                replicas: replica_ids.clone(),
+                isr: replica_ids.into_iter().take(isr_len).collect(),
+                leader_epoch: krabka_metadata::LeaderEpoch(0),
+                adding_replicas: vec![],
+                removing_replicas: vec![],
+                directories: vec![],
+                partition_epoch: 1,
+            },
+        ));
+        image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {
+            node_id: krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID,
+            config_name: MIN_INSYNC_REPLICAS.into(),
+            config_value: Some(cluster_min_isr.to_string()),
+        }));
 
-            assert_min_isr_gate(&image, name, want_refused);
-        }
+        assert_min_isr_gate(&image, name, want_refused);
     }
 
     #[tokio::test]

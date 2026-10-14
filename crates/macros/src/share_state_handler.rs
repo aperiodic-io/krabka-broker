@@ -57,18 +57,16 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
 mod tests {
     use {super::expand, assert2::assert};
 
-    #[test]
-    fn rejects_missing_arguments_invalid_types_and_extra_tokens() {
-        for input in [
-            "",
-            "Request, Response, TopicRow, PartitionRow",
-            "Request Response, TopicRow, PartitionRow, serve",
-            "42, Response, TopicRow, PartitionRow, serve",
-            "Request, Response, TopicRow, PartitionRow, 42",
-            "Request, Response, TopicRow, PartitionRow, serve, extra",
-        ] {
-            assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        empty = { "" },
+        missing_handler = { "Request, Response, TopicRow, PartitionRow" },
+        missing_comma = { "Request Response, TopicRow, PartitionRow, serve" },
+        non_type = { "42, Response, TopicRow, PartitionRow, serve" },
+        non_path_handler = { "Request, Response, TopicRow, PartitionRow, 42" },
+        extra_item = { "Request, Response, TopicRow, PartitionRow, serve, extra" },
+    )]
+    fn rejects_missing_arguments_invalid_types_and_extra_tokens(input: &str) {
+        assert2::assert!(expand(&input.parse().unwrap()).is_err(), "{input}");
     }
 
     #[test]

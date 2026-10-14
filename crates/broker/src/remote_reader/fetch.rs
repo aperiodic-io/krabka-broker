@@ -611,8 +611,17 @@ mod tests {
         assert!(matches!(err, RemoteStorageError::NotReady { partition: 3 }));
     }
 
-    #[test]
-    fn relative_offset_respects_epoch_subrange_boundary() {
+    #[yare::parameterized(
+        prior_epoch_last_offset = { LeaderEpoch(0), 49, Some(49) },
+        prior_epoch_at_next_start = { LeaderEpoch(0), 50, None },
+        next_epoch_before_start = { LeaderEpoch(1), 49, None },
+        next_epoch_at_start = { LeaderEpoch(1), 50, Some(50) },
+    )]
+    fn relative_offset_respects_epoch_subrange_boundary(
+        epoch: LeaderEpoch,
+        offset: i64,
+        expected: Option<u32>,
+    ) {
         let metadata = RemoteLogSegmentMetadata::new(
             krabka_remote_storage::RemoteLogSegmentId::new(tp(), Uuid::new_v4()),
             0,
@@ -631,17 +640,10 @@ mod tests {
         )
         .unwrap();
 
-        for (epoch, offset, expected) in [
-            (LeaderEpoch(0), 49, Some(49)),
-            (LeaderEpoch(0), 50, None),
-            (LeaderEpoch(1), 49, None),
-            (LeaderEpoch(1), 50, Some(50)),
-        ] {
-            assert!(
-                relative_offset(&metadata, epoch, offset) == expected,
-                "epoch={epoch:?} offset={offset}"
-            );
-        }
+        assert2::assert!(
+            relative_offset(&metadata, epoch, offset) == expected,
+            "epoch={epoch:?} offset={offset}"
+        );
     }
 
     /// The broker tiers segments under the leader epoch that was active at

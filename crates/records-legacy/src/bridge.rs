@@ -274,88 +274,89 @@ mod tests {
         wire
     }
 
-    #[test]
-    fn up_conversion_rejects_extreme_offset_and_timestamp_deltas() {
-        for (offsets, timestamps) in [
-            (vec![i64::MIN, i64::MAX], vec![0, 0]),
-            (vec![i64::MAX, i64::MIN], vec![0, 0]),
-            (vec![0, i64::MAX, 1], vec![0, 0, 0]),
-            (vec![0, 1], vec![i64::MIN, i64::MAX]),
-        ] {
-            let wire = flat_v1(&offsets, &timestamps);
-            assert2::assert!(matches!(
-                legacy_to_v2(&wire),
-                Err(LegacyRecordsError::Malformed(_))
-            ));
-        }
+    #[yare::parameterized(
+        descending_extremes = { &[i64::MIN, i64::MAX][..], &[0, 0][..] },
+        descending_max_to_min = { &[i64::MAX, i64::MIN][..], &[0, 0][..] },
+        offset_delta_overflow = { &[0, i64::MAX, 1][..], &[0, 0, 0][..] },
+        timestamp_delta_overflow = { &[0, 1][..], &[i64::MIN, i64::MAX][..] },
+    )]
+    fn up_conversion_rejects_extreme_offset_and_timestamp_deltas(
+        offsets: &[i64],
+        timestamps: &[i64],
+    ) {
+        let wire = flat_v1(offsets, timestamps);
+        assert2::assert!(matches!(
+            legacy_to_v2(&wire),
+            Err(LegacyRecordsError::Malformed(_))
+        ));
     }
 
-    #[test]
-    fn conversion_preserves_representable_extreme_coordinates() {
-        for base in [i64::MIN, i64::MAX - 1] {
-            let wire = flat_v1(&[base, base + 1], &[base, base + 1]);
-            let batch = legacy_to_v2(&wire).unwrap();
-            assert2::assert!(batch.base_offset == base && batch.last_offset_delta == 1);
-            assert2::assert!(batch.base_timestamp == base && batch.max_timestamp == base + 1);
-            assert2::assert!(
-                batch
-                    .records
-                    .iter()
-                    .map(|r| (r.offset_delta, r.timestamp_delta))
-                    .collect::<Vec<_>>()
-                    == vec![(0, 0), (1, 1)]
-            );
-            assert2::assert!(v2_to_legacy(&batch, Magic::V1).unwrap() == wire);
-        }
+    #[yare::parameterized(
+        minimum = { i64::MIN },
+        maximum = { i64::MAX - 1 },
+    )]
+    fn conversion_preserves_representable_extreme_coordinates(base: i64) {
+        let wire = flat_v1(&[base, base + 1], &[base, base + 1]);
+        let batch = legacy_to_v2(&wire).unwrap();
+        assert2::assert!(batch.base_offset == base && batch.last_offset_delta == 1);
+        assert2::assert!(batch.base_timestamp == base && batch.max_timestamp == base + 1);
+        assert2::assert!(
+            batch
+                .records
+                .iter()
+                .map(|r| (r.offset_delta, r.timestamp_delta))
+                .collect::<Vec<_>>()
+                == vec![(0, 0), (1, 1)]
+        );
+        assert2::assert!(v2_to_legacy(&batch, Magic::V1).unwrap() == wire);
     }
 
-    #[test]
-    fn down_conversion_rejects_absolute_coordinate_overflow() {
-        for (base, delta) in [(i64::MAX, 1), (i64::MIN, -1)] {
-            let mut batch = v2_batch(CompressionType::None);
-            batch.base_offset = base;
-            batch.records[0].offset_delta = delta;
-            assert2::assert!(matches!(
-                v2_to_legacy(&batch, Magic::V0),
-                Err(LegacyRecordsError::Malformed(_))
-            ));
-            batch.base_offset = 0;
-            batch.records[0].offset_delta = 0;
-            batch.base_timestamp = base;
-            batch.records[0].timestamp_delta = i64::from(delta);
-            assert2::assert!(matches!(
-                v2_to_legacy(&batch, Magic::V1),
-                Err(LegacyRecordsError::Malformed(_))
-            ));
-            // v0 does not encode timestamps and therefore needs no timestamp arithmetic.
-            assert2::assert!(v2_to_legacy(&batch, Magic::V0).is_ok());
-        }
+    #[yare::parameterized(
+        positive_overflow = { i64::MAX, 1 },
+        negative_overflow = { i64::MIN, -1 },
+    )]
+    fn down_conversion_rejects_absolute_coordinate_overflow(base: i64, delta: i32) {
+        let mut batch = v2_batch(CompressionType::None);
+        batch.base_offset = base;
+        batch.records[0].offset_delta = delta;
+        assert2::assert!(matches!(
+            v2_to_legacy(&batch, Magic::V0),
+            Err(LegacyRecordsError::Malformed(_))
+        ));
+        batch.base_offset = 0;
+        batch.records[0].offset_delta = 0;
+        batch.base_timestamp = base;
+        batch.records[0].timestamp_delta = i64::from(delta);
+        assert2::assert!(matches!(
+            v2_to_legacy(&batch, Magic::V1),
+            Err(LegacyRecordsError::Malformed(_))
+        ));
+        // v0 does not encode timestamps and therefore needs no timestamp arithmetic.
+        assert2::assert!(v2_to_legacy(&batch, Magic::V0).is_ok());
     }
 
-    #[test]
-    fn down_then_up_round_trips_complete_batches() {
-        for (_name, magic, codec) in [
-            ("v1 uncompressed", Magic::V1, CompressionType::None),
-            ("v0 uncompressed", Magic::V0, CompressionType::None),
-            ("v1 gzip", Magic::V1, CompressionType::Gzip),
-            ("v1 snappy", Magic::V1, CompressionType::Snappy),
-        ] {
-            let v2 = v2_batch(codec);
-            let legacy_bytes = v2_to_legacy(&v2, magic).unwrap();
-            let round = legacy_to_v2(&legacy_bytes).unwrap();
+    #[yare::parameterized(
+        v1_uncompressed = { Magic::V1, CompressionType::None },
+        v0_uncompressed = { Magic::V0, CompressionType::None },
+        v1_gzip = { Magic::V1, CompressionType::Gzip },
+        v1_snappy = { Magic::V1, CompressionType::Snappy },
+    )]
+    fn down_then_up_round_trips_complete_batches(magic: Magic, codec: CompressionType) {
+        let v2 = v2_batch(codec);
+        let legacy_bytes = v2_to_legacy(&v2, magic).unwrap();
+        let round = legacy_to_v2(&legacy_bytes).unwrap();
 
-            let mut expected = v2;
-            expected.partition_leader_epoch = -1;
-            expected.attributes = Attributes::default();
-            if magic == Magic::V0 {
-                expected.base_timestamp = -1;
-                expected.max_timestamp = -1;
-                for record in &mut expected.records {
-                    record.timestamp_delta = 0;
-                }
+        let mut expected = v2;
+        expected.partition_leader_epoch = -1;
+        expected.attributes = Attributes::default();
+        if magic == Magic::V0 {
+            expected.base_timestamp = -1;
+            expected.max_timestamp = -1;
+            for record in &mut expected.records {
+                record.timestamp_delta = 0;
             }
-            assert2::assert!(round == expected);
         }
+        assert2::assert!(round == expected);
     }
 
     krabka_macros::legacy_policy_fixture!(policy_wire, crate);

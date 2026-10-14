@@ -6,65 +6,22 @@ use {super::*, assert2::check, krabka_broker::codes};
 /// A runbook branches on `$?`, so each number has to mean one thing. The
 /// three codes that get their own number are the three an operator acts on
 /// differently; every other refusal is a refusal.
-#[test]
-fn every_broker_code_maps_to_the_exit_code_a_runbook_expects() {
-    let cases = [
-        ("no error", codes::NONE, 0),
-        (
-            "an action that needs an approval",
-            codes::BREAK_GLASS_APPROVAL_REQUIRED,
-            EXIT_NO_APPROVAL,
-        ),
-        (
-            "a signature that did not verify",
-            codes::OPERATOR_SIGNATURE_INVALID,
-            EXIT_BAD_SIGNATURE,
-        ),
-        (
-            "a signature the broker needed and did not get",
-            codes::OPERATOR_SIGNATURE_REQUIRED,
-            EXIT_BAD_SIGNATURE,
-        ),
-        (
-            "a principal that already approved",
-            codes::BREAK_GLASS_DUPLICATE_APPROVER,
-            EXIT_REFUSED,
-        ),
-        (
-            "a principal outside the approver set",
-            codes::BREAK_GLASS_NOT_AN_APPROVER,
-            EXIT_REFUSED,
-        ),
-        (
-            "a scope that reaches an internal topic",
-            codes::FREEZE_SCOPE_INVALID,
-            EXIT_REFUSED,
-        ),
-        (
-            "a registry at its ceiling",
-            codes::FREEZE_LIMIT_EXCEEDED,
-            EXIT_REFUSED,
-        ),
-        (
-            "a caller with no cluster right",
-            codes::CLUSTER_AUTHORIZATION_FAILED,
-            EXIT_REFUSED,
-        ),
-        ("a malformed request", codes::INVALID_REQUEST, EXIT_REFUSED),
-        (
-            "a broker that is not the controller",
-            codes::NOT_CONTROLLER,
-            EXIT_REFUSED,
-        ),
-        (
-            "a code this build does not know",
-            codes::UNKNOWN_SERVER_ERROR,
-            EXIT_REFUSED,
-        ),
-    ];
-    for (case, code, expected) in cases {
-        check!(exit_for_code(code) == expected, "{case}");
-    }
+#[yare::parameterized(
+    none = { codes::NONE, 0 },
+    approval_required = { codes::BREAK_GLASS_APPROVAL_REQUIRED, EXIT_NO_APPROVAL },
+    invalid_signature = { codes::OPERATOR_SIGNATURE_INVALID, EXIT_BAD_SIGNATURE },
+    missing_signature = { codes::OPERATOR_SIGNATURE_REQUIRED, EXIT_BAD_SIGNATURE },
+    duplicate_approver = { codes::BREAK_GLASS_DUPLICATE_APPROVER, EXIT_REFUSED },
+    not_approver = { codes::BREAK_GLASS_NOT_AN_APPROVER, EXIT_REFUSED },
+    invalid_freeze_scope = { codes::FREEZE_SCOPE_INVALID, EXIT_REFUSED },
+    freeze_limit = { codes::FREEZE_LIMIT_EXCEEDED, EXIT_REFUSED },
+    unauthorized = { codes::CLUSTER_AUTHORIZATION_FAILED, EXIT_REFUSED },
+    invalid_request = { codes::INVALID_REQUEST, EXIT_REFUSED },
+    not_controller = { codes::NOT_CONTROLLER, EXIT_REFUSED },
+    unknown_code = { codes::UNKNOWN_SERVER_ERROR, EXIT_REFUSED },
+)]
+fn every_broker_code_maps_to_the_exit_code_a_runbook_expects(code: i16, expected: i32) {
+    check!(exit_for_code(code) == expected);
 }
 
 /// An approval says who made it, and a signed one says which key. The

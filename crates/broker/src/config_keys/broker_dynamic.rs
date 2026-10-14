@@ -522,176 +522,184 @@ mod tests {
 
     /// Controller-side validation skips broker-local membership checks but
     /// must reject a wildcard mixed with explicit directories after a merge.
-    #[test]
-    fn forwarded_cordoned_config_keeps_the_wildcard_invariant() {
-        let cases = [
-            ("*", Ok(())),
-            ("/remote/broker/logs", Ok(())),
-            ("*,/remote/broker/logs", Err((codes::INVALID_REQUEST,
-                "requirement failed: When cordoned.log.dirs is set to *, it must not contain other values".to_owned()))),
-        ];
-        for (value, expected) in cases {
-            check!(cordoned_log_dirs_error(&map(&[(CORDONED_LOG_DIRS, value)]), &[]) == expected);
-        }
+    #[yare::parameterized(
+        wildcard = { "*", Ok(()) },
+        named_directory = { "/remote/broker/logs", Ok(()) },
+        wildcard_with_named_directory = {
+            "*,/remote/broker/logs",
+            Err((
+                codes::INVALID_REQUEST,
+                "requirement failed: When cordoned.log.dirs is set to *, it must not contain other values"
+                    .to_owned(),
+            )),
+        },
+    )]
+    fn forwarded_cordoned_config_keeps_the_wildcard_invariant(
+        value: &str,
+        expected: Result<(), (i16, String)>,
+    ) {
+        check!(cordoned_log_dirs_error(&map(&[(CORDONED_LOG_DIRS, value)]), &[]) == expected);
     }
 
-    #[test]
-    fn broker_resource_names_follow_kafkas_node_id_rule() {
+    #[yare::parameterized(
+        default_resource = { "", Ok(krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID) },
+        serving_node = { "1", Ok(NodeId(1)) },
+        other_node = {
+            "2",
+            Err((
+                codes::INVALID_REQUEST,
+                "Unexpected broker id, expected 1, but received 2".to_owned(),
+            )),
+        },
+        negative_node = {
+            "-1",
+            Err((
+                codes::INVALID_REQUEST,
+                "Unexpected broker id, expected 1, but received -1".to_owned(),
+            )),
+        },
+        non_integer = {
+            "abc",
+            Err((
+                codes::INVALID_REQUEST,
+                "Node id must be an integer, but it is: abc".to_owned(),
+            )),
+        },
+    )]
+    fn broker_resource_names_follow_kafkas_node_id_rule(
+        name: &str,
+        want: Result<NodeId, (i16, String)>,
+    ) {
         let serving = NodeId(1);
-        let cases = [
-            ("", Ok(krabka_metadata::DEFAULT_BROKER_CONFIG_NODE_ID)),
-            ("1", Ok(NodeId(1))),
-            (
-                "2",
-                Err((
-                    codes::INVALID_REQUEST,
-                    "Unexpected broker id, expected 1, but received 2".to_owned(),
-                )),
-            ),
-            (
-                "-1",
-                Err((
-                    codes::INVALID_REQUEST,
-                    "Unexpected broker id, expected 1, but received -1".to_owned(),
-                )),
-            ),
-            (
-                "abc",
-                Err((
-                    codes::INVALID_REQUEST,
-                    "Node id must be an integer, but it is: abc".to_owned(),
-                )),
-            ),
-        ];
-        for (name, want) in cases {
-            check!(broker_resource_node(name, serving) == want, "{name:?}");
-        }
+        check!(broker_resource_node(name, serving) == want, "{name:?}");
     }
 
-    #[test]
-    fn dynamic_broker_configs_follow_kafkas_validate_configs() {
-        let cases = [
-            (map(&[("plugin.custom.key", "x")]), false, Ok(())),
-            (
-                map(&[("log.dirs", "/tmp")]),
-                false,
-                Err("Cannot update these configs dynamically: [log.dirs]"),
+    #[yare::parameterized(
+        custom_key_allowed = { map(&[("plugin.custom.key", "x")]), false, Ok(()) },
+        broker_log_dirs_refused = {
+            map(&[("log.dirs", "/tmp")]),
+            false,
+            Err("Cannot update these configs dynamically: [log.dirs]"),
+        },
+        ssl_key_requires_listener_prefix = {
+            map(&[("ssl.keystore.location", "/k")]),
+            true,
+            Err(
+                "These security configs can be dynamically updated only per-listener using \
+                         the listener prefix: [ssl.keystore.location]",
             ),
-            (
-                map(&[("ssl.keystore.location", "/k")]),
-                true,
-                Err(
-                    "These security configs can be dynamically updated only per-listener using \
-                     the listener prefix: [ssl.keystore.location]",
-                ),
+        },
+        listener_ssl_key_requires_named_broker = {
+            map(&[("listener.name.client.ssl.keystore.location", "/k")]),
+            false,
+            Err(
+                "Cannot update these configs at default cluster level, broker id must be \
+                         specified: [listener.name.client.ssl.keystore.location]",
             ),
-            (
-                map(&[("listener.name.client.ssl.keystore.location", "/k")]),
-                false,
-                Err(
-                    "Cannot update these configs at default cluster level, broker id must be \
-                     specified: [listener.name.client.ssl.keystore.location]",
-                ),
+        },
+        listener_ssl_key_allowed_on_named_broker = {
+            map(&[("listener.name.client.ssl.keystore.location", "/k")]),
+            true,
+            Ok(()),
+        },
+        topic_retention_value_allowed = {
+            map(&[("log.retention.ms", " 86400000 ")]),
+            false,
+            Ok(()),
+        },
+        dynamic_integer_value_allowed = { map(&[("num.io.threads", "16")]), false, Ok(()) },
+        throttle_rate_must_be_nonnegative = {
+            map(&[(LEADER_THROTTLED_RATE_KEY, "-1")]),
+            true,
+            Err(
+                "Invalid value -1 for configuration leader.replication.throttled.rate: Value \
+                        must be at least 0",
             ),
-            (
-                map(&[("listener.name.client.ssl.keystore.location", "/k")]),
-                true,
-                Ok(()),
+        },
+        minimum_insync_replicas_must_be_positive = {
+            map(&[("min.insync.replicas", "0")]),
+            true,
+            Err(
+                "Invalid value 0 for configuration min.insync.replicas: Value must be at \
+                         least 1",
             ),
-            (map(&[("log.retention.ms", " 86400000 ")]), false, Ok(())),
-            (map(&[("num.io.threads", "16")]), false, Ok(())),
-            (
-                map(&[(LEADER_THROTTLED_RATE_KEY, "-1")]),
-                true,
-                Err(
-                    "Invalid value -1 for configuration leader.replication.throttled.rate: Value \
-                     must be at least 0",
-                ),
+        },
+        startup_only_key_refused = {
+            map(&[("auto.leader.rebalance.enable", "false")]),
+            false,
+            Err("Cannot update these configs dynamically: [auto.leader.rebalance.enable]"),
+        },
+        queued_max_requests_refused = {
+            map(&[("queued.max.requests", "10")]),
+            true,
+            Err("Cannot update these configs dynamically: [queued.max.requests]"),
+        },
+        non_dynamic_key_precedes_bad_value = {
+            map(&[("log.cleaner.enable", "false"), ("num.io.threads", "abc")]),
+            false,
+            Err("Cannot update these configs dynamically: [log.cleaner.enable]"),
+        },
+        offsets_replication_factor_refused = {
+            map(&[("offsets.topic.replication.factor", "1")]),
+            false,
+            Err("Cannot update these configs dynamically: [offsets.topic.replication.factor]"),
+        },
+        dynamic_integer_value_must_parse = {
+            map(&[("num.io.threads", "abc")]),
+            false,
+            Err("Invalid value abc for configuration num.io.threads: Not a number of type INT"),
+        },
+        connection_limit_must_be_nonnegative = {
+            map(&[("max.connections", "-5")]),
+            false,
+            Err("Invalid value -5 for configuration max.connections: Value must be at least 0"),
+        },
+        network_threads_must_be_positive = {
+            map(&[("num.network.threads", "0")]),
+            false,
+            Err(
+                "Invalid value 0 for configuration num.network.threads: Value must be at \
+                         least 1",
             ),
-            (
-                map(&[("min.insync.replicas", "0")]),
-                true,
-                Err(
-                    "Invalid value 0 for configuration min.insync.replicas: Value must be at \
-                     least 1",
-                ),
+        },
+        tiered_offset_boolean_is_case_insensitive = {
+            map(&[("follower.fetch.last.tiered.offset.enable", " TRUE ")]),
+            false,
+            Ok(()),
+        },
+        listener_override_reports_base_key = {
+            map(&[("listener.name.external.num.network.threads", "abc")]),
+            false,
+            Err(
+                "Invalid value abc for configuration num.network.threads: Not a number of \
+                         type INT",
             ),
-            // Every `KafkaConfig` key that is not dynamic is refused, not only
-            // the ones krabka reads at startup.
-            (
-                map(&[("auto.leader.rebalance.enable", "false")]),
-                false,
-                Err("Cannot update these configs dynamically: [auto.leader.rebalance.enable]"),
+        },
+        per_broker_key_refused_on_cluster_default = {
+            map(&[("sasl.enabled.mechanisms", "PLAIN")]),
+            false,
+            Err(
+                "Cannot update these configs at default cluster level, broker id must be \
+                         specified: [sasl.enabled.mechanisms]",
             ),
-            (
-                map(&[("queued.max.requests", "10")]),
-                true,
-                Err("Cannot update these configs dynamically: [queued.max.requests]"),
-            ),
-            (
-                map(&[("log.cleaner.enable", "false"), ("num.io.threads", "abc")]),
-                false,
-                Err("Cannot update these configs dynamically: [log.cleaner.enable]"),
-            ),
-            (
-                map(&[("offsets.topic.replication.factor", "1")]),
-                false,
-                Err("Cannot update these configs dynamically: [offsets.topic.replication.factor]"),
-            ),
-            // A dynamic key is parsed and range-checked against its `ConfigDef`.
-            (
-                map(&[("num.io.threads", "abc")]),
-                false,
-                Err("Invalid value abc for configuration num.io.threads: Not a number of type INT"),
-            ),
-            (
-                map(&[("max.connections", "-5")]),
-                false,
-                Err("Invalid value -5 for configuration max.connections: Value must be at least 0"),
-            ),
-            (
-                map(&[("num.network.threads", "0")]),
-                false,
-                Err(
-                    "Invalid value 0 for configuration num.network.threads: Value must be at \
-                     least 1",
-                ),
-            ),
-            (
-                map(&[("follower.fetch.last.tiered.offset.enable", " TRUE ")]),
-                false,
-                Ok(()),
-            ),
-            // A listener override is checked as the key it overrides, under
-            // that key's name.
-            (
-                map(&[("listener.name.external.num.network.threads", "abc")]),
-                false,
-                Err(
-                    "Invalid value abc for configuration num.network.threads: Not a number of \
-                     type INT",
-                ),
-            ),
-            // A `PER_BROKER_CONFIGS` key that is not an SSL key is per-broker
-            // too.
-            (
-                map(&[("sasl.enabled.mechanisms", "PLAIN")]),
-                false,
-                Err(
-                    "Cannot update these configs at default cluster level, broker id must be \
-                     specified: [sasl.enabled.mechanisms]",
-                ),
-            ),
-            (map(&[("sasl.enabled.mechanisms", "PLAIN")]), true, Ok(())),
-        ];
-        for (props, per_broker, want) in cases {
-            let want = want.map_err(|message| (codes::INVALID_REQUEST, message.to_owned()));
-            check!(
-                validate_dynamic_broker_configs(&props, per_broker, UnstableApiVersions::Enabled)
-                    == want,
-                "{props:?} per_broker={per_broker}"
-            );
-        }
+        },
+        per_broker_key_allowed_on_named_broker = {
+            map(&[("sasl.enabled.mechanisms", "PLAIN")]),
+            true,
+            Ok(()),
+        },
+    )]
+    fn dynamic_broker_configs_follow_kafkas_validate_configs(
+        props: BTreeMap<String, String>,
+        per_broker: bool,
+        want: Result<(), &str>,
+    ) {
+        let want = want.map_err(|message| (codes::INVALID_REQUEST, message.to_owned()));
+        check!(
+            validate_dynamic_broker_configs(&props, per_broker, UnstableApiVersions::Enabled)
+                == want,
+            "{props:?} per_broker={per_broker}"
+        );
     }
 
     /// #907: the broker keys of Kafka trunk's topic keys are `KafkaConfig`
@@ -715,11 +723,7 @@ mod tests {
         );
         let strict: Vec<&str> =
             served_topic_default_synonyms(UnstableApiVersions::Disabled).collect();
-        for broker in [
-            "log.remote.copy.lag.ms",
-            "log.remote.copy.lag.bytes",
-            "max.decompressed.message.bytes",
-        ] {
+        let check_synonym = |broker: &str| {
             check!(!strict.contains(&broker), "{broker}");
             check!(
                 served_topic_default_synonyms(UnstableApiVersions::Enabled)
@@ -730,26 +734,27 @@ mod tests {
                 broker_key_kind(broker, UnstableApiVersions::Disabled) == BrokerKeyKind::Unknown,
                 "{broker}"
             );
-        }
+        };
+        check_synonym("log.remote.copy.lag.ms");
+        check_synonym("log.remote.copy.lag.bytes");
+        check_synonym("max.decompressed.message.bytes");
     }
 
-    #[test]
-    fn broker_key_kinds_decide_append_and_subtract() {
-        for (name, kind) in [
-            ("log.cleanup.policy", BrokerKeyKind::List),
-            ("log.retention.ms", BrokerKeyKind::Scalar),
-            (LEADER_THROTTLED_RATE_KEY, BrokerKeyKind::Scalar),
-            // Kafka types the operation off `KafkaConfig`'s whole `ConfigDef`,
-            // the keys that are not dynamic included.
-            ("listeners", BrokerKeyKind::List),
-            ("log.dirs", BrokerKeyKind::List),
-            ("num.io.threads", BrokerKeyKind::Scalar),
-            ("not.a.kafka.key", BrokerKeyKind::Unknown),
-        ] {
-            check!(
-                broker_key_kind(name, UnstableApiVersions::Disabled) == kind,
-                "{name}"
-            );
-        }
+    /// Kafka types the operation off `KafkaConfig`'s whole `ConfigDef`, the
+    /// keys that are not dynamic included.
+    #[yare::parameterized(
+        cleanup_policy = { "log.cleanup.policy", BrokerKeyKind::List },
+        retention_ms = { "log.retention.ms", BrokerKeyKind::Scalar },
+        leader_throttled_rate = { LEADER_THROTTLED_RATE_KEY, BrokerKeyKind::Scalar },
+        listeners = { "listeners", BrokerKeyKind::List },
+        log_dirs = { "log.dirs", BrokerKeyKind::List },
+        io_threads = { "num.io.threads", BrokerKeyKind::Scalar },
+        unknown = { "not.a.kafka.key", BrokerKeyKind::Unknown },
+    )]
+    fn broker_key_kinds_decide_append_and_subtract(name: &str, kind: BrokerKeyKind) {
+        check!(
+            broker_key_kind(name, UnstableApiVersions::Disabled) == kind,
+            "{name}"
+        );
     }
 }

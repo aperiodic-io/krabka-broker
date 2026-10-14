@@ -206,8 +206,8 @@ impl Model for CrashModel {
 
     fn actions(&self, s: &Self::State, acts: &mut Vec<Self::Action>) {
         if s.kraft_next < MAX_OFFSET {
-            for node in 0..APPENDERS {
-                if !s.wal_lost[node] {
+            for (node, &wal_lost) in s.wal_lost.iter().enumerate().take(APPENDERS) {
+                if !wal_lost {
                     acts.push(Act::ReserveVia(node));
                 }
             }

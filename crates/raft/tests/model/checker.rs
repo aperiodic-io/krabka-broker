@@ -10,7 +10,7 @@ use {
         log::ModelLog,
         spec::{APPENDER_COUNT, AppenderId, ClientId, KraftLogSpec, LogOp},
         state::{
-            CommitPoint, ModelAction, ModelState, NodeModel, StepWitness, is_leader,
+            CommitPoint, Envelope, ModelAction, ModelState, NodeModel, StepWitness, is_leader,
             live_authority, node_high_watermark,
         },
     },
@@ -42,6 +42,14 @@ fn append_to_leader(state: &mut ModelState, leader: NodeId, client: ClientId, va
         .log
         .append_in_epoch(epoch, 1);
     offset
+}
+
+impl ConsensusModel {
+    fn deliver_if_alive(&self, state: &mut ModelState, env: &Envelope) {
+        if !state.crashed.contains(&env.dst) {
+            self.step(state, env.dst, env.event);
+        }
+    }
 }
 
 impl Model for ConsensusModel {
@@ -185,9 +193,7 @@ impl Model for ConsensusModel {
                 }
                 // A crashed destination is unreachable: the message is consumed
                 // (removed) but produces no transition.
-                if !state.crashed.contains(&env.dst) {
-                    self.step(&mut state, env.dst, env.event);
-                }
+                self.deliver_if_alive(&mut state, &env);
             }
             ModelAction::DropMsg(env) => {
                 // Network loss: remove without delivering. No-op if already gone.
@@ -200,9 +206,7 @@ impl Model for ConsensusModel {
                 if !state.network.contains(&env) {
                     return None;
                 }
-                if !state.crashed.contains(&env.dst) {
-                    self.step(&mut state, env.dst, env.event);
-                }
+                self.deliver_if_alive(&mut state, &env);
             }
             ModelAction::Crash(id) => {
                 if !state.crashed.insert(id) {

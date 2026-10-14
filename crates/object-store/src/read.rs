@@ -205,31 +205,34 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn overwrite_between_head_and_get_cannot_bypass_the_cap() {
-        for race in [Race::Etag, Race::Metadata, Race::Body] {
-            let changing = Arc::new(ChangingStore {
-                inner: object_store::memory::InMemory::new(),
-                race,
-                chunks: Arc::default(),
-            });
-            let key = Path::from("changing");
-            changing
-                .put(&key, PutPayload::from_static(b"123"))
-                .await
-                .unwrap();
-            let store: Arc<dyn object_store::ObjectStore> = changing.clone();
-            let error = read_capped(&store, &key, 5).await.unwrap_err();
-            match race {
-                Race::Etag => assert!(matches!(error, ObjectStoreError::Precondition { .. })),
-                Race::Version => unreachable!("the versioned case returns the original bytes"),
-                Race::Metadata => {
-                    assert!(matches!(error, ObjectStoreError::TooLarge { size: 9, .. }));
-                }
-                Race::Body => {
-                    assert!(matches!(error, ObjectStoreError::TooLarge { size: 6, .. }));
-                    assert!(changing.chunks.load(SeqCst) == 2);
-                }
+    #[yare::parameterized(
+        etag = { Race::Etag },
+        metadata = { Race::Metadata },
+        body = { Race::Body },
+    )]
+    #[test_macro(tokio::test)]
+    async fn overwrite_between_head_and_get_cannot_bypass_the_cap(race: Race) {
+        let changing = Arc::new(ChangingStore {
+            inner: object_store::memory::InMemory::new(),
+            race,
+            chunks: Arc::default(),
+        });
+        let key = Path::from("changing");
+        changing
+            .put(&key, PutPayload::from_static(b"123"))
+            .await
+            .unwrap();
+        let store: Arc<dyn object_store::ObjectStore> = changing.clone();
+        let error = read_capped(&store, &key, 5).await.unwrap_err();
+        match race {
+            Race::Etag => assert2::assert!(matches!(error, ObjectStoreError::Precondition { .. })),
+            Race::Version => unreachable!("the versioned case returns the original bytes"),
+            Race::Metadata => {
+                assert2::assert!(matches!(error, ObjectStoreError::TooLarge { size: 9, .. }));
+            }
+            Race::Body => {
+                assert2::assert!(matches!(error, ObjectStoreError::TooLarge { size: 6, .. }));
+                assert2::assert!(changing.chunks.load(SeqCst) == 2);
             }
         }
     }

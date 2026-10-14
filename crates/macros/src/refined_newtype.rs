@@ -355,90 +355,82 @@ mod tests {
         Expansion { tokens, items }
     }
 
-    #[test]
-    fn quantity_contracts_expose_checked_units_getters_defaults_and_text_parsers() {
-        struct QuantityContract {
-            name: &'static str,
-            to_raw: &'static str,
-            from_raw: &'static str,
-            raw: &'static str,
-            parser: &'static str,
-            default: &'static str,
-        }
-        for case in [
-            QuantityContract {
-                name: "ByteSize",
-                to_raw: "bytes_i64",
-                from_raw: "from_bytes_i64",
-                raw: "i64",
-                parser: "byte_size",
-                default: "::krabka_units::bytes(7)",
-            },
-            QuantityContract {
-                name: "Time",
-                to_raw: "millis_i64",
-                from_raw: "from_millis",
-                raw: "i64",
-                parser: "time",
-                default: "::krabka_units::millis(7)",
-            },
-            QuantityContract {
-                name: "Frequency",
-                to_raw: "per_sec_u64",
-                from_raw: "from_per_sec_u64",
-                raw: "u64",
-                parser: "frequency",
-                default: "::krabka_units::per_sec(7)",
-            },
+    #[yare::parameterized(
+        byte_size = {
+            "ByteSize",
+            "bytes_i64",
+            "from_bytes_i64",
+            "i64",
+            "byte_size",
+            "::krabka_units::bytes(7)",
+        },
+        time = {
+            "Time",
+            "millis_i64",
+            "from_millis",
+            "i64",
+            "time",
+            "::krabka_units::millis(7)",
+        },
+        frequency = {
+            "Frequency",
+            "per_sec_u64",
+            "from_per_sec_u64",
+            "u64",
+            "frequency",
+            "::krabka_units::per_sec(7)",
+        },
+    )]
+    fn quantity_contracts_expose_checked_units_getters_defaults_and_text_parsers(
+        name: &str,
+        to_raw: &str,
+        from_raw: &str,
+        raw: &str,
+        parser_name: &str,
+        default: &str,
+    ) {
+        let source = format!(
+            "#[refined(rule(GreaterI32<0>), quantity = {name}, getter = raw, quantity_getter = quantity, parse_fn = parse_amount, default = {default}, from_str, display)] pub struct Amount(i32);"
+        );
+        let expansion = expanded(&source);
+        let text = compact(&expansion.tokens);
+        for signature in [
+            format!(
+                "fnnew(value:::krabka_units::{name})->::core::result::Result<Self,::std::string::String>"
+            ),
+            "constfnraw(self)->i32".to_owned(),
+            format!("fnquantity(self)->::krabka_units::{name}"),
         ] {
-            let source = format!(
-                "#[refined(rule(GreaterI32<0>), quantity = {}, getter = raw, quantity_getter = quantity, parse_fn = parse_amount, default = {}, from_str, display)] pub struct Amount(i32);",
-                case.name, case.default
-            );
-            let expansion = expanded(&source);
-            let text = compact(&expansion.tokens);
-            for signature in [
-                format!(
-                    "fnnew(value:::krabka_units::{})->::core::result::Result<Self,::std::string::String>",
-                    case.name
-                ),
-                "constfnraw(self)->i32".to_owned(),
-                format!("fnquantity(self)->::krabka_units::{}", case.name),
-            ] {
-                assert!(text.contains(&format!("pub{signature}")), "{signature}");
-            }
-            assert!(text.contains(&format!("TryFrom<::krabka_units::{}>forAmount", case.name)));
-            assert!(text.contains(&format!(
-                "as::krabka_units::convert::{}Ext>::{}(value)",
-                case.name, case.to_raw
-            )));
-            assert!(text.contains(&format!(
-                "as::krabka_units::convert::{}Ext>::{}(raw)==value",
-                case.name, case.from_raw
-            )));
-            assert!(text.contains(&format!(
-                "<i32as::core::convert::TryFrom<{}>>::try_from(raw).ok()",
-                case.raw
-            )));
-            assert!(text.contains(&format!("Self::new({}).expect", case.default)));
-            assert!(text.contains("impl::core::str::FromStrforAmount"));
-            assert!(text.contains(&format!("::krabka_units::parse::{}(value)", case.parser)));
-            assert!(text.contains("::krabka_units::fmt::Human::human"));
-            let parser = expansion
-                .items
-                .items
-                .iter()
-                .find_map(|item| match item {
-                    Item::Fn(function) if function.sig.ident == "parse_amount" => Some(function),
-                    _ => None,
-                })
-                .expect("public text parser");
-            assert!(compact(&parser.vis.to_token_stream()) == "pub");
-            assert!(
-                compact(&parser.sig.to_token_stream())
-                    == "fnparse_amount(value:&str)->::core::result::Result<Amount,::std::string::String>"
-            );
+            assert2::assert!(text.contains(&format!("pub{signature}")), "{signature}");
         }
+        assert2::assert!(text.contains(&format!("TryFrom<::krabka_units::{name}>forAmount")));
+        assert2::assert!(text.contains(&format!(
+            "as::krabka_units::convert::{name}Ext>::{to_raw}(value)"
+        )));
+        assert2::assert!(text.contains(&format!(
+            "as::krabka_units::convert::{name}Ext>::{from_raw}(raw)==value"
+        )));
+        assert2::assert!(text.contains(&format!(
+            "<i32as::core::convert::TryFrom<{raw}>>::try_from(raw).ok()"
+        )));
+        assert2::assert!(text.contains(&format!("Self::new({default}).expect")));
+        assert2::assert!(text.contains("impl::core::str::FromStrforAmount"));
+        assert2::assert!(text.contains(&format!("::krabka_units::parse::{parser_name}(value)")));
+        assert2::assert!(text.contains("::krabka_units::fmt::Human::human"));
+        let parser = expansion
+            .items
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Fn(function) if function.sig.ident == "parse_amount" => Some(function),
+                _ => None,
+            })
+            .expect("public text parser");
+        assert2::assert!(compact(&parser.vis.to_token_stream()) == "pub");
+        assert2::assert!(
+            compact(&parser.sig.to_token_stream())
+                == "fnparse_amount(value:&str)->::core::result::Result<Amount,::std::string::String>"
+        );
     }
 
     #[test]
@@ -460,31 +452,28 @@ mod tests {
         assert!(!text.contains("TryFrom<"));
     }
 
-    #[test]
-    fn rejects_unsupported_quantities_and_getters_without_a_quantity() {
-        struct RejectedPolicy {
-            source: &'static str,
-            diagnostic: &'static str,
-        }
-        for case in [
-            RejectedPolicy {
-                source: "#[refined(rule(GreaterI32<0>), quantity = DataRate)] struct Value(i32);",
-                diagnostic: "`quantity` is `ByteSize`, `Time` or `Frequency`",
-            },
-            RejectedPolicy {
-                source: "#[refined(rule(GreaterI32<0>), quantity_getter = quantity)] struct Value(i32);",
-                diagnostic: "`quantity_getter` needs `quantity = ByteSize|Time|Frequency`",
-            },
-            RejectedPolicy {
-                source: "#[refined(rule(GreaterI32<0>), label = \"value\")] struct Value(i32);",
-                diagnostic: "`label` prefixes a `String` error: add `string_error`",
-            },
-        ] {
-            let item: ItemStruct = moxy::parse!({ case.source }).unwrap();
-            let Err(error) = expand(item) else {
-                panic!("invalid refined policy was accepted");
-            };
-            assert!(error.to_string().contains(case.diagnostic));
-        }
+    #[yare::parameterized(
+        unsupported_quantity = {
+            "#[refined(rule(GreaterI32<0>), quantity = DataRate)] struct Value(i32);",
+            "`quantity` is `ByteSize`, `Time` or `Frequency`"
+        },
+        getter_without_quantity = {
+            "#[refined(rule(GreaterI32<0>), quantity_getter = quantity)] struct Value(i32);",
+            "`quantity_getter` needs `quantity = ByteSize|Time|Frequency`"
+        },
+        label_without_string_error = {
+            "#[refined(rule(GreaterI32<0>), label = \"value\")] struct Value(i32);",
+            "`label` prefixes a `String` error: add `string_error`"
+        },
+    )]
+    fn rejects_unsupported_quantities_and_getters_without_a_quantity(
+        source: &str,
+        diagnostic: &str,
+    ) {
+        let item: ItemStruct = moxy::parse!({ source }).unwrap();
+        let Err(error) = expand(item) else {
+            panic!("invalid refined policy was accepted");
+        };
+        assert2::assert!(error.to_string().contains(diagnostic));
     }
 }

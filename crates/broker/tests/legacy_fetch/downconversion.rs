@@ -22,8 +22,13 @@ use {
         kafka_3_6_2::owned::fetch_response::FetchResponse as LegacyFetchResponse,
         records::{Record, RecordBatch, RecordsPayload},
     },
-    krabka_records_legacy::decode_message_set,
+    krabka_records_legacy::{ParsedRecord, decode_message_set},
 };
+
+fn decode_legacy_records(legacy_bytes: &[u8]) -> Vec<ParsedRecord> {
+    let mut cursor: &[u8] = legacy_bytes;
+    decode_message_set(&mut cursor, legacy_bytes.len()).expect("decode_message_set")
+}
 
 #[tokio::test]
 async fn fetch_v3_downconverts_v2_batch_to_v0_messageset() {
@@ -73,8 +78,7 @@ async fn fetch_v3_downconverts_v2_batch_to_v0_messageset() {
     );
 
     // 6. Decode the MessageSet and verify key/value pairs.
-    let mut ms_cur: &[u8] = &legacy_bytes;
-    let recs = decode_message_set(&mut ms_cur, legacy_bytes.len()).expect("decode_message_set");
+    let recs = decode_legacy_records(&legacy_bytes);
 
     assert!(
         recs.len() == 2,
@@ -151,8 +155,7 @@ async fn fetch_v0_downconverts_to_magic_v0_without_timestamps() {
     assert!(legacy_bytes.len() > 16, "legacy bytes too short");
     assert!(legacy_bytes[16] == 0, "expected v0 MessageSet magic byte 0");
 
-    let mut ms_cur: &[u8] = &legacy_bytes;
-    let recs = decode_message_set(&mut ms_cur, legacy_bytes.len()).expect("decode_message_set");
+    let recs = decode_legacy_records(&legacy_bytes);
     assert!(recs.len() == 1, "expected 1 record");
     check!(recs[0].key.as_deref() == Some(b"k".as_ref()));
     check!(recs[0].value.as_deref() == Some(b"v".as_ref()));

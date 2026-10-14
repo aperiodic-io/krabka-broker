@@ -69,13 +69,7 @@ pub(crate) struct FetchedLog {
 /// default seven-day window, so a batch left at the epoch would be expired out
 /// of the object store before any case could read it back.
 fn stamped_batch(value: Bytes) -> RecordBatch {
-    let now_ms = i64::try_from(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("the test clock is after the epoch")
-            .as_millis(),
-    )
-    .expect("the test clock fits an i64 of milliseconds");
+    let now_ms = test_wallclock_ms();
     RecordBatch {
         base_timestamp: now_ms,
         max_timestamp: now_ms,
@@ -343,3 +337,9 @@ pub(crate) async fn fetch_error_code(bootstrap: &str, topic_id: WireUuid, offset
         .expect("Fetch");
     response.responses[0].partitions[0].error_code
 }
+
+krabka_macros::unix_millis_fixture!(
+    test_wallclock_ms,
+    "the test clock is after the epoch",
+    "the test clock fits an i64 of milliseconds"
+);

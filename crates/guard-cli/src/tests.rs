@@ -38,23 +38,12 @@ fn the_shared_exit_codes_keep_the_barrier_meanings() {
 
 /// A transport failure says that nothing is known about the outcome, which
 /// is the difference between it and a refusal.
-#[test]
-fn a_failure_reports_its_own_exit_code() {
-    let cases = [
-        (
-            "a request that did not complete",
-            Failure::Transport("gone".to_owned()),
-            EXIT_UNREACHABLE,
-        ),
-        ("a refusal", Failure::Refused("no".to_owned()), EXIT_REFUSED),
-        (
-            "a key that cannot be read",
-            Failure::Signature("bad key".to_owned()),
-            EXIT_BAD_SIGNATURE,
-        ),
-    ];
-    for (case, failure, expected) in cases {
-        check!(failure.exit_code() == expected, "{case}");
-        check!(!failure.message().is_empty(), "{case}");
-    }
+#[yare::parameterized(
+    transport = { Failure::Transport("gone".to_owned()), EXIT_UNREACHABLE },
+    refusal = { Failure::Refused("no".to_owned()), EXIT_REFUSED },
+    signature = { Failure::Signature("bad key".to_owned()), EXIT_BAD_SIGNATURE },
+)]
+fn a_failure_reports_its_own_exit_code(failure: Failure, expected: i32) {
+    check!(failure.exit_code() == expected);
+    check!(!failure.message().is_empty());
 }

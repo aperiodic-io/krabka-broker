@@ -8,64 +8,42 @@ fn skew_window_is_symmetric_and_overflow_safe() {
     assert2::check!(!freeze_timestamp_in_window(0, 0, -1));
 }
 
-#[test]
-fn signature_rules_return_the_first_failure() {
-    let valid = FreezeSignatureFacts {
-        identity: FreezeIdentityState::Bound,
-        set_at_ms: 100,
-        now_ms: 100,
-        max_skew_ms: 10,
-        replaces: true,
-        replaced_set_at_ms: 99,
-        signature_valid: true,
-    };
-    for (facts, expected) in [
-        (
-            FreezeSignatureFacts {
-                identity: FreezeIdentityState::UnknownKey,
-                ..valid
-            },
-            FreezeSignatureDecision::UnknownKey,
-        ),
-        (
-            FreezeSignatureFacts {
-                identity: FreezeIdentityState::WrongKeyPrincipal,
-                ..valid
-            },
-            FreezeSignatureDecision::AuthorIsNotKeyPrincipal,
-        ),
-        (
-            FreezeSignatureFacts {
-                identity: FreezeIdentityState::WrongConnectionPrincipal,
-                ..valid
-            },
-            FreezeSignatureDecision::AuthorIsNotConnectionPrincipal,
-        ),
-        (
-            FreezeSignatureFacts {
-                set_at_ms: 111,
-                ..valid
-            },
-            FreezeSignatureDecision::TimestampOutsideSkewWindow,
-        ),
-        (
-            FreezeSignatureFacts {
-                set_at_ms: 99,
-                ..valid
-            },
-            FreezeSignatureDecision::TimestampNotNewer,
-        ),
-        (
-            FreezeSignatureFacts {
-                signature_valid: false,
-                ..valid
-            },
-            FreezeSignatureDecision::SignatureInvalid,
-        ),
-        (valid, FreezeSignatureDecision::Admit),
-    ] {
-        assert2::check!(freeze_signature_decision(facts) == expected);
-    }
+const VALID_SIGNATURE_FACTS: FreezeSignatureFacts = FreezeSignatureFacts {
+    identity: FreezeIdentityState::Bound,
+    set_at_ms: 100,
+    now_ms: 100,
+    max_skew_ms: 10,
+    replaces: true,
+    replaced_set_at_ms: 99,
+    signature_valid: true,
+};
+
+#[yare::parameterized(
+    unknown_key = { FreezeSignatureFacts {
+        identity: FreezeIdentityState::UnknownKey, ..VALID_SIGNATURE_FACTS
+    }, FreezeSignatureDecision::UnknownKey },
+    wrong_key_principal = { FreezeSignatureFacts {
+        identity: FreezeIdentityState::WrongKeyPrincipal, ..VALID_SIGNATURE_FACTS
+    }, FreezeSignatureDecision::AuthorIsNotKeyPrincipal },
+    wrong_connection_principal = { FreezeSignatureFacts {
+        identity: FreezeIdentityState::WrongConnectionPrincipal, ..VALID_SIGNATURE_FACTS
+    }, FreezeSignatureDecision::AuthorIsNotConnectionPrincipal },
+    timestamp_outside_window = { FreezeSignatureFacts {
+        set_at_ms: 111, ..VALID_SIGNATURE_FACTS
+    }, FreezeSignatureDecision::TimestampOutsideSkewWindow },
+    timestamp_not_newer = { FreezeSignatureFacts {
+        set_at_ms: 99, ..VALID_SIGNATURE_FACTS
+    }, FreezeSignatureDecision::TimestampNotNewer },
+    invalid_signature = { FreezeSignatureFacts {
+        signature_valid: false, ..VALID_SIGNATURE_FACTS
+    }, FreezeSignatureDecision::SignatureInvalid },
+    valid_signature = { VALID_SIGNATURE_FACTS, FreezeSignatureDecision::Admit },
+)]
+fn signature_rules_return_the_first_failure(
+    facts: FreezeSignatureFacts,
+    expected: FreezeSignatureDecision,
+) {
+    assert2::check!(freeze_signature_decision(facts) == expected);
 }
 
 #[test]
@@ -154,74 +132,41 @@ fn mutation_inventory_ranks_authorization_then_freeze() {
     }
 }
 
-#[test]
-fn replacements_require_a_live_thaw_target_a_newer_stamp_and_no_tail() {
-    let valid = FreezeReplacementFacts {
-        stored: FreezeStoredState::Present { set_at_ms: 9 },
-        incoming_frozen: true,
-        incoming_set_at_ms: 10,
-        uncommitted_tail: false,
-    };
-    for (facts, expected) in [
-        (
-            FreezeReplacementFacts {
-                stored: FreezeStoredState::Missing,
-                incoming_frozen: false,
-                ..valid
-            },
-            FreezeReplacementDecision::Missing,
-        ),
-        (
-            FreezeReplacementFacts {
-                incoming_set_at_ms: 9,
-                ..valid
-            },
-            FreezeReplacementDecision::Stale,
-        ),
-        (
-            FreezeReplacementFacts {
-                uncommitted_tail: true,
-                ..valid
-            },
-            FreezeReplacementDecision::InFlight,
-        ),
-        (valid, FreezeReplacementDecision::Append),
-        (
-            FreezeReplacementFacts {
-                stored: FreezeStoredState::Missing,
-                incoming_frozen: true,
-                ..valid
-            },
-            FreezeReplacementDecision::Append,
-        ),
-        // A permanent refusal outranks the transient tail, so the
-        // controller never retries a record that can never append.
-        (
-            FreezeReplacementFacts {
-                stored: FreezeStoredState::Missing,
-                incoming_frozen: false,
-                uncommitted_tail: true,
-                ..valid
-            },
-            FreezeReplacementDecision::Missing,
-        ),
-        (
-            FreezeReplacementFacts {
-                incoming_set_at_ms: 8,
-                uncommitted_tail: true,
-                ..valid
-            },
-            FreezeReplacementDecision::Stale,
-        ),
-        (
-            FreezeReplacementFacts {
-                stored: FreezeStoredState::Missing,
-                uncommitted_tail: true,
-                ..valid
-            },
-            FreezeReplacementDecision::InFlight,
-        ),
-    ] {
-        assert2::check!(freeze_replacement_decision(facts) == expected);
-    }
+const VALID_REPLACEMENT_FACTS: FreezeReplacementFacts = FreezeReplacementFacts {
+    stored: FreezeStoredState::Present { set_at_ms: 9 },
+    incoming_frozen: true,
+    incoming_set_at_ms: 10,
+    uncommitted_tail: false,
+};
+
+#[yare::parameterized(
+    missing_target = { FreezeReplacementFacts {
+        stored: FreezeStoredState::Missing, incoming_frozen: false, ..VALID_REPLACEMENT_FACTS
+    }, FreezeReplacementDecision::Missing },
+    stale_timestamp = { FreezeReplacementFacts {
+        incoming_set_at_ms: 9, ..VALID_REPLACEMENT_FACTS
+    }, FreezeReplacementDecision::Stale },
+    uncommitted_tail = { FreezeReplacementFacts {
+        uncommitted_tail: true, ..VALID_REPLACEMENT_FACTS
+    }, FreezeReplacementDecision::InFlight },
+    exact_target = { VALID_REPLACEMENT_FACTS, FreezeReplacementDecision::Append },
+    thaw_target = { FreezeReplacementFacts {
+        stored: FreezeStoredState::Missing, incoming_frozen: true, ..VALID_REPLACEMENT_FACTS
+    }, FreezeReplacementDecision::Append },
+    missing_precedes_tail = { FreezeReplacementFacts {
+        stored: FreezeStoredState::Missing, incoming_frozen: false, uncommitted_tail: true,
+        ..VALID_REPLACEMENT_FACTS
+    }, FreezeReplacementDecision::Missing },
+    stale_precedes_tail = { FreezeReplacementFacts {
+        incoming_set_at_ms: 8, uncommitted_tail: true, ..VALID_REPLACEMENT_FACTS
+    }, FreezeReplacementDecision::Stale },
+    missing_target_with_tail = { FreezeReplacementFacts {
+        stored: FreezeStoredState::Missing, uncommitted_tail: true, ..VALID_REPLACEMENT_FACTS
+    }, FreezeReplacementDecision::InFlight },
+)]
+fn replacements_require_a_live_thaw_target_a_newer_stamp_and_no_tail(
+    facts: FreezeReplacementFacts,
+    expected: FreezeReplacementDecision,
+) {
+    assert2::check!(freeze_replacement_decision(facts) == expected);
 }

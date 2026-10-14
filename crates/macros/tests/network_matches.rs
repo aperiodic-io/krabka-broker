@@ -1,7 +1,5 @@
 //! Match generators retain Rust arm bodies instead of rebuilding them from parsed expressions.
 
-use assert2::assert;
-
 enum RecordsPayload {
     Raw(Vec<u8>),
     Legacy(Vec<u8>),
@@ -38,17 +36,19 @@ fn portable(payload: Result<RecordsPayload, &'static str>) -> Result<Vec<u8>, &'
     }
 }
 
-#[tokio::test]
-async fn preserves_loop_tail_result_attributes_guards_and_awaits() {
-    for (payload, expected) in [
-        (Ok(RecordsPayload::Legacy(vec![1, 2])), Ok(vec![2, 3])),
-        (Ok(RecordsPayload::Raw(vec![4, 5])), Ok(vec![4, 5])),
-        (Ok(RecordsPayload::V2(vec![6, 7])), Ok(vec![6, 7])),
-        (Ok(RecordsPayload::Raw(vec![0])), Err("unsupported records")),
-        (Ok(RecordsPayload::FileRegions(vec![8, 9])), Ok(vec![8, 9])),
-        (Ok(RecordsPayload::Unknown), Err("unsupported records")),
-        (Err("decode failed"), Err("decode failed")),
-    ] {
-        assert!(decode(payload).await == expected);
-    }
+#[yare::parameterized(
+    legacy = { Ok(RecordsPayload::Legacy(vec![1, 2])), Ok(vec![2, 3]) },
+    raw = { Ok(RecordsPayload::Raw(vec![4, 5])), Ok(vec![4, 5]) },
+    v2 = { Ok(RecordsPayload::V2(vec![6, 7])), Ok(vec![6, 7]) },
+    zero_raw_is_refused = { Ok(RecordsPayload::Raw(vec![0])), Err("unsupported records") },
+    file_regions = { Ok(RecordsPayload::FileRegions(vec![8, 9])), Ok(vec![8, 9]) },
+    unknown_payload = { Ok(RecordsPayload::Unknown), Err("unsupported records") },
+    decode_error = { Err("decode failed"), Err("decode failed") },
+)]
+#[test_macro(tokio::test)]
+async fn preserves_loop_tail_result_attributes_guards_and_awaits(
+    payload: Result<RecordsPayload, &'static str>,
+    expected: Result<Vec<u8>, &'static str>,
+) {
+    assert2::assert!(decode(payload).await == expected);
 }

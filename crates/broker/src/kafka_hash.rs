@@ -57,83 +57,27 @@ pub(crate) fn murmur2_partition(data: &[u8], num_partitions: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, assert2::assert};
+    use super::*;
 
-    #[test]
-    fn murmur2_matches_kafka_vectors_for_remainder_lengths() {
-        struct Case {
-            input: &'static [u8],
-            expected: u32,
-        }
-        let cases: &[Case] = &[
-            Case {
-                input: b"",
-                expected: 0x106e_08d9,
-            },
-            Case {
-                input: b"a",
-                expected: 0xa2d0_b27c,
-            },
-            Case {
-                input: b"ab",
-                expected: 0x12d8_262a,
-            },
-            Case {
-                input: b"abc",
-                expected: 0x1c94_221b,
-            },
-            Case {
-                input: b"abcd",
-                expected: 0xb11a_b5f4,
-            },
-            Case {
-                input: b"abcde",
-                expected: 0x1b89_7edd,
-            },
-        ];
-
-        for Case { input, expected } in cases {
-            assert!(murmur2(input) == *expected);
-        }
+    #[yare::parameterized(
+        empty = { b"", 0x106e_08d9 },
+        one_byte = { b"a", 0xa2d0_b27c },
+        two_bytes = { b"ab", 0x12d8_262a },
+        three_bytes = { b"abc", 0x1c94_221b },
+        four_bytes = { b"abcd", 0xb11a_b5f4 },
+        five_bytes = { b"abcde", 0x1b89_7edd },
+    )]
+    fn murmur2_matches_kafka_vectors_for_remainder_lengths(input: &[u8], expected: u32) {
+        assert2::assert!(murmur2(input) == expected);
     }
 
-    #[test]
-    fn murmur2_partition_matches_kafka_utils_abs_mod() {
-        struct Case {
-            input: &'static [u8],
-            partitions: i32,
-            expected: i32,
-        }
-        let cases: &[Case] = &[
-            Case {
-                input: b"my-tid",
-                partitions: 50,
-                expected: 43,
-            },
-            Case {
-                input: b"producer-1",
-                partitions: 50,
-                expected: 45,
-            },
-            Case {
-                input: b"tx-orders-prod",
-                partitions: 50,
-                expected: 26,
-            },
-            Case {
-                input: b"abcde",
-                partitions: 7,
-                expected: 4,
-            },
-        ];
-
-        for Case {
-            input,
-            partitions,
-            expected,
-        } in cases
-        {
-            assert!(murmur2_partition(input, *partitions) == *expected);
-        }
+    #[yare::parameterized(
+        transaction_id = { b"my-tid", 50, 43 },
+        producer_id = { b"producer-1", 50, 45 },
+        orders_transaction = { b"tx-orders-prod", 50, 26 },
+        five_byte_key = { b"abcde", 7, 4 },
+    )]
+    fn murmur2_partition_matches_kafka_utils_abs_mod(input: &[u8], partitions: i32, expected: i32) {
+        assert2::assert!(murmur2_partition(input, partitions) == expected);
     }
 }

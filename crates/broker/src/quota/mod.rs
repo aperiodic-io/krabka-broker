@@ -493,32 +493,36 @@ mod tests {
     /// agreed on every input, and this test pins that they still would. It
     /// compares bit patterns instead of using `==`, so the comparison is
     /// exact.
-    #[test]
-    fn widening_agrees_with_the_former_producer_copy() {
-        for value in [0_u64, 1, 1024, 1 << 52, (1_u64 << 53) - 1, u64::MAX] {
-            let former: f64 = value.to_string().parse().unwrap_or(f64::INFINITY);
-            check!(u64_to_f64(value).to_bits() == former.to_bits());
-        }
+    #[yare::parameterized(
+        zero = { 0_u64 },
+        one = { 1 },
+        kibibyte = { 1024 },
+        exact_integer_boundary = { 1 << 52 },
+        largest_consecutive_integer = { (1_u64 << 53) - 1 },
+        maximum = { u64::MAX },
+    )]
+    fn widening_agrees_with_the_former_producer_copy(value: u64) {
+        let former: f64 = value.to_string().parse().unwrap_or(f64::INFINITY);
+        check!(u64_to_f64(value).to_bits() == former.to_bits());
     }
 
     /// The overage keeps the part token a bucket's debt holds, and a bucket
     /// that owes nothing has none.
-    #[test]
-    fn debt_tokens_is_the_exact_debt() {
-        let m = MICROS_PER_TOKEN;
-        let cases = [
-            (0, None),
-            (1, Some(0.000_001)),
-            (m / 2, Some(0.5)),
-            (m, Some(1.0)),
-            (99 * m + m / 2, Some(99.5)),
-        ];
-        for (debt_micros, want) in cases {
-            check!(
-                debt_tokens(debt_micros) == want,
-                "{debt_micros} micro-tokens of debt"
-            );
-        }
+    #[yare::parameterized(
+        no_debt = { 0, None },
+        one_micro_token = { 1, Some(0.000_001) },
+        half_token = { MICROS_PER_TOKEN / 2, Some(0.5) },
+        one_token = { MICROS_PER_TOKEN, Some(1.0) },
+        ninety_nine_and_half_tokens = {
+            99 * MICROS_PER_TOKEN + MICROS_PER_TOKEN / 2,
+            Some(99.5),
+        },
+    )]
+    fn debt_tokens_is_the_exact_debt(debt_micros: u64, want: Option<f64>) {
+        check!(
+            debt_tokens(debt_micros) == want,
+            "{debt_micros} micro-tokens of debt"
+        );
     }
 
     #[test]
@@ -563,37 +567,38 @@ mod tests {
         assert!(!delay_for_overage_called.load(Ordering::Relaxed));
     }
 
-    #[test]
-    fn consume_configured_quota_ignores_non_positive_rates() {
-        for rate in [-1.0, 0.0] {
-            let image = image_with_quota().value(rate).call();
-            let buckets = QuotaBuckets::new();
-            let initial_rate_called = Arc::new(AtomicBool::new(false));
+    #[yare::parameterized(
+        negative_rate = { -1.0 },
+        zero_rate = { 0.0 },
+    )]
+    fn consume_configured_quota_ignores_non_positive_rates(rate: f64) {
+        let image = image_with_quota().value(rate).call();
+        let buckets = QuotaBuckets::new();
+        let initial_rate_called = Arc::new(AtomicBool::new(false));
 
-            let delay = consume_configured_quota(
-                QuotaConsumption {
-                    image: &image,
-                    buckets: &buckets,
-                    principal: "alice",
-                    client_id: Some(""),
-                    quota_key: "producer_byte_rate",
-                    amount: 1,
-                    max_debt_wait: None,
-                },
-                {
-                    let called = Arc::clone(&initial_rate_called);
-                    move |_| {
-                        called.store(true, Ordering::Relaxed);
-                        1.0
-                    }
-                },
-                |_, _, _| secs(1),
-            );
+        let delay = consume_configured_quota(
+            QuotaConsumption {
+                image: &image,
+                buckets: &buckets,
+                principal: "alice",
+                client_id: Some(""),
+                quota_key: "producer_byte_rate",
+                amount: 1,
+                max_debt_wait: None,
+            },
+            {
+                let called = Arc::clone(&initial_rate_called);
+                move |_| {
+                    called.store(true, Ordering::Relaxed);
+                    1.0
+                }
+            },
+            |_, _, _| secs(1),
+        );
 
-            check!(delay == <Time as TimeExt>::ZERO);
-            check!(buckets.is_empty());
-            assert!(!initial_rate_called.load(Ordering::Relaxed));
-        }
+        check!(delay == <Time as TimeExt>::ZERO);
+        check!(buckets.is_empty());
+        assert2::assert!(!initial_rate_called.load(Ordering::Relaxed));
     }
 
     #[test]

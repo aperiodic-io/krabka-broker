@@ -262,10 +262,7 @@ pub fn short_name(
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        assert2::{assert, check},
-    };
+    use {super::*, assert2::check};
 
     fn map(specs: &[&str], principal: &str, default_realm: &str) -> Option<String> {
         let rules: Vec<_> = specs
@@ -435,42 +432,37 @@ mod tests {
         );
     }
 
-    #[test]
-    fn malformed_rules_are_rejected() {
-        for spec in [
-            "default",
-            "DEFAULT2",
-            "RULE:[1:$1",
-            "RULE:[:$1]",
-            "RULE:[x:$1]",
-            "RULE:[99999999999:$1]",
-            "RULE:[1:$1](abc",
-            "RULE:[1:$1]s/a/b",
-            "RULE:[1:$1]s/a",
-            "RULE:[1:$1]/X",
-            "RULE:[1:$1]/Lx",
-            "RULE:[1:$1](a(b))",
-            "RULE:[1:$1](a[)",
-            // `s/from/to/` has no escape for a slash, so `\/` splits the rule.
-            "RULE:[1:$1]s/^(.*)\\/(.*)$/$2/",
-            "NOT_A_RULE:::",
-        ] {
-            check!(KerberosRule::parse(spec).is_err(), "{spec}");
-        }
+    #[yare::parameterized(
+        lowercase_default = { "default" },
+        suffixed_default = { "DEFAULT2" },
+        unclosed_rule = { "RULE:[1:$1" },
+        empty_field = { "RULE:[:$1]" },
+        nonnumeric_field = { "RULE:[x:$1]" },
+        overflowing_field = { "RULE:[99999999999:$1]" },
+        unclosed_match = { "RULE:[1:$1](abc" },
+        missing_substitution_target = { "RULE:[1:$1]s/a/b" },
+        incomplete_substitution = { "RULE:[1:$1]s/a" },
+        unsupported_flag = { "RULE:[1:$1]/X" },
+        invalid_flag = { "RULE:[1:$1]/Lx" },
+        nested_match = { "RULE:[1:$1](a(b))" },
+        unmatched_character_class = { "RULE:[1:$1](a[)" },
+        escaped_slash_splits_rule = { "RULE:[1:$1]s/^(.*)\\/(.*)$/$2/" },
+        non_rule = { "NOT_A_RULE:::" },
+    )]
+    fn malformed_rules_are_rejected(spec: &str) {
+        check!(KerberosRule::parse(spec).is_err(), "{spec}");
     }
 
-    #[test]
-    fn well_formed_rules_are_accepted() {
-        for spec in [
-            "DEFAULT",
-            "RULE:[1:$1]",
-            "RULE:[1:$1](.*)s/a/b//L",
-            "RULE:[1:$1](.*)s/a/b/gU",
-            "RULE:[2:$1@$2]s/@.*//g/L",
-            "RULE:[1:$1]/L",
-            "  DEFAULT ",
-        ] {
-            assert!(KerberosRule::parse(spec).is_ok(), "{spec}");
-        }
+    #[yare::parameterized(
+        default = { "DEFAULT" },
+        minimal_rule = { "RULE:[1:$1]" },
+        match_and_substitute = { "RULE:[1:$1](.*)s/a/b//L" },
+        global_uppercase_substitution = { "RULE:[1:$1](.*)s/a/b/gU" },
+        second_field_and_global_lowercase = { "RULE:[2:$1@$2]s/@.*//g/L" },
+        lowercase_flag = { "RULE:[1:$1]/L" },
+        padded_default = { "  DEFAULT " },
+    )]
+    fn well_formed_rules_are_accepted(spec: &str) {
+        check!(KerberosRule::parse(spec).is_ok(), "{spec}");
     }
 }

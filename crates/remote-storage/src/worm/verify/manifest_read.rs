@@ -99,41 +99,33 @@ mod tests {
         bytes::Bytes,
     };
 
-    #[tokio::test]
-    async fn a_manifest_of_any_version_but_the_current_one_is_a_break() {
-        for (version, expected) in [
-            (
-                1,
-                "manifest format version 1 predates krabka 1.0, whose verifier reads only \
-                 version 2",
-            ),
-            (
-                0,
-                "unsupported manifest format version 0: this build reads only version 2",
-            ),
-            (
-                3,
-                "unsupported manifest format version 3: this build reads only version 2",
-            ),
-        ] {
-            let archive = Archive::build(&[1]).await;
-            let segment = &archive.segments[0];
-            let mut value = serde_json::to_value(&segment.manifest).unwrap();
-            value["body"]["format_version"] = serde_json::json!(version);
-            put_raw(
-                &archive.ops,
-                &segment.manifest_key,
-                Bytes::from(serde_json::to_vec(&value).unwrap()),
-            )
-            .await;
+    #[yare::parameterized(
+        pre_1_0 = {
+            1,
+            "manifest format version 1 predates krabka 1.0, whose verifier reads only version 2",
+        },
+        older = { 0, "unsupported manifest format version 0: this build reads only version 2" },
+        future = { 3, "unsupported manifest format version 3: this build reads only version 2" },
+    )]
+    #[test_macro(tokio::test)]
+    async fn a_manifest_of_any_version_but_the_current_one_is_a_break(
+        version: u64,
+        expected: &str,
+    ) {
+        let archive = Archive::build(&[1]).await;
+        let segment = &archive.segments[0];
+        let mut value = serde_json::to_value(&segment.manifest).unwrap();
+        value["body"]["format_version"] = serde_json::json!(version);
+        put_raw(
+            &archive.ops,
+            &segment.manifest_key,
+            Bytes::from(serde_json::to_vec(&value).unwrap()),
+        )
+        .await;
 
-            let report = archive.verify().await;
+        let report = archive.verify().await;
 
-            check!(
-                report.first_break().map(|found| found.reason.as_str()) == Some(expected),
-                "version {version}"
-            );
-        }
+        check!(report.first_break().map(|found| found.reason.as_str()) == Some(expected));
     }
 
     #[test]

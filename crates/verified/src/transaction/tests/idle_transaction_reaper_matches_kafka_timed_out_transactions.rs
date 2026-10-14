@@ -120,48 +120,28 @@ fn init_producer_id_identity_bumps_retries_or_fences() {
     }
 }
 
-#[test]
-fn completion_requires_the_prepared_identity_and_state() {
-    use TransactionCompletionDecision::{Proceed, RejectStaleIdentity, RejectState};
-
-    assert!(
+#[yare::parameterized(
+    proceeds = { 3, PREPARE_COMMIT, TransactionCompletionDecision::Proceed },
+    stale_identity = { 4, PREPARE_COMMIT, TransactionCompletionDecision::RejectStaleIdentity },
+    wrong_state = { 3, ONGOING, TransactionCompletionDecision::RejectState },
+)]
+fn completion_requires_the_prepared_identity_and_state(
+    epoch: i16,
+    state: i8,
+    expected: TransactionCompletionDecision,
+) {
+    assert2::assert!(
         transaction_completion_decision(
             TransactionSnapshot {
                 pid: 7,
-                epoch: 3,
-                state: PREPARE_COMMIT,
+                epoch,
+                state
             },
             TransactionIdentity { pid: 7, epoch: 3 },
             TransactionIdentity { pid: 7, epoch: 4 },
             PREPARE_COMMIT,
             COMPLETE_COMMIT,
-        ) == Proceed
-    );
-    assert!(
-        transaction_completion_decision(
-            TransactionSnapshot {
-                pid: 7,
-                epoch: 4,
-                state: PREPARE_COMMIT,
-            },
-            TransactionIdentity { pid: 7, epoch: 3 },
-            TransactionIdentity { pid: 7, epoch: 4 },
-            PREPARE_COMMIT,
-            COMPLETE_COMMIT,
-        ) == RejectStaleIdentity
-    );
-    assert!(
-        transaction_completion_decision(
-            TransactionSnapshot {
-                pid: 7,
-                epoch: 3,
-                state: ONGOING,
-            },
-            TransactionIdentity { pid: 7, epoch: 3 },
-            TransactionIdentity { pid: 7, epoch: 4 },
-            PREPARE_COMMIT,
-            COMPLETE_COMMIT,
-        ) == RejectState
+        ) == expected
     );
 }
 

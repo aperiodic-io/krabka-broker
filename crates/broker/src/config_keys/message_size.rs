@@ -44,23 +44,20 @@ mod tests {
         uuid::Uuid,
     };
 
-    #[test]
-    fn max_message_bytes_matches_kafkas_int_at_least_zero() {
-        let cases = [
-            ("0", true),
-            ("1048588", true),
-            ("2147483647", true),
-            ("-1", false),
-            ("2147483648", false),
-            ("abc", false),
-            ("", false),
-        ];
-        for (value, accepted) in cases {
-            assert!(
-                validate_topic_config(MAX_MESSAGE_BYTES, value).is_ok() == accepted,
-                "max.message.bytes={value}"
-            );
-        }
+    #[yare::parameterized(
+        zero = { "0", true },
+        positive = { "1048588", true },
+        i32_max = { "2147483647", true },
+        negative = { "-1", false },
+        above_i32_max = { "2147483648", false },
+        non_integer = { "abc", false },
+        empty = { "", false },
+    )]
+    fn max_message_bytes_matches_kafkas_int_at_least_zero(value: &str, accepted: bool) {
+        assert2::assert!(
+            validate_topic_config(MAX_MESSAGE_BYTES, value).is_ok() == accepted,
+            "max.message.bytes={value}"
+        );
     }
 
     fn image_with(value: Option<&str>) -> MetadataImage {
@@ -76,23 +73,23 @@ mod tests {
         image
     }
 
-    #[test]
-    fn resolve_max_message_bytes_prefers_the_override_and_falls_back_otherwise() {
+    #[yare::parameterized(
+        no_override = { None, bytes(1_048_588) },
+        positive_override = { Some("2048"), bytes(2048) },
+        zero_override = { Some("0"), bytes(0) },
+        corrupt_override = { Some("not-a-number"), bytes(1_048_588) },
+        negative_override = { Some("-5"), bytes(1_048_588) },
+    )]
+    fn resolve_max_message_bytes_prefers_the_override_and_falls_back_otherwise(
+        stored: Option<&str>,
+        want: krabka_units::ByteSize,
+    ) {
         let default = bytes(1_048_588);
-        let cases = [
-            (None, default),
-            (Some("2048"), bytes(2048)),
-            (Some("0"), bytes(0)),
-            // A corrupt stored value is not an operator's intent.
-            (Some("not-a-number"), default),
-            (Some("-5"), default),
-        ];
-        for (stored, want) in cases {
-            assert!(
-                resolve_max_message_bytes(&image_with(stored), "t", default) == want,
-                "stored {stored:?}"
-            );
-        }
+
+        assert2::assert!(
+            resolve_max_message_bytes(&image_with(stored), "t", default) == want,
+            "stored {stored:?}"
+        );
     }
 
     #[test]

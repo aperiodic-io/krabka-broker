@@ -48,8 +48,7 @@ async fn metadata_returns_this_broker_and_listed_topics() {
         .find(|t| t.name.as_deref() == Some("beta"))
         .unwrap();
     assert!(topic.partitions.len() == 3);
-    for idx in 0..3 {
-        let part = &topic.partitions[idx];
+    for (idx, part) in topic.partitions.iter().take(3).enumerate() {
         let expected_index = i32::try_from(idx).expect("partition index fits in i32");
         check!(
             part.error_code == 0 && part.partition_index == expected_index && part.leader_id == 1

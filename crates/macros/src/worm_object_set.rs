@@ -195,50 +195,75 @@ mod tests {
         assert!(validate(&runtime).unwrap() == Mode::Runtime);
     }
 
-    #[test]
-    fn every_mode_emits_the_same_diagnostic_order_without_hoisting_counts() {
-        for mode in [Mode::Model, Mode::Runtime] {
-            let output = rule(mode).to_string();
-            let names = [
-                "Empty",
-                "DuplicateKey",
-                "CoordinateMismatch",
-                "MissingObject",
-                "CountMismatch",
-                "SizeMismatch",
-                "DigestMismatch",
-                "Admit",
-            ];
-            let positions: Vec<_> = names
-                .iter()
-                .map(|name| output.find(name).unwrap())
-                .collect();
-            assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-            assert!(output.matches("__worm_count").count() == 2);
-            assert!(output.matches("__worm_listed").count() == 1);
-            assert!(output.contains("pearlite") == (mode == Mode::Model));
-            assert!(!output.contains("let "));
-        }
+    #[yare::parameterized(
+        model_mode = { Mode::Model },
+        runtime_mode = { Mode::Runtime },
+    )]
+    fn every_mode_emits_the_same_diagnostic_order_without_hoisting_counts(mode: Mode) {
+        let output = rule(mode).to_string();
+        let names = [
+            "Empty",
+            "DuplicateKey",
+            "CoordinateMismatch",
+            "MissingObject",
+            "CountMismatch",
+            "SizeMismatch",
+            "DigestMismatch",
+            "Admit",
+        ];
+        let positions: Vec<_> = names
+            .iter()
+            .map(|name| output.find(name).unwrap())
+            .collect();
+        assert2::assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        assert2::assert!(output.matches("__worm_count").count() == 2);
+        assert2::assert!(output.matches("__worm_listed").count() == 1);
+        assert2::assert!(output.contains("pearlite") == (mode == Mode::Model));
+        assert2::assert!(!output.contains("let "));
     }
 
-    #[test]
-    fn refuses_unknown_modes_malformed_headers_and_missing_observations() {
-        for input in [
+    #[yare::parameterized(
+        unknown_mode = {
             "Other; { fn f(facts: Facts) -> WormObjectSetDecision } (facts); count [1] listed [1]",
+        },
+        wrong_observed_binding = {
             "Runtime; { fn f(facts: Facts) -> WormObjectSetDecision } (other); count [1] listed [1]",
+        },
+        function_body_in_header = {
             "Runtime; { fn f(facts: Facts) -> WormObjectSetDecision {} } (facts); count [1] listed [1]",
+        },
+        async_header = {
             "Runtime; { async fn f(facts: Facts) -> WormObjectSetDecision } (facts); count [1] listed [1]",
+        },
+        const_header = {
             "Runtime; { const fn f(facts: Facts) -> WormObjectSetDecision } (facts); count [1] listed [1]",
+        },
+        unsafe_header = {
             "Runtime; { unsafe fn f(facts: Facts) -> WormObjectSetDecision } (facts); count [1] listed [1]",
+        },
+        extern_header = {
             "Runtime; { extern fn f(facts: Facts) -> WormObjectSetDecision } (facts); count [1] listed [1]",
+        },
+        generic_header = {
             "Runtime; { fn f<T>(facts: Facts) -> WormObjectSetDecision } (facts); count [1] listed [1]",
+        },
+        extra_parameter = {
             "Runtime; { fn f(facts: Facts, extra: bool) -> WormObjectSetDecision } (facts); count [1] listed [1]",
+        },
+        wrong_return_type = {
             "Runtime; { fn f(facts: Facts) -> bool } (facts); count [1] listed [1]",
+        },
+        empty_count = {
             "Runtime; { fn f(facts: Facts) -> WormObjectSetDecision } (facts); count [] listed [1]",
+        },
+        empty_listed_count = {
             "Runtime; { fn f(facts: Facts) -> WormObjectSetDecision } (facts); count [1] listed []",
+        },
+        trailing_metadata = {
             "Runtime; { fn f(facts: Facts) -> WormObjectSetDecision } (facts); count [1] listed [1] extra",
-        ] {
-            assert!(validate(&input.parse().unwrap()).is_err(), "{input}");
-        }
+        },
+    )]
+    fn refuses_unknown_modes_malformed_headers_and_missing_observations(input: &str) {
+        assert2::assert!(validate(&input.parse().unwrap()).is_err(), "{input}");
     }
 }

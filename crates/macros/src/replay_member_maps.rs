@@ -126,123 +126,127 @@ mod tests {
     use {
         super::expand,
         crate::meta::compact,
-        assert2::assert,
         moxy::{
             ast::{FnParam, GenericParam, ImplItem, ItemImpl, ItemStruct},
             token::ToTokenStream,
         },
     };
 
-    #[test]
-    fn emits_typed_replay_methods_for_each_protocol_and_preserves_generics() {
-        for protocol in ["consumer", "share", "streams"] {
-            let declaration = format!(
-                r#"
-                #[replay_member_maps(protocol = "{protocol}")]
-                struct Seed<T: Clone> where T: Send {{
-                    members: std::collections::HashMap<String, Metadata<T>>,
-                    current_per_member: HashMap<String, ::records::Current<T>>,
-                    target_per_member: HashMap<String, Target>,
-                }}
-            "#
-            );
-            let item: ItemStruct = moxy::parse!({ declaration }).unwrap();
-            let implementation: ItemImpl = moxy::parse!({ expand(item).unwrap() }).unwrap();
-            assert!(
-                matches!(implementation.generics.params.first(), Some(GenericParam::Type(param)) if param.ident == "T")
-            );
-            assert!(implementation.generics.where_clause.is_some());
-            assert!(implementation.items.len() == 3);
-            let install = implementation
-                .items
-                .iter()
-                .find_map(|item| {
-                    item.as_fn()
-                        .filter(|method| method.sig.ident == "install_current_member")
-                })
-                .unwrap();
-            let Some(FnParam::Typed(value)) = install.sig.params.inner.inputs.iter().nth(2) else {
-                panic!("typed current record parameter")
-            };
-            assert!(compact(&value.ty.to_token_stream()) == "::records::Current<T>");
-            assert!(compact(&install.sig.to_token_stream()).contains("implFnOnce()->Metadata<T>"));
-            for name in ["member_tombstone", "remove_replayed_member"] {
-                assert!(
-                    implementation
-                        .items
-                        .iter()
-                        .filter_map(ImplItem::as_fn)
-                        .any(|method| method.sig.ident == name)
-                );
-            }
-        }
+    fn expanded_protocol(protocol: &str) -> ItemImpl {
+        let declaration = format!(
+            r#"
+            #[replay_member_maps(protocol = "{protocol}")]
+            struct Seed<T: Clone> where T: Send {{
+                members: std::collections::HashMap<String, Metadata<T>>,
+                current_per_member: HashMap<String, ::records::Current<T>>,
+                target_per_member: HashMap<String, Target>,
+            }}
+        "#
+        );
+        let item: ItemStruct = moxy::parse!({ declaration }).unwrap();
+        moxy::parse!({ expand(item).unwrap() }).unwrap()
     }
 
-    #[test]
-    fn rejects_unknown_protocols_incomplete_maps_and_wrong_record_containers() {
-        struct RejectedSeed {
-            declaration: &'static str,
-            expected: &'static str,
-        }
-        for case in [
-            RejectedSeed {
-                declaration: "struct Seed {}",
-                expected: "needs `#[replay_member_maps",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"classic\")] struct Seed {}",
-                expected: "replay protocol",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = 1)] struct Seed {}",
-                expected: "string",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed();",
-                expected: "named fields",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"consumer\")] struct Seed {}",
-                expected: "members",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"consumer\")] struct Seed { members: HashMap<String, M> }",
-                expected: "current_per_member",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"streams\")] struct Seed { members: HashMap<String, M>, current_per_member: HashMap<String, C> }",
-                expected: "target_per_member",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: Vec<M> }",
-                expected: "HashMap",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap }",
-                expected: "HashMap",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap<u32, M> }",
-                expected: "HashMap",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap<String> }",
-                expected: "HashMap",
-            },
-            RejectedSeed {
-                declaration: "#[replay_member_maps(protocol = \"share\")] struct Seed { members: (String, M) }",
-                expected: "HashMap",
-            },
-        ] {
-            let declaration = case.declaration;
-            let item: ItemStruct = moxy::parse!({ declaration }).unwrap();
-            assert!(
-                expand(item)
-                    .unwrap_err()
-                    .to_string()
-                    .contains(case.expected),
-                "{declaration}"
-            );
-        }
+    #[yare::parameterized(
+        consumer_protocol = { "consumer" },
+        share_protocol = { "share" },
+        streams_protocol = { "streams" },
+    )]
+    fn emits_typed_replay_methods_for_each_protocol_and_preserves_generics(protocol: &str) {
+        let implementation = expanded_protocol(protocol);
+        assert2::assert!(
+            matches!(implementation.generics.params.first(), Some(GenericParam::Type(param)) if param.ident == "T")
+        );
+        assert2::assert!(implementation.generics.where_clause.is_some());
+        assert2::assert!(implementation.items.len() == 3);
+        let install = implementation
+            .items
+            .iter()
+            .find_map(|item| {
+                item.as_fn()
+                    .filter(|method| method.sig.ident == "install_current_member")
+            })
+            .unwrap();
+        let Some(FnParam::Typed(value)) = install.sig.params.inner.inputs.iter().nth(2) else {
+            panic!("typed current record parameter")
+        };
+        assert2::assert!(compact(&value.ty.to_token_stream()) == "::records::Current<T>");
+        assert2::assert!(
+            compact(&install.sig.to_token_stream()).contains("implFnOnce()->Metadata<T>")
+        );
+    }
+
+    #[yare::parameterized(
+        consumer_tombstone = { "consumer", "member_tombstone" },
+        consumer_remove = { "consumer", "remove_replayed_member" },
+        share_tombstone = { "share", "member_tombstone" },
+        share_remove = { "share", "remove_replayed_member" },
+        streams_tombstone = { "streams", "member_tombstone" },
+        streams_remove = { "streams", "remove_replayed_member" },
+    )]
+    fn emits_each_protocol_method(protocol: &str, name: &str) {
+        let implementation = expanded_protocol(protocol);
+        assert2::assert!(
+            implementation
+                .items
+                .iter()
+                .filter_map(ImplItem::as_fn)
+                .any(|method| method.sig.ident == name)
+        );
+    }
+
+    #[yare::parameterized(
+        missing_metadata = { "struct Seed {}", "needs `#[replay_member_maps" },
+        unknown_protocol = {
+            "#[replay_member_maps(protocol = \"classic\")] struct Seed {}",
+            "replay protocol",
+        },
+        non_string_protocol = { "#[replay_member_maps(protocol = 1)] struct Seed {}", "string" },
+        tuple_seed = {
+            "#[replay_member_maps(protocol = \"share\")] struct Seed();",
+            "named fields",
+        },
+        missing_members = {
+            "#[replay_member_maps(protocol = \"consumer\")] struct Seed {}",
+            "members",
+        },
+        missing_current_map = {
+            "#[replay_member_maps(protocol = \"consumer\")] struct Seed { members: HashMap<String, M> }",
+            "current_per_member",
+        },
+        missing_target_map = {
+            "#[replay_member_maps(protocol = \"streams\")] struct Seed { members: HashMap<String, M>, current_per_member: HashMap<String, C> }",
+            "target_per_member",
+        },
+        vector_members = {
+            "#[replay_member_maps(protocol = \"share\")] struct Seed { members: Vec<M> }",
+            "HashMap",
+        },
+        bare_hash_map = {
+            "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap }",
+            "HashMap",
+        },
+        wrong_hash_key = {
+            "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap<u32, M> }",
+            "HashMap",
+        },
+        missing_hash_value = {
+            "#[replay_member_maps(protocol = \"share\")] struct Seed { members: HashMap<String> }",
+            "HashMap",
+        },
+        non_hash_map_members = {
+            "#[replay_member_maps(protocol = \"share\")] struct Seed { members: (String, M) }",
+            "HashMap",
+        },
+    )]
+    fn rejects_unknown_protocols_incomplete_maps_and_wrong_record_containers(
+        declaration: &str,
+        expected: &str,
+    ) {
+        let item: ItemStruct = moxy::parse!({ declaration }).unwrap();
+        assert2::assert!(
+            expand(item).unwrap_err().to_string().contains(expected),
+            "{declaration}"
+        );
     }
 }

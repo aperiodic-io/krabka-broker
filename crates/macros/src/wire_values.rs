@@ -82,41 +82,24 @@ fn validate(input: &TokenStream) -> Result<bool, ParseError> {
 mod tests {
     use {super::validate, assert2::assert};
 
-    #[test]
-    fn rejects_updates_and_non_struct_inputs() {
-        for input in [
-            "Response { ..other }",
-            "Response { version: 2, ..other }",
-            "Response",
-            "Response {} extra",
-            "42",
-        ] {
-            assert!(validate(&input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        update = { "Response { ..other }" },
+        field_and_update = { "Response { version: 2, ..other }" },
+        path = { "Response" },
+        trailing = { "Response {} extra" },
+        non_path = { "42" },
+    )]
+    fn rejects_updates_and_non_struct_inputs(input: &str) {
+        assert2::assert!(validate(&input.parse().unwrap()).is_err(), "{input}");
     }
 
-    #[test]
-    fn detects_whether_the_explicit_fields_need_a_separator() {
-        struct SeparatorCase {
-            input: &'static str,
-            needs_comma: bool,
-        }
-        for case in [
-            SeparatorCase {
-                input: "module::Response {}",
-                needs_comma: false,
-            },
-            SeparatorCase {
-                input: "module::Response { version: 2, error_code }",
-                needs_comma: true,
-            },
-            SeparatorCase {
-                input: "module::Response { version: 2, error_code, }",
-                needs_comma: false,
-            },
-        ] {
-            assert!(validate(&case.input.parse().unwrap()).unwrap() == case.needs_comma);
-        }
+    #[yare::parameterized(
+        empty_fields = { "module::Response {}", false },
+        fields_need_comma = { "module::Response { version: 2, error_code }", true },
+        trailing_comma = { "module::Response { version: 2, error_code, }", false },
+    )]
+    fn detects_whether_the_explicit_fields_need_a_separator(input: &str, needs_comma: bool) {
+        assert2::assert!(validate(&input.parse().unwrap()).unwrap() == needs_comma);
     }
 
     #[test]

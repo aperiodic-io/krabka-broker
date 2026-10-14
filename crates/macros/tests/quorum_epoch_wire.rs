@@ -130,8 +130,44 @@ fn request_accessors_preserve_raw_values_borrowed_endpoints_and_topic_order() {
     assert!(EndQuorumEpochRequest::default().leader().is_none());
 }
 
+#[yare::parameterized(v0 = { 0 }, v1 = { 1 })]
+fn response_encoders_keep_partition_leader_layouts(version: i16) {
+    let leader = QuorumLeader {
+        id: Some(7),
+        epoch: 9,
+        endpoint: Some(NodeEndpointEntry {
+            node_id: 7,
+            host: "host".into(),
+            port: 9093,
+        }),
+    };
+    {
+        let begin_bytes = begin(0, 42, &leader, version);
+        let decoded = BeginQuorumEpochResponse::decode(&mut &begin_bytes[..], version).unwrap();
+        let topic = &decoded.topics[0];
+        let partition = &topic.partitions[0];
+        assert2::assert!(decoded.error_code == 0 && topic.topic_name == METADATA_TOPIC);
+        assert2::assert!(
+            partition.partition_index == 0
+                && partition.error_code == 42
+                && partition.leader_id == 7
+                && partition.leader_epoch == 9
+        );
+        assert2::assert!(decoded.node_endpoints.len() == usize::from(version == 1));
+        let end_bytes = end(0, 42, &leader, version);
+        let decoded = EndQuorumEpochResponse::decode(&mut &end_bytes[..], version).unwrap();
+        assert2::assert!(decoded.topics[0].partitions[0].leader_id == 7);
+        assert2::assert!(decoded.node_endpoints.len() == usize::from(version == 1));
+        let error_bytes = begin(31, 42, &leader, version);
+        let error = BeginQuorumEpochResponse::decode(&mut &error_bytes[..], version).unwrap();
+        assert2::assert!(
+            error.error_code == 31 && error.topics.is_empty() && error.node_endpoints.is_empty()
+        );
+    }
+}
+
 #[test]
-fn response_encoders_keep_bare_errors_and_partition_leader_layouts() {
+fn response_encoders_keep_bare_errors() {
     let leader = QuorumLeader {
         id: Some(7),
         epoch: 9,
@@ -144,46 +180,35 @@ fn response_encoders_keep_bare_errors_and_partition_leader_layouts() {
     let bare = b"\x00\x1f\x00\x00\x00\x00";
     assert!(begin(31, 42, &leader, 0).as_ref() == bare);
     assert!(end(31, 42, &leader, 0).as_ref() == bare);
-    for version in [0, 1] {
-        let begin_bytes = begin(0, 42, &leader, version);
-        let decoded = BeginQuorumEpochResponse::decode(&mut &begin_bytes[..], version).unwrap();
-        let topic = &decoded.topics[0];
-        let partition = &topic.partitions[0];
-        assert!(decoded.error_code == 0 && topic.topic_name == METADATA_TOPIC);
-        assert!(
-            partition.partition_index == 0
-                && partition.error_code == 42
-                && partition.leader_id == 7
-                && partition.leader_epoch == 9
-        );
-        assert!(decoded.node_endpoints.len() == usize::from(version == 1));
-        let end_bytes = end(0, 42, &leader, version);
-        let decoded = EndQuorumEpochResponse::decode(&mut &end_bytes[..], version).unwrap();
-        assert!(decoded.topics[0].partitions[0].leader_id == 7);
-        assert!(decoded.node_endpoints.len() == usize::from(version == 1));
-        let error_bytes = begin(31, 42, &leader, version);
-        let error = BeginQuorumEpochResponse::decode(&mut &error_bytes[..], version).unwrap();
-        assert!(
-            error.error_code == 31 && error.topics.is_empty() && error.node_endpoints.is_empty()
-        );
-    }
-    for absent in [
+}
+
+#[yare::parameterized(
+    missing_id = { true },
+    missing_endpoint = { false },
+)]
+fn response_encoders_omit_incomplete_leader_endpoints(missing_id: bool) {
+    let endpoint = NodeEndpointEntry {
+        node_id: 7,
+        host: "host".into(),
+        port: 9093,
+    };
+    let absent = if missing_id {
         QuorumLeader {
             id: None,
             epoch: 9,
-            endpoint: leader.endpoint.clone(),
-        },
+            endpoint: Some(endpoint),
+        }
+    } else {
         QuorumLeader {
             id: Some(7),
             epoch: 9,
             endpoint: None,
-        },
-    ] {
-        let bytes = begin(0, 0, &absent, 1);
-        let decoded = BeginQuorumEpochResponse::decode(&mut &bytes[..], 1).unwrap();
-        assert!(decoded.node_endpoints.is_empty());
-        assert!(decoded.topics[0].partitions[0].leader_id == absent.id.unwrap_or(-1));
-    }
+        }
+    };
+    let bytes = begin(0, 0, &absent, 1);
+    let decoded = BeginQuorumEpochResponse::decode(&mut &bytes[..], 1).unwrap();
+    assert2::assert!(decoded.node_endpoints.is_empty());
+    assert2::assert!(decoded.topics[0].partitions[0].leader_id == absent.id.unwrap_or(-1));
 }
 
 #[derive(Debug, PartialEq, Eq)]

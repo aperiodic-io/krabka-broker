@@ -63,34 +63,30 @@ fn copied_pair<T: Clone + Copy + Debug + Eq>(value: T) -> CopiedValues<T> {
     }
 }
 
-#[test]
-fn default_and_copy_only_models_preserve_struct_enum_and_payload_contracts() {
+#[yare::parameterized(
+    named = { Choice::Named { value: Coordinates { first: 42, second: 7 } } },
+    tuple = { Choice::Tuple(9) },
+    empty = { Choice::Empty },
+)]
+fn default_and_copy_only_models_preserve_struct_enum_and_payload_contracts(choice: Choice) {
     let pair = copied_pair(Coordinates {
         first: 42,
         second: 7,
     });
-    assert!(pair.original == pair.copied);
-    assert!(format!("{:?}", pair.original) == "Coordinates { first: 42, second: 7 }");
-    assert!(std::mem::offset_of!(Coordinates, first) == 0);
-    assert!(std::mem::offset_of!(Coordinates, second) == 8);
-    for choice in [
-        Choice::Named {
-            value: pair.original,
-        },
-        Choice::Tuple(9),
-        Choice::Empty,
-    ] {
-        let CopiedValues { original, copied } = copied_pair(choice);
-        assert!(original == copied);
-    }
+    assert2::assert!(pair.original == pair.copied);
+    assert2::assert!(format!("{:?}", pair.original) == "Coordinates { first: 42, second: 7 }");
+    assert2::assert!(std::mem::offset_of!(Coordinates, first) == 0);
+    assert2::assert!(std::mem::offset_of!(Coordinates, second) == 8);
+    let CopiedValues { original, copied } = copied_pair(choice);
+    assert2::assert!(original == copied);
     let no_equality = NoEquality {
         coordinates: pair.copied,
         measurement: 1.5,
     };
     let copied = no_equality;
-    assert!(copied.coordinates == pair.original);
-    assert!(copied.measurement.to_bits() == 1.5_f64.to_bits());
-    assert!(format!("{copied:?}").contains("NoEquality"));
+    assert2::assert!(copied.coordinates == pair.original);
+    assert2::assert!(copied.measurement.to_bits() == 1.5_f64.to_bits());
+    assert2::assert!(format!("{copied:?}").contains("NoEquality"));
 }
 
 #[test]

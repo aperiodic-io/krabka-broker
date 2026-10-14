@@ -54,10 +54,7 @@ impl Member {
         rebalance_timeout: Duration,
         protocols: Vec<(String, Bytes)>,
     ) -> Self {
-        let protocol_metadata = protocols
-            .first()
-            .map(|(_, b)| b.clone())
-            .unwrap_or_default();
+        let protocol_metadata = protocols.first().map_or_default(|(_, b)| b.clone());
         Self {
             id: member_id.into(),
             group_instance_id: None,

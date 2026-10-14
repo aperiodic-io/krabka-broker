@@ -3,6 +3,24 @@ use super::*;
 type Observation = (Option<u64>, i32, bool, Vec<WalCopyBatch>);
 type QuorumLedger = (i64, i64, Vec<(u64, i64)>, Vec<i64>);
 
+fn complete_source() -> [WalCopyBatch; 3] {
+    [
+        (0, 1, std::vec![1, 2]),
+        (2, 0, std::vec![3, 4]),
+        (3, 2, std::vec![5, 6]),
+    ]
+}
+
+fn maximum_offset_source() -> ([WalCopyBatch; 1], FetchWatermarks) {
+    ([(i64::MAX - 1, 0, std::vec![1])], FetchWatermarks {
+        log_start: i64::MAX - 1,
+        log_end: i64::MAX,
+        hw: 0,
+        lso: i64::MAX,
+        deliverable: i64::MAX,
+    })
+}
+
 fn oracle(
     voters: &[u64],
     rows: &[Observation],
@@ -88,13 +106,17 @@ fn damaged_copy(source: &[WalCopyBatch], node: u64, kind: u16, count: usize) -> 
     )
 }
 
+fn maximum_offset_rows(source: &[WalCopyBatch]) -> [Observation; 3] {
+    [
+        damaged_copy(source, 1, 0, 1),
+        damaged_copy(source, 2, 0, 1),
+        damaged_copy(source, 3, 4, 1),
+    ]
+}
+
 #[test]
 fn only_completed_matching_copies_can_release_a_fresh_prefix() {
-    let source = [
-        (0, 1, std::vec![1, 2]),
-        (2, 0, std::vec![3, 4]),
-        (3, 2, std::vec![5, 6]),
-    ];
+    let source = complete_source();
     for floor in [0, 1] {
         let w = FetchWatermarks {
             log_start: floor,
@@ -125,38 +147,6 @@ fn only_completed_matching_copies_can_release_a_fresh_prefix() {
             }
         }
     }
-    let uncapped = FetchWatermarks {
-        log_start: 1,
-        log_end: 6,
-        hw: 0,
-        lso: 6,
-        deliverable: 6,
-    };
-    for (peer, epoch, extra, expected_hw) in [
-        (Some(2), -1, false, 6),
-        (Some(3), 7, false, 1),
-        (Some(2), 8, false, 1),
-        (Some(2), 7, true, 1),
-    ] {
-        let mut row = damaged_copy(&source, 2, 0, 3);
-        row.0 = peer;
-        row.1 = epoch;
-        if extra {
-            row.3.push(source[2].clone());
-        }
-        let rows = [
-            damaged_copy(&source, 1, 0, 3),
-            row,
-            damaged_copy(&source, 3, 2, 3),
-        ];
-        let result =
-            durable_matching_copies_bound_fetch(&[1, 2, 3], &rows, (1, 3, 7), &source, 1, uncapped)
-                .unwrap();
-        assert2::assert!(result.0 == expected_hw);
-        assert2::assert!(
-            Some(result) == oracle(&[1, 2, 3], &rows, (1, 3, 7), &source, 1, uncapped)
-        );
-    }
     let w = FetchWatermarks {
         log_start: 1,
         log_end: 6,
@@ -175,21 +165,43 @@ fn only_completed_matching_copies_can_release_a_fresh_prefix() {
     );
 }
 
+#[yare::parameterized(
+    older_peer_epoch = { Some(2), -1, false, 6 },
+    wrong_peer = { Some(3), 7, false, 1 },
+    newer_peer_epoch = { Some(2), 8, false, 1 },
+    extra_batch = { Some(2), 7, true, 1 },
+)]
+fn mismatched_peer_rows_cannot_vote(peer: Option<u64>, epoch: i32, extra: bool, expected_hw: i64) {
+    let source = complete_source();
+    let uncapped = FetchWatermarks {
+        log_start: 1,
+        log_end: 6,
+        hw: 0,
+        lso: 6,
+        deliverable: 6,
+    };
+    let mut row = damaged_copy(&source, 2, 0, 3);
+    row.0 = peer;
+    row.1 = epoch;
+    if extra {
+        row.3.push(source[2].clone());
+    }
+    let rows = [
+        damaged_copy(&source, 1, 0, 3),
+        row,
+        damaged_copy(&source, 3, 2, 3),
+    ];
+    let result =
+        durable_matching_copies_bound_fetch(&[1, 2, 3], &rows, (1, 3, 7), &source, 1, uncapped)
+            .unwrap();
+    assert2::assert!(result.0 == expected_hw);
+    assert2::assert!(Some(result) == oracle(&[1, 2, 3], &rows, (1, 3, 7), &source, 1, uncapped));
+}
+
 #[test]
 fn byte_quorum_distinguishes_floor_only_and_inherited_watermarks() {
-    let source = [(i64::MAX - 1, 0, std::vec![1])];
-    let w = FetchWatermarks {
-        log_start: i64::MAX - 1,
-        log_end: i64::MAX,
-        hw: 0,
-        lso: i64::MAX,
-        deliverable: i64::MAX,
-    };
-    let rows = [
-        damaged_copy(&source, 1, 0, 1),
-        damaged_copy(&source, 2, 0, 1),
-        damaged_copy(&source, 3, 4, 1),
-    ];
+    let (source, w) = maximum_offset_source();
+    let rows = maximum_offset_rows(&source);
     assert2::assert!(
         durable_matching_copies_bound_fetch(&[1, 2, 3], &rows, (1, 3, 7), &source, w.log_start, w)
             == oracle(&[1, 2, 3], &rows, (1, 3, 7), &source, w.log_start, w)
@@ -214,17 +226,21 @@ fn byte_quorum_distinguishes_floor_only_and_inherited_watermarks() {
         durable_matching_copies_bound_fetch(&[1, 2, 3], &rows, (1, 3, 7), &[], 0, empty)
             == Some((5, 5, std::vec![(1, 5), (2, 5), (3, 5)], std::vec![5; 3]))
     );
-    for bad in [
-        std::vec![(0, -1, std::vec![1])],
-        std::vec![(0, 0, std::vec![])],
-        std::vec![(0, 0, std::vec![1]), (2, 0, std::vec![2])],
-        std::vec![(i64::MAX - 1, 1, std::vec![1])],
-    ] {
-        assert2::assert!(
-            durable_matching_copies_bound_fetch(&[1, 2, 3], &rows, (1, 3, 7), &bad, w.log_start, w)
-                .is_none()
-        );
-    }
+}
+
+#[yare::parameterized(
+    negative_delta = { std::vec![(0, -1, std::vec![1])] },
+    empty_body = { std::vec![(0, 0, std::vec![])] },
+    gapped_source = { std::vec![(0, 0, std::vec![1]), (2, 0, std::vec![2])] },
+    end_overflow = { std::vec![(i64::MAX - 1, 1, std::vec![1])] },
+)]
+fn malformed_sources_are_rejected(bad: Vec<WalCopyBatch>) {
+    let (source, w) = maximum_offset_source();
+    let rows = maximum_offset_rows(&source);
+    assert2::assert!(
+        durable_matching_copies_bound_fetch(&[1, 2, 3], &rows, (1, 3, 7), &bad, w.log_start, w)
+            .is_none()
+    );
 }
 
 proptest! {

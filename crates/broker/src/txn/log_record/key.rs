@@ -57,19 +57,20 @@ mod tests {
 
     /// The key writes the transactional id with an `int16` length: an id of
     /// 32767 bytes encodes, and one of 32768 bytes is an error, not a panic.
-    #[test]
-    fn a_transactional_id_over_32767_bytes_does_not_encode() {
-        for (length, encodes) in [(32_767, true), (32_768, false)] {
-            let id = "t".repeat(length);
+    #[yare::parameterized(
+        at_limit = { 32_767, true },
+        over_limit = { 32_768, false },
+    )]
+    fn a_transactional_id_over_32767_bytes_does_not_encode(length: usize, encodes: bool) {
+        let id = "t".repeat(length);
 
-            let encoded = encode_key(&id);
+        let encoded = encode_key(&id);
 
-            assert!(encoded.is_ok() == encodes, "{length} bytes");
-            if let Ok(bytes) = &encoded {
-                assert!(decode_key(bytes).unwrap() == id);
-            } else {
-                assert!(matches!(encoded, Err(BrokerError::Protocol(_))));
-            }
+        assert2::assert!(encoded.is_ok() == encodes, "{length} bytes");
+        if let Ok(bytes) = &encoded {
+            assert2::assert!(decode_key(bytes).unwrap() == id);
+        } else {
+            assert2::assert!(matches!(encoded, Err(BrokerError::Protocol(_))));
         }
     }
 

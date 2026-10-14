@@ -314,31 +314,30 @@ async fn sweep_runs_full_three_phase_abort_for_an_expired_tid() {
     check!(out == vec!["tid-a".to_owned()]);
 }
 
-#[tokio::test]
-async fn sweep_skips_tids_this_broker_does_not_coordinate() {
+#[yare::parameterized(
+    not_coordinator = { false },
+    prepare_declines = { true },
+)]
+#[test_macro(tokio::test)]
+async fn sweep_skips_before_dispatch(is_coordinator: bool) {
     let mut backend = MockReaperBackend::new();
-    backend.expect_is_coordinator_for().returning(|_| false);
-    // No prepare / dispatch / complete must be reached.
-    backend.expect_prepare_abort().never();
-    forbid_abort_completion(&mut backend);
-
-    let out = sweep_candidates(&backend, &["tid-a"]).await;
-    assert!(out.is_empty());
-}
-
-#[tokio::test]
-async fn sweep_skips_tid_when_prepare_declines_and_does_not_dispatch() {
-    let mut backend = MockReaperBackend::new();
-    backend.expect_is_coordinator_for().returning(|_| true);
-    // Not idle / persistence failed → None.
     backend
-        .expect_prepare_abort()
-        .times(1)
-        .returning(|_, _, _| None);
+        .expect_is_coordinator_for()
+        .returning(move |_| is_coordinator);
+    if is_coordinator {
+        // Not idle / persistence failed → None.
+        backend
+            .expect_prepare_abort()
+            .times(1)
+            .returning(|_, _, _| None);
+    } else {
+        // A non-coordinator must not start the abort protocol.
+        backend.expect_prepare_abort().never();
+    }
     forbid_abort_completion(&mut backend);
 
     let out = sweep_candidates(&backend, &["tid-a"]).await;
-    assert!(out.is_empty());
+    assert2::assert!(out.is_empty());
 }
 
 #[tokio::test]

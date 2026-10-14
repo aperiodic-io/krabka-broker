@@ -7,8 +7,7 @@
 
 pub(super) use crate::handlers::acl_test_support::{
     OPERATION_ANY, OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL,
-    PATTERN_TYPE_MATCH, PATTERN_TYPE_PREFIXED, PERMISSION_ALLOW, PERMISSION_ANY,
-    RESOURCE_TYPE_TOPIC,
+    PATTERN_TYPE_MATCH, PATTERN_TYPE_PREFIXED, PERMISSION_ANY, RESOURCE_TYPE_TOPIC,
 };
 use krabka_protocol::owned::delete_acls_request::{DeleteAclsFilter, DeleteAclsRequest};
 pub(super) const VERSION: i16 = 3;
@@ -16,16 +15,12 @@ pub(super) const VERSION: i16 = 3;
 pub(super) use crate::test_support::allow_acl as acl;
 
 pub(super) fn filter(resource_name: Option<&str>, principal: Option<&str>) -> DeleteAclsFilter {
-    DeleteAclsFilter {
-        resource_type_filter: RESOURCE_TYPE_TOPIC,
-        resource_name_filter: resource_name.map(Into::into),
-        pattern_type_filter: PATTERN_TYPE_LITERAL,
-        principal_filter: principal.map(Into::into),
-        host_filter: Some("*".into()),
-        operation: OPERATION_READ,
-        permission_type: PERMISSION_ALLOW,
-        ..Default::default()
-    }
+    crate::handlers::acl_test_support::acl_request_filter!(
+        DeleteAclsFilter,
+        resource_name,
+        principal,
+        OPERATION_READ
+    )
 }
 
 pub(super) fn request(filters: Vec<DeleteAclsFilter>) -> DeleteAclsRequest {

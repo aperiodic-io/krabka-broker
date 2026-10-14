@@ -68,7 +68,7 @@ mod tests {
     use {super::scaffold, crate::meta::compact, assert2::assert};
 
     #[test]
-    fn preserves_both_join_levels_and_rejects_malformed_bindings() {
+    fn preserves_both_join_levels() {
         let output = scaffold(&"req, Result, |g, t, p| {}".parse().unwrap()).unwrap();
         assert!(
             compact(&output)
@@ -76,13 +76,15 @@ mod tests {
                 .count()
                 == 2
         );
-        for source in [
-            "",
-            "req, Result, |g, t| {}",
-            "req, Result, |g, t, p| ()",
-            "req, Result, |g, t, p| {} extra",
-        ] {
-            assert!(scaffold(&source.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        missing_parameter = { "req, Result, |g, t| {}" },
+        expression_body = { "req, Result, |g, t, p| ()" },
+        trailing = { "req, Result, |g, t, p| {} extra" },
+    )]
+    fn rejects_malformed_bindings(source: &str) {
+        assert2::assert!(scaffold(&source.parse().unwrap()).is_err());
     }
 }

@@ -153,34 +153,48 @@ pub(crate) fn expand(
 
 #[cfg(test)]
 mod tests {
-    use {super::wrappers, crate::meta::compact, assert2::assert};
+    use {super::wrappers, crate::meta::compact};
 
-    #[test]
-    fn rejects_missing_duplicate_and_incompatible_field_codecs() {
-        for methods in [
-            "",
-            "fn encode_fields(&self, buf: &mut BytesMut) {}",
+    #[yare::parameterized(
+        empty_impl = { "" },
+        missing_decode = { "fn encode_fields(&self, buf: &mut BytesMut) {}" },
+        mutable_encode_receiver = {
             "fn encode_fields(&mut self, buf: &mut BytesMut) {} fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {}",
+        },
+        public_encode_method = {
             "pub fn encode_fields(&self, buf: &mut BytesMut) {} fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {}",
+        },
+        borrowed_decode_buffer = {
             "fn encode_fields(&self, buf: &mut BytesMut) {} fn decode_fields(buf: &[u8]) -> Result<Self, BrokerError> {}",
+        },
+        duplicate_encode_method = {
             "fn encode_fields(&self, buf: &mut BytesMut) {} fn encode_fields(self, buf: &mut BytesMut) {} fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {}",
-        ] {
-            let item = format!("impl Value {{ {methods} }}").parse().unwrap();
-            assert!(wrappers(&"record = \"Record\"".parse().unwrap(), &item).is_err());
-        }
+        },
+    )]
+    fn rejects_missing_duplicate_and_incompatible_field_codecs(methods: &str) {
+        let item = format!("impl Value {{ {methods} }}").parse().unwrap();
+        assert2::assert!(wrappers(&"record = \"Record\"".parse().unwrap(), &item).is_err());
     }
 
-    #[test]
-    fn infers_receivers_without_parsing_complex_bodies() {
-        for receiver in ["&self", "self"] {
-            let item = format!("impl Value {{ fn encode_fields({receiver}, buf: &mut BytesMut) {{ module::write(buf, self.value); }} fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {{ return Err(module::error()); }} }}").parse().unwrap();
-            let output = wrappers(&"record = \"Record\"".parse().unwrap(), &item).unwrap();
-            let output = compact(&output);
-            assert!(output.contains(&format!("pubfnencode({receiver})").replace(' ', "")));
-            assert!(output.contains("Self::decode_fields"));
-            for meta in ["", "record = 2", "other = \"Record\""] {
-                assert!(wrappers(&meta.parse().unwrap(), &item).is_err());
-            }
-        }
+    #[yare::parameterized(
+        shared_receiver = { "&self" },
+        owned_receiver = { "self" },
+    )]
+    fn infers_receivers_without_parsing_complex_bodies(receiver: &str) {
+        let item = format!("impl Value {{ fn encode_fields({receiver}, buf: &mut BytesMut) {{ module::write(buf, self.value); }} fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> {{ return Err(module::error()); }} }}").parse().unwrap();
+        let output = wrappers(&"record = \"Record\"".parse().unwrap(), &item).unwrap();
+        let output = compact(&output);
+        assert2::assert!(output.contains(&format!("pubfnencode({receiver})").replace(' ', "")));
+        assert2::assert!(output.contains("Self::decode_fields"));
+    }
+
+    #[yare::parameterized(
+        missing_metadata = { "" },
+        numeric_record_name = { "record = 2" },
+        unsupported_metadata_key = { "other = \"Record\"" },
+    )]
+    fn rejects_invalid_wrapper_metadata(meta: &str) {
+        let item = "impl Value { fn encode_fields(&self, buf: &mut BytesMut) { module::write(buf, self.value); } fn decode_fields(buf: &mut &[u8]) -> Result<Self, BrokerError> { return Err(module::error()); } }".parse().unwrap();
+        assert2::assert!(wrappers(&meta.parse().unwrap(), &item).is_err());
     }
 }

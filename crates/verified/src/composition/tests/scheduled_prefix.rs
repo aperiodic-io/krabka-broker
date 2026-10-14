@@ -160,21 +160,24 @@ fn schedules_reject_corrupt_tails_and_ignore_stale_gate_fields() {
             }
         }
     }
-    for (start, end, batches, times) in [
-        (0, 0, &[][..], &[][..]),
-        (
-            i64::MAX - 1,
-            i64::MAX,
-            &[(i64::MAX - 1, 0)][..],
-            &[i64::MIN][..],
-        ),
-        (0, i64::MAX, &[(i64::MAX, 0)][..], &[0][..]),
-    ] {
-        check_witness(batches, times, &[], 0, i64::MAX, FetchWatermarks {
-            log_start: start,
-            log_end: end,
-            hw: end,
-            ..w
-        });
-    }
+}
+
+#[yare::parameterized(
+    empty_log = { 0, 0, &[][..], &[][..] },
+    maximum_empty_batch = { i64::MAX - 1, i64::MAX, &[(i64::MAX - 1, 0)][..], &[i64::MIN][..] },
+    maximum_end_mismatch = { 0, i64::MAX, &[(i64::MAX, 0)][..], &[0][..] },
+)]
+fn schedules_handle_empty_and_signed_extreme_extents(
+    start: i64,
+    end: i64,
+    batches: &[(i64, i32)],
+    times: &[i64],
+) {
+    check_witness(batches, times, &[], 0, i64::MAX, FetchWatermarks {
+        log_start: start,
+        log_end: end,
+        hw: end,
+        lso: i64::MIN,
+        deliverable: i64::MIN,
+    });
 }

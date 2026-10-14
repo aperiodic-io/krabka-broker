@@ -17,7 +17,7 @@ use {
         barrier::{
             STATE_TOPIC,
             coordinator::{BarrierCoordinator, GroupDescription},
-            handlers::{cluster_describe_denied, interval_to_wire},
+            handlers::{cluster_describe_image, interval_to_wire},
         },
         broker::Broker,
         codes,
@@ -43,8 +43,7 @@ pub(crate) async fn handle(
     version: ApiVersion,
     ctx: &RequestContext<'_>,
 ) -> DispatchResult {
-    let image = broker.controller.current_image();
-    if cluster_describe_denied(broker.config.authorizer.as_ref(), &image, ctx) {
+    let Some(image) = cluster_describe_image(broker, ctx) else {
         let groups = req
             .groups
             .iter()
@@ -57,7 +56,7 @@ pub(crate) async fn handle(
             })
             .collect();
         return encode_response(&response(groups), version);
-    }
+    };
 
     let coordinator = &broker.barrier_coordinator;
     let held = coordinator.describe_groups(&req.groups).await;

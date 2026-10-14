@@ -134,16 +134,18 @@ fn checked_time_scan_rejects_structurally_valid_false_bounds_and_padding() {
     );
 }
 
-#[test]
-fn checked_time_scan_covers_empty_malformed_and_extreme_inputs() {
-    for max in [-1, 0, i64::MAX] {
-        check(&[], &[], &[], max, u32::MAX, i64::MIN);
-        check(&[IndexEntry::new(i64::MIN, 0)], &[], &[], max, 0, i64::MAX);
-        check(&[], &[0], &[], max, 0, 0);
-        check(&[], &[], &[0], max, 0, 0);
-        check(&[], &[0, 0], &[1, 2], max, 0, 0);
-        check(&[], &[1, 0], &[1, 2], max, 0, 0);
-    }
+#[yare::parameterized(
+    negative_maximum = { -1 },
+    zero_maximum = { 0 },
+    maximum_coordinate = { i64::MAX },
+)]
+fn checked_time_scan_covers_empty_malformed_and_extreme_inputs(max: i64) {
+    check(&[], &[], &[], max, u32::MAX, i64::MIN);
+    check(&[IndexEntry::new(i64::MIN, 0)], &[], &[], max, 0, i64::MAX);
+    check(&[], &[0], &[], max, 0, 0);
+    check(&[], &[], &[0], max, 0, 0);
+    check(&[], &[0, 0], &[1, 2], max, 0, 0);
+    check(&[], &[1, 0], &[1, 2], max, 0, 0);
     let offsets = [0, 1, u32::MAX];
     let times = [i64::MAX, i64::MIN, i64::MAX];
     let rows = [

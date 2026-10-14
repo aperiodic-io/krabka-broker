@@ -216,34 +216,24 @@ mod tests {
     // scale factor could go missing. Each case pairs a value written in one unit
     // with the byte-denominated magnitude it must read back as: a dropped or
     // doubled 1024 in either direction fails here.
-    #[test]
-    fn rate_and_burst_round_trip_through_the_accessors() {
-        let cases = [
-            (bytes_per_sec(0), bytes(0)),
-            (bytes_per_sec(1), bytes(1)),
-            (kibibytes_per_sec(1), bytes(1024)),
-            (bytes_per_sec(1024), kibibytes(1)),
-            (bytes_per_sec(3_000_000), mebibytes(2)),
-            (kibibytes_per_sec(64), mebibytes(1)),
-            (
-                ByteRate::from_bytes_per_sec_f64(0.5),
-                ByteSize::from_bytes_f64(5.5),
-            ),
-            (
-                ByteRate::from_bytes_per_sec_f64(1.25),
-                ByteSize::from_bytes_f64(0.75),
-            ),
-            (
-                ByteRate::from_bytes_per_sec_f64(0.000_001),
-                ByteSize::from_bytes_f64(0.000_011),
-            ),
-        ];
-
-        for (rate, burst) in cases {
-            let b = TokenBucket::new();
-            b.set_byte_rate_with_burst(rate, burst);
-            check!((b.byte_rate(), b.byte_burst()) == (rate, burst));
-        }
+    #[yare::parameterized(
+        zero = { bytes_per_sec(0), bytes(0) },
+        one = { bytes_per_sec(1), bytes(1) },
+        one_kibibyte_rate = { kibibytes_per_sec(1), bytes(1024) },
+        one_kibibyte_burst = { bytes_per_sec(1024), kibibytes(1) },
+        decimal_rate = { bytes_per_sec(3_000_000), mebibytes(2) },
+        kibibyte_rate = { kibibytes_per_sec(64), mebibytes(1) },
+        fractional = { ByteRate::from_bytes_per_sec_f64(0.5), ByteSize::from_bytes_f64(5.5) },
+        quarter_rate = { ByteRate::from_bytes_per_sec_f64(1.25), ByteSize::from_bytes_f64(0.75) },
+        submicro = {
+            ByteRate::from_bytes_per_sec_f64(0.000_001),
+            ByteSize::from_bytes_f64(0.000_011),
+        },
+    )]
+    fn rate_and_burst_round_trip_through_the_accessors(rate: ByteRate, burst: ByteSize) {
+        let b = TokenBucket::new();
+        b.set_byte_rate_with_burst(rate, burst);
+        check!((b.byte_rate(), b.byte_burst()) == (rate, burst));
     }
 
     /// The event pair exists separately from the byte pair because a token
@@ -251,69 +241,63 @@ mod tests {
     /// them "compiles but the result is wrong". Only the byte pair was round
     /// tripped, so nothing checked that an event rate reads back as one, nor
     /// that the raw token primitive underneath both publishes what it is given.
-    #[test]
-    fn event_and_token_rates_round_trip_through_the_accessors() {
+    #[yare::parameterized(
+        zero = { 0, 0 },
+        one = { 1, 1 },
+        ten_to_hundred = { 10, 100 },
+        thousand_to_two_fifty = { 1_000, 250 },
+    )]
+    fn event_and_token_rates_round_trip_through_the_accessors(per_sec: u64, burst: u64) {
         // (rate per second, independent burst in whole events)
-        let cases = [(0u64, 0u64), (1, 1), (10, 100), (1_000, 250)];
+        let rate = Frequency::from_per_sec_u64(per_sec);
 
-        for (per_sec, burst) in cases {
-            let rate = Frequency::from_per_sec_u64(per_sec);
+        let b = TokenBucket::new();
+        b.set_event_rate_with_burst(rate, burst);
+        check!((b.event_rate(), b.token_burst()) == (rate, burst));
 
-            let b = TokenBucket::new();
-            b.set_event_rate_with_burst(rate, burst);
-            check!((b.event_rate(), b.token_burst()) == (rate, burst));
+        // `set_event_rate` bursts one second of the rate, as the byte pair does.
+        let b = TokenBucket::new();
+        b.set_event_rate(rate);
+        check!((b.event_rate(), b.token_burst()) == (rate, per_sec));
 
-            // `set_event_rate` bursts one second of the rate, as the byte pair does.
-            let b = TokenBucket::new();
-            b.set_event_rate(rate);
-            check!((b.event_rate(), b.token_burst()) == (rate, per_sec));
-
-            // The untyped primitive both pairs delegate to.
-            let b = TokenBucket::new();
-            b.set_token_rate(per_sec);
-            check!((b.token_rate(), b.token_burst()) == (per_sec, per_sec));
-        }
+        // The untyped primitive both pairs delegate to.
+        let b = TokenBucket::new();
+        b.set_token_rate(per_sec);
+        check!((b.token_rate(), b.token_burst()) == (per_sec, per_sec));
     }
 
     /// A positive byte rate never reads back as the unlimited rate `0`:
     /// one under the storage resolution is stored as that resolution, and a
     /// rate that is not positive is no limit.
-    #[test]
-    fn a_positive_byte_rate_is_never_unlimited() {
-        let resolution = ByteRate::from_bytes_per_sec_f64(0.000_001);
-        let cases = [
-            (1.0e-12, resolution),
-            (0.000_000_4, resolution),
-            (0.0, ByteRate::from_bytes_per_sec(0)),
-            (-3.0, ByteRate::from_bytes_per_sec(0)),
-            (f64::NAN, ByteRate::from_bytes_per_sec(0)),
-        ];
-        for (rate, want) in cases {
-            let b = TokenBucket::new();
-            b.set_byte_rate_with_burst(ByteRate::from_bytes_per_sec_f64(rate), bytes(1));
-            check!(b.byte_rate() == want, "{rate}");
-        }
+    #[yare::parameterized(
+        tiny_positive = { 1.0e-12, ByteRate::from_bytes_per_sec_f64(0.000_001) },
+        below_resolution = { 0.000_000_4, ByteRate::from_bytes_per_sec_f64(0.000_001) },
+        zero = { 0.0, ByteRate::from_bytes_per_sec(0) },
+        negative = { -3.0, ByteRate::from_bytes_per_sec(0) },
+        not_a_number = { f64::NAN, ByteRate::from_bytes_per_sec(0) },
+    )]
+    fn a_positive_byte_rate_is_never_unlimited(rate: f64, want: ByteRate) {
+        let b = TokenBucket::new();
+        b.set_byte_rate_with_burst(ByteRate::from_bytes_per_sec_f64(rate), bytes(1));
+        check!(b.byte_rate() == want, "{rate}");
     }
 
     /// A rate finer than the storage resolution still matches the bucket it
     /// configured, and a different rate does not.
-    #[test]
-    fn runs_at_byte_rate_compares_the_stored_rate() {
+    #[yare::parameterized(
+        exact = { 0.123_456_7, true },
+        rounds_same = { 0.123_457, true },
+        rounds_lower = { 0.123_456, false },
+        different = { 0.5, false },
+        zero = { 0.0, false },
+    )]
+    fn runs_at_byte_rate_compares_the_stored_rate(rate: f64, want: bool) {
         let b = TokenBucket::new();
         b.set_byte_rate_with_burst(ByteRate::from_bytes_per_sec_f64(0.123_456_7), bytes(1));
-        let cases = [
-            (0.123_456_7, true),
-            (0.123_457, true),
-            (0.123_456, false),
-            (0.5, false),
-            (0.0, false),
-        ];
-        for (rate, want) in cases {
-            check!(
-                b.runs_at_byte_rate(ByteRate::from_bytes_per_sec_f64(rate)) == want,
-                "{rate}"
-            );
-        }
+        check!(
+            b.runs_at_byte_rate(ByteRate::from_bytes_per_sec_f64(rate)) == want,
+            "{rate}"
+        );
     }
 
     // `set_rate` derives the burst from one second's worth of the rate, so the

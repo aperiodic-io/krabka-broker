@@ -8,7 +8,7 @@
 
 use {
     crate::share_group_harness::{
-        boot, connect, create_topic, describe, heartbeat, rejoin, start, total_assigned,
+        boot, connect, create_topic, describe, heartbeat, join_share_group, rejoin, total_assigned,
     },
     assert2::{assert, check},
 };
@@ -114,11 +114,7 @@ async fn member_leave_epoch_minus_one() {
     let client = connect(&bootstrap).await;
     create_topic(&client, "t3", 2).await;
 
-    let mut join = heartbeat("g1", &uuid::Uuid::new_v4().to_string(), 0);
-    join.subscribed_topic_names = Some(vec!["t3".into()]);
-    let r = client.send(join).await.unwrap();
-    assert!(r.error_code == 0, "join failed: {:?}", r.error_code);
-    let mid = r.member_id.clone().unwrap();
+    let mid = join_share_group(&client, "g1", &uuid::Uuid::new_v4().to_string(), "t3").await;
 
     let leave = heartbeat("g1", &mid, -1);
     let lr = client.send(leave).await.unwrap();
@@ -148,27 +144,21 @@ async fn member_leave_epoch_minus_one() {
 /// and `ShareGroupDescribe` reports them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn state_survives_restart() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let log_dir = dir.path().to_path_buf();
-
-    let member_id;
-    {
-        let broker = start(log_dir.clone()).await;
-        let bootstrap = broker.listen_addr().to_string();
+    let (member_id, dir) = {
+        let (broker, bootstrap, dir) = boot().await;
         let client = connect(&bootstrap).await;
         create_topic(&client, "t4", 2).await;
 
-        let mut join = heartbeat("g1", &uuid::Uuid::new_v4().to_string(), 0);
-        join.subscribed_topic_names = Some(vec!["t4".into()]);
-        let r = client.send(join).await.unwrap();
-        assert!(r.error_code == 0, "join failed: {:?}", r.error_code);
-        member_id = r.member_id.clone().unwrap();
+        let member_id =
+            join_share_group(&client, "g1", &uuid::Uuid::new_v4().to_string(), "t4").await;
 
         // flush_pending inside the share actor awaits offsets_log.append before
         // returning the heartbeat response, so the join record is durable on
         // disk by the time the client receives the response above.
         broker.shutdown().await;
-    }
+        (member_id, dir)
+    };
+    let log_dir = dir.path().to_path_buf();
 
     {
         let (_broker, client) = rejoin(log_dir).await;

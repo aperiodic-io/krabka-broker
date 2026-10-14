@@ -437,13 +437,16 @@ mod tests {
         assert!(resolved.name() == "x");
     }
 
-    #[test]
-    fn assignor_enabled_matches_find_assignor() {
+    #[yare::parameterized(
+        uniform = { "uniform" },
+        range = { "range" },
+        custom = { "y" },
+        unknown = { "ghost" },
+    )]
+    fn assignor_enabled_matches_find_assignor(name: &str) {
         let mut cfg = NextGenConfig::default();
         cfg.register_assignor(Arc::new(TestAssignor("y"))).unwrap();
-        for name in ["uniform", "range", "y", "ghost"] {
-            assert!(cfg.assignor_enabled(name) == cfg.find_assignor(name).is_some());
-        }
+        assert2::assert!(cfg.assignor_enabled(name) == cfg.find_assignor(name).is_some());
     }
 
     /// Kafka's `group.consumer.max.size` defaults to `Integer.MAX_VALUE`
@@ -466,15 +469,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn migration_policy_from_str_round_trips_all_names() {
-        use ConsumerGroupMigrationPolicy as P;
-        for p in [P::Disabled, P::Upgrade, P::Downgrade, P::Bidirectional] {
-            assert!(p.as_str().parse::<P>().unwrap() == p);
-        }
-        // Case-insensitive.
-        assert!("BiDirectional".parse::<P>().unwrap() == P::Bidirectional);
-        assert!("UPGRADE".parse::<P>().unwrap() == P::Upgrade);
+    #[yare::parameterized(
+        disabled = { "disabled", ConsumerGroupMigrationPolicy::Disabled },
+        upgrade = { "upgrade", ConsumerGroupMigrationPolicy::Upgrade },
+        downgrade = { "downgrade", ConsumerGroupMigrationPolicy::Downgrade },
+        bidirectional = { "bidirectional", ConsumerGroupMigrationPolicy::Bidirectional },
+        mixed_case = { "BiDirectional", ConsumerGroupMigrationPolicy::Bidirectional },
+        upper_case = { "UPGRADE", ConsumerGroupMigrationPolicy::Upgrade },
+    )]
+    fn migration_policy_from_str_round_trips_all_names(
+        name: &str,
+        want: ConsumerGroupMigrationPolicy,
+    ) {
+        assert2::assert!(name.parse::<ConsumerGroupMigrationPolicy>().unwrap() == want);
     }
 
     #[test]

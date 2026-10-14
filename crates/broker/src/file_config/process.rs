@@ -92,25 +92,23 @@ mod tests {
                 ]
         );
     }
-    #[test]
-    fn process_roles_witness_are_case_insensitive() {
-        for roles in [
-            r#"["broker", "controller", "witness"]"#,
-            r#"["BROKER", "Controller", "WiTnEsS"]"#,
-        ] {
-            let toml = format!("[process]\nroles = {roles}");
-            let cfg = configured(&toml, "parse").expect("apply");
-            assert!(
-                cfg.roles
-                    == vec![
-                        crate::config::NodeRole::Broker,
-                        crate::config::NodeRole::Controller,
-                        crate::config::NodeRole::Witness
-                    ],
-                "{roles}"
-            );
-            assert!(cfg.is_witness(), "{roles}");
-        }
+    #[yare::parameterized(
+        lowercase_roles = { r#"["broker", "controller", "witness"]"# },
+        mixed_case_roles = { r#"["BROKER", "Controller", "WiTnEsS"]"# },
+    )]
+    fn process_roles_witness_are_case_insensitive(roles: &str) {
+        let toml = format!("[process]\nroles = {roles}");
+        let cfg = configured(&toml, "parse").expect("apply");
+        assert2::assert!(
+            cfg.roles
+                == vec![
+                    crate::config::NodeRole::Broker,
+                    crate::config::NodeRole::Controller,
+                    crate::config::NodeRole::Witness
+                ],
+            "{roles}"
+        );
+        assert2::assert!(cfg.is_witness(), "{roles}");
     }
     #[test]
     fn stretch_table_becomes_a_stretch_profile() {
@@ -137,42 +135,40 @@ mod tests {
         let cfg = configured("", "parse").expect("apply");
         assert!(cfg.stretch == None);
     }
-    #[test]
-    fn partial_stretch_table_names_the_missing_field() {
-        for (toml, missing) in [
-            (
-                r#"
+    #[yare::parameterized(
+        missing_sites = {
+            r#"
                 [stretch]
                 witness_site = "dc-w"
                 preferred_leader_site = "dc-a"
                 "#,
-                "stretch.sites",
-            ),
-            (
-                r#"
+            "stretch.sites"
+        },
+        missing_witness = {
+            r#"
                 [stretch]
                 sites = ["dc-a", "dc-b", "dc-w"]
                 preferred_leader_site = "dc-a"
                 "#,
-                "stretch.witness_site",
-            ),
-            (
-                r#"
+            "stretch.witness_site"
+        },
+        missing_preferred_leader = {
+            r#"
                 [stretch]
                 sites = ["dc-a", "dc-b", "dc-w"]
                 witness_site = "dc-w"
                 "#,
-                "stretch.preferred_leader_site",
-            ),
-        ] {
-            let error =
-                configured(toml, "parse").expect_err("a half-built stretch profile is rejected");
-            assert!(matches!(error, FileConfigError::InvalidConfig(_)));
-            assert!(
-                error.to_string().contains(missing),
-                "error names the missing field {missing}: {error}"
-            );
-        }
+            "stretch.preferred_leader_site"
+        },
+    )]
+    fn partial_stretch_table_names_the_missing_field(toml: &str, missing: &str) {
+        let error =
+            configured(toml, "parse").expect_err("a half-built stretch profile is rejected");
+        assert2::assert!(matches!(error, FileConfigError::InvalidConfig(_)));
+        assert2::assert!(
+            error.to_string().contains(missing),
+            "error names the missing field {missing}: {error}"
+        );
     }
     #[test]
     fn process_roles_rejects_unknown_role() {

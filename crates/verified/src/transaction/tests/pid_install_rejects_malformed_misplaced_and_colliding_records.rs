@@ -1,36 +1,129 @@
 use {super::*, assert2::assert};
 
-#[test]
-fn pid_install_rejects_malformed_misplaced_and_colliding_records() {
-    use TransactionPidInstallDecision::{
-        Apply, RejectCollision, RejectCurrentIdentity, RejectStagedIdentity, RejectWrongPartition,
-    };
-
-    for (arguments, expected) in [
-        ((false, 1, 0, -1, -1, true, true), RejectWrongPartition),
-        ((true, -1, 0, -1, -1, true, true), RejectCurrentIdentity),
-        ((true, 1, -1, -1, -1, true, true), RejectCurrentIdentity),
-        ((true, 1, 0, 2, -1, true, true), RejectStagedIdentity),
-        ((true, 1, 0, -1, 0, true, true), RejectStagedIdentity),
-        ((true, 1, 0, 1, 0, true, true), Apply),
-        ((true, 1, 0, -1, -1, false, true), RejectCollision),
-        ((true, 1, 0, 2, 0, true, false), RejectCollision),
-        ((true, 1, 0, -1, -1, true, true), Apply),
-        ((true, 0, 0, -1, -1, true, true), Apply),
-        ((true, 1, 0, 2, 0, true, true), Apply),
-    ] {
-        assert!(
-            transaction_pid_install_decision(
-                arguments.0,
-                arguments.1,
-                arguments.2,
-                arguments.3,
-                arguments.4,
-                arguments.5,
-                arguments.6,
-            ) == expected
-        );
-    }
+#[yare::parameterized(
+    wrong_partition = {
+        false,
+        1,
+        0,
+        -1,
+        -1,
+        true,
+        true,
+        TransactionPidInstallDecision::RejectWrongPartition,
+    },
+    negative_pid = {
+        true,
+        -1,
+        0,
+        -1,
+        -1,
+        true,
+        true,
+        TransactionPidInstallDecision::RejectCurrentIdentity,
+    },
+    negative_epoch = {
+        true,
+        1,
+        -1,
+        -1,
+        -1,
+        true,
+        true,
+        TransactionPidInstallDecision::RejectCurrentIdentity,
+    },
+    incomplete_staged_id = {
+        true,
+        1,
+        0,
+        2,
+        -1,
+        true,
+        true,
+        TransactionPidInstallDecision::RejectStagedIdentity,
+    },
+    incomplete_staged_epoch = {
+        true,
+        1,
+        0,
+        -1,
+        0,
+        true,
+        true,
+        TransactionPidInstallDecision::RejectStagedIdentity,
+    },
+    nonnegative_staged_identity = {
+        true,
+        1,
+        0,
+        1,
+        0,
+        true,
+        true,
+        TransactionPidInstallDecision::Apply,
+    },
+    current_owner_collision = {
+        true,
+        1,
+        0,
+        -1,
+        -1,
+        false,
+        true,
+        TransactionPidInstallDecision::RejectCollision,
+    },
+    next_owner_collision = {
+        true,
+        1,
+        0,
+        2,
+        0,
+        true,
+        false,
+        TransactionPidInstallDecision::RejectCollision,
+    },
+    absent_staged_identity = {
+        true,
+        1,
+        0,
+        -1,
+        -1,
+        true,
+        true,
+        TransactionPidInstallDecision::Apply,
+    },
+    zero_producer_id = { true, 0, 0, -1, -1, true, true, TransactionPidInstallDecision::Apply },
+    matching_staged_identity = {
+        true,
+        1,
+        0,
+        2,
+        0,
+        true,
+        true,
+        TransactionPidInstallDecision::Apply,
+    },
+)]
+fn pid_install_rejects_malformed_misplaced_and_colliding_records(
+    partition_matches: bool,
+    producer_id: i64,
+    producer_epoch: i16,
+    next_producer_id: i64,
+    next_producer_epoch: i16,
+    current_owner_matches: bool,
+    next_owner_matches: bool,
+    expected: TransactionPidInstallDecision,
+) {
+    assert2::assert!(
+        transaction_pid_install_decision(
+            partition_matches,
+            producer_id,
+            producer_epoch,
+            next_producer_id,
+            next_producer_epoch,
+            current_owner_matches,
+            next_owner_matches,
+        ) == expected
+    );
 }
 
 fn malformed_marker_cases() -> Vec<(

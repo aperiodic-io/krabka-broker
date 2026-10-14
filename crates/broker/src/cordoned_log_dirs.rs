@@ -322,97 +322,52 @@ mod tests {
         krabka_metadata::{BrokerConfigRecord, MetadataRecord},
     };
 
-    struct UsableCase<'a> {
-        label: &'a str,
-        /// The registered directory ids.
-        log_dirs: &'a [u128],
-        /// The cordoned ids.
-        cordoned: Option<&'a [u128]>,
-        /// Whether placement may use the broker.
-        want: bool,
-    }
-
-    struct HeartbeatCase<'a> {
-        label: &'a str,
-        /// The stored cordoned ids.
-        stored: Option<&'a [u128]>,
-        /// The reported set.
-        reported: Option<Vec<uuid::Uuid>>,
-        /// Whether a registration change is written.
-        writes: bool,
-    }
-
     fn dirs() -> Vec<PathBuf> { vec![PathBuf::from("/d1"), PathBuf::from("/d2")] }
 
     /// Each message is the one `kafka-configs --alter --entity-name 1
     /// --add-config cordoned.log.dirs=...` printed against `apache/kafka:4.3.1`
     /// with `log.dirs=/tmp/d1,/tmp/d2`.
-    #[test]
-    fn values_resolve_as_kafka_validates_them() {
-        struct Case {
-            value: &'static str,
-            want: Result<Vec<PathBuf>, &'static str>,
-        }
-
-        let d1 = PathBuf::from("/d1");
-        let d2 = PathBuf::from("/d2");
-        let cases: [Case; 10] = [
-            Case {
-                value: "",
-                want: Ok(vec![]),
-            },
-            Case {
-                value: "  ",
-                want: Ok(vec![]),
-            },
-            Case {
-                value: "/d1",
-                want: Ok(vec![d1.clone()]),
-            },
-            Case {
-                value: "/d2 , /d1",
-                want: Ok(vec![d1.clone(), d2.clone()]),
-            },
-            Case {
-                value: "/d1,/d1",
-                want: Ok(vec![d1]),
-            },
-            Case {
-                value: "*",
-                want: Ok(vec![PathBuf::from("/d1"), d2]),
-            },
-            Case {
-                value: "/d1,",
-                want: Err("Configuration 'cordoned.log.dirs' values must not be empty."),
-            },
-            Case {
-                value: "*,/d1",
-                want: Err(
-                    "requirement failed: When cordoned.log.dirs is set to *, it must not \
-                     contain other values",
-                ),
-            },
-            Case {
-                value: "/nope",
-                want: Err(
-                    "requirement failed: All entries in cordoned.log.dirs must be present in \
-                     log.dirs or log.dir. Missing entries : /nope",
-                ),
-            },
-            Case {
-                value: "/x,/d1,/y",
-                want: Err(
-                    "requirement failed: All entries in cordoned.log.dirs must be present in \
-                     log.dirs or log.dir. Missing entries : /x, /y",
-                ),
-            },
-        ];
-        for Case { value, want } in cases {
-            check!(
-                resolve(value, &dirs()) == want.map_err(str::to_owned),
-                "{value:?}"
-            );
-        }
+    #[yare::parameterized(
+        empty = { "", Ok(vec![]) },
+        whitespace = { "  ", Ok(vec![]) },
+        one_directory = { "/d1", Ok(vec![PathBuf::from("/d1")]) },
+        trimmed_ordered_directories = {
+            "/d2 , /d1",
+            Ok(vec![PathBuf::from("/d1"), PathBuf::from("/d2")]),
+        },
+        duplicate_directory = { "/d1,/d1", Ok(vec![PathBuf::from("/d1")]) },
+        wildcard = { "*", Ok(vec![PathBuf::from("/d1"), PathBuf::from("/d2")]) },
+        trailing_empty_entry = {
+            "/d1,",
+            Err("Configuration 'cordoned.log.dirs' values must not be empty.".to_owned()),
+        },
+        wildcard_with_directory = {
+            "*,/d1",
+            Err(
+                "requirement failed: When cordoned.log.dirs is set to *, it must not \
+                         contain other values"
+                    .to_owned(),
+            ),
+        },
+        missing_directory = {
+            "/nope",
+            Err(
+                "requirement failed: All entries in cordoned.log.dirs must be present in \
+                         log.dirs or log.dir. Missing entries : /nope"
+                    .to_owned(),
+            ),
+        },
+        multiple_missing_directories = {
+            "/x,/d1,/y",
+            Err(
+                "requirement failed: All entries in cordoned.log.dirs must be present in \
+                         log.dirs or log.dir. Missing entries : /x, /y"
+                    .to_owned(),
+            ),
+        },
+    )]
+    fn values_resolve_as_kafka_validates_them(value: &str, want: Result<Vec<PathBuf>, String>) {
+        check!(resolve(value, &dirs()) == want, "{value:?}");
     }
 
     fn registration(
@@ -434,117 +389,57 @@ mod tests {
     }
 
     /// Kafka's `BrokerRegistration.hasUncordonedDirs`.
-    #[test]
-    fn a_broker_is_usable_unless_every_directory_is_cordoned() {
-        let cases: [UsableCase<'_>; 5] = [
-            UsableCase {
-                label: "not reported yet",
-                log_dirs: &[1, 2],
-                cordoned: None,
-                want: true,
-            },
-            UsableCase {
-                label: "nothing cordoned",
-                log_dirs: &[1, 2],
-                cordoned: Some(&[]),
-                want: true,
-            },
-            UsableCase {
-                label: "one of two cordoned",
-                log_dirs: &[1, 2],
-                cordoned: Some(&[1]),
-                want: true,
-            },
-            UsableCase {
-                label: "every directory cordoned",
-                log_dirs: &[1, 2],
-                cordoned: Some(&[2, 1]),
-                want: false,
-            },
-            UsableCase {
-                label: "no directory ids registered",
-                log_dirs: &[],
-                cordoned: Some(&[1]),
-                want: true,
-            },
-        ];
-        for UsableCase {
-            label,
-            log_dirs,
-            cordoned,
-            want,
-        } in cases
-        {
-            check!(
-                has_uncordoned_dirs(&registration(log_dirs, cordoned)) == want,
-                "{label}"
-            );
-        }
+    #[yare::parameterized(
+        not_reported_yet = { &[1, 2], None, true },
+        nothing_cordoned = { &[1, 2], Some(&[][..]), true },
+        one_of_two_cordoned = { &[1, 2], Some(&[1][..]), true },
+        every_directory_cordoned = { &[1, 2], Some(&[2, 1][..]), false },
+        no_directory_ids_registered = { &[], Some(&[1][..]), true },
+    )]
+    fn a_broker_is_usable_unless_every_directory_is_cordoned(
+        log_dirs: &[u128],
+        cordoned: Option<&[u128]>,
+        want: bool,
+    ) {
+        check!(has_uncordoned_dirs(&registration(log_dirs, cordoned)) == want);
     }
 
     /// Kafka's `handleDirectoriesCordoned`: a record only when the heartbeat
     /// carries a set and it differs from the stored one as a set.
-    #[test]
-    fn a_heartbeat_changes_the_registration_only_when_its_set_differs() {
-        let one = uuid::Uuid::from_u128(1);
-        let two = uuid::Uuid::from_u128(2);
-        let cases: [HeartbeatCase<'_>; 5] = [
-            HeartbeatCase {
-                label: "the broker has not caught up",
-                stored: None,
-                reported: None,
-                writes: false,
-            },
-            HeartbeatCase {
-                label: "the first report",
-                stored: None,
-                reported: Some(vec![]),
-                writes: true,
-            },
-            HeartbeatCase {
-                label: "an unchanged set",
-                stored: Some(&[1, 2]),
-                reported: Some(vec![two, one]),
-                writes: false,
-            },
-            HeartbeatCase {
-                label: "a new directory",
-                stored: Some(&[1]),
-                reported: Some(vec![one, two]),
-                writes: true,
-            },
-            HeartbeatCase {
-                label: "uncordon everything",
-                stored: Some(&[1]),
-                reported: Some(vec![]),
-                writes: true,
-            },
-        ];
-        for HeartbeatCase {
-            label,
-            stored,
-            reported,
-            writes,
-        } in cases
-        {
-            let mut image = MetadataImage::new(uuid::Uuid::nil());
-            let current = registration(&[1, 2], stored);
-            image.apply(&MetadataRecord::V1BrokerRegistration(current));
-            let want = writes.then(|| {
-                MetadataRecord::V1BrokerRegistrationChange(BrokerRegistrationChangeRecord {
-                    node_id: NodeId(1),
-                    broker_epoch: 7,
-                    fenced: krabka_metadata::FencingChange::None,
-                    in_controlled_shutdown: false,
-                    log_dirs: vec![],
-                    cordoned_log_dirs: reported.clone(),
-                })
-            });
-            check!(
-                registration_change(&image, NodeId(1), reported.as_deref()) == want,
-                "{label}"
-            );
-        }
+    #[yare::parameterized(
+        broker_not_caught_up = { None, None, false },
+        first_report = { None, Some(vec![]), true },
+        unchanged_set_different_order = {
+            Some(&[1, 2][..]),
+            Some(vec![uuid::Uuid::from_u128(2), uuid::Uuid::from_u128(1)]),
+            false
+        },
+        new_directory = {
+            Some(&[1][..]),
+            Some(vec![uuid::Uuid::from_u128(1), uuid::Uuid::from_u128(2)]),
+            true
+        },
+        uncordon_everything = { Some(&[1][..]), Some(vec![]), true },
+    )]
+    fn a_heartbeat_changes_the_registration_only_when_its_set_differs(
+        stored: Option<&[u128]>,
+        reported: Option<Vec<uuid::Uuid>>,
+        writes: bool,
+    ) {
+        let mut image = MetadataImage::new(uuid::Uuid::nil());
+        let current = registration(&[1, 2], stored);
+        image.apply(&MetadataRecord::V1BrokerRegistration(current));
+        let want = writes.then(|| {
+            MetadataRecord::V1BrokerRegistrationChange(BrokerRegistrationChangeRecord {
+                node_id: NodeId(1),
+                broker_epoch: 7,
+                fenced: krabka_metadata::FencingChange::None,
+                in_controlled_shutdown: false,
+                log_dirs: vec![],
+                cordoned_log_dirs: reported.clone(),
+            })
+        });
+        check!(registration_change(&image, NodeId(1), reported.as_deref()) == want);
     }
 
     fn image_with(value: Option<&str>) -> MetadataImage {

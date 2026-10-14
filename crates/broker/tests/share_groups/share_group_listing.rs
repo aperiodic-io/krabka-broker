@@ -6,7 +6,10 @@
 //! and on the `types_filter` behaviour.
 
 use {
-    crate::share_group_harness::{boot, connect, create_topic, heartbeat},
+    crate::{
+        share_group_harness::{boot, connect, create_topic, join_share_group},
+        support::client::list_groups_by_type,
+    },
     assert2::assert,
     krabka_protocol::owned::list_groups_request::ListGroupsRequest,
 };
@@ -22,20 +25,10 @@ async fn list_groups_includes_share_group() {
     create_topic(&client, "t7", 2).await;
 
     // Join a share group so it is registered in the coordinator.
-    let mut join = heartbeat("g7", &uuid::Uuid::new_v4().to_string(), 0);
-    join.subscribed_topic_names = Some(vec!["t7".into()]);
-    let r = client.send(join).await.unwrap();
-    assert!(r.error_code == 0, "join failed: {:?}", r.error_code);
+    let _ = join_share_group(&client, "g7", &uuid::Uuid::new_v4().to_string(), "t7").await;
 
     // types_filter = ["share"] → contains g7 tagged "share".
-    let resp = client
-        .send(ListGroupsRequest {
-            types_filter: vec!["share".into()],
-            ..Default::default()
-        })
-        .await
-        .expect("ListGroups[share]");
-    assert!(resp.error_code == 0, "list error: {:?}", resp.error_code);
+    let resp = list_groups_by_type(&client, "share").await;
     let share_row = resp.groups.iter().find(|g| g.group_id == "g7");
     let share_row = share_row.unwrap_or_else(|| {
         panic!(
@@ -50,13 +43,7 @@ async fn list_groups_includes_share_group() {
     );
 
     // types_filter = ["consumer"] → g7 must NOT appear.
-    let resp = client
-        .send(ListGroupsRequest {
-            types_filter: vec!["consumer".into()],
-            ..Default::default()
-        })
-        .await
-        .expect("ListGroups[consumer]");
+    let resp = list_groups_by_type(&client, "consumer").await;
     assert!(
         !resp.groups.iter().any(|g| g.group_id == "g7"),
         "share group g7 must be excluded under types_filter=[consumer], got {:?}",

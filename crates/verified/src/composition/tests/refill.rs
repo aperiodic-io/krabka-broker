@@ -23,33 +23,31 @@ proptest! {
     }
 }
 
-#[test]
-fn refill_partition_covers_fractional_debt_and_saturation_boundaries() {
-    for (initial, elapsed, rate, burst, request, expected) in [
-        ((0, 0, 0), (1, 1), 1_500_000_000, 10, 10, (3, 0, 0, 0)),
-        (
-            (0, 7, 500_000_000),
-            (1, 0),
-            1_500_000_000,
-            10,
-            5,
-            (0, 0, 5, 0),
-        ),
-        ((0, 0, 0), (1, 1), 3, 10, 10, (0, 0, 0, 6)),
-        ((0, 7, 0), (1, 1), 3, 0, 10, (0, 0, 7, 6)),
-        ((0, 0, 0), (1, 1), 1_500_000_000, 1, 10, (1, 0, 0, 0)),
-        (
-            (0, u64::MAX, 0),
-            (u64::MAX, 0),
-            u64::MAX,
-            u64::MAX,
-            u64::MAX,
-            (u64::MAX, 0, 0, 0),
-        ),
-    ] {
-        assert2::assert!(
-            refill_partition_preserves_consume_budget(initial, elapsed, rate, burst, request)
-                == expected
-        );
-    }
+#[yare::parameterized(
+    fractional_refill = { (0, 0, 0), (1, 1), 1_500_000_000, 10, 10, (3, 0, 0, 0) },
+    fractional_debt = { (0, 7, 500_000_000), (1, 0), 1_500_000_000, 10, 5, (0, 0, 5, 0) },
+    retained_fraction = { (0, 0, 0), (1, 1), 3, 10, 10, (0, 0, 0, 6) },
+    zero_burst = { (0, 7, 0), (1, 1), 3, 0, 10, (0, 0, 7, 6) },
+    saturation_discards_fraction = { (0, 0, 0), (1, 1), 1_500_000_000, 1, 10, (1, 0, 0, 0) },
+    maximum_values = {
+        (0, u64::MAX, 0),
+        (u64::MAX, 0),
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+        (u64::MAX, 0, 0, 0),
+    },
+)]
+fn refill_partition_covers_fractional_debt_and_saturation_boundaries(
+    initial: (u64, u64, u64),
+    elapsed: (u64, u64),
+    rate: u64,
+    burst: u64,
+    request: u64,
+    expected: (u64, u64, u64, u64),
+) {
+    assert2::assert!(
+        refill_partition_preserves_consume_budget(initial, elapsed, rate, burst, request)
+            == expected
+    );
 }

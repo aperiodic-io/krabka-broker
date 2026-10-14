@@ -89,52 +89,50 @@ fn sdk_builder<const MAJOR: u8, const MINOR: u8>(kind: &'static str) -> Builder 
     }
 }
 
-#[test]
-fn connection_policy_preserves_opaque_builder_scope_and_method_order_for_both_sdks() {
-    for kind in ["S3", "GCS"] {
-        EVENTS.with_borrow_mut(Vec::clear);
-        let config = Config {
-            max_retries: 3,
-            retry_timeout: Duration::from_secs(40),
-            allow_http: true,
-            request_timeout: Duration::from_secs(7),
-            connect_timeout: Duration::from_secs(2),
-        };
-        let configured = krabka_macros::connection_policy!(
-            {
-                let label = if kind == "S3" { "S3" } else { "GCS" };
-                sdk_builder::<1, 2>(label)
-            },
-            config
+#[yare::parameterized(s3 = { "S3" }, gcs = { "GCS" })]
+fn connection_policy_preserves_opaque_builder_scope_and_method_order_for_both_sdks(kind: &str) {
+    EVENTS.with_borrow_mut(Vec::clear);
+    let config = Config {
+        max_retries: 3,
+        retry_timeout: Duration::from_secs(40),
+        allow_http: true,
+        request_timeout: Duration::from_secs(7),
+        connect_timeout: Duration::from_secs(2),
+    };
+    let configured = krabka_macros::connection_policy!(
+        {
+            let label = if kind == "S3" { "S3" } else { "GCS" };
+            sdk_builder::<1, 2>(label)
+        },
+        config
+    );
+    assert2::assert!(configured.kind == kind);
+    assert2::assert!(
+        configured.retry
+            == Some(RetryConfig {
+                attempts: 3,
+                timeout: Duration::from_secs(40)
+            })
+    );
+    assert2::assert!(
+        configured.client
+            == Some(ClientOptions {
+                allow_http: true,
+                request: Duration::from_secs(7),
+                connect: Duration::from_secs(2),
+            })
+    );
+    EVENTS.with_borrow(|events| {
+        assert2::assert!(
+            *events
+                == [
+                    "builder",
+                    "retry_config",
+                    "with_retry",
+                    "client_new",
+                    "client_options",
+                    "with_client_options"
+                ]
         );
-        assert!(configured.kind == kind);
-        assert!(
-            configured.retry
-                == Some(RetryConfig {
-                    attempts: 3,
-                    timeout: Duration::from_secs(40)
-                })
-        );
-        assert!(
-            configured.client
-                == Some(ClientOptions {
-                    allow_http: true,
-                    request: Duration::from_secs(7),
-                    connect: Duration::from_secs(2),
-                })
-        );
-        EVENTS.with_borrow(|events| {
-            assert!(
-                *events
-                    == [
-                        "builder",
-                        "retry_config",
-                        "with_retry",
-                        "client_new",
-                        "client_options",
-                        "with_client_options"
-                    ]
-            );
-        });
-    }
+    });
 }

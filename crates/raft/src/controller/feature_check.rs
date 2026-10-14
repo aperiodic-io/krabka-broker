@@ -120,77 +120,77 @@ mod tests {
 
     /// Kafka 4.3's latest production `metadata.version` is `4.3-IV0` (30), and
     /// `4.4-IV2` (33) is one of trunk's unstable levels.
-    #[test]
-    fn a_level_outside_the_supported_range_is_refused_with_kafkas_message() {
-        use UnstableFeatureVersions::{Disabled, Enabled};
-
-        for (what, levels, unstable, expected) in [
-            (
-                "the latest production level",
-                vec![finalized("metadata.version", 30)],
-                Disabled,
-                None,
-            ),
-            (
-                "an unstable level with the flag off",
-                vec![finalized("metadata.version", 33)],
-                Disabled,
-                Some(refusal("metadata.version", 33, "7-30")),
-            ),
-            (
-                "an unstable level with the flag on",
-                vec![finalized("metadata.version", 33)],
-                Enabled,
-                None,
-            ),
-            (
-                "a feature above its range",
-                vec![finalized("share.version", 5)],
-                Enabled,
-                Some(refusal("share.version", 5, "0-2")),
-            ),
-            (
-                "a level below the range",
-                vec![finalized("metadata.version", 3)],
-                Enabled,
-                Some(refusal("metadata.version", 3, "7-34")),
-            ),
-            (
-                "the first of two refused features",
-                vec![
-                    finalized("metadata.version", 33),
-                    finalized("share.version", 5),
-                ],
-                Disabled,
-                Some(refusal("metadata.version", 33, "7-30")),
-            ),
-            (
-                "a feature this controller does not know",
-                vec![finalized("some.future.feature", 9)],
-                Disabled,
-                Some(refusal("some.future.feature", 9, "0")),
-            ),
-            (
-                "a feature this controller does not know, with the flag on",
-                vec![finalized("some.future.feature", 1)],
-                Enabled,
-                Some(refusal("some.future.feature", 1, "0")),
-            ),
-            (
-                "a known feature at a level it supports beside an unknown one",
-                vec![
-                    finalized("metadata.version", 30),
-                    finalized("some.future.feature", 2),
-                ],
-                Disabled,
-                Some(refusal("some.future.feature", 2, "0")),
-            ),
-            ("no finalized feature", vec![], Disabled, None),
-        ] {
-            check!(
-                unsupported_feature_level(&image_at(&levels), unstable) == expected,
-                "{what}"
-            );
-        }
+    #[yare::parameterized(
+        latest_production = {
+            "the latest production level",
+            &[finalized("metadata.version", 30)][..],
+            UnstableFeatureVersions::Disabled,
+            None,
+        },
+        unstable_off = {
+            "an unstable level with the flag off",
+            &[finalized("metadata.version", 33)][..],
+            UnstableFeatureVersions::Disabled,
+            Some(refusal("metadata.version", 33, "7-30")),
+        },
+        unstable_on = {
+            "an unstable level with the flag on",
+            &[finalized("metadata.version", 33)][..],
+            UnstableFeatureVersions::Enabled,
+            None,
+        },
+        feature_above_range = {
+            "a feature above its range",
+            &[finalized("share.version", 5)][..],
+            UnstableFeatureVersions::Enabled,
+            Some(refusal("share.version", 5, "0-2")),
+        },
+        level_below_range = {
+            "a level below the range",
+            &[finalized("metadata.version", 3)][..],
+            UnstableFeatureVersions::Enabled,
+            Some(refusal("metadata.version", 3, "7-34")),
+        },
+        first_refusal = {
+            "the first of two refused features",
+            &[finalized("metadata.version", 33), finalized("share.version", 5)][..],
+            UnstableFeatureVersions::Disabled,
+            Some(refusal("metadata.version", 33, "7-30")),
+        },
+        unknown_feature = {
+            "a feature this controller does not know",
+            &[finalized("some.future.feature", 9)][..],
+            UnstableFeatureVersions::Disabled,
+            Some(refusal("some.future.feature", 9, "0")),
+        },
+        unknown_feature_with_flag = {
+            "a feature this controller does not know, with the flag on",
+            &[finalized("some.future.feature", 1)][..],
+            UnstableFeatureVersions::Enabled,
+            Some(refusal("some.future.feature", 1, "0")),
+        },
+        known_beside_unknown = {
+            "a known feature at a level it supports beside an unknown one",
+            &[finalized("metadata.version", 30), finalized("some.future.feature", 2)][..],
+            UnstableFeatureVersions::Disabled,
+            Some(refusal("some.future.feature", 2, "0")),
+        },
+        no_finalized_feature = {
+            "no finalized feature",
+            &[][..],
+            UnstableFeatureVersions::Disabled,
+            None,
+        },
+    )]
+    fn a_level_outside_the_supported_range_is_refused_with_kafkas_message(
+        what: &str,
+        levels: &[FeatureLevelRecord],
+        unstable: UnstableFeatureVersions,
+        expected: Option<String>,
+    ) {
+        check!(
+            unsupported_feature_level(&image_at(levels), unstable) == expected,
+            "{what}"
+        );
     }
 }

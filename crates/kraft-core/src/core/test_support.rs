@@ -116,6 +116,12 @@ pub fn three_voter_machine() -> QuorumStateMachine {
     machine(NodeId(1), &[NodeId(1), NodeId(2), NodeId(3)])
 }
 
+pub fn adjacent_voter_machine() -> QuorumStateMachine {
+    let mut machine = three_voter_machine();
+    let _ = machine.apply_voter_set(voters(&[NodeId(1), NodeId(2), NodeId(99)]), SimInstant(0));
+    machine
+}
+
 pub fn machine(me: NodeId, ids: &[NodeId]) -> QuorumStateMachine {
     QuorumStateMachine::new(
         me,

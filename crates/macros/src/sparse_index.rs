@@ -1,7 +1,9 @@
 //! Sparse-index construction and file operations, with shared open instrumentation.
 
 use {
-    crate::meta::{ItemBody, compact, impl_block, item_body, named_fields},
+    crate::meta::{
+        ItemBody, compact, first_missing_named_field, impl_block, item_body, named_fields,
+    },
     moxy::{
         ast::{Attributed, FnParam, FromMeta, ItemFn, ItemStruct, Meta, ParseError},
         token::{LitStr, Spanner, TokenStream, TokenTree},
@@ -60,16 +62,11 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
             )
         })?;
     let fields = named_fields(&item, "SparseIndex")?;
-    for required in ["file", "io", "entries"] {
-        if !fields
-            .iter()
-            .any(|field| field.ident.as_ref().is_some_and(|name| name == required))
-        {
-            return Err(ParseError::new(
-                item.ident.span(),
-                format!("`SparseIndex` needs a `{required}` field"),
-            ));
-        }
+    if let Some(required) = first_missing_named_field(fields, &["file", "io", "entries"]) {
+        return Err(ParseError::new(
+            item.ident.span(),
+            format!("`SparseIndex` needs a `{required}` field"),
+        ));
     }
     let IndexPolicy {
         raw,
@@ -188,41 +185,43 @@ mod tests {
         },
     };
 
-    #[test]
-    fn generates_the_complete_file_index_contract_for_both_kinds() {
-        for kind in ["offset", "time"] {
-            let source = format!(
-                "#[sparse_index(kind = \"{kind}\")] struct DiskIndex {{ entries: Vec<IndexEntry<i64, u32>>, io: Arc<dyn LogIo>, file: File }}"
-            );
-            let declaration: ItemStruct = moxy::parse!({ source }).unwrap();
-            let implementation: ItemImpl = moxy::parse!({ expand(declaration).unwrap() }).unwrap();
-            let contract = ["open", "flush_handle", "entry_count", "flush", "set_io"];
-            assert!(implementation.items.len() == contract.len());
-            assert!(
-                contract
-                    .into_iter()
-                    .all(|name| implementation.items.iter().any(|member| member
-                        .as_fn()
-                        .is_some_and(|method| method.sig.ident == name)))
-            );
-        }
+    #[yare::parameterized(offset = { "offset" }, time = { "time" })]
+    fn generates_the_complete_file_index_contract_for_both_kinds(kind: &str) {
+        let source = format!(
+            "#[sparse_index(kind = \"{kind}\")] struct DiskIndex {{ entries: Vec<IndexEntry<i64, u32>>, io: Arc<dyn LogIo>, file: File }}"
+        );
+        let declaration: ItemStruct = moxy::parse!({ source }).unwrap();
+        let implementation: ItemImpl = moxy::parse!({ expand(declaration).unwrap() }).unwrap();
+        let contract = ["open", "flush_handle", "entry_count", "flush", "set_io"];
+        assert2::assert!(implementation.items.len() == contract.len());
+        assert2::assert!(
+            contract
+                .into_iter()
+                .all(|name| implementation.items.iter().any(|member| member
+                    .as_fn()
+                    .is_some_and(|method| method.sig.ident == name)))
+        );
     }
 
-    #[test]
-    fn rejects_invalid_kind_layout_and_absent_fields() {
-        for source in [
-            "struct MissingOptions {}",
-            "#[sparse_index()] struct MissingKind {}",
-            "#[sparse_index(kind = \"stamp\")] struct OtherKind {}",
-            "#[sparse_index(kind = 1)] struct WrongType {}",
-            "#[sparse_index(kind = \"time\")] struct Tuple(File);",
+    #[yare::parameterized(
+        no_fields = { "struct MissingOptions {}" },
+        missing_kind = { "#[sparse_index()] struct MissingKind {}" },
+        unknown_kind = { "#[sparse_index(kind = \"stamp\")] struct OtherKind {}" },
+        numeric_kind = { "#[sparse_index(kind = 1)] struct WrongType {}" },
+        tuple_struct = { "#[sparse_index(kind = \"time\")] struct Tuple(File);" },
+        missing_file = {
             "#[sparse_index(kind = \"offset\")] struct NoFile { io: Arc<dyn LogIo>, entries: Vec<IndexEntry<u32, u32>> }",
+        },
+        missing_io = {
             "#[sparse_index(kind = \"time\")] struct NoIo { file: File, entries: Vec<IndexEntry<i64, u32>> }",
+        },
+        missing_entries = {
             "#[sparse_index(kind = \"offset\")] struct NoEntries { file: File, io: Arc<dyn LogIo> }",
-        ] {
-            let declaration: ItemStruct = moxy::parse!({ source }).unwrap();
-            assert!(expand(declaration).is_err());
-        }
+        },
+    )]
+    fn rejects_invalid_kind_layout_and_absent_fields(source: &str) {
+        let declaration: ItemStruct = moxy::parse!({ source }).unwrap();
+        assert2::assert!(expand(declaration).is_err());
     }
 
     #[test]
@@ -231,15 +230,18 @@ mod tests {
         let valid: TokenStream = "pub fn open(path: PathBuf) -> Result<Self, Error> { let rows = values.map(|&value| nested!(value)); unknown_syntax!(); Ok(rows) }".parse().unwrap();
         assert!(validate_open(&empty, &valid).is_ok());
         assert!(validate_open(&"unused".parse().unwrap(), &valid).is_err());
-        for source in [
-            "fn load(path: PathBuf) {}",
-            "fn open(other: PathBuf) {}",
-            "fn open(&self, path: &Path) {}",
-            "async fn open(path: PathBuf) {}",
-            "struct Index {}",
-            "fn open(path: PathBuf) {} fn extra() {}",
-        ] {
-            assert!(validate_open(&empty, &source.parse().unwrap()).is_err());
-        }
+    }
+
+    #[yare::parameterized(
+        wrong_name = { "fn load(path: PathBuf) {}" },
+        wrong_argument = { "fn open(other: PathBuf) {}" },
+        receiver = { "fn open(&self, path: &Path) {}" },
+        async_fn = { "async fn open(path: PathBuf) {}" },
+        struct_item = { "struct Index {}" },
+        extra_item = { "fn open(path: PathBuf) {} fn extra() {}" },
+    )]
+    fn instrumentation_rejects_invalid_headers(source: &str) {
+        let empty = TokenStream::new();
+        assert2::assert!(validate_open(&empty, &source.parse().unwrap()).is_err());
     }
 }

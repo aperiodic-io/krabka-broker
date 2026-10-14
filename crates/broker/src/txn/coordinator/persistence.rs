@@ -389,33 +389,32 @@ mod tests {
     /// The `TransactionLogKey` writes the transactional id with an `int16`
     /// length. An id of 32767 bytes is persisted, and one of 32768 bytes is an
     /// error that appends nothing and keeps no entry, not a panic.
-    #[tokio::test]
-    async fn a_transactional_id_over_32767_bytes_is_not_persisted() {
+    #[yare::parameterized(
+        at_limit = { 32_767, true },
+        over_limit = { 32_768, false },
+    )]
+    #[test_macro(tokio::test)]
+    async fn a_transactional_id_over_32767_bytes_is_not_persisted(length: usize, persisted: bool) {
         let dir = tempfile::tempdir().unwrap();
         let (coordinator, _data) = live_coordinator(dir.path()).await;
         let log = coordinator
             .partitions
             .get(bootstrap::TOPIC, PartitionIndex(0))
             .expect("the state partition");
-        for (producer_id, (length, persisted)) in
-            [(32_767, true), (32_768, false)].into_iter().enumerate()
-        {
-            let tid = "t".repeat(length);
-            let producer_id = ProducerId(i64::try_from(producer_id).unwrap() + 7);
-            let entry = TxnEntry::new_empty(tid.clone(), producer_id, 0, 60_000, 0);
+        let tid = "t".repeat(length);
+        let entry = TxnEntry::new_empty(tid.clone(), ProducerId(7), 0, 60_000, 0);
 
-            let outcome = coordinator
-                .put_under_state_partition_lock(entry, TxnVersion::Classic)
-                .await;
+        let outcome = coordinator
+            .put_under_state_partition_lock(entry, TxnVersion::Classic)
+            .await;
 
-            assert!(outcome.is_ok() == persisted, "{length} bytes");
-            assert!(
-                persisted || matches!(outcome, Err(BrokerError::Protocol(_))),
-                "{length} bytes is a protocol error"
-            );
-            assert!(coordinator.state.contains_key(&tid) == persisted);
-        }
-        assert!(log.log_end_offset().0 == 1);
+        assert2::assert!(outcome.is_ok() == persisted, "{length} bytes");
+        assert2::assert!(
+            persisted || matches!(outcome, Err(BrokerError::Protocol(_))),
+            "{length} bytes is a protocol error"
+        );
+        assert2::assert!(coordinator.state.contains_key(&tid) == persisted);
+        assert2::assert!(log.log_end_offset().0 == i64::from(persisted));
     }
 
     /// The replay follows Kafka's `TransactionStateManager.loadTransactionMetadata`.

@@ -101,6 +101,8 @@ pub(crate) mod parse;
 mod recovery;
 pub(crate) mod registry;
 mod schema;
+#[cfg(test)]
+mod test_support;
 mod topic_scope;
 
 mod trunk_log;

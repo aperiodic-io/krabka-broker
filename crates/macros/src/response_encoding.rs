@@ -76,17 +76,15 @@ pub(crate) fn expand(tokens: &TokenStream) -> Result<TokenStream, ParseError> {
 mod tests {
     use {super::expand, assert2::assert};
 
-    #[test]
-    fn rejects_unknown_sections_and_malformed_type_lists() {
-        for input in [
-            "unknown { Response }",
-            "response Response",
-            "response { Response Other }",
-            "response { Response,, }",
-            "row { 42 }",
-        ] {
-            assert!(expand(&input.parse().expect("tokens")).is_err());
-        }
+    #[yare::parameterized(
+        unknown_section = { "unknown { Response }" },
+        ungrouped_section = { "response Response" },
+        missing_comma = { "response { Response Other }" },
+        doubled_comma = { "response { Response,, }" },
+        non_type = { "row { 42 }" },
+    )]
+    fn rejects_unknown_sections_and_malformed_type_lists(input: &str) {
+        assert2::assert!(expand(&input.parse().expect("tokens")).is_err());
     }
 
     #[test]

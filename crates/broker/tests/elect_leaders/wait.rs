@@ -5,19 +5,14 @@
 //! for the result to appear in an image, so the waits are gathered here rather
 //! than repeated next to each scenario.
 
+/// Waits until `handle` sees `(topic, partition)` in its image.
+pub use crate::support::partitions::{
+    wait_partition_exists, wait_partition_isr_contains as wait_isr_contains,
+    wait_partition_isr_contains, wait_partition_isr_only, wait_partition_leader,
+};
 use {
     krabka_broker::BrokerHandle,
     krabka_metadata::{LeaderEpoch, PartitionRecord},
-};
-
-/// Waits until `handle` sees `(topic, partition)` in its image.
-pub async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition: i32) {
-    handle.wait_until_partition_present(topic, partition).await;
-}
-
-pub use crate::support::partitions::{
-    wait_partition_isr_contains as wait_isr_contains, wait_partition_isr_contains,
-    wait_partition_isr_only, wait_partition_leader,
 };
 
 /// Polls until the metadata image of the handle shows the partition record.

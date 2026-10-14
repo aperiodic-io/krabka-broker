@@ -31,6 +31,14 @@ enum Start {
     OpenAtEpoch3,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Presented {
+    Sentinel,
+    StartedGuard,
+    /// A guard started, then a marker for the producer landed.
+    GuardBeforeMarker,
+}
+
 fn log_at(start: Start) -> TempLog {
     let TempLog { dir, mut log } = test_log();
     if matches!(start, Start::CommittedAtEpoch3 | Start::OpenAtEpoch3) {
@@ -52,174 +60,170 @@ fn log_at(start: Start) -> TempLog {
 /// Kafka's `UnifiedLog.maybeStartTransactionVerification`: a stale epoch is
 /// refused, an open transaction at the batch epoch needs no guard, and any
 /// other transactional batch gets one guard that a repeated start keeps.
-#[test]
-fn a_verification_starts_only_outside_an_open_transaction() {
-    let cases = [
-        ("no producer state", Start::Empty, 0, Ok(true)),
-        ("after a commit", Start::CommittedAtEpoch3, 3, Ok(true)),
-        ("open transaction", Start::OpenAtEpoch3, 3, Ok(false)),
-        (
-            "open transaction, stale epoch",
-            Start::OpenAtEpoch3,
-            2,
-            Err(TransactionAppendRefusal::StaleProducerEpoch),
-        ),
-        (
-            "open transaction, newer epoch",
-            Start::OpenAtEpoch3,
-            4,
-            Ok(true),
-        ),
-    ];
-    for (name, start, epoch, want_guard) in cases {
-        let TempLog { dir: _dir, mut log } = log_at(start);
-        let first = log.maybe_start_transaction_verification(batch(epoch, 2, true), false, CLOCK);
-        let again = log.maybe_start_transaction_verification(batch(epoch, 2, true), false, CLOCK);
-        assert!(first == again, "{name}");
-        assert!(
-            first.map(|guard| guard != VerificationGuard::SENTINEL) == want_guard,
-            "{name}"
-        );
-    }
+#[yare::parameterized(
+    no_producer_state = { "no producer state", Start::Empty, 0, Ok(true) },
+    after_commit = { "after a commit", Start::CommittedAtEpoch3, 3, Ok(true) },
+    open_transaction = { "open transaction", Start::OpenAtEpoch3, 3, Ok(false) },
+    stale_epoch = {
+        "open transaction, stale epoch",
+        Start::OpenAtEpoch3,
+        2,
+        Err(TransactionAppendRefusal::StaleProducerEpoch),
+    },
+    newer_epoch = { "open transaction, newer epoch", Start::OpenAtEpoch3, 4, Ok(true) },
+)]
+fn a_verification_starts_only_outside_an_open_transaction(
+    name: &str,
+    start: Start,
+    epoch: i16,
+    want_guard: Result<bool, TransactionAppendRefusal>,
+) {
+    let TempLog { dir: _dir, mut log } = log_at(start);
+    let first = log.maybe_start_transaction_verification(batch(epoch, 2, true), false, CLOCK);
+    let again = log.maybe_start_transaction_verification(batch(epoch, 2, true), false, CLOCK);
+    assert2::assert!(first == again, "{name}");
+    assert2::assert!(
+        first.map(|guard| guard != VerificationGuard::SENTINEL) == want_guard,
+        "{name}"
+    );
 }
 
 /// The append-time check of `UnifiedLog.analyzeAndValidateProducerState` and
 /// `ProducerAppendInfo`.
-#[test]
-fn an_append_needs_an_open_transaction_or_the_current_guard() {
-    #[derive(Debug, Clone, Copy)]
-    enum Presented {
-        Sentinel,
-        StartedGuard,
-        /// A guard started, then a marker for the producer landed.
-        GuardBeforeMarker,
-    }
-    let cases = [
-        (
-            "no transaction, no guard",
-            Start::CommittedAtEpoch3,
-            batch(3, 2, true),
-            Presented::Sentinel,
-            Err(TransactionAppendRefusal::InvalidTransactionState),
-        ),
-        (
-            "no transaction, current guard",
-            Start::CommittedAtEpoch3,
-            batch(3, 2, true),
-            Presented::StartedGuard,
-            Ok(()),
-        ),
-        (
-            "a marker cleared the guard",
-            Start::OpenAtEpoch3,
-            batch(3, 2, true),
-            Presented::GuardBeforeMarker,
-            Err(TransactionAppendRefusal::InvalidTransactionState),
-        ),
-        (
-            "open transaction",
-            Start::OpenAtEpoch3,
-            batch(3, 2, true),
-            Presented::Sentinel,
-            Ok(()),
-        ),
-        (
-            "stale epoch",
-            Start::CommittedAtEpoch3,
-            batch(2, 2, true),
-            Presented::Sentinel,
-            Err(TransactionAppendRefusal::StaleProducerEpoch),
-        ),
-        (
-            "non-transactional batch in an open transaction",
-            Start::OpenAtEpoch3,
-            batch(3, 2, false),
-            Presented::Sentinel,
-            Err(TransactionAppendRefusal::InvalidTransactionState),
-        ),
-        (
-            "non-transactional batch after a commit",
-            Start::CommittedAtEpoch3,
-            batch(3, 2, false),
-            Presented::Sentinel,
-            Ok(()),
-        ),
-    ];
-    for (name, start, appended, presented, want) in cases {
-        let TempLog { dir: _dir, mut log } = log_at(start);
-        let guard = match presented {
-            Presented::Sentinel => VerificationGuard::SENTINEL,
-            Presented::StartedGuard => log
-                .maybe_start_transaction_verification(appended, false, CLOCK)
-                .unwrap(),
-            Presented::GuardBeforeMarker => {
-                // The verification started for the next epoch, then the
-                // coordinator ended the open transaction.
-                let next = TransactionalBatch {
-                    producer_epoch: 4,
-                    ..appended
-                };
-                let guard = log
-                    .maybe_start_transaction_verification(next, false, CLOCK)
-                    .unwrap();
-                log.append(&mut commit_marker(PID, 3)).unwrap();
-                guard
-            }
-        };
-        assert!(
-            log.check_transactional_append(appended, guard) == want,
-            "{name}"
-        );
-    }
+#[yare::parameterized(
+    no_transaction_no_guard = {
+        "no transaction, no guard",
+        Start::CommittedAtEpoch3,
+        batch(3, 2, true),
+        Presented::Sentinel,
+        Err(TransactionAppendRefusal::InvalidTransactionState),
+    },
+    no_transaction_current_guard = {
+        "no transaction, current guard",
+        Start::CommittedAtEpoch3,
+        batch(3, 2, true),
+        Presented::StartedGuard,
+        Ok(()),
+    },
+    marker_cleared_guard = {
+        "a marker cleared the guard",
+        Start::OpenAtEpoch3,
+        batch(3, 2, true),
+        Presented::GuardBeforeMarker,
+        Err(TransactionAppendRefusal::InvalidTransactionState),
+    },
+    open_transaction = {
+        "open transaction",
+        Start::OpenAtEpoch3,
+        batch(3, 2, true),
+        Presented::Sentinel,
+        Ok(()),
+    },
+    stale_epoch = {
+        "stale epoch",
+        Start::CommittedAtEpoch3,
+        batch(2, 2, true),
+        Presented::Sentinel,
+        Err(TransactionAppendRefusal::StaleProducerEpoch),
+    },
+    non_transactional_in_open = {
+        "non-transactional batch in an open transaction",
+        Start::OpenAtEpoch3,
+        batch(3, 2, false),
+        Presented::Sentinel,
+        Err(TransactionAppendRefusal::InvalidTransactionState),
+    },
+    non_transactional_after_commit = {
+        "non-transactional batch after a commit",
+        Start::CommittedAtEpoch3,
+        batch(3, 2, false),
+        Presented::Sentinel,
+        Ok(()),
+    },
+)]
+fn an_append_needs_an_open_transaction_or_the_current_guard(
+    name: &str,
+    start: Start,
+    appended: TransactionalBatch,
+    presented: Presented,
+    want: Result<(), TransactionAppendRefusal>,
+) {
+    let TempLog { dir: _dir, mut log } = log_at(start);
+    let guard = match presented {
+        Presented::Sentinel => VerificationGuard::SENTINEL,
+        Presented::StartedGuard => log
+            .maybe_start_transaction_verification(appended, false, CLOCK)
+            .unwrap(),
+        Presented::GuardBeforeMarker => {
+            // The verification started for the next epoch, then the
+            // coordinator ended the open transaction.
+            let next = TransactionalBatch {
+                producer_epoch: 4,
+                ..appended
+            };
+            let guard = log
+                .maybe_start_transaction_verification(next, false, CLOCK)
+                .unwrap();
+            log.append(&mut commit_marker(PID, 3)).unwrap();
+            guard
+        }
+    };
+    assert2::assert!(
+        log.check_transactional_append(appended, guard) == want,
+        "{name}"
+    );
 }
 
 /// Kafka's `ProducerAppendInfo.checkSequence` with a verification state.
-#[test]
-fn a_verified_first_batch_keeps_the_verified_sequence() {
-    let cases = [
-        (
-            "transaction version 2, no batch, sequence 0",
-            true,
-            0,
-            0,
-            Ok(()),
-        ),
-        (
-            "transaction version 2, no batch, sequence 5",
-            true,
-            5,
-            5,
-            Err(TransactionAppendRefusal::OutOfOrderSequence),
-        ),
-        (
-            "transaction version 1, no batch, sequence 5",
-            false,
-            5,
-            5,
-            Ok(()),
-        ),
-        (
-            "above the lowest verified sequence",
-            false,
-            5,
-            7,
-            Err(TransactionAppendRefusal::OutOfOrderSequence),
-        ),
-    ];
-    for (name, supports_epoch_bump, verified_sequence, appended_sequence, want) in cases {
-        let TempLog { dir: _dir, mut log } = log_at(Start::Empty);
-        let guard = log
-            .maybe_start_transaction_verification(
-                batch(0, verified_sequence, true),
-                supports_epoch_bump,
-                CLOCK,
-            )
-            .unwrap();
-        assert!(
-            log.check_transactional_append(batch(0, appended_sequence, true), guard) == want,
-            "{name}"
-        );
-    }
+#[yare::parameterized(
+    version_two_sequence_zero = {
+        "transaction version 2, no batch, sequence 0",
+        true,
+        0,
+        0,
+        Ok(()),
+    },
+    version_two_sequence_five = {
+        "transaction version 2, no batch, sequence 5",
+        true,
+        5,
+        5,
+        Err(TransactionAppendRefusal::OutOfOrderSequence),
+    },
+    version_one_sequence_five = {
+        "transaction version 1, no batch, sequence 5",
+        false,
+        5,
+        5,
+        Ok(()),
+    },
+    above_lowest_sequence = {
+        "above the lowest verified sequence",
+        false,
+        5,
+        7,
+        Err(TransactionAppendRefusal::OutOfOrderSequence),
+    },
+)]
+fn a_verified_first_batch_keeps_the_verified_sequence(
+    name: &str,
+    supports_epoch_bump: bool,
+    verified_sequence: i32,
+    appended_sequence: i32,
+    want: Result<(), TransactionAppendRefusal>,
+) {
+    let TempLog { dir: _dir, mut log } = log_at(Start::Empty);
+    let guard = log
+        .maybe_start_transaction_verification(
+            batch(0, verified_sequence, true),
+            supports_epoch_bump,
+            CLOCK,
+        )
+        .unwrap();
+    assert2::assert!(
+        log.check_transactional_append(batch(0, appended_sequence, true), guard) == want,
+        "{name}"
+    );
 }
 
 /// The first transactional append clears the guard, and verification state
@@ -256,26 +260,27 @@ fn an_append_and_the_expiration_window_clear_the_guard() {
 /// A truncation and a hard reset drop the verification state, as a reopen of
 /// the log does, so a verification from before them cannot refuse a batch
 /// after them.
-#[test]
-fn a_truncation_and_a_reset_clear_the_verification_state() {
-    for name in ["truncate", "reset"] {
-        let TempLog { dir: _dir, mut log } = log_at(Start::Empty);
-        log.append(&mut sample_batch(2)).unwrap();
-        let guard = log
-            .maybe_start_transaction_verification(batch(0, 5, true), true, CLOCK)
-            .unwrap();
-        if name == "truncate" {
-            log.truncate_to(Offset(1)).unwrap();
-        } else {
-            log.reset_to(Offset(1)).unwrap();
-        }
-        assert!(log.verification_states.is_empty(), "{name}");
-        assert!(
-            log.check_transactional_append(batch(0, 5, true), guard)
-                == Err(TransactionAppendRefusal::InvalidTransactionState),
-            "{name}"
-        );
+#[yare::parameterized(
+    truncate = { "truncate" },
+    reset = { "reset" },
+)]
+fn a_truncation_and_a_reset_clear_the_verification_state(name: &str) {
+    let TempLog { dir: _dir, mut log } = log_at(Start::Empty);
+    log.append(&mut sample_batch(2)).unwrap();
+    let guard = log
+        .maybe_start_transaction_verification(batch(0, 5, true), true, CLOCK)
+        .unwrap();
+    if name == "truncate" {
+        log.truncate_to(Offset(1)).unwrap();
+    } else {
+        log.reset_to(Offset(1)).unwrap();
     }
+    assert2::assert!(log.verification_states.is_empty(), "{name}");
+    assert2::assert!(
+        log.check_transactional_append(batch(0, 5, true), guard)
+            == Err(TransactionAppendRefusal::InvalidTransactionState),
+        "{name}"
+    );
 }
 
 #[test]

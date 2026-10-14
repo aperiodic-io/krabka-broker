@@ -14,7 +14,8 @@ use {
         RECORDS, TOPIC,
         multi_client::fetch_all_records,
         multi_cluster::{
-            await_all_brokers_registered, await_all_rlmm_active, start_three_tiered_brokers,
+            await_all_brokers_registered, await_all_rlmm_active, await_pair_leader,
+            start_three_tiered_brokers,
         },
         multi_workload::{
             await_follower_local_eviction, create_tiered_topic, produce_and_await_remote_segments,
@@ -62,13 +63,7 @@ async fn tiered_storage_metadata_sharing_via_survivor() {
     // With rf=2 and 3 registered brokers, round-robin assigns [1, 2];
     // broker 1 is the preferred leader. Wait until b1's metadata image names
     // the partition leader as one of the two replicas, then read which.
-    let b1_id = b1.node_id();
-    let b2_id = b2.node_id();
-    b1.wait_for_image(|img| {
-        img.partition(TOPIC, 0)
-            .is_some_and(|p| p.leader == b1_id || p.leader == b2_id)
-    })
-    .await;
+    let (b1_id, b2_id) = await_pair_leader(&b1, &b2, TOPIC, 0).await;
     let (leader_node_id, follower_node_id, follower_addr) =
         if b1.partition_leader_for_test(TOPIC, 0) == Some(b1_id) {
             let f_addr = format!("127.0.0.1:{}", b2.listen_addr().port());

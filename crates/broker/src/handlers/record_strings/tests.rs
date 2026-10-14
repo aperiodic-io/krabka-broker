@@ -199,33 +199,30 @@ fn a_state_request_with_an_id_over_32767_bytes_is_refused() {
     );
 }
 
-#[test]
-fn the_string_bound_counts_utf8_bytes_instead_of_characters() {
-    struct Utf8BoundaryCase {
-        suffix: &'static str,
-        accepted: bool,
-    }
-    for case in [
-        Utf8BoundaryCase {
-            suffix: "abc",
-            accepted: true,
-        },
-        Utf8BoundaryCase {
-            suffix: "abcd",
-            accepted: false,
-        },
-    ] {
-        let request = InitProducerIdRequest {
-            transactional_id: Some(format!("{}{}", "🦀".repeat(8191), case.suffix)),
-            ..Default::default()
-        };
-        assert!(request.longest_record_string() == if case.accepted { LIMIT } else { LIMIT + 1 });
-        assert!(decoded(&request, init_producer_id_request::MAX_VERSION).is_ok() == case.accepted);
-    }
+#[yare::parameterized(
+    exactly_at_limit = { "abc", true },
+    one_byte_over_limit = { "abcd", false },
+)]
+fn the_string_bound_counts_utf8_bytes_instead_of_characters(suffix: &str, accepted: bool) {
+    let request = InitProducerIdRequest {
+        transactional_id: Some(format!("{}{}", "🦀".repeat(8191), suffix)),
+        ..Default::default()
+    };
+    assert2::assert!(request.longest_record_string() == if accepted { LIMIT } else { LIMIT + 1 });
+    assert2::assert!(decoded(&request, init_producer_id_request::MAX_VERSION).is_ok() == accepted);
 }
 
 #[test]
 fn a_group_admin_request_with_a_name_over_32767_bytes_is_refused() {
+    macro_rules! share_group_offset_fields {
+        () => {
+            krabka_macros::string_mutations! {
+                "group id" => required[group_id],
+                "topic name" => required[topics[0].topic_name]
+            }
+        };
+    }
+
     check_request(
         delete_groups_request::MAX_VERSION,
         &DeleteGroupsRequest {
@@ -240,7 +237,7 @@ fn a_group_admin_request_with_a_name_over_32767_bytes_is_refused() {
             topics: vec![AlterShareGroupOffsetsRequestTopic::default()],
             ..Default::default()
         },
-        krabka_macros::string_mutations! { "group id" => required[group_id], "topic name" => required[topics[0].topic_name] },
+        share_group_offset_fields!(),
     );
     check_request(
         delete_share_group_offsets_request::MAX_VERSION,
@@ -248,6 +245,6 @@ fn a_group_admin_request_with_a_name_over_32767_bytes_is_refused() {
             topics: vec![DeleteShareGroupOffsetsRequestTopic::default()],
             ..Default::default()
         },
-        krabka_macros::string_mutations! { "group id" => required[group_id], "topic name" => required[topics[0].topic_name] },
+        share_group_offset_fields!(),
     );
 }

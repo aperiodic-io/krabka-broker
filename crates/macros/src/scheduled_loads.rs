@@ -84,18 +84,24 @@ mod tests {
         assert!(tokens.contains("Waitsuntileveryloadtaskofthisrefreshhasended."));
     }
 
-    #[test]
-    fn rejects_missing_task_fields_and_invalid_failure_messages() {
-        for source in [
-            "struct Loads { tasks: Vec<JoinHandle<()>> }",
-            "#[scheduled_loads(failure_message = \"failure\")] struct Loads;",
+    #[yare::parameterized(
+        missing_attribute = { "struct Loads { tasks: Vec<JoinHandle<()>> }" },
+        unit_struct = { "#[scheduled_loads(failure_message = \"failure\")] struct Loads;" },
+        wrong_field = {
             "#[scheduled_loads(failure_message = \"failure\")] struct Loads { handles: Vec<JoinHandle<()>> }",
+        },
+        extra_field = {
             "#[scheduled_loads(failure_message = \"failure\")] struct Loads { tasks: Vec<JoinHandle<()>>, extra: bool }",
+        },
+        numeric_message = {
             "#[scheduled_loads(failure_message = 1)] struct Loads { tasks: Vec<JoinHandle<()>> }",
+        },
+        empty_message = {
             "#[scheduled_loads(failure_message = \"\")] struct Loads { tasks: Vec<JoinHandle<()>> }",
-        ] {
-            let item: ItemStruct = moxy::parse!({ source }).unwrap();
-            assert!(expand(item).is_err(), "{source}");
-        }
+        },
+    )]
+    fn rejects_missing_task_fields_and_invalid_failure_messages(source: &str) {
+        let item: ItemStruct = moxy::parse!({ source }).unwrap();
+        assert2::assert!(expand(item).is_err(), "{source}");
     }
 }

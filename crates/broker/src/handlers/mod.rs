@@ -61,9 +61,9 @@ pub(crate) use self::{
     acl_gates::{
         acl_denied, acl_denied_quiet, allowed_topics, any_topic_describe_denied,
         cluster_action_denied, cluster_alter_configs_denied, cluster_alter_denied,
-        cluster_describe_denied, cluster_shortcut_denied, config_resource_refusal, denied_topics,
-        group_delete_denied, group_describe_denied, group_read_denied, requested_topic_name,
-        topic_decisions,
+        cluster_describe_denied, cluster_describe_image, cluster_shortcut_denied,
+        config_resource_refusal, denied_topics, group_delete_denied, group_describe_denied,
+        group_read_denied, requested_topic_name, topic_decisions,
     },
     admin_audit::{audit_admin, audit_admin_for, audit_admin_success, audit_resource},
     coordinator_routing::{
@@ -87,6 +87,32 @@ pub(crate) use self::{
 
 /// Encoded response returned by a raw-body handler dispatch function.
 pub(crate) type DispatchResult = Result<bytes::Bytes, BrokerError>;
+
+macro_rules! raw_request_handler {
+    (
+        $request:ident, $binding:ident, $broker:ident, $version:ident, $correlation:ident,
+        $req_bytes:ident, $ctx:ident, $context:ident, $body:tt
+    ) => {
+        #[krabka_macros::decode_dispatch(request = $request, binding($binding))]
+        pub(crate) fn handle(
+            $broker: &Broker,
+            $version: ApiVersion,
+            $correlation: CorrelationId,
+            $req_bytes: &[u8],
+            $ctx: &$context<'_>,
+        ) -> DispatchResult $body
+    };
+    ($request:ident, $binding:ident, $broker:ident, $version:ident, $req_bytes:ident, $ctx:ident, $body:tt) => {
+        #[krabka_macros::decode_dispatch(request = $request, binding($binding))]
+        pub(crate) async fn handle(
+            $broker: &Broker,
+            $version: ApiVersion,
+            $req_bytes: &[u8],
+            $ctx: &RequestContext<'_>,
+        ) -> DispatchResult $body
+    };
+}
+pub(crate) use raw_request_handler;
 
 pub(crate) mod context;
 pub(crate) use context::{RequestContext, TelemetryContext};

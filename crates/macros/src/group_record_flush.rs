@@ -100,21 +100,33 @@ mod tests {
         let output = compact(&scaffold(&metadata, &signature).unwrap());
         assert!(output.contains("ifdelta.is_empty(){returnOk(());}"));
         assert!(output.find("log.append").unwrap() < output.find("__flush_cache").unwrap());
-        for invalid in [
-            "",
-            "group []; encode [encode()];",
-            "group [id]; encode {};",
-            "group [id]; encode [encode()]; extra",
-        ] {
-            assert!(scaffold(&invalid.parse().unwrap(), &signature).is_err());
-        }
-        for invalid in [
+    }
+
+    #[yare::parameterized(
+        empty = { "" },
+        empty_group = { "group []; encode [encode()];" },
+        empty_block = { "group [id]; encode {};" },
+        trailing = { "group [id]; encode [encode()]; extra" },
+    )]
+    fn rejects_invalid_record_boundary_metadata(invalid: &str) {
+        let signature = function_signature(&"pub(super) async fn flush(state: &State, delta: Delta, log: &Log, coordinator: &Coordinator, now: i64) -> Result<(), Error> {}".parse().unwrap()).unwrap();
+        assert2::assert!(scaffold(&invalid.parse().unwrap(), &signature).is_err());
+    }
+
+    #[yare::parameterized(
+        sync = {
             "fn flush(state: &State, delta: Delta, log: &Log, coordinator: &Coordinator, now: i64) {}",
-            "async fn flush(state: &State) {}",
+        },
+        missing_arguments = { "async fn flush(state: &State) {}" },
+        missing_receiver = {
             "async fn flush(_: &State, delta: Delta, log: &Log, coordinator: &Coordinator, now: i64) {}",
-        ] {
-            let signature = function_signature(&invalid.parse().unwrap()).unwrap();
-            assert!(scaffold(&metadata, &signature).is_err());
-        }
+        },
+    )]
+    fn rejects_invalid_record_boundary_signatures(invalid: &str) {
+        let metadata = "group [&state.id]; encode [native!(delta, |&Row { value }| value)];"
+            .parse()
+            .unwrap();
+        let signature = function_signature(&invalid.parse().unwrap()).unwrap();
+        assert2::assert!(scaffold(&metadata, &signature).is_err());
     }
 }

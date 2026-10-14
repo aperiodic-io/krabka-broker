@@ -140,14 +140,12 @@ mod tests {
         assert2::assert!(parse_log_filename("00000000000000000000.index").is_err());
     }
 
-    #[test]
-    fn rejects_wrong_digit_count() {
-        for (_name, filename) in [
-            ("too few digits", "123.log"),
-            ("too many digits", "000000000000000001847.log"),
-        ] {
-            assert2::assert!(parse_log_filename(filename).is_err());
-        }
+    #[yare::parameterized(
+        too_few_digits = { "123.log" },
+        too_many_digits = { "000000000000000001847.log" },
+    )]
+    fn rejects_wrong_digit_count(filename: &str) {
+        assert2::assert!(parse_log_filename(filename).is_err());
     }
 
     #[test]

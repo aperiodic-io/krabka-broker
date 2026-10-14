@@ -14,6 +14,24 @@ fn started_metadata(
     start: &TokenStream,
     end: &TokenStream,
     timestamp: &TokenStream,
+) -> TokenStream {
+    started_metadata_with_values(
+        root,
+        id,
+        start,
+        end,
+        timestamp,
+        &moxy::template! { 100 },
+        &moxy::template! { 2048 },
+    )
+}
+
+fn started_metadata_with_values(
+    root: &TokenStream,
+    id: &TokenStream,
+    start: &TokenStream,
+    end: &TokenStream,
+    timestamp: &TokenStream,
     event_timestamp: &TokenStream,
     size: &TokenStream,
 ) -> TokenStream {
@@ -38,8 +56,6 @@ pub(crate) fn remote_started_segment(input: TokenStream) -> Result<TokenStream, 
         &moxy::template! { start },
         &moxy::template! { end },
         &moxy::template! { timestamp },
-        &moxy::template! { 100 },
-        &moxy::template! { 2048 },
     );
     Ok(moxy::template! {
         pub(crate) fn {{ name }}(
@@ -70,8 +86,6 @@ pub(crate) fn segment(input: TokenStream) -> Result<TokenStream, ParseError> {
         &moxy::template! { start },
         &moxy::template! { end },
         &timestamp,
-        &moxy::template! { 100 },
-        &moxy::template! { 2048 },
     );
     Ok(moxy::template! {
         pub(crate) fn {{ started }}(id: u128, start: i64, end: i64) -> {{ root }}::RemoteLogSegmentMetadata {
@@ -95,7 +109,7 @@ pub(crate) fn worm_segment(input: TokenStream) -> Result<TokenStream, ParseError
     let [name, root, id_base, topic, partition, span]: [TokenStream; 6] =
         arguments(input, 6)?.try_into().expect("six arguments");
     let name = fixture_name(name)?;
-    let metadata = started_metadata(
+    let metadata = started_metadata_with_values(
         &root,
         &moxy::template! {
             {{ root }}::RemoteLogSegmentId::new(
@@ -146,22 +160,22 @@ pub(crate) fn wal_capture_topic_fixture(input: TokenStream) -> Result<TokenStrea
 
 #[cfg(test)]
 mod tests {
-    use {super::segment, assert2::assert};
+    use super::segment;
 
-    #[test]
-    fn timestamp_policy_is_explicit_and_bounded_to_the_supported_fixtures() {
-        for input in [
-            "started, finish, crate, end",
-            "started, finish, krabka_remote_storage, next_offset",
-        ] {
-            assert!(segment(input.parse().unwrap()).is_ok(), "{input}");
-        }
-        for input in [
-            "started, finish, crate",
-            "started, finish, crate, last",
-            "started, finish, , end",
-        ] {
-            assert!(segment(input.parse().unwrap()).is_err(), "{input}");
-        }
+    #[yare::parameterized(
+        crate_end = { "started, finish, crate, end" },
+        remote_storage_next = { "started, finish, krabka_remote_storage, next_offset" },
+    )]
+    fn timestamp_policy_accepts_supported_fixtures(input: &str) {
+        assert2::assert!(segment(input.parse().unwrap()).is_ok(), "{input}");
+    }
+
+    #[yare::parameterized(
+        missing_fourth = { "started, finish, crate" },
+        wrong_fourth = { "started, finish, crate, last" },
+        missing_third = { "started, finish, , end" },
+    )]
+    fn timestamp_policy_rejects_unsupported_fixtures(input: &str) {
+        assert2::assert!(segment(input.parse().unwrap()).is_err(), "{input}");
     }
 }

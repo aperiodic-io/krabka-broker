@@ -181,31 +181,18 @@ struct Assignment {
     items: Vec<i32>,
 }
 
-#[test]
-fn array_derive_keeps_version_field_framing_and_record_errors() {
-    for ArrayCase { items, golden } in [
-        ArrayCase {
-            items: vec![],
-            golden: hex("0000 01 00"),
-        },
-        ArrayCase {
-            items: vec![3, -1],
-            golden: hex("0000 03 00000003 ffffffff 00"),
-        },
-    ] {
-        let value = Assignment { items };
-        assert!(value.encode() == golden);
-        assert!(Assignment::decode(&golden) == Ok(value));
-        for end in 0..golden.len() {
-            assert!(Assignment::decode(&golden[..end]).is_err());
-        }
+#[yare::parameterized(
+    empty_array = { vec![], hex("0000 01 00") },
+    multiple_items = { vec![3, -1], hex("0000 03 00000003 ffffffff 00") },
+)]
+fn array_derive_keeps_version_field_framing_and_record_errors(items: Vec<i32>, golden: Vec<u8>) {
+    let value = Assignment { items };
+    assert2::assert!(value.encode() == golden);
+    assert2::assert!(Assignment::decode(&golden) == Ok(value));
+    for end in 0..golden.len() {
+        assert2::assert!(Assignment::decode(&golden[..end]).is_err());
     }
-    assert!(Assignment::decode(&hex("0001")) == Err("unknown AssignmentRecord version"));
-    assert!(Assignment::decode(&hex("0000 00 00")) == Err("null array"));
-    assert!(Assignment::decode(&hex("0000 01 01")) == Err("bad trailer"));
-}
-
-struct ArrayCase {
-    items: Vec<i32>,
-    golden: Vec<u8>,
+    assert2::assert!(Assignment::decode(&hex("0001")) == Err("unknown AssignmentRecord version"));
+    assert2::assert!(Assignment::decode(&hex("0000 00 00")) == Err("null array"));
+    assert2::assert!(Assignment::decode(&hex("0000 01 01")) == Err("bad trailer"));
 }

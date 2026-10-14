@@ -37,6 +37,10 @@ fn metadata(with_a2: bool) -> StaticMetadata {
     }
 }
 
+fn a_regex_resolver(topics: &[&str]) -> FixedRegexResolver {
+    FixedRegexResolver::new(&[("a.*", topics)])
+}
+
 fn request(
     member_id: &str,
     member_epoch: i32,
@@ -84,9 +88,22 @@ fn heartbeat(
     let result = step
         .resolutions
         .take()
-        .map(|resolved| apply_regex_result(state, resolved, &metadata.input))
-        .unwrap_or_default();
+        .map_or_default(|resolved| apply_regex_result(state, resolved, &metadata.input));
     Beat { step, result }
+}
+
+fn join_with_a_regex(
+    state: &mut GroupState,
+    metadata: &StaticMetadata,
+    member_id: &str,
+    resolver: &FixedRegexResolver,
+) -> Beat {
+    heartbeat(
+        state,
+        metadata,
+        &request(member_id, 0, Some("a.*")),
+        &RegexResolution::with(resolver),
+    )
 }
 
 /// A steady heartbeat of `member_id` at its epoch, which resolves nothing.
@@ -107,8 +124,7 @@ fn target_topics(state: &GroupState, member_id: &str) -> HashSet<Uuid> {
         .target
         .per_member
         .get(member_id)
-        .map(|topics| topics.keys().copied().collect())
-        .unwrap_or_default()
+        .map_or_default(|topics| topics.keys().copied().collect())
 }
 
 fn resolved(topics: &[&str]) -> RegularExpressionValue {
@@ -133,16 +149,11 @@ fn held_topics(state: &GroupState, member: &str) -> HashSet<Uuid> {
 /// gets the topics at its next heartbeat, which computes the target.
 #[test]
 fn a_member_that_joins_with_a_regex_gets_the_resolved_topics_at_its_next_heartbeat() {
-    let resolver = FixedRegexResolver::new(&[("a.*", &["a1", "a2"])]);
+    let resolver = a_regex_resolver(&["a1", "a2"]);
     let mut state = GroupState::new("g");
     let metadata = metadata(true);
 
-    let joined = heartbeat(
-        &mut state,
-        &metadata,
-        &request("m1", 0, Some("a.*")),
-        &RegexResolution::with(&resolver),
-    );
+    let joined = join_with_a_regex(&mut state, &metadata, "m1", &resolver);
 
     check!(joined.step.response.error_code == 0);
     check!(joined.step.pending.resolved_regexes.is_empty());
@@ -170,22 +181,12 @@ fn a_member_that_joins_with_a_regex_gets_the_resolved_topics_at_its_next_heartbe
 /// second one triggers no resolution and writes no record.
 #[test]
 fn members_share_the_resolution_of_the_same_regex() {
-    let resolver = FixedRegexResolver::new(&[("a.*", &["a1"])]);
+    let resolver = a_regex_resolver(&["a1"]);
     let mut state = GroupState::new("g");
     let metadata = metadata(false);
-    heartbeat(
-        &mut state,
-        &metadata,
-        &request("m1", 0, Some("a.*")),
-        &RegexResolution::with(&resolver),
-    );
+    join_with_a_regex(&mut state, &metadata, "m1", &resolver);
 
-    let step = heartbeat(
-        &mut state,
-        &metadata,
-        &request("m2", 0, Some("a.*")),
-        &RegexResolution::with(&resolver),
-    );
+    let step = join_with_a_regex(&mut state, &metadata, "m2", &resolver);
 
     check!(resolver.calls() == 1);
     check!(step.step.pending.resolved_regexes.is_empty());
@@ -200,18 +201,13 @@ fn members_share_the_resolution_of_the_same_regex() {
 /// not leave the topic unassigned.
 #[test]
 fn a_heartbeat_without_the_pattern_refreshes_the_resolution_when_the_metadata_changed() {
-    let first = FixedRegexResolver::new(&[("a.*", &["a1"])]);
+    let first = a_regex_resolver(&["a1"]);
     let mut state = GroupState::new("g");
-    heartbeat(
-        &mut state,
-        &metadata(false),
-        &request("m1", 0, Some("a.*")),
-        &RegexResolution::with(&first),
-    );
+    join_with_a_regex(&mut state, &metadata(false), "m1", &first);
     keepalive(&mut state, &metadata(false), "m1");
     check!(target_topics(&state, "m1") == HashSet::from([A1]));
     let epoch = state.members["m1"].member_epoch;
-    let second = FixedRegexResolver::new(&[("a.*", &["a1", "a2"])]);
+    let second = a_regex_resolver(&["a1", "a2"]);
 
     // (label, the version of the latest relevant image, whether it refreshes)
     let rows = [
@@ -255,19 +251,14 @@ fn a_heartbeat_without_the_pattern_refreshes_the_resolution_when_the_metadata_ch
 /// target drops the topic at the next heartbeat.
 #[test]
 fn a_refresh_that_no_longer_selects_a_topic_takes_it_from_the_target() {
-    let first = FixedRegexResolver::new(&[("a.*", &["a1", "a2"])]);
+    let first = a_regex_resolver(&["a1", "a2"]);
     let mut state = GroupState::new("g");
     let metadata = metadata(true);
-    heartbeat(
-        &mut state,
-        &metadata,
-        &request("m1", 0, Some("a.*")),
-        &RegexResolution::with(&first),
-    );
+    join_with_a_regex(&mut state, &metadata, "m1", &first);
     keepalive(&mut state, &metadata, "m1");
     check!(target_topics(&state, "m1") == HashSet::from([A1, A2]));
     let epoch = state.members["m1"].member_epoch;
-    let second = FixedRegexResolver::new(&[("a.*", &["a1"])]);
+    let second = a_regex_resolver(&["a1"]);
 
     let step = heartbeat(
         &mut state,
@@ -378,16 +369,11 @@ fn a_failover_keeps_the_topics_of_a_regex_without_a_heartbeat_that_carries_the_p
 /// the group keeps one that another member still uses.
 #[test]
 fn a_leaving_member_tombstones_the_resolution_only_it_used() {
-    let resolver = FixedRegexResolver::new(&[("a.*", &["a1"])]);
+    let resolver = a_regex_resolver(&["a1"]);
     let mut state = GroupState::new("g");
     let metadata = metadata(false);
     for member in ["m1", "m2"] {
-        heartbeat(
-            &mut state,
-            &metadata,
-            &request(member, 0, Some("a.*")),
-            &RegexResolution::with(&resolver),
-        );
+        join_with_a_regex(&mut state, &metadata, member, &resolver);
     }
 
     let first = heartbeat(
@@ -413,30 +399,32 @@ fn a_leaving_member_tombstones_the_resolution_only_it_used() {
 /// `i16` length prefix. A pattern of 32767 bytes still fits and its record
 /// encodes. A longer one is rejected before it reaches persistence, just as
 /// Kafka's request reader rejects it before the coordinator sees it.
-#[test]
-fn a_regex_over_the_record_key_bound_does_not_encode() {
+#[yare::parameterized(
+    at_limit = { false, true },
+    over_limit = { true, false },
+)]
+fn a_regex_over_the_record_key_bound_does_not_encode(over_limit: bool, encodes: bool) {
     let longest = "a".repeat(usize::from(i16::MAX.unsigned_abs()));
     let too_long = format!("{longest}a");
     let resolver = FixedRegexResolver::new(&[(&longest, &["a1"]), (&too_long, &["a1"])]);
     let metadata = metadata(false);
     let regexes = RegexResolution::with(&resolver);
 
-    for (pattern, encodes) in [(&longest, true), (&too_long, false)] {
-        let mut state = GroupState::new("g");
-        let joined = heartbeat(
-            &mut state,
-            &metadata,
-            &request("m1", 0, Some(pattern)),
-            &regexes,
-        );
-        if encodes {
-            check!(joined.step.response.error_code == codes::NONE);
-            check!(joined.result.resolved_regexes.len() == 1);
-            check!(joined.result.to_batch("g", 0).is_ok());
-        } else {
-            check!(joined.step.response.error_code != codes::NONE);
-            check!(joined.result.resolved_regexes.is_empty());
-        }
+    let pattern = if over_limit { &too_long } else { &longest };
+    let mut state = GroupState::new("g");
+    let joined = heartbeat(
+        &mut state,
+        &metadata,
+        &request("m1", 0, Some(pattern)),
+        &regexes,
+    );
+    if encodes {
+        check!(joined.step.response.error_code == codes::NONE);
+        check!(joined.result.resolved_regexes.len() == 1);
+        check!(joined.result.to_batch("g", 0).is_ok());
+    } else {
+        check!(joined.step.response.error_code != codes::NONE);
+        check!(joined.result.resolved_regexes.is_empty());
     }
 }
 

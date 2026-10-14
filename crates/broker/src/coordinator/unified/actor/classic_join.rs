@@ -692,49 +692,54 @@ mod tests {
     /// has no rebalance timeout field, so its session timeout is the member's
     /// rebalance timeout, and that is what the group persists. From v1 the
     /// request's own rebalance timeout stands.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn join_v0_takes_the_rebalance_timeout_from_the_session_timeout() {
+    #[yare::parameterized(
+        v0_uses_session_timeout = { 0, -1, 45_000 },
+        v1_uses_request_timeout = { 1, 90_000, 90_000 },
+    )]
+    #[test_macro(tokio::test(flavor = "multi_thread", worker_threads = 2))]
+    async fn join_v0_takes_the_rebalance_timeout_from_the_session_timeout(
+        version: i16,
+        requested_ms: i32,
+        want_ms: i32,
+    ) {
         use krabka_protocol::owned::join_group_request::JoinGroupRequestProtocol;
 
-        // (version, rebalance timeout the request carries, the one persisted)
-        for (version, requested_ms, want_ms) in [(0, -1, 45_000), (1, 90_000, 90_000)] {
-            let (coord, log) = make_coordinator_with_config(NextGenConfig {
-                classic_initial_rebalance_delay: Duration::ZERO,
-                ..NextGenConfig::assigning_at_once()
-            });
-            let handle = marked_classic_handle(&coord, "g");
-            let rx = rpc::begin(&handle, |tx| GroupActorMessage::ClassicJoin {
-                req: JoinGroupRequest {
-                    group_id: "g".into(),
-                    session_timeout_ms: 45_000,
-                    rebalance_timeout_ms: requested_ms,
-                    protocol_type: "consumer".into(),
-                    protocols: vec![JoinGroupRequestProtocol {
-                        name: "range".into(),
-                        ..Default::default()
-                    }],
+        let (coord, log) = make_coordinator_with_config(NextGenConfig {
+            classic_initial_rebalance_delay: Duration::ZERO,
+            ..NextGenConfig::assigning_at_once()
+        });
+        let handle = marked_classic_handle(&coord, "g");
+        let rx = rpc::begin(&handle, |tx| GroupActorMessage::ClassicJoin {
+            req: JoinGroupRequest {
+                group_id: "g".into(),
+                session_timeout_ms: 45_000,
+                rebalance_timeout_ms: requested_ms,
+                protocol_type: "consumer".into(),
+                protocols: vec![JoinGroupRequestProtocol {
+                    name: "range".into(),
                     ..Default::default()
-                },
-                version,
-                client_id: "client-a".into(),
-                client_host: "127.0.0.1".into(),
-                regex_resolver: no_topic_regex_resolver(),
-                reply: tx,
-            })
-            .await;
-            let joined = rx.await.unwrap();
-            check!(joined.error_code == codes::NONE, "v{version}");
+                }],
+                ..Default::default()
+            },
+            version,
+            client_id: "client-a".into(),
+            client_host: "127.0.0.1".into(),
+            regex_resolver: no_topic_regex_resolver(),
+            reply: tx,
+        })
+        .await;
+        let joined = rx.await.unwrap();
+        check!(joined.error_code == codes::NONE, "v{version}");
 
-            let synced = rpc::classic_sync(&handle, &joined.member_id, joined.generation_id).await;
-            check!(synced.error_code == codes::NONE, "v{version}");
+        let synced = rpc::classic_sync(&handle, &joined.member_id, joined.generation_id).await;
+        check!(synced.error_code == codes::NONE, "v{version}");
 
-            let persisted = last_classic_metadata(&log).await;
-            check!(persisted.members.len() == 1, "v{version}");
-            check!(
-                persisted.members[0].rebalance_timeout_ms == want_ms,
-                "v{version}"
-            );
-        }
+        let persisted = last_classic_metadata(&log).await;
+        check!(persisted.members.len() == 1, "v{version}");
+        check!(
+            persisted.members[0].rebalance_timeout_ms == want_ms,
+            "v{version}"
+        );
     }
 
     /// A `Stable` group whose one member, `m1`, is the static member
@@ -894,8 +899,7 @@ mod tests {
                 .assigned_partitions
                 .iter()
                 .find(|tp| tp.topic == "t")
-                .map(|tp| tp.partitions.clone())
-                .unwrap_or_default()
+                .map_or_default(|tp| tp.partitions.clone())
         };
         let p_c = parts(&sync_c);
         let p_2 = parts(&sync2);
@@ -988,32 +992,41 @@ mod tests {
     }
 
     /// A `JoinGroup` for topic `t` as a classic consumer client sends it.
+    fn join_request(
+        member_id: &str,
+        group_instance_id: Option<&str>,
+        protocol_type: &str,
+        protocol_name: &str,
+    ) -> JoinGroupRequest {
+        use krabka_protocol::owned::join_group_request::JoinGroupRequestProtocol;
+
+        JoinGroupRequest {
+            group_id: "g".into(),
+            session_timeout_ms: 45_000,
+            rebalance_timeout_ms: 300_000,
+            member_id: member_id.into(),
+            group_instance_id: group_instance_id.map(Into::into),
+            protocol_type: protocol_type.into(),
+            protocols: vec![JoinGroupRequestProtocol {
+                name: protocol_name.into(),
+                metadata: crate::coordinator::unified::actor::test_support::subscription_blob(&[
+                    "t",
+                ]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
     async fn join_at(
         handle: &GroupActorHandle,
         member_id: &str,
         group_instance_id: Option<&str>,
         version: i16,
     ) -> JoinResult {
-        use krabka_protocol::owned::join_group_request::JoinGroupRequestProtocol;
-
         send_join_at(
             handle,
-            JoinGroupRequest {
-                group_id: "g".into(),
-                session_timeout_ms: 45_000,
-                rebalance_timeout_ms: 300_000,
-                member_id: member_id.into(),
-                group_instance_id: group_instance_id.map(Into::into),
-                protocol_type: "consumer".into(),
-                protocols: vec![JoinGroupRequestProtocol {
-                    name: "range".into(),
-                    metadata: crate::coordinator::unified::actor::test_support::subscription_blob(
-                        &["t"],
-                    ),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
+            join_request(member_id, group_instance_id, "consumer", "range"),
             version,
         )
         .await
@@ -1329,8 +1342,6 @@ mod tests {
     /// type, protocol name) to the error, which carries only the code.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_classic_join_that_the_group_cannot_take_is_refused() {
-        use krabka_protocol::owned::join_group_request::JoinGroupRequestProtocol;
-
         let rows = [
             (
                 "a full group",
@@ -1372,22 +1383,7 @@ mod tests {
 
             let refused = send_join_at(
                 &handle,
-                JoinGroupRequest {
-                    group_id: "g".into(),
-                    session_timeout_ms: 45_000,
-                    rebalance_timeout_ms: 300_000,
-                    member_id: "m-new".into(),
-                    protocol_type: protocol_type.into(),
-                    protocols: vec![JoinGroupRequestProtocol {
-                        name: protocol_name.into(),
-                        metadata:
-                            crate::coordinator::unified::actor::test_support::subscription_blob(&[
-                                "t",
-                            ]),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                },
+                join_request("m-new", None, protocol_type, protocol_name),
                 9,
             )
             .await;
@@ -1526,24 +1522,7 @@ mod tests {
         handle
             .tx
             .send(GroupActorMessage::ClassicJoin {
-                req: JoinGroupRequest {
-                    group_id: "g".into(),
-                    session_timeout_ms: 45_000,
-                    rebalance_timeout_ms: 300_000,
-                    member_id: "m-classic".into(),
-                    protocol_type: "consumer".into(),
-                    protocols: vec![
-                        krabka_protocol::owned::join_group_request::JoinGroupRequestProtocol {
-                            name: "range".into(),
-                            metadata:
-                                crate::coordinator::unified::actor::test_support::subscription_blob(
-                                    &["t"],
-                                ),
-                            ..Default::default()
-                        },
-                    ],
-                    ..Default::default()
-                },
+                req: join_request("m-classic", None, "consumer", "range"),
                 version: 9,
                 client_id: "client-b".into(),
                 client_host: "127.0.0.1".into(),

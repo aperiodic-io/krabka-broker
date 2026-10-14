@@ -666,21 +666,41 @@ mod tests {
         assert2::assert!(LogView::last_epoch(&log) == 3);
     }
 
-    #[test]
-    fn logview_end_offset_for_epoch_follows_kafka() {
+    #[yare::parameterized(
+        epoch_older_than_log = {
+            "an epoch older than the log",
+            1,
+            LogOffsetMetadata { offset: 0, epoch: 1 },
+        },
+        completed_prior_epoch = {
+            "a completed prior epoch",
+            2,
+            LogOffsetMetadata { offset: 1, epoch: 2 },
+        },
+        between_held_epochs = {
+            "an epoch between two the log holds",
+            3,
+            LogOffsetMetadata { offset: 1, epoch: 2 },
+        },
+        current_epoch = { "the current epoch", 4, LogOffsetMetadata { offset: 2, epoch: 4 } },
+        newer_than_log = {
+            "an epoch newer than the log",
+            9,
+            LogOffsetMetadata { offset: 2, epoch: 4 },
+        },
+    )]
+    fn logview_end_offset_for_epoch_follows_kafka(
+        case: &str,
+        epoch: u32,
+        expected: LogOffsetMetadata,
+    ) {
         let LogInDir { mut log, dir: _dir } = open_tmp();
         log.append(&mut batch(0, 2, b"a"), 0).unwrap(); // epoch 2 @ [0,1)
         log.append(&mut batch(0, 4, b"b"), 0).unwrap(); // epoch 4 @ [1,2)
-        let at = |offset, epoch| LogOffsetMetadata { offset, epoch };
-        for (case, epoch, want) in [
-            ("an epoch older than the log", 1, at(0, 1)),
-            ("a completed prior epoch", 2, at(1, 2)),
-            ("an epoch between two the log holds", 3, at(1, 2)),
-            ("the current epoch", 4, at(2, 4)),
-            ("an epoch newer than the log", 9, at(2, 4)),
-        ] {
-            check!(LogView::end_offset_for_epoch(&log, epoch) == want, "{case}");
-        }
+        check!(
+            LogView::end_offset_for_epoch(&log, epoch) == expected,
+            "{case}"
+        );
     }
 
     #[test]

@@ -102,15 +102,20 @@ fn traversal_consumes_strings_in_declaration_order_and_counts_utf8_bytes() {
     });
     assert!(OptionalRequest::default().longest_record_string() == 0);
     assert!(EmptyRequest.longest_record_string() == 0);
-    for length in [32_767, 32_768] {
-        assert!(
-            StateRequest {
-                group_id: "x".repeat(length)
-            }
-            .longest_record_string()
-                == length
-        );
-    }
+}
+
+#[yare::parameterized(
+    maximum = { 32_767 },
+    over_maximum = { 32_768 },
+)]
+fn longest_string_boundary_keeps_the_exact_utf8_byte_length(length: usize) {
+    assert2::assert!(
+        StateRequest {
+            group_id: "x".repeat(length)
+        }
+        .longest_record_string()
+            == length
+    );
 }
 
 #[test]

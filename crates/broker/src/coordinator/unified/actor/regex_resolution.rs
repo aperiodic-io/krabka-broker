@@ -85,11 +85,8 @@ impl RegexResolution<'static> {
     /// for the tests that do not exercise regular expressions.
     pub(crate) fn none() -> Self {
         Self {
-            resolver: &NoTopicRegexResolver,
-            refresh_version: -1,
             now_ms: 0,
-            refresh_interval: Duration::from_mins(10),
-            min_refresh_interval: Duration::from_secs(10),
+            ..Self::with(&NoTopicRegexResolver)
         }
     }
 }

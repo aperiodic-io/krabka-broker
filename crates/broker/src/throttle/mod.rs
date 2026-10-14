@@ -190,56 +190,75 @@ mod tests {
         assert!(ThrottledReplicas::parse("*").unwrap() == ThrottledReplicas::All);
     }
 
-    #[test]
-    fn pairs_parse_in_order() {
-        for (input, want) in [
-            ("0:1", vec![replica(0, 1)]),
-            ("0:1,0:2,1:3", vec![
-                replica(0, 1),
-                replica(0, 2),
-                replica(1, 3),
-            ]),
-        ] {
-            assert!(
-                ThrottledReplicas::parse(input) == Ok(ThrottledReplicas::List(want)),
-                "{input}"
-            );
-        }
+    #[yare::parameterized(
+        one_pair = { "0:1", vec![replica(0, 1)] },
+        multiple_pairs = { "0:1,0:2,1:3", vec![replica(0, 1), replica(0, 2), replica(1, 3)] },
+    )]
+    fn pairs_parse_in_order(input: &str, want: Vec<ThrottledReplica>) {
+        assert2::assert!(
+            ThrottledReplicas::parse(input) == Ok(ThrottledReplicas::List(want)),
+            "{input}"
+        );
     }
 
     /// Each broker reads only the entries that name it, as Kafka's
     /// `ConfigHandler.parseThrottledPartitions` filters on its own broker id,
     /// and `*` throttles every partition (#1210).
-    #[test]
-    fn a_broker_keeps_only_the_entries_that_name_it() {
-        let listed =
-            |partitions: &[i32]| ThrottledPartitions::Listed(partitions.iter().copied().collect());
-        // (list, broker, partitions it throttles there)
-        let cases = [
-            ("", 1, ThrottledPartitions::None),
-            ("*", 1, ThrottledPartitions::All),
-            ("*", 9, ThrottledPartitions::All),
-            ("0:1,0:2,1:3", 1, listed(&[0])),
-            ("0:1,0:2,1:3", 2, listed(&[0])),
-            ("0:1,0:2,1:3", 3, listed(&[1])),
-            ("0:1,0:2,1:3", 4, listed(&[])),
-            ("0:1,2:1,5:1,3:2", 1, listed(&[0, 2, 5])),
-        ];
-        for (list, broker, want) in cases {
-            let parsed = ThrottledReplicas::parse(list).unwrap();
-            assert!(
-                parsed.partitions_of(NodeId(broker)) == want,
-                "{list:?} on broker {broker}"
-            );
-        }
+    #[yare::parameterized(
+        empty_list = { "", 1, ThrottledPartitions::None },
+        wildcard_broker_one = { "*", 1, ThrottledPartitions::All },
+        wildcard_broker_nine = { "*", 9, ThrottledPartitions::All },
+        first_replica = {
+            "0:1,0:2,1:3",
+            1,
+            ThrottledPartitions::Listed([0].into_iter().collect()),
+        },
+        second_replica = {
+            "0:1,0:2,1:3",
+            2,
+            ThrottledPartitions::Listed([0].into_iter().collect()),
+        },
+        third_replica = {
+            "0:1,0:2,1:3",
+            3,
+            ThrottledPartitions::Listed([1].into_iter().collect()),
+        },
+        no_matching_replicas = {
+            "0:1,0:2,1:3",
+            4,
+            ThrottledPartitions::Listed([].into_iter().collect()),
+        },
+        multiple_matching_partitions = {
+            "0:1,2:1,5:1,3:2",
+            1,
+            ThrottledPartitions::Listed([0, 2, 5].into_iter().collect()),
+        },
+    )]
+    fn a_broker_keeps_only_the_entries_that_name_it(
+        list: &str,
+        broker: u64,
+        want: ThrottledPartitions,
+    ) {
+        let parsed = ThrottledReplicas::parse(list).unwrap();
+        assert2::assert!(
+            parsed.partitions_of(NodeId(broker)) == want,
+            "{list:?} on broker {broker}"
+        );
+    }
+
+    #[yare::parameterized(
+        listed_zero = { 0, true },
+        absent_one = { 1, false },
+        listed_three = { 3, true },
+        absent_four = { 4, false },
+    )]
+    fn a_listed_partition_is_throttled_and_no_other(partition: i32, want: bool) {
+        let listed = ThrottledPartitions::Listed([0, 3].into_iter().collect());
+        assert2::assert!(listed.contains(partition) == want, "partition {partition}");
     }
 
     #[test]
-    fn a_listed_partition_is_throttled_and_no_other() {
-        let listed = ThrottledPartitions::Listed([0, 3].into_iter().collect());
-        for (partition, want) in [(0, true), (1, false), (3, true), (4, false)] {
-            assert!(listed.contains(partition) == want, "partition {partition}");
-        }
+    fn all_and_no_partitions_keep_their_special_membership() {
         assert!(ThrottledPartitions::All.contains(7));
         assert!(!ThrottledPartitions::None.contains(0));
     }
@@ -274,30 +293,32 @@ mod tests {
         }
     }
 
-    #[test]
-    fn malformed_pair_rejected() {
+    #[yare::parameterized(
+        no_separator = { "not-a-pair" },
+        nonnumeric_broker = { "0:x" },
+        nonnumeric_partition = { "x:1" },
+        negative_partition = { "-1:1" },
+        explicit_positive_sign = { "+0:1" },
+        spaces_around_separator = { "0 : 1" },
+    )]
+    fn malformed_pair_rejected(input: &str) {
         // Kafka's `([0-9]+:[0-9]+)?` has no sign and no space around the colon.
-        for input in ["not-a-pair", "0:x", "x:1", "-1:1", "+0:1", "0 : 1"] {
-            assert!(ThrottledReplicas::parse(input).is_err(), "{input}");
-        }
+        assert2::assert!(ThrottledReplicas::parse(input).is_err(), "{input}");
     }
 
-    #[test]
-    fn kafka_list_spellings_parse_as_kafka_reads_them() {
-        let cases = [
-            (" ", ThrottledReplicas::None),
-            (" * ", ThrottledReplicas::All),
-            (
-                " 0:1 , 2:3 ",
-                ThrottledReplicas::List(vec![replica(0, 1), replica(2, 3)]),
-            ),
-            (
-                "0:1,,1:2",
-                ThrottledReplicas::List(vec![replica(0, 1), replica(1, 2)]),
-            ),
-        ];
-        for (input, want) in cases {
-            assert!(ThrottledReplicas::parse(input) == Ok(want), "{input:?}");
-        }
+    #[yare::parameterized(
+        whitespace_means_none = { " ", ThrottledReplicas::None },
+        trimmed_wildcard_means_all = { " * ", ThrottledReplicas::All },
+        spaced_pairs = {
+            " 0:1 , 2:3 ",
+            ThrottledReplicas::List(vec![replica(0, 1), replica(2, 3)])
+        },
+        empty_segments_are_ignored = {
+            "0:1,,1:2",
+            ThrottledReplicas::List(vec![replica(0, 1), replica(1, 2)])
+        },
+    )]
+    fn kafka_list_spellings_parse_as_kafka_reads_them(input: &str, want: ThrottledReplicas) {
+        assert2::assert!(ThrottledReplicas::parse(input) == Ok(want), "{input:?}");
     }
 }

@@ -83,17 +83,15 @@ mod tests {
         assert2::assert!(controller_addr(&voters, NodeId(7)) == Some("only-host:9094".to_string()));
     }
 
-    #[test]
-    fn api_version_for_matches_kip595_codecs() {
-        for (_case, key, want) in [
-            ("vote", api_key::VOTE, 2),
-            ("begin quorum epoch", api_key::BEGIN_QUORUM_EPOCH, 1),
-            ("end quorum epoch", api_key::END_QUORUM_EPOCH, 1),
-            ("fetch snapshot", api_key::FETCH_SNAPSHOT, 1),
-            ("fetch", api_key::FETCH, 18),
-            ("unknown API", -123, 0),
-        ] {
-            assert2::assert!(api_version_for(ApiKey(key)) == want);
-        }
+    #[yare::parameterized(
+        vote = { api_key::VOTE, 2 },
+        begin_epoch = { api_key::BEGIN_QUORUM_EPOCH, 1 },
+        end_epoch = { api_key::END_QUORUM_EPOCH, 1 },
+        fetch_snapshot = { api_key::FETCH_SNAPSHOT, 1 },
+        fetch = { api_key::FETCH, 18 },
+        unknown = { -123, 0 },
+    )]
+    fn api_version_for_matches_kip595_codecs(key: i16, want: i16) {
+        assert2::assert!(api_version_for(ApiKey(key)) == want);
     }
 }

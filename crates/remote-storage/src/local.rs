@@ -218,29 +218,23 @@ mod tests {
         assert!(full == b"0123456789");
     }
 
-    #[test]
-    fn fetch_partial_byte_ranges() {
+    #[yare::parameterized(
+        inclusive_range = { 2, Some(5), b"2345".as_ref() },
+        open_ended_range = { 7, None, b"789".as_ref() },
+        end_clamps_at_eof = { 8, Some(99), b"89".as_ref() },
+        start_at_eof = { 10, None, b"".as_ref() },
+    )]
+    fn fetch_partial_byte_ranges(start: u32, end: Option<u32>, want: &[u8]) {
         let LocalFixture {
             remote: _remote,
             source: _src,
             store: rsm,
             metadata: md,
         } = copied_store(TransactionIndex::Omitted);
-        for (start, end, want) in [
-            // Inclusive [2, 5] -> "2345".
-            (2, Some(5), b"2345".as_ref()),
-            // Open-ended from 7 -> "789".
-            (7, None, b"789".as_ref()),
-            // End past EOF clamps.
-            (8, Some(99), b"89".as_ref()),
-            // Start at EOF -> empty.
-            (10, None, b"".as_ref()),
-        ] {
-            check!(
-                rsm.fetch_log_segment(&md, start, end).unwrap() == want,
-                "range [{start}, {end:?}]"
-            );
-        }
+        check!(
+            rsm.fetch_log_segment(&md, start, end).unwrap() == want,
+            "range [{start}, {end:?}]"
+        );
     }
 
     #[test]
@@ -267,28 +261,26 @@ mod tests {
         check_sample_indexes(&rsm, &md);
     }
 
-    #[test]
-    fn copied_files_use_kafka_local_tiered_storage_layout() {
+    #[yare::parameterized(
+        log = { ".log" },
+        offset_index = { ".index" },
+        time_index = { ".timeindex" },
+        snapshot = { ".snapshot" },
+        leader_epoch_checkpoint = { ".leader_epoch_checkpoint" },
+        transaction_index = { ".txnindex" },
+    )]
+    fn copied_files_use_kafka_local_tiered_storage_layout(suffix: &str) {
         let LocalFixture { remote, .. } = copied_store(TransactionIndex::Present);
 
         let partition = remote.path().join("orders-0-AAAAAAAAAAAAAAAAAAAAAQ");
-        for suffix in [
-            ".log",
-            ".index",
-            ".timeindex",
-            ".snapshot",
-            ".leader_epoch_checkpoint",
-            ".txnindex",
-        ] {
-            check!(
-                partition
-                    .join(format!(
-                        "00000000000000000000-AAAAAAAAAAAAAAAAAAAACg{suffix}"
-                    ))
-                    .is_file(),
-                "missing Kafka layout artifact {suffix}"
-            );
-        }
+        check!(
+            partition
+                .join(format!(
+                    "00000000000000000000-AAAAAAAAAAAAAAAAAAAACg{suffix}"
+                ))
+                .is_file(),
+            "missing Kafka layout artifact {suffix}"
+        );
     }
 
     #[test]

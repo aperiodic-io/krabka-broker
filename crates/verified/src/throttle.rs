@@ -103,24 +103,29 @@ pub fn plan_consume(
 mod tests {
     use {super::*, proptest::prelude::*};
 
-    #[test]
-    fn plan_consume_grants_and_caps() {
-        for ((available, refill, burst, requested), (grant, new_available)) in [
-            ((100, 0, 1000, 50), (50, 50)),
-            ((100, 0, 1000, 200), (100, 0)),
-            ((900, 500, 1000, 200), (200, 800)),
-            ((0, 0, 1000, 100), (0, 0)),
-            ((u64::MAX, u64::MAX, 1000, 1000), (1000, 0)),
-        ] {
-            assert2::assert!(
-                plan_consume(
-                    AvailableTokens(available),
-                    RefillTokens(refill),
-                    BurstCapacity(burst),
-                    RequestedTokens(requested)
-                ) == (GrantedTokens(grant), NewAvailable(new_available))
-            );
-        }
+    #[yare::parameterized(
+        available = { 100, 0, 1000, 50, 50, 50 },
+        request_capped_by_available = { 100, 0, 1000, 200, 100, 0 },
+        request_after_refill = { 900, 500, 1000, 200, 200, 800 },
+        empty_bucket = { 0, 0, 1000, 100, 0, 0 },
+        saturating_refill = { u64::MAX, u64::MAX, 1000, 1000, 1000, 0 },
+    )]
+    fn plan_consume_grants_and_caps(
+        available: u64,
+        refill: u64,
+        burst: u64,
+        requested: u64,
+        grant: u64,
+        new_available: u64,
+    ) {
+        assert2::assert!(
+            plan_consume(
+                AvailableTokens(available),
+                RefillTokens(refill),
+                BurstCapacity(burst),
+                RequestedTokens(requested)
+            ) == (GrantedTokens(grant), NewAvailable(new_available))
+        );
     }
 
     proptest! {

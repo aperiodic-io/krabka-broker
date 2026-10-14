@@ -575,68 +575,69 @@ mod tests {
         check!(order.len() == DEPTH);
     }
 
-    #[tokio::test]
-    async fn a_reference_closure_is_bounded_by_schema_count() {
-        let server = MockServer::start().await;
-        let mut root = Vec::new();
-        for index in 0..=MAX_REFERENCE_SCHEMAS {
-            root.push(SchemaReference {
-                name: format!("Ref{index}"),
-                subject: format!("subject-{index}"),
-                version: 1,
-            });
-            reference_endpoint(
-                &server,
-                index,
-                None,
-                u64::from(index < MAX_REFERENCE_SCHEMAS),
-            )
-            .await;
-        }
-
-        let result = validator(server.uri())
-            .reference_sources_ordered(&root, MAX_REFERENCE_BYTES)
-            .await;
-        assert!(let Err(error) = result);
-        check!(
-            error
-                .to_string()
-                .contains("schema closure exceeds 32 references"),
-            "{error}"
-        );
+    #[derive(Clone, Copy)]
+    enum ClosureLimit {
+        SchemaCount,
+        TotalBytes,
     }
 
-    #[tokio::test]
-    async fn a_reference_closure_is_bounded_by_total_bytes() {
+    #[yare::parameterized(
+        schema_count = { ClosureLimit::SchemaCount },
+        total_bytes = { ClosureLimit::TotalBytes },
+    )]
+    #[test_macro(tokio::test)]
+    async fn a_reference_closure_is_bounded(limit: ClosureLimit) {
         let server = MockServer::start().await;
-        response_endpoint(
-            &server,
-            "/subjects/large/versions/1",
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "subject": "large",
-                "version": 1,
-                "id": 7,
-                "schema": "x".repeat(MAX_REFERENCE_BYTES + 1)
-            })),
-            Some(1),
-        )
-        .await;
-        let root = [SchemaReference {
-            name: "large".to_owned(),
-            subject: "large".to_owned(),
-            version: 1,
-        }];
+        let (root, expected_error) = match limit {
+            ClosureLimit::SchemaCount => {
+                let mut root = Vec::new();
+                for index in 0..=MAX_REFERENCE_SCHEMAS {
+                    root.push(SchemaReference {
+                        name: format!("Ref{index}"),
+                        subject: format!("subject-{index}"),
+                        version: 1,
+                    });
+                    reference_endpoint(
+                        &server,
+                        index,
+                        None,
+                        u64::from(index < MAX_REFERENCE_SCHEMAS),
+                    )
+                    .await;
+                }
+                (root, "schema closure exceeds 32 references")
+            }
+            ClosureLimit::TotalBytes => {
+                response_endpoint(
+                    &server,
+                    "/subjects/large/versions/1",
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "subject": "large",
+                        "version": 1,
+                        "id": 7,
+                        "schema": "x".repeat(MAX_REFERENCE_BYTES + 1)
+                    })),
+                    Some(1),
+                )
+                .await;
+                (
+                    vec![SchemaReference {
+                        name: "large".to_owned(),
+                        subject: "large".to_owned(),
+                        version: 1,
+                    }],
+                    "schema closure exceeds 1048576 bytes",
+                )
+            }
+        };
 
         let result = validator(server.uri())
             .reference_sources_ordered(&root, MAX_REFERENCE_BYTES)
             .await;
-        assert!(let Err(error) = result);
-        check!(
-            error
-                .to_string()
-                .contains("schema closure exceeds 1048576 bytes"),
-            "{error}"
-        );
+        let Err(error) = result else {
+            panic!("expected the oversized reference closure to be rejected");
+        };
+        check!(error.to_string().contains(expected_error), "{error}");
     }
 
     #[tokio::test]

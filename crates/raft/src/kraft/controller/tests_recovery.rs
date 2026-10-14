@@ -664,24 +664,24 @@ fn load_quorum_state_refuses_an_unknown_or_missing_data_version() {
 /// A file that is not JSON at all, such as the binary quorum state a build
 /// before 1.0 once wrote, or a zero-filled file, is refused rather than read
 /// as "no vote".
-#[test]
-fn load_quorum_state_refuses_a_file_that_is_not_json() {
-    for contents in [&[0u8; 53][..], &[0u8; 54][..], b"", b"{\"leaderId\""] {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(dir.path().join(QUORUM_STATE_FILE), contents).expect("write state");
+#[yare::parameterized(
+    binary_size_53 = { &[0u8; 53][..] },
+    binary_size_54 = { &[0u8; 54][..] },
+    empty_file = { b"" },
+    truncated_json = { b"{\"leaderId\"" },
+)]
+fn load_quorum_state_refuses_a_file_that_is_not_json(contents: &[u8]) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join(QUORUM_STATE_FILE), contents).expect("write state");
 
-        let loaded = load_quorum_state(dir.path(), uuid::Uuid::nil(), &voter_set(&[NodeId(1)]));
+    let loaded = load_quorum_state(dir.path(), uuid::Uuid::nil(), &voter_set(&[NodeId(1)]));
 
-        check!(
-            matches!(
-                loaded,
-                Err(RaftError::PersistedFormat {
-                    artifact: QUORUM_STATE_FILE,
-                    problem: PersistedFormatError::Malformed(_),
-                    ..
-                })
-            ),
-            "{contents:?}"
-        );
-    }
+    check!(matches!(
+        loaded,
+        Err(RaftError::PersistedFormat {
+            artifact: QUORUM_STATE_FILE,
+            problem: PersistedFormatError::Malformed(_),
+            ..
+        })
+    ));
 }

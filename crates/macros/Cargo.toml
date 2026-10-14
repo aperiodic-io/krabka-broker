@@ -26,6 +26,7 @@ moxy = { workspace = true }
 assert2 = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, features = ["env"] }
+derive_more = { workspace = true }
 futures-util = { workspace = true }
 krabka-units = { workspace = true }
 krabka-protocol = { version = "0.6.0", default-features = false }

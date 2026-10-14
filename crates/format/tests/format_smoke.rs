@@ -41,13 +41,11 @@ fn check_dynamic_checkpoint(dir: &tempfile::TempDir, records: &[MetadataRecord])
     assert2::assert!(std::fs::metadata(offset_zero_checkpoint(dir)).is_ok_and(|m| m.len() > 0));
 }
 
-fn check_refused_cases(cases: &[Vec<&str>], expected: i32) {
-    for args in cases {
-        let dir = tempfile::tempdir().unwrap();
-        let out = run_format(&dir, args);
-        assert2::assert!(!out.status.success());
-        assert2::assert!(out.status.code() == Some(expected));
-    }
+fn check_refused_case(args: &[&str], expected: i32) {
+    let dir = tempfile::tempdir().unwrap();
+    let out = run_format(&dir, args);
+    assert2::assert!(!out.status.success());
+    assert2::assert!(out.status.code() == Some(expected));
 }
 
 fn formatted_directory_id(dir: &tempfile::TempDir, args: &[&str]) -> uuid::Uuid {
@@ -98,49 +96,24 @@ fn format_with_add_scram_writes_credential_record() {
 
 /// `krabka.version` bootstraps at level 0, which writes no record, unless
 /// `--feature krabka.version=N` overrides it.
-#[test]
-fn format_seeds_krabka_version_only_when_overridden() {
-    /// The extra flags, and the `krabka.version` the bootstrap seeds.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct Case<'a> {
-        flags: &'a [&'a str],
-        seeded: Option<i16>,
-    }
-    let cases = [
-        Case {
-            flags: &[],
-            seeded: None,
-        },
-        Case {
-            flags: &["--feature", "krabka.version=1"],
-            seeded: Some(1),
-        },
-        Case {
-            flags: &["--feature", "krabka.version=0"],
-            seeded: None,
-        },
-    ];
-    let actual: Vec<_> = cases
-        .iter()
-        .map(|Case { flags, .. }| {
-            let dir = tempfile::tempdir().unwrap();
-            let mut args = vec!["--node-id", "1"];
-            args.extend_from_slice(flags);
-            let out = run_format(&dir, &args);
-            assert2::assert!(out.status.success(), "{flags:?}: {out:?}");
-            let seeded = bootstrap_records(&dir)
-                .into_iter()
-                .find_map(|record| match record {
-                    MetadataRecord::V1FeatureLevel(f) if f.name == "krabka.version" => {
-                        Some(f.level)
-                    }
-                    _ => None,
-                });
-            Case { flags, seeded }
-        })
-        .collect();
-    let expected: Vec<_> = cases.to_vec();
-    assert2::assert!(actual == expected);
+#[yare::parameterized(
+    default_is_omitted = { &[][..], None },
+    level_one_is_seeded = { &["--feature", "krabka.version=1"][..], Some(1) },
+    level_zero_is_omitted = { &["--feature", "krabka.version=0"][..], None },
+)]
+fn format_seeds_krabka_version_only_when_overridden(flags: &[&str], expected: Option<i16>) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut args = vec!["--node-id", "1"];
+    args.extend_from_slice(flags);
+    let out = run_format(&dir, &args);
+    assert2::assert!(out.status.success(), "{flags:?}: {out:?}");
+    let seeded = bootstrap_records(&dir)
+        .into_iter()
+        .find_map(|record| match record {
+            MetadataRecord::V1FeatureLevel(f) if f.name == "krabka.version" => Some(f.level),
+            _ => None,
+        });
+    assert2::assert!(seeded == expected, "{flags:?}");
 }
 
 #[test]
@@ -199,74 +172,70 @@ fn initial_controllers_persists_the_local_listed_directory_id() {
     check_dynamic_checkpoint(&dir, &records);
 }
 
-#[test]
-fn initial_controllers_rejects_ambiguous_or_missing_local_identity() {
-    check_refused_cases(
+#[yare::parameterized(
+    local_controller_missing = {
         &[
-            vec![
-                "--node-id",
-                "3",
-                "--initial-controllers",
-                "2@two.example:9093:00000000-0000-0000-0000-000000000002",
-            ],
-            vec![
-                "--node-id",
-                "2",
-                "--initial-controllers",
-                "2@two.example:9093:00000000-0000-0000-0000-000000000002,2@other.example:9093:00000000-0000-0000-0000-000000000003",
-            ],
-            vec![
-                "--node-id",
-                "2",
-                "--initial-controllers",
-                "2@two.example:9093:00000000-0000-0000-0000-000000000002,3@three.example:9093:00000000-0000-0000-0000-000000000002",
-            ],
-        ],
-        4,
-    );
+            "--node-id",
+            "3",
+            "--initial-controllers",
+            "2@two.example:9093:00000000-0000-0000-0000-000000000002",
+        ][..],
+    },
+    duplicate_node_id = {
+        &[
+            "--node-id",
+            "2",
+            "--initial-controllers",
+            "2@two.example:9093:00000000-0000-0000-0000-000000000002,2@other.example:9093:00000000-0000-0000-0000-000000000003",
+        ][..],
+    },
+    duplicate_directory_id = {
+        &[
+            "--node-id",
+            "2",
+            "--initial-controllers",
+            "2@two.example:9093:00000000-0000-0000-0000-000000000002,3@three.example:9093:00000000-0000-0000-0000-000000000002",
+        ][..],
+    },
+)]
+fn initial_controllers_rejects_ambiguous_or_missing_local_identity(args: &[&str]) {
+    check_refused_case(args, 4);
 }
 
-#[test]
-fn dynamic_modes_are_mutually_exclusive() {
-    check_refused_cases(
+#[yare::parameterized(
+    standalone_and_none = { &["--node-id", "1", "--standalone", "--no-initial-controllers"][..] },
+    explicit_and_none = {
         &[
-            vec!["--node-id", "1", "--standalone", "--no-initial-controllers"],
-            vec![
-                "--node-id",
-                "1",
-                "--initial-controllers",
-                "1@one.example:9093:00000000-0000-0000-0000-000000000001",
-                "--no-initial-controllers",
-            ],
-            vec![
-                "--node-id",
-                "1",
-                "--standalone",
-                "--initial-controllers",
-                "1@one.example:9093:00000000-0000-0000-0000-000000000001",
-            ],
-        ],
-        2,
-    );
-}
+            "--node-id",
+            "1",
+            "--initial-controllers",
+            "1@one.example:9093:00000000-0000-0000-0000-000000000001",
+            "--no-initial-controllers",
+        ][..],
+    },
+    standalone_and_explicit = {
+        &[
+            "--node-id",
+            "1",
+            "--standalone",
+            "--initial-controllers",
+            "1@one.example:9093:00000000-0000-0000-0000-000000000001",
+        ][..],
+    },
+)]
+fn dynamic_modes_are_mutually_exclusive(args: &[&str]) { check_refused_case(args, 2); }
+
+#[yare::parameterized(
+    nonzero_with_no_controllers = {
+        &["--node-id", "1", "--no-initial-controllers", "--feature", "kraft.version=0"][..]
+    },
+    version_one_without_quorum_mode = { &["--node-id", "1", "--feature", "kraft.version=1"][..] },
+    version_two_without_quorum_mode = { &["--node-id", "1", "--feature", "kraft.version=2"][..] },
+)]
+fn kraft_version_must_match_the_selected_format_mode(args: &[&str]) { check_refused_case(args, 5); }
 
 #[test]
-fn kraft_version_must_match_the_selected_format_mode() {
-    check_refused_cases(
-        &[
-            vec![
-                "--node-id",
-                "1",
-                "--no-initial-controllers",
-                "--feature",
-                "kraft.version=0",
-            ],
-            vec!["--node-id", "1", "--feature", "kraft.version=1"],
-            vec!["--node-id", "1", "--feature", "kraft.version=2"],
-        ],
-        5,
-    );
-
+fn static_kraft_version_zero_is_accepted() {
     let static_dir = tempfile::tempdir().unwrap();
     let out = run_format(&static_dir, &[
         "--node-id",

@@ -343,7 +343,7 @@ pub(super) fn apply_remote_storage(
             cfg.remote_log_metadata = RlmmKind::InMemory;
         } else {
             let mut policy = KafkaRlmmConfig {
-                bootstrap: km.map(|k| k.bootstrap.clone()).unwrap_or_default(),
+                bootstrap: km.map_or_default(|k| k.bootstrap.clone()),
                 num_partitions: km
                     .and_then(|k| k.num_partitions)
                     .unwrap_or(DEFAULT_RLMM_TOPIC_NUM_PARTITIONS),
@@ -479,32 +479,30 @@ snapshot_interval = "90s"
         check!(km.event_queue_capacity.capacity() == 2048);
         check!(km.snapshot_interval == secs(90));
     }
-    #[test]
-    fn kafka_metadata_section_rejects_invalid_policy() {
-        for (field, value) in [
-            ("min_isr", "0"),
-            ("topic_create_timeout", "\"0ms\""),
-            ("topic_create_timeout", "\"0.5ms\""),
-            ("topic_create_timeout", "\"2147483648ms\""),
-            ("fetch_max_wait", "\"0ms\""),
-            ("fetch_max_bytes", "\"0B\""),
-            ("fetch_max_bytes", "\"0.5B\""),
-            ("fetch_max_bytes", "\"2147483648B\""),
-            ("fetch_retry_backoff", "\"0ms\""),
-            ("event_queue_capacity", "0"),
-            ("snapshot_interval", "\"0s\""),
-        ] {
-            let source = format!(
-                "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n\
-                 [remote_storage.kafka_metadata]\n{field} = {value}\n"
-            );
-            let file: FileConfig = toml::from_str(&source).expect("parse policy syntax");
-            let mut config = BrokerConfig::default();
-            let error = file
-                .apply_to(&mut config)
-                .expect_err("invalid metadata policy must fail");
-            assert!(error.to_string().contains(field), "{field}: {error}");
-        }
+    #[yare::parameterized(
+        min_isr = { "min_isr", "0" },
+        topic_create_timeout_zero = { "topic_create_timeout", "\"0ms\"" },
+        topic_create_timeout_fractional = { "topic_create_timeout", "\"0.5ms\"" },
+        topic_create_timeout_overflow = { "topic_create_timeout", "\"2147483648ms\"" },
+        fetch_max_wait_zero = { "fetch_max_wait", "\"0ms\"" },
+        fetch_max_bytes_zero = { "fetch_max_bytes", "\"0B\"" },
+        fetch_max_bytes_fractional = { "fetch_max_bytes", "\"0.5B\"" },
+        fetch_max_bytes_overflow = { "fetch_max_bytes", "\"2147483648B\"" },
+        fetch_retry_backoff_zero = { "fetch_retry_backoff", "\"0ms\"" },
+        event_queue_capacity_zero = { "event_queue_capacity", "0" },
+        snapshot_interval_zero = { "snapshot_interval", "\"0s\"" },
+    )]
+    fn kafka_metadata_section_rejects_invalid_policy(field: &str, value: &str) {
+        let source = format!(
+            "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n\
+             [remote_storage.kafka_metadata]\n{field} = {value}\n"
+        );
+        let file: FileConfig = toml::from_str(&source).expect("parse policy syntax");
+        let mut config = BrokerConfig::default();
+        let error = file
+            .apply_to(&mut config)
+            .expect_err("invalid metadata policy must fail");
+        assert2::assert!(error.to_string().contains(field), "{field}: {error}");
     }
     #[test]
     fn reader_bounds_and_index_cache_size_default_to_kafkas_values() {
@@ -535,55 +533,46 @@ index_cache_size = "256MiB"
 
     /// The two KIP-405 sweep bounds default to Kafka's thread-pool sizes,
     /// and an operator who names them gets what they named.
-    #[test]
-    fn sweep_bounds_default_to_kafkas_thread_pool_sizes_and_are_overridable() {
-        for (case, toml, copier, expiration) in [
-            (
-                "defaults",
-                "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n",
-                10,
-                10,
-            ),
-            (
-                "overridden",
-                "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n\
-                 copier_threads = 32\nexpiration_threads = 4\n",
-                32,
-                4,
-            ),
-        ] {
-            let cfg = configured_unwrap_parse(toml).unwrap();
-            check!(cfg.remote_copier_threads == copier, "{case}");
-            check!(cfg.remote_expiration_threads == expiration, "{case}");
-        }
+    #[yare::parameterized(
+        defaults = { "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n", 10, 10 },
+        overridden = {
+            "[remote_storage]\nstorage_dir = \"/tmp/tier\"\n\
+             copier_threads = 32\nexpiration_threads = 4\n",
+            32,
+            4,
+        },
+    )]
+    fn sweep_bounds_default_to_kafkas_thread_pool_sizes_and_are_overridable(
+        source: &str,
+        copier: usize,
+        expiration: usize,
+    ) {
+        let config = configured_unwrap_parse(source).unwrap();
+        assert2::check!(config.remote_copier_threads == copier);
+        assert2::check!(config.remote_expiration_threads == expiration);
     }
 
-    #[test]
-    fn a_zero_reader_bound_sweep_bound_or_cache_size_is_rejected() {
-        for (field, value) in [
-            ("reader_threads", "0"),
-            ("reader_max_pending_tasks", "0"),
-            ("copier_threads", "0"),
-            ("expiration_threads", "0"),
-            ("index_cache_size", "\"0B\""),
-        ] {
-            let source =
-                format!("[remote_storage]\nstorage_dir = \"/tmp/tier\"\n{field} = {value}\n");
-            let file: FileConfig = toml::from_str(&source).expect("parse syntax");
-            let mut config = BrokerConfig::default();
-            let error = file
-                .apply_to(&mut config)
-                .expect_err("a zero bound must fail");
-            assert!(error.to_string().contains(field), "{field}: {error}");
-        }
+    #[yare::parameterized(
+        reader_threads = { "reader_threads", "0" },
+        reader_pending_tasks = { "reader_max_pending_tasks", "0" },
+        copier_threads = { "copier_threads", "0" },
+        expiration_threads = { "expiration_threads", "0" },
+        index_cache_size = { "index_cache_size", "\"0B\"" },
+    )]
+    fn a_zero_reader_bound_sweep_bound_or_cache_size_is_rejected(field: &str, value: &str) {
+        let source = format!("[remote_storage]\nstorage_dir = \"/tmp/tier\"\n{field} = {value}\n");
+        let file: FileConfig = toml::from_str(&source).expect("parse syntax");
+        let mut config = BrokerConfig::default();
+        let error = file
+            .apply_to(&mut config)
+            .expect_err("a zero bound must fail");
+        assert2::assert!(error.to_string().contains(field), "{field}: {error}");
     }
 
-    #[test]
-    fn remote_storage_backends_are_mutually_exclusive() {
-        for (case, source, expected) in [
-            (
-                "remote_storage_local_and_s3_together_rejected",
-                r#"
+    #[yare::parameterized(
+        local_and_s3 = {
+            "remote_storage_local_and_s3_together_rejected",
+            r#"
 [remote_storage]
 storage_dir = "/tmp/tier"
 
@@ -591,22 +580,22 @@ storage_dir = "/tmp/tier"
 bucket = "b"
 region = "us-east-1"
 "#,
-                "cannot set both",
-            ),
-            (
-                "remote_storage_local_and_gcs_together_rejected",
-                r#"
+            "cannot set both",
+        },
+        local_and_gcs = {
+            "remote_storage_local_and_gcs_together_rejected",
+            r#"
 [remote_storage]
 storage_dir = "/tmp/tier"
 
 [remote_storage.gcs]
 bucket = "b"
 "#,
-                "cannot set",
-            ),
-            (
-                "remote_storage_s3_and_gcs_together_rejected",
-                r#"
+            "cannot set",
+        },
+        s3_and_gcs = {
+            "remote_storage_s3_and_gcs_together_rejected",
+            r#"
 [remote_storage.s3]
 bucket = "b"
 region = "us-east-1"
@@ -614,16 +603,16 @@ region = "us-east-1"
 [remote_storage.gcs]
 bucket = "b"
 "#,
-                "cannot set",
-            ),
-        ] {
-            let error = configured_unwrap_parse(source).unwrap_err();
-            let rendered = error.to_string();
-            assert!(
-                rendered.contains(expected),
-                "{case}: expected backend-conflict error, got: {rendered}"
-            );
-        }
+            "cannot set",
+        },
+    )]
+    fn remote_storage_backends_are_mutually_exclusive(case: &str, source: &str, expected: &str) {
+        let error = configured_unwrap_parse(source).unwrap_err();
+        let rendered = error.to_string();
+        assert2::assert!(
+            rendered.contains(expected),
+            "{case}: expected backend-conflict error, got: {rendered}"
+        );
     }
 
     #[test]
@@ -645,17 +634,14 @@ in_memory = true
 
     /// The copy deadline reaches `BrokerConfig`, and it defaults to the
     /// production constant when the TOML omits it.
-    #[test]
-    fn copy_timeout_parses_and_defaults() {
-        let cases = [
-            ("", DEFAULT_REMOTE_COPY_TIMEOUT),
-            ("copy_timeout = \"90s\"\n", secs(90)),
-        ];
-        for (line, want) in cases {
-            let toml = format!("[remote_storage]\nstorage_dir = \"/tmp/tier\"\n{line}");
-            let cfg = configured_unwrap_parse(&toml).unwrap();
-            check!(cfg.remote_copy_timeout == want, "{line:?}");
-        }
+    #[yare::parameterized(
+        default = { "", DEFAULT_REMOTE_COPY_TIMEOUT },
+        ninety_seconds = { "copy_timeout = \"90s\"\n", secs(90) },
+    )]
+    fn copy_timeout_parses_and_defaults(line: &str, expected: krabka_units::Time) {
+        let source = format!("[remote_storage]\nstorage_dir = \"/tmp/tier\"\n{line}");
+        let config = configured_unwrap_parse(&source).unwrap();
+        assert2::check!(config.remote_copy_timeout == expected, "{line:?}");
     }
 
     /// A zero deadline would abandon every copy before it started, so it is

@@ -125,42 +125,42 @@ mod tests {
         );
     }
 
-    #[test]
-    fn preserves_password_whitespace_and_trims_the_username() {
-        for (body, expected) in [
-            (
-                "pad=  secret  ",
-                maplit::hashmap! { "pad".to_string() => "  secret  ".to_string() },
-            ),
-            (
-                "tabbed=\tsecret\t",
-                maplit::hashmap! { "tabbed".to_string() => "\tsecret\t".to_string() },
-            ),
-            (
-                "spacey=  pa=ss  ",
-                maplit::hashmap! { "spacey".to_string() => "  pa=ss  ".to_string() },
-            ),
-            (
-                "  admin  =  secret  ",
-                maplit::hashmap! { "admin".to_string() => "  secret  ".to_string() },
-            ),
-            (
-                "empty=",
-                maplit::hashmap! { "empty".to_string() => String::new() },
-            ),
-            (
-                "blank=   ",
-                maplit::hashmap! { "blank".to_string() => "   ".to_string() },
-            ),
-            (
-                "   \t  \n\t# indented comment\n  admin=secret\n",
-                maplit::hashmap! { "admin".to_string() => "secret".to_string() },
-            ),
-        ] {
-            let cfg = apply_credential_file(body).unwrap();
-
-            assert!(*cfg.plain_credentials.as_map() == expected, "{body:?}");
-        }
+    #[yare::parameterized(
+        padded_password = {
+            "pad=  secret  ",
+            maplit::hashmap! { "pad".to_string() => "  secret  ".to_string() }
+        },
+        tabbed_password = {
+            "tabbed=\tsecret\t",
+            maplit::hashmap! { "tabbed".to_string() => "\tsecret\t".to_string() }
+        },
+        password_with_equals = {
+            "spacey=  pa=ss  ",
+            maplit::hashmap! { "spacey".to_string() => "  pa=ss  ".to_string() }
+        },
+        padded_username = {
+            "  admin  =  secret  ",
+            maplit::hashmap! { "admin".to_string() => "  secret  ".to_string() }
+        },
+        empty_password = {
+            "empty=",
+            maplit::hashmap! { "empty".to_string() => String::new() }
+        },
+        whitespace_password = {
+            "blank=   ",
+            maplit::hashmap! { "blank".to_string() => "   ".to_string() }
+        },
+        comment_and_whitespace = {
+            "   \t  \n\t# indented comment\n  admin=secret\n",
+            maplit::hashmap! { "admin".to_string() => "secret".to_string() }
+        },
+    )]
+    fn preserves_password_whitespace_and_trims_the_username(
+        body: &str,
+        expected: std::collections::HashMap<String, String>,
+    ) {
+        let cfg = apply_credential_file(body).unwrap();
+        assert2::assert!(*cfg.plain_credentials.as_map() == expected, "{body:?}");
     }
 
     #[test]
@@ -170,20 +170,23 @@ mod tests {
         assert!(cfg.plain_credentials.is_empty());
     }
 
-    #[test]
-    fn rejects_a_malformed_line() {
-        for body in ["admin=secret\nnonsense\n", "admin=secret\n  nonsense  \n"] {
-            let message = apply_credential_file(body).expect_err("a line without `=` is rejected");
-            assert!(message.contains("expected user=password"), "{message}");
-        }
+    #[yare::parameterized(
+        unpadded = { "admin=secret\nnonsense\n" },
+        whitespace_padded = { "admin=secret\n  nonsense  \n" },
+    )]
+    fn rejects_a_malformed_line(body: &str) {
+        let message = apply_credential_file(body).expect_err("a line without `=` is rejected");
+        assert2::assert!(message.contains("expected user=password"), "{message}");
     }
 
-    #[test]
-    fn rejects_an_empty_username() {
-        for body in ["=secret\n", "   =secret\n", "\t=  secret  \n"] {
-            let message = apply_credential_file(body).expect_err("an empty username is rejected");
-            assert!(message.contains("empty username"), "{message}");
-        }
+    #[yare::parameterized(
+        no_leading_whitespace = { "=secret\n" },
+        leading_spaces = { "   =secret\n" },
+        leading_tab_and_padded_password = { "\t=  secret  \n" },
+    )]
+    fn rejects_an_empty_username(body: &str) {
+        let message = apply_credential_file(body).expect_err("an empty username is rejected");
+        assert2::assert!(message.contains("empty username"), "{message}");
     }
 
     #[test]

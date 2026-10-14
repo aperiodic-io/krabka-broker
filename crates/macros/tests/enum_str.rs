@@ -96,22 +96,23 @@ fn as_str_takes_self_by_reference_when_a_variant_has_fields() {
     assert!(roles.iter().map(Role::name).collect::<Vec<_>>() == ["Leader", "Voted", "Resigned"]);
 }
 
+#[yare::parameterized(
+    attempted_snake_case = { "attempted", Some(Phase::Attempted) },
+    api_activity_snake_case = { "api_activity", Some(Phase::ApiActivity) },
+    configured_name = { "compact,delete", Some(Phase::CompactAndDelete) },
+    alias = { "compact-delete", Some(Phase::CompactAndDelete) },
+    empty_name = { "", Some(Phase::NoCleanup) },
+    none_alias = { "none", Some(Phase::NoCleanup) },
+    off_alias = { "off", Some(Phase::NoCleanup) },
+    uppercase_variant = { "Attempted", None },
+    pascal_case_variant = { "ApiActivity", None },
+)]
+fn parse_accepts_each_name_and_alias_and_nothing_else(text: &str, want: Option<Phase>) {
+    assert2::assert!(Phase::from_name(text) == want, "{text:?}");
+}
+
 #[test]
-fn parse_accepts_each_name_and_alias_and_nothing_else() {
-    let cases = [
-        ("attempted", Some(Phase::Attempted)),
-        ("api_activity", Some(Phase::ApiActivity)),
-        ("compact,delete", Some(Phase::CompactAndDelete)),
-        ("compact-delete", Some(Phase::CompactAndDelete)),
-        ("", Some(Phase::NoCleanup)),
-        ("none", Some(Phase::NoCleanup)),
-        ("off", Some(Phase::NoCleanup)),
-        ("Attempted", None),
-        ("ApiActivity", None),
-    ];
-    for (text, want) in cases {
-        assert!(Phase::from_name(text) == want, "{text:?}");
-    }
+fn parse_rejects_case_changes_in_other_enum_name_forms() {
     assert!(Upper::parse("FATALERROR") == Some(Upper::FatalError));
     assert!(Upper::parse("warn") == None);
     assert!(Kebab::parse("highly-available") == Some(Kebab::HighlyAvailable));

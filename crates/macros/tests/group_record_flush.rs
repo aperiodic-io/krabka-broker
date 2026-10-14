@@ -54,52 +54,24 @@ async fn flush(
     events.borrow_mut().push("cache");
 }
 
-#[tokio::test]
-async fn empty_and_failed_deltas_never_publish_a_cache_update() {
-    struct Scenario {
-        empty: bool,
-        failure: Option<Failure>,
-        expected: &'static [&'static str],
-    }
-    for case in [
-        Scenario {
-            empty: true,
-            failure: None,
-            expected: &[],
-        },
-        Scenario {
-            empty: false,
-            failure: Some(Failure::Encode),
-            expected: &["encode"],
-        },
-        Scenario {
-            empty: false,
-            failure: Some(Failure::Append),
-            expected: &["encode", "append"],
-        },
-        Scenario {
-            empty: false,
-            failure: None,
-            expected: &["encode", "append", "cache"],
-        },
-    ] {
-        let events = RefCell::new(Vec::new());
-        let log = Journal {
-            events: &events,
-            fails: case.failure == Some(Failure::Append),
-        };
-        let result = flush(
-            "group",
-            Delta {
-                empty: case.empty,
-                failure: case.failure,
-            },
-            &log,
-            &events,
-            0,
-        )
-        .await;
-        assert!(result.err() == case.failure);
-        assert!(events.into_inner() == case.expected);
-    }
+#[yare::parameterized(
+    empty_delta = { true, None, &[][..] },
+    encode_failure = { false, Some(Failure::Encode), &["encode"][..] },
+    append_failure = { false, Some(Failure::Append), &["encode", "append"][..] },
+    successful_flush = { false, None, &["encode", "append", "cache"][..] },
+)]
+#[test_macro(tokio::test)]
+async fn empty_and_failed_deltas_never_publish_a_cache_update(
+    empty: bool,
+    failure: Option<Failure>,
+    expected: &[&str],
+) {
+    let events = RefCell::new(Vec::new());
+    let log = Journal {
+        events: &events,
+        fails: failure == Some(Failure::Append),
+    };
+    let result = flush("group", Delta { empty, failure }, &log, &events, 0).await;
+    assert2::assert!(result.err() == failure);
+    assert2::assert!(events.into_inner() == expected);
 }

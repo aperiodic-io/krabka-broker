@@ -6,7 +6,10 @@ use {
     super::{test_support::DEFAULT_MAX_FRAME_BYTES, *},
     crate::{
         api_catalog::{
-            INTER_BROKER_ONLY_APIS, LegacyRequestVersions, UnstableApiVersions, dispatched_apis,
+            INTER_BROKER_ONLY_APIS,
+            LegacyRequestVersions::{self, Disabled as NoLegacy, Enabled as Legacy},
+            UnstableApiVersions::{self, Disabled as Strict, Enabled as Trunk},
+            dispatched_apis,
         },
         authorizer::AuthorizationResult,
         codes,
@@ -441,170 +444,73 @@ async fn assert_gated_version(case: GatedVersion) {
 /// dispatched request with an empty body fails to decode and closes as well,
 /// so the rows tell "refused before dispatch" from "dispatched" by the
 /// unsupported-request metric.
-#[tokio::test]
-async fn a_gated_version_is_refused_unless_its_switch_is_on() {
-    use crate::api_catalog::{
-        LegacyRequestVersions::{Disabled as NoLegacy, Enabled as Legacy},
-        UnstableApiVersions::{Disabled as Strict, Enabled as Trunk},
-    };
-
-    let cases: &[GatedVersion] = &[
-        GatedVersion {
-            api_key: 22,
-            name: "InitProducerId",
-            frame_version: 6,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 22,
-            name: "InitProducerId",
-            frame_version: 5,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: false,
-        },
-        GatedVersion {
-            api_key: 22,
-            name: "InitProducerId",
-            frame_version: 6,
-            unstable: Trunk,
-            legacy: NoLegacy,
-            refused: false,
-        },
-        GatedVersion {
-            api_key: 28,
-            name: "TxnOffsetCommit",
-            frame_version: 6,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 28,
-            name: "TxnOffsetCommit",
-            frame_version: 6,
-            unstable: Trunk,
-            legacy: NoLegacy,
-            refused: false,
-        },
-        GatedVersion {
-            api_key: 88,
-            name: "StreamsGroupHeartbeat",
-            frame_version: 1,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 88,
-            name: "StreamsGroupHeartbeat",
-            frame_version: 1,
-            unstable: Trunk,
-            legacy: NoLegacy,
-            refused: false,
-        },
-        GatedVersion {
-            api_key: 89,
-            name: "StreamsGroupDescribe",
-            frame_version: 1,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 93,
-            name: "StreamsGroupTopologyDescriptionUpdate",
-            frame_version: 0,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 93,
-            name: "StreamsGroupTopologyDescriptionUpdate",
-            frame_version: 0,
-            unstable: Trunk,
-            legacy: NoLegacy,
-            refused: false,
-        },
-        GatedVersion {
-            api_key: 94,
-            name: "UnregisterController",
-            frame_version: 0,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 94,
-            name: "UnregisterController",
-            frame_version: 0,
-            unstable: Trunk,
-            legacy: NoLegacy,
-            refused: false,
-        },
-        GatedVersion {
-            api_key: 0,
-            name: "Produce",
-            frame_version: 2,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 0,
-            name: "Produce",
-            frame_version: 0,
-            unstable: Trunk,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 0,
-            name: "Produce",
-            frame_version: 2,
-            unstable: Strict,
-            legacy: Legacy,
-            refused: false,
-        },
-        GatedVersion {
-            api_key: 1,
-            name: "Fetch",
-            frame_version: 3,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 1,
-            name: "Fetch",
-            frame_version: 3,
-            unstable: Strict,
-            legacy: Legacy,
-            refused: false,
-        },
-        GatedVersion {
-            api_key: 2,
-            name: "ListOffsets",
-            frame_version: 0,
-            unstable: Strict,
-            legacy: NoLegacy,
-            refused: true,
-        },
-        GatedVersion {
-            api_key: 2,
-            name: "ListOffsets",
-            frame_version: 0,
-            unstable: Strict,
-            legacy: Legacy,
-            refused: false,
-        },
-    ];
-    for &case in cases {
-        assert_gated_version(case).await;
-    }
+#[yare::parameterized(
+    init_pid_unstable_refused = { 22, "InitProducerId", 6, Strict, NoLegacy, true },
+    init_pid_legacy_range = { 22, "InitProducerId", 5, Strict, NoLegacy, false },
+    init_pid_unstable_enabled = { 22, "InitProducerId", 6, Trunk, NoLegacy, false },
+    txn_offset_unstable_refused = { 28, "TxnOffsetCommit", 6, Strict, NoLegacy, true },
+    txn_offset_unstable_enabled = { 28, "TxnOffsetCommit", 6, Trunk, NoLegacy, false },
+    streams_heartbeat_unstable_refused = { 88, "StreamsGroupHeartbeat", 1, Strict, NoLegacy, true },
+    streams_heartbeat_unstable_enabled = { 88, "StreamsGroupHeartbeat", 1, Trunk, NoLegacy, false },
+    streams_describe_unstable_refused = { 89, "StreamsGroupDescribe", 1, Strict, NoLegacy, true },
+    streams_topology_unstable_refused = {
+        93,
+        "StreamsGroupTopologyDescriptionUpdate",
+        0,
+        Strict,
+        NoLegacy,
+        true,
+    },
+    streams_topology_unstable_enabled = {
+        93,
+        "StreamsGroupTopologyDescriptionUpdate",
+        0,
+        Trunk,
+        NoLegacy,
+        false,
+    },
+    unregister_controller_unstable_refused = {
+        94,
+        "UnregisterController",
+        0,
+        Strict,
+        NoLegacy,
+        true,
+    },
+    unregister_controller_unstable_enabled = {
+        94,
+        "UnregisterController",
+        0,
+        Trunk,
+        NoLegacy,
+        false,
+    },
+    produce_legacy_refused = { 0, "Produce", 2, Strict, NoLegacy, true },
+    produce_unstable_still_refused_by_legacy_gate = { 0, "Produce", 0, Trunk, NoLegacy, true },
+    produce_legacy_enabled = { 0, "Produce", 2, Strict, Legacy, false },
+    fetch_legacy_refused = { 1, "Fetch", 3, Strict, NoLegacy, true },
+    fetch_legacy_enabled = { 1, "Fetch", 3, Strict, Legacy, false },
+    list_offsets_legacy_refused = { 2, "ListOffsets", 0, Strict, NoLegacy, true },
+    list_offsets_legacy_enabled = { 2, "ListOffsets", 0, Strict, Legacy, false },
+)]
+#[test_macro(tokio::test)]
+async fn a_gated_version_is_refused_unless_its_switch_is_on(
+    api_key: i16,
+    name: &'static str,
+    frame_version: i16,
+    unstable: UnstableApiVersions,
+    legacy: LegacyRequestVersions,
+    refused: bool,
+) {
+    assert_gated_version(GatedVersion {
+        api_key,
+        name,
+        frame_version,
+        unstable,
+        legacy,
+        refused,
+    })
+    .await;
 }
 
 /// #784: `ApiVersions` v5 is Kafka trunk's KIP-1242 version. With

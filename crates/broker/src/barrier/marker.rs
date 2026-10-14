@@ -188,21 +188,22 @@ mod tests {
     /// The group name is a string with an `i16` length. The builder writes one
     /// of 32767 bytes and refuses a longer one with an error, because a panic
     /// here would take down the connection of the request that named the group.
-    #[test]
-    fn a_group_name_of_32767_bytes_builds_and_one_of_32768_is_refused() {
-        for (length, builds) in [(MAX_STRING_BYTES, true), (MAX_STRING_BYTES + 1, false)] {
-            let marker = BarrierMarker {
-                group: "g".repeat(length),
-                ..sample()
-            };
-            let built = build_barrier_batch(&marker, Offset(0), 0);
-            assert!(built.is_ok() == builds, "{length} bytes");
-            if let Ok(batch) = built {
-                assert!(
-                    parse_barrier_marker(&batch.records[0]).ok() == Some(marker),
-                    "{length} bytes"
-                );
-            }
+    #[yare::parameterized(
+        at_limit = { MAX_STRING_BYTES, true },
+        over_limit = { MAX_STRING_BYTES + 1, false },
+    )]
+    fn a_group_name_of_32767_bytes_builds_and_one_of_32768_is_refused(length: usize, builds: bool) {
+        let marker = BarrierMarker {
+            group: "g".repeat(length),
+            ..sample()
+        };
+        let built = build_barrier_batch(&marker, Offset(0), 0);
+        assert2::assert!(built.is_ok() == builds, "{length} bytes");
+        if let Ok(batch) = built {
+            assert2::assert!(
+                parse_barrier_marker(&batch.records[0]).ok() == Some(marker),
+                "{length} bytes"
+            );
         }
     }
 

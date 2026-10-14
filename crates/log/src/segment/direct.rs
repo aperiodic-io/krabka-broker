@@ -336,7 +336,7 @@ impl DirectWriter {
 
     pub(crate) fn end(&self) -> u64 { self.end }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn file(&self) -> &File { &self.shared.file }
 
     /// The block size that file offsets and write lengths align to.

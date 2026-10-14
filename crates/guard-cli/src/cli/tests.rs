@@ -15,15 +15,15 @@ krabka_macros::duration_parser_fixture!(
         /// with no unit is refused rather than guessed at.
     },
     [
-        ("30m", Some(1_800_000)),
-        ("1h", Some(3_600_000)),
-        ("1 hour", Some(3_600_000)),
+        thirty_minutes = { "30m", Some(1_800_000) },
+        one_hour = { "1h", Some(3_600_000) },
+        one_hour_words = { "1 hour", Some(3_600_000) },
         // A unit is required, so a number alone cannot be read as the
         // wrong scale. Zero is the one exemption, having no scale.
-        ("30", None),
-        ("0", Some(0)),
-        ("banana", None),
-        ("", None),
+        missing_unit = { "30", None },
+        zero = { "0", Some(0) },
+        invalid_word = { "banana", None },
+        empty = { "", None },
     ]
 );
 
@@ -77,8 +77,17 @@ fn a_freeze_names_exactly_one_scope() {
 /// The three signing flags travel together. A key file with no key id
 /// would produce a signature the broker cannot look up, and a key id with
 /// no key file would name a signature that was never made.
-#[test]
-fn the_signing_flags_travel_together() {
+#[yare::parameterized(
+    no_signature = { &[][..], true },
+    all_flags = {
+        &["--sign-with", "key.pk8", "--key-id", "alice-yubi", "--principal", "User:alice"][..],
+        true,
+    },
+    missing_key_id = { &["--sign-with", "key.pk8", "--principal", "User:alice"][..], false },
+    missing_principal = { &["--sign-with", "key.pk8", "--key-id", "alice-yubi"][..], false },
+    missing_key_file = { &["--key-id", "alice-yubi"][..], false },
+)]
+fn the_signing_flags_travel_together(extra: &[&str], parses: bool) {
     let base = [
         "krabka-guard",
         "-b",
@@ -90,40 +99,8 @@ fn the_signing_flags_travel_together() {
         "--reason",
         "DR cutover",
     ];
-    let cases = [
-        ("no signature at all", vec![], true),
-        (
-            "all three flags",
-            vec![
-                "--sign-with",
-                "key.pk8",
-                "--key-id",
-                "alice-yubi",
-                "--principal",
-                "User:alice",
-            ],
-            true,
-        ),
-        (
-            "a key file with no key id",
-            vec!["--sign-with", "key.pk8", "--principal", "User:alice"],
-            false,
-        ),
-        (
-            "a key file with no principal",
-            vec!["--sign-with", "key.pk8", "--key-id", "alice-yubi"],
-            false,
-        ),
-        (
-            "a key id with no key file",
-            vec!["--key-id", "alice-yubi"],
-            false,
-        ),
-    ];
-    for (case, extra, parses) in cases {
-        let line = base.iter().copied().chain(extra);
-        check!(Cli::try_parse_from(line).is_ok() == parses, "{case}");
-    }
+    let line = base.iter().copied().chain(extra.iter().copied());
+    check!(Cli::try_parse_from(line).is_ok() == parses);
 }
 
 /// `--verify-signatures` with no key file would check the registry against
@@ -148,41 +125,18 @@ fn verifying_signatures_needs_a_local_key_file() {
 /// The break-glass action names reach the wire as the values the broker's
 /// own action type carries, and no action takes the zero that a default
 /// request holds.
-#[test]
-fn every_action_carries_its_own_wire_value_and_name() {
-    let cases = [
-        ("thaw", Action::ThawTopicFreeze, 1, "thaw_topic_freeze"),
-        (
-            "unclean election",
-            Action::UncleanElectLeaders,
-            2,
-            "unclean_elect_leaders",
-        ),
-        (
-            "unclean recovery",
-            Action::UncleanRecovery,
-            3,
-            "unclean_recovery",
-        ),
-        (
-            "unregister broker",
-            Action::UnregisterBroker,
-            4,
-            "unregister_broker",
-        ),
-        (
-            "cancel reassignment",
-            Action::CancelReassignment,
-            5,
-            "cancel_reassignment",
-        ),
-        ("delete topic", Action::DeleteTopic, 6, "delete_topic"),
-        ("delete records", Action::DeleteRecords, 7, "delete_records"),
-    ];
-    for (case, action, wire, name) in cases {
-        check!(action.wire() == wire, "{case}");
-        check!(action_name(wire) == name, "{case}");
-    }
+#[yare::parameterized(
+    thaw = { Action::ThawTopicFreeze, 1, "thaw_topic_freeze" },
+    unclean_election = { Action::UncleanElectLeaders, 2, "unclean_elect_leaders" },
+    unclean_recovery = { Action::UncleanRecovery, 3, "unclean_recovery" },
+    unregister_broker = { Action::UnregisterBroker, 4, "unregister_broker" },
+    cancel_reassignment = { Action::CancelReassignment, 5, "cancel_reassignment" },
+    delete_topic = { Action::DeleteTopic, 6, "delete_topic" },
+    delete_records = { Action::DeleteRecords, 7, "delete_records" },
+)]
+fn every_action_carries_its_own_wire_value_and_name(action: Action, wire: i8, name: &str) {
+    check!(action.wire() == wire);
+    check!(action_name(wire) == name);
     check!(action_name(0) == "unknown");
     check!(action_name(8) == "unknown");
 }

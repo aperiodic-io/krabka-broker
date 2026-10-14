@@ -523,8 +523,7 @@ mod tests {
                         active: maplit::btreemap! {"0".to_string() => vec![0, 1]},
                         active_pending_revocation: maplit::btreemap! {"0".to_string() => vec![2]},
                         active_epochs: epochs
-                            .map(|epochs| maplit::btreemap! {"0".to_string() => epochs})
-                            .unwrap_or_default(),
+                            .map_or_default(|epochs| maplit::btreemap! {"0".to_string() => epochs}),
                         active_pending_revocation_epochs: maplit::btreemap! {
                             "0".to_string() => vec![6],
                         },

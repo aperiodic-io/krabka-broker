@@ -248,8 +248,7 @@ mod tests {
                 let long = arg.get_long().unwrap_or_default();
                 let env = arg
                     .get_env()
-                    .map(|env| env.to_string_lossy().into_owned())
-                    .unwrap_or_default();
+                    .map_or_default(|env| env.to_string_lossy().into_owned());
                 let help = arg.get_help().map(ToString::to_string);
                 let accepted = PROBES
                     .iter()
@@ -451,25 +450,25 @@ mod tests {
     /// of type INT". The topic-level `max.message.bytes` this key defaults
     /// enforces the same domain, so an operator cannot set a broker-wide cap
     /// through the flag that `kafka-configs --alter` would refuse on a topic.
-    #[test]
-    fn message_max_bytes_takes_kafkas_int_at_least_zero() {
+    #[yare::parameterized(
+        zero = { "0B", Some(0) },
+        bytes = { "2048B", Some(2048) },
+        int_max = { "2147483647B", Some(2_147_483_647) },
+        mebibytes = { "1MiB", Some(1_048_576) },
+        negative = { "-1B", None },
+        above_int_max = { "2147483648B", None },
+        gibibytes = { "2GiB", None },
+        fractional_byte = { "1.5B", None },
+    )]
+    fn message_max_bytes_takes_kafkas_int_at_least_zero(
+        value: &'static str,
+        expected: Option<u64>,
+    ) {
         let _guard = env_guard();
-
-        for (value, expected) in [
-            ("0B", Some(0)),
-            ("2048B", Some(2048)),
-            ("2147483647B", Some(2_147_483_647)),
-            ("1MiB", Some(1_048_576)),
-            ("-1B", None),
-            ("2147483648B", None),
-            ("2GiB", None),
-            ("1.5B", None),
-        ] {
-            let parsed = Args::try_parse_from(["krabka-broker", "--message-max-bytes", value])
-                .ok()
-                .and_then(|args| args.runtime.message_max_bytes)
-                .map(ByteSizeExt::bytes_u64);
-            check!(parsed == expected, "--message-max-bytes={value}");
-        }
+        let parsed = Args::try_parse_from(["krabka-broker", "--message-max-bytes", value])
+            .ok()
+            .and_then(|args| args.runtime.message_max_bytes)
+            .map(ByteSizeExt::bytes_u64);
+        check!(parsed == expected, "--message-max-bytes={value}");
     }
 }

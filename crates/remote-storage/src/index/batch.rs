@@ -131,28 +131,22 @@ mod tests {
         buf.freeze()
     }
 
-    #[test]
-    fn first_batch_at_or_after_decodes_and_skips() {
+    #[yare::parameterized(
+        skips_first_batch = { 10, Some(10) },
+        below_all_batches = { 0, Some(0) },
+        above_all_batches = { 1_000, None },
+    )]
+    fn first_batch_at_or_after_decodes_and_skips(floor: i64, want_base: Option<i64>) {
         // Two adjacent batches; floor=10 should skip the first (last=9) and
         // return the second.
         let bytes = encoded(&[test_batch_at(0, 10, b'a'), test_batch_at(10, 10, b'b')]);
+        assert2::assert!(
+            first_batch_at_or_after(&bytes, floor).map(|b| b.base_offset) == want_base
+        );
+    }
 
-        let cases = [
-            // Floor=10 skips the first batch (last=9), returns the second.
-            (10, Some(10)),
-            // Floor below everything → first batch.
-            (0, Some(0)),
-            // Floor above everything → None.
-            (1_000, None),
-        ];
-        for (floor, want_base) in cases {
-            assert!(
-                first_batch_at_or_after(&bytes, floor).map(|b| b.base_offset) == want_base,
-                "floor {floor}"
-            );
-        }
-
-        // Empty buffer → None.
+    #[test]
+    fn first_batch_at_or_after_empty_buffer_returns_none() {
         assert!(first_batch_at_or_after(&[], 0).is_none());
     }
 
@@ -160,7 +154,7 @@ mod tests {
     fn first_batch_at_or_after_rejects_floor_past_base_plus_delta() {
         let bytes = encoded(&[test_batch_at(3, 4, b'z')]);
 
-        assert!(
+        assert2::assert!(
             first_batch_at_or_after(&bytes, 7).is_none(),
             "batch 3..6 must not cover floor 7"
         );
@@ -172,56 +166,59 @@ mod tests {
         assert!(first_batch_at_or_after(&bytes, i64::MAX).is_none());
     }
 
-    #[test]
-    fn first_record_at_or_after_timestamp_honours_both_floors() {
+    #[yare::parameterized(
+        both_floors_inside_first_batch = { 10, 1_600, Some((12, 1_600)) },
+        offset_floor_skips_match = { 14, 1_000, Some((14, 2_000)) },
+        no_timestamp_match = { 10, 9_999, None },
+    )]
+    fn first_record_at_or_after_timestamp_honours_both_floors(
+        floor_offset: i64,
+        target: i64,
+        want: Option<(i64, i64)>,
+    ) {
         let bytes = encoded(&[
             timestamped_batch_at(10, &[1_000, 1_100, 1_600, 1_700], b'a'),
             timestamped_batch_at(14, &[2_000, 2_200, 2_400], b'b'),
         ]);
-
-        let cases = [
-            // Both floors satisfied inside the first batch.
-            (10, 1_600, Some((12, 1_600))),
-            // The offset floor skips qualifying records in the first batch.
-            (14, 1_000, Some((14, 2_000))),
-            // No record reaches the timestamp floor.
-            (10, 9_999, None),
-        ];
-        for (floor_offset, target, want) in cases {
-            assert!(
-                first_record_at_or_after_timestamp(&bytes, floor_offset, target, None).unwrap()
-                    == want,
-                "floor_offset {floor_offset} target {target}"
-            );
-        }
+        assert2::assert!(
+            first_record_at_or_after_timestamp(&bytes, floor_offset, target, None).unwrap() == want
+        );
     }
 
-    #[test]
-    fn append_time_lookup_ignores_producer_timestamps() {
+    #[yare::parameterized(
+        ordinary_and_first_match = { 1_000, 0, 10, 1_500, Some((10, 2_400)) },
+        ordinary_and_second_match = { 1_000, 0, 11, 2_400, Some((11, 2_400)) },
+        ordinary_offset_past_batch = { 1_000, 0, 12, 0, None },
+        ordinary_timestamp_past_max = { 1_000, 0, 10, 2_401, None },
+        max_base_and_first_match = { i64::MAX, 1, 10, 1_500, Some((10, 2_400)) },
+        max_base_and_second_match = { i64::MAX, 1, 11, 2_400, Some((11, 2_400)) },
+        max_base_and_offset_past_batch = { i64::MAX, 1, 12, 0, None },
+        max_base_and_timestamp_past_max = { i64::MAX, 1, 10, 2_401, None },
+        min_base_and_first_match = { i64::MIN, -1, 10, 1_500, Some((10, 2_400)) },
+        min_base_and_second_match = { i64::MIN, -1, 11, 2_400, Some((11, 2_400)) },
+        min_base_and_offset_past_batch = { i64::MIN, -1, 12, 0, None },
+        min_base_and_timestamp_past_max = { i64::MIN, -1, 10, 2_401, None },
+    )]
+    fn append_time_lookup_ignores_producer_timestamps(
+        base: i64,
+        delta: i64,
+        floor: i64,
+        target: i64,
+        expected: Option<(i64, i64)>,
+    ) {
         let mut batch = timestamped_batch_at(10, &[1_000, 1_100], b'a');
         batch.attributes = batch
             .attributes
             .with_timestamp_type(TimestampType::LogAppendTime);
         batch.max_timestamp = 2_400;
-        for (base, delta) in [(1_000, 0), (i64::MAX, 1), (i64::MIN, -1)] {
-            batch.base_timestamp = base;
-            for record in &mut batch.records {
-                record.timestamp_delta = delta;
-            }
-            let bytes = encoded(&[batch.clone()]);
-            for (floor, target, expected) in [
-                (10, 1_500, Some((10, 2_400))),
-                (11, 2_400, Some((11, 2_400))),
-                (12, 0, None),
-                (10, 2_401, None),
-            ] {
-                assert!(
-                    first_record_at_or_after_timestamp(&bytes, floor, target, None).unwrap()
-                        == expected,
-                    "base {base} delta {delta} floor {floor} target {target}"
-                );
-            }
+        batch.base_timestamp = base;
+        for record in &mut batch.records {
+            record.timestamp_delta = delta;
         }
+        let bytes = encoded(&[batch]);
+        assert2::assert!(
+            first_record_at_or_after_timestamp(&bytes, floor, target, None).unwrap() == expected
+        );
     }
 
     #[test]
@@ -270,73 +267,72 @@ mod tests {
     /// its max timestamp and its last offset reach the lookup's, and holds each
     /// record it reads to the limit. A batch the producer did not compress is
     /// never held to it.
-    #[test]
-    fn first_record_at_or_after_timestamp_refuses_only_the_records_kafka_reads() {
-        use krabka_compression::CompressionType::{Gzip, None as Uncompressed};
-
+    #[yare::parameterized(
+        found_before_oversized_batch = {
+            krabka_compression::CompressionType::Gzip,
+            10,
+            1_000,
+            Some(100),
+            Ok(Some((10, 1_000))),
+        },
+        oversized_record_is_match = {
+            krabka_compression::CompressionType::Gzip,
+            10,
+            1_100,
+            Some(100),
+            Err(LARGE),
+        },
+        oversized_record_before_match = {
+            krabka_compression::CompressionType::Gzip,
+            10,
+            1_200,
+            Some(100),
+            Err(LARGE),
+        },
+        batch_below_offset_floor = {
+            krabka_compression::CompressionType::Gzip,
+            13,
+            1_100,
+            Some(100),
+            Ok(None),
+        },
+        no_limit = {
+            krabka_compression::CompressionType::Gzip,
+            10,
+            1_100,
+            None,
+            Ok(Some((11, 1_100))),
+        },
+        uncompressed_batch = {
+            krabka_compression::CompressionType::None,
+            10,
+            1_100,
+            Some(100),
+            Ok(Some((11, 1_100))),
+        },
+    )]
+    fn first_record_at_or_after_timestamp_refuses_only_the_records_kafka_reads(
+        codec: krabka_compression::CompressionType,
+        floor_offset: i64,
+        target: i64,
+        limit: Option<usize>,
+        want: Result<Option<(i64, i64)>, usize>,
+    ) {
         let layout = |codec| {
             encoded(&[
                 sized_batch_at(10, &[sized(1_000, 10)], codec),
                 sized_batch_at(11, &[sized(1_100, 1_000), sized(1_200, 10)], codec),
             ])
         };
-        for (name, codec, floor_offset, target, limit, want) in [
-            (
-                "found before the oversized batch",
-                Gzip,
-                10,
-                1_000,
-                Some(100),
-                Ok(Some((10, 1_000))),
-            ),
-            (
-                "the oversized record is the match",
-                Gzip,
-                10,
-                1_100,
-                Some(100),
-                Err(LARGE),
-            ),
-            (
-                "an oversized record before the match is read too",
-                Gzip,
-                10,
-                1_200,
-                Some(100),
-                Err(LARGE),
-            ),
-            (
-                "the batch ends below the offset floor",
-                Gzip,
-                13,
-                1_100,
-                Some(100),
-                Ok(None),
-            ),
-            ("no limit", Gzip, 10, 1_100, None, Ok(Some((11, 1_100)))),
-            (
-                "an uncompressed batch is never held to it",
-                Uncompressed,
-                10,
-                1_100,
-                Some(100),
-                Ok(Some((11, 1_100))),
-            ),
-        ] {
-            let got = match first_record_at_or_after_timestamp(
-                &layout(codec),
-                floor_offset,
-                target,
-                limit,
-            ) {
+        let got =
+            match first_record_at_or_after_timestamp(&layout(codec), floor_offset, target, limit) {
                 Ok(found) => Ok(found),
                 Err(RemoteStorageError::RecordTooLarge { size, limit }) => {
-                    assert!(limit == 100);
+                    assert2::assert!(limit == 100);
                     Err(size)
                 }
                 Err(other) => panic!("unexpected error: {other}"),
             };
-            assert!(got == want, "{name}");
-        }
+        assert2::assert!(got == want);
     }
 }

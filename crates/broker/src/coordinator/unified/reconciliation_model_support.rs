@@ -130,8 +130,7 @@ pub fn client_moves(
     let owned: BTreeSet<_> = owned
         .iter()
         .find(|row| row.member_id == id)
-        .map(|row| row.partitions.iter().copied().collect())
-        .unwrap_or_default();
+        .map_or_default(|row| row.partitions.iter().copied().collect());
     advertised
         .iter()
         .filter(|partition| !owned.contains(*partition))
@@ -306,8 +305,7 @@ pub fn advertised_for(advertised: &[MemberPartitions], id: &str) -> Vec<i32> {
     advertised
         .iter()
         .find(|row| row.member_id == id)
-        .map(|row| row.partitions.clone())
-        .unwrap_or_default()
+        .map_or_default(|row| row.partitions.clone())
 }
 
 pub fn exclusive_ownership(owned: &[MemberPartitions]) -> bool {
@@ -410,4 +408,32 @@ fn epoch_ledger_keeps_existing_violations_and_records_only_regressions() {
         assert!(ledger.contains("epoch regression") == case.regressed);
         assert!(ledger.len() == if case.regressed { 2 } else { 1 });
     }
+}
+
+#[test]
+fn owned_parts_round_trip_sorted_unique_and_empty_members() {
+    let owned = vec![
+        MemberPartitions {
+            member_id: "member".to_owned(),
+            partitions: vec![2, 1, 2],
+        },
+        MemberPartitions {
+            member_id: "empty".to_owned(),
+            partitions: vec![],
+        },
+    ];
+    let mapped = owned_map(&owned);
+    assert!(
+        owned_to_vec(&mapped)
+            == vec![
+                MemberPartitions {
+                    member_id: "empty".to_owned(),
+                    partitions: vec![],
+                },
+                MemberPartitions {
+                    member_id: "member".to_owned(),
+                    partitions: vec![1, 2],
+                },
+            ]
+    );
 }

@@ -41,7 +41,6 @@ pub(super) struct MemberProj {
 }
 
 #[krabka_macros::reconciliation_fields(group)]
-#[derive(Clone, PartialEq, Eq, Hash, Debug, krabka_macros::ReconciliationGroup)]
 pub(super) struct CgcState {
     /// Coordinator-side members, sorted by id.
     pub(super) members: Vec<MemberProj>,

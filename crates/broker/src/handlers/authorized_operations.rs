@@ -512,25 +512,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn bit_values_match_kafka_int8_codes() {
+    #[yare::parameterized(
+        read = { AclOperation::Read, 1 << 3 },
+        write = { AclOperation::Write, 1 << 4 },
+        create = { AclOperation::Create, 1 << 5 },
+        delete = { AclOperation::Delete, 1 << 6 },
+        alter = { AclOperation::Alter, 1 << 7 },
+        describe = { AclOperation::Describe, 1 << 8 },
+        cluster_action = { AclOperation::ClusterAction, 1 << 9 },
+        describe_configs = { AclOperation::DescribeConfigs, 1 << 10 },
+        alter_configs = { AclOperation::AlterConfigs, 1 << 11 },
+        idempotent_write = { AclOperation::IdempotentWrite, 1 << 12 },
+    )]
+    fn bit_values_match_kafka_int8_codes(op: AclOperation, want: i32) {
         // Sanity: spot-check that the bit positions equal Kafka's wire
         // discriminants. If `operation_to_wire` ever drifts from
         // Kafka's `AclOperation.code()`, the wire field would become
         // unintelligible to JVM clients.
-        for (op, want) in [
-            (AclOperation::Read, 1 << 3),
-            (AclOperation::Write, 1 << 4),
-            (AclOperation::Create, 1 << 5),
-            (AclOperation::Delete, 1 << 6),
-            (AclOperation::Alter, 1 << 7),
-            (AclOperation::Describe, 1 << 8),
-            (AclOperation::ClusterAction, 1 << 9),
-            (AclOperation::DescribeConfigs, 1 << 10),
-            (AclOperation::AlterConfigs, 1 << 11),
-            (AclOperation::IdempotentWrite, 1 << 12),
-        ] {
-            assert!(bit(op) == want, "{op:?}");
-        }
+        assert2::assert!(bit(op) == want, "{op:?}");
     }
 }

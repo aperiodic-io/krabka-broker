@@ -150,34 +150,20 @@ mod tests {
 
     /// Four bytes is the boundary: exactly four is a readable `u32`, and fewer
     /// must yield `None` rather than index past the end.
-    #[test]
-    fn take_u32_reads_at_the_four_byte_boundary() {
-        struct Case {
-            input: &'static [u8],
-            want: Option<u32>,
-            want_left: usize,
-        }
-        let case = |input, want, want_left| Case {
-            input,
-            want,
-            want_left,
-        };
-        let cases = [
-            case(&[], None, 0),
-            case(&[0x00], None, 1),
-            case(&[0x00, 0x00, 0x01], None, 3),
-            case(&[0x00, 0x00, 0x01, 0x00], Some(256), 0),
-            case(&[0x00, 0x00, 0x01, 0x00, 0xff], Some(256), 1),
-        ];
-        for Case {
-            input,
-            want,
-            want_left,
-        } in cases
-        {
-            let mut b: &[u8] = input;
-            let got = take_u32(&mut b);
-            check!((got, b.len()) == (want, want_left), "take_u32({input:x?})");
-        }
+    #[yare::parameterized(
+        empty = { &[][..], None, 0 },
+        one_byte = { &[0x00][..], None, 1 },
+        three_bytes = { &[0x00, 0x00, 0x01][..], None, 3 },
+        exact_four_bytes = { &[0x00, 0x00, 0x01, 0x00][..], Some(256), 0 },
+        one_trailing_byte = { &[0x00, 0x00, 0x01, 0x00, 0xff][..], Some(256), 1 },
+    )]
+    fn take_u32_reads_at_the_four_byte_boundary(
+        input: &'static [u8],
+        want: Option<u32>,
+        want_left: usize,
+    ) {
+        let mut b: &[u8] = input;
+        let got = take_u32(&mut b);
+        check!((got, b.len()) == (want, want_left));
     }
 }

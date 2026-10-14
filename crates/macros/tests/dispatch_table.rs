@@ -18,6 +18,12 @@ use {
 // These adapters share tracing callsites. Serialize calls while capture tests install scoped subscribers.
 static ADAPTER_TESTS: Mutex<()> = Mutex::new(());
 
+fn registered_dispatch_table() -> DispatchRegistry {
+    let mut registry = DispatchRegistry::default();
+    register_dispatch_table(&mut registry);
+    registry
+}
+
 type ApiVersion = i16;
 type CorrelationId = i32;
 type Bytes = Vec<u8>;
@@ -545,124 +551,122 @@ fn observe(registry: &DispatchRegistry, api: ApiKey) -> Option<Observed> {
     })
 }
 
-#[test]
-fn every_section_registers_an_adapter_that_reaches_its_handler() {
-    let _serial = ADAPTER_TESTS.lock().expect("adapter test lock");
-    let mut registry = DispatchRegistry::default();
-    register_dispatch_table(&mut registry);
-
-    let ok = |reply: &str| Ok(reply.to_owned());
-    let cases = [
-        (
-            ApiKey::Metadata,
-            "context",
-            9,
-            ok("metadata b1 5 7 c1 body"),
-            Err(BrokerError::EmptyBody),
-        ),
-        (
-            ApiKey::AddPartitionsToTxn,
-            "context",
-            3,
-            ok("txn::add_partitions_to_txn b1 5 7 c1 body"),
-            Err(BrokerError::EmptyBody),
-        ),
-        (
-            ApiKey::DescribeConfigs,
-            "context",
-            4,
-            ok("describe_configs b1 5 7 c1 body"),
-            Err(BrokerError::EmptyBody),
-        ),
-        (
-            ApiKey::ListGroups,
-            "context",
-            3,
-            ok("list_groups b1 5 c1 v5:body @v5"),
-            Err(BrokerError::EmptyBody),
-        ),
-        (
-            ApiKey::Heartbeat,
-            "context",
-            4,
-            ok("heartbeat b1 5 c1 v5:body @v5"),
-            Err(BrokerError::EmptyBody),
-        ),
-        (
-            ApiKey::ListConfigResources,
-            "context",
-            0,
-            ok("list_config_resources b1 5 c1 v5:body @v5"),
-            Err(BrokerError::EmptyBody),
-        ),
-        (
-            ApiKey::DescribeAcls,
-            "context",
-            2,
-            ok("describe_acls b1 5 c1 v5:body @v5"),
-            ok("describe_acls b1 5 c1 v5: @v5"),
-        ),
-        (
-            ApiKey::UpdateFeatures,
-            "context",
-            0,
-            ok("update_features b1 5 c1 v5:body @v5"),
-            Err(BrokerError::EmptyBody),
-        ),
-        (
-            ApiKey::CreateDelegationToken,
-            "auth",
-            2,
-            ok("create_delegation_token_adapter b1 5 7 User:alice body"),
-            Err(BrokerError::EmptyBody),
-        ),
-        (
-            ApiKey::PushTelemetry,
-            "telemetry",
-            0,
-            ok("push_telemetry b1 5 7 i1 body"),
-            Err(BrokerError::EmptyBody),
-        ),
-    ];
-
-    assert!(registry.entries.len() == cases.len());
-    for (api, kind, flexible_min, reply, empty_body) in cases {
-        let expected = Observed {
-            kind,
-            flexible_min,
-            reply,
-            empty_body,
-        };
-        assert!(observe(&registry, api) == Some(expected), "{api:?}");
-    }
-}
-
-fn check_typed_adapter_error(body: &[u8], error: &BrokerError) {
-    let mut registry = DispatchRegistry::default();
-    register_dispatch_table(&mut registry);
-
-    for api in [
+#[yare::parameterized(
+    metadata = {
+        ApiKey::Metadata,
+        "context",
+        9,
+        Ok("metadata b1 5 7 c1 body".to_owned()),
+        Err(BrokerError::EmptyBody),
+    },
+    add_partitions_to_txn = {
+        ApiKey::AddPartitionsToTxn,
+        "context",
+        3,
+        Ok("txn::add_partitions_to_txn b1 5 7 c1 body".to_owned()),
+        Err(BrokerError::EmptyBody),
+    },
+    describe_configs = {
+        ApiKey::DescribeConfigs,
+        "context",
+        4,
+        Ok("describe_configs b1 5 7 c1 body".to_owned()),
+        Err(BrokerError::EmptyBody),
+    },
+    list_groups = {
         ApiKey::ListGroups,
+        "context",
+        3,
+        Ok("list_groups b1 5 c1 v5:body @v5".to_owned()),
+        Err(BrokerError::EmptyBody),
+    },
+    heartbeat = {
         ApiKey::Heartbeat,
+        "context",
+        4,
+        Ok("heartbeat b1 5 c1 v5:body @v5".to_owned()),
+        Err(BrokerError::EmptyBody),
+    },
+    list_config_resources = {
         ApiKey::ListConfigResources,
+        "context",
+        0,
+        Ok("list_config_resources b1 5 c1 v5:body @v5".to_owned()),
+        Err(BrokerError::EmptyBody),
+    },
+    describe_acls = {
         ApiKey::DescribeAcls,
-    ] {
-        let entry = registry.entries[&(api as i16)];
-        assert!(call(entry, body).as_ref() == Err(error), "{api:?}");
-    }
+        "context",
+        2,
+        Ok("describe_acls b1 5 c1 v5:body @v5".to_owned()),
+        Ok("describe_acls b1 5 c1 v5: @v5".to_owned()),
+    },
+    update_features = {
+        ApiKey::UpdateFeatures,
+        "context",
+        0,
+        Ok("update_features b1 5 c1 v5:body @v5".to_owned()),
+        Err(BrokerError::EmptyBody),
+    },
+    create_delegation_token = {
+        ApiKey::CreateDelegationToken,
+        "auth",
+        2,
+        Ok("create_delegation_token_adapter b1 5 7 User:alice body".to_owned()),
+        Err(BrokerError::EmptyBody),
+    },
+    push_telemetry = {
+        ApiKey::PushTelemetry,
+        "telemetry",
+        0,
+        Ok("push_telemetry b1 5 7 i1 body".to_owned()),
+        Err(BrokerError::EmptyBody),
+    },
+)]
+fn every_section_registers_an_adapter_that_reaches_its_handler(
+    api: ApiKey,
+    kind: &'static str,
+    flexible_min: ApiVersion,
+    reply: Result<String, BrokerError>,
+    empty_body: Result<String, BrokerError>,
+) {
+    let _serial = ADAPTER_TESTS.lock().expect("adapter test lock");
+    let registry = registered_dispatch_table();
+    assert2::assert!(registry.entries.len() == 10);
+    let expected = Observed {
+        kind,
+        flexible_min,
+        reply,
+        empty_body,
+    };
+    assert2::assert!(observe(&registry, api) == Some(expected), "{api:?}");
 }
 
-#[test]
-fn a_typed_adapter_maps_a_decode_failure_to_a_broker_error() {
+fn check_typed_adapter_error(body: &[u8], error: &BrokerError, api: ApiKey) {
+    let registry = registered_dispatch_table();
+    let entry = registry.entries[&(api as i16)];
+    assert2::assert!(call(entry, body).as_ref() == Err(error), "{api:?}");
+}
+
+#[yare::parameterized(
+    decode_list_groups = { &[0xff][..], BrokerError::Decode, ApiKey::ListGroups },
+    decode_heartbeat = { &[0xff][..], BrokerError::Decode, ApiKey::Heartbeat },
+    decode_config_resources = { &[0xff][..], BrokerError::Decode, ApiKey::ListConfigResources },
+    decode_acls = { &[0xff][..], BrokerError::Decode, ApiKey::DescribeAcls },
+    encode_list_groups = { &b"nope"[..], BrokerError::Encode, ApiKey::ListGroups },
+    encode_heartbeat = { &b"nope"[..], BrokerError::Encode, ApiKey::Heartbeat },
+    encode_config_resources = { &b"nope"[..], BrokerError::Encode, ApiKey::ListConfigResources },
+    encode_acls = { &b"nope"[..], BrokerError::Encode, ApiKey::DescribeAcls },
+)]
+fn typed_adapters_map_failures_to_broker_errors(body: &[u8], error: BrokerError, api: ApiKey) {
     let _serial = ADAPTER_TESTS.lock().expect("adapter test lock");
-    check_typed_adapter_error(&[0xff], &BrokerError::Decode);
+    check_typed_adapter_error(body, &error, api);
 }
 
 #[test]
 fn only_a_typed_group_adapter_decodes_through_decode_group_request() {
     let _serial = ADAPTER_TESTS.lock().expect("adapter test lock");
-    let mut registry = DispatchRegistry::default();
-    register_dispatch_table(&mut registry);
+    let registry = registered_dispatch_table();
 
     let long = b"longer-than-eight";
     let replies = [ApiKey::ListGroups, ApiKey::Heartbeat]
@@ -674,12 +678,6 @@ fn only_a_typed_group_adapter_decodes_through_decode_group_request() {
                 Err(BrokerError::RecordString),
             ]
     );
-}
-
-#[test]
-fn a_typed_adapter_returns_the_encoders_error() {
-    let _serial = ADAPTER_TESTS.lock().expect("adapter test lock");
-    check_typed_adapter_error(b"nope", &BrokerError::Encode);
 }
 
 #[test]
@@ -773,11 +771,82 @@ fn trace(registry: &DispatchRegistry, api: ApiKey, body: &[u8]) -> Vec<Traced> {
     std::mem::take(&mut *capture.traced.lock().expect("capture lock"))
 }
 
-#[test]
-fn a_generated_adapter_runs_its_handler_in_a_handle_span_and_records_its_error() {
+#[yare::parameterized(
+    metadata = {
+        ApiKey::Metadata,
+        "handle_metadata",
+        "Metadata",
+        true,
+        &b""[..],
+        BrokerError::EmptyBody,
+    },
+    add_partitions_to_txn = {
+        ApiKey::AddPartitionsToTxn,
+        "handle_add_partitions_to_txn",
+        "AddPartitionsToTxn",
+        true,
+        &b""[..],
+        BrokerError::EmptyBody,
+    },
+    describe_configs = {
+        ApiKey::DescribeConfigs,
+        "handle_describe_configs",
+        "DescribeConfigs",
+        true,
+        &b""[..],
+        BrokerError::EmptyBody,
+    },
+    list_groups = {
+        ApiKey::ListGroups,
+        "handle_list_groups",
+        "ListGroups",
+        false,
+        &b"nope"[..],
+        BrokerError::Encode,
+    },
+    heartbeat = {
+        ApiKey::Heartbeat,
+        "handle_heartbeat",
+        "Heartbeat",
+        false,
+        &b"longer-than-eight"[..],
+        BrokerError::RecordString,
+    },
+    list_config_resources = {
+        ApiKey::ListConfigResources,
+        "handle_list_config_resources",
+        "ListConfigResources",
+        false,
+        &[0xff][..],
+        BrokerError::Decode,
+    },
+    describe_acls = {
+        ApiKey::DescribeAcls,
+        "handle_describe_acls",
+        "DescribeAcls",
+        false,
+        &b"nope"[..],
+        BrokerError::Encode,
+    },
+    push_telemetry = {
+        ApiKey::PushTelemetry,
+        "handle_push_telemetry",
+        "PushTelemetry",
+        true,
+        &b""[..],
+        BrokerError::EmptyBody,
+    },
+)]
+fn a_generated_adapter_runs_its_handler_in_a_handle_span_and_records_its_error(
+    api: ApiKey,
+    name: &'static str,
+    api_field: &'static str,
+    raw: bool,
+    refused: &'static [u8],
+    refusal: BrokerError,
+) {
     let _serial = ADAPTER_TESTS.lock().expect("adapter test lock");
-    let mut registry = DispatchRegistry::default();
-    register_dispatch_table(&mut registry);
+    let registry = registered_dispatch_table();
 
     let span = |name, api: &str, req_bytes: Option<usize>| {
         let mut fields = BTreeMap::from([("api", api.to_owned()), ("version", "5".to_owned())]);
@@ -795,98 +864,26 @@ fn a_generated_adapter_runs_its_handler_in_a_handle_span_and_records_its_error()
         span: Some(name),
         fields: BTreeMap::from([("error", error.to_string())]),
     };
-    // Each case: the api, its span name and `api` field, whether the adapter
-    // hands the handler the raw body, and a body the handler or the codec
-    // refuses with the error the event records.
-    let cases = [
-        (
-            ApiKey::Metadata,
-            "handle_metadata",
-            "Metadata",
-            true,
-            &b""[..],
-            BrokerError::EmptyBody,
-        ),
-        (
-            ApiKey::AddPartitionsToTxn,
-            "handle_add_partitions_to_txn",
-            "AddPartitionsToTxn",
-            true,
-            b"",
-            BrokerError::EmptyBody,
-        ),
-        (
-            ApiKey::DescribeConfigs,
-            "handle_describe_configs",
-            "DescribeConfigs",
-            true,
-            b"",
-            BrokerError::EmptyBody,
-        ),
-        (
-            ApiKey::ListGroups,
-            "handle_list_groups",
-            "ListGroups",
-            false,
-            b"nope",
-            BrokerError::Encode,
-        ),
-        (
-            ApiKey::Heartbeat,
-            "handle_heartbeat",
-            "Heartbeat",
-            false,
-            b"longer-than-eight",
-            BrokerError::RecordString,
-        ),
-        (
-            ApiKey::ListConfigResources,
-            "handle_list_config_resources",
-            "ListConfigResources",
-            false,
-            &[0xff],
-            BrokerError::Decode,
-        ),
-        (
-            ApiKey::DescribeAcls,
-            "handle_describe_acls",
-            "DescribeAcls",
-            false,
-            b"nope",
-            BrokerError::Encode,
-        ),
-        (
-            ApiKey::PushTelemetry,
-            "handle_push_telemetry",
-            "PushTelemetry",
-            true,
-            b"",
-            BrokerError::EmptyBody,
-        ),
+    let ok = trace(&registry, api, b"body");
+    let expected_ok = vec![span(name, api_field, raw.then_some(4))];
+    assert2::assert!(ok == expected_ok, "{api:?}");
+
+    let err = trace(&registry, api, refused);
+    let expected_err = vec![
+        span(name, api_field, raw.then_some(refused.len())),
+        error(name, refusal),
     ];
-
-    for (api, name, api_field, raw, refused, refusal) in cases {
-        let ok = trace(&registry, api, b"body");
-        let expected_ok = vec![span(name, api_field, raw.then_some(4))];
-        assert!(ok == expected_ok, "{api:?}");
-
-        let err = trace(&registry, api, refused);
-        let expected_err = vec![
-            span(name, api_field, raw.then_some(refused.len())),
-            error(name, refusal),
-        ];
-        assert!(err == expected_err, "{api:?}");
-    }
+    assert2::assert!(err == expected_err, "{api:?}");
 }
 
-#[test]
-fn an_own_span_or_hand_written_adapter_opens_no_span_and_records_no_error() {
+#[yare::parameterized(
+    update_features = { ApiKey::UpdateFeatures },
+    delegation_token = { ApiKey::CreateDelegationToken },
+)]
+fn an_own_span_or_hand_written_adapter_opens_no_span_and_records_no_error(api: ApiKey) {
     let _serial = ADAPTER_TESTS.lock().expect("adapter test lock");
-    let mut registry = DispatchRegistry::default();
-    register_dispatch_table(&mut registry);
+    let registry = registered_dispatch_table();
 
-    for api in [ApiKey::UpdateFeatures, ApiKey::CreateDelegationToken] {
-        let traced = [b"body".as_slice(), b""].map(|body| trace(&registry, api, body));
-        assert!(traced == [vec![], vec![]], "{api:?}");
-    }
+    let traced = [b"body".as_slice(), b""].map(|body| trace(&registry, api, body));
+    assert2::assert!(traced == [vec![], vec![]], "{api:?}");
 }

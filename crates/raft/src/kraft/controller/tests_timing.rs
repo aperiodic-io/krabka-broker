@@ -16,7 +16,7 @@ use {
         core::election_jitter_ms,
         transport::wire::FETCH_VERSION,
     },
-    assert2::{assert, check},
+    assert2::check,
     krabka_units::prelude::{TimeExt as _, millis, secs},
 };
 
@@ -58,28 +58,28 @@ fn initial_election_deadline_matches_startup_role() {
     assert2::assert!(at.duration_since(base) == Duration::from_millis(TIMEOUT_MS + jitter));
 }
 
-#[test]
-fn election_timeout_converts_to_whole_milliseconds() {
-    for (_case, timeout, want_ms) in [
-        ("whole second", secs(1), 1_000u64),
-        ("sub-second", millis(250), 250),
-        ("zero", secs(0), 0),
-        ("negative clamps to zero", Time::from_millis(-4), 0),
-    ] {
-        check!(election_timeout_ms(timeout) == want_ms);
-    }
+#[yare::parameterized(
+    whole_second = { secs(1), 1_000u64 },
+    sub_second = { millis(250), 250 },
+    zero = { secs(0), 0 },
+    negative_clamps_to_zero = { Time::from_millis(-4), 0 },
+)]
+fn election_timeout_converts_to_whole_milliseconds(timeout: Time, want_ms: u64) {
+    check!(election_timeout_ms(timeout) == want_ms);
 }
 
-#[test]
-fn heartbeat_period_is_one_third_of_election_timeout_with_floor() {
-    for (_case, timeout_ms, want_ms) in [
-        ("ordinary timeout", 1000, 333),
-        ("short timeout", 120, 40),
-        ("floor below three milliseconds", 2, 1),
-        ("zero timeout floor", 0, 1),
-    ] {
-        assert2::assert!(heartbeat_period(millis(timeout_ms), None) == millis(want_ms));
-    }
+#[yare::parameterized(
+    ordinary_timeout = { 1_000,
+    333 },
+    short_timeout = { 120,
+    40 },
+    floor_below_three_milliseconds = { 2,
+    1 },
+    zero_timeout_floor = { 0,
+    1 }
+)]
+fn heartbeat_period_is_one_third_of_election_timeout_with_floor(timeout_ms: u32, want_ms: u32) {
+    assert2::assert!(heartbeat_period(millis(timeout_ms), None) == millis(want_ms));
 }
 
 #[test]
@@ -87,74 +87,88 @@ fn configured_heartbeat_overrides_derived_period() {
     assert2::assert!(heartbeat_period(secs(5), Some(millis(500))) == millis(500));
 }
 
-#[test]
-fn election_timer_only_starts_non_leader_voters() {
-    for (_case, is_voter, is_leader, want) in [
-        ("non-leader voter", true, false, true),
-        ("leader voter", true, true, false),
-        ("non-voter follower", false, false, false),
-        ("non-voter leader", false, true, false),
-    ] {
-        assert2::assert!(election_timer_starts_election(is_voter, is_leader) == want);
-    }
+#[yare::parameterized(
+    non_leader_voter = { true,
+    false,
+    true },
+    leader_voter = { true,
+    true,
+    false },
+    non_voter_follower = { false,
+    false,
+    false },
+    non_voter_leader = { false,
+    true,
+    false }
+)]
+fn election_timer_only_starts_non_leader_voters(is_voter: bool, is_leader: bool, want: bool) {
+    assert2::assert!(election_timer_starts_election(is_voter, is_leader) == want);
 }
 
-#[test]
-fn following_leader_for_role_reports_followed_leader_only() {
-    for (role, want) in [
-        (
-            Role::Follower {
-                leader_id: NodeId(7),
-                fetch_deadline: SimInstant(10),
-                has_fetched_from_leader: false,
-            },
-            Some(NodeId(7)),
-        ),
-        (
-            Role::Observer {
-                leader_id: Some(NodeId(9)),
-                fetch_deadline: SimInstant(10),
-            },
-            Some(NodeId(9)),
-        ),
-        (
-            Role::Observer {
-                leader_id: None,
-                fetch_deadline: SimInstant(10),
-            },
-            None,
-        ),
-        (
-            Role::Leader {
-                replicas: std::collections::BTreeMap::new(),
-                fetched_voters: std::collections::BTreeSet::new(),
-                high_watermark: 0,
-                epoch_start_offset: 0,
-            },
-            None,
-        ),
-    ] {
-        assert2::assert!(following_leader_for_role(&role) == want);
-    }
+#[yare::parameterized(
+    follower = {
+        Role::Follower {
+            leader_id: NodeId(7),
+            fetch_deadline: SimInstant(10),
+            has_fetched_from_leader: false,
+        },
+        Some(NodeId(7)),
+    },
+    observer_with_leader = {
+        Role::Observer { leader_id: Some(NodeId(9)), fetch_deadline: SimInstant(10) },
+        Some(NodeId(9)),
+    },
+    observer_without_leader = {
+        Role::Observer { leader_id: None, fetch_deadline: SimInstant(10) },
+        None,
+    },
+    leader = {
+        Role::Leader {
+            replicas: std::collections::BTreeMap::new(),
+            fetched_voters: std::collections::BTreeSet::new(),
+            high_watermark: 0,
+            epoch_start_offset: 0,
+        },
+        None,
+    },
+)]
+fn following_leader_for_role_reports_followed_leader_only(role: Role, want: Option<NodeId>) {
+    assert2::assert!(following_leader_for_role(&role) == want);
 }
 
-#[test]
-fn leadership_loss_detection_handles_stepdown_and_epoch_bump() {
-    for (_case, was_leader, is_leader, held_epoch, current_epoch, want) in [
-        ("leader stepped down", true, false, 3, 3, true),
-        ("leader epoch advanced", true, true, 3, 4, true),
-        ("leadership unchanged", true, true, 3, 3, false),
-        ("follower epoch advanced", false, false, 3, 4, false),
-    ] {
-        assert2::assert!(
-            should_fail_waiters_on_leadership_change(
-                was_leader,
-                is_leader,
-                held_epoch,
-                current_epoch
-            ) == want
-        );
-    }
+#[yare::parameterized(
+    leader_stepped_down = { true,
+    false,
+    3,
+    3,
+    true },
+    leader_epoch_advanced = { true,
+    true,
+    3,
+    4,
+    true },
+    leadership_unchanged = { true,
+    true,
+    3,
+    3,
+    false },
+    follower_epoch_advanced = { false,
+    false,
+    3,
+    4,
+    false }
+)]
+fn leadership_loss_detection_handles_stepdown_and_epoch_bump(
+    was_leader: bool,
+    is_leader: bool,
+    held_epoch: Epoch,
+    current_epoch: Epoch,
+    want: bool,
+) {
+    assert2::assert!(
+        should_fail_waiters_on_leadership_change(was_leader, is_leader, held_epoch, current_epoch)
+            == want
+    );
 }
 
 #[test]

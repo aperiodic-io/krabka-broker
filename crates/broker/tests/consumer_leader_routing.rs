@@ -21,13 +21,12 @@
 
 use {
     crate::support::{
-        client::{connect_client, connect_with_context, create_topic_with},
+        client::connect_with_context,
         consumer_groups::{collect_routing_values, routing_consumer},
-        partitions::require_non_bootstrap_partitions,
+        partitions::{require_non_bootstrap_partitions, start_leader_routing_cluster},
         produce::{SinglePartitionProduceSetup, batch_request},
         records::value_record,
-        registered_cluster, shutdown_cluster,
-        topics::{CreateTopicSetup, TopicPartitionCount},
+        shutdown_cluster,
     },
     assert2::assert,
     bytes::Bytes,
@@ -98,41 +97,8 @@ async fn produce_one(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn consumer_fetches_from_non_bootstrap_leaders() {
     let _g = cluster_lock().lock().await;
-    let cluster = registered_cluster(3).await;
-
-    // Bootstrap everything (admin, consumer) at node 1.
-    let bootstrap = cluster[0].1.listen_addr.to_string();
     let topic = "routing-rf1";
-    // 6 partitions on a 3-broker cluster with rf=1: round-robin places 2
-    // partitions per broker, so at least 4 partitions are led by non-bootstrap
-    // brokers. We assert below that at least one is off-bootstrap to guard
-    // against degenerate scheduling.
-    let n_partitions: i32 = 6;
-
-    let admin = connect_client(bootstrap.clone(), None).await;
-
-    // Create the topic with replication_factor=1. Each partition lives on
-    // exactly ONE broker; the bootstrap broker has NO replica for partitions
-    // placed on the other two nodes.
-    let topic_id = create_topic_with(&admin, CreateTopicSetup {
-        topic,
-        num_partitions: TopicPartitionCount(n_partitions),
-        ..Default::default()
-    })
-    .await;
-
-    // Wait until node 1's controller image knows every partition AND its
-    // assigned leader. The metadata image is raft-replicated and is the exact
-    // image the routing path below reads (`partition_leader_for_test` on
-    // `cluster[0].0`). `leader != 0` subsumes partition-presence, so a single
-    // per-partition awaiter covers both the "materialized" and "leader-known"
-    // phases the two old poll-loops handled separately.
-    for p in 0..n_partitions {
-        cluster[0]
-            .0
-            .wait_for_image(|img| img.partition(topic, p).is_some_and(|part| part.leader != 0))
-            .await;
-    }
+    let (cluster, bootstrap, topic_id, n_partitions) = start_leader_routing_cluster(topic).await;
 
     // Discriminating guard: assert at least one partition is led by a
     // non-bootstrap broker. If the controller puts every leader on node 1 the
