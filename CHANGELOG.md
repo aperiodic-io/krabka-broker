@@ -23,6 +23,16 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+### Changed
+
+- A small fetch from the page cache looks its run up once. A fetch on a
+  `sendfile`-capable connection first describes its run of batches; when the
+  run is too short for `sendfile`, the broker used to read it with the
+  byte-copy path, which looked the same run up a second time: another offset
+  index floor, header scan and readahead hint under the log lock. It now
+  reads the regions the first walk found. Followers and consumers at the tail
+  of a log make this fetch on every round trip.
+
 ## [1.0.5] - 2026-10-14
 
 1.0.5 changes no on-disk format and adds no setting, so it upgrades from any
