@@ -132,11 +132,19 @@ crate_tests(
     # dedup in the same run; its bounds are wide, but a lane of ~140 suites on
     # four cores is exactly the noise they would otherwise have to absorb.
     # `dedup_stress` measures peak memory and lock waits in child processes it
-    # starts, for the same reason.
+    # starts, for the same reason. `dedup_chaos` and `dedup_partition` run seeded
+    # fault schedules (crashes, leader moves, relay cuts) against 3-broker
+    # clusters under timed liveness bounds, and `dedup_soak` judges resident
+    # memory and latency drift across cycles: contention moves all three.
+    # `dedup_fuzz` bounds each request's peak memory in a child it starts.
     cpu_heavy = [
         "compaction",
         "dedup_bounds",
+        "dedup_chaos",
+        "dedup_fuzz",
+        "dedup_partition",
         "dedup_recovery",
+        "dedup_soak",
         "dedup_stress",
         "diskless_e2e",
         "durability",

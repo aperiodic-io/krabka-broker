@@ -322,6 +322,47 @@ fn per_call_work_is_bounded_at_every_size() {
     }
 }
 
+// A partition that holds a few entries while it, or the broker budget, is at
+// its limit: every new identity sweeps, and the sweep budget is larger than
+// the index. One call must not lap such an index, since each lap closes a pass
+// and rebuilds its histogram, so a new identity cost 57 times one on an idle
+// index. Both ways of being full are covered, on both paths.
+#[test]
+fn a_tiny_index_at_a_limit_is_not_lapped_in_one_call() {
+    const BROKER_LIMIT: usize = 64;
+    for path in PATHS {
+        for held in [1_usize, 8] {
+            let shared = Arc::new(DedupBudget::new(BROKER_LIMIT));
+            let own_limit = DedupWindowFilter::new(HOUR, held, None);
+            let broker_limit = DedupWindowFilter::new(HOUR, BROKER_LIMIT, Some(shared.clone()));
+            // Fills the rest of the broker budget, so `broker_limit` is full
+            // with only `held` entries of its own.
+            let mut elsewhere = DedupWindowFilter::new(HOUR, BROKER_LIMIT, Some(shared));
+            for (name, mut filter) in [("own limit", own_limit), ("broker limit", broker_limit)] {
+                let mut timestamp = 1_000;
+                let mut identities = (0_u64..).map(nth);
+                for identity in identities.by_ref().take(held) {
+                    path.apply(&mut filter, identity, timestamp);
+                }
+                for identity in identities.by_ref().take(BROKER_LIMIT - held) {
+                    path.apply(&mut elsewhere, identity, timestamp);
+                }
+                for (call, identity) in identities.take(2_000).enumerate() {
+                    timestamp += 1;
+                    let (before, len) = (filter.sweep_visits(), filter.len() as u64);
+                    path.apply(&mut filter, identity, timestamp);
+                    // A call sweeps at most twice, the routine step and the
+                    // emergency one, and each visits an entry at most once.
+                    assert!(
+                        filter.sweep_visits() - before <= 2 * len.max(1),
+                        "{path:?} {name} holding {held}, call {call}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 // Many partitions on one broker, each allowed more than the broker budget,
 // with traffic that repeats identities and moves time back and forth.
 #[test]

@@ -564,8 +564,10 @@ impl DedupWindowFilter {
     // correctly timed records for up to that long. The clamp also keeps every
     // stored timestamp at or below the watermark.
     //
-    // The clamp changes nothing for a record at or behind the broker's time,
-    // which is every record seen during log replay.
+    // The clamp changes nothing for a record at or behind the broker's time.
+    // A record still ahead of it during log replay was clamped to its arrival,
+    // which the log does not record, so the broker's rebuild skips it rather
+    // than clamping it to the later replay time.
     fn clamp_to_now(&mut self, timestamp_ms: i64, now_ms: i64) -> i64 {
         if timestamp_ms > now_ms {
             self.counters.skew_clamped_records += 1;
@@ -658,8 +660,14 @@ impl DedupWindowFilter {
     // after the last segment, so successive calls walk the whole index in
     // bounded slices. This is the only eviction that `classify`, `populate`
     // and `tick` do.
+    //
+    // One call visits at most as many entries as the index holds. An index
+    // smaller than the budget would otherwise be lapped several times in one
+    // call, and every lap closes a pass and rebuilds its histogram: a new
+    // identity on a near-empty partition at its limit cost 57 times one on an
+    // idle index. A second visit to the same entry in one call learns nothing.
     fn sweep_step(&mut self, budget: usize, mode: SweepMode) {
-        for _ in 0..budget {
+        for _ in 0..budget.min(self.len) {
             if self.len == 0 {
                 self.sweep_segment = 0;
                 self.sweep_pos = 0;

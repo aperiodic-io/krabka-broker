@@ -85,32 +85,54 @@ async fn relay_forwards_bytes_to_the_upstream() {
     relay.shutdown().await;
 }
 
-#[tokio::test]
-async fn cut_tears_down_an_open_connection_and_stops_new_ones() {
-    let upstream = start_echo().await;
-    let relay = Relay::start(upstream).await;
-
+// A relay to a fresh echo server, and a connection through it that has made
+// one round trip with `payload`.
+async fn relay_with_open_connection(payload: &[u8]) -> (Relay, TcpStream) {
+    let relay = Relay::start(start_echo().await).await;
     let mut open = within("connect", TcpStream::connect(relay.addr()))
         .await
         .expect("connect through a healthy relay");
-    let before = within(
-        "round trip before the cut",
-        round_trip(&mut open, b"before"),
+    let echoed = within(
+        "round trip through the relay",
+        round_trip(&mut open, payload),
     )
     .await;
-    check!(before.expect("round trip before the cut") == b"before".to_vec());
+    check!(echoed.expect("round trip through a healthy relay") == payload.to_vec());
+    (relay, open)
+}
 
+// Cut `relay` and require that `open`, already connected, dies with it.
+async fn cut_and_expect_closed(relay: &Relay, open: &mut TcpStream) {
     relay.cut();
-
     // The connection that was already open must die too. A cut that only
     // blocked new connections would leave a broker replicating over the socket
     // it already had, and the test would prove nothing.
-    let after_cut = within("open connection after the cut", round_trip(&mut open, b"x")).await;
+    let after_cut = within("open connection after the cut", round_trip(open, b"x")).await;
     assert!(let Err(_) = &after_cut, "cut must tear down connections already open");
+}
+
+#[tokio::test]
+async fn cut_tears_down_an_open_connection_and_stops_new_ones() {
+    let (relay, mut open) = relay_with_open_connection(b"before").await;
+    cut_and_expect_closed(&relay, &mut open).await;
 
     // And a fresh connection must fail rather than hang.
     let while_cut = within("fresh connection while cut", probe(relay.addr(), b"x")).await;
     assert!(let Err(_) = &while_cut, "cut must not carry a new connection");
+
+    relay.shutdown().await;
+}
+
+#[tokio::test]
+async fn healing_a_relay_that_is_not_cut_leaves_a_later_cut_complete() {
+    let (relay, mut open) = relay_with_open_connection(b"before").await;
+
+    // A `heal_all` over every link heals links that were never cut. That must
+    // not move the open connection out of reach of the next cut.
+    relay.heal();
+    let healed = within("round trip after heal", round_trip(&mut open, b"still")).await;
+    check!(healed.expect("round trip after a no-op heal") == b"still".to_vec());
+    cut_and_expect_closed(&relay, &mut open).await;
 
     relay.shutdown().await;
 }

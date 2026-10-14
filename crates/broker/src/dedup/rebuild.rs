@@ -89,8 +89,14 @@ pub(super) fn rebuild_from_log(
         while let Ok(batch) = validate_one_v2_batch(rest) {
             let (wire, tail) = rest.split_at(batch.total_len.min(rest.len()));
             visit_wire_batch(wire, key_header, policy, |identity| {
+                // A record still dated ahead of the broker was clamped to its
+                // arrival time when it was classified, and the log does not
+                // say when that was. Any time chosen here is later, so it
+                // would hold the identity past the window the live index gave
+                // it. Leaving it out makes the index narrower, never wrong.
                 if let RecordIdentity::Indexed(record) = identity
                     && let Some(digest) = record.identity
+                    && record.timestamp_ms <= now_ms
                 {
                     filter.populate(digest, record.timestamp_ms, now_ms);
                 }
