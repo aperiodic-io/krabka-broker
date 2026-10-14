@@ -3212,6 +3212,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "crc32c",
  "derive_more",
  "exponential-backoff",
  "futures",

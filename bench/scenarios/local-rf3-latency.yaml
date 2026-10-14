@@ -1,0 +1,18 @@
+# Latency of a replicated cluster below saturation: RF=3, acks=1, at a fixed
+# rate. Sized for `krabka-bench-local` on a developer machine.
+name: local-rf3-latency
+mode_tag: cluster
+msg_size: 100B
+partitions: 6
+replication_factor: 3
+producers: 2
+consumers: 1
+mode:
+  kind: fixed_rate
+  rate: 5000/s
+acks: leader
+compression: none
+linger: 0ms
+batch_size: 16KiB
+warmup: 10s
+duration: 20s

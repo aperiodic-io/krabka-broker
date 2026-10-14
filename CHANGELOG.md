@@ -23,6 +23,25 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+### Added
+
+- `krabka-bench-local` starts a three-broker cluster on one machine from a
+  directory of release binaries, runs a scenario against it, and prints
+  throughput and latency. Its raw-protocol generator sends pre-encoded Produce
+  batches the way a batching client does, reports committed throughput from
+  how far each partition's high watermark advanced, and with `--find-max`
+  bisects for the highest rate the cluster sustains. Each broker gets an equal
+  share of the machine's cores, as separate machines would give it. Two
+  scenarios, `local-rf3-saturate` and `local-rf3-latency`, cover a replicated
+  RF=3, acks=1 workload of 100-byte records.
+
+### Fixed
+
+- The bench driver's acks=all scenarios start: they asked the idempotent
+  producer for more in-flight requests than its limit of five. A paced run
+  settles acknowledgements while it waits for its next send, instead of
+  reporting the pacer's period as latency.
+
 ## [1.0.5] - 2026-10-14
 
 1.0.5 changes no on-disk format and adds no setting, so it upgrades from any
