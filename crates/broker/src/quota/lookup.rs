@@ -66,6 +66,11 @@ pub fn lookup_quota_with_key(
     client_id: Option<&str>,
     quota_key: &str,
 ) -> Option<(EntityKey, f64)> {
+    // Most clusters configure no client quota at all, and every request asks.
+    // Each level below builds its entity key, so skip them when none can match.
+    if image.client_quotas().is_empty() {
+        return None;
+    }
     let Some(client_id) = client_id else {
         return lookup_null_client_quota(image, principal, quota_key);
     };
@@ -375,6 +380,21 @@ mod tests {
     fn assert_alice_app1_entity(entity: QuotaEntitySpec<'_>) {
         let img = img_with(vec![rec().entity(entity).value(1024.0).call()]);
         assert!(lookup_quota(&img, "alice", Some("app1"), "producer_byte_rate") == Some(1024.0));
+    }
+
+    #[test]
+    fn an_image_without_quotas_has_none_for_any_identity() {
+        let img = img_with(Vec::new());
+        let identities = [
+            ("alice", Some("app1")),
+            ("alice", Some("")),
+            ("alice", None),
+            ("", Some("app1")),
+        ];
+        let found = identities.map(|(principal, client_id)| {
+            lookup_quota_with_key(&img, principal, client_id, "producer_byte_rate")
+        });
+        check!(found == [None, None, None, None]);
     }
 
     #[test]

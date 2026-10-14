@@ -23,6 +23,22 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+### Changed
+
+- Less work per request on the produce and fetch paths:
+  - Dispatch reads a Produce request's `acks` from its leading fields to
+    decide whether a response is owed, instead of decoding the request a
+    second time.
+  - A request body is read straight into the buffer, without first being
+    filled with zeros.
+  - A fetch response's small inline parts (the frame length, the header, the
+    envelope metadata and small record runs) go out in one write instead of
+    one syscall and one TCP segment each.
+  - A cluster with no client quota answers a request's quota lookup without
+    building the eight candidate entity keys.
+  - The log-directory health check every produce and fetch makes answers
+    without hashing the directory's path while every directory is online.
+
 ## [1.0.5] - 2026-10-14
 
 1.0.5 changes no on-disk format and adds no setting, so it upgrades from any
