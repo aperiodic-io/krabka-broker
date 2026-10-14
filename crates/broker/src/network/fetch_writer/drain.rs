@@ -27,6 +27,23 @@ crate::sendfile_cfg! {
     use super::sendfile::sendfile_region;
 }
 
+/// Inline ops shorter than this are copied into the coalescing buffer; longer
+/// ones are written from their own `Bytes`, where the copy would cost more
+/// than the syscall it saves.
+const COALESCE_BELOW: usize = 16 * 1024;
+
+/// Writes and clears the coalesced inline bytes, if there are any.
+async fn write_coalesced<S>(stream: &mut S, coalesced: &mut Vec<u8>) -> Result<(), BrokerError>
+where
+    S: AsyncWrite + Unpin,
+{
+    if !coalesced.is_empty() {
+        stream.write_all(coalesced).await.map_err(BrokerError::Io)?;
+        coalesced.clear();
+    }
+    Ok(())
+}
+
 /// Drain a fetch write-plan to `stream`, write each op in order, then flush.
 ///
 /// The caller MUST have flushed any pending `Framed` codec output first, so
@@ -66,17 +83,30 @@ where
     // file op always overwrites, because every file region of one response
     // goes to the same stream and so takes the same arm.
     let mut path: Option<FetchDrainPath> = None;
+    // Small inline ops -- the frame length, the response header, the envelope
+    // metadata between records regions, and small records runs -- are copied
+    // into one buffer and go out together. Written one by one, each is its own
+    // syscall and, on a `TCP_NODELAY` socket, its own segment, so a small
+    // fetch response cost four sends and as many wakeups at the reader.
+    let mut coalesced = Vec::new();
     for op in std::iter::once(first).chain(ops) {
         krabka_macros::sendfile_match! { match op {
             WriteOp::Inline(b) => {
-                stream.write_all(&b).await.map_err(BrokerError::Io)?;
+                if b.len() < COALESCE_BELOW {
+                    coalesced.extend_from_slice(&b);
+                } else {
+                    write_coalesced(stream, &mut coalesced).await?;
+                    stream.write_all(&b).await.map_err(BrokerError::Io)?;
+                }
                 path.get_or_insert(FetchDrainPath::Vectored);
             }
             WriteOp::File(region) => {
+                write_coalesced(stream, &mut coalesced).await?;
                 path = Some(drain_file_region(stream, &region).await?);
             }
         }}
     }
+    write_coalesced(stream, &mut coalesced).await?;
     stream.flush().await.map_err(BrokerError::Io)?;
     // The empty plan is rejected above, so the plan named a path; `vectored`
     // is the honest fallback for a plan that somehow drained no op at all.

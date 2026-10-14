@@ -778,12 +778,8 @@ fn any_partition_failed(topic_results: &[TopicProduceResponse]) -> bool {
 
 /// Whether Kafka requires a response for this Produce request. `acks=0`
 /// requests are one-way even when an append or authorization check fails.
-pub(crate) fn response_required(
-    request_bytes: &[u8],
-    body_bytes: Bytes,
-    version: i16,
-) -> Result<bool, BrokerError> {
-    Ok(decode_produce_request(request_bytes, body_bytes, version)?.acks != 0)
+pub(crate) fn response_required(request_bytes: &[u8], version: i16) -> Result<bool, BrokerError> {
+    Ok(framing::produce_acks(request_bytes, version)? != 0)
 }
 
 #[cfg(test)]

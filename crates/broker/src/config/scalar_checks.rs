@@ -239,6 +239,10 @@ impl BrokerConfig {
                 self.metadata_max_bytes_between_snapshots,
             ),
             ("replication.fetch_max", self.replication.fetch_max),
+            (
+                "replication.fetch_response_max",
+                self.replication.fetch_response_max,
+            ),
             ("replication.fetch_min", self.replication.fetch_min),
         ] {
             require_positive_size(name, value)?;

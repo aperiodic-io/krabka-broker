@@ -103,9 +103,17 @@ async fn read_size<S: AsyncRead + Unpin>(
 }
 
 async fn read_body<S: AsyncRead + Unpin>(stream: &mut S, size: usize) -> io::Result<Bytes> {
+    // Read into the buffer's spare capacity rather than zero-filling it
+    // first: every request body is about to be overwritten in full. The
+    // reader is bounded to this frame's remaining bytes, so no read reaches
+    // into the next frame however much spare capacity the buffer has.
     let mut body = BytesMut::with_capacity(size);
-    body.resize(size, 0);
-    stream.read_exact(&mut body).await?;
+    while body.len() < size {
+        let remaining = u64::try_from(size - body.len()).unwrap_or(u64::MAX);
+        if (&mut *stream).take(remaining).read_buf(&mut body).await? == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+    }
     Ok(body.freeze())
 }
 

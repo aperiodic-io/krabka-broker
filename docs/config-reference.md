@@ -482,9 +482,10 @@ Validated operational policy loaded from `[runtime]`.
 | `replica_fetchers` | integer (uint) | broker default |  | How many fetchers this broker runs per leader it follows, Kafka's `num.replica.fetchers`. Every partition followed from one leader is hashed onto one of that leader's fetchers, and each fetcher holds one connection and sends one batched `Fetch` per round. |
 | `replica_lag_time_max` | string | broker default | duration | Maximum follower lag before the leader proposes an ISR shrink. Kafka's `replica.lag.time.max.ms`. |
 | `replication_epoch_fence_backoff` | string | broker default | duration | Retry delay after a leader-epoch fence. |
-| `replication_fetch_max` | string | broker default | byte size | Maximum bytes a follower requests from a leader in one replication fetch. It reaches the leader as the fetch request's `max_bytes`. |
+| `replication_fetch_max` | string | broker default | byte size | Maximum bytes a follower requests for one partition in a replication fetch, Kafka's `replica.fetch.max.bytes`. It reaches the leader as each partition's `partition_max_bytes`. |
 | `replication_fetch_max_wait` | string | broker default | duration | Maximum time a leader holds a replication fetch that is not yet satisfied. It reaches the leader as the fetch request's `max_wait_ms`. |
 | `replication_fetch_min` | string | broker default | byte size | Minimum bytes that satisfy a replication fetch. It reaches the leader as the fetch request's `min_bytes`, which the leader honours as a floor. |
+| `replication_fetch_response_max` | string | broker default | byte size | Maximum bytes of one whole replication fetch response, Kafka's `replica.fetch.response.max.bytes`. It reaches the leader as the fetch request's `max_bytes`. |
 | `replication_reconnect_delay_cap` | string | broker default | duration | Maximum delay between leader reconnection attempts. |
 | `replication_reconnect_initial_delay` | string | broker default | duration | Initial delay before a follower reconnects to a leader. |
 | `replication_send_error_backoff` | string | broker default | duration | Retry delay after sending a replication request fails. |

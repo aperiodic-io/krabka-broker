@@ -28,9 +28,19 @@ pub struct ReplicationRuntimeConfig {
     #[default(1)]
     pub fetchers: usize,
 
-    /// Maximum bytes requested from a leader in one replication fetch.
+    /// Maximum bytes requested for one partition in a replication fetch,
+    /// Kafka's `replica.fetch.max.bytes`.
     #[default(mebibytes(1))]
     pub fetch_max: ByteSize,
+    /// Maximum bytes of one whole replication fetch response, Kafka's
+    /// `replica.fetch.response.max.bytes`.
+    ///
+    /// A follower asks for every partition it follows from a leader in one
+    /// fetch, so this caps how much it can copy per round trip. Kafka's
+    /// default is ten partitions' worth; the per-partition cap alone would let
+    /// one partition's backlog hold the whole follower to a megabyte a round.
+    #[default(mebibytes(10))]
+    pub fetch_response_max: ByteSize,
     /// Maximum leader wait for a replication fetch.
     #[default(millis(500))]
     pub fetch_max_wait: Time,

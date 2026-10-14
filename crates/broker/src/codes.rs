@@ -670,7 +670,10 @@ pub fn from_broker_error(err: &BrokerError) -> i16 {
         // A raft write that reached a node which is no longer the leader is
         // the same answer to a client as a partition whose writer is gone:
         // retry, after refreshing metadata.
+        // An append that raced the removal of its partition finds the log
+        // fenced, which is the same answer as a writer that is gone.
         BrokerError::PartitionWriterDied { .. }
+        | BrokerError::Log(krabka_log::LogError::Fenced)
         | BrokerError::Raft(krabka_raft::RaftError::NotLeader { .. }) => NOT_LEADER_OR_FOLLOWER,
         BrokerError::Raft(krabka_raft::RaftError::Network(_)) => REQUEST_TIMED_OUT,
         BrokerError::GroupInvalidState { .. } => REBALANCE_IN_PROGRESS,

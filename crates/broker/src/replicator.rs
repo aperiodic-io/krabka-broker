@@ -61,6 +61,7 @@ mod follower_throttle;
 /// `benches/perf_deferrals.rs`.
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod hot_path;
+mod leader_link;
 mod raw_fetch;
 mod response;
 mod session;

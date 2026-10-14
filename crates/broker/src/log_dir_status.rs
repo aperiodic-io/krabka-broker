@@ -28,7 +28,10 @@ use {
     dashmap::DashMap,
     std::{
         path::{Path, PathBuf},
-        sync::Arc,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
     },
 };
 
@@ -50,6 +53,11 @@ type Status = Option<String>;
 #[derive(Clone, Default)]
 pub struct LogDirRegistry {
     inner: Arc<DashMap<PathBuf, Status>>,
+    /// Raised before the first directory is marked offline, and never
+    /// lowered: a directory stays offline until the broker restarts. While it
+    /// is down, [`Self::is_offline`], which every produce and fetch asks,
+    /// answers without hashing the path.
+    any_offline: Arc<AtomicBool>,
     /// The metadata log directory, when it is registered, and the fault the
     /// registry publishes once that directory goes offline. Kafka's
     /// `ReplicaManager.handleLogDirFailure` halts the node when the failed
@@ -76,6 +84,7 @@ impl LogDirRegistry {
     #[must_use]
     pub fn probe(log_dirs: &[PathBuf]) -> Self {
         let inner: DashMap<PathBuf, Status> = DashMap::new();
+        let any_offline = Arc::new(AtomicBool::new(false));
         for dir in log_dirs {
             match probe_one(dir) {
                 Ok(()) => {
@@ -87,12 +96,14 @@ impl LogDirRegistry {
                         reason = %reason,
                         "log dir failed startup writability probe; marking offline",
                     );
+                    any_offline.store(true, Ordering::SeqCst);
                     inner.insert(dir.clone(), Some(reason));
                 }
             }
         }
         Self {
             inner: Arc::new(inner),
+            any_offline,
             metadata_dir: None,
         }
     }
@@ -156,9 +167,11 @@ impl LogDirRegistry {
     /// every produce.
     #[must_use]
     pub fn is_offline(&self, dir: &Path) -> bool {
-        self.inner
-            .get(dir)
-            .is_some_and(|entry| entry.value().is_some())
+        self.any_offline.load(Ordering::SeqCst)
+            && self
+                .inner
+                .get(dir)
+                .is_some_and(|entry| entry.value().is_some())
     }
 
     /// Offline dirs paired with their probe-failure reason.
@@ -213,6 +226,10 @@ impl LogDirRegistry {
         // entry's value is `Option<String>`; we want to flip `None` →
         // `Some(reason)` without overwriting a pre-existing
         // `Some(other_reason)`.
+        //
+        // The flag goes up before the entry changes, so a reader that finds
+        // it down also finds the directory online.
+        self.any_offline.store(true, Ordering::SeqCst);
         let flipped = if let Some(mut entry) = self.inner.get_mut(dir) {
             if entry.value().is_some() {
                 return false;

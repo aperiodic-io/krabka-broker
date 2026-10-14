@@ -65,6 +65,7 @@ impl RuntimeFileConfig {
         set_runtime! {
             runtime => cfg;
             whole_bytes_i32: replication_fetch_max => replication.fetch_max;
+            whole_bytes_i32: replication_fetch_response_max => replication.fetch_response_max;
             whole_millis_i32_time: replication_fetch_max_wait => replication.fetch_max_wait;
             whole_bytes_i32: replication_fetch_min => replication.fetch_min;
             positive_time: replication_throttle_exhausted_backoff

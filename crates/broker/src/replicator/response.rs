@@ -22,7 +22,12 @@ use {
             handle_offset_moved_to_tiered_storage, handle_offset_out_of_range,
         },
     },
-    crate::{codes, partition::Partition},
+    crate::{
+        codes,
+        error::BrokerError,
+        partition::{Partition, ReplicatedBatch},
+        partition_writer::replicate_inline,
+    },
     bytes::Buf as _,
     krabka_ids::PartitionIndex,
     krabka_log::{Offset, VerbatimBatch},
@@ -346,6 +351,11 @@ async fn replicate_raw_batches(
     cfg: &Config,
     mut remaining: bytes::Bytes,
 ) -> RowAction {
+    // Consecutive data batches go to the writer together, so a row costs one
+    // writer round trip instead of one per batch. A control batch needs its
+    // marker decoded for the transaction bookkeeping, so it flushes the run
+    // and goes on its own.
+    let mut run = ReplicatedRun::default();
     while !remaining.is_empty() {
         if replication_target_changed(cfg) {
             return RowAction::Drop;
@@ -364,32 +374,78 @@ async fn replicate_raw_batches(
         let header = validated.header;
         let attributes = Attributes(header.attributes.get());
         let base_offset = Offset(header.base_offset.get());
-        let result = if attributes.is_control_batch() {
-            let mut cursor: &[u8] = &batch_bytes;
-            match RecordBatch::decode(&mut cursor) {
-                Ok(batch) => part.replicate_batch(batch).await,
-                Err(error) => {
-                    warn!(%error, topic = %cfg.topic, partition = cfg.partition.get(),
-                        "replicator: invalid control batch");
-                    break;
-                }
-            }
-        } else {
+        if !attributes.is_control_batch() {
             let batch = VerbatimBatch::from_header(header, batch_bytes);
-            part.replicate_verbatim(batch, base_offset).await
+            remaining.advance(batch_len);
+            run.push(ReplicatedBatch { batch, base_offset }, batch_len);
+            continue;
+        }
+        remaining.advance(batch_len);
+        if let Err(action) = run.flush(part, cfg).await {
+            return action;
+        }
+        let mut cursor: &[u8] = &batch_bytes;
+        let result = match RecordBatch::decode(&mut cursor) {
+            Ok(batch) => part.replicate_batch(batch).await,
+            Err(error) => {
+                warn!(%error, topic = %cfg.topic, partition = cfg.partition.get(),
+                    "replicator: invalid control batch");
+                return RowAction::Continue;
+            }
         };
         if let Err(error) = result {
-            warn!(%error, topic = %cfg.topic, partition = cfg.partition.get(),
-                "replicator: append failed");
-            if let Some(offline) = offline_after_failed_append(part, cfg) {
-                return offline;
-            }
-            break;
+            return append_failed(part, cfg, &error);
         }
         record_replicated(cfg, u64::try_from(batch_len).unwrap_or(0));
-        remaining.advance(batch_len);
+    }
+    if let Err(action) = run.flush(part, cfg).await {
+        return action;
     }
     RowAction::Continue
+}
+
+/// The data batches of one row not yet handed to the writer.
+#[derive(Default)]
+struct ReplicatedRun {
+    batches: Vec<ReplicatedBatch>,
+    bytes: usize,
+}
+
+impl ReplicatedRun {
+    fn push(&mut self, batch: ReplicatedBatch, len: usize) {
+        self.batches.push(batch);
+        self.bytes += len;
+    }
+
+    /// Appends the run through one writer round trip. A failed append ends
+    /// the row with the action [`append_failed`] picks.
+    async fn flush(&mut self, part: &Partition, cfg: &Config) -> Result<(), RowAction> {
+        if self.batches.is_empty() {
+            return Ok(());
+        }
+        let batches = std::mem::take(&mut self.batches);
+        let bytes = std::mem::take(&mut self.bytes);
+        // An idle writer means the append runs here, with no hop to the
+        // writer task and back; see `WriterGate`.
+        let result = match replicate_inline(part, batches, &cfg.log_dir_status).await {
+            Ok(result) => result,
+            Err(batches) => part.replicate_verbatim_batches(batches).await,
+        };
+        if let Err(error) = result {
+            return Err(append_failed(part, cfg, &error));
+        }
+        record_replicated(cfg, u64::try_from(bytes).unwrap_or(0));
+        Ok(())
+    }
+}
+
+/// The action after an append failed: offline when the failure took the log
+/// directory offline, otherwise continue, so the next round fetches again
+/// from the log end.
+fn append_failed(part: &Partition, cfg: &Config, error: &BrokerError) -> RowAction {
+    warn!(%error, topic = %cfg.topic, partition = cfg.partition.get(),
+        "replicator: append failed");
+    offline_after_failed_append(part, cfg).unwrap_or(RowAction::Continue)
 }
 
 /// One partition this round asked about, and the epoch it asked under.
@@ -488,12 +544,13 @@ pub(super) async fn apply_response_indexed(
     request_epochs: &std::collections::HashMap<FollowedKey, i32>,
 ) -> Vec<KeyedAction> {
     let response_index = ResponseIndex::of(response);
-    let mut rows = Vec::new();
-    for topic_index in 0..response.responses.len() {
-        for partition_index in 0..response.responses[topic_index].partitions.len() {
-            let topic = &response.responses[topic_index];
-            let partition = topic.partitions[partition_index].partition_index;
-            let Some(cfg) = followed.config(topic, partition) else {
+    // First decide which rows to apply, against the whole response; then
+    // apply them concurrently. Each row is its own partition with its own
+    // writer, so one partition's append does not wait behind another's.
+    let mut wanted = std::collections::HashMap::new();
+    for (topic_index, topic) in response.responses.iter().enumerate() {
+        for (partition_index, row) in topic.partitions.iter().enumerate() {
+            let Some(cfg) = followed.config(topic, row.partition_index) else {
                 continue;
             };
             if response_index.locate(response, &cfg)
@@ -506,22 +563,29 @@ pub(super) async fn apply_response_indexed(
             }
             let key = FollowedKey {
                 topic: Arc::clone(&cfg.topic),
-                partition: PartitionIndex(partition),
+                partition: PartitionIndex(row.partition_index),
             };
             let request_epoch = request_epochs
                 .get(&key)
                 .copied()
                 .unwrap_or(cfg.leader_epoch.0);
-            let action = handle_partition_response(
-                &mut response.responses[topic_index].partitions[partition_index],
-                &cfg,
-                request_epoch,
-            )
-            .await;
-            rows.push(KeyedAction { key, action });
+            wanted.insert((topic_index, partition_index), (cfg, key, request_epoch));
         }
     }
-    rows
+    let mut applying = Vec::with_capacity(wanted.len());
+    for (topic_index, topic) in response.responses.iter_mut().enumerate() {
+        for (partition_index, row) in topic.partitions.iter_mut().enumerate() {
+            let Some((cfg, key, request_epoch)) = wanted.remove(&(topic_index, partition_index))
+            else {
+                continue;
+            };
+            applying.push(async move {
+                let action = handle_partition_response(row, &cfg, request_epoch).await;
+                KeyedAction { key, action }
+            });
+        }
+    }
+    futures_util::future::join_all(applying).await
 }
 
 /// Where each `(topic identity, partition)` sits in one response.

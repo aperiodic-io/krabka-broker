@@ -100,6 +100,12 @@ pub struct Log {
     active: Option<Segment>,
     dir_sync_needed: bool,
     rollover_flusher: rollover_flush::Flusher,
+    /// Set by [`Log::fence`] when the partition is being removed: every
+    /// append from then on fails with [`LogError::Fenced`].
+    fenced: bool,
+    /// The log end offset when this process opened the log. The bytes from
+    /// here on in the active segment are ones this process wrote.
+    opened_end: Offset,
     unflushed_messages: u64,
     last_flush: std::time::Instant,
     roll_jitter: Option<RollJitter>,

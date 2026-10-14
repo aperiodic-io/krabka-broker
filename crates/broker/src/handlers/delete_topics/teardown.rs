@@ -80,7 +80,7 @@ impl LocalDeletion {
                 captured.index,
                 &captured.runtime,
                 || {
-                    if let Some(writer) = captured.runtime.take_writer_handle() {
+                    if let Some(writer) = captured.runtime.retire() {
                         writer.abort();
                     }
                     let dir = log_dir::partition_dir(

@@ -99,6 +99,7 @@ impl Log {
         batches: &[PlacedBatch<'_>],
         index_interval: ByteSize,
     ) -> Result<Vec<Offset>, LogError> {
+        self.ensure_unfenced()?;
         self.rollover_flusher.check()?;
         self.active
             .as_mut()

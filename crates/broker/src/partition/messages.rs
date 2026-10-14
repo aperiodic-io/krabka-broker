@@ -91,6 +91,19 @@ impl ProduceData {
                 .expect("commit marker offset count is non-negative"),
         }
     }
+
+    /// The bytes this job appends and the newest timestamp it carries, which
+    /// decide whether its append rolls the segment. An owned batch is encoded
+    /// again on append, and a recompression can change its size, so its size
+    /// here is an estimate.
+    pub(crate) fn append_footprint(&self) -> (usize, i64) {
+        match self {
+            Self::Verbatim(batch) => (batch.bytes.len(), batch.max_timestamp),
+            Self::Owned(batch)
+            | Self::OwnedControl(batch)
+            | Self::OwnedCommitMarker { batch, .. } => (batch.encoded_len(), batch.max_timestamp),
+        }
+    }
 }
 
 /// What the writer reports back for one appended batch.
@@ -163,9 +176,12 @@ pub enum WriterMessage {
     /// Append a leader's already-encoded data batch without decoding or
     /// recompressing it. Control batches cannot use this arm because their
     /// marker record is needed for transaction bookkeeping.
+    ///
+    /// One message carries every data batch of a fetch response row, in
+    /// offset order, so a follower pays one writer round trip per partition
+    /// per fetch rather than one per batch.
     ReplicateVerbatim {
-        batch: VerbatimBatch,
-        base_offset: Offset,
+        batches: Vec<ReplicatedBatch>,
         ack: oneshot::Sender<Result<(), BrokerError>>,
     },
     /// Truncate the log so no records at offset `>= offset` remain. Used
@@ -285,4 +301,14 @@ mod tests {
 
         check!(data.record_count() == 4);
     }
+}
+
+/// One leader-encoded data batch a follower appends, and the offset the
+/// leader assigned it.
+#[derive(Debug)]
+pub struct ReplicatedBatch {
+    /// The batch as the leader wrote it.
+    pub batch: VerbatimBatch,
+    /// The leader's base offset for the batch.
+    pub base_offset: Offset,
 }

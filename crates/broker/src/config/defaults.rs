@@ -406,6 +406,8 @@ mod tests {
                     // Kafka's `num.replica.fetchers` default.
                     fetchers: 1,
                     fetch_max: mebibytes(1),
+                    // Kafka's `replica.fetch.response.max.bytes` default.
+                    fetch_response_max: mebibytes(10),
                     fetch_max_wait: millis(500),
                     fetch_min: bytes(1),
                     throttle_exhausted_backoff: millis(100),

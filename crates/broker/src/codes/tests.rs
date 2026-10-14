@@ -154,6 +154,10 @@ fn from_broker_error_maps_variants_to_wire_codes() {
             NOT_LEADER_OR_FOLLOWER, // 6
         ),
         (
+            BrokerError::Log(krabka_log::LogError::Fenced),
+            NOT_LEADER_OR_FOLLOWER, // 6
+        ),
+        (
             BrokerError::GroupInvalidState {
                 group_id: "g".into(),
                 state: "PreparingRebalance".into(),

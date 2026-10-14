@@ -12,7 +12,7 @@
 use {
     super::{
         Config, FetcherConfig, FollowedKey, FollowedSnapshot,
-        connection::{connect_with_backoff, sleep_or_cancel},
+        connection::{FollowerLink, connect_with_backoff, sleep_or_cancel},
         ensure_local_partition,
         follower_throttle::{FetchThrottleDecision, follower_partition_fetch_cap},
         raw_fetch::RawFetchRequest,
@@ -20,7 +20,7 @@ use {
         response::{FollowedIndex, KeyedAction, RoundEntry, RowAction, apply_response_indexed},
         session::{FollowerFetchSession, SessionKey, SessionOutcome, WantedRows},
     },
-    krabka_client_core::{ClientError, Connection},
+    krabka_client_core::ClientError,
     krabka_protocol::owned::{
         fetch_request::{FetchPartition, FetchRequest, ReplicaState},
         fetch_response::FetchResponse,
@@ -84,7 +84,7 @@ pub(super) async fn run_fetcher_loop(fetcher: &FetcherConfig) -> Result<(), Stri
     // election and a consumer's metadata are all keyed off the partition
     // existing. One task per partition used to guarantee that by construction,
     // since each dialled only after opening its own log.
-    let mut client: Option<Connection> = None;
+    let mut client: Option<FollowerLink> = None;
 
     loop {
         if fetcher.shutdown.is_cancelled() {
@@ -415,7 +415,7 @@ fn build_fetch_request(
         },
         max_wait_ms,
         min_bytes: replication.fetch_min.bytes_i32(),
-        max_bytes: replication.fetch_max.bytes_i32(),
+        max_bytes: replication.fetch_response_max.bytes_i32(),
         session_id: session_request.session_id,
         session_epoch: session_request.session_epoch,
         topics: session_request.topics,
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn the_first_request_carries_every_partition_and_the_configured_envelope() {
         let (mut cfg, _log_dir) = test_config(image_with_leader(LEADER_ID));
-        cfg.connection.replication.fetch_max = bytes(2_345_678);
+        cfg.connection.replication.fetch_response_max = bytes(2_345_678);
         cfg.connection.replication.fetch_max_wait = millis(321);
         cfg.connection.replication.fetch_min = bytes(17);
         let fetcher = test_fetcher(&cfg, FollowedPartitions::default());

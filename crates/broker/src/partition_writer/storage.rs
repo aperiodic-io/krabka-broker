@@ -8,7 +8,9 @@
 
 use {
     crate::{
-        blocking::spawn_blocking, error::BrokerError, log_dir_status::LogDirRegistry,
+        blocking::{run_page_cache_io, spawn_blocking},
+        error::BrokerError,
+        log_dir_status::LogDirRegistry,
         replica_state::ReplicaState,
     },
     arc_swap::ArcSwap,
@@ -95,6 +97,27 @@ pub(super) async fn run_log_mutation<T: Send + 'static>(
     let result = match spawn_blocking(operation).await {
         Ok(value) => value,
         Err(join_err) => Err(storage_failure_error(panic_context, join_err)),
+    };
+    if let Err(err) = &result {
+        flag_storage_failure(err, storage.log_dir, storage.registry);
+    }
+    result
+}
+
+/// [`run_log_mutation`] for an append under `log`'s lock, which runs on the
+/// calling task when `stays_in_cache` says it only writes into the page cache
+/// and away from async polling otherwise; see [`run_page_cache_io`]. The
+/// failure handling is the same.
+pub(super) async fn run_log_append<T: Send + 'static>(
+    log: &Arc<Mutex<Log>>,
+    stays_in_cache: impl FnOnce(&mut Log) -> bool,
+    operation: impl FnOnce(&mut Log) -> Result<T, BrokerError> + Send + 'static,
+    panic_context: &'static str,
+    storage: StorageStatus<'_>,
+) -> Result<T, BrokerError> {
+    let result = match run_page_cache_io(log, stays_in_cache, operation).await {
+        Ok(value) => value,
+        Err(panic) => Err(storage_failure_error(panic_context, panic)),
     };
     if let Err(err) = &result {
         flag_storage_failure(err, storage.log_dir, storage.registry);

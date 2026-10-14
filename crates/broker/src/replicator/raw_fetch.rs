@@ -1,7 +1,7 @@
 //! Fetch response decoding that leaves record batches in their wire form.
 
 use {
-    bytes::{Buf, BufMut},
+    bytes::{Buf, BufMut, Bytes},
     krabka_protocol::{
         Decode, Encode, ProtocolError, ProtocolRequest,
         owned::{
@@ -14,11 +14,9 @@ use {
         primitives::{
             array::{get_array_len, get_nullable_array_len},
             fixed::{get_i16, get_i32, get_i64},
-            string_bytes::{
-                get_compact_nullable_bytes_owned, get_compact_string_owned,
-                get_nullable_bytes_owned, get_string_owned,
-            },
+            string_bytes::{get_compact_string_owned, get_string_owned},
             uuid::get_uuid,
+            varint::get_uvarint,
         },
         records::RecordsPayload,
         tagged_fields::read_tagged_fields,
@@ -79,6 +77,19 @@ impl Decode<'_> for RawFetchResponse {
     }
 }
 
+/// The next `length` bytes of `buf`. On a `Bytes` buffer, which is what a
+/// follower's `LeaderLink::send` decodes from, this is a slice of the response
+/// frame and copies nothing: a follower's records go from the socket buffer to
+/// the log write.
+fn take_bytes<B: Buf>(buf: &mut B, length: usize) -> Result<Bytes, ProtocolError> {
+    if buf.remaining() < length {
+        return Err(ProtocolError::UnexpectedEof {
+            needed: length - buf.remaining(),
+        });
+    }
+    Ok(buf.copy_to_bytes(length))
+}
+
 fn decode_topic<B: Buf>(
     buf: &mut B,
     version: i16,
@@ -134,9 +145,19 @@ fn decode_partition<B: Buf>(
         out.preferred_read_replica = get_i32(buf)?;
     }
     let records = if flex {
-        get_compact_nullable_bytes_owned(buf)?
+        match usize::try_from(get_uvarint(buf)?) {
+            Ok(0) => None,
+            Ok(length) => Some(take_bytes(buf, length - 1)?),
+            Err(_) => return Err(ProtocolError::UnexpectedEof { needed: usize::MAX }),
+        }
     } else {
-        get_nullable_bytes_owned(buf)?
+        // Any negative length is null records, as Kafka's generated
+        // `readRecords` and the protocol crate's `get_nullable_bytes_owned`
+        // both read it.
+        match usize::try_from(get_i32(buf)?) {
+            Ok(length) => Some(take_bytes(buf, length)?),
+            Err(_) => None,
+        }
     };
     out.records = records.map(RecordsPayload::Raw);
     if flex {
