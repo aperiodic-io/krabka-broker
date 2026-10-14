@@ -23,6 +23,18 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+### Fixed
+
+- A consumer catching up on a backlog that is no longer in the page cache
+  reads it in one large read per fetch. Before, the `sendfile` fetch walked
+  the run's batch headers with one small synchronous read each, and on
+  uncached bytes each of those reads waited for the disk while the
+  partition's log lock was held, which slowed the drain and held up the
+  producer's appends. A fetch now checks, without waiting, whether the page
+  cache holds the start and the end of its window, and takes the byte-copy
+  path, which reads the window in one read, when it does not. Cached fetches
+  keep the zero-copy `sendfile` path.
+
 ## [1.0.4] - 2026-10-13
 
 1.0.4 changes no on-disk format and adds no setting, so it upgrades from any

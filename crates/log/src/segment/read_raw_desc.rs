@@ -26,6 +26,44 @@ const SMALL_BATCH_THRESHOLD: usize = 16 * 1024;
 const HEADER_SCAN_WINDOW: usize = 256 * 1024;
 
 impl Segment {
+    /// Whether describing this segment's run from `fetch_offset` would walk
+    /// bytes that are not in the page cache.
+    ///
+    /// The walk reads each batch header with a small synchronous read under
+    /// the log lock. On cached bytes those reads cost microseconds, and
+    /// `sendfile` then sends the run without a copy. On bytes only on the
+    /// disk -- a consumer catching up on an old backlog, or a segment that
+    /// wrote through `O_DIRECT` -- each one waits for the disk while the
+    /// producer's appends wait for the lock, and one large read of the
+    /// window is faster. The page at the far end of the window decides as
+    /// well as the first: the previous fetch's readahead hint usually leaves
+    /// the start cached while the rest is still on its way from the disk, so
+    /// a window whose first or last byte is not cached is read in one read
+    /// by the byte-copy path.
+    ///
+    /// # Errors
+    /// Returns an error when the offset lookup fails.
+    pub(crate) fn fetch_would_block(
+        &self,
+        fetch_offset: Offset,
+        limit_offset: Offset,
+        max_size: ByteSize,
+    ) -> Result<bool, LogError> {
+        if self.wrote_direct {
+            return Ok(true);
+        }
+        let Some(start_pos) =
+            self.raw_start_position(fetch_offset, limit_offset, "read_raw_desc")?
+        else {
+            return Ok(false);
+        };
+        let window = (max_size.bytes_u64().max(HEADER_LEN as u64))
+            .min(self.log_size.saturating_sub(start_pos));
+        let last = start_pos + window.saturating_sub(1);
+        Ok(!self.io.is_cached(&self.log_file, start_pos)
+            || !self.io.is_cached(&self.log_file, last))
+    }
+
     /// Descriptor variant of [`Segment::read_raw`] for the zero-copy
     /// `sendfile` fetch path.
     ///

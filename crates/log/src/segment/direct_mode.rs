@@ -54,11 +54,6 @@ impl Drop for DirectMode {
 impl Segment {
     pub(crate) fn writes_direct(&self) -> bool { self.direct.is_some() }
 
-    /// Whether this segment has written through `O_DIRECT` since it was
-    /// opened, sealed or not. See `wrote_direct` on [`Segment`].
-    #[krabka_macros::sendfile_cfg]
-    pub(crate) fn wrote_direct(&self) -> bool { self.wrote_direct }
-
     /// Write this segment's appends through `O_DIRECT` from here on, keeping
     /// up to `tail_cache` of the newest bytes in memory for reads.
     ///

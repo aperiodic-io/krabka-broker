@@ -6,6 +6,7 @@ use {
     super::*,
     crate::{
         config::LogConfig,
+        io::LogIo,
         log::{
             RawRead,
             test_support::{
@@ -13,6 +14,7 @@ use {
                 test_batch_at, test_log, tiny_segments,
             },
         },
+        name::log_path,
         segment::Segment,
         test_support::{AdviceCall, RecordedAdvice, segmented_log},
     },
@@ -564,4 +566,99 @@ fn configured_read_ahead_max_reaches_both_verbatim_reads() {
         }
     }
     check!(actual == expected);
+}
+
+/// A disk that reports the bytes of the `.log` file with inode `cold` as not
+/// in the page cache, and every other byte as cached.
+#[krabka_macros::sendfile_cfg]
+#[derive(Debug)]
+struct ColdFile {
+    cold: u64,
+}
+
+#[krabka_macros::sendfile_cfg]
+impl LogIo for ColdFile {
+    fn is_cached(&self, file: &std::fs::File, _offset: u64) -> bool {
+        use std::os::unix::fs::MetadataExt;
+        file.metadata().unwrap().ino() != self.cold
+    }
+}
+
+/// The inode of the `.log` file of the segment based at `base`.
+#[krabka_macros::sendfile_cfg]
+fn segment_inode(dir: &std::path::Path, base: i64) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(log_path(dir, base)).unwrap().ino()
+}
+
+#[krabka_macros::sendfile_cfg]
+/// A fetch whose run is not in the page cache is not described: walking its
+/// batch headers would be one disk read per batch under the log lock. The
+/// descriptor comes back empty, so the broker takes the byte-copy path,
+/// which reads the run in one read and returns the same bytes.
+#[test]
+fn an_uncached_run_falls_back_to_one_large_read() {
+    let dir = tempdir().unwrap();
+    let mut log = segmented_log(dir.path(), mebibytes(1));
+    for off in 0..6 {
+        log.append(&mut test_batch_at(off)).unwrap();
+    }
+    let end = log.log_end_offset();
+    let raw = log.read_raw(Offset(0), end, mebibytes(10)).unwrap();
+    log.test_set_io(std::sync::Arc::new(ColdFile {
+        cold: segment_inode(dir.path(), 0),
+    }));
+
+    let desc = log.read_raw_desc(Offset(0), end, mebibytes(10)).unwrap();
+    assert2::assert!(desc.regions.is_empty());
+    let copied = log.read_raw(Offset(0), end, mebibytes(10)).unwrap();
+    assert2::assert!(copied.bytes == raw.bytes);
+}
+
+#[krabka_macros::sendfile_cfg]
+/// The walk stops at the first segment whose run is not cached: it sends the
+/// cached segments before it, and never passes over it to a later segment,
+/// which would skip its offsets.
+#[test]
+fn the_descriptor_walk_stops_at_an_uncached_segment() {
+    let dir = tempdir().unwrap();
+    let mut log = segmented_log(dir.path(), bytes(100));
+    for off in 0..6 {
+        log.append(&mut test_batch_at(off)).unwrap();
+    }
+    assert2::assert!(log.segments.len() >= 2);
+    let end = log.log_end_offset();
+    let second = log.segments[1].base_offset();
+    log.test_set_io(std::sync::Arc::new(ColdFile {
+        cold: segment_inode(dir.path(), second.0),
+    }));
+
+    let desc = log.read_raw_desc(Offset(0), end, mebibytes(10)).unwrap();
+    assert2::assert!(desc.start_offset == Offset(0));
+    let sent: usize = desc.regions.iter().map(|region| region.len).sum();
+    let first = log.read_raw(Offset(0), second, mebibytes(10)).unwrap();
+    assert2::assert!(sent == first.total);
+}
+
+#[krabka_macros::sendfile_cfg]
+/// A fetch that starts past a segment's last offset has nothing to walk in
+/// it, so the segment never blocks the fetch, cached or not.
+#[test]
+fn a_fetch_past_a_segment_never_blocks_on_it() {
+    let dir = tempdir().unwrap();
+    let mut log = segmented_log(dir.path(), bytes(100));
+    for off in 0..6 {
+        log.append(&mut test_batch_at(off)).unwrap();
+    }
+    log.test_set_io(std::sync::Arc::new(ColdFile {
+        cold: segment_inode(dir.path(), 0),
+    }));
+    let end = log.log_end_offset();
+    let first = &log.segments[0];
+    assert2::assert!(
+        first
+            .fetch_would_block(Offset(0), end, mebibytes(1))
+            .unwrap()
+    );
+    assert2::assert!(!first.fetch_would_block(end, end, mebibytes(1)).unwrap());
 }
