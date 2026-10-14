@@ -72,7 +72,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let w = wal(dir.path());
         let (results, leo, _) = run_produce_append_batch(
-            w.log.clone(),
+            &w.log,
             None,
             (
                 vec![
@@ -106,7 +106,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let w = wal(dir.path());
         let (_results, leo, _) = run_produce_append_batch(
-            w.log.clone(),
+            &w.log,
             None,
             (vec![sample_owned().count(3).call()], Vec::new()),
         )

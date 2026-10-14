@@ -5,11 +5,12 @@
 use {
     super::*,
     crate::{
+        config::LogConfig,
         leader_epoch_checkpoint::EpochEntry,
         log::test_support::{
-            EncodedVerbatim, TempLog, check_append_time_lookup, install_stamps,
-            log_append_time_log, sample_batch, stamped_test_log, test_batch_at, test_log,
-            verbatim_from,
+            EncodedVerbatim, TempLog, check_append_time_lookup, configured_test_log,
+            install_stamps, log_append_time_log, sample_batch, stamped_test_log, test_batch_at,
+            test_log, verbatim_from,
         },
     },
     assert2::{assert, check},
@@ -413,4 +414,80 @@ fn verbatim_append_flush_logic() {
     log.append_verbatim(&txn_vb).unwrap();
     assert!(sync_observer::take_segment_flushes().is_empty());
     drop(dir);
+}
+
+#[test]
+fn a_fenced_log_refuses_every_append_and_still_serves_reads() {
+    let TempLog { dir: _dir, mut log } = test_log();
+    log.append(&mut test_batch_at(0)).unwrap();
+    let before = stored_bytes(&log);
+
+    log.fence();
+
+    let EncodedVerbatim {
+        batch: verbatim, ..
+    } = verbatim_from(&test_batch_at(0), LeaderEpoch(4));
+    let refused = [
+        log.append(&mut test_batch_at(0)).map(|_| ()),
+        log.append_at(&mut test_batch_at(1), Offset(1)),
+        log.append_verbatim(&verbatim).map(|_| ()),
+        log.append_verbatim_at(&verbatim, Offset(1)).map(|_| ()),
+    ];
+    for result in refused {
+        check!(let Err(LogError::Fenced) = result);
+    }
+    check!(log.log_end_offset() == Offset(1));
+    check!(stored_bytes(&log) == before);
+}
+
+#[test]
+fn an_append_may_block_only_when_it_rolls_or_the_log_flushes() {
+    let now = test_batch_at(0).max_timestamp;
+    let plain = |config: LogConfig| {
+        let TempLog { dir, mut log } = configured_test_log(config);
+        log.append(&mut test_batch_at(0)).unwrap();
+        (dir, log)
+    };
+    let cases = [
+        (LogConfig::default(), kibibytes(1), false),
+        (LogConfig::default(), mebibytes(2048), true),
+        (
+            LogConfig {
+                flush_messages: Some(10_000),
+                ..LogConfig::default()
+            },
+            kibibytes(1),
+            true,
+        ),
+        (
+            LogConfig {
+                flush_interval: Some(krabka_units::secs(60)),
+                ..LogConfig::default()
+            },
+            kibibytes(1),
+            true,
+        ),
+    ];
+    for (config, incoming, blocks) in cases {
+        let (_dir, mut log) = plain(config);
+        check!(
+            log.append_may_block(incoming, now) == blocks,
+            "{incoming:?}"
+        );
+    }
+}
+
+#[test]
+fn only_bytes_this_process_wrote_count_as_written_since_open() {
+    let TempLog { dir, mut log } = test_log();
+    log.append(&mut test_batch_at(0)).unwrap();
+    log.append(&mut test_batch_at(1)).unwrap();
+    check!(log.written_since_open_from() == Offset(0));
+    drop(log);
+
+    let mut reopened = Log::open(dir.path(), LogConfig::default()).unwrap();
+    check!(reopened.written_since_open_from() == Offset(2));
+    assert!(reopened.roll().unwrap());
+    reopened.append(&mut test_batch_at(2)).unwrap();
+    check!(reopened.written_since_open_from() == Offset(2));
 }

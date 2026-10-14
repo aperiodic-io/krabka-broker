@@ -381,6 +381,7 @@ impl Log {
         transaction_stamp: Option<u64>,
         verbatim: Option<&[u8]>,
     ) -> Result<(), LogError> {
+        self.ensure_unfenced()?;
         self.rollover_flusher.check()?;
         let base_offset = Offset(batch.base_offset);
         let Some((last_offset, _)) = krabka_verified::local_append_coordinates(

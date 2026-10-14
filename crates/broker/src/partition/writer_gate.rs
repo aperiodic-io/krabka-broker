@@ -96,6 +96,17 @@ impl WriterGate {
         polled
     }
 
+    /// Marks the writer as computing its next deadline, before it reads the
+    /// log for it.
+    ///
+    /// An inline append nudges when its deadline is earlier than the armed
+    /// one. While the writer computes, every deadline is earlier than this,
+    /// so a nudge in that window leaves a wake-up behind and the writer
+    /// computes again; a nudge before it is covered by the computation, which
+    /// reads the log after the append; and one after [`Self::arm`] compares
+    /// against the fresh deadline. No nudge is lost between the two.
+    pub(crate) fn disarm(&self) { self.armed_deadline_ms.store(NO_DEADLINE, Ordering::SeqCst); }
+
     /// Records the maintenance deadline the writer is about to sleep toward.
     pub(crate) fn arm(&self, delay: Option<Duration>) {
         let deadline = delay.map_or(NO_DEADLINE, |delay| deadline_ms(SystemTime::now(), delay));
@@ -134,6 +145,7 @@ mod tests {
     use {
         super::*,
         crate::{
+            error::BrokerError,
             log_dir_status::LogDirRegistry,
             partition::{ProduceData, ProduceJob, test_support::test_partition},
             partition_writer::produce_inline,
@@ -142,6 +154,7 @@ mod tests {
         },
         assert2::{assert, check},
         futures_util::FutureExt as _,
+        krabka_log::LogError,
         tempfile::TempDir,
         tokio::sync::oneshot,
     };
@@ -217,7 +230,7 @@ mod tests {
             &partition,
             job,
             &LogDirRegistry::default(),
-            &ProducerState::new(),
+            &Arc::new(ProducerState::new()),
         )
         .await;
 
@@ -225,6 +238,44 @@ mod tests {
         let answered = answer.now_or_never().expect("answered inline");
         check!(answered.expect("ack sent").expect("appended").base_offset.0 == 0);
         check!(partition.log_end_offset().0 == 3);
+    }
+
+    #[tokio::test]
+    async fn an_inline_produce_after_retire_is_refused_and_writes_nothing() {
+        let (partition, _rx, _dir) = gated(true);
+        let (ack, answer) = oneshot::channel();
+        let job = ProduceJob {
+            data: ProduceData::Owned(partition_records_batch().count(3).call()),
+            ack,
+            producer_check: None,
+        };
+
+        drop(partition.retire());
+        let appended = produce_inline(
+            &partition,
+            job,
+            &LogDirRegistry::default(),
+            &Arc::new(ProducerState::new()),
+        )
+        .await;
+
+        assert!(appended.is_ok());
+        let answered = answer.now_or_never().expect("answered inline");
+        assert!(let Err(BrokerError::Log(LogError::Fenced)) = answered.expect("ack sent"));
+        check!(partition.log_end_offset().0 == 0);
+    }
+
+    /// The race the disarm closes: the writer reads the log, an inline
+    /// append lands and nudges before the writer arms what it read, and the
+    /// writer must still be woken to read the log again.
+    #[test]
+    fn a_nudge_between_disarm_and_arm_still_wakes_the_writer() {
+        let gate = WriterGate::shared(true);
+        gate.arm(Some(Duration::ZERO));
+        gate.disarm();
+        gate.nudge_if_earlier(Some(Duration::from_secs(1)));
+        gate.arm(None);
+        check!(gate.nudged().now_or_never().is_some());
     }
 
     #[test]

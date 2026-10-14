@@ -91,6 +91,19 @@ impl ProduceData {
                 .expect("commit marker offset count is non-negative"),
         }
     }
+
+    /// The bytes this job appends and the newest timestamp it carries, which
+    /// decide whether its append rolls the segment. An owned batch is encoded
+    /// again on append, and a recompression can change its size, so its size
+    /// here is an estimate.
+    pub(crate) fn append_footprint(&self) -> (usize, i64) {
+        match self {
+            Self::Verbatim(batch) => (batch.bytes.len(), batch.max_timestamp),
+            Self::Owned(batch)
+            | Self::OwnedControl(batch)
+            | Self::OwnedCommitMarker { batch, .. } => (batch.encoded_len(), batch.max_timestamp),
+        }
+    }
 }
 
 /// What the writer reports back for one appended batch.

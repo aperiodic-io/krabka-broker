@@ -194,6 +194,8 @@ impl Log {
             active: Some(active),
             dir_sync_needed,
             rollover_flusher: super::rollover_flush::Flusher::default(),
+            fenced: false,
+            opened_end: Offset(0),
             unflushed_messages: 0,
             last_flush: std::time::Instant::now(),
             roll_jitter: None,
@@ -272,6 +274,7 @@ impl Log {
         // Recovery needs no durable watermark: the schedule is in the records,
         // so the first advance rebuilds it from the log start.
         log.delivery_watermark = log.log_start_offset();
+        log.opened_end = log.log_end_offset();
         Ok(log)
     }
 

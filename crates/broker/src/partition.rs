@@ -336,6 +336,22 @@ impl Partition {
         }
     }
 
+    /// Fence the log and then remove and return the writer task handle, for a
+    /// caller that is about to delete the partition's directory.
+    ///
+    /// An append can run on a request's own task while the writer is idle
+    /// (see [`WriterGate`]), so aborting the writer does not stop every
+    /// writer of the log. The fence does: it is taken under the log's mutex,
+    /// so an append either finished before it or finds the log fenced and is
+    /// answered `NOT_LEADER_OR_FOLLOWER`, as a produce to a gone writer was.
+    pub(crate) fn retire(&self) -> Option<JoinHandle<()>> {
+        self.log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .fence();
+        self.take_writer_handle()
+    }
+
     /// Remove and return the writer task handle exactly once. Broker shutdown
     /// uses this after request handlers drain, then aborts and awaits the task.
     pub(crate) fn take_writer_handle(&self) -> Option<JoinHandle<()>> {

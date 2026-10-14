@@ -244,6 +244,7 @@ impl Log {
         batch: &VerbatimBatch,
         base_offset: Offset,
     ) -> Result<(), LogError> {
+        self.ensure_unfenced()?;
         self.rollover_flusher.check()?;
         let Some((last_offset, _)) = krabka_verified::local_append_coordinates(
             self.append_at_expected_offset().0,

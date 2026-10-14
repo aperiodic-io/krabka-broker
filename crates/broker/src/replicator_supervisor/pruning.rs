@@ -75,7 +75,7 @@ impl ReplicatorSupervisor {
         let Some(removed) = self.partitions.remove(topic, index) else {
             return;
         };
-        if let Some(writer) = removed.take_writer_handle() {
+        if let Some(writer) = removed.retire() {
             writer.abort();
         }
         self.hot_tail.remove_partition(topic_id, index);

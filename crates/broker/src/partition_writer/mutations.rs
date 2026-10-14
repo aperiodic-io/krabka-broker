@@ -8,6 +8,7 @@
 use {
     super::{
         WriterPartition,
+        append::append_may_block,
         storage::{
             StorageStatus, flag_storage_failure, lock_log, run_log_append, run_log_mutation,
         },
@@ -77,7 +78,7 @@ pub(super) async fn handle_replicate(
     // catching up on replicated markers across many partitions at once, that
     // can starve this broker's own heartbeat-sending task past the
     // controller's liveness timeout.
-    let result = run_log_append(
+    let result = run_log_mutation(
         move || {
             let mut guard = lock_log(&log_for_blocking);
             if let Some(high_watermark) = high_watermark {
@@ -122,27 +123,33 @@ pub(super) async fn handle_replicate_verbatim(
     ack: tokio::sync::oneshot::Sender<Result<(), BrokerError>>,
     append_notify: &Notify,
 ) {
-    let log_for_blocking = Arc::clone(log);
-    let result = run_log_append(
-        move || {
-            // The lock is taken per batch, not across the run: a fetch row can
-            // carry megabytes, and every reader of this partition -- a fetch, an
-            // epoch check, an offset lookup -- blocks its worker thread on the
-            // lock while it is held.
-            for ReplicatedBatch { batch, base_offset } in &batches {
-                lock_log(&log_for_blocking)
-                    .append_verbatim_at(batch, *base_offset)
-                    .map_err(BrokerError::from)?;
-            }
-            Ok(())
-        },
-        "replicate verbatim task panicked",
-        StorageStatus {
-            log_dir,
-            registry: log_dir_status,
-        },
-    )
-    .await;
+    let storage = StorageStatus {
+        log_dir,
+        registry: log_dir_status,
+    };
+    // One batch per lock, not the whole run: a fetch row can carry megabytes,
+    // and every reader of this partition -- a fetch, an epoch check, an offset
+    // lookup -- waits on the lock while it is held. Each batch also decides
+    // for itself whether its append may block.
+    let mut result = Ok(());
+    for ReplicatedBatch { batch, base_offset } in batches {
+        let footprint = (batch.bytes.len(), batch.max_timestamp);
+        result = run_log_append(
+            log,
+            move |log| !append_may_block(log, footprint),
+            move |log| {
+                log.append_verbatim_at(&batch, base_offset)
+                    .map(|_| ())
+                    .map_err(BrokerError::from)
+            },
+            "replicate verbatim task panicked",
+            storage,
+        )
+        .await;
+        if result.is_err() {
+            break;
+        }
+    }
     let succeeded = result.is_ok();
     let _ = ack.send(result);
     if succeeded {

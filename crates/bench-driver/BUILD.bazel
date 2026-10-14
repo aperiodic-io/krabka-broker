@@ -14,6 +14,14 @@ crate_binary(
     lib = ":bench-driver",
 )
 
+# Starts a local krabka cluster from the release binaries and runs one scenario
+# against it; see `src/local_main.rs`.
+crate_binary(
+    name = "krabka-bench-local",
+    crate_root = "src/local_main.rs",
+    lib = ":bench-driver",
+)
+
 # The aggregator. `bench/justfile`'s report recipes run this one.
 crate_binary(
     name = "krabka-bench-report",

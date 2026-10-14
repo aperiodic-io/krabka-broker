@@ -293,7 +293,7 @@ pub(crate) fn try_spawn_partition_with_replication_target(
         WriterPolicy {
             max_produce_group,
             sequencer,
-            gate: Some(Arc::clone(&writer_gate)),
+            gate: Arc::clone(&writer_gate),
         },
     );
     let writer = if let Some(engine) = wal_engine {

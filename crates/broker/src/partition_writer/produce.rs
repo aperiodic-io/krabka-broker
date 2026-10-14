@@ -13,14 +13,20 @@ use {
     },
     crate::{
         error::BrokerError,
-        partition::{ProduceData, ProduceJob, WriterMessage},
+        log_dir_status::LogDirRegistry,
+        partition::{AppendedBatch, ProduceData, ProduceJob, WriterMessage},
         producer_state::ProducerState,
         replica_state::ReplicaState,
         wal::{OffsetSequencer, SharedWal},
     },
-    krabka_log::Log,
+    arc_swap::ArcSwap,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, Offset, ProducerSnapshotEntry},
     krabka_raft::RaftError,
-    std::sync::{Arc, Mutex},
+    std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
     tokio::sync::{Notify, mpsc},
 };
 
@@ -35,7 +41,7 @@ pub(super) struct ProduceGroup {
 pub(super) struct ProduceStorage<'a> {
     pub(super) log: &'a Arc<Mutex<Log>>,
     pub(super) status: StorageStatus<'a>,
-    pub(super) producer_state: &'a ProducerState,
+    pub(super) producer_state: &'a Arc<ProducerState>,
 }
 
 /// The notifications and replica state a produce group signals.
@@ -88,6 +94,40 @@ pub(super) async fn append_group(
     signals: ProduceSignals<'_>,
     diskless: DisklessParts<'_>,
 ) {
+    if let Some(appended) = append_jobs(identity, jobs, storage, signals, diskless).await {
+        finish_group(appended).await;
+    }
+}
+
+/// A group whose records are in the log, and everything its epilogue needs to
+/// answer the jobs and publish the append, owned, so that the epilogue can
+/// outlive the task that appended.
+pub(super) struct AppendedGroup {
+    topic: String,
+    partition: PartitionIndex,
+    acks: Vec<tokio::sync::oneshot::Sender<Result<AppendedBatch, BrokerError>>>,
+    results: Vec<Result<AppendedBatch, BrokerError>>,
+    leo: Offset,
+    control_entries: Vec<ProducerSnapshotEntry>,
+    log_dir: Arc<ArcSwap<PathBuf>>,
+    log_dir_status: LogDirRegistry,
+    producer_state: Arc<ProducerState>,
+    replica_state: Arc<tokio::sync::Mutex<ReplicaState>>,
+    append_notify: Arc<Notify>,
+    hw_advance_notify: Arc<Notify>,
+    wal: Option<SharedWal>,
+}
+
+/// Appends a group of produce jobs, in order. Returns the group for
+/// [`finish_group`] to answer, or `None` when every job is already answered
+/// because the group could not append.
+pub(super) async fn append_jobs(
+    identity: WriterPartition<'_>,
+    jobs: Vec<ProduceJob>,
+    storage: ProduceStorage<'_>,
+    signals: ProduceSignals<'_>,
+    diskless: DisklessParts<'_>,
+) -> Option<AppendedGroup> {
     let DisklessParts { wal, sequencer } = diskless;
     let ProduceStorage {
         log,
@@ -138,7 +178,7 @@ pub(super) async fn append_group(
                     "no sequencer configured",
                 )));
             }
-            return;
+            return None;
         };
         let count = datas.iter().map(ProduceData::record_count).sum();
         match sequencer
@@ -146,18 +186,17 @@ pub(super) async fn append_group(
             .await
         {
             Ok(base) => {
-                run_produce_append_batch_at(Arc::clone(log), base, high_watermark, (datas, checks))
-                    .await
+                run_produce_append_batch_at(log, base, high_watermark, (datas, checks)).await
             }
             Err(error) => {
                 for ack in acks {
                     let _ = ack.send(Err(reservation_failure(&error)));
                 }
-                return;
+                return None;
             }
         }
     } else {
-        run_produce_append_batch(Arc::clone(log), high_watermark, (datas, checks)).await
+        run_produce_append_batch(log, high_watermark, (datas, checks)).await
     };
     let (results, leo, control_entries) = match append_result {
         Ok(value) => value,
@@ -169,28 +208,64 @@ pub(super) async fn append_group(
                     "group append panic",
                 )));
             }
-            return;
+            return None;
         }
     };
+    Some(AppendedGroup {
+        topic: identity.topic.to_owned(),
+        partition: identity.partition,
+        acks,
+        results,
+        leo,
+        control_entries,
+        log_dir: Arc::clone(log_dir),
+        log_dir_status: log_dir_status.clone(),
+        producer_state: Arc::clone(producer_state),
+        replica_state: Arc::clone(replica_state),
+        append_notify: Arc::clone(append_notify),
+        hw_advance_notify: Arc::clone(hw_advance_notify),
+        wal: wal.cloned(),
+    })
+}
+
+/// Answers an appended group and publishes what it appended: the producer
+/// tracker's copy of any marker, the high watermark, the acknowledgements and
+/// the wakeups.
+pub(super) async fn finish_group(group: AppendedGroup) {
+    let AppendedGroup {
+        topic,
+        partition,
+        acks,
+        results,
+        leo,
+        control_entries,
+        log_dir,
+        log_dir_status,
+        producer_state,
+        replica_state,
+        append_notify,
+        hw_advance_notify,
+        wal,
+    } = group;
 
     // A transaction marker changes the producer state in the log. Without
     // this copy the tracker keeps the state from before the marker until a
     // restart rebuilds it from the log, and a produce gets a different
     // answer before and after that restart. `control_entries` comes from the
-    // same lock acquisition the append itself already ran under
-    // `block_in_place`/`spawn_blocking` (see `append_produce_batch`'s doc
-    // comment): mirroring here takes no further `std::sync::Mutex` lock on
-    // this async task, only the `ProducerState` per-partition `tokio::sync::
-    // Mutex` this call already awaits cooperatively.
+    // same lock acquisition the append itself ran under (see
+    // `append_produce_batch`'s doc comment): mirroring here takes no further
+    // `std::sync::Mutex` lock on this async task, only the `ProducerState`
+    // per-partition `tokio::sync::Mutex` this call already awaits
+    // cooperatively.
     if !control_entries.is_empty() {
         producer_state
-            .mirror_log_entries(identity.topic, identity.partition, control_entries)
+            .mirror_log_entries(&topic, partition, control_entries)
             .await;
     }
 
     let any_ok = results.iter().any(Result::is_ok);
     for err in results.iter().filter_map(|result| result.as_ref().err()) {
-        flag_storage_failure(err, log_dir, log_dir_status);
+        flag_storage_failure(err, &log_dir, &log_dir_status);
     }
 
     // An in-process (non-diskless) leader recompute takes no I/O, only the
@@ -232,7 +307,7 @@ pub(super) async fn append_group(
                     state.recompute_hw_for_wal_durable(durable) > previous
                 }
                 Err(error) => {
-                    flag_storage_failure(&error, log_dir, log_dir_status);
+                    flag_storage_failure(&error, &log_dir, &log_dir_status);
                     false
                 }
             }

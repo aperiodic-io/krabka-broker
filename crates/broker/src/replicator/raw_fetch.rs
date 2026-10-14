@@ -151,6 +151,9 @@ fn decode_partition<B: Buf>(
             Err(_) => return Err(ProtocolError::UnexpectedEof { needed: usize::MAX }),
         }
     } else {
+        // Any negative length is null records, as Kafka's generated
+        // `readRecords` and the protocol crate's `get_nullable_bytes_owned`
+        // both read it.
         match usize::try_from(get_i32(buf)?) {
             Ok(length) => Some(take_bytes(buf, length)?),
             Err(_) => None,
