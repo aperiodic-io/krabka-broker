@@ -191,9 +191,14 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
 
     };
     let replication = moxy::template! {
-    /// Maximum bytes a follower requests from a leader in one replication
-    /// fetch. It reaches the leader as the fetch request's `max_bytes`.
+    /// Maximum bytes a follower requests for one partition in a replication
+    /// fetch, Kafka's `replica.fetch.max.bytes`. It reaches the leader as each
+    /// partition's `partition_max_bytes`.
     pub replication_fetch_max: Option<ByteSize>,
+    /// Maximum bytes of one whole replication fetch response, Kafka's
+    /// `replica.fetch.response.max.bytes`. It reaches the leader as the fetch
+    /// request's `max_bytes`.
+    pub replication_fetch_response_max: Option<ByteSize>,
     /// Maximum time a leader holds a replication fetch that is not yet
     /// satisfied. It reaches the leader as the fetch request's `max_wait_ms`.
     pub replication_fetch_max_wait: Option<Time>,

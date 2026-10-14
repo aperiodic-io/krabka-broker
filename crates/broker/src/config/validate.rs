@@ -315,6 +315,21 @@ impl BrokerConfig {
                 "replication fetch minimum bytes exceeds maximum".into(),
             ));
         }
+        // A follower's fetch asks for `fetch_min` within a response capped at
+        // `fetch_response_max`: a floor above the cap is one the leader can
+        // never reach, and every fetch would wait out its whole max wait.
+        if self.replication.fetch_min > self.replication.fetch_response_max {
+            return Err(BrokerError::InvalidRuntimeConfig(
+                "replication fetch minimum bytes exceeds the fetch response maximum".into(),
+            ));
+        }
+        // The follower reads the response as one frame, under the client
+        // frame limit.
+        if self.replication.fetch_response_max > self.client_frame_max.size() {
+            return Err(BrokerError::InvalidRuntimeConfig(
+                "replication fetch response maximum exceeds the client frame maximum".into(),
+            ));
+        }
         if self.replication.reconnect_initial_delay > self.replication.reconnect_delay_cap {
             return Err(BrokerError::InvalidRuntimeConfig(
                 "replication reconnect initial delay exceeds cap".into(),
@@ -557,6 +572,22 @@ mod tests {
         let mut config = BrokerConfig::default();
         config.replication.fetch_min = config.replication.fetch_max + bytes(1);
         assert_invalid_runtime(&config, "replication fetch minimum bytes exceeds maximum");
+
+        let mut config = BrokerConfig::default();
+        config.replication.fetch_response_max = config.replication.fetch_min;
+        config.replication.fetch_min += bytes(1);
+        config.replication.fetch_max = config.replication.fetch_min;
+        assert_invalid_runtime(
+            &config,
+            "replication fetch minimum bytes exceeds the fetch response maximum",
+        );
+
+        let mut config = BrokerConfig::default();
+        config.replication.fetch_response_max = config.client_frame_max.size() + bytes(1);
+        assert_invalid_runtime(
+            &config,
+            "replication fetch response maximum exceeds the client frame maximum",
+        );
 
         let mut config = BrokerConfig::default();
         config.replication.reconnect_initial_delay = config.replication.reconnect_delay_cap * 2.0;

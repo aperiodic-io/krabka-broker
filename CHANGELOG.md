@@ -23,6 +23,17 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+### Added
+
+- `replication.fetch_response_max` (file key `replication_fetch_response_max`),
+  Kafka's `replica.fetch.response.max.bytes`, caps a follower's whole fetch
+  response; it defaults to 10 MiB, as in Kafka. Before, the per-partition cap
+  `replication.fetch_max` (`replica.fetch.max.bytes`, 1 MiB) also capped the
+  whole response, so a follower copied at most 1 MiB per round trip from a
+  leader and fell behind under load, holding the high watermark back. The
+  broker refuses a `replication.fetch_min` above the new cap, and a cap above
+  `client_frame_max`.
+
 ## [1.0.5] - 2026-10-14
 
 1.0.5 changes no on-disk format and adds no setting, so it upgrades from any
